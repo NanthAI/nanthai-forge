@@ -4,7 +4,13 @@ import { posix, join } from 'node:path';
 import ts from 'typescript';
 import { classifyCheckPath, webTest } from './check-path-scopes.mjs';
 import { builtinModules } from 'node:module';
-import { packageScriptGraph, scriptPath, scriptSelectionReason } from './script-impact.mjs';
+import {
+  docsPackager,
+  docsWrapper,
+  packageScriptGraph,
+  scriptPath,
+  scriptSelectionReason,
+} from './script-impact.mjs';
 
 export const smokeTests = [
   'tests/files.test.mjs',
@@ -171,7 +177,8 @@ export function selectTests({ paths, files, forceFull = false }) {
           !literals.some(value => resolve(path, value)) &&
           !(arg && ts.isStringLiteralLike(arg) && external(arg.text))
         ) {
-          if (scriptsChanged.some(item => item.path === path))
+          // Packagers load installed artifacts, not repository sources.
+          if (scriptsChanged.some(item => item.path === path) && !docsPackager(path))
             uncertain = `Unknown module loading in changed script: ${path}`;
           if (templates.some(Boolean)) {
             for (const prefix of templates.filter(Boolean)) widen(prefix);
@@ -193,18 +200,30 @@ export function selectTests({ paths, files, forceFull = false }) {
   }
   if (uncertain) return full(uncertain);
   if (scriptsChanged.length && packageGraph.error) return full(packageGraph.error);
-  const seeds = classifications.flatMap(item => item.seeds);
-  const affected = new Set(seeds);
-  const queue = [...seeds];
-  while (queue.length) {
-    const queueCurrent = queue.shift();
-    for (const importer of reverse.get(queueCurrent) ?? []) {
-      if (!affected.has(importer)) {
-        affected.add(importer);
-        queue.push(importer);
+  // The docs-check wrapper only spawns the docs check; the runner importing it is not a consumer.
+  const affected = new Set();
+  const spread = (seeds, blocked) => {
+    const queue = [...seeds];
+    for (const seed of seeds) affected.add(seed);
+    while (queue.length) {
+      const current = queue.shift();
+      if (blocked && docsWrapper(current)) continue;
+      for (const importer of reverse.get(current) ?? []) {
+        if (!affected.has(importer)) {
+          affected.add(importer);
+          queue.push(importer);
+        }
       }
     }
-  }
+  };
+  spread(
+    classifications.filter(item => !docsPackager(item.path)).flatMap(item => item.seeds),
+    false,
+  );
+  spread(
+    classifications.filter(item => docsPackager(item.path)).flatMap(item => item.seeds),
+    true,
+  );
   for (const item of scriptsChanged) {
     const evidence = scriptSelectionReason(item, packageGraph.roots, tests, reverse);
     if (evidence.full) return full(evidence.full);
@@ -212,8 +231,19 @@ export function selectTests({ paths, files, forceFull = false }) {
     item.reason = evidence.reason;
   }
   for (const item of classifications) {
-    if (item.requireConsumer && !hasTestConsumer(item.path, reverse, tests))
+    if (item.requireConsumer && !hasTestConsumer(item.path, reverse, tests)) {
+      // Fixtures used only by standalone measurement tooling have no test to run; static
+      // checks cover them. Anything unused, or reaching the pipeline or product, stays full.
+      const users = importersOf(item.path, reverse);
+      if (
+        users.size &&
+        ![...users].some(
+          path => packageGraph.roots?.has(path) || /^(?:src|web\/src|convex|netlify)\//.test(path),
+        )
+      )
+        continue;
       return full(`No known consuming test for helper or fixture: ${item.path}`);
+    }
   }
   const webChanged = classifications.some(
     item => item.domain === 'web' || item.seeds.some(path => path.startsWith('web/')),
@@ -236,6 +266,18 @@ export function selectTests({ paths, files, forceFull = false }) {
       ].join('; '),
     tests: selected,
   };
+}
+
+function importersOf(path, reverse) {
+  const visited = new Set(),
+    queue = [path];
+  while (queue.length)
+    for (const importer of reverse.get(queue.shift()) ?? [])
+      if (!visited.has(importer)) {
+        visited.add(importer);
+        queue.push(importer);
+      }
+  return visited;
 }
 
 function hasTestConsumer(path, reverse, tests) {

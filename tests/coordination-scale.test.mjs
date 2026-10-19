@@ -2,7 +2,7 @@ import { dispatchCoordination } from '../dist/coordination-dispatch.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { state } from './hosted-fixture.mjs';
-import { moduleUrl } from './convex-module.mjs';
+import { moduleSource, moduleUrl } from './convex-module.mjs';
 import { indexedRecord, activityFields } from '../dist/work-hosted-index.js';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 const coordination = await import(moduleUrl('../convex/projectCoordination.ts'));
@@ -256,8 +256,7 @@ test('presence hook requests all flat pages and resolves a Lane on page two', as
     },
   };
   try {
-    const source = Buffer.from(moduleUrl('../web/src/cockpit/coordination.ts').split(',')[1], 'base64')
-      .toString()
+    const source = moduleSource('../web/src/cockpit/coordination.ts')
       .replace(
         /import \{ useEffect, useMemo, useState \} from [^;]+;/,
         'const { useEffect, useMemo, useState } = globalThis.__f4React;',

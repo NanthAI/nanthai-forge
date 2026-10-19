@@ -1,6 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 import { posix } from 'node:path';
 
+// Packagers and validators for documents and notices. Their consumers are the
+// docs-check wrapper and the tests that run it, not the check runner, so a change
+// here selects those tests instead of the whole suite. Unknown packagers stay full.
+// Regexes, not strings: a path literal in a script would count as a reference to it.
+export const docsPackager = path =>
+  /^scripts\/(?:package-(?:documents|notices|smoke)|check-documents|selfhost-notices)\.mjs$/.test(path);
+export const docsWrapper = path => /^scripts\/check-documentation\.mjs$/.test(path);
+const docsTests = [
+  'tests/ci-scope.test.mjs',
+  'tests/interaction-static.test.mjs',
+  'tests/packaged-scripts.test.mjs',
+  'tests/selfhost-notices.test.mjs',
+];
+
 export const scriptPath = path => /^scripts\/.+\.(?:mjs|js|ts)$/.test(path);
 const commandNode = name => `package-script:${name}`;
 const scriptReferences = text =>
@@ -74,23 +88,29 @@ export function scriptSelectionReason(item, roots, tests, reverse) {
   const basename = posix.basename(item.path).replace(/\.(?:mjs|js|ts)$/, '');
   const matching = tests.filter(path => posix.basename(path) === `${basename}.test.mjs`);
   // Only claim a consumer when it is reachable from this particular changed script.
+  const docs = docsPackager(item.path);
   const visited = new Set([item.path]),
     queue = [item.path];
   while (queue.length) {
-    for (const importer of reverse.get(queue.shift()) ?? [])
+    const current = queue.shift();
+    // The wrapper only spawns the docs check; the runner importing it is not a consumer.
+    if (docs && docsWrapper(current)) continue;
+    for (const importer of reverse.get(current) ?? [])
       if (!visited.has(importer)) {
         visited.add(importer);
         queue.push(importer);
       }
   }
-  const critical = [...visited].find(path => roots.has(path));
+  const critical = [...visited].find(
+    path => roots.has(path) && !(docs && (docsPackager(path) || docsWrapper(path))),
+  );
   if (critical)
     return { full: `Check pipeline, packaging or build dependency: ${item.path} reaches ${critical}` };
   if ([...visited].some(path => /^(?:src|web\/src|convex|netlify)\//.test(path)))
     return { full: `Product runtime dependency: ${item.path}` };
   const consuming = tests.filter(path => visited.has(path));
   return {
-    tests: matching,
+    tests: [...matching, ...(docs ? docsTests.filter(path => tests.includes(path)) : [])],
     reason: `${item.path}: ${consuming.length ? `${consuming.length} importing/runtime/package-command test(s)` : 'no importing tests; static checks and smoke'}${matching.length ? '; basename test coverage' : ''}`,
   };
 }

@@ -62,7 +62,7 @@ test('manual QA/browser fixtures, including deletions, select UI regression cove
 });
 
 test('Convex schema/functions share backend coverage; generated API includes web consumers', () => {
-  for (const path of ['convex/schema.ts', 'convex/first.ts', 'convex/_generated/api.d.ts']) {
+  for (const path of ['convex/schema.ts', 'convex/first.ts', 'convex/_generated/api.js']) {
     const result = select([path]);
     assert.equal(result.scope, 'scoped');
     assert.equal(result.domain, 'convex');

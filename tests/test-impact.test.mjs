@@ -551,3 +551,136 @@ test('npm aliases with short flags retain pipeline dependencies', () => {
     /Check pipeline, packaging or build dependency/,
   );
 });
+
+const narrowFiles = (extra = {}) =>
+  new Map([
+    ...scriptFiles(),
+    ['scripts/package-documents.mjs', 'export const packageDocuments = 1;'],
+    ['scripts/check-documents.mjs', "import { packageDocuments } from './package-documents.mjs';"],
+    ['scripts/check-documentation.mjs', "spawn('scripts/check-documents.mjs');"],
+    ['scripts/forge-check.mjs', "import './check-documentation.mjs';"],
+    ['scripts/package-local.mjs', 'export const local = 1;'],
+    ['tests/interaction-static.test.mjs', "import '../scripts/check-documentation.mjs'"],
+    ['tests/packaged-scripts.test.mjs', ''],
+    ['tests/selfhost-notices.test.mjs', ''],
+    ['convex/_generated/api.js', 'export const api = 1;'],
+    ['convex/_generated/api.d.ts', 'export declare const api: number;'],
+    ['convex/_generated/dataModel.d.ts', 'export type Id = string;'],
+    ['convex/users.ts', "import { api } from './_generated/api.js'"],
+    ['convex/other.ts', 'export const other = 1;'],
+    ['tests/users.test.mjs', "import '../convex/users.ts'"],
+    ['tests/other.test.mjs', "import '../convex/other.ts'"],
+    ['scripts/thing.mjs', 'export const thing = 1;'],
+    ['scripts/thing.d.mts', 'export declare const thing: number;'],
+    ['tests/thing.test.mjs', "import '../scripts/thing.mjs'"],
+    ['tests/tool-fixture.mjs', 'export const fixture = 1;'],
+    ['tests/measure.mjs', "import './tool-fixture.mjs'"],
+    ...Object.entries(extra),
+  ]);
+const narrow = (path, extra) => selectTests({ paths: [path], files: narrowFiles(extra) });
+
+test('docs packagers select the docs-check tests, not the whole suite', () => {
+  for (const path of ['scripts/package-documents.mjs', 'scripts/check-documents.mjs']) {
+    const result = narrow(path);
+    assert.equal(result.scope, 'scoped', path);
+    for (const name of ['interaction-static', 'packaged-scripts', 'selfhost-notices', 'ci-scope'])
+      assert.ok(result.tests.includes(`tests/${name}.test.mjs`), `${path} ${name}`);
+    assert.ok(!result.tests.includes('tests/unrelated.test.mjs'));
+    assert.ok(!result.tests.includes('tests/leaf.test.mjs'));
+  }
+});
+
+test('docs packagers stay full when they reach the runner, product code or an unknown packager', () => {
+  assert.equal(narrow('scripts/check-documentation.mjs').scope, 'full');
+  assert.equal(narrow('scripts/package-local.mjs').scope, 'full');
+  assert.equal(narrow('scripts/forge-check.mjs').scope, 'full');
+  assert.equal(
+    narrow('scripts/package-documents.mjs', {
+      'scripts/forge-check.mjs': "import './check-documentation.mjs'; import './package-documents.mjs';",
+    }).scope,
+    'full',
+  );
+  assert.equal(
+    narrow('scripts/package-documents.mjs', { 'src/reader.ts': "import '../scripts/package-documents.mjs'" })
+      .scope,
+    'full',
+  );
+});
+
+test('skill documents select the tests that read them and fail safe when nothing does', () => {
+  const skill = 'skills/forge-agent/SKILL.md';
+  assert.equal(narrow(skill).scope, 'full');
+  const readers = { 'tests/skill.test.mjs': `readFileSync('${skill}')` };
+  const result = narrow(skill, readers);
+  assert.equal(result.scope, 'scoped');
+  assert.ok(result.tests.includes('tests/skill.test.mjs'));
+  assert.ok(!result.tests.includes('tests/unrelated.test.mjs'));
+  // Package manifests list the file but do not read it.
+  assert.equal(narrow(skill, { 'package.json': JSON.stringify({ files: [skill] }) }).scope, 'full');
+  // A product module that reads it selects the tests naming that module.
+  const viaSource = narrow(skill, {
+    'src/skill-reader.ts': `readFileSync('${skill}')`,
+    'tests/skill-reader.test.mjs': "import '../dist/skill-reader.js'; // skill-reader",
+  });
+  assert.equal(viaSource.scope, 'scoped');
+  assert.ok(viaSource.tests.includes('tests/skill-reader.test.mjs'));
+});
+
+test('declaration files select typecheck plus tests loading their module', () => {
+  const api = narrow('convex/_generated/api.d.ts');
+  assert.equal(api.scope, 'scoped');
+  assert.ok(api.tests.includes('tests/users.test.mjs'));
+  assert.ok(!api.tests.includes('tests/other.test.mjs'));
+  const model = narrow('convex/_generated/dataModel.d.ts');
+  assert.equal(model.scope, 'scoped');
+  assert.ok(!model.tests.includes('tests/users.test.mjs'));
+  const thing = narrow('scripts/thing.d.mts');
+  assert.equal(thing.scope, 'scoped');
+  assert.ok(thing.tests.includes('tests/thing.test.mjs'));
+  assert.ok(!thing.tests.includes('tests/unrelated.test.mjs'));
+  // The runtime twin keeps the whole backend; a deleted declaration keeps the wide backend scope.
+  assert.ok(narrow('convex/_generated/api.js').tests.includes('tests/other.test.mjs'));
+  const deleted = narrowFiles();
+  deleted.delete('convex/_generated/api.d.ts');
+  assert.ok(
+    selectTests({ paths: ['convex/_generated/api.d.ts'], files: deleted }).tests.includes(
+      'tests/other.test.mjs',
+    ),
+  );
+});
+
+test('fixtures select their importing tests; orphan fixtures stay full unless only tooling uses them', () => {
+  const used = narrow('tests/tool-fixture.mjs', { 'tests/using.test.mjs': "import './tool-fixture.mjs'" });
+  assert.equal(used.scope, 'scoped');
+  assert.ok(used.tests.includes('tests/using.test.mjs'));
+  assert.ok(!used.tests.includes('tests/unrelated.test.mjs'));
+  // Used only by standalone measurement tooling: no test to run, static checks cover it.
+  const tooling = narrow('tests/tool-fixture.mjs');
+  assert.equal(tooling.scope, 'scoped');
+  assert.ok(!tooling.tests.includes('tests/unrelated.test.mjs'));
+  // Nothing uses it, tooling reaches the pipeline or product code uses it: full.
+  assert.equal(narrow('tests/lonely-fixture.mjs', { 'tests/lonely-fixture.mjs': '' }).scope, 'full');
+  assert.equal(
+    narrow('tests/tool-fixture.mjs', { 'scripts/runner-helper.js': "import '../tests/tool-fixture.mjs'" })
+      .scope,
+    'full',
+  );
+  assert.equal(
+    narrow('tests/tool-fixture.mjs', { 'src/untested.ts': "import '../tests/tool-fixture.mjs'" }).scope,
+    'full',
+  );
+});
+
+test('package.json, lockfile and the check-selection code itself always run full', () => {
+  for (const path of [
+    'package.json',
+    'package-lock.json',
+    'scripts/test-impact.mjs',
+    'scripts/check-path-scopes.mjs',
+    'scripts/script-impact.mjs',
+    'scripts/verify.mjs',
+    'unknown.d.ts',
+    'skills/unknown/other.txt',
+  ])
+    assert.equal(narrow(path).scope, 'full', path);
+});

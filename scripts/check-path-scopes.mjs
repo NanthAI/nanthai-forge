@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { posix } from 'node:path';
 // Explicit infrastructure/fixture ownership supplements the import graph. Unknown
 // paths stay unknown: a filename resemblance is never an independence proof.
 export const webTest = path => /^(?:tests\/ui-|tests\/.*-ui\.test)/.test(path);
@@ -41,6 +42,21 @@ export function classifyCheckPath(path, files) {
     return domain('convex', ['convex/', 'web/src/'], 'Convex TypeScript configuration');
   if (path === 'netlify/tsconfig.json')
     return domain('netlify', ['netlify/'], 'Netlify TypeScript configuration');
+  // A declaration file only changes typechecking (static checks always run) and
+  // the tests that load its runtime twin; no other backend file reads its text.
+  const declaration = path.match(
+    /^((?:convex\/_generated\/(?:api|server|dataModel)|scripts\/[^/]+))\.d\.m?ts$/,
+  );
+  if (declaration && files.has(path)) {
+    const twin = ['.mjs', '.js', '.mts', '.ts']
+      .map(ext => declaration[1] + ext)
+      .find(file => files.has(file));
+    return {
+      domain: declaration[1].startsWith('scripts/') ? 'scripts' : 'convex',
+      seeds: twin ? [path, twin] : [path],
+      reason: 'Declaration file: typecheck plus tests loading its module',
+    };
+  }
   if (/^convex\/_generated\/(?:api|server|dataModel)\.(?:js|d\.ts)$/.test(path))
     return domain('convex', ['convex/', 'web/src/'], 'Generated Convex API and its backend/web consumers');
   if (manualFixture(path))
@@ -51,6 +67,41 @@ export function classifyCheckPath(path, files) {
     return { domain: 'web', seeds: [path], reason: 'Manual UI capture tooling' };
   if (/^scripts\/ui-shots(?:\.mjs|\/.+\.mjs)$/.test(path) && files.has(path))
     return { domain: 'web', seeds: [path], reason: 'UI capture tooling and its unit tests' };
+  // Agent skill docs are read by name: select the code and tests naming them.
+  if (/^skills\/.+\.md$/.test(path)) {
+    const folder = path.slice(0, path.lastIndexOf('/'));
+    const name = path.slice(folder.length + 1);
+    // Packagers run in CI (package-smoke), not under the test suite; manifests list everything.
+    const readers = [...files].filter(
+      ([file, text]) =>
+        !/^package(?:-lock)?\.json$|^scripts\/package-/.test(file) &&
+        (text.includes(path) || (text.includes(`${folder}/`) && text.includes(name))),
+    );
+    if (!readers.length) return null;
+    // Product code that reads the document is covered by the tests naming that module.
+    const modules = readers
+      .filter(([file]) => file.startsWith('src/'))
+      .map(([file]) => posix.basename(file).replace(/\.[^.]+$/, ''));
+    return {
+      domain: 'skills',
+      seeds: [path, ...readers.filter(([file]) => !file.startsWith('src/')).map(([file]) => file)],
+      tests: [...files]
+        .filter(
+          ([file, text]) =>
+            /^tests\/[^/]+\.test\.mjs$/.test(file) &&
+            modules.some(
+              module =>
+                text.includes(module) ||
+                // A `*-cli` module serves the command of that name: tests spawning the CLI with it.
+                (/-cli$/.test(module) &&
+                  text.includes(`'${module.slice(0, -4)}'`) &&
+                  /dist\/cli|nforge/.test(text)),
+            ),
+        )
+        .map(([file]) => file),
+      reason: 'Agent skill document and the tests that read it directly or through the module that does',
+    };
+  }
   if (!files.has(path)) return null;
   if (/^scripts\/.+\.(?:mjs|js|ts)$/.test(path)) return { domain: 'scripts', seeds: [path] };
   if (/^src\/.+\.ts$/.test(path)) return { domain: 'core', seeds: [path] };

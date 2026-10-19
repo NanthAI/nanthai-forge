@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { moduleUrl } from './convex-module.mjs';
-const compiled = Buffer.from(moduleUrl('../web/src/source-highlight.ts').split(',')[1], 'base64')
-  .toString()
-  .replace(/import\('(.*?)'\)/g, (_, name) => `import('${import.meta.resolve(name)}')`);
+import { moduleSource } from './convex-module.mjs';
+const compiled = moduleSource('../web/src/source-highlight.ts').replace(
+  /import\('(.*?)'\)/g,
+  (_, name) => `import('${import.meta.resolve(name)}')`,
+);
 const { highlightSource } = await import(
   `data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`
 );
