@@ -1,0 +1,35 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.fx-scale-list { list-style: none; margin: 0; padding: 0; }
+.fx-scale-groups > ul { list-style: none; padding: 0; margin: 0; }
+.fx-scale-groups details { border-top: 1px solid var(--fx-line); }
+.fx-scale-groups summary { display: flex; align-items: center; justify-content: space-between; gap: 4px 16px; cursor: pointer; padding: 10px 14px; background: var(--fx-surface-2); min-height: 42px; list-style: none; }
+.fx-scale-groups summary::-webkit-details-marker { display: none; }
+.fx-scale-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.fx-scale-chevron { flex: none; }
+.fx-scale-groups details[open] > summary .fx-scale-chevron { transform: rotate(90deg); }
+.fx-scale-heading .fx-count { flex: none; white-space: nowrap; }
+.fx-scale-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-scale-title { font-weight: 600; }
+.fx-scale-summary { display: flex; justify-content: flex-end; gap: 6px 12px; color: var(--fx-text-2); font-size: 12px; flex: none; }
+.fx-scale-more { padding: 4px 14px; border-top: 1px solid var(--fx-line); }
+.fx-scale-totals { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 10px 14px; font-size: 12px; color: var(--fx-text-2); border-bottom: 1px solid var(--fx-line); }
+.fx-scale-totals span { display: inline-flex; gap: 5px; align-items: center; }
+@media (max-width: 720px) { .fx-scale-more button { min-height: 32px; white-space: normal; text-align: left; } }
+
+.fx-scale-status { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+@media (max-width: 720px) {
+  .fx-scale-groups summary { flex-wrap: wrap; }
+  .fx-scale-heading { width: 100%; }
+  .fx-scale-summary { justify-content: flex-start; flex: 1 1 100%; gap: 6px; overflow-x: auto; }
+}
+
+/* The people panel is 300px on desktop; last-seen belongs below the name. */
+.fx-people .fx-person { grid-template-columns: 24px minmax(0, 1fr); }
+.fx-people .fx-person-main { min-width: 0; }
+.fx-people .fx-person-seen { grid-column: 2; justify-content: flex-start; max-width: none; }
+.fx-people .fx-person-name { flex-wrap: wrap; overflow-wrap: anywhere; }
+.fx-people .fx-agent-tag { white-space: nowrap; }
+
+
+.fx-person > .fx-session-children, .fx-subagent > .fx-session-children { grid-column: 1 / -1; min-width: 0; }
+

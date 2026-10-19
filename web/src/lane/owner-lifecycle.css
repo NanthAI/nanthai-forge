@@ -1,0 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+.fx-lifecycle-form { display:grid; gap:16px; }
+.fx-lifecycle-form label { display:grid; gap:6px; }
+.fx-lifecycle-form label:has(input) { display:flex; align-items:center; }
+.fx-lifecycle-form textarea { width:100%; resize:vertical; padding:8px; background:var(--fx-surface); color:var(--fx-text); border:1px solid var(--fx-line-strong); border-radius:var(--fx-r-2); }

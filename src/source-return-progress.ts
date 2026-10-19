@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: Apache-2.0
+export type SourceReturnProgress = {
+  phase: string;
+  step: number;
+  done: number;
+  total: number;
+  elapsedMs: number;
+  etaSeconds: number | null;
+  resumed: boolean;
+  /** Per-push totals so far (servers before accounting omit them). */
+  storageReads?: number;
+  storageBytes?: number;
+  steps?: number;
+  invocations?: number;
+};
+const megabytes = (bytes: number) => `${(bytes / 1e6).toFixed(1)} MB`;
+export function formatSourceReturnProgress(event: SourceReturnProgress) {
+  const elapsed = Math.ceil(event.elapsedMs / 1000);
+  if (event.phase === 'complete')
+    return `source return complete: elapsed ${elapsed}s${
+      event.storageBytes === undefined
+        ? ''
+        : `, ${event.steps} steps in ${event.invocations} calls, ${megabytes(event.storageBytes)} read from storage`
+    }\n`;
+  return `${event.resumed ? `source return: resuming from step ${event.step}\n` : ''}source return ${event.phase}: ${event.done}/${event.total} items (step ${event.step}), elapsed ${elapsed}s, ETA ${event.etaSeconds === null ? 'pending' : `${event.etaSeconds}s`}\n`;
+}

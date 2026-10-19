@@ -1,0 +1,525 @@
+# Architecture
+
+Forge has five parts. Each owns one kind of data, and no part quietly takes over another's job.
+
+```text
+  Coding agent / human
+        |
+   nforge CLI, MCP, local Git/Work HTTP    Hosted browser (Netlify)
+        |                                         |
+  Native store + Work store  <-- exchange -->  Convex (hosted)
+  (your machine, canonical)                   (checkpoints, event journal,
+        |                                      sessions, messages, access)
+  Local checks (your OS account)                  |
+                                          Netlify worker (public analysis)
+```
+
+For the vocabulary used below (Intent, Lane, View, Channel, State), see [concepts](concepts.md).
+
+## Who owns what
+
+| Part | Owns | Code |
+| --- | --- | --- |
+| Native store | Immutable source: file blobs (SHA-256), State manifests and disposable owner-computed source indexes | `src/native-source.ts` |
+| Work store | Mutable metadata: Intents, Lanes, notes, check runs, selections | `src/work-store.ts`, `src/work.ts`, `src/native-work.ts` |
+| Analysis | Derived, partial code graph with exact locators | `src/snapshot.ts`, `src/analyze.ts`, `src/graph-query.ts` |
+| Local execution | Check and Playbook processes in materialized Views | `src/work-run.ts`, `src/work-playbook.ts` |
+| Agent interface | Short commands over the same owners | `src/agent-workflow.ts`, `src/mcp-agent-workflow.ts` |
+| Convex | Hosted checkpoints, the Work event journal, sessions, messages, current access | `convex/` |
+| Web | Hosted browser UI (the only browser UI) | `web/src/` |
+| Local server | `nforge serve`: token-protected Git smart-HTTP and Work API on 127.0.0.1, no browser pages | `src/http.ts`, `src/work-git-http.ts`, `src/work-http.ts` |
+| Netlify worker | Public-repository analysis in the background | `netlify/functions/` |
+| Git compatibility | Import, export, projections and publication | `src/native-git*.ts`, `src/work-git*.ts` |
+
+The local native owner is canonical for Forge's own development. A hosted project holds checkpoints you send it plus its own metadata journal. Source synchronization is explicit. Bound owners also send advisory agent presence and lifecycle metadata automatically, with a binding opt-out; these updates do not transfer source or check artifacts.
+
+## Four kinds of state
+
+- **Source** is a State: immutable bytes.
+- **Analysis** is a result computed over source by a specific analyzer version.
+- **Work** is changing collaboration data.
+- **Authorization** is what a caller may access right now.
+
+Changing one never silently changes another. A View pins its base, ordered Lane heads and dependencies. A Channel records which View was accepted. Repeating a mutation with the same operation UUID returns the original result. It never moves a Channel backward or reruns a finished check.
+
+## Source analysis
+
+Forge reads TypeScript, JavaScript, Python, Java and Rust. TypeScript and JavaScript use the TypeScript compiler, which resolves identifier references. Python, Java and Rust use pinned Lezer parsers that give declarations and conservative lexical references. Analysis never runs repository code and needs no model.
+
+Coverage is partial and says so. Relative imports resolve for TypeScript, JavaScript and Python, as do qualified Java imports and explicit Rust file modules. Not modelled: tsconfig aliases, installed packages, dynamic dispatch, framework routes, macros, overload resolution and complete call or data-flow graphs. A missing relationship means unknown. It does not mean independent.
+
+`impact` means direct reverse imports. Use ordinary search for configuration, strings and unsupported languages.
+
+Freshness comes from rereading source, never from timestamps. Re-indexing captures source twice and publishes only if both reads match. An unchanged, valid graph is reused. A worker keeps only its latest compiler program.
+
+## Storage
+
+**Native objects.** `NativeSource.put` hashes each file and stores it once under `.forge/work/objects`. A State is a manifest of paths, blob hashes, modes and parent States. A changed file is stored whole. Capture reports which paths were excluded and why. Retained files and their directory prefixes are indexed once per capture, preserving tracked files through ignore rules. Native ancestry queries stop at a verified match and share verified parent information only within one operation; full history traversal remains available for merge bases and exports. State manifests and their on-disk format are unchanged.
+
+**Hosted blob access.** Every Convex function that stores, reads, links or deletes file bytes goes through `BlobStore` (`convex/blobStore.ts`), and the CLI moves exchange object bytes through `ExchangeBlobs` (`src/exchange-blobs.ts`). Both are backed by Convex file storage today; `projectObjects` rows may carry optional `location` (`convex` or `r2`, absent means `convex`) and `r2Key` for the coming R2 backing store, and `convex/presign.ts` signs R2 URLs inside Convex functions.
+
+**Lanes and checks.** `materialize` writes a State into a fresh directory of ordinary files. Lanes and check workspaces are independent copies. Large files may share filesystem extents on supported systems. Editing a Lane never changes stored objects or other Lanes.
+
+**Work records.** Native owners keep Work in `.forge/work`. Git-backed owners keep it in the Git common directory under `forge-work`. `work.json` is a small manifest that points to immutable, content-addressed record pages. A save writes new records, syncs them, then atomically replaces the manifest. An interrupted save leaves the previous snapshot in place. The owner lock serializes manifest publication and shared Channel mutations. Agent Lane operations also take a per-Lane lock: checkpoint capture and native sync file writes run outside the owner lock; sync publishes only its Lane into a fresh manifest with a source-field CAS, preserving concurrent changes to other Lanes. Native start reserves its records, materializes outside the owner lock, then publishes activation. Check execution and observation hold no Work, Lane or Channel lock; after a Channel CAS race finish either proves the enabled disjoint fast-path or syncs, composes and checks a fresh pinned attempt before rejoining the acceptance queue. Transient contention at the final cancellation/spawn journal step retries without rematerializing, changing the run ID or releasing its machine-capacity ticket; a never-started command is not marked failed merely because this lock was busy. The per-operation finish journal guard prevents duplicate drivers of the same operation; it does not exclude other agents.
+
+Lock admission uses FIFO filesystem tickets with process-start identities. Writers wait up to ten minutes by default (`FORGE_WORK_LOCK_WAIT_MS`); agent `start`, `checkpoint` and `sync` accept `waitMs`, and `lockWaitMs` selects lock patience separately from finish's existing observation window. Waiting emits compact stderr progress initially and every five seconds with queue position, operation/run identity, elapsed time and published holder phase. Check observation reports queued/preparing/running phases without taking a writer lock. Finish-driver and landing queues also use bounded waits (`FORGE_LANDING_LOCK_WAIT_MS`, falling back to the Work lock setting); timeout returns a typed, retryable outcome. `WORK_BUSY` after timeout includes available holder identity and instructions to replay the original operation. A not-yet-published holder is described as pending admission. Dead local holders and queue tickets recover; ambiguous/remote locks remain intact. All writers must use the current queue-aware CLI for FIFO ordering; the exclusive owner file still protects against older writers. `FORGE_WORK_LOCK_TRACE=/absolute/file.jsonl` records operation, actor, lock path, wait and hold milliseconds for each released lock. No source or prompt bytes enter this optional trace. Nothing is capped or deleted automatically.
+
+Native composition prepares its pinned source merge outside the owner lock. Publication checks the Work revision again, restores any newly merged objects collected during preparation, and writes the View in the short owner critical section. A stale revision retries with the same composition operation ID.
+
+**Owner working copy.** Optional `ownerRootUpdates` (default off) refreshes tracked
+owner files after durable main acceptance, inside the same owner lock. It uses
+the final composed main head, not the original candidate. Owner-local journals
+pin the last applied State and any interrupted target; retries finish that target
+before selecting current main. The shared atomic workspace writer has a separate
+owner apply journal and a strict first-apply guard. It reads only selected tracked
+paths, refuses local edits and untracked obstructions, and preserves `.forge/`
+source exclusions and ignored/untracked content. Skips retain acceptance and
+publish a local Needs you notice with `nforge owner refresh ROOT` recovery. The
+explicit command uses the same lock and guard. Recovery/notice files live under
+`.forge/work`; no Work schema changes or real-owner policy migration occur.
+
+Selected-run observation retries transient `SOURCE_CHANGED` reads from concurrent
+Work publication within its existing observation window. It keeps following the
+original run without restarting execution or taking a writer lock for live reads;
+invalid metadata and other read failures remain explicit.
+
+**Compatibility.** Older JSON journals stay readable. The first indexed write migrates them, and older CLIs then refuse the owner rather than damage it. Never copy `work.json` alone. Use an export, or keep the `records` directory with it.
+
+**Hosting.** `nforge host` reuses owner/key project creation and device CLI authority, then object exchange, hosted Work initialization and the current derived index. Deployment/project bindings and pending operation pins live in an atomically replaced `hosted-binding.json` beside local Work. This transport state does not change Work revisions. Project creation validates the complete autonomy policy, including the optional disjoint fast-path setting; older policies without that field remain readable. Unexpected hosted errors retain a generic client response and log their name, message and stack server-side, without custom error payloads; rejected Convex document payloads are redacted.
+
+**Browser bootstrap.** `projectBootstrap.create` prepares an empty native State,
+portable Work and source manifest in storage. One transaction validates their
+pins and publishes the owner/key project, retained checkpoint, initialized Work,
+`main` receipt and ready Code/Work index. Retrying the owner's operation UUID
+returns the same project; a changed name is refused. Concurrent prepared retries
+reconcile the winning transaction and discard only their own unused preparation
+bytes. Source files are added through the existing source-transfer boundaries.
+
+**Exchange.** Native bound pushes durably retain a consistent local Work snapshot
+and available mutable run outputs before their first hosted read. Hosted metadata
+is merged separately into that candidate and the current local owner; later local
+Work writes stay local until the next push. Known hosted checkpoint or Work CAS
+mismatches reconcile fresh hosted pins with the original local capture, with up to
+three automatic rebases after the initial attempt. Each attempt retains separate
+immutable pins and deterministic child operation IDs. Unknown outcomes reconcile
+the original receipt before changing any baseline. Explicit revision-pinned
+requests retain their exact revision checks.
+
+`nforge exchange` sends a checkpoint to a hosted project by asking which content hashes are missing and uploading only those. The Work snapshot is pinned under the owner lock; immutable source traversal, hashing and network transfer run outside it. Large files are split into content-defined chunks. Manifest and Work metadata travel as chunk trees under a small versioned root. Whole-file hashes stay the identity, and the backend verifies them before binding. A matching retry returns the original receipt. Successful native pushes retain a checksummed, project/checkpoint-scoped preparation hint: unchanged source ancestry, finished-run content and uploaded pins are reused without rereading their bytes or negotiating every object. A missing or corrupt hint falls back to full preparation. The backend reuses unchanged digest/size bindings from a completely validated prior checkpoint; those bindings are immutable until explicit project deletion, and publication rechecks active owner authority.
+
+Native owners attach an optional content-addressed derived-row sidecar to source
+return. Selection happens before derivation against the exact hosted source-return
+baseline, which may differ from the checkpoint used for upload negotiation. Only
+new State parents/ancestry, comparisons for changed Lane/View records, changed View
+provenance and new selected trees are supplied. Ancestry is a State's own parents;
+hosted chunks reference those parent boundaries rather than copying full closures.
+Readers compose these references with previously hosted closures and parent caches.
+Older preparation hints recover their exact digest-verified local Work snapshot;
+if that snapshot is unavailable the optional sidecar is omitted.
+
+Sidecar schema 2 and the disposable local delta cache each have a 4 MiB byte
+budget. Oversized legacy caches are skipped before reading. The client stops
+accumulating derived rows at the budget and omits oversized sidecars; the hosted
+action checks declared bytes before any object read, then validates actual bytes,
+digest and JSON. A budget miss falls back to hosted computation and never denies
+a push. The cache retains only the latest bounded delta, not historical View rows
+or transitive closures. Original prepared operations retain their pins on retry;
+oversized original sidecars are omitted without changing source publication pins.
+Work and hosted schema versions stay unchanged.
+
+The existing owner-only source-return action validates the Work digest, shape,
+counts, unique keys, source pins, comparison pairs and View identities without
+reading source blobs. Valid complete sidecars bypass the parent, diffstat,
+ancestry and View item phases and use the existing staged delta publication.
+Missing, oversized, legacy or incomplete sidecars retain hosted computation, as do
+contributor sources. Final authority and source/Work CAS checks stay in the same
+publication transaction. A sidecar carries the existing owner's source trust;
+its metadata is disposable and never becomes source authority.
+
+Native object source returns compare the validated metadata with the selected generation, reuse immutable diffstat pairs and unchanged View provenance, and derive only new source prefixes and affected Views. State-parent caches and complete legacy ancestry boundaries carry earlier work across receipts. New ancestry closures store bounded chunks of hashes instead of expanding a new head into individual historical pair rows. Reads compose those closures with legacy positive pairs; previously retained ancestors absent from an older candidate-pair table can be resolved from cached parents. Existing generations require no schema migration or backfill.
+
+A private return generation holds its computational cursor in file storage. Small deltas keep the selected physical record partition: the final source/Work CAS applies their changed rows and removals atomically with the receipt. The publication budget accounts for new rows, old rows read, protocol bytes and payload-cleanup scheduling. Larger deltas use the existing complete private-partition rebuild and atomic switch. These are internal transaction budgets, not limits on retained source or Work.
+
+The initial metadata reader has an 8 MiB byte memo. Derived steps share a 2 MiB immutable State-byte memo within an action, checking current authority and storage on every use. A logical step reads at most 16 States or roughly 2 MiB of source (one larger State remains readable), and drains at most 100 rows or about 500 KB. Steps checkpoint many logical items together: native delta cursors after at most 64 items or about a second of computation, full partitions once the step's State, byte or row budget is used. The server loops over committed steps for up to 30 seconds (or 1,000 steps) per invocation rather than requiring a client round trip per item, because every cold invocation rereads the cursor and snapshot. State comparison and View provenance still discard historical file lists; arbitrary individual metadata or States do not have a flat-memory guarantee. The [documented action execution limit](https://docs.convex.dev/production/state/limits) remains ten minutes.
+
+Cursor contents and validated metadata travel through file storage as gzip JSON; legacy plain JSON cursors still resume. A warm worker reuses a cursor or snapshot body it stored or read, after checking current storage size and SHA-256. Each committed cursor carries the push's running storage reads, bytes, steps and invocations; the completing call returns them as `accounting` (the stored receipt is unchanged) and the CLI prints them. Setting `FORGE_SOURCE_RETURN_MAX_STEPS` or `FORGE_SOURCE_RETURN_MAX_STORAGE_BYTES` on the deployment pauses a return after a committed step with `SOURCE_RETURN_BUDGET`; pushing the same operation again resumes once the limit is raised or unset. Both are unset by default. The cursor and private rows commit atomically under a step CAS; replaced disposable cursors are removed. An old R3 partition without a computational cursor restarts its disposable rows with the original operation timestamp. Only the final source/Work CAS selects the complete result. Lost replies resume the original cursor or return the exact final receipt. Older CLIs receive `SOURCE_RETURN_PENDING` rather than mistaking partial preparation for success; current CLIs continue automatically and print phase, items done/total, durable step, elapsed time, ETA and saved restart position on stderr. JSON stdout retains the original final receipt.
+
+Diagnostics log `source-return prepare`, `prepared`, `step` (phase, durable step, row count/bytes, State count/bytes, derived rows, elapsed milliseconds and CAS result), and `complete` (published revision). No source payloads are logged. Unavailable optional ancestry/provenance remains explicitly unknown and does not deny a source return; each staging/final mutation still checks current owner authority. Unknown hosted failures remain typed `HOSTED_ACTION_FAILED` and preserve pending push pins. Full fallback Work validation and manifest/catalog processing still scale with retained metadata. Legacy archive/Git projection retains its existing full reconstruction path. The target of under 200 MB on the dogfooding project needs live post-deployment measurement. Retained-byte coverage lives in `tests/hosted-source-memory.test.mjs`; transaction/RPC budgets and the 9,200-object/854 MiB logical-source regression live in `tests/hosted-return-progress.test.mjs`. Incremental landing fixtures live in `tests/source-return-incremental.test.mjs`. See [source exchange](operations/source-exchange.md).
+
+Without a valid owner sidecar, hosted native Lane/View diffstats advance through the same durable return cursor. Only changed records schedule comparisons; a step advances as many records as its State and byte budget allows, looks up immutable base/head totals in batches, compares changed files in batches of up to 100, and publishes each summary once with the index. A partly compared pair resumes from its saved offset. Unavailable or inexact source keeps line totals unknown.
+
+**Archives.** `export-work` writes the full retained closure: source States, Work and recorded run files. It can pack this as a `.tar.gz`. Source-only release archives are narrower and contain empty Work. Browser backup and contributor-proposal imports unpack local exports and upload reusable logical objects. New hosted archive registrations are retired; historical stored archives and pending uploads retain read/resume support. Object proposals pull as validated unpacked exports for direct native contribution import. Older hosted archives are still readable and can be converted explicitly. See [operations](operations.md).
+
+**Collection.** Object collection removes only verified, unreferenced objects. Referenced history, Lanes, logs and backups are never pruned.
+
+## Work record delta exchange
+
+Native exchange schema 2 keeps ordered collections of stable record keys and
+SHA-256 pins in a chunked record catalog. Planning versions use their id and
+version together. Only missing record bytes and catalog chunks travel; the
+delta names the exact baseline catalog, checkpoint Work digest and hosted journal
+revision, with prior/result hashes for additions, replacements and removals.
+The local Work format and its canonical pretty-printed JSON bytes stay unchanged.
+
+New checkpoint rows can carry an optional verified-record marker. The first v2
+checkpoint and old baselines use complete validation; existing rows are not
+rewritten. Later publication validates changed records and their source/record
+references, including inbound references on removals. It streams the complete
+logical Work SHA-256 from exact record segments in bounded batches rather than
+assembling another Work JSON or parsing every unchanged record. Local snapshot
+preparation, catalog reads and this hashing still scale with retained metadata.
+
+An exchange-only journal adapter replays hosted events over touched records,
+checks retained history by ordered record hashes, and uses the existing
+source-return event with its whole-JSON digest. It hydrates affected dependants,
+referenced records, View families, the default Intent and selected Channels for
+the existing derived-index planner. Small updates publish through the original
+atomic source/Work CAS and operation receipt. No new writer authority or portable
+Work event is introduced.
+
+Schema-1 exchange and full reconstruction remain supported. Missing/old
+baselines, unsupported metadata changes, schema transitions, planning-journal
+operations, inserted/reordered histories and contexts beyond the internal 4 MiB preparation budget use that
+complete path. This budget selects an implementation path and never denies a
+push. A partial index cursor that outgrows atomic publication selects the
+verified checkpoint and lets the existing complete index rebuild run. Recovery
+and the logical-manifest compatibility endpoint reproduce and verify the
+original Work bytes. Current CLI readers understand both exchange versions.
+
+Local preparation pins a Work revision and immutable root under the short owner
+lock, then durably retains the operation's snapshot before network access. Running
+outputs are captured as available immutable bytes; later output and Work writes
+belong to the next push. Retries reuse the retained snapshot, never recapture it
+under the same attempt ID. A known hosted CAS mismatch reconciles the hosted
+journal with that pinned local snapshot and derives a fresh delta, with at most
+three automatic rebase attempts before returning the existing stale/conflict
+outcome. Each attempt has immutable pins and its own deterministic operation ID
+under the retained parent push ID. Unknown outcomes reconcile that attempt's
+receipt before any rebase; reusing an ID with changed pins remains invalid.
+
+## Checks and evidence
+
+Native checks select local or Modal execution through `checks.runner` in project
+autonomy policy. The Modal owner-side adapter pins source, definition, selection
+and runtime, verifies snapshot hashes remotely, uses independent remote capacity,
+and binds the terminal receipt to those pins. Owner credentials stay on the
+controller; declared secret inputs stay local. Infrastructure fallback is explicit;
+unknown executions retain IDs for adoption rather than repeating commands.
+See [Modal checks](operations/modal-checks.md) for execution and cost details.
+
+A check is an executable, its arguments, an optional environment label and explicit environment/credential passthrough names. A run records the pinned View, the check definition, an environment fingerprint and the process owner. It runs in a fresh workspace under your OS account with private HOME/XDG/temp directories and a clean runtime allowlist plus declared passthrough. Passthrough values are transient; receipts retain names only. It is not sandboxed. The runner keeps outcomes, logs and chosen build outputs. Cancelled, interrupted and failed are different results. After a lost reply, a retry observes the existing run and does not start another.
+
+Playbooks run a sequence of checks. Automation rules start a Playbook on an event. Evidence is reused only under the explicit native disjoint fast-path policy; acceptance revalidates the exact check and manifest-path proof and schedules full main verification. Missing coverage is unknown. A passing check, a model critique and a human review are separate facts. Accepting a Channel is an explicit step against an observed previous head. An optional Invariant can require specific evidence first.
+
+A hosted project can ask a connected local computer to run a check. The request carries only pins and the check name. The local owner validates them and keeps the logs and evidence. A queued, claimed or finished status is a report. It does not prove the machine is online.
+
+## Making-of record
+
+`making-of` is a read model over existing records: the Intent, its Lanes (by `intentId`), its Views, their runs and accepted Channel moves (by `viewId`), plus local presence and self-reports from `hosted-binding.json`. Records-v2 owners read only those indexed records; older owners read loaded Work. The derivation (`src/making-of.ts`) is pure and omits values whose inputs are missing; loading and the `report` mutation live in `src/making-of-read.ts`. Runs record `queuedAt` at creation and move `startedAt` forward when the command spawns, which separates queue from running time. Self-reports are keyed by Lane, actor and optional session, keep their applied operation IDs for replay, and never change the Work revision or format.
+
+Designed, not built: an opt-in OpenTelemetry intake. Claude Code and Codex can export OTLP metrics (token and cost counters with model and session attributes) when the user enables telemetry. `nforge serve` would accept OTLP/HTTP JSON on its existing token-authenticated loopback listener, map the session to a Lane through a `forge.lane_id` resource attribute set from the Lane environment, and write the same self-report record. It stays off unless the user configures the exporter, and it drops prompt and tool-content attributes.
+
+## Acceptance from the hosted browser
+
+A native project created by `nforge host` remains canonical on its bound local
+owner. The hosting key and native backup format distinguish it from Git-backed
+and hosted-canonical projects. Hosted Accept records an owner-scoped request,
+not a `hostedChannelMoves` selection: operation UUID, exact View/head, expected
+main, server-attributed requester and person/agent classification. The original
+request survives source/index refreshes. Bound pulls materialize source client directories without native Work or
+acceptance authority. Existing independent bound owners can exchange source and
+activity, but do not consume canonical acceptance requests or report their local
+Channel moves as canonical main.
+Bindings without an explicit `acceptanceOwner:true` role are not canonical owners.
+They do not consume owner requests or publish local Channel moves as canonical main;
+`nforge host ROOT --status` reports that the legacy binding has no recorded role.
+An operator must establish which directory is canonical before migrating that binding.
+No role is inferred from a matching project key or an old binding. Retry of the same operation reconciles
+its original pins and terminal result.
+
+`nforge host ROOT --listen` and `nforge serve ROOT` poll every five seconds while
+running. B5's detached `host --sync-agent` worker also consumes one request after
+flushing activity; it is opportunistic, not a persistent connection. Hosting
+performs an initial poll. Owner machine observations live separately from project Work and policy.
+The owner reports its machine name, last-seen main and
+the listener command with a `ROOT` placeholder. Last-seen is an observation; a machine not seen for
+30 seconds is labelled accordingly, not declared incapable of accepting.
+
+The consumer uses the existing native person acceptance path under the owner
+lock and current autonomy policy. Device requests retain agent classification
+and cannot acquire person acceptance authority. If main advanced after a person
+request, the owner-approved fast-path compares source manifests against the
+expected main. Only disjoint changed paths (including directory-prefix clashes)
+compose on current main without a new check. The receipt records the comparison base, both path sets,
+original View/head and current main. Before the first main acceptance, the retained
+native bootstrap supplies the comparison base. Overlap or unavailable ancestry rejects as
+needs re-check; original source, checks and accepted work remain. The composed
+View has a new identity; it does not inherit a passing run on that identity.
+
+Local Channel moves are durable before network delivery. The binding retains
+terminal receipts and exact metadata publication payloads for lost-reply replay.
+The consumer refreshes indexed hosted main from local receipts before reporting
+completion. Source and check-artifact transfer remains explicit: indexed source
+pins do not promise that newly composed bytes have already been uploaded.
+The browser says Requested / Waiting for the named machine, and only says
+Accepted into main after the local receipt arrives. Git-backed and hosted-canonical
+projects retain their existing hosted selection path.
+
+Revert creates a compensating-change Intent and a hand-to-agent prompt. The agent
+must create a reverse-diff Lane on current main, preserve later work, then check
+and accept the new View normally. Creating the Intent does not reverse source.
+Main is never rewound by this action.
+
+## Collaboration
+
+Source changes and live coordination are separate. Convex stores sessions and an append-only message feed outside the Work journal. A session is an attributed claim: who, where, status and optional Intent, Lane or path. Last-seen is the time a report arrived. A heartbeat touch moves only receipt time (`lastSeen`), preserving `lastActivity` and `activityKind`; real MCP activity advances both. Bound owner observations pin activity time before transport, so delayed delivery cannot look like fresh editing. CLI lifecycle calls persist local session observations; one process-owned observer with per-Lane filesystem watchers coalesces edits about once per minute without reading or hashing source. Its minute tick also observes queued/running checks. Presence observers validate the current Work format before creating owner or Lane queue tickets; unsupported formats leave the owner untouched. HTTP and MCP own their in-process presence observers: closing the last handle aborts watchers and waits for Lane queue releases. Standalone CLI lifecycle observations retain their detached worker. HTTP shutdown also clears the acceptance interval and waits for its active poll before returning. Hosted Now uses shared 15-minute working and 90-minute folding defaults, keep quiet sessions visible, and collapse duplicate name+Lane observations. Silence never completes a session; explicit completion or accepted/closed Lanes do. Messages and handoffs target a session, a participant or the project; acknowledgements refer to the original and are recorded per participant. Claims are advisory path scopes with an expiry. Hosted Work writes, exchange publishes and source returns insert `change` events in the same transaction. Events carry denormalized kind, recipient, Intent and Lane for indexed inbox and scoped feeds. Nothing pauses an agent, locks a file or accepts source.
+
+Hosted Intent, note and Channel operations use a derived indexed Work generation, rebuilt from the checkpoint and the event journal. Source return updates a ready generation in place: small deltas modify changed rows, while larger deltas stage a replacement record partition before an atomic switch under the same public generation. Browser query identities stay stable; CLI pagination cursors additionally pin the source revision, and multi-part record hydration retries if that revision changes. Unavailable derived indexes retain the rebuild fallback. The cockpit strip selects the latest accepted `main` move from the pushed local `channelMoves` and hosted selection records, including its recorded timestamp, actor and exact-View check. Indexed Lane `main.included` means main contains that Lane head; View/run `main.included` means the checked head contains main. These opposite ancestry directions are kept separate, with unavailable ancestry reported as unknown. Accepted moves and their exact View inputs also identify landed Lane heads in older indexes. Unanchored notes, Intent creation/status and planning comments use `projectWorkCommand.command`, a single mutation with an operation UUID and no client-held revision. It reads current headers, applies the shared reducer and assigns the next journal revision atomically; Convex retries concurrent transactions. Coordination messages and heartbeat touches are already independent server mutations.
+
+The `projectWorkHeads` row owns the mutable Work revision and projection metadata. Legacy project/generation fields seed it lazily; ordinary writes leave those shared documents unchanged. Revision-sensitive reads (Work state, workspace, provenance plans, exports and source return) hydrate the head; collection/detail reads depend on the stable generation and their selected record ranges. Index preparation remains the existing hosted-open step. Anchored notes still validate source bytes in an action; planning-item replacement, Channel acceptance and source return retain their pinned revision checks. The legacy command action remains compatible. Source return atomically selects the new checkpoint and head; journal replay and operation receipts retain contiguous revisions and original retry identities.
+
+Related work is found by comparing changed paths against each View's base. Composition merges independent text-line changes. Overlaps, binary changes and add/delete conflicts stay explicit. Agents should announce scope, watch related activity, message when needed and acknowledge agreements. See [agents](agents.md) and [decisions](decisions.md).
+
+
+## Source durability and interrupted workspace updates
+
+`NativeSource` fsyncs new object bytes before publishing their hash names. The
+objects directory is fsynced before returning a retained capture or individual
+object write, including retries that find an existing object. Capture batches
+that directory flush across all files; each new file still receives its own
+file fsync. Creating metadata directories also flushes their parent entries.
+Directory fsync is used on Unix; Windows does not expose the same directory
+flush through this API. This is write-ordering coverage, not a claim of tested
+power-loss recovery on every filesystem or storage device.
+
+Sync records its selected target and merge timestamp per operation durably in the Lane's
+excluded metadata before applying files. A separate durable apply signature
+records removals, so interrupted additions, deletions and file/directory
+transitions can resume against that same plan. Replacements are written and
+fsynced in private files on the workspace filesystem, then renamed atomically
+into place; an interruption inside the write leaves the previous complete file.
+Directory entries are flushed before publishing the Lane metadata. Retry
+recognises old/new versions and planned removals, while unrelated edits still
+surface as conflicts with the working copy. Completed selections are retired at
+metadata publication; undo also reconciles selection cleanup after a lost reply.
+Partial private files are retained.
+
+New Lane directories are built in unique staging siblings, including their
+native owner marker. File bytes and directories are flushed before the complete
+directory is renamed to its reserved Lane path. Start replay and explicit resume
+therefore see either no final directory or a complete marked one. Interrupted
+staging directories are retained rather than deleting potentially edited work;
+unknown or changed final directories remain untouched. Check workspace
+materialization keeps its existing behavior.
+
+## Client error capture
+
+The hosted browser reports its own failures through one module, `web/src/error-capture.ts`: window `error` and `unhandledrejection` events, the app error boundary, and every failed mutation or action made through the hosted Convex client. Failed calls are rethrown unchanged after reporting, so existing toasts and retries behave as before. Opaque cross-origin `Script error.` events are ignored, and an error object reported as a failed call is not reported again as an unhandled rejection. The local app does not report.
+
+The client keeps only the URL path (no origin, credentials, query or fragment), strips query strings from URLs in messages and stacks, and redacts JWTs, bearer tokens, `fga_`/`sk_`/`rk_` tokens and `token=`/`secret:`/`password=`-style values. Thrown non-Error objects are never serialized. The same failure (kind, function, code, message, top stack frame) is sent at most once per ten minutes, at most ten reports per minute per page, and up to ten reports wait until a signed-in session attaches. Anonymous visitors send nothing. The build hash is the content hash of Vite's entry chunk (`assets/index-<hash>.js`), or `dev`.
+
+`clientErrors:report` is a retry-safe mutation keyed by the caller's auth subject and a client operation id. The user always comes from auth, never from arguments; anonymous calls are dropped. The server scrubs and clips every field again with the shared `src/client-error-text.ts` rules (message 500 characters, stack 4,000, route 300). A project id is attached only when the caller currently has read access to that project. `clientErrors:recent` lists a project's reports newest first, for the project owner only; reporters other than the owner appear as `reportedByYou: false`, never by account. The table is additive and has no retention rule.
+
+## Hosted coordination paging
+
+`projectCoordination.sessions({projectId, paginationOpts, parentSessionId?, all?})`
+returns Convex `{page, continueCursor, isDone}` pages. The default selects roots;
+`parentSessionId` selects immediate children of that session; `all: true` selects
+flat project sessions (including descendants). Each row preserves `parentSessionId`,
+strips credentials and has `subagents: []`; descendants are never recursively read.
+Consumers expand a branch with a separate child query or page the flat stream for
+complete presence. Pages use immutable creation order, newest first, so heartbeats
+do not move records across cursors. New inserts appear on the live first page.
+`recent` uses the same Convex cursor contract in immutable newest-first event order.
+The cockpit hook exposes `sessionsComplete`, `loadMoreSessions`, `eventsComplete`,
+`eventsLoading`, and `loadMoreEvents`. Presence consumers read flat pages to completion;
+Activity requests additional retained events explicitly. UIs must distinguish partial
+observations from a complete absence of a participant.
+
+Activity counts range-read optional derived `projectWorkRecords.activityAt` through
+`by_generation_and_collection_and_activityAt`, selecting only recent Lane saves
+and runs before resolving their Views. All index writers derive the timestamps.
+Existing rows are populated by the bounded, idempotent internal
+`coordinationBackfill:activity({cursor})` mutation, repeating the returned cursor
+until `isDone`; counts for unbackfilled imported history are incomplete until then.
+
+
+Hosted Review uses this owner request path for native projects and offers every
+retained clean View, including Views without a previous acceptance. People may
+accept clean unchecked Views; agents still need exact-View passing evidence and
+the current autonomy policy. `hosted-work` CLI and `forge_hosted_work` expose
+`accept` with operationId, revision, viewId, head, archiveSha256, channel and
+previousId. The CLI/MCP command explicitly downscopes to agent authority even
+when supplied an account JWT; device credentials can never obtain person authority.
+Repeating the original pins reconciles the same request or receipt.
+
+Hosted native Intent and Lane lifecycle menus queue complete, reopen and abandon
+on the same canonical owner listener. Requested and machine-waiting states are
+observations; only the owner receipt reports an applied lifecycle transition.
+Commands pin the target head/base and lifecycle state. Abandon uses B4's existing
+reason, save-first and Intent cascade semantics. Complete/reopen retain source
+and acceptance history. B4's cancel command cancels check runs: there is no
+cancelled Intent or Lane state, so these menus do not invent one. Hosted-canonical
+and Git projects retain their existing Intent status controls.
+
+
+An overlap rejection offers **Re-check on latest main**. It queues a separate
+owner request, composes the pinned reviewed View with the latest local main using
+normal View dependencies, and queues the configured check through the existing
+runner. It never accepts source. Original request ids replay the same composed
+View and run even if main advances later. A text conflict retains a conflict View
+and reports why no check was queued. Re-check receipts are separate from acceptance
+receipts; new source/check artifacts still use explicit exchange. Deterministic
+acceptance failures do not offer an unchanged acceptance retry; transient owner
+failures retain Request again.
+
+Hosted Code uses paths-only `sourceTreePaths` pages, keyed by an exact source
+head and published with the selected Work generation. The `sourceTrees` marker
+records complete availability, including an empty tree. Current source and main
+are prepared during source indexing; older or unavailable tree indexes use the
+existing exact-source review reader. File text is read only for the selected
+file, independently of the tree. The project frame shares summary pages and
+coordination subscriptions with its child pages. Summary pages start with 20 rows and continue through all history in 100-record
+pages. Non-summary readers retain the backend's existing 100-record page size. Code and View
+chunks are warmed when their navigation links receive hover or keyboard focus;
+module preloading never caches project data.
+
+An open tab costs nothing while nobody is looking. The browser's Convex client
+drops every live subscription after 30 s hidden or 5 minutes without input or
+focus (`web/src/live-reads.ts`); mounted pages keep their last values, the strip
+shows Paused, and the next input or visibility change subscribes each mounted
+read once for fresh data. Nothing polls; time-window counts advance only while
+awake.
+
+Page readiness distinguishes the first summary page from complete retained
+history. Summary consumers can render available rows while continuation pages
+arrive; complete-history flags remain available for counts and editor writes.
+Updated backends advertise `recentSummaryPages`, allowing the browser to request
+newest summary pages first and restore positional order as history arrives. The
+default records API order stays ascending. Actor labels are resolved once per
+actor within a records query; that reuse ends with the query and never skips a
+fresh name or authority read on a later request.
+
+Lane headers use the indexed header immediately while save payloads hydrate in
+the background. Selected Intent, View and run summaries use the existing keyed
+and parent indexes rather than waiting for unrelated project history. For native
+object checkpoints, source-pin lookups recognize an absent base or head before
+starting a manifest read that would return the same source-unavailable error.
+Archive and older index readers keep the existing source-review path. ID-based
+routes subscribe to project state and workspace alongside canonical URL
+resolution; the route gate and every query retain their existing access checks.
+
+Development builds, or explicit QA builds with `VITE_FORGE_PERF=1`, expose
+`window.__forgeCritical` first-result marks for Projects, Now, Work, Lane and Code.
+They record timing and query labels only, exclude presence updates, and never
+change a recorded complete time when a live tick rerenders the page.
+
+Source review also resolves exact State and selected-file pins through the
+existing `sourceBlobs` index when its generation names the requested backup.
+It reads only those immutable objects, without walking the complete retained
+manifest. Each object read still verifies current access, storage metadata,
+size and digest; the final checkpoint check remains. Missing or inconsistent
+disposable pins, an older backup, or an index/source-return race restart the
+original manifest reader with the same backup, base and head. No source revision
+or visibility is substituted, and no new index format or backfill is required.
+
+## Unified Work format (schema 18)
+
+`src/work-unified-types.ts` defines unified Work formats 16 and 18: a unified
+Intent plus separate Initiative grouping records. `convertWork15To16` in
+`src/work-intent-converter.ts` is a pure converter for schema-15 portable Work,
+with schema-16 pass-through for deterministic retries. Local stores read and write
+formats 15/16/17/18. Format 18 combines unified Intents with format-17 landing
+batches; explicit migration accepts 15, 16 and 17. Historical format-16 receipts
+remain exact. Hosted pushes down-project to legacy Intents, retaining format 17
+when batch records are present.
+
+Unlinked issues retain their UUIDs. A single issue-to-execution link folds only
+when that pair is unique in both directions across retained planning history;
+its issue UUID becomes an alias. Execution title and lifecycle status win, while
+the issue body supplies the description. Ambiguous components keep separate
+Intents with reciprocal related IDs. Legacy ready maps to active; closed issues
+map to completed and in-progress issues to active, without creating execution
+or acceptance evidence. Pre-execution Intents have no source pin. Unknown
+creator or assignment identities remain absent.
+
+Original Intents, planning versions and comments remain in `legacyIntentMerge`,
+including unknown fields, conflicting facts and legacy ready observations.
+Planning versions/comments also retain their original collections and byte order;
+conversation references retain comment IDs and assign deterministic UUIDs to
+notes by Intent UUID and note index. Notes and source anchors are unchanged.
+Initiatives retain all versions in planning history. Current memberships retain
+each source placement (direct Initiative links and issue placement), ordered by
+the existing planning display: direct links first, then issue insertion order.
+No Initiative is derived from an empty membership list. Historical memberships
+remain in the original planning versions.
+
+The migration receipt records before/after cardinalities, folded-pair counts,
+SHA-256 of exact input/output JSON, and original Intent/version/comment hashes.
+The output digest covers the payload without the receipt to avoid a circular
+hash. Conversion never rewrites journal commands or request hashes. A conflicting
+issue/execution UUID reports `INTENT_MERGE_ID_COLLISION` without mutating input.
+The anonymous count/topology fixture contains only ordinal IDs, lifecycle facts
+and counts; every title, note and comment in its generated Work is synthetic.
+
+Local Work unifies legacy Intents only through the explicit owner command
+`{"action":"migrate-intents"}` (`src/work-intent-migration.ts`); no reader or
+writer migrates implicitly. Take a verified backup first. Under the owner lock it
+converts the current Work, writes the converted pages as content-addressed
+records, reads them back and validates them, writes `intent-merge-receipt.json`,
+then switches `work.json` with one atomic rename. A failure before the rename
+leaves the original format-15/16/17 pointer and records untouched. The migration ID derives from
+the original Work hash, so a retry reproduces identical pages and receipt; once switched,
+a retry returns the stored `intentMigration` receipt without writing. The large
+`legacyIntentMerge` copy is stored as a one-record paged collection, so ordinary
+commits never rewrite it inside the commit pointer.
+
+In unified Work, record writers complete unified fields on any Intent they write
+(`unifyIntent`): title, description, empty relation lists and a stable
+conversation entry per note. `intent-status ready` keeps the Intent active and
+records the request as lifecycle history; Ready is derived attention. The legacy
+planning commands (`put-planning-item`, `comment-planning-item`) remain the write
+API: an Issue write updates the unified Intent (title, description, version,
+relations, memberships) and still appends its planning version or comment, which
+keeps operation-ID retries, exports and the hosted push exact. Issue IDs folded at
+migration resolve through `intentAliases`, and writes through the alias or the
+Intent ID extend one version chain. Planning status sets the status of an Intent
+with no source pin (closed → completed, otherwise active); once a Lane has pinned
+an Intent, its execution lifecycle owns status. An Intent created from an Issue
+has no source pin until `agent start` with its `intentId` captures one from its
+first Lane; composition and Git `lane` commands on an unpinned Intent fail with
+`INTENT_NOT_STARTED`. `intentState` derives Proposed, Planned, In motion and Done
+for presentation only.
+
+Native exchange sends `hostedPushWork` without down-projecting unified fields or
+unpinned Intents. Record reference validation uses the declared Work format, so
+formats 16 and 18 accept an Intent without a base before its first Lane. Unknown
+extension fields remain opaque to reference discovery. Unified collections still
+select the complete metadata compatibility path rather than record deltas; the
+hosted reader validates the complete bytes with the shared format-aware parser.
+No Work migration or synthetic source base is needed for existing planned Intents.
+
+Hosted journal reads and local recovery replay original events through the Intent
+migration revision, convert once at that cutover, then apply later events to
+unified Intents. Companion reconciliation uses the same cutover for the
+already-received event prefix before normalizing merge inputs. Legacy
+source-return digests are checked against their original representation; errors
+identify the event, revision, action and expected/actual Work digest prefixes.
+
+### Hosted main read contract
+
+Source clients use the schema-1 `HostedMain` contract (`src/hosted-main.ts`), read
+atomically by `projectMain:current`: project, source generation, backup, native
+main head and its Channel receipt, including previous head/receipt pins. Hosted
+Channel selection overrides the uploaded native main seed. An expected head plus
+receipt detects stale selection, including rollback to the same source bytes.
+This endpoint reuses the current accepted receipts and selected generation; there
+is no new main table, Work format, acceptance rule or storage authority.
+
+Client checkout downloads only that State and missing file blobs through existing
+project-scoped object storage, validates exact bytes, and materializes a source
+client directory. It never restores native Work or derives current main from an
+uploaded checkpoint's root head. Explicit independent-owner restore remains the
+full retained-closure recovery operation. Client cache and retry receipts are
+transport state; they do not grant hosted access or move a Channel. See
+[hosted main client checkout](operations/source-exchange.md#hosted-main-client-checkout).

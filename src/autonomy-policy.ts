@@ -1,0 +1,195 @@
+// SPDX-License-Identifier: Apache-2.0
+import { z } from 'zod';
+import { invariant } from './errors.js';
+/** Portable API shape, shared by local owners, hosted projects and UI clients. */
+export const autonomyPolicySchema = z.object({
+  githubMirror: z
+    .object({
+      repo: z
+        .string()
+        .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
+        .refine(value => value.split('/').every(part => part !== '.' && part !== '..')),
+      autoPush: z.boolean(),
+      laneRefs: z.literal(false),
+    })
+    .optional(),
+  preset: z.enum(['supervised', 'trusted', 'autonomous', 'custom']),
+  acceptance: z.object({
+    mode: z.enum(['review', 'auto-on-pass']),
+    disjointFastPath: z.boolean().optional(),
+    landing: z.enum(['batched', 'optimistic']).optional(),
+    /** Remote runners only: wait up to this long after the oldest queued landing before the first check. */
+    batchWindowMs: z.number().int().min(0).max(60_000).optional(),
+    autoActors: z.array(z.string().min(1)).optional(),
+    protectedPaths: z.array(z.string().min(1)),
+  }),
+  checks: z
+    .object({
+      runner: z.enum(['modal', 'local', 'github-actions']),
+      fallback: z.enum(['manual', 'local']).optional(),
+      repo: z
+        .string()
+        .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
+        .refine(value => value.split('/').every(part => part !== '.' && part !== '..'))
+        .optional(),
+      runsOn: z.string().min(1).optional(),
+      shards: z.number().int().positive().optional(),
+      /** Remote runners only: landing batches checked at once (stacked on one another). */
+      concurrency: z.number().int().min(1).max(16).optional(),
+    })
+    .optional(),
+  ownerRootUpdates: z.boolean().optional(),
+  laneUpdates: z.enum(['auto', 'ask']),
+  lifecycle: z.object({ completeOnAccept: z.boolean(), cleanRegenerableCopies: z.boolean() }),
+  notify: z.object({ awaySummary: z.boolean() }),
+});
+export type AutonomyPolicy = z.infer<typeof autonomyPolicySchema>;
+export type AcceptanceActor = { kind: 'person' | 'agent'; id: string };
+export function policyPreset(preset: Exclude<AutonomyPolicy['preset'], 'custom'>): AutonomyPolicy {
+  return {
+    preset,
+    acceptance: {
+      mode: preset === 'supervised' ? 'review' : 'auto-on-pass',
+      disjointFastPath: false,
+      autoActors: [],
+      protectedPaths: [],
+    },
+    ownerRootUpdates: false,
+    laneUpdates: preset === 'supervised' ? 'ask' : 'auto',
+    lifecycle: { completeOnAccept: preset !== 'supervised', cleanRegenerableCopies: preset === 'autonomous' },
+    notify: { awaySummary: true },
+  };
+}
+/** Existing owners have no new restrictions or cleanup on upgrade. */
+export function legacyPolicy(): AutonomyPolicy {
+  return { ...policyPreset('trusted'), preset: 'custom' };
+}
+export function effectivePolicy(data: { autonomyPolicy?: AutonomyPolicy | undefined }): AutonomyPolicy {
+  const policy = data.autonomyPolicy ? autonomyPolicySchema.parse(data.autonomyPolicy) : legacyPolicy();
+  // An absent runner policy preserves the legacy finish protocol. Fallback is
+  // manual unless explicitly opted in, including when no checks policy exists.
+  return policy.checks ? { ...policy, checks: { fallback: 'manual', ...policy.checks } } : policy;
+}
+export const policyWriteSchema = z
+  .object({
+    action: z.literal('set-policy'),
+    operationId: z.string().uuid(),
+    /** Compare-and-swap prevents a concurrent settings edit from being overwritten. */
+    expectedPolicy: autonomyPolicySchema.optional(),
+    preset: autonomyPolicySchema.shape.preset.optional(),
+    acceptance: autonomyPolicySchema.shape.acceptance.partial().optional(),
+    checks: autonomyPolicySchema.shape.checks.unwrap().partial().optional(),
+    ownerRootUpdates: autonomyPolicySchema.shape.ownerRootUpdates,
+    laneUpdates: autonomyPolicySchema.shape.laneUpdates.optional(),
+    lifecycle: autonomyPolicySchema.shape.lifecycle.partial().optional(),
+    notify: autonomyPolicySchema.shape.notify.partial().optional(),
+    githubMirror: autonomyPolicySchema.shape.githubMirror,
+  })
+  .strict();
+export type PolicyWrite = z.infer<typeof policyWriteSchema>;
+export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): AutonomyPolicy {
+  const base =
+    command.preset === 'custom'
+      ? { ...previous, preset: 'custom' as const }
+      : command.preset
+        ? policyPreset(command.preset)
+        : previous;
+  const edited =
+    command.checks ||
+    command.acceptance ||
+    command.ownerRootUpdates !== undefined ||
+    command.laneUpdates ||
+    command.lifecycle ||
+    command.notify ||
+    command.githubMirror;
+  const githubMirror = command.githubMirror ?? previous.githubMirror;
+  const policy = autonomyPolicySchema.parse({
+    ...base,
+    ...(githubMirror ? { githubMirror } : {}),
+    ...(edited ? { preset: 'custom' } : {}),
+    ...(command.checks
+      ? { checks: { runner: 'local', fallback: 'manual', ...base.checks, ...command.checks } }
+      : {}),
+    acceptance: { ...base.acceptance, ...command.acceptance },
+    ownerRootUpdates: command.ownerRootUpdates ?? base.ownerRootUpdates,
+    laneUpdates: command.laneUpdates ?? base.laneUpdates,
+    lifecycle: { ...base.lifecycle, ...command.lifecycle },
+    notify: { ...base.notify, ...command.notify },
+  });
+  // Cleaning is part of autonomous behavior, never supervised acceptance.
+  invariant(
+    !policy.lifecycle.cleanRegenerableCopies || policy.acceptance.mode === 'auto-on-pass',
+    'BAD_ARGUMENT',
+    'Regenerable-copy cleanup requires auto-on-pass acceptance.',
+  );
+  for (const glob of policy.acceptance.protectedPaths) globPattern(glob);
+  return policy;
+}
+/** Repository-relative globs: *, **, ?, character classes and brace alternatives.
+ * Invalid patterns require review rather than silently missing protected paths. */
+export function globPattern(glob: string): RegExp {
+  let pattern = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i]!;
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        i++;
+        if (glob[i + 1] === '/') {
+          i++;
+          pattern += '(?:.*/)?';
+        } else pattern += '.*';
+      } else pattern += '[^/]*';
+    } else if (c === '?') pattern += '[^/]';
+    else if (c === '[') {
+      const end = glob.indexOf(']', i + 1);
+      invariant(end > i + 1, 'BAD_ARGUMENT', 'Protected-path glob has an unclosed character class.');
+      const body = glob.slice(i + 1, end).replace(/^!/, '^');
+      pattern += `[${body}]`;
+      i = end;
+    } else if (c === '{') pattern += '(?:';
+    else if (c === '}') pattern += ')';
+    else if (c === ',' && glob.slice(0, i).lastIndexOf('{') > glob.slice(0, i).lastIndexOf('}'))
+      pattern += '|';
+    else pattern += c.replace(/[\\^$+?.()|]/g, '\\$&');
+  }
+  try {
+    return new RegExp(`^${pattern}$`);
+  } catch {
+    invariant(false, 'BAD_ARGUMENT', 'Protected-path glob is invalid.');
+  }
+}
+export function protectedMatches(policy: AutonomyPolicy, paths: string[]) {
+  return paths.filter(path => policy.acceptance.protectedPaths.some(glob => globPattern(glob).test(path)));
+}
+export function reviewReason(
+  policy: AutonomyPolicy,
+  actor: AcceptanceActor,
+  paths: string[] | null,
+): string | null {
+  if (actor.kind === 'person') return null;
+  if (policy.acceptance.mode === 'review') return 'Waiting for review by a person; not in main yet';
+  const allowed = policy.acceptance.autoActors ?? [];
+  if (allowed.length && !allowed.includes(actor.id))
+    return `Waiting for review by a person; actor ${actor.id} is not allowed to auto-accept`;
+  if (paths === null && policy.acceptance.protectedPaths.length)
+    return 'Waiting for review by a person; protected-path coverage is unavailable';
+  const matched = protectedMatches(policy, paths ?? []);
+  return matched.length ? `Waiting for review by a person; protected paths: ${matched.join(', ')}` : null;
+}
+
+/** Portable hosted command schema: safe to import in non-Node Convex mutations. */
+export const hostedAcceptanceCommandSchema = z.object({
+  action: z.literal('accept-hosted-channel'),
+  // Explicitly use agent authority; this can never promote a device to person authority.
+  agent: z.literal(true).optional(),
+  channel: z.string().trim().min(1),
+  acceptanceId: z.string().uuid().optional(),
+  viewId: z.string().uuid(),
+  head: z.string().regex(/^[0-9a-f]{40,64}$/),
+  previousId: z.string().uuid().nullable(),
+  archiveSha256: z.string().regex(/^[0-9a-f]{64}$/),
+});
+
+/** Opt-in trusted acceptance, including equivalent custom policy edits. */
+export const optimisticLanding = (policy: AutonomyPolicy) =>
+  policy.acceptance.landing === 'optimistic' && policy.acceptance.mode === 'auto-on-pass';

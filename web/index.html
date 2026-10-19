@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="color-scheme" content="light dark"/>
+<script>
+(function () {
+  var theme = 'system';
+  try { theme = localStorage.getItem('forge-theme') || 'system'; } catch (_) {}
+  document.documentElement.dataset.theme = theme === 'dark' || theme === 'light' ? theme :
+    (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+})();
+</script>
+<style>
+html { background: #f4f6f9; color-scheme: light; }
+html[data-theme="dark"] { background: #0b0e13; color-scheme: dark; }
+body { margin: 0; background: inherit; }
+</style>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"/>
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png"/>
+<link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png"/>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
+<link rel="manifest" href="/site.webmanifest"/><title>NanthAi:Forge · Source explorer</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>

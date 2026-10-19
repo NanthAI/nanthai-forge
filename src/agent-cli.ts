@@ -1,0 +1,190 @@
+// SPDX-License-Identifier: Apache-2.0
+import { readFileSync, realpathSync } from 'node:fs';
+import { sep } from 'node:path';
+import { AgentWorkflow } from './agent-workflow.js';
+import { invariant } from './errors.js';
+
+export const AGENT_HELP = `Forge agent workflow
+  nforge agent ROOT ACTION [JSON | --command-file FILE]
+  nforge agent ROOT ACTION --help
+  nforge mcp ROOT --agent
+
+Typical loop:
+  nforge agent ROOT start '{"outcome":"Fix the login bug"}'
+  (edit files in the returned path)
+  nforge agent ROOT finish '{"laneId":"LANE_ID","message":"Fix login","accept":true}'
+
+finish checkpoints, syncs the Lane with main if main moved, composes, runs the
+"verify" check (or the only check) and requests acceptance under project policy.
+CHANNEL_CHANGED retries use a per-Channel landing queue (maxRetries defaults to 3);
+receipts list all attempts and waiting positions.
+New supervised projects stop at awaiting-review; a person accepts their checked View.
+policy reads settings; set-policy selects a preset or edits fields (custom).
+laneUpdates:ask stops at sync-required when main moved; native undo-sync restores
+a recorded pre-sync checkpoint and refuses newer edits unless force:true.
+start/checkpoint/sync/finish include a local peers digest; scope:{paths:["src/file.ts"]}
+declares paths; start retains planned claims until the Lane closes.
+take {laneId,takeover:true} hands another actor’s Lane to you with its context. peers {laneId,detail:true} reads full details.
+Clean checkpoints succeed with the unchanged head.
+sync brings main into a Lane like git pull; resolve any conflict markers, then
+finish again. Inside a Lane directory laneId may be omitted.
+
+Omitted operationId and pins are filled from current state and returned under
+"resolved". After an unknown reply, retry with your request plus "resolved".
+
+Actions: peers, link, take, start, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
+         log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, view, provenance, views, review, brief, guidance,
+         making-of, report.
+start intentId adds a sibling Lane; finish with:[laneId] lands siblings together.
+after:{intentId} or after:{viewId} waits for that work to land; land-ready resumes waits.
+finish/accept complete included Lanes; the Intent completes when all its Lanes are done (keepOpen:true to opt out).
+Lanes show merged:true when their head is already in a Channel; complete-merged
+completes those. clean is a dry run until apply:true. run needs only {"laneId"}; log accepts tail:BYTES, shard:N (or "static"), and attempt:N (default 1).
+start records actor:"agent-name" (or FORGE_AGENT_NAME, then FORGE_ACTOR).
+Use distinct names in concurrent shells; tool optionally names the agent tool.
+making-of reads one Intent's derived record (Lanes, saves, runs with queue/run time,
+landings, sessions); report records self-reported harness, model and token totals.
+Read the packaged agent skill: nforge docs agent.
+`;
+
+const examples: Record<string, unknown> = {
+  peers: { laneId: 'LANE_ID', detail: true },
+  take: { laneId: 'LANE_ID', takeover: true },
+  link: { laneId: 'LANE_ID', path: 'src/file.ts', line: 42 },
+  view: { viewId: 'VIEW_ID', offset: 0, limit: 20 },
+  provenance: { viewId: 'VIEW_ID', file: 'src/file.ts', lines: true, offset: 0, limit: 20 },
+  views: { laneId: 'LANE_ID', offset: 0, limit: 20 },
+  brief: { situation: 'continue-lane', laneId: 'LANE_ID', agent: 'generic' },
+  policy: {},
+  'set-policy': { operationId: 'UUID', preset: 'trusted' },
+  'undo-sync': { laneId: 'LANE_ID', syncOperationId: 'SYNC_UUID' },
+  guidance: { operationId: 'UUID', scope: 'project', agentGuidance: 'How agents should work' },
+  'land-ready': {},
+  start: { outcome: 'Describe the intended change' },
+  checkpoint: { laneId: 'LANE_ID', message: 'Describe the checkpoint' },
+  sync: { laneId: 'LANE_ID' },
+  compose: { operationId: 'UUID', intentId: 'INTENT_ID', inputs: [{ laneId: 'LANE_ID', head: 'HEAD' }] },
+  finish: { laneId: 'LANE_ID', message: 'Describe the change', accept: true },
+  'define-check': {
+    name: 'verify',
+    executable: '/absolute/node',
+    args: ['check.mjs'],
+    environmentLabel: 'Local configured runtime',
+  },
+  run: { laneId: 'LANE_ID' },
+  observe: { operationId: 'ORIGINAL_UUID', waitMs: 1000 },
+  log: { operationId: 'ORIGINAL_UUID', stream: 'stderr', tail: 4096 },
+  cancel: { operationId: 'ORIGINAL_UUID' },
+  accept: { viewId: 'VIEW_ID' },
+  complete: { laneId: 'LANE_ID' },
+  abandon: { laneId: 'LANE_ID', reason: 'Superseded by accepted work', saveFirst: true },
+  reopen: { laneId: 'LANE_ID' },
+  'complete-merged': { channel: 'main' },
+  clean: { apply: false, kinds: ['check-workspaces', 'lane-deps', 'lanes'] },
+  status: { intentId: 'INTENT_ID', offset: 0, limit: 5 },
+  records: { collection: 'lanes', state: 'active', merged: false, offset: 0, limit: 50 },
+  'making-of': { intentId: 'INTENT_ID' },
+  report: { laneId: 'LANE_ID', harness: 'claude-code', model: 'MODEL', tokens: { input: 1200, output: 340 } },
+  review: { kind: 'lane', id: 'LANE_ID', expectedHead: 'HEAD', paths: ['src/file.ts'] },
+};
+const strict: Record<string, unknown> = {
+  finish: {
+    operationId: 'UUID',
+    laneId: 'LANE_ID',
+    expectedHead: 'HEAD',
+    message: 'Describe the change',
+    checkId: 'CHECK_ID',
+    expectedDefinition: 'DEFINITION',
+    accept: { expectedPrevious: 'CURRENT_CHANNEL_HEAD' },
+  },
+  accept: { operationId: 'UUID', viewId: 'VIEW_ID', expectedHead: 'HEAD', expectedPrevious: null },
+};
+function actionHelp(action: string): string {
+  invariant(action in examples, 'BAD_ARGUMENT', 'Unknown agent action. Use agent --help.');
+  let result = `nforge agent ROOT ${action} '${JSON.stringify(examples[action])}'\n`;
+  if (strict[action]) result += `Fully pinned: '${JSON.stringify(strict[action])}'\n`;
+  if (action === 'review')
+    result += `View: ${JSON.stringify({ kind: 'view', id: 'VIEW_ID', expectedHead: 'HEAD', expectedBase: 'BASE', expectedStatus: 'clean', paths: ['src/file.ts'] })}\nOmit paths for changed-path summaries. Continue with nextOffset and expectedReviewTree:reviewTree; keep the same source pins.\n`;
+  if (action === 'finish')
+    result +=
+      'with:[LANE_ID] includes sibling recorded heads in one View/check/acceptance. after:{intentId} or after:{viewId} records a dependency; rerun the same request or land-ready after it lands. Omit accept to check only. accept:true means main at its current head. If main moved, finish syncs first; a sync conflict stops with phase "sync" and markers in the Lane. CHANNEL_CHANGED automatically retries sync/check/accept under the landing queue (maxRetries:3 by default, 0 disables retries). Receipts include attempts and queue positions. CHANNEL_DIVERGED means the View lacks the Channel head: sync and finish again. CONTRACT_RESYNC_REQUIRED means main changed an export or schema your edits use; finish retries it like CHANNEL_CHANGED.\n';
+  if (action === 'sync')
+    result +=
+      'Needs a checkpointed Lane (else LANE_DIRTY). Returns up-to-date, merged, or conflict with markers; resolve them and checkpoint or finish.\n';
+  if (action === 'report')
+    result +=
+      'Totals are cumulative for this Lane session (actor + optional sessionId); a new report replaces them. Advisory and local; nothing is verified.\n';
+  if (action === 'start')
+    result +=
+      'intentId adds a Lane to an open Intent; after declares a landing dependency. Default uses accepted main when present; channel:null explicitly selects workspace source.\n';
+  return result;
+}
+/** laneId from a cwd inside `<work directory>/lane-<uuid>`. */
+function laneFromCwd(directory: string): string | undefined {
+  let cwd: string;
+  try {
+    cwd = realpathSync(process.cwd());
+  } catch {
+    return undefined;
+  }
+  const prefix = `${directory}${sep}lane-`;
+  if (!cwd.startsWith(prefix)) return undefined;
+  const id = cwd.slice(prefix.length).split(sep)[0]!;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) ? id : undefined;
+}
+
+export async function agentCli(args: string[]): Promise<unknown> {
+  if (!args.length || args[0] === '--help' || args[0] === 'help') {
+    process.stdout.write(AGENT_HELP);
+    return undefined;
+  }
+  const [root, action, option, path] = args;
+  if (action === 'help' || action === '--help') {
+    process.stdout.write(AGENT_HELP);
+    return undefined;
+  }
+  invariant(
+    root &&
+      action &&
+      (args.length === 2 || args.length === 3 || (args.length === 4 && option === '--command-file')),
+    'BAD_ARGUMENT',
+    'Use agent ROOT ACTION [JSON | --command-file FILE].',
+  );
+  if (option === '--help') {
+    process.stdout.write(actionHelp(action));
+    return undefined;
+  }
+  let text = option ?? '{}';
+  if (option === '--command-file') {
+    invariant(path, 'BAD_ARGUMENT', 'Choose a command JSON file.');
+    try {
+      text = readFileSync(path, 'utf8');
+    } catch {
+      invariant(false, 'BAD_ARGUMENT', 'Command file could not be read.');
+    }
+  }
+  let parameters: unknown;
+  try {
+    parameters = JSON.parse(text);
+  } catch {
+    invariant(false, 'BAD_ARGUMENT', 'Command parameters must be JSON.');
+  }
+  invariant(
+    parameters && typeof parameters === 'object' && !Array.isArray(parameters),
+    'BAD_ARGUMENT',
+    'Command parameters must be a JSON object.',
+  );
+  const selected = parameters as Record<string, unknown>;
+  invariant(
+    selected.action === undefined || selected.action === action,
+    'BAD_ARGUMENT',
+    'Command action differs from the selected action.',
+  );
+  const agent = new AgentWorkflow(root);
+  if (['checkpoint', 'sync', 'finish'].includes(action) && selected.laneId === undefined) {
+    const laneId = laneFromCwd(agent.work.store.directory);
+    if (laneId) selected.laneId = laneId;
+  }
+  const response = await agent.dispatch({ ...selected, action });
+  return action === 'brief' ? response.result : response;
+}

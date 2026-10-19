@@ -1,0 +1,329 @@
+{
+  "format": 1,
+  "coverage": "PARTIAL",
+  "binarySbom": false,
+  "licenseClearance": false,
+  "releases": [
+    "precompiled-2026-09-28-5c7cb5b",
+    "precompiled-2026-10-01-d2ca853"
+  ],
+  "originals": [
+    {
+      "path": "aws-lc-sys-0.45.0/LICENSE",
+      "size": 20337,
+      "sha256": "728536b4160e051f86d7c9c388f704866b3d512cd7df97ac3516c65279523c4e",
+      "source": "https://static.crates.io/crates/aws-lc-sys/aws-lc-sys-0.45.0.crate",
+      "sourceMember": "LICENSE",
+      "scope": "original selected locked crate archive member; individual nested component linkage unresolved"
+    },
+    {
+      "path": "aws-lc-sys-0.45.0/aws-lc/LICENSE",
+      "size": 20338,
+      "sha256": "977c541bd25ffe36975dde25c028c0cd15ddf3d08243983b58e8a6a3d9447523",
+      "source": "https://static.crates.io/crates/aws-lc-sys/aws-lc-sys-0.45.0.crate",
+      "sourceMember": "aws-lc/LICENSE",
+      "scope": "original selected locked crate archive member; individual nested component linkage unresolved"
+    },
+    {
+      "path": "aws-lc-sys-0.45.0/aws-lc/third_party/fiat/LICENSE",
+      "size": 1161,
+      "sha256": "43e358d7b6eb109d0f51f7b3a090fd82607965767c25fadee39e922475de2061",
+      "source": "https://static.crates.io/crates/aws-lc-sys/aws-lc-sys-0.45.0.crate",
+      "sourceMember": "aws-lc/third_party/fiat/LICENSE",
+      "scope": "original selected locked crate archive member; individual nested component linkage unresolved"
+    },
+    {
+      "path": "convex-october/LICENSE.md",
+      "size": 3861,
+      "sha256": "cee614f23a461cb4aba2910e7127ae0969bcf42a0a91a38d3e3449d843383086",
+      "source": "https://github.com/get-convex/convex-backend/releases/download/precompiled-2026-10-01-d2ca853/LICENSE.md",
+      "sourceMember": "LICENSE.md",
+      "scope": "original root license for named vendor release"
+    },
+    {
+      "path": "convex-september/LICENSE.md",
+      "size": 3861,
+      "sha256": "cee614f23a461cb4aba2910e7127ae0969bcf42a0a91a38d3e3449d843383086",
+      "source": "https://github.com/get-convex/convex-backend/releases/download/precompiled-2026-09-28-5c7cb5b/LICENSE.md",
+      "sourceMember": "LICENSE.md",
+      "scope": "original root license for named vendor release"
+    },
+    {
+      "path": "libsqlite3-sys-0.30.1/LICENSE",
+      "size": 1072,
+      "sha256": "f59ba65550f2a5adff98ec6478d783402c8e0a3eb515025c0b3438f3d30dc39e",
+      "source": "https://static.crates.io/crates/libsqlite3-sys/libsqlite3-sys-0.30.1.crate",
+      "sourceMember": "LICENSE",
+      "scope": "original selected locked crate archive member; individual nested component linkage unresolved"
+    },
+    {
+      "path": "rusty-v8/LICENSE",
+      "size": 1078,
+      "sha256": "1c6356fb751d45f0c53093ebf8a7f5e580e802f51999178e19d60f3ec39e147d",
+      "source": "https://raw.githubusercontent.com/get-convex/rusty_v8/105b32c50433c4cf6eb77fe6a79e93b8637b20e2/LICENSE",
+      "sourceMember": "LICENSE",
+      "scope": "MIT wrapper source notice; selected pinned lock source"
+    },
+    {
+      "path": "v8/LICENSE",
+      "size": 3093,
+      "sha256": "6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/LICENSE",
+      "sourceMember": "LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/LICENSE.fdlibm",
+      "size": 250,
+      "sha256": "e7115e18444dae09d17f361ddc365fb1d342640fe500796209c63f7c80dfae10",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/LICENSE.fdlibm",
+      "sourceMember": "LICENSE.fdlibm",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/LICENSE.strongtalk",
+      "size": 1482,
+      "sha256": "6a585a9f466654abc8fc0829d56b1bc987e3a073d31faa03bba37d33640a23cd",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/LICENSE.strongtalk",
+      "sourceMember": "LICENSE.strongtalk",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/LICENSE.v8",
+      "size": 1527,
+      "sha256": "4af93c12062c58058378de2397dc1c92bbff9ddfb1d583a01c84127557ce97ca",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/LICENSE.v8",
+      "sourceMember": "LICENSE.v8",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/docs/compiler/turboshaft/compiler-turboshaft-copying-approach.md.notice",
+      "size": 3588,
+      "sha256": "e16d0348d4701b8e024a8798464ec9ed9cdd0f8efb7265a137a0f699d5a3a438",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/docs/compiler/turboshaft/compiler-turboshaft-copying-approach.md",
+      "sourceMember": "docs/compiler/turboshaft/compiler-turboshaft-copying-approach.md",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/src/compiler/turboshaft/copying-phase.cc",
+      "size": 650,
+      "sha256": "8050804c21e9547da764741ae0aa9b8a3fb8df1f7a24c8ba5f94e7fa7e3564d9",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/src/compiler/turboshaft/copying-phase.cc",
+      "sourceMember": "src/compiler/turboshaft/copying-phase.cc",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/src/compiler/turboshaft/copying-phase.h",
+      "size": 47142,
+      "sha256": "9ce6c13ed8caef76b6ab49fd605134d1a4910ed153ddec69efe17d3d495ab9d1",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/src/compiler/turboshaft/copying-phase.h",
+      "sourceMember": "src/compiler/turboshaft/copying-phase.h",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/test/js-perf-test/SixSpeed/LICENSE.sixspeed",
+      "size": 1147,
+      "sha256": "f915aef5cdb93903ae8850c4a1efb638ee1195b1380b6e446a583c1d0eef3ff7",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/test/js-perf-test/SixSpeed/LICENSE.sixspeed",
+      "sourceMember": "test/js-perf-test/SixSpeed/LICENSE.sixspeed",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/test/mjsunit/third_party/object-keys/LICENSE",
+      "size": 1492,
+      "sha256": "b5e27ca8c92bf5748046345e3c5621a97542abd931ad5870b2057c4e20e2ece8",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/test/mjsunit/third_party/object-keys/LICENSE",
+      "sourceMember": "test/mjsunit/third_party/object-keys/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/test/mjsunit/third_party/regexp-pcre/LICENSE",
+      "size": 2491,
+      "sha256": "f55e9e4ba1ce2ae3b0f21577d9dfd3cea376123cb69e444b891f2f0fc1f9069a",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/test/mjsunit/third_party/regexp-pcre/LICENSE",
+      "sourceMember": "test/mjsunit/third_party/regexp-pcre/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/test/wasm-js/third_party/LICENSE.testharness",
+      "size": 1502,
+      "sha256": "5a7b465d39b5e018bc40cc34162176269f7c476989cb4dbcf0ec0b81701545a7",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/test/wasm-js/third_party/LICENSE.testharness",
+      "sourceMember": "test/wasm-js/third_party/LICENSE.testharness",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/colorama/LICENSE",
+      "size": 1492,
+      "sha256": "15137d6c822e3ab097093a33c3a39a9df699f373f6438867ad534ff60762a947",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/colorama/LICENSE",
+      "sourceMember": "third_party/colorama/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/fp16/LICENSE",
+      "size": 1158,
+      "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/fp16/LICENSE",
+      "sourceMember": "third_party/fp16/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/glibc/LICENSE",
+      "size": 26526,
+      "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/glibc/LICENSE",
+      "sourceMember": "third_party/glibc/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/highway/LICENSE",
+      "size": 11356,
+      "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/highway/LICENSE",
+      "sourceMember": "third_party/highway/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/inspector_protocol/LICENSE",
+      "size": 1537,
+      "sha256": "450ebb9e9e50c2809d9ca581931fc8946d8d5aa0c8c35aae9ac471342fe4a88e",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/inspector_protocol/LICENSE",
+      "sourceMember": "third_party/inspector_protocol/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/jsoncpp/LICENSE",
+      "size": 2665,
+      "sha256": "76c45ece83a26117f86f4e349e7df118708e061e87225328fb478ce1e8b3eb86",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/jsoncpp/LICENSE",
+      "sourceMember": "third_party/jsoncpp/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/rapidhash-v8/LICENSE",
+      "size": 1705,
+      "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/rapidhash-v8/LICENSE",
+      "sourceMember": "third_party/rapidhash-v8/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/re2/LICENSE",
+      "size": 1558,
+      "sha256": "6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/re2/LICENSE",
+      "sourceMember": "third_party/re2/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/siphash/LICENSE",
+      "size": 6555,
+      "sha256": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/siphash/LICENSE",
+      "sourceMember": "third_party/siphash/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/utf8-decoder/LICENSE",
+      "size": 1087,
+      "sha256": "3f712e5fbdfdbd5ee7d9b8c8152580220df55de47f4eba2f26c95c4de19ad096",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/utf8-decoder/LICENSE",
+      "sourceMember": "third_party/utf8-decoder/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/v8/builtins/LICENSE",
+      "size": 12763,
+      "sha256": "b9a6d9320b8f2693e8d41e496ce56caadacaddcca9be2a64a61749278f425cf2",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/v8/builtins/LICENSE",
+      "sourceMember": "third_party/v8/builtins/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/v8/codegen/LICENSE",
+      "size": 1157,
+      "sha256": "17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/v8/codegen/LICENSE",
+      "sourceMember": "third_party/v8/codegen/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/valgrind/LICENSE",
+      "size": 2439,
+      "sha256": "ebf25b8ce59c9e8883acd1ca75b6fc121937ca034f666c4077d2be739d2e1622",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/valgrind/LICENSE",
+      "sourceMember": "third_party/valgrind/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/vtune/LICENSE",
+      "size": 1925,
+      "sha256": "02aea3ade0c02470335987f7d93ffaed877bcefc8414a416e2e548665bb0bfd0",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/vtune/LICENSE",
+      "sourceMember": "third_party/vtune/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "v8/third_party/wasm-api/LICENSE",
+      "size": 11358,
+      "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+      "source": "https://raw.githubusercontent.com/get-convex/v8/a8137b51f6e5e332ea11904e00005bec187b2ae6/third_party/wasm-api/LICENSE",
+      "sourceMember": "third_party/wasm-api/LICENSE",
+      "scope": "V8 source-declared notice candidate; individual nested component linkage unresolved"
+    },
+    {
+      "path": "zstd-sys-2.0.10+zstd.1.5.6/LICENSE",
+      "size": 18,
+      "sha256": "a77b7cfeaf911ed410ffbe76f0cb2b24ad8a4d94e7ead5727e914425c416cc63",
+      "source": "https://static.crates.io/crates/zstd-sys/zstd-sys-2.0.10+zstd.1.5.6.crate",
+      "sourceMember": "LICENSE",
+      "scope": "original selected locked crate archive member; individual nested component linkage unresolved"
+    },
+    {
+      "path": "zstd-sys-2.0.10+zstd.1.5.6/LICENSE.Apache-2.0",
+      "size": 10174,
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "source": "https://static.crates.io/crates/zstd-sys/zstd-sys-2.0.10+zstd.1.5.6.crate",
+      "sourceMember": "LICENSE.Apache-2.0",
+      "scope": "original selected locked crate archive member; individual nested component linkage unresolved"
+    },
+    {
+      "path": "zstd-sys-2.0.10+zstd.1.5.6/LICENSE.BSD-3-Clause",
+      "size": 1595,
+      "sha256": "48341f685c87304089aa099b23c386f8bacc519ef555aa7a13e239908907b3fd",
+      "source": "https://static.crates.io/crates/zstd-sys/zstd-sys-2.0.10+zstd.1.5.6.crate",
+      "sourceMember": "LICENSE.BSD-3-Clause",
+      "scope": "original selected locked crate archive member; individual nested component linkage unresolved"
+    },
+    {
+      "path": "zstd-sys-2.0.10+zstd.1.5.6/LICENSE.Mit",
+      "size": 1080,
+      "sha256": "129e8edef29e9abcd2ebabe252f4ef1b1289cdca356bf0040284a2fbccfb96c8",
+      "source": "https://static.crates.io/crates/zstd-sys/zstd-sys-2.0.10+zstd.1.5.6.crate",
+      "sourceMember": "LICENSE.Mit",
+      "scope": "original selected locked crate archive member; individual nested component linkage unresolved"
+    },
+    {
+      "path": "zstd-sys-2.0.10+zstd.1.5.6/zstd/COPYING",
+      "size": 18091,
+      "sha256": "f9c375a1be4a41f7b70301dd83c91cb89e41567478859b77eef375a52d782505",
+      "source": "https://static.crates.io/crates/zstd-sys/zstd-sys-2.0.10+zstd.1.5.6.crate",
+      "sourceMember": "zstd/COPYING",
+      "scope": "original selected locked crate archive member; individual nested component linkage unresolved"
+    },
+    {
+      "path": "zstd-sys-2.0.10+zstd.1.5.6/zstd/LICENSE",
+      "size": 1549,
+      "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+      "source": "https://static.crates.io/crates/zstd-sys/zstd-sys-2.0.10+zstd.1.5.6.crate",
+      "sourceMember": "zstd/LICENSE",
+      "scope": "original selected locked crate archive member; individual nested component linkage unresolved"
+    }
+  ],
+  "disclosure": {
+    "path": "PARTIAL.md",
+    "size": 1268,
+    "sha256": "9463e2b7d29d1e9b65adb367516a30f7269cb3f42ef38cdb158a3574c5190ca6"
+  }
+}

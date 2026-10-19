@@ -1,0 +1,27 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+html, body { background: var(--fx-bg, #f4f6f9); }
+.fx-app-loader {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  background: var(--fx-bg);
+  color: var(--fx-text);
+}
+.fx-app-loader .fx-mark { width: 64px; height: 64px; overflow: visible; }
+.fx-loading-mark { display: inline-grid; width: 64px; height: 64px; }
+.fx-loading-mark > * { grid-area: 1 / 1; }
+.fx-loading-orbit .fx-orbit { transform-origin: 32px 32px; animation: fx-orb 2200ms cubic-bezier(.65,0,.35,1) infinite; }
+.fx-loading-orbit .fx-mark-lower { animation: fx-out 2200ms cubic-bezier(.65,0,.35,1) infinite; }
+@keyframes fx-out {
+  0%, 8% { transform: translateX(0); }
+  22%, 78% { transform: translateX(30px); }
+  92%, 100% { transform: translateX(0); }
+}
+@keyframes fx-orb {
+  0%, 22% { transform: rotate(0); }
+  78%, 100% { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-loading-mark * { animation: none !important; }
+}

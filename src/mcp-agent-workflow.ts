@@ -1,0 +1,208 @@
+// SPDX-License-Identifier: Apache-2.0
+import { agentPeers, peersInputSchema } from './agent-peers.js';
+import { controlQueue } from './queue-control.js';
+import { queueAgentSync } from './agent-hosted-sync.js';
+import { registerHostedWorkTools } from './mcp-hosted-work.js';
+import { registerExchangeTools } from './mcp-exchange.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import { AgentWorkflow, agentActionSchema } from './agent-workflow.js';
+import { briefInputSchema } from './agent-brief-types.js';
+import { agentBrief } from './agent-brief.js';
+import { ForgeError } from './errors.js';
+
+export function registerAgentWorkflow(server: McpServer, root: string) {
+  const agent = new AgentWorkflow(root, true);
+  server.registerTool(
+    'forge_peers',
+    {
+      description:
+        'Read local path overlaps and landed-since-base dry sync. Advisory, no locks or hosted calls. detail:true includes entries omitted by the 1.5 KB lifecycle digest. scope.paths declares relevance for this read only.',
+      inputSchema: peersInputSchema.shape,
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    async input => ({
+      content: [{ type: 'text' as const, text: JSON.stringify(agentPeers(agent.work.store, input)) }],
+    }),
+  );
+  server.registerTool(
+    'forge_queue',
+    {
+      description:
+        'List local finish/check queue positions, cancel a finish and its check process groups, or prioritize an operation. Repeated mutations reconcile the same ticket markers.',
+      inputSchema: { action: z.enum(['list', 'cancel', 'prioritize']), operation: z.string().optional() },
+    },
+    async ({ action, operation }) => {
+      try {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(controlQueue(action, operation)) }],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                error: {
+                  code: error instanceof ForgeError ? error.code : 'INTERNAL_ERROR',
+                  message: error instanceof ForgeError ? error.message : 'Queue action failed.',
+                },
+              }),
+            },
+          ],
+        };
+      }
+    },
+  );
+  server.registerTool(
+    'forge_brief',
+    {
+      description:
+        'Read a deterministic, current agent briefing for a Forge situation. Repository instruction paths take precedence; source contents are never included.',
+      inputSchema: briefInputSchema.shape,
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    async input => {
+      try {
+        if ('laneId' in input && typeof input.laneId === 'string')
+          queueAgentSync(
+            agent.work.store,
+            { action: 'activity', laneId: input.laneId },
+            {},
+            false,
+            'MCP call',
+          );
+        return {
+          content: [
+            { type: 'text' as const, text: JSON.stringify(await agentBrief(agent.work.store, input, true)) },
+          ],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                error: {
+                  code: error instanceof ForgeError ? error.code : 'INTERNAL_ERROR',
+                  message: error instanceof ForgeError ? error.message : 'Briefing could not be read.',
+                },
+              }),
+            },
+          ],
+        };
+      }
+    },
+  );
+  registerHostedWorkTools(server);
+  registerExchangeTools(server, root);
+  const groups = [
+    {
+      name: 'forge_task',
+      actions: [
+        'start',
+        'take',
+        'checkpoint',
+        'sync',
+        'undo-sync',
+        'undo-revert',
+        'set-policy',
+        'compose',
+        'finish',
+        'land-ready',
+        'accept',
+        'complete',
+        'abandon',
+        'reopen',
+        'complete-merged',
+        'clean',
+        'guidance',
+        'peer-ack',
+      ],
+      description:
+        'Receipts include local peers and pre-compose conflict notices; peers detail:true returns exact hunks, intents, messages and known owner sessions. peer-ack records accept-order, swap or split advisory choices using noticeId and laneId; it never pauses or resolves source. start scope.paths retains planned claims; other calls add relevance for that call. take transfers an open Lane with context; takeover:true is required for another actor’s Lane, and ownership remains advisory. Clean checkpoints reuse the unchanged head. Start isolated work (intentId adds a sibling Lane; after records a landing dependency), checkpoint edits, sync a Lane with main, undo-sync, set-policy, compose Lane heads, finish (checkpoint, sync, compose, check, optional accept:true) or accept a View; finish with:[laneId] composes sibling recorded heads together; land-ready resumes dependency waits. Acceptance follows project policy and completes input Lanes when completeOnAccept is enabled unless keepOpen:true. Finish retries CHANNEL_CHANGED up to maxRetries (default 3), checking without Work/Lane/Channel locks and queuing only acceptance; receipts list attempts and waiting positions. Supervised finish stops at awaiting-review. Automatic sync/acceptance records undo instructions. abandon a Lane or Intent with a reason (saveFirst saves dirty edits; cascade closes open child Lanes); complete/reopen a Lane or Intent; complete-merged completes Lanes already in main. clean lists (default) or with apply:true deletes regenerable local disk: finished check workspaces, build dirs and fully captured directories of completed Lanes (reopen restores them). Work/Lane locks wait FIFO (default ten minutes; lockWaitMs or FORGE_WORK_LOCK_WAIT_MS), with periodic stderr phase/run/queue/holder progress; start/checkpoint/sync also accept waitMs. Omitted pins are filled and returned as resolved; retry an unknown outcome with them.',
+    },
+    {
+      name: 'forge_check',
+      actions: ['define-check', 'run', 'observe', 'log', 'cancel'],
+      description:
+        'Configure and run exact-View local checks, observe the original run, read a log page or cancel. Runs use a clean environment with private HOME/XDG/temp. Define env/credentials variable names for explicit passthrough; values are not retained. Runs are local OS processes, not sandboxes.',
+    },
+    {
+      name: 'forge_work_overview',
+      actions: ['peers', 'status', 'records', 'policy', 'link', 'making-of', 'report'],
+      description:
+        'Read Forge URLs with link (laneId, viewId or save; optional path/line), policy, concise Work pins and counts, or page one retained collection directly with records without reconstructing all Work history. making-of reads one Intent’s derived record: Lanes, saves, check runs with queued/running time, landings, sessions, wall clock and active time. report records cumulative self-reported harness, model and token totals for a Lane session (advisory). All source and history remain retained.',
+    },
+    {
+      name: 'forge_review',
+      actions: ['review', 'view', 'provenance', 'views'],
+      description:
+        'Read an exact Lane or View changed-path summary or selected contextual hunks. Truncation and unknown coverage stay explicit.',
+    },
+  ];
+  for (const group of groups) {
+    const options = agentActionSchema.options.filter(option =>
+      group.actions.includes(option.shape.action.value),
+    );
+    const schema =
+      options.length === 1 ? options[0]! : z.union([options[0]!, options[1]!, ...options.slice(2)]);
+    server.registerTool(
+      group.name,
+      {
+        description: group.description,
+        inputSchema: { command: schema },
+        annotations: {
+          readOnlyHint: group.actions.every(action =>
+            ['link', 'review', 'records', 'view', 'provenance', 'views'].includes(action),
+          ),
+          destructiveHint: group.actions.includes('clean'),
+          idempotentHint: group.actions.every(action =>
+            [
+              'link',
+              'status',
+              'policy',
+              'records',
+              'making-of',
+              'report',
+              'review',
+              'view',
+              'provenance',
+              'views',
+              'observe',
+              'log',
+            ].includes(action),
+          ),
+          openWorldHint: group.actions.includes('run') || group.actions.includes('finish'),
+        },
+      },
+      async ({ command }) => {
+        try {
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(await agent.dispatch(command)) }],
+          };
+        } catch (error) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text' as const,
+                text: JSON.stringify({
+                  error: {
+                    code: error instanceof ForgeError ? error.code : 'INTERNAL_ERROR',
+                    message:
+                      error instanceof ForgeError
+                        ? error.message
+                        : 'Forge could not complete the agent action.',
+                  },
+                }),
+              },
+            ],
+          };
+        }
+      },
+    );
+  }
+}

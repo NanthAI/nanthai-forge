@@ -1,0 +1,221 @@
+// SPDX-License-Identifier: Apache-2.0
+// Actions controller under GitHub-side stress: rate limits, lagging job lists, OOM diagnosis.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { controlActions } from '../dist/github-actions-controller.js';
+import { actionsApi, mutate, observe } from '../dist/github-actions-api.js';
+import { ForgeError } from '../dist/errors.js';
+
+const limited = () => new ForgeError('GITHUB_ACTIONS_RATE_LIMITED', 'synthetic rate limit');
+function setup(t, groups = [['a']]) {
+  const root = mkdtempSync(join(tmpdir(), 'forge-actions-resilience-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const plan = { runId: randomUUID(), output: root, groups };
+  const journal = {
+    commit: 'a'.repeat(40),
+    repo: 'synthetic/checks',
+    retrying: [],
+    retrySources: {},
+    oom: [],
+    logged: [],
+    states: {},
+  };
+  return { plan, journal };
+}
+// jobs(poll) returns the job list for the nth jobs read; fail(endpoint, n) may throw per call.
+function fakeApi(plan, journal, { jobs, logs = {}, fail = () => {}, resetMs } = {}) {
+  const calls = [],
+    waits = [],
+    counts = {};
+  let jobPolls = 0;
+  const api = {
+    async request(endpoint, method = 'GET') {
+      counts[endpoint] = (counts[endpoint] ?? 0) + 1;
+      calls.push({ endpoint, method });
+      fail(endpoint, counts[endpoint]);
+      if (endpoint.endsWith('/dispatches') || endpoint.endsWith('/timing')) return {};
+      return { id: 10, head_sha: journal.commit, status: 'completed', conclusion: 'success' };
+    },
+    async pages(endpoint) {
+      counts[endpoint] = (counts[endpoint] ?? 0) + 1;
+      calls.push({ endpoint });
+      fail(endpoint, counts[endpoint]);
+      if (endpoint.includes('/runs?'))
+        return [{ id: 10, head_sha: journal.commit, display_title: `forge-check/${plan.runId}` }];
+      return jobs(++jobPolls);
+    },
+    async log(id) {
+      return logs[id] ?? 'ok\n';
+    },
+    async sleep(ms) {
+      waits.push(ms);
+    },
+    ...(resetMs === undefined ? {} : { rateLimitResetMs: async () => resetMs }),
+  };
+  return { api, calls, waits };
+}
+const job = (id, name, status = 'completed', conclusion = status === 'completed' ? 'success' : null) => ({
+  id,
+  name,
+  status,
+  conclusion,
+  run_attempt: 1,
+});
+const control = (plan, journal, api, progress = []) =>
+  controlActions(
+    plan,
+    journal,
+    () => {},
+    api,
+    () => false,
+    line => progress.push(line),
+  );
+
+test('a completed run whose job list lags is observed again, not interrupted', async t => {
+  const { plan, journal } = setup(t);
+  // P1c burst-8 #2: the run said completed while the job list still showed a shard in progress.
+  const { api, waits } = fakeApi(plan, journal, {
+    jobs: poll => [
+      job(1, 'forge-static'),
+      poll < 4 ? job(2, 'forge-shard-0', 'in_progress') : job(2, 'forge-shard-0'),
+    ],
+  });
+  const progress = [];
+  const outcome = await control(plan, journal, api, progress);
+  assert.equal(outcome.status, 'passed');
+  assert.equal(outcome.exitCode, 0);
+  assert.equal(waits.filter(ms => ms === 10_000).length, 3);
+  assert.ok(progress.some(line => /job list to settle/.test(line)));
+});
+
+test('a job list that never settles is interrupted after a bounded wait', async t => {
+  const { plan, journal } = setup(t);
+  const { api, waits } = fakeApi(plan, journal, {
+    jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0', 'in_progress')],
+  });
+  const outcome = await control(plan, journal, api);
+  assert.equal(outcome.status, 'interrupted');
+  assert.equal(waits.length, 30);
+});
+
+test('rate-limited reads wait for the reported reset and continue past the transport retry cap', async t => {
+  const { plan, journal } = setup(t);
+  journal.runId = 10;
+  const { api, waits } = fakeApi(plan, journal, {
+    jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0')],
+    // Ten consecutive rate-limit rejections: more than observe's six transport attempts.
+    fail: (endpoint, n) => {
+      if (endpoint.endsWith('/runs/10') && n <= 10) throw limited();
+    },
+    resetMs: 120_000,
+  });
+  const progress = [];
+  const outcome = await control(plan, journal, api, progress);
+  assert.equal(outcome.status, 'passed');
+  assert.deepEqual(
+    waits.filter(ms => ms > 10_000),
+    Array(10).fill(121_000),
+  );
+  assert.ok(progress.some(line => /rate limited; waiting 121 s/.test(line)));
+});
+
+test('rate-limit waits are at least a minute and at most an hour', async () => {
+  for (const [resetMs, expected] of [
+    [undefined, 60_000],
+    [-5_000, 60_000],
+    [10 * 3_600_000, 3_600_000],
+  ]) {
+    const waits = [];
+    let attempt = 0;
+    const api = { sleep: async ms => waits.push(ms), rateLimitResetMs: async () => resetMs };
+    assert.equal(
+      await observe(api, async () => {
+        if (!attempt++) throw limited();
+        return 'ok';
+      }),
+      'ok',
+    );
+    assert.deepEqual(waits, [expected]);
+  }
+});
+
+test('a rate-limited dispatch is retried once the budget resets; other failures are not', async t => {
+  const { plan, journal } = setup(t);
+  const { api, calls } = fakeApi(plan, journal, {
+    jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0')],
+    fail: (endpoint, n) => {
+      if (endpoint.endsWith('/dispatches') && n === 1) throw limited();
+    },
+  });
+  assert.equal((await control(plan, journal, api)).status, 'passed');
+  assert.equal(calls.filter(call => call.endpoint.endsWith('/dispatches')).length, 2);
+
+  let writes = 0;
+  await assert.rejects(
+    mutate({ sleep: async () => {} }, async () => {
+      writes++;
+      throw new ForgeError('GITHUB_ACTIONS_API', 'unknown outcome');
+    }),
+    /unknown outcome/,
+  );
+  assert.equal(writes, 1);
+});
+
+test('test names mentioning SIGKILL are not an OOM diagnosis; only failed jobs report 137', async t => {
+  const { plan, journal } = setup(t, [['a'], ['b']]);
+  const { api } = fakeApi(plan, journal, {
+    jobs: () => [
+      job(1, 'forge-static'),
+      job(2, 'forge-shard-0'),
+      job(3, 'forge-shard-1', 'completed', 'failure'),
+    ],
+    logs: {
+      2: 'ok 1 - sync resumes after SIGKILL at afterPlan\nok 2 - out of memory guard\n',
+      3: 'not ok 3 - a flaky test\n##[error]Process completed with exit code 1.\n',
+    },
+  });
+  const outcome = await control(plan, journal, api);
+  assert.equal(outcome.status, 'failed');
+  assert.equal(outcome.exitCode, 1);
+  assert.deepEqual(journal.oom, []);
+
+  const second = setup(t);
+  const oom = fakeApi(second.plan, second.journal, {
+    jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0', 'completed', 'failure')],
+    logs: { 2: '##[error]Process completed with exit code 137.\n' },
+  });
+  const killed = await control(second.plan, second.journal, oom.api);
+  assert.equal(killed.exitCode, 137);
+  assert.deepEqual(second.journal.oom, [2]);
+});
+
+test('gh transport classifies rate-limit stderr without exposing it', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-actions-gh-limit-'));
+  const previous = process.env.PATH;
+  t.after(() => {
+    process.env.PATH = previous;
+    rmSync(root, { recursive: true, force: true });
+  });
+  writeFileSync(
+    join(root, 'gh'),
+    `#!${process.execPath}\nconst a=process.argv.slice(2);if(a[1]==='rate_limit'){process.stdout.write(String(Math.floor(Date.now()/1000)+90));process.exit(0)}process.stderr.write(a[1].includes('limited')?'gh: API rate limit already exceeded for user ID 1234. (HTTP 403)':'HTTP 404: secret-ish detail');process.exit(1);\n`,
+    { mode: 0o755 },
+  );
+  process.env.PATH = `${root}:${previous}`;
+  await assert.rejects(actionsApi.request('repos/x/limited'), error => {
+    assert.equal(error.code, 'GITHUB_ACTIONS_RATE_LIMITED');
+    assert.doesNotMatch(error.message, /1234/);
+    return true;
+  });
+  await assert.rejects(actionsApi.request('repos/x/missing'), error => {
+    assert.equal(error.code, 'GITHUB_ACTIONS_API');
+    assert.doesNotMatch(error.message, /secret-ish/);
+    return true;
+  });
+  const reset = await actionsApi.rateLimitResetMs();
+  assert.ok(reset > 60_000 && reset <= 90_000);
+});
