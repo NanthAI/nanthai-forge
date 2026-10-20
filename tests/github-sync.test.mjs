@@ -120,7 +120,7 @@ if(args.includes('push')){
  if(state.raceHead){spawnSync(real,['--git-dir='+(state.raceGit??remote),'update-ref','refs/heads/main',state.raceHead]);delete state.raceHead;}
  save();
 }
-const out=spawnSync(real,['-c','user.name=Configured Human','-c','user.email=configured@example.test','-c','forge.githubSync.coAuthor=Synthetic lead <lead@example.test>',...(state.config??[]).flatMap(c=>['-c',c]),...args],{encoding:'utf8',...(args.includes('--stdin')||args.includes('mktree')?{input:readFileSync(0)}:{})});
+const out=spawnSync(real,['-c','user.name=Configured Human','-c','user.email=configured@example.test','-c','forge.githubSync.coAuthor=Synthetic lead <lead@example.test>',...(state.config??[]).flatMap(c=>['-c',c]),...args],{encoding:'utf8',env:{...process.env,GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_NOSYSTEM:'1'},...(args.includes('--stdin')||args.includes('mktree')?{input:readFileSync(0)}:{})});
 process.stdout.write(out.stdout??'');process.stderr.write(out.stderr??'');
 if(args.includes('push')&&state.lostReply){state.lostReply=false;state.failObserve=true;save();process.exit(92);}
 process.exit(out.status??1);
