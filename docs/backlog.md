@@ -48,7 +48,8 @@ Open work and friction, one line per problem. S is a small focused change, M spa
 - M: Installed CLI/plugin packages can lag accepted main; route plugin execution through the nforge wrapper and expose installed source/version pins in lifecycle receipts.
 - M: External build-slot admission lacks FIFO tickets, holder/elapsed progress, install admission and separation of remote orchestration from local CPU work. Document argv arrays or full Node/npm invocation for zsh.
 - S: Abbreviate transpiled data-URL stack frames in fixture diagnostics while retaining error name, message and source location.
-- S: Expose read-only affected-tests output from the existing impact selector so shared fixture edits have a reproducible focused test set.
+- S: Expose read-only affected-tests output from the existing impact selector (an agent command naming the tests a Lane's change affects) so agents run only those and never the full suite; the landing check is the one full run on the combined work of concurrent Lanes.
+- M: Cache check results by exact tree and check definition so identical work is never tested twice, across Lanes and retries.
 - S: Provide a pinned snapshot-read/drain helper for direct library/export callers racing post-accept workers, preserving original source and operation IDs.
 - M: Add an explicit fixture/local-build mode to ui-shots while retaining real signed-in integration captures for hosted review.
 - S: Provide or document offline generated Convex API type maintenance without connecting to a deployment.
@@ -85,6 +86,7 @@ Open work and friction, one line per problem. S is a small focused change, M spa
 - L: Hosted Lanes, hosted accept, server-side landing queue, hosted two-way GitHub sync and offline qualification.
 - L: Self-hosted worker (`nforge worker`), runner picker, Modal with the project's own key and contributor first-click rule.
 - M: Git serving and Lane refs; Lane-scoped undo.
+- M: Optional remote pre-check an agent can request before finishing: its affected tests run on the project runner, nothing heavy on the agent's machine.
 - L: Making-of browser timeline/flows, Intent discussions with per-item visibility, Markdown/images on Intents and a real dependency graph in Code.
 - L / owner decision required for restrictions: Open-source proposal limits, anonymous visibility, optional CLA, hidden paths, stars and forks with upstream; extension model; ownership areas, batch actions, saved filters, inline comments and change-type approval rules.
 - M: Slack needs-you notifications, WebMCP and Candidate previews.
