@@ -7,3 +7,5 @@ export function standardSelection(input: {
   mainCheck?: unknown;
   env?: Record<string, string | undefined>;
 }): { scope: string; reason: string; tests: string[] };
+
+export function selectionSourcePath(path: string): boolean;

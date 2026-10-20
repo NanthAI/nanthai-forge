@@ -1,3 +1,4 @@
+import { agentLaneTests } from './agent-lane-tests.js';
 import { agentLaneStatus } from './agent-lane-status.js';
 import { syncSummary } from './agent-operation-summary.js';
 import { runnerMonthCosts } from './check-cost.js';
@@ -110,6 +111,7 @@ export class AgentWorkflow {
       delete (identity as { waitMs?: number }).waitMs;
     const store = this.work.store,
       { command, resolved } = resolveAgentDefaults(store, identity);
+    if (command.action === 'tests') return agentLaneTests(store, command.laneId);
     // A cleaned Lane is restored before an action needs its source.
     const needed =
       command.action === 'review'
@@ -225,6 +227,7 @@ export class AgentWorkflow {
   }
   private async action(command: AgentAction): Promise<{ revision: number; result: unknown }> {
     const store = this.work.store;
+    if (command.action === 'tests') return agentLaneTests(store, command.laneId);
     if (command.action === 'take') return agentTake(store, command);
     if (command.action === 'peer-ack') {
       const journal = new CoordinationJournal(store),

@@ -6,14 +6,13 @@ import { workGit } from './work-git.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
-/** Runner-owned comparison of immutable inputs, never the mutable Lane or current main. */
-export function writeCheckScope(store: WorkStore, run: CheckRun, directory: string) {
-  const base = run.comparisonBase ?? run.base;
+/** Compare immutable saved source without materializing or executing it. */
+export function checkChangedPaths(store: WorkStore, base: string, head: string) {
   let paths: string[];
   if (store.native) {
     const source = new NativeSource(store.root);
     const before = new Map(source.state(base).files.map(file => [file.path, file]));
-    const after = new Map(source.state(run.head).files.map(file => [file.path, file]));
+    const after = new Map(source.state(head).files.map(file => [file.path, file]));
     paths = [...new Set([...before.keys(), ...after.keys()])].filter(path => {
       const a = before.get(path),
         b = after.get(path);
@@ -28,12 +27,19 @@ export function writeCheckScope(store: WorkStore, run: CheckRun, directory: stri
       '--name-only',
       '-z',
       base,
-      run.head,
+      head,
       '--',
     ]);
     if (names && !names.endsWith('\0')) throw new Error('Incomplete check comparison');
     paths = names ? names.slice(0, -1).split('\0') : [];
   }
+  return paths.sort();
+}
+
+/** Runner-owned comparison of immutable inputs, never the mutable Lane or current main. */
+export function writeCheckScope(store: WorkStore, run: CheckRun, directory: string) {
+  const base = run.comparisonBase ?? run.base;
+  let paths = checkChangedPaths(store, base, run.head);
   if (store.native) {
     const data = store.load();
     const prefix = data.landingBatches

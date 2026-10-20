@@ -7,7 +7,7 @@ Use ordinary search/read/edit tools on the selected source. For recorded deliver
 
 ## Working on Forge, not GitHub
 
-- Run only the tests your change affects, plus typecheck, lint and format checks on touched files. Never run the full suite locally: `finish` runs the project's check on the project's runner for the combined work of concurrent Lanes.
+- Run the set from `nforge agent <owner> tests '{"laneId":"…"}'` (plus typecheck/lint/Prettier). Checkpoint edits first: selection compares the saved head to current main, using the landing check’s shared scoped selector; full audits and combined Lanes may widen it. Run the returned `command` in the Lane after building; `command:null` means no test files (documentation checks still apply). Ask again after sync or main advances. Never run the full suite locally: `finish` runs the project's check on the project's runner for the combined work of concurrent Lanes.
 - Let `finish` compose concurrent Lanes into one check. If a Lane fails, Forge drops it from the batch and the others still land after passing; a failed candidate never turns main red. Do not rebase, babysit a merge queue or rerun CI per PR. Configured native runners batch code changes; other paths retain ordinary checks and project acceptance policy.
 - Read peers and presence before editing to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
 
@@ -16,6 +16,7 @@ Use ordinary search/read/edit tools on the selected source. For recorded deliver
 ```sh
 nforge agent ROOT start '{"outcome":"CHANGE"}'                          # laneId + path; edit only that path
 nforge agent ROOT finish '{"laneId":"LANE_ID","message":"CHANGE","accept":true}'
+nforge agent ROOT tests '{"laneId":"LANE_ID"}'                          # saved head vs main; selected tests + command
 nforge agent ROOT run '{"laneId":"LANE_ID"}'                            # re-run the default check on the Lane's latest clean Candidate
 nforge agent ROOT status '{"laneId":"LANE_ID"}'                       # compact saved Lane record
 nforge agent ROOT log '{"operationId":"RUN_ID","stream":"stderr","tail":4096}'

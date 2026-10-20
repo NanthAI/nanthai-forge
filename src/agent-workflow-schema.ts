@@ -44,6 +44,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
     path: z.string().min(1).optional(),
     line: z.number().int().positive().safe().optional(),
   }),
+  z.object({ action: z.literal('tests'), laneId: id }),
   z.object({ action: z.literal('policy') }),
   z.object({ action: z.literal('land-ready') }),
   z.object({ action: z.literal('undo-revert'), operationId: id, acceptanceId: id }),

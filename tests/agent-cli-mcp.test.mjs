@@ -138,6 +138,13 @@ test('agent MCP profile awaits graph readiness, preserves selectors and legacy t
   });
   assert.ok(!started.isError);
   const lane = started.body.result;
+  const selectedTests = await call('forge_check', { command: { action: 'tests', laneId: lane.laneId } });
+  assert.ok(!selectedTests.isError);
+  assert.equal(selectedTests.body.result.head, lane.head);
+  assert.ok(Array.isArray(selectedTests.body.result.tests));
+  const unknownTests = await call('forge_check', { command: { action: 'tests', laneId: randomUUID() } });
+  assert.equal(unknownTests.isError, true);
+  assert.equal(unknownTests.body.error.code, 'NOT_FOUND');
   const beforeLink = readWorkBytes(join(root, '.forge/work/work.json'));
   const linkRequest = { command: { action: 'link', laneId: lane.laneId, path: 'a.ts', line: 1 } };
   const link = await call('forge_work_overview', linkRequest);

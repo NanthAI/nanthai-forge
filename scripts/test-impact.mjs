@@ -26,14 +26,17 @@ export const safePath = path =>
   !path.split('/').some(part => ['', '.', '..'].includes(part)) &&
   !/[\x00-\x1f\x7f\ufffd\\*?\[\]{}!]/.test(path);
 
+export const selectionSourcePath = path =>
+  ['package.json', 'package-lock.json'].includes(path) ||
+  /^(?:src|web|convex|netlify|tests|scripts)\/.+\.(?:[cm]?js|[cm]?tsx?|css|json|svg|html)$/.test(path);
+
 export function sourceFiles(root = '.') {
   const files = new Map();
   function walk(dir) {
     for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
       const path = posix.join(dir, entry.name);
       if (entry.isDirectory()) walk(path);
-      else if (/\.(?:[cm]?js|[cm]?tsx?|css|json|svg|html)$/.test(path))
-        files.set(path, readFileSync(join(root, path), 'utf8'));
+      else if (selectionSourcePath(path)) files.set(path, readFileSync(join(root, path), 'utf8'));
     }
   }
   for (const dir of ['src', 'web', 'convex', 'netlify', 'tests', 'scripts']) walk(dir);
