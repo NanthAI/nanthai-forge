@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ExchangeDownloadCache } from './exchange-download-cache.js';
+import { SignedDownloadCache } from './exchange-r2-read.js';
 import { hostedMainSchema, type MainExpectation } from './hosted-main.js';
 import { retryExchange } from './exchange-retry.js';
 import type { SourceReturnProgress } from './source-return-progress.js';
@@ -32,13 +33,16 @@ const chunked = (pin: ContentPin) => {
 export class ConvexExchange implements ExchangeTransport {
   readonly metadataTrees = true;
   private readonly downloadCache = new ExchangeDownloadCache();
+  private readonly signedDownloads = new WeakMap<ConvexHttpClient, SignedDownloadCache>();
   readonly workRecords = true;
   onReturnProgress?: (progress: SourceReturnProgress) => void;
   uploadBatchSize?: number;
   readonly client: ConvexHttpClient;
   /** Byte transport; built on the current client so a replaced client is honored. */
   private get blobs() {
-    return new ConvexExchangeBlobs(this.client);
+    let cache = this.signedDownloads.get(this.client);
+    if (!cache) this.signedDownloads.set(this.client, (cache = new SignedDownloadCache()));
+    return new ConvexExchangeBlobs(this.client, cache);
   }
   /** Digests just found not to be R2 objects, so a large-object read need not ask again. */
   private readonly unsigned = new Set<string>();
@@ -405,7 +409,11 @@ export class ConvexExchange implements ExchangeTransport {
         action(this.proposalId ? 'projectProposalObjects:checkpoint' : 'projectExchangeActions:checkpoint'),
         this.proposalId ? { proposalId: this.proposalId } : { backupId: logical.backupId },
       );
-    const direct = logical ? undefined : (await this.blobs.getSigned(this.projectId, [pin])).get(pin.sha256);
+    const direct = logical
+      ? undefined
+      : this.downloadCache.get(pin)
+        ? await this.download(pin)
+        : (await this.blobs.getSigned(this.projectId, [pin])).get(pin.sha256);
     await downloadExchangeFile(pin, path, async offset => {
       if (direct) return direct.subarray(offset, Math.min(offset + 2 * 1024 * 1024, direct.length));
       if (logical)

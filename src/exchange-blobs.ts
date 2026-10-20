@@ -3,7 +3,7 @@ import type { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import type { ContentPin } from './native-exchange.js';
 import { ForgeError, invariant } from './errors.js';
-import { readSigned, type SignedObject } from './exchange-r2-read.js';
+import { readSigned, SignedDownloadCache, type SignedObject } from './exchange-r2-read.js';
 
 /** The one place the CLI moves exchange object bytes. Callers verify sizes and
  * digests; this seam only transports. Today the only implementation is Convex
@@ -76,7 +76,10 @@ export function putTarget(target: PutTarget, bytes: Buffer): Promise<{ storageId
 }
 
 export class ConvexExchangeBlobs implements ExchangeBlobs {
-  constructor(private readonly client: Pick<ConvexHttpClient, 'action' | 'mutation'>) {}
+  constructor(
+    private readonly client: Pick<ConvexHttpClient, 'action' | 'mutation'>,
+    private readonly signedDownloads = new SignedDownloadCache(),
+  ) {}
   put = putTarget;
   getSigned(projectId: string, pins: ContentPin[]): Promise<Map<string, Buffer>> {
     return readSigned(
@@ -87,6 +90,7 @@ export class ConvexExchangeBlobs implements ExchangeBlobs {
         }) as Promise<SignedObject[]>,
       projectId,
       pins,
+      this.signedDownloads,
     );
   }
   getGroup(projectId: string, pins: ContentPin[]): Promise<BlobRow[]> {
