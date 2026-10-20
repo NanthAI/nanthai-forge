@@ -48,7 +48,7 @@ export function portfolioWork({ intents, lanes, views, plans }: PortfolioInput) 
   }
   const viewItems: PortfolioItem[] = views.map(view => ({
     id: `view:${view.id}`,
-    title: intents.find(intent => intent.id === view.intentId)?.outcome ?? 'Retained source View',
+    title: intents.find(intent => intent.id === view.intentId)?.outcome ?? 'Retained source Candidate',
     kind: 'View',
     status: view.status,
     at: view.at,

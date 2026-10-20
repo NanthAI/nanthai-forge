@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { filterIntents, type IntentRow } from './model';
+import { filterIntents, intentReady, type IntentRow } from './model';
 
 /** Presentation buckets only. Landing has no recorded state and shares Ready. */
 export const boardColumns = ['planned', 'working', 'checking', 'ready', 'done'] as const;
@@ -14,7 +14,7 @@ export const boardLabels = {
 export function intentColumn(row: IntentRow): BoardColumn {
   if (row.planned) return 'planned';
   if (filterIntents([row], 'done').length) return 'done';
-  if (filterIntents([row], 'ready').length) return 'ready';
+  if (intentReady(row)) return 'ready';
   return row.tone === 'running' ? 'checking' : 'working';
 }
 export function intentColumns(rows: readonly IntentRow[]) {

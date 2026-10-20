@@ -75,17 +75,34 @@ export function intentRows(intents: readonly IntentInput[], lanes: readonly Cock
   });
 }
 
-export type IntentFilter = 'open' | 'ready' | 'done' | 'planned' | 'all';
+/** Lifecycle buckets: Proposed › Planned › In motion › Done. Ready is In motion; Abandoned is Done. */
+export const intentFilters = ['proposed', 'planned', 'in-motion', 'done', 'all'] as const;
+export type IntentFilter = (typeof intentFilters)[number];
+export const intentFilterLabels: Record<IntentFilter, string> = {
+  proposed: 'Proposed',
+  planned: 'Planned',
+  'in-motion': 'In motion',
+  done: 'Done',
+  all: 'All',
+};
+/** Older links used `open` and `ready`; both now land on In motion. */
+export function readIntentFilter(value: string | null): IntentFilter {
+  return intentFilters.find(filter => filter === value) ?? 'in-motion';
+}
+/** A checked Candidate waits for acceptance. */
+export const intentReady = (row: IntentRow) =>
+  row.status === 'ready' || (row.status === 'active' && row.tone === 'passed');
 export function filterIntents(rows: readonly IntentRow[], filter: IntentFilter): IntentRow[] {
   const keep = (row: IntentRow) =>
     filter === 'all'
       ? true
-      : filter === 'planned'
-        ? row.planned
-        : filter === 'done'
-          ? row.status === 'completed' || row.status === 'abandoned'
-          : filter === 'ready'
-            ? row.status === 'ready' || (row.status === 'active' && row.tone === 'passed')
+      : filter === 'proposed'
+        ? // Work Intents are created by someone with plan rights, so none is Proposed.
+          false
+        : filter === 'planned'
+          ? row.planned
+          : filter === 'done'
+            ? row.status === 'completed' || row.status === 'abandoned'
             : !row.planned && (row.status === 'active' || row.status === 'ready');
   return rows
     .filter(keep)

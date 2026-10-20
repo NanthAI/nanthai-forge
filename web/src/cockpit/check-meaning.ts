@@ -35,8 +35,8 @@ export function checkMeaning(
     tone: 'plain' as const,
     glyph: 'plain' as const,
     label: passed
-      ? 'Check failed · fixed in a later View (passed)'
-      : 'Check failed · superseded by a later View',
+      ? 'Check failed · fixed in a later Candidate (passed)'
+      : 'Check failed · superseded by a later Candidate',
     laterViewId: latest.id,
   };
 }

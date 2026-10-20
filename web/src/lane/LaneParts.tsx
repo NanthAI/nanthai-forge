@@ -33,14 +33,14 @@ export function nextStep(lane: CockpitLane): Step {
         tone: 'failed',
         glyph: 'failed',
         title: 'Not ready to accept: the check failed',
-        body: 'Fix the failures in the Lane and finish again. If the failure was unrelated, run the check again on the same View.',
+        body: 'Fix the failures in the Lane and finish again. If the failure was unrelated, run the check again on the same Candidate.',
       };
     case 'running':
       return {
         tone: 'running',
         glyph: 'running',
         title: 'Checking…',
-        body: 'The check is running on the latest View of this Lane.',
+        body: 'The check is running on the latest Candidate of this Lane.',
       };
     case 'passed':
       return {

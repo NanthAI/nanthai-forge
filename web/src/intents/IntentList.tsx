@@ -11,7 +11,7 @@ import { WorkRow } from '../ui/WorkRow';
 import { age, toneLabel } from '../ui/status';
 import { IntentBoard } from './IntentBoard';
 import { useIntentLayout } from './useIntentLayout';
-import { filterIntents, type IntentFilter, type IntentRow } from './model';
+import { filterIntents, intentFilterLabels, intentFilters, type IntentFilter, type IntentRow } from './model';
 
 /** Every Intent as one row: what it is for, how its Lanes stand, when it last moved. */
 export function IntentListView({
@@ -39,9 +39,9 @@ export function IntentListView({
   const [creating, setCreating] = useState(initiallyCreating);
   const shown = filterIntents(rows, filter);
   const count = (value: IntentFilter) => filterIntents(rows, value).length;
-  const label = (name: string, value: IntentFilter) => (
+  const label = (value: IntentFilter) => (
     <>
-      {name}
+      {intentFilterLabels[value]}
       <span className="fx-filter-count" style={{ visibility: countsKnown ? 'visible' : 'hidden' }}>
         <span className="fx-filter-separator" aria-hidden="true">
           ·
@@ -138,13 +138,7 @@ export function IntentListView({
               label="Show Intents"
               value={filter}
               onChange={setFilter}
-              options={[
-                { id: 'open', label: label('Open', 'open') },
-                { id: 'ready', label: label('Ready', 'ready') },
-                { id: 'done', label: label('Done', 'done') },
-                { id: 'planned', label: label('Planned', 'planned') },
-                { id: 'all', label: label('All', 'all') },
-              ]}
+              options={intentFilters.map(id => ({ id, label: label(id) }))}
             />
           </header>
         )}
@@ -157,7 +151,7 @@ export function IntentListView({
             showDone={showDone}
           />
         ) : shown.length === 0 ? (
-          <p className="fx-board-empty">{filter === 'open' ? 'No open Intents.' : 'Nothing here.'}</p>
+          <p className="fx-board-empty">{filter === 'in-motion' ? 'Nothing in motion.' : 'Nothing here.'}</p>
         ) : shown.length > SCALE_AFTER ? (
           <ScaleGroups
             groups={groupByInitiative(shown, initiatives, row => row.id)}

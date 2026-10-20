@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
-const { intentRows, filterIntents } = await import(moduleUrl('../web/src/intents/model.ts'));
+const { intentRows, filterIntents, intentReady } = await import(moduleUrl('../web/src/intents/model.ts'));
 const { intentColumns, intentFlags, recentDone } = await import(
   moduleUrl('../web/src/intents/board-model.ts')
 );
@@ -41,11 +41,11 @@ test('Board partitions the same derived list status without duplicating or dropp
     make('abandoned', 'abandoned'),
   ];
   const columns = intentColumns(rows);
-  assert.equal(columns.ready.length, filterIntents(rows, 'ready').length);
+  assert.equal(columns.ready.length, rows.filter(intentReady).length);
   assert.equal(columns.done.length, filterIntents(rows, 'done').length);
   assert.equal(
     columns.working.length + columns.checking.length + columns.ready.length,
-    filterIntents(rows, 'open').length,
+    filterIntents(rows, 'in-motion').length,
   );
   assert.equal(
     new Set(

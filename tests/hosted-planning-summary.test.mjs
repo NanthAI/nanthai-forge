@@ -103,8 +103,9 @@ test('Planning filters and group totals count the displayed Intent states, inclu
   assert.match(group.rows.find(row => row.id === 'i0').searchText, /Old link/);
   for (const [filter, count] of [
     ['all', 10],
+    ['proposed', 0],
     ['planned', 9],
-    ['working', 1],
+    ['in-motion', 1],
     ['done', 0],
   ]) {
     assert.equal(group.rows.filter(row => planningRowMatches(row, filter)).length, count);
@@ -116,11 +117,17 @@ test('Planning filters and group totals count the displayed Intent states, inclu
       act: async () => {},
     }),
   );
-  assert.match(html, /10 Intents.*1 working/);
+  assert.match(html, /10 Intents.*1 in motion/);
   assert.match(html, /Planned\s*<span class="fx-count">9/);
-  assert.match(html, /Working\s*<span class="fx-count">1/);
+  assert.match(html, /In motion\s*<span class="fx-count">1/);
+  assert.match(html, /Proposed\s*<span class="fx-count">0/);
+  assert.match(html, /Done\s*<span class="fx-count">0/);
+  assert.match(html, /Proposed[^]*Planned[^]*In motion[^]*Done[^]*All/);
   assert.match(html, /All\s*<span class="fx-count">10/);
-  assert.doesNotMatch(html, />Issue<|Find an issue|No Intent yet|In motion|New planning item|>Updated</);
+  assert.doesNotMatch(
+    html,
+    />Issue<|Find an issue|No Intent yet|>Working\s*<span class="fx-count"|New planning item|>Updated</,
+  );
   assert.match(html, /Find an Intent/);
   assert.match(html, /<span>Intent<\/span><span>Status<\/span>/);
   assert.match(html, /aria-label="More planning actions"[^>]*aria-haspopup="menu"[^>]*aria-expanded="false"/);

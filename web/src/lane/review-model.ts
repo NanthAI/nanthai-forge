@@ -64,5 +64,5 @@ export function reviewViewLabel(
     .slice()
     .sort((a, b) => a.at.localeCompare(b.at));
   const index = ordered.findIndex(view => view.id === viewId);
-  return index < 0 ? 'View' : `View ${index + 1}`;
+  return index < 0 ? 'Candidate' : `Candidate ${index + 1}`;
 }

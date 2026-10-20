@@ -93,7 +93,7 @@ export function laneFacts(work: Work, lanes: readonly CockpitLane[], now: number
           glyph: 'passed',
           text: [
             `Landed on main${landing?.at ? ` ${age(landing.at, now, true)}` : ''}`,
-            view ? `View of ${plural(width, 'Lane')}` : '',
+            view ? `Candidate of ${plural(width, 'Lane')}` : '',
             by ? `accepted by ${by}` : '',
           ]
             .filter(Boolean)

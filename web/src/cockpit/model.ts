@@ -161,7 +161,7 @@ export function cockpitLanes(work: CockpitWork): CockpitLane[] {
     } else if (view?.status === 'conflict') {
       tone = 'conflict';
       label = 'Conflict';
-      fact = 'Its View could not combine cleanly';
+      fact = 'Its Candidate could not combine cleanly';
     } else if (run && ['interrupted', 'cancelled'].includes(run.status)) {
       tone = 'plain';
       label = run.status === 'cancelled' ? 'Cancelled' : 'Interrupted';
@@ -180,7 +180,9 @@ export function cockpitLanes(work: CockpitWork): CockpitLane[] {
       tone = run.status === 'queued' ? 'waiting' : 'running';
       label = run.status === 'queued' ? 'Queued' : 'Checking';
       fact =
-        run.status === 'queued' ? 'Check queued for machine capacity' : 'Check running on its latest View';
+        run.status === 'queued'
+          ? 'Check queued for machine capacity'
+          : 'Check running on its latest Candidate';
     } else if (run?.status === 'passed' && run.main?.included === false) {
       tone = 'waiting';
       label = 'Needs update';
@@ -188,7 +190,7 @@ export function cockpitLanes(work: CockpitWork): CockpitLane[] {
     } else if (run?.status === 'passed') {
       tone = 'passed';
       label = 'Ready';
-      fact = 'Check passed on its latest View';
+      fact = 'Check passed on its latest Candidate';
     } else if (lane.state === 'paused') {
       tone = 'waiting';
       label = 'Paused';

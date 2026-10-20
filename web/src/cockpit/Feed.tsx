@@ -52,7 +52,7 @@ export function Feed({
                   {item.laneId && laneHref ? <a href={laneHref(item.laneId)}>{item.text}</a> : item.text}
                   {item.laterViewId && viewHref && (
                     <a className="fx-feed-detail" href={viewHref(item.laterViewId)}>
-                      Later View
+                      Later Candidate
                     </a>
                   )}
                   {item.detail && <span className="fx-feed-detail">{item.detail}</span>}

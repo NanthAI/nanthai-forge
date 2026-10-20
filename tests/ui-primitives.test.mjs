@@ -50,10 +50,10 @@ test('agents and people are distinguishable by shape and label', () => {
   assert.match(person, /fx-av-human/);
 });
 
-test('concept terms explain Intent and View in one plain line', () => {
+test('concept terms explain Intent and Candidate in one plain line', () => {
   assert.equal(concepts.intent.explain, 'The outcome you want.');
   const html = renderToStaticMarkup(h(ui.ConceptTerm, { concept: 'view', explain: true }));
-  assert.match(html, /title="View: An exact combination of Lanes, ready to check and accept\."/);
+  assert.match(html, /title="Candidate: An exact combination of Lanes, ready to check and accept\."/);
   assert.match(html, /fx-concept-explain/);
 });
 
@@ -61,7 +61,7 @@ test('exact record hides empty values and renders nothing when all are empty', (
   const html = renderToStaticMarkup(
     h(ui.ExactRecord, {
       rows: [
-        ['View', 'abc123'],
+        ['Candidate', 'abc123'],
         ['Pins', undefined],
       ],
     }),

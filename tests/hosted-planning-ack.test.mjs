@@ -8,6 +8,7 @@ import ts from 'typescript';
 import { moduleUrl } from './convex-module.mjs';
 const planningRows = await import(moduleUrl('../web/src/planning-rows.ts'));
 const intentProgress = await import(moduleUrl('../src/work-intent-progress.ts'));
+const intentModel = await import(moduleUrl('../web/src/intents/model.ts'));
 
 // Exercise the actual editor handlers with deterministic state and deferred network
 // replies. Rendering effects are irrelevant to this race: the acknowledged version
@@ -56,15 +57,17 @@ function editor() {
             ? intentProgress
             : name === './planning-rows'
               ? planningRows
-              : name === './ui/status'
-                ? { age: () => 'now' }
-                : name === './shell/WorkHeader'
-                  ? { useWorkHeader: () => null }
-                  : name === './shell/Shell'
-                    ? { PageHead: 'header' }
-                    : name === './WorkspaceUI'
-                      ? { useDestination: () => hooks.useState(''), ActionPanel: 'section' }
-                      : {},
+              : name === './intents/model'
+                ? intentModel
+                : name === './ui/status'
+                  ? { age: () => 'now' }
+                  : name === './shell/WorkHeader'
+                    ? { useWorkHeader: () => null }
+                    : name === './shell/Shell'
+                      ? { PageHead: 'header' }
+                      : name === './WorkspaceUI'
+                        ? { useDestination: () => hooks.useState(''), ActionPanel: 'section' }
+                        : {},
   });
   const data = { revision: 1, intents: [], planningItems: [], planningComments: [], hostedEvents: [] };
   const props = { data, busy: false, scope: 'hosted', act: async () => {} };

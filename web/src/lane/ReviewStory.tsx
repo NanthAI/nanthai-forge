@@ -80,7 +80,7 @@ export function ReviewStory({
         count={data ? `${groups.length} ${groups.length === 1 ? 'group' : 'groups'}` : undefined}
         actions={
           <span
-            title="Each group is a recorded Lane save. The diff shows this View’s final changes to that save’s files."
+            title="Each group is a recorded Lane save. The diff shows this Candidate’s final changes to that save’s files."
             aria-label="How groups are made"
           >
             ⓘ
@@ -138,14 +138,14 @@ export function ReviewStory({
                 {data.reason ? (
                   <ErrorToast read error={data.reason} />
                 ) : (
-                  'No recorded save cohorts for this View.'
+                  'No recorded save cohorts for this Candidate.'
                 )}
               </p>
             )}
           </>
         )}
       </Panel>
-      {(!data || data.files.total > 0) && children(current?.paths, current?.message ?? 'View changes')}
+      {(!data || data.files.total > 0) && children(current?.paths, current?.message ?? 'Candidate changes')}
     </>
   );
 }

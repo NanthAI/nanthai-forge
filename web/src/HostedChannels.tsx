@@ -121,14 +121,14 @@ export default function HostedChannels({
           <input value={name} disabled={busy || !!pending} onChange={e => setName(e.target.value)} />
         </label>
         <label>
-          Clean View or retained acceptance
+          Clean Candidate or retained acceptance
           <select value={selected} disabled={busy || !!pending} onChange={e => setSelected(e.target.value)}>
-            <option value="">Choose a View</option>
+            <option value="">Choose a Candidate</option>
             {candidates
               .sort((a, b) => b.at.localeCompare(a.at))
               .map(view => (
                 <option key={view.id} value={view.id}>
-                  {sourceLabels[view.viewId] ?? 'View'} · {new Date(view.at).toLocaleString()}
+                  {sourceLabels[view.viewId] ?? 'Candidate'} · {new Date(view.at).toLocaleString()}
                   {view.move
                     ? ' · accepted'
                     : (data.runs ?? []).some(

@@ -9,8 +9,8 @@ const Hosted = lazy(async () => ({ default: (await import('../views/HostedView')
 function Unavailable() {
   return (
     <div className="fx-page">
-      <PageHead title="View" />
-      <ErrorToast retry={() => location.reload()}>This View page could not load.</ErrorToast>
+      <PageHead title="Candidate" />
+      <ErrorToast retry={() => location.reload()}>This Candidate page could not load.</ErrorToast>
     </div>
   );
 }
@@ -25,8 +25,8 @@ class ViewBoundary extends Component<{ children: ReactNode }, { failed: boolean 
 }
 const pending = (
   <div className="fx-page" aria-busy="true">
-    <PageHead title="View" />
-    <p role="status">Loading View…</p>
+    <PageHead title="Candidate" />
+    <p role="status">Loading Candidate…</p>
   </div>
 );
 export function HostedViewRoute(props: HostedProps) {

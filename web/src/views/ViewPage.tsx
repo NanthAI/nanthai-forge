@@ -52,7 +52,7 @@ export function ViewPage({
     return (
       <div className="fx-page fx-view-page">
         <h1>
-          <Glyph name="view" /> View
+          <Glyph name="view" /> Candidate
         </h1>
         <div className="fx-view-placeholder" aria-busy={!error}>
           {error ? (
@@ -60,7 +60,7 @@ export function ViewPage({
               {error} <Button onClick={retry}>Retry</Button>
             </ErrorToast>
           ) : (
-            <p className="fx-loading">Reading View…</p>
+            <p className="fx-loading">Reading Candidate…</p>
           )}
         </div>
       </div>
@@ -74,7 +74,7 @@ export function ViewPage({
       .map(
         input => `${laneName(input.laneId)}${input.saveIndex >= 0 ? ` · save ${input.saveIndex + 1}` : ''}`,
       )
-      .join(' + ') || 'View';
+      .join(' + ') || 'Candidate';
   const inputName = laneName;
   const added = extra?.viewId === viewId ? extra : undefined;
   const metadata = new Map(provenance.data?.files.items.map(file => [file.path, file]));
@@ -115,7 +115,10 @@ export function ViewPage({
         items={[
           { label: data.why.outcome ?? 'Intent', href: intentHref(data.intentId) },
           ...data.inputs.map(input => ({ label: laneName(input.laneId), href: laneHref(input.laneId) })),
-          { label: `View${viewNumber?.(viewId) ? ` ${viewNumber(viewId)}` : ''}`, href: viewHref(viewId) },
+          {
+            label: `Candidate${viewNumber?.(viewId) ? ` ${viewNumber(viewId)}` : ''}`,
+            href: viewHref(viewId),
+          },
         ]}
       />
       <div className="fx-lane-head">
@@ -254,7 +257,7 @@ export function ViewPage({
             </div>
             <ExactRecord
               rows={[
-                ['View', viewId],
+                ['Candidate', viewId],
                 ['Base', data.base],
                 ['Head', data.head ?? undefined],
               ]}
@@ -266,7 +269,7 @@ export function ViewPage({
                 {data.supersededBy && (
                   <li>
                     <a href={viewHref(data.supersededBy)}>
-                      Superseded by View {viewNumber?.(data.supersededBy) ?? ''}
+                      Superseded by Candidate {viewNumber?.(data.supersededBy) ?? ''}
                     </a>
                   </li>
                 )}
@@ -274,7 +277,7 @@ export function ViewPage({
                   d =>
                     d.kind === 'view' && (
                       <li key={d.viewId}>
-                        <a href={viewHref(d.viewId)}>View {viewNumber?.(d.viewId) ?? ''}</a>
+                        <a href={viewHref(d.viewId)}>Candidate {viewNumber?.(d.viewId) ?? ''}</a>
                       </li>
                     ),
                 )}

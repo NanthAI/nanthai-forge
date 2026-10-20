@@ -32,15 +32,15 @@ test('missing provenance stays empty and duplicate paths do not inflate file cou
   assert.deepEqual(reviewGroups([entry, entry])[0].paths, ['a.ts']);
 });
 
-test('review labels number Views within their Intent in build order', () => {
+test('review labels number Candidates within their Intent in build order', () => {
   const views = [
     { id: 'later', intentId: 'i', at: '2026-10-02' },
     { id: 'other', intentId: 'j', at: '2026-09-01' },
     { id: 'first', intentId: 'i', at: '2026-10-01' },
   ];
-  assert.equal(reviewViewLabel(views, 'later'), 'View 2');
-  assert.equal(reviewViewLabel(views, 'first'), 'View 1');
-  assert.equal(reviewViewLabel(views, 'missing'), 'View');
+  assert.equal(reviewViewLabel(views, 'later'), 'Candidate 2');
+  assert.equal(reviewViewLabel(views, 'first'), 'Candidate 1');
+  assert.equal(reviewViewLabel(views, 'missing'), 'Candidate');
 });
 test('historical Review replaces decision controls with its recorded disposition', async () => {
   const { createElement: h } = await import('react');
@@ -53,9 +53,9 @@ test('historical Review replaces decision controls with its recorded disposition
   assert.match(accepted, /by Maya/);
   assert.doesNotMatch(accepted, /<button/);
   const superseded = renderToStaticMarkup(
-    h(ReviewDisposition, { replacement: { href: '/review/new', label: 'View 16', check: 'passed' } }),
+    h(ReviewDisposition, { replacement: { href: '/review/new', label: 'Candidate 16', check: 'passed' } }),
   );
-  assert.match(superseded, /Superseded by View 16/);
+  assert.match(superseded, /Superseded by Candidate 16/);
   assert.match(superseded, / · passed/);
   assert.match(superseded, /href="\/review\/new"/);
   assert.doesNotMatch(superseded, /<button/);

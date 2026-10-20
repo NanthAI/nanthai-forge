@@ -44,7 +44,7 @@ export function HostedConversation({
           try {
             await writer.current!.send({
               kind: 'message',
-              text: viewId ? `View ${viewId}: ${text}` : text,
+              text: viewId ? `Candidate ${viewId}: ${text}` : text,
               context: { ...(laneId ? { laneId } : {}), ...(intentId ? { intentId } : {}) },
             });
             return true;

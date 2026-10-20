@@ -60,7 +60,7 @@ export function LaneViews({
   if (data && !items.length && !error) return null;
   return (
     <Panel
-      title="Part of these Views"
+      title="Part of these Candidates"
       count={data ? items.length : undefined}
       actions={<a href={intentHref}>Work map</a>}
     >
@@ -68,9 +68,9 @@ export function LaneViews({
         {error || pageError ? (
           <ErrorToast error={error || pageError} retry={error ? retry : more} />
         ) : !data ? (
-          <p className="fx-loading">Reading Views…</p>
+          <p className="fx-loading">Reading Candidates…</p>
         ) : !items.length ? (
-          <p className="fx-panel-note">No Views yet</p>
+          <p className="fx-panel-note">No Candidates yet</p>
         ) : (
           <ul className="fx-view-links">
             {visible.map(view => {
@@ -80,7 +80,7 @@ export function LaneViews({
                 <li key={view.viewId}>
                   <div>
                     <a href={viewHref(view.viewId)}>
-                      <b>View {viewNumber?.(view.viewId) ?? ''}</b>
+                      <b>Candidate {viewNumber?.(view.viewId) ?? ''}</b>
                     </a>{' '}
                     <StatusPill tone={tone}>{label}</StatusPill>
                   </div>
@@ -103,7 +103,7 @@ export function LaneViews({
         )}
         {(cursor || offset != null) && (
           <Button disabled={busy} onClick={() => void more()}>
-            More Views
+            More Candidates
           </Button>
         )}
       </div>

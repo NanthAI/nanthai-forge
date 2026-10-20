@@ -169,7 +169,7 @@ export function HostedNowView({
       value={workReferences(records, {
         Lane: laneHref,
         Intent: id => hostedHref({ projectTab: 'intent', intent: id }),
-        View: id => hostedHref({ projectTab: 'intent', viewId: id }),
+        Candidate: id => hostedHref({ projectTab: 'intent', viewId: id }),
       })}
     >
       <div className="fx-page">

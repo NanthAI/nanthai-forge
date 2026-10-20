@@ -80,7 +80,7 @@ export function Activity({
         )}
         {item.laterViewId && (
           <a className="fx-feed-detail" href={viewHref(item.laterViewId)}>
-            Later View
+            Later Candidate
           </a>
         )}
       </div>

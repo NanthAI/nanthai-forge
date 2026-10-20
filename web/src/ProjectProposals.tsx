@@ -59,7 +59,7 @@ export function ProposalProvenance({
         Original base <code>{proposal.baseState}</code> · candidate <code>{proposal.head}</code>
       </p>
       <p>
-        View <code>{proposal.viewId}</code> · {proposal.transport === 'objects' ? 'manifest' : 'archive'}{' '}
+        Candidate <code>{proposal.viewId}</code> · {proposal.transport === 'objects' ? 'manifest' : 'archive'}{' '}
         SHA-256 <code>{proposal.digest}</code>
       </p>
       <p>
@@ -152,7 +152,7 @@ export default function ProjectProposals({
         candidates = proposalCandidates(JSON.parse(new TextDecoder().decode(work)), pin);
       if (!candidates.length)
         throw new Error(
-          'This archive has no clean View for the selected Intent and its original base. Compose a View locally, then export again.',
+          'This archive has no clean Candidate for the selected Intent and its original base. Compose a Candidate locally, then export again.',
         );
       setSelection({ file, preview, digest: await archiveDigest(file), candidates });
       setViewId(candidates.at(-1)!.id);
@@ -335,7 +335,7 @@ export default function ProjectProposals({
           {selection && (
             <>
               <label>
-                Proposal View
+                Proposal Candidate
                 <select
                   value={viewId}
                   disabled={busy || !!attempt}
@@ -366,13 +366,13 @@ export default function ProjectProposals({
       {pin && (
         <DetailPanel className="collection-guide" title={<>Send changes from your computer</>}>
           <p>
-            Return a clean local View for an Intent you created on Forge. Upload stores a proposal; the
+            Return a clean local Candidate for an Intent you created on Forge. Upload stores a proposal; the
             project owner integrates it in a separate Lane.
           </p>
           <p>
             Download source and the current Work journal, restore them in a new folder, edit a Lane for your
-            hosted Intent, compose a clean View and export the full native source and Work archive. Checks run
-            on your computer.
+            hosted Intent, compose a clean Candidate and export the full native source and Work archive.
+            Checks run on your computer.
           </p>
         </DetailPanel>
       )}

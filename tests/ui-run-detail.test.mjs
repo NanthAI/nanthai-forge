@@ -67,7 +67,7 @@ test('Review accepts a compact hosted run summary without assuming a full check 
   );
   assert.match(html, /verify/);
   assert.match(html, /Failed/);
-  assert.match(html, /exactly this View/);
+  assert.match(html, /exactly this Candidate/);
 });
 test('failed Lane check metadata is compact and does not repeat empty overlap or banner content', async () => {
   const { createElement } = await import('react');

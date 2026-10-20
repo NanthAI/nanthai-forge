@@ -106,7 +106,7 @@ export function LaneRow({
               {lane.laterViewId && viewHref && (
                 <>
                   {' '}
-                  · <a href={viewHref(lane.laterViewId)}>Later View</a>
+                  · <a href={viewHref(lane.laterViewId)}>Later Candidate</a>
                 </>
               )}
             </span>

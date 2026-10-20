@@ -63,7 +63,7 @@ export function RunDetail({
         </Button>
         {rerun && !liveRun(run.status) && (
           <Button disabled={busy} onClick={() => void act(rerun)}>
-            Rerun on this View
+            Rerun on this Candidate
           </Button>
         )}
         {cancel && liveRun(run.status) && (
@@ -89,7 +89,7 @@ export function RunDetail({
         summary="Exact run record"
         rows={[
           ['Run', run.id],
-          ['View', run.viewId],
+          ['Candidate', run.viewId],
           ['Head', run.head],
           ['Base', run.base],
           [

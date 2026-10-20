@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { intentProgress } from '../../src/work-intent-progress';
 import type { PlanningItem } from '../../src/work-planning-types';
+import type { IntentFilter } from './intents/model';
 
 export type PlanningRow = {
   id: string;
@@ -10,15 +11,18 @@ export type PlanningRow = {
   intentId?: string;
   itemId?: string;
 };
-export type PlanningFilter = 'planned' | 'working' | 'done' | 'all';
+export type PlanningFilter = IntentFilter;
 export function planningRowMatches(row: PlanningRow, filter: PlanningFilter) {
   return (
     filter === 'all' ||
-    (filter === 'planned'
-      ? row.label === 'Planned'
-      : filter === 'done'
-        ? row.label === 'Done' || row.label === 'Abandoned'
-        : row.label === 'Working' || row.label === 'Ready')
+    (filter === 'proposed'
+      ? // Every stored planning item is maintainer-declared, so none is Proposed yet.
+        false
+      : filter === 'planned'
+        ? row.label === 'Planned'
+        : filter === 'done'
+          ? row.label === 'Done' || row.label === 'Abandoned'
+          : row.label === 'Working' || row.label === 'Ready')
   );
 }
 

@@ -53,7 +53,7 @@ const viewTone = (view: ViewRow): [Tone, string] =>
                 ? ['running', `Check ${view.check}`]
                 : ['plain', 'Not checked'];
 
-/** One Intent: its Lanes, its Views and their checks, decisions and linked planning. */
+/** One Intent: its Lanes, its Candidates and their checks, decisions and linked planning. */
 export function IntentDetailView({
   row,
   views,
@@ -121,8 +121,8 @@ export function IntentDetailView({
               {row.lanes.length > 0 && `, ${row.lanes.filter(l => l.accepted).length} accepted`}
             </span>
             <span>
-              {views.length} {views.length === 1 ? 'View' : 'Views'}, {views.filter(v => v.accepted).length}{' '}
-              accepted
+              {views.length} {views.length === 1 ? 'Candidate' : 'Candidates'},{' '}
+              {views.filter(v => v.accepted).length} accepted
             </span>
             {row.createdAt && <span>started {age(row.createdAt, now, true)}</span>}
           </div>
@@ -160,7 +160,7 @@ export function IntentDetailView({
       {error && <ErrorToast>{error}</ErrorToast>}
       {open && ready && (
         <p className="fx-situation">
-          <b>View {views.indexOf(ready) + 1} is ready for your review.</b>
+          <b>Candidate {views.indexOf(ready) + 1} is ready for your review.</b>
         </p>
       )}
       {row.lanes.length > 0 && (
@@ -210,9 +210,9 @@ export function IntentDetailView({
         </div>
         <aside className="fx-lane-col">
           <section id="intent-views">
-            <Panel title="Views" count={views.length}>
+            <Panel title="Candidates" count={views.length}>
               {views.length === 0 ? (
-                <p className="fx-panel-note">No Views yet.</p>
+                <p className="fx-panel-note">No Candidates yet.</p>
               ) : (
                 <ul className="fx-views">
                   {[...views]
@@ -225,7 +225,7 @@ export function IntentDetailView({
                           <StatusPill tone={tone}>{label}</StatusPill>
                           {viewHref || reviewHref ? (
                             <a href={(viewHref ?? reviewHref)!(view.id)}>
-                              <b>View {views.indexOf(view) + 1}</b>
+                              <b>Candidate {views.indexOf(view) + 1}</b>
                               <span className="fx-view-row-lanes">
                                 {view.inputs
                                   ?.map(input => {
@@ -241,7 +241,7 @@ export function IntentDetailView({
                               </span>
                             </a>
                           ) : (
-                            <span>{view.lanes || 'View'}</span>
+                            <span>{view.lanes || 'Candidate'}</span>
                           )}
                           <span>
                             {view.changes && <DiffStat add={view.changes.add} del={view.changes.del} />}
@@ -263,7 +263,7 @@ export function IntentDetailView({
               )}
               {views.length > 5 && (
                 <Button variant="ghost" onClick={() => setAllViews(!allViews)}>
-                  {allViews ? 'Show fewer Views' : `${views.length - 5} more Views`}
+                  {allViews ? 'Show fewer Candidates' : `${views.length - 5} more Candidates`}
                 </Button>
               )}
             </Panel>

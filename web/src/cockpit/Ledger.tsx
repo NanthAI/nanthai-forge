@@ -188,7 +188,7 @@ function Acceptance({
             {row.laneCount && (
               <>
                 <Glyph name="lane" size={11} />
-                View of {row.laneCount} {row.laneCount === 1 ? 'Lane' : 'Lanes'}
+                Candidate of {row.laneCount} {row.laneCount === 1 ? 'Lane' : 'Lanes'}
               </>
             )}
             {undo && row.automatic?.undo && (

@@ -5,7 +5,7 @@ import { cockpitLanes, type CockpitWork } from '../cockpit/model';
 import { cleanUrl, routeUrlState } from './location';
 export type SearchItem = {
   id: string;
-  kind: 'Intent' | 'Lane' | 'View' | 'File';
+  kind: 'Intent' | 'Lane' | 'Candidate' | 'File';
   title: string;
   href: string;
   at?: string;
@@ -79,14 +79,14 @@ export function workSearchItems(work: CockpitWork, hosted: boolean, now = Date.n
       })),
     ...work.views.map((view, i) => ({
       id: `view:${view.id}`,
-      kind: 'View' as const,
+      kind: 'Candidate' as const,
       title:
         work.intents.find(intent => intent.id === view.intentId)?.outcome ||
         (view.inputs?.length === 1
           ? work.lanes.find(lane => lane.id === view.inputs?.[0]?.laneId)?.name
           : '') ||
         `main + ${view.inputs?.length ?? 0} ${(view.inputs?.length ?? 0) === 1 ? 'Lane' : 'Lanes'}`,
-      secondary: `View ${i + 1}`,
+      secondary: `Candidate ${i + 1}`,
       href: searchHref(
         hosted,
         hosted ? { projectTab: 'views', viewId: view.id } : { tab: 'intents', viewId: view.id },
@@ -121,7 +121,7 @@ export function searchGroups(
 ) {
   const ranked = rankSearchItems(items, query, recent);
   if (query.trim())
-    return (['Intent', 'Lane', 'View', 'File'] as const)
+    return (['Intent', 'Lane', 'Candidate', 'File'] as const)
       .map(kind => {
         const matches = ranked.filter(item => item.kind === kind);
         return {

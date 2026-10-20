@@ -103,8 +103,8 @@ export function Autonomy({
         <details>
           <summary>Guardrails</summary>
           <p>
-            Automatic acceptance requires a passing check on the exact View. Protected paths require a person.
-            Recorded actions retain their provenance.
+            Automatic acceptance requires a passing check on the exact Candidate. Protected paths require a
+            person. Recorded actions retain their provenance.
           </p>
         </details>
       </div>

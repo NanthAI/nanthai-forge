@@ -128,7 +128,7 @@ test('Lane facts state who, what and when, and never use Active or Unassigned', 
   assert.equal(landed.label, 'Done');
   assert.equal(landed.glyph, 'passed');
   assert.equal(landed.auto, true);
-  assert.match(landed.text, /^Landed on main 3 h ago · View of 1 Lane · accepted by Agent workflow$/);
+  assert.match(landed.text, /^Landed on main 3 h ago · Candidate of 1 Lane · accepted by Agent workflow$/);
   const dropped = facts.get('l4');
   assert.equal(dropped.label, 'Abandoned');
   assert.equal(dropped.tone, 'stale');
@@ -180,6 +180,8 @@ test('Lanes and Intents lists render the same Work row and Lane glyph', () => {
     intents,
     /<li class="fx-wr fx-wr-active"><div class="fx-wr-main"><a href="#i1" class="fx-wr-title"/,
   );
+  assert.match(intents, />Proposed<[^]*>Planned<[^]*>In motion<[^]*>Done<[^]*>All</);
+  assert.doesNotMatch(intents, />Open<|>Ready</);
   const nav = html(h(InlineWorkNav, { header: { page: 'lanes', counts: { lanes: 3 }, onChange() {} } }));
   const lanePath = html(
     h(LaneFactLine, { fact: { open: true, tone: 'active', label: 'Working', text: 'x', glyph: 'lane' } }),

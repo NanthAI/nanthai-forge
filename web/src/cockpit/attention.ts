@@ -198,7 +198,7 @@ export function localFeed(work: LocalRecords, since: number, limit = 8): FeedIte
       text:
         'laterViewId' in state
           ? state.label
-          : `${laneId ? (laneName.get(laneId) ?? 'A View') : 'A View'} · check ${run.check?.name ? `${run.check.name} ` : ''}${run.status}`,
+          : `${laneId ? (laneName.get(laneId) ?? 'A Candidate') : 'A Candidate'} · check ${run.check?.name ? `${run.check.name} ` : ''}${run.status}`,
       ...(laneId ? { laneId } : {}),
     });
   }
@@ -210,7 +210,7 @@ export function localFeed(work: LocalRecords, since: number, limit = 8): FeedIte
         at: move.at,
         tone: 'passed',
         glyph: 'channel',
-        text: `${laneId ? (laneName.get(laneId) ?? 'A View') : 'A View'} · accepted into ${move.channel}`,
+        text: `${laneId ? (laneName.get(laneId) ?? 'A Candidate') : 'A Candidate'} · accepted into ${move.channel}`,
         detail: move.head.slice(0, 7),
         ...(laneId ? { laneId } : {}),
       });

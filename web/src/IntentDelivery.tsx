@@ -53,7 +53,7 @@ export default function IntentDelivery({
       />
     ) : (
       <p className="fx-loading" role="status">
-        Reading View…
+        Reading Candidate…
       </p>
     );
   const accepted = data.channelMoves.filter(move => views.records.some(item => item.id === move.viewId));
@@ -61,21 +61,21 @@ export default function IntentDelivery({
     <section>
       <h3>
         <Icon name="source-review" />
-        Views
+        Candidates
       </h3>
       <ul className="overview-list">
         {views.records.map(item => (
           <li key={item.id}>
             <button onClick={() => select(item.id)}>
               <Icon name="view" />
-              View · {new Date(item.at).toLocaleString()}
+              Candidate · {new Date(item.at).toLocaleString()}
               <WorkStatus status={item.status} />
             </button>
           </li>
         ))}
       </ul>
-      {views.loading && <p role="status">Loading Views…</p>}
-      {!views.loading && !views.records.length && <p>No Views recorded for this Intent.</p>}
+      {views.loading && <p role="status">Loading Candidates…</p>}
+      {!views.loading && !views.records.length && <p>No Candidates recorded for this Intent.</p>}
       {owner && (
         <HostedChannels
           projectId={projectId}
@@ -83,7 +83,7 @@ export default function IntentDelivery({
           data={{ ...data, channelMoves: accepted, views: views.records, runs: runs.records }}
           channels={channels}
           sourceLabels={Object.fromEntries(
-            views.records.map(item => [item.id, `View from ${new Date(item.at).toLocaleString()}`]),
+            views.records.map(item => [item.id, `Candidate from ${new Date(item.at).toLocaleString()}`]),
           )}
         />
       )}

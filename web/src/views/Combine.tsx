@@ -25,7 +25,7 @@ export function Combine({
           setOpen(true);
         }}
       >
-        Combine into a View
+        Combine into a Candidate
       </Button>
     );
   return (
@@ -47,7 +47,7 @@ export function Combine({
       }}
     >
       <fieldset>
-        <legend>Lanes in this View</legend>
+        <legend>Lanes in this Candidate</legend>
         {candidates.map(lane => (
           <label key={lane.id}>
             <input

@@ -55,7 +55,7 @@ export function SourcePicker({
         {item(options.main)}
         {options.lanes.length > 0 && <div className="fx-source-group">Open Lanes</div>}
         {options.lanes.map(item)}
-        {options.candidates.length > 0 && <div className="fx-source-group">Recent Views</div>}
+        {options.candidates.length > 0 && <div className="fx-source-group">Recent Candidates</div>}
         {options.candidates.map(item)}
         <form
           className="fx-source-exact"

@@ -5,6 +5,7 @@ import { PlanningDetail } from './PlanningDetail';
 import { intentProgress } from '../../src/work-intent-progress';
 import { PlanningIntents } from './PlanningIntents';
 import { planningGroups, planningRowMatches, type PlanningFilter } from './planning-rows';
+import { intentFilterLabels, intentFilters } from './intents/model';
 import { PagedList } from './cockpit/ScaleList';
 import { Segmented, StatusPill } from './ui/primitives';
 import { age } from './ui/status';
@@ -473,17 +474,11 @@ export function WorkPlanning({
             label="Planning status"
             value={filter}
             onChange={setFilter}
-            options={(['planned', 'working', 'done', 'all'] as const).map(id => ({
+            options={intentFilters.map(id => ({
               id,
               label: (
                 <>
-                  {id === 'planned'
-                    ? 'Planned'
-                    : id === 'working'
-                      ? 'Working'
-                      : id === 'done'
-                        ? 'Done'
-                        : 'All'}{' '}
+                  {intentFilterLabels[id]}{' '}
                   <span className="fx-count">
                     {countRows.filter(row => planningRowMatches(row, id)).length}
                   </span>
@@ -578,8 +573,11 @@ export function WorkPlanning({
                   </button>
                   <span>
                     {group.rows.length} {group.rows.length === 1 ? 'Intent' : 'Intents'}
-                    {group.rows.some(row => planningRowMatches(row, 'working')) && (
-                      <> · {group.rows.filter(row => planningRowMatches(row, 'working')).length} working</>
+                    {group.rows.some(row => planningRowMatches(row, 'in-motion')) && (
+                      <>
+                        {' '}
+                        · {group.rows.filter(row => planningRowMatches(row, 'in-motion')).length} in motion
+                      </>
                     )}
                   </span>
                 </header>

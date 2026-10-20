@@ -452,7 +452,7 @@ test('acceptance groups keep Intent identity; Accepted lists each acceptance as 
   assert.equal((html.match(/class="fx-ledger-r"/g) ?? []).length, 4);
   assert.match(html, /href="\/lane\/a"/);
   assert.match(html, /href="\/lane\/b"/);
-  assert.match(html, /View of 1 Lane/);
+  assert.match(html, /Candidate of 1 Lane/);
 });
 
 test('main strip joins the indexed Channel selection to its acceptance receipt', async () => {
@@ -515,7 +515,7 @@ test('What changing lists every open Lane by attention with one fold and no acce
   assert.doesNotMatch(html, /accepted today|no saved changes|waiting for you →|Unassigned/);
 });
 
-test('historical failed checks are muted only within their H17 family and link to the later View', async () => {
+test('historical failed checks are muted only within their H17 family and link to the later Candidate', async () => {
   const { checkMeaning } = await import(moduleUrl('../web/src/cockpit/check-meaning.ts'));
   const views = [
     { id: 'old', intentId: 'i', at: '2026-10-15T12:00:00Z', inputs: [{ laneId: 'a' }, { laneId: 'b' }] },
@@ -525,7 +525,7 @@ test('historical failed checks are muted only within their H17 family and link t
   assert.deepEqual(checkMeaning(records, 'old', 'failed'), {
     tone: 'plain',
     glyph: 'plain',
-    label: 'Check failed · fixed in a later View (passed)',
+    label: 'Check failed · fixed in a later Candidate (passed)',
     laterViewId: 'new',
   });
   assert.equal(checkMeaning(records, 'new', 'failed').tone, 'failed');
@@ -565,7 +565,7 @@ test('Activity keeps pending messages in Needs you and deduplicates multi-Lane c
   assert.equal(items[1].glyph, 'check');
 });
 
-test('a Lane pinned to an earlier failed View never presents that superseded failure as current', async () => {
+test('a Lane pinned to an earlier failed Candidate never presents that superseded failure as current', async () => {
   const { cockpitLanes } = await import(moduleUrl('../web/src/cockpit/model.ts'));
   const [result] = cockpitLanes({
     intents: [{ id: 'i', outcome: 'Outcome' }],
@@ -608,7 +608,7 @@ test('a Lane pinned to an earlier failed View never presents that superseded fai
   });
   assert.equal(result.tone, 'plain');
   assert.equal(result.laterViewId, 'new');
-  assert.equal(result.fact, 'Check failed · fixed in a later View (passed)');
+  assert.equal(result.fact, 'Check failed · fixed in a later Candidate (passed)');
 });
 
 test('Now actors prefer the session name and hide unknown automatic workflow actors', async () => {
@@ -669,7 +669,7 @@ test('Accepted rows show who accepted with auto, the check with its duration, di
   assert.match(html, /What landed on main[\s\S]*Intent[\s\S]*Who accepted[\s\S]*Check[\s\S]*Diff[\s\S]*When/);
   assert.match(html, /<b>Today<\/b> · 1/);
   assert.match(html, /href="\/view\/v">Fix the layout/);
-  assert.match(html, /View of 2 Lanes/);
+  assert.match(html, /Candidate of 2 Lanes/);
   assert.match(html, />Undo</);
   assert.match(html, /Select an earlier View to roll back/);
   assert.match(html, /Layout outcome/);
@@ -911,7 +911,7 @@ test('Work reference chips resolve full ids and unique prefixes, without guessin
       name: 'Review UI',
       href: '/intents/review',
     },
-    { id: '1a2b3c4d-1234-4567-8901-123456789abc', kind: 'View', name: '', href: '/views/candidate' },
+    { id: '1a2b3c4d-1234-4567-8901-123456789abc', kind: 'Candidate', name: '', href: '/views/candidate' },
   ];
   const text = `Lane ${laneId}, Intent c3a91839 and View 1a2b3c4d1234. Also 8392ffa1-acff.`;
   const parts = referenceParts(text, refs).filter(part => typeof part !== 'string');
@@ -922,7 +922,9 @@ test('Work reference chips resolve full ids and unique prefixes, without guessin
   const html = renderToStaticMarkup(h(WorkReferenceContext.Provider, { value: refs }, h(WorkText, { text })));
   assert.match(html, /href="\/lanes\/native"/);
   assert.match(html, /Native acceptance/);
-  assert.match(html, /View 1a2b3c4d/);
+  assert.match(html, /Candidate 1a2b3c4d/);
+  // Older messages still say View; the chip resolves to the same Candidate.
+  assert.equal(referenceParts('Candidate 1a2b3c4d', refs)[1].reference?.href, '/views/candidate');
   const ambiguous = referenceParts('Lane 8392ffa1', [
     ...refs,
     { ...refs[0], id: '8392ffa1-0000-0000-0000-000000000000' },

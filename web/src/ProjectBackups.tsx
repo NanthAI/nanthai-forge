@@ -24,7 +24,7 @@ type Attempt = {
   id?: Id<'projectBackups'>;
 };
 const describe = (p: WorkArchivePreview) =>
-  `${countLabel(p.intents, 'Intent')} · ${countLabel(p.lanes, 'Lane')} · ${countLabel(p.views, 'View')} · ${countLabel(p.runs, 'run')} · ${countLabel(p.files, 'file')} · ${countLabel(p.unavailable, 'unavailable evidence file')}`;
+  `${countLabel(p.intents, 'Intent')} · ${countLabel(p.lanes, 'Lane')} · ${countLabel(p.views, 'Candidate')} · ${countLabel(p.runs, 'run')} · ${countLabel(p.files, 'file')} · ${countLabel(p.unavailable, 'unavailable evidence file')}`;
 
 function History({
   projectId,

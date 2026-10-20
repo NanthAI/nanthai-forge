@@ -19,8 +19,8 @@ export const concepts: Record<Concept, { label: string; plural: string; glyph: G
       explain: 'An isolated copy where one person or agent makes part of an Intent.',
     },
     view: {
-      label: 'View',
-      plural: 'Views',
+      label: 'Candidate',
+      plural: 'Candidates',
       glyph: 'view',
       explain: 'An exact combination of Lanes, ready to check and accept.',
     },
@@ -28,12 +28,12 @@ export const concepts: Record<Concept, { label: string; plural: string; glyph: G
       label: 'Check',
       plural: 'Checks',
       glyph: 'check',
-      explain: 'A recorded test run on one exact View.',
+      explain: 'A recorded test run on one exact Candidate.',
     },
     channel: {
       label: 'Channel',
       plural: 'Channels',
       glyph: 'channel',
-      explain: 'Accepted source, such as main. Only Views whose check passed get in.',
+      explain: 'Accepted source, such as main. Only Candidates whose check passed get in.',
     },
   };

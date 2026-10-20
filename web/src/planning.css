@@ -90,8 +90,8 @@
 }
 
 @media(max-width:720px) {
- .planning-filters > .fx-seg { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); width:100%; }
- .planning-filters .fx-seg > button { min-width:0; flex-direction:column; justify-content:center; gap:3px; padding:6px; min-height:44px; }
+ .planning-filters > .fx-seg { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); width:100%; }
+ .planning-filters .fx-seg > button { min-width:0; flex-direction:column; justify-content:center; gap:3px; padding:6px 2px; min-height:44px; white-space:nowrap; }
 }
 
 /* Match shared panels and keep details alongside the list on tablet widths. */

@@ -24,7 +24,7 @@ test('revert handoff pins the original acceptance and requests a checked compens
   for (const pin of ['acceptance', 'view', 'accepted', 'before', 'intent']) assert.ok(prompt.includes(pin));
   assert.match(prompt, /reverse.*diff/);
   assert.match(prompt, /preserving later accepted work/);
-  assert.match(prompt, /check.*new exact View/);
+  assert.match(prompt, /check.*new exact Candidate/);
   assert.match(prompt, /Main must never be rewound/);
 });
 

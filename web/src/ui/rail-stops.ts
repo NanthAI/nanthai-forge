@@ -36,7 +36,10 @@ export function railStops(lane: RailInput): RailStops {
       title: 'edited, saved; blocked at check by a conflict',
     };
   if (lane.laterViewId)
-    return { segments: ['on', 'on', 'off', 'off'], title: 'edited, saved; check superseded by a later View' };
+    return {
+      segments: ['on', 'on', 'off', 'off'],
+      title: 'edited, saved; check superseded by a later Candidate',
+    };
   if (lane.runStatus && FAILED.has(lane.runStatus))
     return {
       segments: ['on', 'on', 'bad', 'off'],

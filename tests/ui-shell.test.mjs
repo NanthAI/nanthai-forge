@@ -217,7 +217,7 @@ test('palette groups query matches and bounds the empty state without dropping s
   assert.equal(group.total, 20);
   assert.equal(search.searchGroups(items, 'tax', [], [], 'Lane')[0].items.length, 20);
 });
-test('View search names composition and keeps its number secondary', () => {
+test('Candidate search names composition and keeps its number secondary', () => {
   const previous = globalThis.location;
   globalThis.location = { href: 'http://local/' };
   try {
@@ -231,7 +231,7 @@ test('View search names composition and keeps its number secondary', () => {
       false,
     );
     assert.equal(items.find(item => item.id === 'view:v1').title, 'Fix tax');
-    assert.equal(items.find(item => item.id === 'view:v1').secondary, 'View 1');
+    assert.equal(items.find(item => item.id === 'view:v1').secondary, 'Candidate 1');
     assert.equal(items.find(item => item.id === 'view:v2').title, 'main + 0 Lanes');
   } finally {
     if (previous === undefined) delete globalThis.location;

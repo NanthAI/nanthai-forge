@@ -230,8 +230,8 @@ export default function LocalChecks({
                 : pending
                   ? 'Retry original request'
                   : pinnedRun
-                    ? 'Rerun on this View'
-                    : 'Run on this View'}
+                    ? 'Rerun on this Candidate'
+                    : 'Run on this Candidate'}
             </Button>
           </form>
         )}

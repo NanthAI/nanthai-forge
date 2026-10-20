@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useCallback, useEffect, useState } from 'react';
 import { cleanUrl, routeUrlState } from '../shell/location';
-import type { IntentFilter } from './model';
+import { readIntentFilter, type IntentFilter } from './model';
 export type IntentLayout = 'list' | 'board';
 export const layoutKey = (scope: string) => `forge.intents.layout:${scope}`;
 export function readIntentLayout(search: string, saved: string | null): IntentLayout {
   const requested = new URLSearchParams(search).get('intentLayout');
   return (requested ?? saved) === 'board' ? 'board' : 'list';
 }
-const readFilter = (): IntentFilter => {
-  const value = routeUrlState().searchParams.get('intentFilter');
-  return value === 'planned' || value === 'ready' || value === 'done' || value === 'all' ? value : 'open';
-};
+const readFilter = (): IntentFilter => readIntentFilter(routeUrlState().searchParams.get('intentFilter'));
 /** URL wins over this browser's per-account/project preference. Storage may be disabled. */
 export function useIntentLayout(scope: string) {
   const read = useCallback(() => {

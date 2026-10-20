@@ -32,12 +32,12 @@ export function ReviewCheck({
             </StatusPill>
             <span className="fx-faint" title={run.endedAt ?? run.startedAt}>
               {age(run.endedAt ?? run.startedAt, now, true)} ·{' '}
-              {run.head === head ? 'exactly this View' : 'different source'}
+              {run.head === head ? 'exactly this Candidate' : 'different source'}
             </span>
             {children}
           </>
         ) : (
-          <p className="fx-faint">No check recorded for this View.</p>
+          <p className="fx-faint">No check recorded for this Candidate.</p>
         )}
       </div>
     </Panel>

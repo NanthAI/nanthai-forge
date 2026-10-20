@@ -8,7 +8,7 @@ import type { ViewRow } from '../intents/IntentDetail';
 import type { CockpitLane } from '../cockpit/model';
 import './views.css';
 
-/** A bounded window of join points; the complete history stays in the Views list. */
+/** A bounded window of join points; the complete history stays in the Candidates list. */
 export function mapViews(views: readonly ViewRow[]) {
   const ordered = [...views].sort((a, b) => a.at.localeCompare(b.at));
   return {
@@ -94,7 +94,7 @@ export function WorkMap({
             viewBox={`0 0 ${width} ${height}`}
             style={{ width, height }}
             role="group"
-            aria-label={`${lanes.length} ${lanes.length === 1 ? 'Lane' : 'Lanes'}, ${views.length} ${views.length === 1 ? 'View' : 'Views'}, ${views.filter(v => v.accepted).length} accepted; time runs ${mobile ? 'down' : 'left to right'}`}
+            aria-label={`${lanes.length} ${lanes.length === 1 ? 'Lane' : 'Lanes'}, ${views.length} ${views.length === 1 ? 'Candidate' : 'Candidates'}, ${views.filter(v => v.accepted).length} accepted; time runs ${mobile ? 'down' : 'left to right'}`}
           >
             {lanes.map((lane, i) => (
               <g key={lane.id}>

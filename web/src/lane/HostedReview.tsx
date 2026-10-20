@@ -218,7 +218,7 @@ export function HostedReview({
           action: 'note',
           intentId: view.intentId,
           kind: 'decision',
-          text: `Changes requested for [View](${hostedHref({ projectTab: 'intent', reviewView: view.id })}) @ ${view.head}:\n${text}`,
+          text: `Changes requested for [Candidate](${hostedHref({ projectTab: 'intent', reviewView: view.id })}) @ ${view.head}:\n${text}`,
         }),
       };
       const original = feedback.current ?? requested;
@@ -257,9 +257,9 @@ export function HostedReview({
       ok: passed,
       warn: !passed,
       title: run
-        ? `Check ${run.status} on exactly this View`
+        ? `Check ${run.status} on exactly this Candidate`
         : story
-          ? 'No check recorded for this View'
+          ? 'No check recorded for this Candidate'
           : 'Reading check record…',
       body: run?.checkName ?? '',
     },
@@ -324,7 +324,7 @@ export function HostedReview({
                     : 'Waiting'}
           </StatusPill>
           <h1 title={story?.why.outcome ?? intent?.outcome}>
-            {story?.why.outcome ?? intent?.outcome ?? 'Review View'}
+            {story?.why.outcome ?? intent?.outcome ?? 'Review Candidate'}
           </h1>
           <div className="fx-lane-meta">
             <span>
@@ -418,7 +418,7 @@ export function HostedReview({
             ) : done ? (
               <ReviewDisposition acceptance={done} />
             ) : !story ? (
-              <p className="fx-loading">Reading View record…</p>
+              <p className="fx-loading">Reading Candidate record…</p>
             ) : (
               <Panel title={accepted ? 'Acceptance' : 'Your decision'} className="fx-decide">
                 {!accepted && (
@@ -492,9 +492,9 @@ export function HostedReview({
             />
             <Panel>
               <ExactRecord
-                summary="Exact record: View, pins, receipts"
+                summary="Exact record: Candidate, pins, receipts"
                 rows={[
-                  ['View', view.id],
+                  ['Candidate', view.id],
                   ['Head', view.head],
                   ['Base', view.base],
                   ['Check run', run?.id],

@@ -133,7 +133,7 @@ export function HostedLaneChanges({
       title={title}
       paths={paths}
       error={error || (index && !index.available ? index.reason : undefined)}
-      subtitle={selectedPaths ? 'View changes · selected save’s files' : 'against the Lane base'}
+      subtitle={selectedPaths ? 'Candidate changes · selected save’s files' : 'against the Lane base'}
       load={load}
     />
   );

@@ -11,7 +11,7 @@ export function revertPrompt(
   move: Pick<ChannelMove, 'id' | 'viewId' | 'head' | 'previous'>,
   intentId: string,
 ) {
-  return `Work on Intent ${intentId}. If this Intent is hosted-only, reconcile hosted metadata into the bound owner with the existing exchange workflow first. Create a new revert Lane for acceptance ${move.id} (View ${move.viewId}, accepted head ${move.head}, previous main ${move.previous ?? 'none'}). Apply the reverse of that acceptance's diff on current main, preserving later accepted work. Resolve conflicts explicitly, checkpoint, check the new exact View and have it accepted normally under the current autonomy policy. Main must never be rewound. This Intent and prompt do not apply the reverse diff or accept anything.`;
+  return `Work on Intent ${intentId}. If this Intent is hosted-only, reconcile hosted metadata into the bound owner with the existing exchange workflow first. Create a new revert Lane for acceptance ${move.id} (Candidate ${move.viewId}, accepted head ${move.head}, previous main ${move.previous ?? 'none'}). Apply the reverse of that acceptance's diff on current main, preserving later accepted work. Resolve conflicts explicitly, checkpoint, check the new exact Candidate and have it accepted normally under the current autonomy policy. Main must never be rewound. This Intent and prompt do not apply the reverse diff or accept anything.`;
 }
 export function RevertAcceptance({
   move,
