@@ -10,9 +10,10 @@ export async function fullGitBundle(
   refs: { ref: string; head: string }[],
   temp: string,
   code: string,
+  git: (root: string, args: string[]) => string | Promise<string> = workGit,
 ) {
-  for (const item of refs) workGit(transport, ['update-ref', item.ref, item.head]);
-  workGit(transport, [
+  for (const item of refs) await git(transport, ['update-ref', item.ref, item.head]);
+  await git(transport, [
     '--no-lazy-fetch',
     '--no-replace-objects',
     'bundle',
@@ -22,7 +23,7 @@ export async function fullGitBundle(
   ]);
   chmodSync(temp, 0o600);
   unlinkSync(join(transport, 'objects/info/alternates'));
-  const heads = workGit(transport, ['bundle', 'list-heads', temp]).trim();
+  const heads = (await git(transport, ['bundle', 'list-heads', temp])).trim();
   invariant(
     heads.split('\n').sort().join('\n') ===
       refs
@@ -33,9 +34,9 @@ export async function fullGitBundle(
     'The bundle names different source.',
   );
   // Verify without source alternates: native Git checks self-contained prerequisites, pack integrity and ancestry connectivity.
-  workGit(transport, ['--no-lazy-fetch', '--no-replace-objects', 'bundle', 'verify', temp]);
-  workGit(transport, ['--no-lazy-fetch', '--no-replace-objects', 'bundle', 'unbundle', temp]);
-  workGit(transport, [
+  await git(transport, ['--no-lazy-fetch', '--no-replace-objects', 'bundle', 'verify', temp]);
+  await git(transport, ['--no-lazy-fetch', '--no-replace-objects', 'bundle', 'unbundle', temp]);
+  await git(transport, [
     '--no-lazy-fetch',
     '--no-replace-objects',
     'fsck',

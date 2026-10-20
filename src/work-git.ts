@@ -14,14 +14,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Lane } from './work-types.js';
 import { execFileSync } from 'node:child_process';
-import { ForgeError, invariant } from './errors.js';
-
-// Per-command ceiling for local Git. FORGE_GIT_TIMEOUT_MS raises it for heavily loaded machines
-// (the standard check sets it); invalid values fall back to the default.
-const gitTimeout = () => {
-  const value = Number(process.env.FORGE_GIT_TIMEOUT_MS);
-  return Number.isInteger(value) && value >= 1000 && value <= 3_600_000 ? value : 20_000;
-};
+import { invariant } from './errors.js';
+import { gitCommand, gitFailure, gitTimeout } from './work-git-command.js';
 
 export function workGit(
   root: string,
@@ -43,7 +37,7 @@ export function workGit(
   acceptConflict = false,
   raw = false,
 ): string | Buffer {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  const command = gitCommand(root, args);
   // Large stdin written through spawnSync's pipe intermittently stalls until the timeout (seen with
   // `hash-object --stdin` on a 1 MiB blob). Hand Git the same bytes as a private file descriptor instead.
   let spill: { directory: string; fd: number } | undefined;
@@ -54,49 +48,18 @@ export function workGit(
     spill = { directory, fd: openSync(file, 'r') };
   }
   try {
-    return execFileSync(
-      'git',
-      [
-        '--no-replace-objects',
-        '-c',
-        'core.hooksPath=/dev/null',
-        '-c',
-        'core.fsmonitor=false',
-        '-c',
-        'commit.gpgSign=false',
-        '-c',
-        'submodule.recurse=false',
-        '-c',
-        'core.untrackedCache=false',
-        '-C',
-        root,
-        ...args,
-      ],
-      {
-        encoding: raw ? undefined : 'utf8',
-        timeout: gitTimeout(),
-        maxBuffer: 4 * 1024 * 1024,
-        env: {
-          ...env,
-          GIT_CONFIG_NOSYSTEM: '1',
-          GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-          GIT_TERMINAL_PROMPT: '0',
-          GIT_AUTHOR_NAME: 'NanthAi Forge',
-          GIT_AUTHOR_EMAIL: 'forge@localhost',
-          GIT_COMMITTER_NAME: 'NanthAi Forge',
-          GIT_COMMITTER_EMAIL: 'forge@localhost',
-        },
-        stdio: [spill ? spill.fd : 'pipe', 'pipe', 'pipe'],
-        ...(input === undefined || spill ? {} : { input }),
-      },
-    );
+    return execFileSync('git', command.args, {
+      encoding: raw ? undefined : 'utf8',
+      timeout: gitTimeout(),
+      maxBuffer: 4 * 1024 * 1024,
+      env: command.env,
+      stdio: [spill ? spill.fd : 'pipe', 'pipe', 'pipe'],
+      ...(input === undefined || spill ? {} : { input }),
+    });
   } catch (error) {
     const failure = error as { status?: number; stdout?: string };
     if (acceptConflict && failure.status === 1 && typeof failure.stdout === 'string') return failure.stdout;
-    throw new ForgeError(
-      'WORK_GIT_FAILED',
-      'Git operation failed or exceeded its limit. Existing branches and workspaces are retained; inspect work status before retrying.',
-    );
+    throw gitFailure(error, args);
   } finally {
     if (spill) {
       closeSync(spill.fd);

@@ -370,7 +370,7 @@ test('a large imported diff reports a diagnostic without making unrelated local 
   const status = work.status();
   assert.equal(status.intents.length, 2);
   assert.equal(status.lanes[0].available, true);
-  assert.match(status.intents.find(i => i.id === imported.id).externalDiffError, /Git operation failed/);
+  assert.match(status.intents.find(i => i.id === imported.id).externalDiffError, /Git diff failed/);
   assert.equal(git(root, ['rev-parse', `refs/forge/github/${head}`]).trim(), head);
 });
 

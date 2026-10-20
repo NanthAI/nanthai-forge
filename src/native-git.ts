@@ -18,6 +18,9 @@ import { NativeSource, nativeMarker, nativePaths, type NativeFile } from './nati
 import { WorkStore } from './work-store.js';
 import { workSchema, type GitProjection } from './work-types.js';
 import { workGit } from './work-git.js';
+import { asyncGitTreeWriter } from './native-git-tree.js';
+import { nativeGitRunner } from './native-git-runner.js';
+export { treeForGit } from './native-git-tree.js';
 import { fullGitBundle } from './work-git-bundle.js';
 import { withGithubTransport } from './work-github.js';
 import { safeRelative } from './files.js';
@@ -195,48 +198,6 @@ export async function importNativeGit(input: string, commit: string, target: str
     rmSync(scratch, { recursive: true, force: true });
   }
 }
-function gitTreeWriter(root: string, source: NativeSource) {
-  // Git object identities belong to this one repository/object format. Keep only IDs, not source buffers.
-  const blobs = new Map<string, string>();
-  return (files: NativeFile[]): string => {
-    const entries = new Map<string, { files: string[]; dirs: Set<string> }>();
-    const node = (path: string) => {
-      if (!entries.has(path)) entries.set(path, { files: [], dirs: new Set() });
-      return entries.get(path)!;
-    };
-    node('');
-    for (const file of files) {
-      const parts = file.path.split('/'),
-        name = parts.pop()!;
-      let dir = '';
-      for (const part of parts) {
-        node(dir).dirs.add(part);
-        dir = dir ? `${dir}/${part}` : part;
-        node(dir);
-      }
-      let blob = blobs.get(file.blob);
-      if (!blob) {
-        // Validate authoritative bytes before the first write; immutable identities reuse that exact Git object.
-        blob = workGit(root, ['hash-object', '-w', '--stdin'], source.object(file.blob)).trim();
-        blobs.set(file.blob, blob);
-      }
-      node(dir).files.push(
-        `${file.mode === 'symlink' ? '120000' : file.mode === 'executable' ? '100755' : '100644'} blob ${blob}\t${name}\0`,
-      );
-    }
-    function build(path: string): string {
-      const entry = node(path),
-        records = [...entry.files];
-      for (const name of entry.dirs)
-        records.push(`040000 tree ${build(path ? `${path}/${name}` : name)}\t${name}\0`);
-      return workGit(root, ['mktree', '-z'], Buffer.from(records.join(''))).trim();
-    }
-    return build('');
-  };
-}
-export function treeForGit(root: string, files: NativeFile[], source: NativeSource): string {
-  return gitTreeWriter(root, source)(files);
-}
 export async function exportNativeGit(input: string, head: string, target: string) {
   invariant(/^[0-9a-f]{64}$/.test(head), 'BAD_ARGUMENT', 'Select an exact retained native State.');
   const store = new WorkStore(input);
@@ -244,6 +205,8 @@ export async function exportNativeGit(input: string, head: string, target: strin
   const source = new NativeSource(store.root),
     states = [...source.ancestors(head)],
     { destination, scratch } = fresh(target);
+  const runner = nativeGitRunner(),
+    git = runner.git;
   try {
     const formats = new Set(
       states.flatMap(id => (source.state(id).git ? [source.state(id).git!.format] : [])),
@@ -257,7 +220,7 @@ export async function exportNativeGit(input: string, head: string, target: strin
       output = join(scratch, 'output');
     mkdirSync(output, { mode: 0o700 });
     const repo = join(output, 'repository.git');
-    workGit(scratch, [
+    await git(scratch, [
       'init',
       '--bare',
       '--template=',
@@ -271,8 +234,8 @@ export async function exportNativeGit(input: string, head: string, target: strin
     )) {
       const path = join(scratch, bundle + '.bundle');
       writeFileSync(path, source.object(bundle), { flag: 'wx', mode: 0o600 });
-      workGit(repo, ['--no-lazy-fetch', 'bundle', 'verify', path]);
-      for (const record of workGit(repo, ['--no-lazy-fetch', 'bundle', 'unbundle', path])
+      await git(repo, ['--no-lazy-fetch', 'bundle', 'verify', path]);
+      for (const record of (await git(repo, ['--no-lazy-fetch', 'bundle', 'unbundle', path]))
         .trim()
         .split('\n')) {
         const [oid, ref] = record.split(' ');
@@ -290,19 +253,20 @@ export async function exportNativeGit(input: string, head: string, target: strin
         original.set(ref, oid);
       }
     }
-    for (const [ref, oid] of original) workGit(repo, ['update-ref', ref, oid]);
+    for (const [ref, oid] of original) await git(repo, ['update-ref', ref, oid]);
     const mappings = new Map<string, string>(),
-      writeTree = gitTreeWriter(repo, source);
-    function project(id: string): string {
+      writeTree = asyncGitTreeWriter(repo, source, git);
+    async function project(id: string): Promise<string> {
       const existing = mappings.get(id);
       if (existing) return existing;
       const state = source.state(id),
-        tree = writeTree(state.files);
+        tree = await writeTree(state.files);
       let commit: string;
-      const parents = state.parents.map(project);
+      const parents: string[] = [];
+      for (const parent of state.parents) parents.push(await project(parent));
       if (state.git) {
         invariant(
-          workGit(repo, ['--no-lazy-fetch', 'rev-parse', `${state.git.commit}^{tree}`]).trim() === tree,
+          (await git(repo, ['--no-lazy-fetch', 'rev-parse', `${state.git.commit}^{tree}`])).trim() === tree,
           'INVALID_NATIVE_GIT',
           'Original imported tree differs from its native State.',
         );
@@ -311,19 +275,26 @@ export async function exportNativeGit(input: string, head: string, target: strin
         const seconds = Math.floor(Date.parse(state.at) / 1000);
         invariant(Number.isSafeInteger(seconds), 'INVALID_NATIVE_GIT', 'Native source time is invalid.');
         const raw = `tree ${tree}\n${parents.map(parent => `parent ${parent}\n`).join('')}author NanthAi Forge <forge@localhost> ${seconds} +0000\ncommitter NanthAi Forge <forge@localhost> ${seconds} +0000\n\n${state.message}\n\nForge-State: ${id}\n`;
-        commit = workGit(repo, ['hash-object', '-t', 'commit', '-w', '--stdin'], Buffer.from(raw)).trim();
+        commit = (await git(repo, ['hash-object', '-t', 'commit', '-w', '--stdin'], Buffer.from(raw))).trim();
       }
       mappings.set(id, commit);
       return commit;
     }
-    const commit = project(head);
+    const commit = await project(head);
     const branch = `refs/heads/forge-native/${head}`;
-    workGit(repo, ['update-ref', branch, commit, '']);
-    workGit(repo, ['symbolic-ref', 'HEAD', branch]);
-    const pins = refs(repo);
+    await git(repo, ['update-ref', branch, commit, '']);
+    await git(repo, ['symbolic-ref', 'HEAD', branch]);
+    const pins = (await git(repo, ['for-each-ref', '--format=%(refname) %(objectname)']))
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map(line => {
+        const [ref, head] = line.split(' ');
+        return { ref: ref!, head: head! };
+      });
     pins.push({ ref: 'HEAD', head: commit });
     writeFileSync(join(repo, 'objects/info/alternates'), '');
-    const bundle = await fullGitBundle(repo, pins, join(output, 'source.bundle'), 'INVALID_NATIVE_GIT');
+    const bundle = await fullGitBundle(repo, pins, join(output, 'source.bundle'), 'INVALID_NATIVE_GIT', git);
     const mapping = {
       schema: 1,
       kind: 'forge-native-git-projection',
@@ -342,6 +313,7 @@ export async function exportNativeGit(input: string, head: string, target: strin
     publish(output, destination);
     return { ...mapping, path: destination, bundle: { ...bundle, path: join(destination, 'source.bundle') } };
   } finally {
+    runner.close();
     rmSync(scratch, { recursive: true, force: true });
   }
 }
