@@ -33,6 +33,7 @@ export function intentTimeline(
       } else merged.set(event.id, { ...event, lane: { id: lane.id, name: lane.name } });
     }
   }
+  const creator = intent.lifecycle?.find(entry => entry.at === intent.createdAt)?.actor?.name;
   if (intent.createdAt)
     merged.set(`created:${intent.id}`, {
       id: `created:${intent.id}`,
@@ -40,6 +41,7 @@ export function intentTimeline(
       tone: 'plain',
       glyph: 'file',
       text: 'Created',
+      ...(creator ? { detail: `by ${creator}` } : {}),
     });
   for (const [index, entry] of (intent.lifecycle ?? []).entries())
     merged.set(`intent:${intent.id}:${index}`, {
@@ -55,7 +57,7 @@ export function intentTimeline(
             : entry.to === 'abandoned'
               ? 'Abandoned'
               : 'Ready',
-      detail: [entry.reason, entry.actor?.name].filter(Boolean).join(' · '),
+      detail: [entry.actor?.name && `by ${entry.actor.name}`, entry.reason].filter(Boolean).join(' · '),
     });
   for (const event of events.filter(event => !event.laneId)) merged.set(event.id, event);
   return [...merged.values()].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());

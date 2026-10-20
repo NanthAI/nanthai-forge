@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from 'react';
+import { planningActor, type AttributedPlanningItem } from './planning/attribution';
 import { InitiativePage, InitiativeConversation, PlanningRowFact } from './planning/InitiativePage';
 import { Menu } from './ui/Menu';
 import { ErrorToast } from './ui/Toast';
@@ -166,7 +167,7 @@ export function WorkPlanning({
   renderBody?: (item: PlanningItem, open: boolean) => ReactNode;
   renderConversation?: (item: PlanningItem) => ReactNode;
   timelineData?: PlanningData;
-  initiativeOrigin?: PlanningItem;
+  initiativeOrigin?: AttributedPlanningItem;
 }) {
   const workHeader = useWorkHeader();
   const initiativeWrites = useRef(
@@ -477,7 +478,12 @@ export function WorkPlanning({
           timelineData={timelineData}
           origin={
             initiativeOrigin ??
-            data.planningItems.find(item => item.id === detailItem.id && item.version === 1)
+            (() => {
+              const first = data.planningItems.find(item => item.id === detailItem.id && item.version === 1);
+              return (
+                first && { ...first, actorDisplayName: planningActor(first.operationId, data.hostedEvents) }
+              );
+            })()
           }
           readOnly={readOnly}
           busy={busy}

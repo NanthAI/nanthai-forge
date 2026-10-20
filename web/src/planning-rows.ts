@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { AttributedPlanningItem } from './planning/attribution';
 import { intentProgress } from '../../src/work-intent-progress';
 import type { PlanningItem } from '../../src/work-planning-types';
 import type { IntentFilter } from './intents/model';
@@ -209,7 +210,7 @@ export function childInitiatives(items: readonly PlanningItem[], parentId: strin
 }
 
 export function initiativeTimeline(
-  item: PlanningItem,
+  item: AttributedPlanningItem,
   rows: readonly PlanningRow[],
   intents: readonly PlanningIntent[],
   lanes: readonly PlanningLane[],
@@ -229,19 +230,20 @@ export function initiativeTimeline(
       id: item.operationId ?? item.id,
       at: item.at,
       label: 'Created',
-      detail: '',
+      detail: item.actorDisplayName ? `by ${item.actorDisplayName}` : '',
       glyph: 'initiative',
     });
   for (const row of rows) {
     const intent = intents.find(value => value.id === row.intentId);
     const at = intent?.createdAt ?? row.createdAt;
+    const creator = intent?.lifecycle?.find(event => event.at === at)?.actor?.name;
     const link = { intentId: row.intentId, itemId: row.itemId };
     if (at)
       events.push({
         id: `${row.id}:planned`,
         at,
         label: row.label === 'Proposed' ? 'Intent proposed' : 'Intent planned',
-        detail: row.title,
+        detail: [creator && `by ${creator}`, row.title].filter(Boolean).join(' · '),
         glyph: 'intent',
         ...link,
       });
@@ -253,7 +255,13 @@ export function initiativeTimeline(
         id: `${row.id}:motion`,
         at: first.at,
         label: 'Intent in motion',
-        detail: [row.title, first.name && `Lane ${first.name} started`].filter(Boolean).join(' · '),
+        detail: [
+          row.title,
+          started && started.startedBy?.name && `by ${started.startedBy.name}`,
+          first.name && `Lane ${first.name} started`,
+        ]
+          .filter(Boolean)
+          .join(' · '),
         glyph: 'lane',
         ...link,
       });

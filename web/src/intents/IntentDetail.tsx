@@ -15,6 +15,7 @@ import { laneFacts } from '../ui/lane-facts';
 import type { CockpitWork } from '../cockpit/model';
 import type { TimelineEvent } from '../lane/timeline';
 import { eventAnchor } from '../cockpit/Feed';
+import { DetailsText } from '../ui/DetailsText';
 import { Glyph } from '../ui/Glyph';
 import { Button, ButtonLink, ExactRecord, Panel, StatusPill } from '../ui/primitives';
 import { age } from '../ui/status';
@@ -132,18 +133,24 @@ export function IntentDetailView({
       title="Details"
       actions={
         onEdit ? (
-          <Button variant="ghost" size="sm" onClick={onEdit}>
+          <Button variant="ghost" size="sm" icon="pencil" onClick={onEdit}>
             Edit
           </Button>
         ) : (
-          editHref && <a href={editHref}>Edit</a>
+          editHref && (
+            <ButtonLink variant="ghost" size="sm" icon="pencil" href={editHref}>
+              Edit
+            </ButtonLink>
+          )
         )
       }
     >
       {editor ?? (
         <>
           {row.constraints && row.constraints !== row.outcome && (
-            <div className="fx-intent-why">{row.constraints}</div>
+            <div className="fx-intent-why">
+              <DetailsText text={row.constraints} />
+            </div>
           )}
           {(row.lanes.length > 0 || base) && (
             <ExactRecord
@@ -187,7 +194,12 @@ export function IntentDetailView({
                     {views.length} {views.length === 1 ? 'Candidate' : 'Candidates'} ·{' '}
                     {views.filter(view => view.accepted).length} accepted
                   </span>
-                  {row.createdAt && <span>started {age(row.createdAt, now, true)}</span>}
+                  {row.createdAt && (
+                    <span>
+                      started {age(row.createdAt, now, true)}
+                      {row.createdBy && <> by {row.createdBy}</>}
+                    </span>
+                  )}
                 </>
               )}
             </div>
@@ -215,12 +227,12 @@ export function IntentDetailView({
               />
             )}
             {onEdit && (
-              <Button variant="ghost" onClick={onEdit}>
+              <Button variant="ghost" icon="pencil" onClick={onEdit}>
                 Edit
               </Button>
             )}
             {editHref && (
-              <ButtonLink variant="ghost" href={editHref}>
+              <ButtonLink variant="ghost" icon="pencil" href={editHref}>
                 Edit
               </ButtonLink>
             )}
@@ -327,7 +339,18 @@ export function IntentDetailView({
           viewHref={viewHref ?? reviewHref}
         />
       )}
-      <Panel title="Lanes" count={row.lanes.length}>
+      <Panel
+        title="Lanes"
+        count={row.lanes.length}
+        actions={
+          canStart &&
+          (addLane ? (
+            <AddLane add={name => run(addLane(name))} />
+          ) : (
+            <AddLaneHandoff intentId={startIntentId} />
+          ))
+        }
+      >
         {row.lanes.length ? (
           <ul className="fx-intent-lanes">
             {[...row.open, ...row.lanes.filter(lane => !lane.open)].map(lane => {

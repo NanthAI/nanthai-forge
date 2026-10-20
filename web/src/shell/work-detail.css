@@ -52,3 +52,12 @@
 /* Keep both side-panel headers on the same 42 px rhythm as the main column. */
 .fx-detail-side .fx-panel-h { min-height: 42px; height: 42px; }
 .fx-detail-side .fx-collapse { height: 22px; }
+
+/* Details keep cockpit body type inside the legacy hosted project nesting. */
+.fx .fx-detail :is(.fx-intent-why, .fx-initiative-body),
+.fx .fx-detail :is(.fx-intent-why, .fx-initiative-body) p { font-size: 13px; line-height: 1.55; color: var(--fx-text-2); }
+.fx-detail :is(.fx-intent-why, .fx-initiative-body) p { margin: 0 0 10px; }
+.fx-detail :is(.fx-intent-why, .fx-initiative-body) p:last-child { margin-bottom: 0; }
+.fx-detail :is(.fx-intent-why, .fx-initiative-body) strong { color: var(--fx-text); }
+.fx-detail .planning-create textarea { height: 84px; padding: 8px 10px; resize: vertical; }
+.fx-detail .planning-create :is(input, select, textarea):focus-visible { outline: 2px solid var(--fx-focus); outline-offset: 0; }

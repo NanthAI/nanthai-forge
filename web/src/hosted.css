@@ -76,10 +76,10 @@
 
 /* Project planning is usable before the local Work stylesheet is loaded. */
 .hosted-work .planning-board{margin:0 0 28px}
-.hosted-work .planning-board :is(form,label){display:grid;gap:8px;min-width:0}
-.hosted-work .planning-board form{gap:18px;max-width:720px;margin:20px 0}
-.hosted-work .planning-board :is(input,select,textarea){width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;color:var(--fg);background:var(--surface);min-height:44px}
-.hosted-work .planning-board textarea{min-height:96px;resize:vertical}
+.hosted-work .planning-board:not(.fx, .fx *) :is(form,label){display:grid;gap:8px;min-width:0}
+.hosted-work .planning-board:not(.fx, .fx *) form{gap:18px;max-width:720px;margin:20px 0}
+.hosted-work .planning-board:not(.fx, .fx *) :is(input,select,textarea){width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;color:var(--fg);background:var(--surface);min-height:44px}
+.hosted-work .planning-board:not(.fx, .fx *) textarea{min-height:96px;resize:vertical}
 .hosted-work .planning-board input[type=checkbox]{width:18px;height:18px;min-height:0;flex-shrink:0;accent-color:var(--accent)}
 .hosted-work .planning-board .publication-draft{display:flex;align-items:center;gap:10px;min-height:44px}
 .hosted-work .planning-board summary{min-height:44px;align-content:center}

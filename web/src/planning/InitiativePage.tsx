@@ -12,6 +12,8 @@ import {
   type PlanningRow,
 } from '../planning-rows';
 import { WorkDetailLayout, CollapseSideButton } from '../shell/WorkDetailLayout';
+import type { AttributedPlanningItem } from './attribution';
+import { DetailsText } from '../ui/DetailsText';
 import { Glyph } from '../ui/Glyph';
 import { Menu } from '../ui/Menu';
 import { Avatar, Button, Panel, StatusPill } from '../ui/primitives';
@@ -169,7 +171,7 @@ export function InitiativePage({
   body?: ReactNode;
   conversation: ReactNode;
   timelineData?: PlanningData;
-  origin?: PlanningItem;
+  origin?: AttributedPlanningItem;
 }) {
   const [copyError, setCopyError] = useState('');
   const groups = planningGroups(data.planningItems, data.intents, data.lanes ?? []);
@@ -189,7 +191,7 @@ export function InitiativePage({
   const addIntent = () => onCreate('issue', item.id);
   const edit = !readOnly && (
     <button className="fx-act" onClick={onEdit}>
-      Edit
+      <Glyph name="pencil" size={12} /> Edit
     </button>
   );
   const pill = (
@@ -277,6 +279,7 @@ export function InitiativePage({
               {origin.version === 1 && (
                 <span className="fx-initiative-created">
                   created <time title={origin.at}>{age(origin.at, Date.now(), true)}</time>
+                  {origin.actorDisplayName && <> by {origin.actorDisplayName}</>}
                 </span>
               )}
             </div>
@@ -286,7 +289,7 @@ export function InitiativePage({
               <Button icon="plus" onClick={addIntent}>
                 Add Intent
               </Button>
-              <Button variant="ghost" onClick={onEdit}>
+              <Button variant="ghost" icon="pencil" onClick={onEdit}>
                 Edit
               </Button>
               <Menu label="⋯" ariaLabel="More Initiative actions">
@@ -354,7 +357,7 @@ export function InitiativePage({
         </p>
       )}
       <Panel title="Details" actions={edit}>
-        {editor || <div className="fx-initiative-body">{body ?? <p>{item.body}</p>}</div>}
+        {editor || <div className="fx-initiative-body">{body ?? <DetailsText text={item.body} />}</div>}
       </Panel>
       <Panel
         title="Intents"

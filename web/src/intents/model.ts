@@ -11,6 +11,7 @@ export type IntentRow = {
   status: IntentStatus;
   planned: boolean;
   createdAt?: string;
+  createdBy?: string;
   lanes: CockpitLane[];
   open: CockpitLane[];
   /** The most urgent state among its open Lanes, or the Intent status when none are open. */
@@ -29,7 +30,9 @@ type IntentInput = {
   constraints?: string;
   status: IntentStatus;
   createdAt?: string;
+  createdBy?: string;
   notes?: readonly { kind: string; at: string }[];
+  lifecycle?: readonly { at: string; actor?: { name: string } }[];
 };
 
 const statusTone: Record<IntentStatus, [Tone, string]> = {
@@ -41,6 +44,8 @@ const statusTone: Record<IntentStatus, [Tone, string]> = {
 
 export function intentRows(intents: readonly IntentInput[], lanes: readonly CockpitLane[]): IntentRow[] {
   return intents.map(intent => {
+    const creator =
+      intent.createdBy ?? intent.lifecycle?.find(entry => entry.at === intent.createdAt)?.actor?.name;
     const own = lanes.filter(lane => lane.intentId === intent.id);
     const planned = intentProgress(intent.status, own.length) === 'Planned';
     const open = own.filter(lane => lane.open);
@@ -64,6 +69,7 @@ export function intentRows(intents: readonly IntentInput[], lanes: readonly Cock
       status: intent.status,
       planned,
       ...(intent.createdAt ? { createdAt: intent.createdAt } : {}),
+      ...(creator ? { createdBy: creator } : {}),
       lanes: own,
       open,
       tone,

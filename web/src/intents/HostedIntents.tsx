@@ -1,3 +1,5 @@
+import { usePlanningActors } from '../planning/usePlanningActors';
+import type { AttributedPlanningItem } from '../planning/attribution';
 import { usePageCritical } from '../ui/page-critical';
 // SPDX-License-Identifier: Apache-2.0
 import type { ReactNode } from 'react';
@@ -109,6 +111,7 @@ export default function HostedIntents({
     selectedPlanning?.id ?? intentId,
     Boolean(intentId),
   );
+  const attributedVersions = usePlanningActors(projectId, workspace, planningVersions.records);
   const commentWrite = useRef<
     | Extract<import('../../../src/work-planning-types').PlanningWrite, { action: 'comment-planning-item' }>
     | undefined
@@ -177,7 +180,7 @@ export default function HostedIntents({
       channelMoves: moves.records,
       notes: notes.records,
       planningComments: planningComments.records,
-      planningVersions: planningVersions.records,
+      planningVersions: attributedVersions,
     }),
     [
       planning.records,
@@ -188,7 +191,7 @@ export default function HostedIntents({
       moves.records,
       notes.records,
       planningComments.records,
-      planningVersions.records,
+      attributedVersions,
     ],
   );
   const selectedIntent = intents.records.find(intent => intent.id === intentId);
@@ -275,7 +278,7 @@ export function HostedIntentsView({
   records: CockpitWork & {
     planningItems?: readonly PlanningItem[];
     planningComments?: readonly WorkData['planningComments'][number][];
-    planningVersions?: readonly PlanningItem[];
+    planningVersions?: readonly AttributedPlanningItem[];
     intents: readonly IntentHeader[];
     channelMoves: readonly WorkData['channelMoves'][number][];
     notes: readonly NoteRow[];
@@ -352,7 +355,9 @@ export function HostedIntentsView({
         id: `planning:${version.operationId}`,
         at: version.at,
         text: version.version === 1 ? 'Planned' : version.status === 'closed' ? 'Done' : 'Details edited',
-        detail: `version ${version.version}`,
+        detail: [version.actorDisplayName && `by ${version.actorDisplayName}`, `version ${version.version}`]
+          .filter(Boolean)
+          .join(' · '),
         glyph: 'file',
         tone: 'plain',
       });
@@ -413,6 +418,7 @@ export function HostedIntentsView({
     return (
       <PlanningIntentPage
         item={item ?? planningItem(intent)}
+        origin={records.planningVersions?.find(version => version.version === 1)}
         initiatives={initiatives}
         readOnly={!planningAct && !setStatus && !lifecycle}
         act={planningAct}

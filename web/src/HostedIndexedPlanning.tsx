@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { InitiativeConversation } from './planning/InitiativePage';
+import { usePlanningActors } from './planning/usePlanningActors';
+import { DetailsText } from './ui/DetailsText';
 import { PlanningIntentPage } from './PlanningIntents';
 import { Conversation } from './intents/IntentParts';
 import { intentRows } from './intents/model';
@@ -71,7 +73,7 @@ function ItemBody({
   const value = useResolvedWorkValue(projectId, workspace, 'planningItems', item, open);
   return value ? (
     <>
-      <p>{value.body}</p>
+      <DetailsText text={value.body} />
     </>
   ) : (
     <p role="status">Loading item…</p>
@@ -195,6 +197,7 @@ function PlannedIntentRoute({
   const briefs = useMemo(() => hostedBriefs(client, props.projectId), [client, props.projectId]);
   const value = useResolvedWorkValue(props.projectId, props.workspace, 'planningItems', item);
   const history = useWorkRecords<PlanningItem>(props.projectId, props.workspace, 'planningVersions', item.id);
+  const versions = usePlanningActors(props.projectId, props.workspace, history.records);
   const comments = useWorkRecords<WorkData['planningComments'][number]>(
     props.projectId,
     props.workspace,
@@ -221,8 +224,7 @@ function PlannedIntentRoute({
     constraints: item.body,
     status: item.status === 'closed' ? ('completed' as const) : ('active' as const),
     createdAt:
-      history.records.find(version => version.version === 1)?.at ??
-      (item.version === 1 ? item.at : undefined),
+      versions.find(version => version.version === 1)?.at ?? (item.version === 1 ? item.at : undefined),
   };
   const row = intentRows([source], cockpitLanes(work))[0]!;
   const now = Date.now();
@@ -234,13 +236,15 @@ function PlannedIntentRoute({
   }));
   if (!value) return <p role="status">Loading Intent…</p>;
   const timeline = [
-    ...history.records.map(version => ({
+    ...versions.map(version => ({
       id: `planning:${version.operationId}`,
       at: version.at,
       tone: 'plain' as const,
       glyph: 'file' as const,
       text: version.version === 1 ? 'Planned' : version.status === 'closed' ? 'Done' : 'Details edited',
-      detail: `version ${version.version}`,
+      detail: [version.actorDisplayName && `by ${version.actorDisplayName}`, `version ${version.version}`]
+        .filter(Boolean)
+        .join(' · '),
     })),
     ...(intent ? intentTimeline(work, intent.id) : []),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
@@ -248,6 +252,7 @@ function PlannedIntentRoute({
     <BriefSourceContext.Provider value={briefs}>
       <PlanningIntentPage
         item={value}
+        origin={versions.find(version => version.version === 1)}
         initiatives={items}
         readOnly={props.readOnly}
         busy={props.busy}
@@ -334,6 +339,7 @@ export default function HostedIndexedPlanning(
     selected,
     items.records.some(item => item.id === selected && item.kind === 'initiative'),
   );
+  const attributedOrigins = usePlanningActors(props.projectId, props.workspace, origins.records);
   const data: PlanningData = {
     revision: props.workspace.revision,
     intents: props.intents,
@@ -379,7 +385,7 @@ export default function HostedIndexedPlanning(
       <WorkPlanning
         intentId={props.intentId}
         timelineData={timelineData}
-        initiativeOrigin={origins.records.find(item => item.version === 1)}
+        initiativeOrigin={attributedOrigins.find(item => item.version === 1)}
         renderConversation={item => (
           <>
             {comments.loading && <p role="status">Loading conversation…</p>}

@@ -277,7 +277,7 @@ test('abandoned source-return lifecycle retains reason and history, leaves Now, 
   assert.equal(JSON.parse(lifecycle.value).reason, 'Superseded by main');
   const { laneTimeline } = await import(moduleUrl('../web/src/lane/timeline.ts'));
   const events = laneTimeline({ ...f.records, lanes: f.data.lanes }, f.laneId);
-  assert.ok(events.some(entry => entry.detail === 'Superseded by main · Worker'));
+  assert.ok(events.some(entry => entry.detail === 'by Worker · Superseded by main'));
   f.records.lanes = [header];
   const rows = cockpitLanes({ ...f.records, intents: f.data.intents });
   assert.equal(rows[0].open, false);

@@ -189,6 +189,38 @@ test('compact maps keep tracks compact and every Candidate point navigable', asy
   assert.doesNotMatch(markup, /fx-map-marker/);
 });
 
+test('Details emphasize only leading template labels and keep source bytes as text', async () => {
+  const { DetailsText } = await import(moduleUrl('../web/src/ui/DetailsText.tsx'));
+  const text =
+    'Outcome. Exact bytes <script>stay text</script>\n\nWhy. Measure first.\n\nDone when. Reviewed.\n\nA sentence with Why. inside.';
+  const markup = html(h(DetailsText, { text }));
+  for (const label of ['Outcome.', 'Why.', 'Done when.'])
+    assert.ok(markup.includes(`<strong>${label}</strong>`));
+  assert.match(markup, /&lt;script&gt;stay text&lt;\/script&gt;/);
+  assert.match(markup, /<p>A sentence with Why. inside.<\/p>/);
+  assert.equal((markup.match(/<strong>/g) ?? []).length, 3);
+});
+
+test('Intent meta and timeline attribute only matching recorded actors', () => {
+  const known = structuredClone(records);
+  known.intents[0].lifecycle.unshift({
+    to: 'active',
+    at: known.intents[0].createdAt,
+    actor: { kind: 'person', name: 'Dino' },
+  });
+  known.intents[0].lifecycle.at(-1).actor = { kind: 'agent', name: 'gpt-builder' };
+  known.lanes[0].checkpoints[0].actor = { kind: 'agent', name: 'save-worker' };
+  const events = intentTimeline(known, 'i');
+  assert.equal(events.find(event => event.text === 'Created').detail, 'by Dino');
+  assert.equal(events.find(event => event.text === 'Done').detail, 'by gpt-builder');
+  assert.equal(events.find(event => event.id === 'save:a:0').detail, 'by save-worker · Saved a');
+  const knownRow = intentRows(known.intents, cockpitLanes(known))[0];
+  assert.equal(knownRow.createdBy, 'Dino');
+  assert.match(html(h(IntentDetailView, { ...props, row: knownRow })), /started .*? by Dino/);
+  assert.equal(intentRows(records.intents, row.lanes)[0].createdBy, undefined);
+  assert.equal(intentTimeline(records, 'i').find(event => event.text === 'Created').detail, undefined);
+});
+
 test('Candidate rows reuse recorded diffstats and omit unknown totals', () => {
   const candidate = records.views[0];
   for (const [changes, files] of [

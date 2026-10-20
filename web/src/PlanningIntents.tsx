@@ -3,6 +3,7 @@ import { intentProgress } from '../../src/work-intent-progress';
 import { PagedList } from './cockpit/ScaleList';
 import { StatusPill } from './ui/primitives';
 import { useEffect, useRef, useState, type ComponentProps } from 'react';
+import type { AttributedPlanningItem } from './planning/attribution';
 import type { PlanningItem, PlanningWrite } from '../../src/work-planning-types';
 import type { PlanningAct } from './WorkPlanning';
 import { IntentDetailView } from './intents/IntentDetail';
@@ -69,8 +70,10 @@ export function PlanningIntentPage({
   act,
   loadItem,
   lifecycle,
+  origin,
 }: {
-  item: PlanningItem;
+  item: AttributedPlanningItem;
+  origin?: AttributedPlanningItem;
   initiatives: readonly PlanningItem[];
   detail: ComponentProps<typeof IntentDetailView>;
   readOnly?: boolean;
@@ -214,6 +217,8 @@ export function PlanningIntentPage({
         }
       : {}),
   };
+  const creator =
+    origin?.actorDisplayName ?? row.createdBy ?? (item.version === 1 ? item.actorDisplayName : undefined);
   const timeline = [...(detail.timeline ?? [])];
   if (saved && !timeline.some(event => event.id === `planning:${saved.operationId}`))
     timeline.unshift({
@@ -266,6 +271,7 @@ export function PlanningIntentPage({
             <span>
               {started ? 'started' : 'planned'}{' '}
               {row.createdAt ? age(row.createdAt, detail.now, true) : age(current.at, detail.now, true)}
+              {creator && <> by {creator}</>}
               {current.version > 1 && <> · edited {age(current.at, detail.now, true)}</>}
             </span>
           </>

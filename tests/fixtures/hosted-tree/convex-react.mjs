@@ -33,3 +33,5 @@ export const usePaginatedQuery = (reference, args) => ({
 });
 export const useMutation = () => async () => null;
 export const useAction = reference => async args => tree().actions?.[name(reference)]?.(args) ?? null;
+
+export const useQueries = queries => Object.fromEntries(Object.entries(queries).map(([key, { query, args }]) => [key, useQuery(query, args)]));

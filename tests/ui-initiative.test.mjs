@@ -365,3 +365,31 @@ test('a legacy Intent edit timestamp is not displayed as its planning event', ()
     false,
   );
 });
+
+test('Initiative creation byline uses the recorded origin actor and omits unknown authors', () => {
+  const known = renderToStaticMarkup(
+    h(InitiativePage, { ...props, origin: { ...initiative, actorDisplayName: 'Dino' } }),
+  );
+  assert.match(known, /created <time[^>]*>.*?<\/time> by Dino/);
+  assert.match(known, /by Dino<\/a>/);
+  const events = model.initiativeTimeline(initiative, [], [], []);
+  assert.equal(events[0].detail, '');
+  const markup = renderToStaticMarkup(h(InitiativePage, props));
+  assert.doesNotMatch(markup, /created <time[^>]*>.*?<\/time> by /);
+});
+
+test('Initiative planned events use the creator recorded at creation, not a later Lane holder', () => {
+  const source = {
+    ...intents[0],
+    lifecycle: [{ from: '', to: 'active', at, actor: { kind: 'person', name: 'Maya' } }],
+  };
+  const events = model.initiativeTimeline(
+    initiative,
+    rows,
+    [source],
+    [{ intentId: source.id, startedBy: { kind: 'agent', name: 'Different holder' } }],
+  );
+  const planned = events.find(event => event.id === `${source.id}:planned`);
+  assert.match(planned.detail, /^by Maya · /);
+  assert.doesNotMatch(planned.detail, /Different holder/);
+});

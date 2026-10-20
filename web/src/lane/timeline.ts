@@ -22,7 +22,7 @@ export function laneTimeline(
     tone: 'plain',
     glyph: 'file',
     text: 'Saved',
-    detail: save.message,
+    detail: [save.actor?.name && `by ${save.actor.name}`, save.message].filter(Boolean).join(' · '),
   }));
   if (!saves.length && lane.lastCheckpointAt)
     saves.push({
@@ -80,7 +80,9 @@ export function laneTimeline(
                   : entry.to === 'active'
                     ? 'Reopened'
                     : entry.to.charAt(0).toUpperCase() + entry.to.slice(1),
-              detail: [entry.reason, entry.actor?.name].filter(Boolean).join(' · '),
+              detail: [entry.actor?.name && `by ${entry.actor.name}`, entry.reason]
+                .filter(Boolean)
+                .join(' · '),
             },
           ],
     ),

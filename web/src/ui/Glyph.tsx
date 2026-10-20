@@ -121,6 +121,7 @@ const paths = {
       <path d="M5.5 13.75h5" {...s} />
     </>
   ),
+  pencil: <path d="m11.5 2.5 2 2L6 12l-3 1 1-3z" {...s} />,
   plus: <path d="M8 3v10M3 8h10" {...s} />,
   close: <path d="m4 4 8 8M12 4l-8 8" {...s} />,
   arrow: <path d="M3 8h10M9 4l4 4-4 4" {...s} />,
