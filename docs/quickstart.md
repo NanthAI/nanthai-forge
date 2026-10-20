@@ -78,7 +78,7 @@ No policy change is needed for this flow.
 | Intent | The outcome someone wants; groups related work. | Yes, also a CLI concept. |
 | Lane | One contributor's isolated working directory and saved source history. | Yes, also a CLI concept. |
 | Candidate (formerly View) | An exact pinned combination of Lane heads for checks and review. | Yes, also a CLI concept. |
-| Channel | A named pointer to accepted source, usually main. | Yes, also a CLI concept. |
+| Channel | A named pointer to accepted source, usually main. Like a protected branch: it moves only when a Candidate is accepted. | Yes, also a CLI concept. |
 | Check | A configured command; a run records its result against an exact Candidate. | Yes, also a CLI concept. |
 | Now | The activity screen showing current work and observed agent presence. | UI navigation label. |
 | Needs you | Work or messages needing your attention, such as review or a reply. | UI label, not a separate source state. |

@@ -57,8 +57,11 @@ export function snapshotAccumulator() {
   }
   function finish() {
     if (!tables.has('hostedProjects')) throw failure('SNAPSHOT_INVALID');
-    const filePaths = new Set(files.map(file => file.path));
-    if (!tables.has('_storage') || [...storageIds].some(id => !filePaths.has(`_storage/${id}`)))
+    // Convex names stored files `_storage/<id>`, plus an extension when the content type has one.
+    const fileIds = new Set(
+      files.filter(file => file.path.startsWith('_storage/')).map(file => file.path.slice(9).split('.')[0]),
+    );
+    if (!tables.has('_storage') || [...storageIds].some(id => !fileIds.has(id)))
       throw failure('STORAGE_INCOMPLETE');
     const work = projects
       .filter(p => p.work && !p.removal)

@@ -139,6 +139,16 @@ test('storage manifests and each referenced file are required', () => {
   assert.throws(() => accumulator.finish(), { code: 'STORAGE_INCOMPLETE' });
 });
 
+test('stored files exported with a content-type extension count as present', () => {
+  const accumulator = snapshotAccumulator();
+  for (const [table, rows] of Object.entries(durabilityFixture())) {
+    accumulator.add({ kind: 'table', table });
+    rows.forEach(value => accumulator.add({ kind: 'record', table, value }));
+  }
+  accumulator.add({ kind: 'file', path: '_storage/blob.gz', size: 7, sha256: 'file-hash' });
+  assert.equal(accumulator.finish().files.count, 1);
+});
+
 test('invalid or duplicate main rows do not become successful comparisons', () => {
   const invalid = durabilityFixture();
   invalid.projectWorkRecords[0].value = JSON.stringify({ head: 'invalid' });

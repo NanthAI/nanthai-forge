@@ -50,6 +50,13 @@ and Linux test races. The method note records zero retries and **zero red-main
 observations on both sides** in the reported runs; this is an observation of
 those runs, not a guarantee that arbitrary checks catch every bug.
 
+A smaller repeat on **2026-10-20** (P2) ran both sides on the same Blacksmith
+4-vCPU runners with four shards and GitHub's merge queue: a single docs change
+landed in a median 57 s on Forge versus 172 s on GitHub (3.0×, 3 / 3 runs), and a
+four-change burst in 310 s versus 678 s (2.2×, 3 / 2 runs; one GitHub run was cut
+short by the operator's job time limit). Main stayed green with zero retries on
+both sides; Forge ran 4 checks per burst, the merge queue 12.
+
 This measures landing throughput of completed changes. It does not measure agent
 coding time, total development time, token use or coordination quality. R3, the
 coordination evaluation, is pending. No single-agent token or time advantage over
