@@ -349,6 +349,7 @@ export const interactionEvidenceSchema = interactionRequestSchema.extend({
   overlap: z.array(z.string()),
 });
 export const checkRunSchema = z.object({
+  supersessionBaseline: id.optional(),
   optimistic: z.boolean().optional(),
   recovery: recoveryCheckSchema.optional(),
   backend: checkBackendSchema.optional(),
@@ -391,6 +392,16 @@ export const checkRunSchema = z.object({
   queuedAt: z.string().optional(),
   warnings: z.array(z.string()).optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
+  cancellation: z
+    .object({
+      reason: z.enum(['command', 'superseded', 'signal', 'queue']),
+      at: z.string(),
+      actor: z.union([workActorSchema, z.object({ kind: z.literal('system'), name: z.string() })]).optional(),
+      details: z.string().optional(),
+      signal: z.string().optional(),
+      supersededBy: id.optional(),
+    })
+    .optional(),
   cancelRequested: z.boolean().optional(),
   exitCode: z.number().int().nullable().optional(),
   signal: z.string().nullable().optional(),
@@ -447,6 +458,7 @@ export const playbookRunSchema = z.object({
   startedAt: z.string(),
   endedAt: z.string().optional(),
   runner: checkRunSchema.shape.runner,
+  cancellation: checkRunSchema.shape.cancellation,
   cancelRequested: z.boolean().optional(),
   details: z.string(),
 });
@@ -468,7 +480,12 @@ export const playbookCommandSchema = z.discriminatedUnion('action', [
     expectedChecks: z.array(z.object({ id, definition: oid })).min(1),
     onFailure: z.enum(['stop', 'continue']).default('stop'),
   }),
-  z.object({ action: z.literal('cancel-playbook'), operationId: id }),
+  z.object({
+    action: z.literal('cancel-playbook'),
+    operationId: id,
+    actor: workActorSchema.optional(),
+    reason: z.string().optional(),
+  }),
   z.object({ action: z.literal('export-playbook'), kind: z.enum(['definition', 'run', 'automation']), id }),
 ]);
 export const invariantPinSchema = z.object({ id, definition: oid });
@@ -874,7 +891,12 @@ export const evidenceCommandSchema = z.discriminatedUnion('action', [
     expectedEnvironment: oid,
     interaction: interactionRequestSchema.nullable().optional(),
   }),
-  z.object({ action: z.literal('cancel-check'), operationId: id }),
+  z.object({
+    action: z.literal('cancel-check'),
+    operationId: id,
+    actor: workActorSchema.optional(),
+    reason: z.string().optional(),
+  }),
   z.object({
     action: z.literal('read-check-output'),
     shard: z.union([z.number().int().nonnegative(), z.literal('static')]).optional(),

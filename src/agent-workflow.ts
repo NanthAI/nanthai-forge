@@ -428,7 +428,12 @@ export class AgentWorkflow {
       if (store.select('landingEntries', command.operationId))
         return cancelLandingEntry(this.work, command.operationId);
       const response = await this.work.dispatch(
-        { action: 'cancel-check', operationId: command.operationId },
+        {
+          action: 'cancel-check',
+          operationId: command.operationId,
+          actor: localActor('agent', command.actor, command.tool),
+          reason: command.reason,
+        },
         revision,
       );
       return { revision: response.revision, result: runReceipt(response.result as CheckRun) };

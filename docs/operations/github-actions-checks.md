@@ -69,6 +69,19 @@ Failed test jobs stay failed. Confirmed unfinished jobs (runner loss, timeout or
 startup failure) can retry once individually; successful siblings are retained.
 Unrecoverable incomplete runs are interrupted; requested cancellation cancels the
 retained Actions run and records cancellation only after observing it terminal.
+When a newer Candidate supersedes the checked Candidate in the same Intent and
+Lane-input family, the controller cancels only the retained older execution.
+Each new run retains the latest family Candidate when requested, so a fresh explicit
+check of an older Candidate remains possible. Historical runs without that cursor
+require a replacement timestamp strictly after their request to prove supersession.
+The run keeps status `cancelled` with `cancellation.reason: "superseded"` and the
+replacement Candidate ID; its receipt, execution ID and logs remain available.
+Cancellation provenance optionally records the first request's timestamp, actor,
+reason and details. Command cancellation accepts optional actor/tool attribution
+and a reason. Observed controller signals retain their signal name; an external
+sender is unknown. Historical records without these fields remain readable.
+Queue a new run operation to check a cancelled Candidate again.
+
 A failed job whose log has the runner's `exit code 137`, a SIGKILL/out-of-memory
 error annotation or a kernel `Killed process` line gets a likely-OOM diagnosis
 (exit 137); test names in passing logs do not count. This is not a

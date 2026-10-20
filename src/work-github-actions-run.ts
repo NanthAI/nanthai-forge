@@ -9,7 +9,7 @@ import { actionsApi, type ActionsApi } from './github-actions-api.js';
 import { actionsJournal, deleteActionsRef, exportActionsSnapshot } from './github-actions-export.js';
 import { controlActions } from './github-actions-controller.js';
 import { durableReplace } from './native-durability.js';
-import { pollCancellation } from './work-cancel-poll.js';
+import { remoteCancellation, cancellationDetails } from './work-run-cancellation.js';
 import { updateModalRun } from './work-modal-run.js';
 import { CheckQueue } from './check-queue.js';
 import { workProgress } from './work-progress.js';
@@ -31,9 +31,9 @@ export async function launchGithubActionsRun(
   const control = new CheckQueue(undefined, {
     identity: { control: true, runId: run.id, phase: 'GitHub Actions check' },
   });
-  let signalled = false;
-  const onSignal = () => {
-    signalled = true;
+  let signalled: NodeJS.Signals | undefined;
+  const onSignal = (signal: NodeJS.Signals) => {
+    signalled = signal;
   };
   for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.on(signal, onSignal);
   const sequencePath = join(path, 'github-actions-progress-sequence');
@@ -89,8 +89,14 @@ export async function launchGithubActionsRun(
       journal.rateUsdPerMinute = policy?.ratesUsdPerMinute?.[runsOn] ?? actionsRate(runsOn);
     }
     save();
-    const cancelled = () =>
-      signalled || control.cancelled() || pollCancellation(() => store.select('runs', run.id));
+    const cancelled = () => {
+      const queued = control.cancelled();
+      return remoteCancellation(
+        store,
+        run,
+        signalled ? { reason: 'signal', signal: signalled } : queued ? { reason: 'queue' } : undefined,
+      );
+    };
     progress(
       `Pinned ${run.head}; ${plan.selection.scope}; ${plan.groups.length} test shards plus static checks; ${journal.repo} (${journal.runsOn})`,
     );
@@ -104,6 +110,7 @@ export async function launchGithubActionsRun(
     else delete run.backend.estimatedCostUsd;
     const receipt = createRunReceipt({
       ...outcome,
+      cancellation: run.cancellation,
       backend: run.backend,
       checkSelection: plan.standard ? plan.selection : undefined,
       endedAt: new Date().toISOString(),
@@ -117,7 +124,7 @@ export async function launchGithubActionsRun(
             })),
           }
         : {}),
-      details: `GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}. ${outcome.status === 'passed' ? 'Run ref is removed after recording this result.' : 'Run ref and logs retained for diagnosis; remove the run-owned ref after inspection.'}`,
+      details: `GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} ${outcome.status === 'passed' ? 'Run ref is removed after recording this result.' : 'Run ref and logs retained for diagnosis; remove the run-owned ref after inspection.'}`,
     });
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
     if (outcome.status === 'passed') {
@@ -151,6 +158,7 @@ export async function launchGithubActionsRun(
     // Never serialize raw transport errors or stacks. Git's stderr is kept only after redaction.
     const receipt = createRunReceipt({
       status: 'interrupted',
+      cancellation: run.cancellation,
       backend: run.backend,
       endedAt: new Date().toISOString(),
       exitCode: null,

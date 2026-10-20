@@ -48,6 +48,7 @@ export const runReceipt = (run: CheckRun) => ({
   exitCode: run.exitCode ?? null,
   signal: run.signal ?? null,
   cancelRequested: run.cancelRequested ?? false,
+  ...(run.cancellation ? { cancellation: run.cancellation } : {}),
   coverage: 'Selected command outcome; external inputs and review coverage remain unknown.',
   reuse: 'disabled',
   humanReview: 'separate',

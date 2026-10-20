@@ -18,7 +18,7 @@ export const checkBackendSchema = z.object({
   cost: checkCostSchema.optional(),
   credentialsRef: modalCredentialsRefSchema.nullable().optional(),
   retryable: z.boolean().optional(),
-  verdict: z.enum(['clean', 'flake', 'quarantined']).optional(),
+  verdict: z.enum(['clean', 'flake', 'quarantined', 'failed']).optional(),
   testVerdicts: z
     .array(z.object({ test: z.string(), verdict: z.enum(['passed', 'failed', 'flake', 'fixed']) }))
     .optional(),

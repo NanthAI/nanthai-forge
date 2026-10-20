@@ -4,6 +4,7 @@ import { checkRunSchema } from './work-types.js';
 export const receiptSchema = checkRunSchema
   .pick({
     status: true,
+    cancellation: true,
     backend: true,
     failureSummary: true,
     checkSelection: true,

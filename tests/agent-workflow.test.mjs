@@ -320,11 +320,23 @@ test('agent cancellation and unknown process outcome do not replay executable', 
     };
     const run = (await agent.dispatch(command)).result;
     assert.ok(['running', 'preparing'].includes(run.status));
-    await agent.dispatch({ action: 'cancel', operationId: run.operationId });
+    await agent.dispatch({
+      action: 'cancel',
+      operationId: run.operationId,
+      actor: 'synthetic-canceller',
+      reason: 'Stop this synthetic check',
+    });
+    const request = agent.work.store.select('runs', run.operationId).cancellation;
+    assert.equal(request.actor.name, 'synthetic-canceller');
+    assert.equal(request.reason, 'command');
+    assert.equal(request.details, 'Stop this synthetic check');
+    await agent.dispatch({ action: 'cancel', operationId: run.operationId, actor: 'another-actor' });
+    assert.deepEqual(agent.work.store.select('runs', run.operationId).cancellation, request);
     const cancelled = (
       await agent.dispatch({ action: 'observe', operationId: run.operationId, waitMs: 5000 })
     ).result;
     assert.equal(cancelled.status, 'cancelled');
+    assert.deepEqual(cancelled.cancellation, request);
     assert.equal((await agent.dispatch(command)).result.status, 'cancelled');
     const store = agent.work.store;
     store.locked(() => {
@@ -610,6 +622,45 @@ test('agent default start preserves accepted Channel integrity; explicit workspa
     assert.equal(selected.head, git(root, ['rev-parse', 'HEAD']));
     assert.equal(selected.baseChannel, null);
     assert.notEqual(selected.head, view.head);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('new check requests retain the latest family Candidate while checking historical source', async () => {
+  const root = fixture(true),
+    agent = new AgentWorkflow(root);
+  try {
+    const lane = await start(agent);
+    const compose = () =>
+      agent.dispatch({
+        action: 'compose',
+        operationId: randomUUID(),
+        intentId: lane.intentId,
+        inputs: [{ laneId: lane.laneId, head: lane.head }],
+      });
+    const original = (await compose()).result;
+    const replacement = (await compose()).result;
+    assert.notEqual(original.viewId, replacement.viewId);
+    const check = (
+      await agent.dispatch({
+        action: 'define-check',
+        name: 'Historical check',
+        executable: process.execPath,
+        args: ['-e', 'process.exit(0)'],
+      })
+    ).result;
+    const run = (
+      await agent.dispatch({
+        action: 'run',
+        operationId: randomUUID(),
+        viewId: original.viewId,
+        expectedHead: original.head,
+        checkId: check.checkId,
+      })
+    ).result;
+    assert.equal(run.status, 'passed');
+    assert.equal(agent.work.store.select('runs', run.runId).supersessionBaseline, replacement.viewId);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

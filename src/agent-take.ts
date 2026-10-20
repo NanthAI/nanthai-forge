@@ -74,7 +74,15 @@ export function agentTake(
                 pin.head !== lane.head &&
                 now - Date.parse(run.queuedAt ?? run.startedAt) > PRESENCE.workingMs
               ) {
-                tx.patchFields('runs', run.id, { cancelRequested: true });
+                tx.patchFields('runs', run.id, {
+                  cancelRequested: true,
+                  cancellation: {
+                    reason: 'superseded',
+                    at: new Date(now).toISOString(),
+                    actor: localActor('agent', command.actor, command.tool),
+                    details: 'Stale queued check superseded during Lane handover.',
+                  },
+                });
                 superseded.push(run.id);
               }
             }

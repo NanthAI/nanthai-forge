@@ -59,6 +59,7 @@ function fixture(t, files = {}) {
   const run = {
     id: randomUUID(),
     viewId: view.id,
+    supersessionBaseline: view.id,
     head: view.head,
     base: view.base,
     inputs: view.inputs,
@@ -1038,4 +1039,222 @@ test('Blacksmith zero API billing still records timestamp USD, retries and pinne
   );
   assert.equal(read(join(path, 'result.json')).backend.cost.estimatedCostUsd, 0.032);
   assert.equal(read(join(path, 'github-actions.json')).rateUsdPerMinute, 0.008);
+});
+
+for (const replacement of ['same-family', 'same-family-legacy', 'other-family', 'accepted', 'none']) {
+  test(`runner supersession cancels only an older Candidate: ${replacement}`, async t => {
+    const { work, run, view, path } = fixture(t);
+    if (replacement === 'same-family-legacy') {
+      delete run.supersessionBaseline;
+      work.store.locked(() => {
+        const tx = work.store.records();
+        tx.replace('runs', tx.find('runs', run.id).position, run);
+        work.store.commitRecords(tx);
+      });
+    }
+    if (replacement === 'accepted')
+      work.store.locked(() => {
+        const tx = work.store.records();
+        tx.append('channelMoves', {
+          id: randomUUID(),
+          channel: 'main',
+          viewId: view.id,
+          head: view.head,
+          previous: null,
+          at: new Date().toISOString(),
+          status: 'accepted',
+          provenance: 'user-declared-local',
+        });
+        work.store.commitRecords(tx);
+      });
+    let api,
+      calls,
+      replaced = false,
+      polls = 0;
+    const proxy = {
+      request: async (...args) => {
+        const value = await api.request(...args);
+        if (!replaced && args[0].endsWith('/runs/10')) {
+          replaced = true;
+          if (replacement !== 'none')
+            work.store.locked(() => {
+              const tx = work.store.records();
+              tx.append('views', {
+                ...view,
+                id: randomUUID(),
+                ...(replacement === 'same-family-legacy'
+                  ? { at: new Date(Date.parse(run.startedAt) + 1).toISOString() }
+                  : {}),
+                ...(replacement === 'other-family' ? { inputs: [] } : {}),
+              });
+              work.store.commitRecords(tx);
+            });
+        }
+        return value;
+      },
+      pages: (...args) => api.pages(...args),
+      log: (...args) => api.log(...args),
+      sleep: async () => {},
+    };
+    await launchGithubActionsRun(
+      work.store,
+      run,
+      proxy,
+      async (plan, journal, save) => {
+        journal.commit = 'a'.repeat(40);
+        journal.pushed = true;
+        save();
+        ({ api, calls } = transport(plan, journal));
+        if (replacement.startsWith('same-family')) {
+          const request = api.request;
+          api.request = async (...args) => {
+            const value = await request(...args);
+            if (args[0].endsWith('/runs/10') && ++polls === 1) value.status = 'in_progress';
+            return value;
+          };
+        }
+      },
+      async () => {},
+    );
+    const receipt = read(join(path, 'result.json'));
+    assert.equal(receipt.status, replacement.startsWith('same-family') ? 'cancelled' : 'passed');
+    assert.equal(
+      calls.filter(call => call.endpoint.endsWith('/10/cancel')).length,
+      replacement.startsWith('same-family') ? 1 : 0,
+    );
+    if (replacement.startsWith('same-family')) {
+      assert.equal(receipt.cancellation.reason, 'superseded');
+      assert.deepEqual(receipt.cancellation.actor, { kind: 'system', name: 'Forge check controller' });
+      assert.match(receipt.details, /cancelled-superseded/);
+      assert.equal(
+        receipt.cancellation.supersededBy,
+        work.store.records().all('views', view.intentId, 'intentId').at(-1).id,
+      );
+      assert.deepEqual(receipt.backend.executionIds, ['10']);
+      assert.equal(work.store.select('runs', run.id).cancellation.reason, 'superseded');
+    }
+  });
+}
+
+test('controller signal observation retains SIGTERM and leaves sender unknown', async t => {
+  const { CheckQueue } = await import('../dist/check-queue.js');
+  const { work, run, path } = fixture(t);
+  t.mock.method(CheckQueue.prototype, 'cancelled', () => {
+    process.emit('SIGTERM', 'SIGTERM');
+    return false;
+  });
+  await launchGithubActionsRun(work.store, run, {}, async () => assert.fail('must not export'));
+  const receipt = read(join(path, 'result.json'));
+  assert.equal(receipt.status, 'cancelled');
+  assert.equal(receipt.cancellation.reason, 'signal');
+  assert.equal(receipt.cancellation.signal, 'SIGTERM');
+  assert.equal(receipt.cancellation.actor, undefined);
+});
+
+for (const legacy of [false, true, 'unknown-time']) {
+  test(`a fresh request can check an already superseded Candidate (legacy=${legacy})`, async t => {
+    const { work, run, view, path } = fixture(t);
+    const replacement = {
+      ...view,
+      id: randomUUID(),
+      ...(legacy === 'unknown-time' ? { at: 'unknown' } : {}),
+    };
+    if (legacy) delete run.supersessionBaseline;
+    else run.supersessionBaseline = replacement.id;
+    work.store.locked(() => {
+      const tx = work.store.records();
+      tx.append('views', replacement);
+      tx.replace('runs', tx.find('runs', run.id).position, run);
+      work.store.commitRecords(tx);
+    });
+    let api;
+    const proxy = {
+      request: (...args) => api.request(...args),
+      pages: (...args) => api.pages(...args),
+      log: (...args) => api.log(...args),
+      sleep: async () => {},
+    };
+    await launchGithubActionsRun(
+      work.store,
+      run,
+      proxy,
+      async (plan, journal, save) => {
+        journal.commit = 'a'.repeat(40);
+        journal.pushed = true;
+        save();
+        api = transport(plan, journal).api;
+      },
+      async () => {},
+    );
+    assert.equal(read(join(path, 'result.json')).status, 'passed');
+    assert.equal(work.store.select('runs', run.id).cancelRequested, undefined);
+  });
+}
+
+test('acceptance racing supersession observation prevents cancellation of the accepted check', async t => {
+  const { work, run, view, path } = fixture(t);
+  const locked = work.store.locked.bind(work.store),
+    readRecords = work.store.readRecords.bind(work.store);
+  let replaced = false,
+    observed = false,
+    accepted = false;
+  t.mock.method(work.store, 'readRecords', () => {
+    const tx = readRecords();
+    if (replaced) observed = true;
+    return tx;
+  });
+  t.mock.method(work.store, 'locked', (...args) => {
+    if (replaced && observed && !accepted) {
+      accepted = true;
+      locked(() => {
+        const tx = work.store.records();
+        tx.append('channelMoves', {
+          id: randomUUID(),
+          channel: 'main',
+          viewId: view.id,
+          head: view.head,
+          previous: null,
+          at: new Date().toISOString(),
+          status: 'accepted',
+          provenance: 'user-declared-local',
+        });
+        work.store.commitRecords(tx);
+      });
+    }
+    return locked(...args);
+  });
+  let api, calls;
+  const proxy = {
+    request: async (...args) => {
+      const value = await api.request(...args);
+      if (!replaced && args[0].endsWith('/runs/10')) {
+        work.store.locked(() => {
+          const tx = work.store.records();
+          tx.append('views', { ...view, id: randomUUID() });
+          work.store.commitRecords(tx);
+        });
+        replaced = true;
+        value.status = 'in_progress';
+      }
+      return value;
+    },
+    pages: (...args) => api.pages(...args),
+    log: (...args) => api.log(...args),
+    sleep: async () => {},
+  };
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    proxy,
+    async (plan, journal, save) => {
+      journal.commit = 'a'.repeat(40);
+      journal.pushed = true;
+      save();
+      ({ api, calls } = transport(plan, journal));
+    },
+    async () => {},
+  );
+  assert.equal(accepted, true);
+  assert.equal(read(join(path, 'result.json')).status, 'passed');
+  assert.equal(calls.filter(call => call.endpoint.endsWith('/cancel')).length, 0);
 });

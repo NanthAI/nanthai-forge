@@ -102,6 +102,10 @@ test('only named quarantined failures become nonblocking, static and unrelated f
   const at = new Date().toISOString();
   // No prior verdicts: a flake is not a clean passing check.
   const first = modalQuarantine(store, { id: randomUUID() }, result(), groups, at);
+  const failure = modalQuarantine(store, { id: randomUUID() }, result(false), groups, at);
+  assert.equal(failure.verdict, 'failed');
+  assert.equal(failure.blocked, true);
+  assert.deepEqual(failure.quarantine, []);
   assert.equal(first.verdict, 'flake');
   assert.equal(first.blocked, true);
   assert.deepEqual(checkQuarantine(store), { needsYou: [] });

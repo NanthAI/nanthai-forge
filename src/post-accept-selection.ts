@@ -22,7 +22,16 @@ export function selectMainAudit(data: WorkData, push?: { channel: string; checkI
     const main = data.channelMoves
       .filter(move => move.channel === active.mainCheck!.channel && move.status === 'accepted')
       .at(-1);
-    if (main && active.head !== main.head && !recoveryAllowed(data)) active.cancelRequested = true;
+    if (main && active.head !== main.head && !recoveryAllowed(data) && !active.cancelRequested) {
+      active.cancelRequested = true;
+      active.cancellation = {
+        reason: 'superseded',
+        at: new Date().toISOString(),
+        supersededBy: main.viewId,
+        actor: { kind: 'system', name: 'Forge main audit scheduler' },
+        details: 'New accepted main superseded this audit.',
+      };
+    }
     return { wait: true as const };
   }
   const newest = [...latest.values()].reverse().find(({ move, checkId }) => {

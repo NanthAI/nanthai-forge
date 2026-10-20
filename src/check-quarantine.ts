@@ -203,9 +203,11 @@ export function modalQuarantine(
       verdict:
         recoveredFailure || verdicts.some(item => item.verdict === 'flake')
           ? ('flake' as const)
-          : failures.length
-            ? ('quarantined' as const)
-            : ('clean' as const),
+          : failures.some(test => !quarantined.has(test))
+            ? ('failed' as const)
+            : failures.length
+              ? ('quarantined' as const)
+              : ('clean' as const),
     };
   });
 }

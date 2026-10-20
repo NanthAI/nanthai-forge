@@ -191,6 +191,11 @@ test('an active obsolete main audit is cancelled, never run alongside the newest
   data.runs.push({ id: 'old', head: 'first', mainCheck: { channel: 'main' }, status: 'running' });
   assert.deepEqual(selectMainAudit(data), { wait: true });
   assert.equal(data.runs[0].cancelRequested, true);
+  assert.equal(data.runs[0].cancellation.reason, 'superseded');
+  assert.equal(data.runs[0].cancellation.actor.kind, 'system');
+  const cancellation = data.runs[0].cancellation;
+  selectMainAudit(data);
+  assert.deepEqual(data.runs[0].cancellation, cancellation);
 });
 
 test('restart adopts only an exact live or completed Lane/head run', () => {
@@ -341,6 +346,9 @@ test(
     const [cancelled] = await result;
     assert.equal(cancelled.status, 'cancelled', errors);
     assert.equal(cancelled.signal, 'SIGKILL', errors);
+    assert.equal(cancelled.cancellation.reason, 'signal', errors);
+    assert.equal(cancelled.cancellation.signal, 'SIGTERM', errors);
+    assert.equal(cancelled.cancellation.actor, undefined, errors);
     assert.equal(cancelled.auditError, 'CANCELLED', errors);
     await closed;
     assert.equal(queueEntries().length, 0);

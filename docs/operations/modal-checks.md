@@ -101,7 +101,18 @@ observations without shard identity retain their run-level logs.
 
 Restart reuses completed shard receipts and observes saved sandbox IDs. It replaces only confirmed stopped incomplete standard work and the recorded test-failure/static-OOM retries. A creation with an unknown response is
 never repeated. Cancelling records a local control file and terminates retained
-sandboxes through the owner-side SDK. Modal and local cancellation polls defer a
+sandboxes through the owner-side SDK. For unaccepted Candidates, a newer Candidate
+in the same Intent and Lane-input family cancels the superseded Candidate's retained execution through
+that same control file. New runs retain the latest family Candidate at request time,
+so a fresh explicit check of an older Candidate can run. Historical runs without
+that cursor require a strictly later replacement timestamp to prove supersession.
+The receipt keeps status `cancelled`, optional
+`cancellation.reason: "superseded"`, the replacement Candidate ID and execution
+IDs. Cancellation provenance records an observed request's timestamp and reason,
+plus actor/details for command cancellation or the observed controller signal.
+An unobservable external sender stays unknown; historical records omit these
+optional fields. Queue a new run operation to check a cancelled Candidate again.
+Modal and local cancellation polls defer a
 transient `SOURCE_CHANGED` record-read race until the next tick. Other polling
 errors interrupt the Modal controller or fail the local run through its normal
 completion path, preserving the error instead of throwing from a timer.
@@ -144,7 +155,9 @@ verdicts within seven days quarantine that exact file/test identity and list it 
 Needs you. Quarantined tests continue running; only their completely attributed
 failures become non-blocking. Static checks, unrelated tests and incomplete or
 unattributed reports continue to block. Receipts retain actual process exit codes,
-including nonzero exits for non-blocking quarantined failures.
+including nonzero exits for non-blocking quarantined failures. A named failure
+outside the ledger has verdict `failed`; `quarantined` applies only when all
+attributed failures belong to the actual ledger. Blocking behavior is unchanged.
 
 Twenty consecutive clean test passes release quarantine; failures and flakes
 reset the streak. The ledger derives from retained run receipts and deduplicates

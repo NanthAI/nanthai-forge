@@ -3,6 +3,7 @@
 // every file; the standard check can supply a pinned impact selection. Tests start
 // after their builds, streaming counts while static-step diagnostics stay buffered.
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { commandQueue } from './verify-queue.mjs';
 import { workerBudget } from '../tests/worker-budget.mjs';
 import { fileTimeout } from './test-files.mjs';
@@ -48,19 +49,31 @@ function run(name, command, args) {
 function runCommand(name, command, args) {
   const begin = Date.now();
   return new Promise(resolve => {
-    const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, {
+      env: name === 'test' ? { ...env, FORGE_TEST_DIAGNOSTICS: '1' } : env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     const chunks = [],
       failures = [];
+    const decoder = new StringDecoder('utf8');
     let pending = '',
       completed = 0,
       failed = 0;
     child.stdout.on('data', chunk => {
-      chunks.push(chunk);
-      if (name !== 'test') return;
-      pending += chunk.toString();
+      if (name !== 'test') {
+        chunks.push(chunk);
+        return;
+      }
+      pending += decoder.write(chunk);
       const lines = pending.split('\n');
       pending = lines.pop();
       for (const raw of lines) {
+        if (raw.startsWith('__FORGE_TEST_FAILURE__')) {
+          const failure = JSON.parse(raw.slice('__FORGE_TEST_FAILURE__'.length));
+          process.stdout.write(`[test] Failed test file: ${failure.file}\n${failure.output}\n`);
+          continue;
+        }
+        chunks.push(Buffer.from(`${raw}\n`));
         const line = raw.trimStart();
         if (/^(?:ok|not ok) (?:\d+|-)/.test(line)) {
           completed++;
@@ -83,6 +96,8 @@ function runCommand(name, command, args) {
     function finish(code) {
       if (finished) return;
       finished = true;
+      pending += decoder.end();
+      if (pending) chunks.push(Buffer.from(pending));
       if (code === 137) outOfMemory = true;
       const seconds = ((Date.now() - begin) / 1000).toFixed(1);
       timings.push(`${code === 0 ? 'ok  ' : 'FAIL'} ${seconds.padStart(6)}s  ${name}`);

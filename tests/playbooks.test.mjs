@@ -188,10 +188,22 @@ test('HTTP cancellation stops a live step and later launches, protects exports a
   const cancelled = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ command: { action: 'cancel-playbook', operationId: run.id }, revision: 0 }),
+    body: JSON.stringify({
+      command: {
+        action: 'cancel-playbook',
+        operationId: run.id,
+        actor: { kind: 'person', name: 'synthetic-canceller' },
+        reason: 'Stop synthetic sequence',
+      },
+      revision: 0,
+    }),
   });
   assert.equal(cancelled.status, 200);
-  assert.equal((await wait(work, run.id)).status, 'cancelled');
+  const stopped = await wait(work, run.id);
+  assert.equal(stopped.status, 'cancelled');
+  assert.equal(stopped.cancellation.actor.name, 'synthetic-canceller');
+  assert.equal(stopped.cancellation.details, 'Stop synthetic sequence');
+  assert.deepEqual(work.status().runs[0].cancellation, stopped.cancellation);
   assert.equal(existsSync(marker), false);
   assert.equal(work.status().runs.length, 1);
   const exportBody = JSON.stringify({

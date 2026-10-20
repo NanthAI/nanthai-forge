@@ -162,7 +162,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
     /** Read the last `tail` bytes of the stream instead of a page. */
     tail: z.number().int().min(1).max(65536).optional(),
   }),
-  z.object({ action: z.literal('cancel'), operationId: id }),
+  z.object({ action: z.literal('cancel'), operationId: id, ...attribution, reason: z.string().optional() }),
   z.object({
     action: z.literal('accept'),
     ...lockWait,

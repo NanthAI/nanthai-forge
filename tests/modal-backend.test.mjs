@@ -71,6 +71,7 @@ function fixture(t, files = {}) {
   const run = {
     id: randomUUID(),
     viewId: view.id,
+    supersessionBaseline: view.id,
     head: view.head,
     base: view.base,
     inputs: view.inputs,
@@ -1157,4 +1158,25 @@ test('external project file tokens are redacted even when controller exceptions 
     assert.doesNotMatch(text, /synthetic-external-id|synthetic-external-secret/);
   }
   assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /\[redacted\]/);
+});
+
+test('superseded Modal Candidate reaches cancellation control and keeps execution receipt', async t => {
+  const { work, run, path } = fixture(t);
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  await launchModalRun(work.store, run, async (file, emit) => {
+    assert.equal(existsSync(join(path, 'modal-cancel')), false);
+    emit({ kind: 'execution', executionId: 'sb-superseded', image: 'im-synthetic' });
+    work.store.locked(() => {
+      const tx = work.store.records();
+      tx.append('views', { ...tx.find('views', run.viewId).record, id: randomUUID() });
+      work.store.commitRecords(tx);
+    });
+    t.mock.timers.tick(250);
+    assert.equal(readFileSync(join(path, 'modal-cancel'), 'utf8'), 'cancel');
+    emit(result(read(file)));
+  });
+  const receipt = read(join(path, 'result.json'));
+  assert.equal(receipt.status, 'cancelled');
+  assert.equal(receipt.cancellation.reason, 'superseded');
+  assert.deepEqual(receipt.backend.executionIds, ['sb-superseded']);
 });

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { localActor } from './work-actor.js';
 import { processAlive, processIdentity } from './local-process.js';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -396,10 +397,20 @@ export function playbookWork(store: WorkStore, command: PlaybookCommand, revisio
         if (command.action === 'cancel-playbook') {
           invariant(existing, 'NOT_FOUND', 'Playbook run not found.');
           if (existing.status === 'running') {
+            if (!existing.cancelRequested)
+              existing.cancellation = {
+                reason: 'command',
+                at: new Date().toISOString(),
+                actor: command.actor ?? localActor('person'),
+                ...(command.reason ? { details: command.reason } : {}),
+              };
             existing.cancelRequested = true;
             for (const step of existing.steps) {
               const run = data.runs.find(r => r.id === step.runId);
-              if (run && !run.endedAt) run.cancelRequested = true;
+              if (run && !run.endedAt && !run.cancelRequested) {
+                run.cancelRequested = true;
+                run.cancellation = existing.cancellation;
+              }
             }
             recoverPlaybooks(data);
             data.revision++;

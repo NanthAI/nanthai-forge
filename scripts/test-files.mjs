@@ -52,7 +52,8 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
         { env: childEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' },
       );
       children.add(child);
-      const results = [];
+      const results = [],
+        diagnostics = [];
       const headings = new Map();
       let timedOut = false;
       const timer = setTimeout(() => {
@@ -65,6 +66,7 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
       }, timeoutMs);
       for (const stream of [child.stdout, child.stderr]) {
         createInterface({ input: stream }).on('line', line => {
+          if (process.env.FORGE_TEST_DIAGNOSTICS === '1') diagnostics.push(line);
           const heading = /^(\s*)# Subtest: (.*)$/.exec(line);
           if (heading) {
             const depth = heading[1].length;
@@ -92,6 +94,10 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
         if (code !== 0 || timedOut) {
           failed = true;
           process.stdout.write(`# Failed test file: ${file}\n`);
+          if (process.env.FORGE_TEST_DIAGNOSTICS === '1')
+            process.stdout.write(
+              `__FORGE_TEST_FAILURE__${JSON.stringify({ file, output: diagnostics.join('\n') })}\n`,
+            );
         }
         if (process.env.FORGE_TEST_EVENTS === '1')
           process.stdout.write(

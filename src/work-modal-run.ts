@@ -4,7 +4,7 @@ import { modalRunCost } from './check-cost.js';
 import { ForgeError } from './errors.js';
 import { localFallbackAllowed, runnerRetryMessage } from './check-fallback.js';
 import { mkdirBelow } from './mkdir-below.js';
-import { pollCancellation } from './work-cancel-poll.js';
+import { remoteCancellation, cancellationDetails } from './work-run-cancellation.js';
 import { ModalShardLogs } from './modal-shard-logs.js';
 import { processStartTime } from './local-process.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -29,8 +29,11 @@ export function updateModalRun(store: WorkStore, run: CheckRun) {
     const tx = store.records(),
       selected = tx.find('runs', run.id)!;
     // Cancellation is owned by the latest record, not this controller's cached copy.
-    const { cancelRequested } = selected.record;
-    tx.replace('runs', selected.position, { ...run, ...(cancelRequested ? { cancelRequested } : {}) });
+    const { cancelRequested, cancellation } = selected.record;
+    tx.replace('runs', selected.position, {
+      ...run,
+      ...(cancelRequested ? { cancelRequested, cancellation } : {}),
+    });
     store.commitRecords(tx);
   });
 }
@@ -66,6 +69,13 @@ export async function launchModalRun(
     appendFileSync(join(path, 'stdout.log'), `${line}\n`, { mode: 0o600 });
     workProgress('modal check', line, `${run.id}:${sequence}`);
   };
+  let signalled: NodeJS.Signals | undefined;
+  const onSignal = (signal: NodeJS.Signals) => {
+    signalled = signal;
+  };
+  for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.on(signal, onSignal);
+  const cancelledRun = () =>
+    remoteCancellation(store, run, signalled ? { reason: 'signal', signal: signalled } : undefined);
   let plan: ModalPlan | undefined;
   let credentials: ReturnType<typeof modalCredentials> | undefined;
   try {
@@ -111,11 +121,10 @@ export async function launchModalRun(
       },
     );
     while (!queue.tryAcquire()) {
-      if (pollCancellation(() => store.select('runs', run.id))) break;
+      if (cancelledRun()) break;
       await pause();
     }
-    if (pollCancellation(() => store.select('runs', run.id)))
-      writeFileSync(join(path, 'modal-cancel'), 'cancel', { mode: 0o600 });
+    if (cancelledRun()) writeFileSync(join(path, 'modal-cancel'), 'cancel', { mode: 0o600 });
     run.status = 'running';
     updateModalRun(store, run);
     progress(
@@ -125,8 +134,7 @@ export async function launchModalRun(
     const cancellationFailure = new Promise<never>((_, reject) => {
       cancel = setInterval(() => {
         try {
-          if (pollCancellation(() => store.select('runs', run.id)))
-            writeFileSync(join(path, 'modal-cancel'), 'cancel', { mode: 0o600 });
+          if (cancelledRun()) writeFileSync(join(path, 'modal-cancel'), 'cancel', { mode: 0o600 });
         } catch (error) {
           pollingFailed = true;
           clearInterval(cancel);
@@ -255,20 +263,20 @@ export async function launchModalRun(
         credentials,
       ),
     ]);
+    const cancelled = cancelledRun();
     if (
       terminal?.kind === 'error' &&
       terminal.safeFallback &&
       infrastructureRetries === 0 &&
       localFallbackAllowed(store, run) &&
       ['auth', 'network', 'billing'].includes(terminal.category) &&
-      !store.select('runs', run.id)?.cancelRequested
+      !cancelled
     ) {
       progress(`Modal ${terminal.category}; confirmed remote work stopped; local fallback`);
       modalFallback(run, terminal.category);
       updateModalRun(store, run);
       return false;
     }
-    const cancelled = store.select('runs', run.id)?.cancelRequested;
     const outcome = terminal?.kind === 'result' ? terminal : undefined;
     const unavailable =
       terminal?.kind === 'error' &&
@@ -314,6 +322,7 @@ export async function launchModalRun(
             : 'passed'
           : (unavailable ?? 'interrupted'),
       backend: run.backend,
+      cancellation: run.cancellation,
       ...(failureSummary ? { failureSummary } : {}),
       checkSelection: plan.standard ? plan.selection : undefined,
       ...(run.check.measureResources
@@ -341,11 +350,13 @@ export async function launchModalRun(
       endedAt,
       exitCode: outcome?.exitCode ?? null,
       signal: null,
-      details: unavailable
-        ? runnerRetryMessage(unavailable)
-        : outcome
-          ? `Modal outcome bound to the exact source, definition, selection and runtime; compute cost is estimated. ${outcome.details ?? ''} ${assessment?.verdict === 'flake' ? 'Flake verdict (pass after failure); attempts and available named results retained.' : ''} ${assessment?.quarantine.length ? 'Quarantined tests still ran and reported; only their attributed failures are non-blocking.' : ''}`.trim()
-          : `Modal infrastructure interrupted the check; no check failure was recorded. Retry resumes the same pinned Candidate/plan and retains completed shards. ${terminal?.kind === 'error' ? (terminal.details ?? `Modal ${terminal.category} failure.`) : ''}`.trim(),
+      details: cancelled
+        ? `Modal check cancelled; evidence and execution IDs retained.${cancellationDetails(run)}`
+        : unavailable
+          ? runnerRetryMessage(unavailable)
+          : outcome
+            ? `Modal outcome bound to the exact source, definition, selection and runtime; compute cost is estimated. ${outcome.details ?? ''} ${assessment?.verdict === 'flake' ? 'Flake verdict (pass after failure); attempts and available named results retained.' : ''} ${assessment?.quarantine.length ? 'Quarantined tests still ran and reported; only their attributed failures are non-blocking.' : ''}`.trim()
+            : `Modal infrastructure interrupted the check; no check failure was recorded. Retry resumes the same pinned Candidate/plan and retains completed shards. ${terminal?.kind === 'error' ? (terminal.details ?? `Modal ${terminal.category} failure.`) : ''}`.trim(),
     });
     if (
       ['interrupted', 'runner-unavailable', 'runner-budget-exhausted'].includes(receipt.status) &&
@@ -405,6 +416,7 @@ export async function launchModalRun(
     run.details = `Modal controller interrupted: ${message}. No command was repeated. Retained execution IDs require reconciliation.`;
     const receipt = createRunReceipt({
       status: run.status,
+      cancellation: run.cancellation,
       backend: run.backend,
       endedAt: run.endedAt,
       exitCode: null,
@@ -415,6 +427,7 @@ export async function launchModalRun(
     updateModalRun(store, run);
     return true;
   } finally {
+    for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.off(signal, onSignal);
     if (cancel) clearInterval(cancel);
     queue?.release();
   }

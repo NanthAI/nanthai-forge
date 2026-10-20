@@ -1,3 +1,5 @@
+import { runCandidateFamily } from './work-run-cancellation.js';
+import { localActor } from './work-actor.js';
 import { launchGithubActionsRun } from './work-github-actions-run.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { pollCancellation } from './work-cancel-poll.js';
@@ -210,7 +212,8 @@ async function launchLocal(
   let stopping = false;
   let finished = false;
   let measured: ReturnType<typeof resourceCommand>;
-  const onSignal = () => {
+  const onSignal = (signal: NodeJS.Signals) => {
+    run.cancellation ??= { reason: 'signal', signal, at: new Date().toISOString() };
     runInterruption.abort();
     stopping = true;
     if (child?.pid) {
@@ -238,7 +241,8 @@ async function launchLocal(
     error?: CheckRun['error'],
   ) => {
     if (finished) return;
-    stopping ||= queue?.cancelled() ?? false;
+    const queueCancelled = queue?.cancelled() ?? false;
+    stopping ||= queueCancelled;
     if (stopping && !failure)
       failure = run.mainCheck
         ? 'Main audit cancelled or yielded to foreground work. Evidence is retained; the scheduler retries latest main when the queue is idle.'
@@ -341,6 +345,16 @@ async function launchLocal(
               }
             : localCost(run.id),
       },
+      cancellation:
+        store.select('runs', run.id)?.cancellation ??
+        run.cancellation ??
+        (queueCancelled
+          ? {
+              reason: 'queue',
+              at: new Date().toISOString(),
+              actor: { kind: 'system', name: 'Forge check queue' },
+            }
+          : undefined),
       status: stopping ? 'cancelled' : code === 0 && !failure ? 'passed' : 'failed',
       ...(!stopping && (code !== 0 || failure) ? { failureSummary: failureSummary(store, run) } : {}),
       exitCode: code,
@@ -686,6 +700,12 @@ export function runWork(
       invariant(existing, 'NOT_FOUND', 'Run not found.');
       if (active(existing) && !existing.cancelRequested) {
         existing.cancelRequested = true;
+        existing.cancellation = {
+          reason: 'command',
+          at: new Date().toISOString(),
+          actor: command.actor ?? localActor('person'),
+          ...(command.reason ? { details: command.reason } : {}),
+        };
         tx.replace('runs', selected!.position, existing);
         data.revision = store.commitRecords(tx);
       }
@@ -760,6 +780,7 @@ export function runWork(
       },
       id: command.operationId,
       viewId: view.id,
+      supersessionBaseline: runCandidateFamily(tx, view).at(-1)?.id ?? view.id,
       head: command.expectedHead,
       base: view.base,
       ...(view.composedMain ? { comparisonBase: view.composedMain } : {}),
