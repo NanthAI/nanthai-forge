@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fingerprintPrivateFile, readSource } from '../dist/files.js';
+import { touchCtime } from './helpers.mjs';
 
 test('private fingerprints reconcile stable metadata-only changes and reject changing content or authority', async t => {
   const root = fs.mkdtempSync(join(tmpdir(), 'forge-fingerprint-')),
@@ -27,12 +28,18 @@ test('private fingerprints reconcile stable metadata-only changes and reject cha
         read = ++reads;
       stream.once('data', () => {
         if (kind === 'ongoing' || read === 1) {
-          if (kind === 'content') fs.writeFileSync(path, Buffer.alloc(bytes.length, 23));
-          else if (kind === 'link') fs.linkSync(path, join(root, 'linked'));
+          if (kind === 'content') {
+            // Same-size rewrites are detected through mtime; coarse Linux timestamps can leave it unchanged
+            // within one tick, so model a write that lands in a later tick.
+            const { mtimeMs } = fs.statSync(path);
+            fs.writeFileSync(path, Buffer.alloc(bytes.length, 23));
+            fs.utimesSync(path, new Date(), new Date(mtimeMs + 1000));
+          } else if (kind === 'link') fs.linkSync(path, join(root, 'linked'));
           else if (kind === 'replacement') {
             fs.renameSync(path, join(root, 'moved'));
             fs.writeFileSync(path, bytes, { mode: 0o600 });
-          } else fs.chmodSync(path, kind === 'permissions' ? 0o400 : 0o600);
+          } else if (kind === 'permissions') fs.chmodSync(path, 0o400);
+          else touchCtime(path);
         }
       });
       return stream;
@@ -44,7 +51,7 @@ test('private fingerprints reconcile stable metadata-only changes and reject cha
         sha256: createHash('sha256').update(bytes).digest('hex'),
       });
       assert.equal(reads, 2);
-    } else await assert.rejects(fingerprintPrivateFile(path), { code: 'INVALID_FILE_EXPORT' });
+    } else await assert.rejects(fingerprintPrivateFile(path), { code: 'INVALID_FILE_EXPORT' }, kind);
     fs.createReadStream = original;
     syncBuiltinESMExports();
     if (fs.existsSync(join(root, 'linked'))) fs.unlinkSync(join(root, 'linked'));
@@ -80,7 +87,8 @@ test('source reads reconcile ctime-only hydration with identical stable reread a
           fs.renameSync(path, join(root, 'moved'));
           if (kind === 'symlink') fs.symlinkSync(join(root, 'moved'), path);
           else fs.writeFileSync(path, bytes, { mode: 0o600 });
-        } else fs.chmodSync(path, kind === 'permissions' ? 0o400 : 0o600);
+        } else if (kind === 'permissions') fs.chmodSync(path, 0o400);
+        else touchCtime(path);
       }
       return count;
     };

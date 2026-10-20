@@ -197,7 +197,8 @@ test('one failing change in the middle does not land, the others do, and main is
 });
 
 test('a late arrival during an in-flight check is checked concurrently, stacked, and lands after its parent', async t => {
-  const f = await fixture(t, { window: 60 });
+  // A 1.5 s check keeps the first one in flight well past the 300 ms late arrival on a slow runner.
+  const f = await fixture(t, { delay: 1500, window: 60 });
   const { ms } = await burst(f, [
     { path: 'a.txt', at: 0 },
     { path: 'b.txt', at: 10 },
@@ -218,7 +219,8 @@ test('a late arrival during an in-flight check is checked concurrently, stacked,
 });
 
 test('a failing parent batch supersedes the stacked batch, which is requeued and checked on real main', async t => {
-  const f = await fixture(t, { window: 60 });
+  // A 1.5 s check keeps the first one in flight well past the 300 ms late arrival on a slow runner.
+  const f = await fixture(t, { delay: 1500, window: 60 });
   await burst(f, [
     { path: 'bad.txt', at: 0 },
     { path: 'late.txt', at: 300 },

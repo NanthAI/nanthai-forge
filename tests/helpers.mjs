@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -23,3 +23,12 @@ export function git(root, args) {
   );
 }
 export const code = expected => error => error.code === expected;
+
+// A same-mode chmod is a metadata-only change, but coarse kernel timestamps (Linux CI runners) can leave
+// ctime unchanged within one clock tick; repeat it until ctime actually moves.
+export function touchCtime(path, mode = 0o600) {
+  const before = statSync(path, { bigint: true }).ctimeNs,
+    deadline = Date.now() + 1000;
+  do chmodSync(path, mode);
+  while (statSync(path, { bigint: true }).ctimeNs === before && Date.now() < deadline);
+}

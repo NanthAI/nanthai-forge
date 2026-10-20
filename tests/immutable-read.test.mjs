@@ -8,6 +8,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { digest } from '../dist/hash.js';
 import { readSource } from '../dist/files.js';
 import { NativeSource } from '../dist/native-source.js';
+import { touchCtime } from './helpers.mjs';
 
 test('native hash-bound timestamps and mutable stable ctime-only hydration retain content/authority failures', t => {
   const root = fs.mkdtempSync(join(tmpdir(), 'forge-immutable-read-'));
@@ -44,7 +45,7 @@ test('native hash-bound timestamps and mutable stable ctime-only hydration retai
           fs.renameSync(path, join(root, 'moved'));
           if (kind === 'symlink') fs.symlinkSync(join(root, 'moved'), path);
           else fs.writeFileSync(path, bytes, { mode: 0o600 });
-        } else fs.chmodSync(path, 0o600);
+        } else touchCtime(path);
       }
       return count;
     };
