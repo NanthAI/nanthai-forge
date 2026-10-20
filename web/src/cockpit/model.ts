@@ -2,6 +2,7 @@
 import { checkMeaning, latestRun } from './check-meaning';
 export { latestRun } from './check-meaning';
 import type { Lane, WorkView, CheckRun } from '../../../src/work-types';
+import type { HostedChanges } from '../../../src/work-hosted-summary';
 import { attentionRank, type Tone } from '../ui/status';
 
 /** The cockpit's view of one Lane: everything a row needs, derived only from recorded Work. */
@@ -74,6 +75,7 @@ export type CockpitWork = {
   views: readonly (Pick<WorkView, 'id' | 'intentId' | 'base' | 'head' | 'status' | 'at'> & {
     inputs?: WorkView['inputs'];
     dependencies?: WorkView['dependencies'];
+    changes?: HostedChanges;
   })[];
   runs: readonly (Pick<CheckRun, 'id' | 'viewId' | 'status'> & {
     head?: string;

@@ -25,7 +25,7 @@ import './intents.css';
 export type ViewRow = {
   id: string;
   number?: number;
-  changes?: { add: number; del: number };
+  changes?: NonNullable<CockpitWork['views'][number]['changes']>;
   status: 'clean' | 'conflict';
   at: string;
   lanes: string;

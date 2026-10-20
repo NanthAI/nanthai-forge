@@ -19,6 +19,7 @@ export function intentViews(work: CockpitWork, intentId: string): ViewRow[] {
         id: view.id,
         at: view.at,
         status: view.status,
+        ...(view.changes ? { changes: view.changes } : {}),
         lanes: (view.inputs ?? [])
           .map(input => work.lanes.find(l => l.id === input.laneId)?.name ?? 'Lane')
           .join(' + '),

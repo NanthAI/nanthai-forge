@@ -289,7 +289,16 @@ export function Candidates({
                           />
                           {view.accepted && acceptedBy ? `accepted by ${acceptedBy} · ` : ''}
                           {view.checkName} {view.check ?? label}
-                          {view.changes && <DiffStat add={view.changes.add} del={view.changes.del} />}
+                          {view.changes && (
+                            <>
+                              <span>
+                                · {view.changes.files} {view.changes.files === 1 ? 'file' : 'files'}
+                              </span>
+                              {view.changes.add !== undefined && view.changes.del !== undefined && (
+                                <DiffStat add={view.changes.add} del={view.changes.del} />
+                              )}
+                            </>
+                          )}
                         </div>
                       </div>
                       {canReviewView(view) && reviewHref ? (

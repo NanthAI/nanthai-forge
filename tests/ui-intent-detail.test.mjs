@@ -188,3 +188,28 @@ test('compact maps keep tracks compact and every Candidate point navigable', asy
   assert.match(markup, /href="\/lanes\/b"/);
   assert.doesNotMatch(markup, /fx-map-marker/);
 });
+
+test('Candidate rows reuse recorded diffstats and omit unknown totals', () => {
+  const candidate = records.views[0];
+  for (const [changes, files] of [
+    [{ files: 6, add: 210, del: 61 }, '6 files'],
+    [{ files: 1, add: 0, del: 0 }, '1 file'],
+    [{ files: 0, add: 0, del: 0 }, '0 files'],
+    [{ files: 2 }, '2 files'],
+  ]) {
+    const views = intentViews({ ...records, views: [{ ...candidate, changes }] }, 'i');
+    assert.deepEqual(views[0].changes, changes);
+    const markup = html(h(IntentDetailView, { ...props, views }));
+    const candidates = markup.slice(markup.indexOf('id="intent-views"'));
+    assert.ok(candidates.includes(`· ${files}`), candidates);
+    if (changes.add !== undefined && changes.del !== undefined) {
+      assert.ok(candidates.includes(`class="fx-add">+${changes.add}</span>`));
+      assert.ok(candidates.includes(`class="fx-del">−${changes.del}</span>`));
+    } else assert.doesNotMatch(candidates, /fx-diffstat|fx-add|fx-del/);
+  }
+  const views = intentViews(records, 'i');
+  assert.equal(Object.hasOwn(views[0], 'changes'), false);
+  const markup = html(h(IntentDetailView, { ...props, views }));
+  const candidates = markup.slice(markup.indexOf('id="intent-views"'));
+  assert.doesNotMatch(candidates, /fx-diffstat|\d files?\b|Unknown|Loading/);
+});
