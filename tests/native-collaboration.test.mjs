@@ -17,7 +17,7 @@ test('native diff3 merges independent edits byte-exactly and retains overlapping
   assert.equal(merge('a\nb\nc\nd\n', 'b\nc\nd\n', 'a\nb\nc\nd\ne\n').toString(), 'b\nc\nd\ne\n');
   assert.equal(merge('a\nb\n', 'a\nB\n', 'a\nB\n').toString(), 'a\nB\n');
   assert.equal(merge('a\nb\n', 'a\nB\n', 'a\nC\n'), null);
-  assert.equal(merge('a\n', 'x\na\n', 'y\na\n'), null);
+  assert.equal(merge('a\n', 'x\na\n', 'y\na\n')?.toString(), 'x\ny\na\n');
   assert.equal(merge('a\0b', 'a\0B', 'A\0b'), null);
   assert.equal(mergeNativeText(Buffer.from([255]), b('x'), b('y')), null);
   // Deterministic varied sequences catch reconstruction errors including repeated lines.

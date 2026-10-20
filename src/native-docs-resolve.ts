@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { attributionEdits as edits, attributionLines as lines } from './native-text-merge.js';
 import { overlappingPaths, type NativeFile, type NativeSource } from './native-source.js';
+import { nativeMergeMessage, type NativeMergeResolution } from './native-merge.js';
 
 /** Markdown documentation, matching the standard check's docs scope. */
 export const markdownDoc = (path: string) => /^(?:docs\/.+|[^/]+)\.md$/.test(path);
@@ -119,8 +120,10 @@ export function resolveDocsComposition(
   main: string,
   message: string,
   at: string,
-): { head: string; paths: string[] } | null {
-  const merged = source.mergeFiles(lane, main);
+): { head: string; paths: string[]; resolutions?: NativeMergeResolution[] } | null {
+  const merged = source.mergeFiles(lane, main, undefined, undefined, undefined, {
+    insertionOrder: 'right-first',
+  });
   if (!merged.conflicts.length) return null;
   const files: NativeFile[] = [...merged.files];
   for (const item of merged.conflicts) {
@@ -140,7 +143,8 @@ export function resolveDocsComposition(
   }
   if (overlappingPaths(files).length) return null;
   return {
-    head: source.writeState(files, [lane, main], message, at),
+    head: source.writeState(files, [lane, main], nativeMergeMessage(message, merged.resolutions), at),
+    ...(merged.resolutions.length ? { resolutions: merged.resolutions } : {}),
     paths: merged.conflicts.map(item => item.path).sort(),
   };
 }

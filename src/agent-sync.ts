@@ -61,7 +61,9 @@ const clean = (source: NativeSource, path: string, head: string) =>
   source.tree(source.capture(path, false, head)) === source.tree(source.state(head).files);
 /** Working files for a conflicted sync: merged files, marker hunks for text, Lane version otherwise. */
 export function conflictPlan(source: NativeSource, laneHead: string, target: string, channel: string) {
-  const merged = source.mergeFiles(laneHead, target),
+  const merged = source.mergeFiles(laneHead, target, undefined, undefined, undefined, {
+      insertionOrder: 'right-first',
+    }),
     files: Target[] = [...merged.files],
     conflicts: Conflict[] = [];
   const empty = Buffer.alloc(0),
@@ -69,7 +71,7 @@ export function conflictPlan(source: NativeSource, laneHead: string, target: str
   for (const item of merged.conflicts) {
     const left = read(item.left),
       right = read(item.right),
-      marked = markNativeTextConflicts(read(item.base), left, right, ['lane', channel]);
+      marked = markNativeTextConflicts(read(item.base), left, right, ['lane', channel], 'right-first');
     if (!marked) {
       if (item.left) files.push(item.left);
       conflicts.push({ path: item.path, kind: 'binary' });
@@ -150,14 +152,23 @@ export function agentSync(
         const from = source.state(original.parent).files,
           state = source.state(original.head),
           target = original.sync?.target ?? state.parents[1] ?? original.head;
-        // The retained summary records a docs resolution; its paths are deterministic.
-        const resolved = original.automatic?.summary.includes(RESOLVED)
-          ? source.mergeFiles(original.parent, target).conflicts.map(item => item.path)
-          : [];
+        // Only recorded resolutions need derived details. Keep the original
+        // orientation so replay cannot create a reversed merge blob.
+        const docsResolved = original.automatic?.summary.includes(RESOLVED),
+          insertionsResolved = state.message.includes('\nboth-insertions: '),
+          replay =
+            docsResolved || insertionsResolved
+              ? source.mergeFiles(original.parent, target, undefined, undefined, undefined, {
+                  insertionOrder: 'right-first',
+                })
+              : undefined,
+          resolved = docsResolved ? replay!.conflicts.map(item => item.path) : [],
+          resolutions = insertionsResolved ? replay!.resolutions : [];
         return {
           revision: tx.revision,
           result: receipt({
             status: 'merged',
+            ...(resolutions.length ? { resolutions } : {}),
             head: original.head,
             parent: original.parent,
             target,
@@ -250,12 +261,12 @@ export function agentSync(
       const message = `Sync ${command.channel}`,
         operation = { id: command.operationId, request: hash },
         from = source.state(lane.head).files,
-        composed = source.compose(lane.head, target, message, at),
+        composed = source.compose(lane.head, target, message, at, { insertionOrder: 'right-first' }),
         docs =
           !composed.head && options.resolveDocs
             ? resolveDocsComposition(source, lane.head, target, message, at)
             : null,
-        merged = docs ? { head: docs.head, conflicts: [] } : composed;
+        merged = docs ? { ...docs, conflicts: [] } : composed;
       // Files first, metadata second: an interrupted sync leaves the old head, and
       // its retry (or any later sync) recognises the partly written workspace.
       if (merged.head) {
@@ -297,6 +308,7 @@ export function agentSync(
           }),
           result: receipt({
             status: 'merged',
+            ...('resolutions' in merged ? { resolutions: merged.resolutions } : {}),
             head: merged.head,
             parent: lane.head,
             target,

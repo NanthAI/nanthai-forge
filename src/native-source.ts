@@ -19,7 +19,12 @@ import { digest } from './hash.js';
 import { exclusion, readSource, safeRelative, sourceRealpath as realpathSync } from './files.js';
 import { sourceLanguage } from './languages.js';
 import { invariant } from './errors.js';
-import { mergeNativeFiles } from './native-merge.js';
+import {
+  mergeNativeFiles,
+  nativeMergeMessage,
+  type NativeMergeOptions,
+  type NativeMergeResolution,
+} from './native-merge.js';
 import { diskGuard } from './disk-guard.js';
 import { nativeFile } from './native-file.js';
 import { NativeWorkspaceFiles } from './native-workspace-files.js';
@@ -410,22 +415,39 @@ export class NativeSource {
   ancestors(id: string): Set<string> {
     return this.ancestry().ancestors(id);
   }
-  compose(left: string, right: string, message: string, at: string) {
+  compose(
+    left: string,
+    right: string,
+    message: string,
+    at: string,
+    options: NativeMergeOptions = {},
+  ): { head?: string; conflicts: string[]; resolutions?: NativeMergeResolution[] } {
     const ancestry = this.ancestry();
     if (ancestry.contains(left, right)) return { head: left, conflicts: [] };
     if (ancestry.contains(right, left)) return { head: right, conflicts: [] };
     const a = ancestry.ancestors(left),
       b = ancestry.ancestors(right);
-    const merged = this.mergeFiles(left, right, a, b, ancestry),
+    const merged = this.mergeFiles(left, right, a, b, ancestry, options),
       conflicts = merged.conflicts.map(item => item.path);
     conflicts.push(...overlappingPaths(merged.files));
-    return conflicts.length
-      ? { conflicts }
-      : { head: this.writeState(merged.files, [left, right], message, at), conflicts };
+    if (conflicts.length) return { conflicts };
+    const resolutions = merged.resolutions.length ? { resolutions: merged.resolutions } : {};
+    return {
+      head: this.writeState(merged.files, [left, right], nativeMergeMessage(message, merged.resolutions), at),
+      conflicts,
+      ...resolutions,
+    };
   }
   /** Recursive three-way file merge. Ambiguous virtual-base entries retain their
    * alternatives until the heads agree; unresolved entries are normal conflicts. */
-  mergeFiles(left: string, right: string, a?: Set<string>, b?: Set<string>, ancestry = this.ancestry()) {
+  mergeFiles(
+    left: string,
+    right: string,
+    a?: Set<string>,
+    b?: Set<string>,
+    ancestry = this.ancestry(),
+    options: NativeMergeOptions = {},
+  ) {
     return mergeNativeFiles(
       this,
       left,
@@ -433,6 +455,7 @@ export class NativeSource {
       a ?? ancestry.ancestors(left),
       b ?? ancestry.ancestors(right),
       ancestry,
+      options,
     );
   }
 }

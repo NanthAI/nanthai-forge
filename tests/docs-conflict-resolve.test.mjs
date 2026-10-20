@@ -120,8 +120,15 @@ async function setup(t) {
   assert.equal(initial.status, 'accepted');
   const a = (await dispatch(agent, { action: 'start', outcome: 'candidate' })).result;
   const b = (await dispatch(agent, { action: 'start', outcome: 'concurrent main' })).result;
-  writeFileSync(join(a.path, 'docs/status.md'), text(insert(6, '- lane capability')));
-  writeFileSync(join(b.path, 'docs/status.md'), text(insert(6, '- main capability')));
+  // Exercise real base-line replacements: pure insertions now merge natively.
+  writeFileSync(
+    join(a.path, 'docs/status.md'),
+    text(items.map((line, i) => (i === 5 ? '- lane capability' : line))),
+  );
+  writeFileSync(
+    join(b.path, 'docs/status.md'),
+    text(items.map((line, i) => (i === 5 ? '- main capability' : line))),
+  );
   return { root, agent, store: agent.work.store, a, b, initial };
 }
 const scoped = t => {
@@ -161,7 +168,10 @@ test('finish lands a docs-only sync conflict with docs scope and replays idempot
   assert.match(receipt.sync.undo, /undo-sync/);
   assert.equal(receipt.run.checkSelection.scope, 'docs');
   const bytes = landed(f, receipt.acceptance.head);
-  assert.equal(bytes, text(insert(6, '- main capability', '- lane capability')).toString());
+  assert.equal(
+    bytes,
+    text([...items.slice(0, 5), '- main capability', '- lane capability', ...items.slice(6)]).toString(),
+  );
   assert.doesNotMatch(bytes, /<<<<<<<|=======|>>>>>>>/);
   const lane = f.store.select('lanes', f.a.laneId, 'id', true);
   assert.equal(lane.pendingMerge, undefined);

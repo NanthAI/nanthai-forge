@@ -2,6 +2,27 @@
 import { reconcileNativeImports } from './native-import-merge.js';
 /** Conservative line-based diff3. Ambiguous/expensive or non-text edits stay conflicts. */
 type Edit = { start: number; end: number; lines: string[] };
+export type NativeTextResolution = { baseLine: number; resolved: 'both-insertions' };
+export type NativeInsertionOrder = 'left-first' | 'right-first';
+type MergeOptions = {
+  insertionOrder?: NativeInsertionOrder;
+  resolutions?: NativeTextResolution[];
+};
+/** Shared punctuation/blank lines are normal block boundaries. Shared content
+ * makes additions ambiguous: preserve the explicit conflict rather than interleave. */
+function independentInsertions(first: Edit, second: Edit): boolean {
+  if (first.start !== first.end || second.start !== second.end || first.start !== second.start) return false;
+  const a = first.lines.join(''),
+    b = second.lines.join('');
+  if (!a || !b || !a.endsWith('\n') || !b.endsWith('\n')) return false;
+  const x = a.trim(),
+    y = b.trim();
+  if (!x || !y || x.startsWith(y) || y.startsWith(x) || x.endsWith(y) || y.endsWith(x)) return false;
+  const meaningful = new Set(
+    first.lines.map(line => line.trim()).filter(line => !/^[\s{}()[\],;]*$/u.test(line)),
+  );
+  return !second.lines.some(line => meaningful.has(line.trim()));
+}
 function lines(bytes: Buffer): string[] | null {
   try {
     const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
@@ -83,7 +104,13 @@ function edits(before: string[], after: string[]): Edit[] | null {
   }
   return null;
 }
-export function mergeNativeText(base: Buffer, left: Buffer, right: Buffer, path?: string): Buffer | null {
+export function mergeNativeText(
+  base: Buffer,
+  left: Buffer,
+  right: Buffer,
+  path?: string,
+  options: MergeOptions = {},
+): Buffer | null {
   const original = lines(base),
     a = lines(left),
     b = lines(right);
@@ -91,7 +118,8 @@ export function mergeNativeText(base: Buffer, left: Buffer, right: Buffer, path?
   const first = edits(original, a),
     second = edits(original, b);
   if (!first || !second) return null;
-  const merged = [...first];
+  const merged = first.map(edit => ({ ...edit, lines: [...edit.lines] })),
+    resolutions: NativeTextResolution[] = [];
   for (const edit of second) {
     let duplicate = false;
     for (const other of first) {
@@ -103,17 +131,16 @@ export function mergeNativeText(base: Buffer, left: Buffer, right: Buffer, path?
         duplicate = true;
         break;
       }
-      const insertion = edit.start === edit.end,
-        otherInsertion = other.start === other.end;
-      const overlap =
-        insertion && otherInsertion
-          ? edit.start === other.start
-          : insertion
-            ? edit.start >= other.start && edit.start <= other.end
-            : otherInsertion
-              ? other.start >= edit.start && other.start <= edit.end
-              : edit.start < other.end && other.start < edit.end;
-      if (overlap) return null;
+      if (overlaps(edit, other)) {
+        if (!independentInsertions(other, edit)) return null;
+        const target = merged[first.indexOf(other)]!;
+        target.lines =
+          options.insertionOrder === 'right-first'
+            ? [...edit.lines, ...other.lines]
+            : [...other.lines, ...edit.lines];
+        resolutions.push({ baseLine: edit.start + 1, resolved: 'both-insertions' });
+        duplicate = true;
+      }
     }
     if (!duplicate) merged.push(edit);
   }
@@ -126,7 +153,9 @@ export function mergeNativeText(base: Buffer, left: Buffer, right: Buffer, path?
   }
   output.push(...original.slice(cursor));
   const reconciled = reconcileNativeImports(original, a, b, output, path);
-  return reconciled ? Buffer.from(reconciled.join('')) : null;
+  if (!reconciled) return null;
+  options.resolutions?.push(...resolutions);
+  return Buffer.from(reconciled.join(''));
 }
 type Side = Edit & { side: 0 | 1 };
 function overlaps(edit: Edit, other: Edit) {
@@ -147,7 +176,8 @@ export function markNativeTextConflicts(
   left: Buffer,
   right: Buffer,
   labels: [string, string],
-): { bytes: Buffer; conflicted: boolean } | null {
+  insertionOrder: NativeInsertionOrder = 'left-first',
+): { bytes: Buffer; conflicted: boolean; resolutions?: NativeTextResolution[] } | null {
   const original = lines(base),
     a = lines(left),
     b = lines(right);
@@ -175,7 +205,8 @@ export function markNativeTextConflicts(
     if (group) group.push(edit);
     else groups.push([edit]);
   }
-  const output: string[] = [];
+  const output: string[] = [],
+    resolutions: NativeTextResolution[] = [];
   let cursor = 0,
     conflicted = false;
   const apply = (items: Edit[], start: number, end: number) => {
@@ -198,13 +229,16 @@ export function markNativeTextConflicts(
       y = apply(sides[1]!, start, end);
     if (!sides[0]!.length || !sides[1]!.length || x.join('') === y.join(''))
       output.push(...(sides[0]!.length ? x : y));
-    else {
+    else if (group.length === 2 && independentInsertions(sides[0]![0]!, sides[1]![0]!)) {
+      output.push(...(insertionOrder === 'right-first' ? [...y, ...x] : [...x, ...y]));
+      resolutions.push({ baseLine: start + 1, resolved: 'both-insertions' });
+    } else {
       conflicted = true;
       output.push(...hunk(x, y));
     }
   }
   output.push(...original.slice(cursor));
-  return { bytes: Buffer.from(output.join('')), conflicted };
+  return { bytes: Buffer.from(output.join('')), conflicted, ...(resolutions.length ? { resolutions } : {}) };
 }
 
 // Shared deterministic alignment for source attribution; this never executes source.

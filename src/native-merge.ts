@@ -2,7 +2,19 @@
 import type { NativeFile, NativeSource } from './native-source.js';
 import { NativeAncestry } from './native-ancestry.js';
 import { invariant } from './errors.js';
-import { mergeNativeText } from './native-text-merge.js';
+import {
+  mergeNativeText,
+  type NativeInsertionOrder,
+  type NativeTextResolution,
+} from './native-text-merge.js';
+
+export type NativeMergeOptions = { insertionOrder?: NativeInsertionOrder };
+export type NativeMergeResolution = NativeTextResolution & { path: string };
+/** Keep resolution provenance on the immutable merge State without a Work schema change. */
+export function nativeMergeMessage(message: string, resolutions: NativeMergeResolution[]) {
+  const notes = resolutions.map(item => `${item.resolved}: ${item.path}:${item.baseLine}`).join('\n');
+  return message + (notes ? `\n${notes}` : '');
+}
 
 type Variant = NativeFile | undefined;
 type Tree = Map<string, Variant[]>;
@@ -23,6 +35,7 @@ export function mergeNativeFiles(
   a: Set<string>,
   b: Set<string>,
   verified: NativeAncestry,
+  options: NativeMergeOptions = {},
 ) {
   const trees = new Map<string, Tree>(),
     virtual = new Map<string, string[]>(),
@@ -35,7 +48,12 @@ export function mergeNativeFiles(
     }
     return result;
   };
-  function entry(original: Variant, x: Variant, y: Variant): Variant | null {
+  function entry(
+    original: Variant,
+    x: Variant,
+    y: Variant,
+    resolved: NativeMergeResolution[],
+  ): Variant | null {
     if (same(x, y)) return x;
     if (same(x, original)) return y;
     if (same(y, original)) return x;
@@ -45,19 +63,25 @@ export function mergeNativeFiles(
     let blob =
       x.blob === original.blob ? y.blob : y.blob === original.blob || x.blob === y.blob ? x.blob : undefined;
     if (!blob && ![original, x, y].some(file => file.mode === 'symlink')) {
+      const resolutions: NativeTextResolution[] = [];
       const bytes = mergeNativeText(
         source.object(original.blob),
         source.object(x.blob),
         source.object(y.blob),
         x.path,
+        { ...options, resolutions },
       );
-      if (bytes) blob = source.put(bytes);
+      if (bytes) {
+        blob = source.put(bytes);
+        resolved.push(...resolutions.map(item => ({ path: x.path, ...item })));
+      }
     }
     return blob ? { path: x.path, mode, blob } : null;
   }
   function merge(base: Tree, l: Tree, r: Tree) {
     const result: Tree = new Map(),
-      conflicts: NativeMergeConflict[] = [];
+      conflicts: NativeMergeConflict[] = [],
+      resolutions: NativeMergeResolution[] = [];
     for (const path of [...new Set([...base.keys(), ...l.keys(), ...r.keys()])].sort()) {
       const originals = base.get(path) ?? [undefined],
         xs = l.get(path) ?? [undefined],
@@ -67,7 +91,7 @@ export function mergeNativeFiles(
       for (const x of xs)
         for (const y of ys)
           for (const original of originals) {
-            const merged = entry(original, x, y);
+            const merged = entry(original, x, y, resolutions);
             if (merged === null) conflict = true;
             else outcomes.push(merged);
           }
@@ -83,7 +107,7 @@ export function mergeNativeFiles(
         });
       } else result.set(path, choices);
     }
-    return { tree: result, conflicts };
+    return { tree: result, conflicts, resolutions };
   }
   function baseFor(
     x: string,
@@ -139,12 +163,13 @@ export function mergeNativeFiles(
       l = new Map(source.state(left).files.map(file => [file.path, file])),
       r = new Map(source.state(right).files.map(file => [file.path, file]));
     const files: NativeFile[] = [],
-      conflicts: NativeMergeConflict[] = [];
+      conflicts: NativeMergeConflict[] = [],
+      resolutions: NativeMergeResolution[] = [];
     for (const path of [...new Set([...original.keys(), ...l.keys(), ...r.keys()])].sort()) {
       const before = original.get(path),
         x = l.get(path),
         y = r.get(path);
-      const selected = entry(before, x, y);
+      const selected = entry(before, x, y, resolutions);
       if (selected === null)
         conflicts.push({
           path,
@@ -154,12 +179,20 @@ export function mergeNativeFiles(
         });
       else if (selected) files.push(selected);
     }
-    return { files, conflicts };
+    return {
+      files,
+      conflicts,
+      resolutions: resolutions.filter(item => !conflicts.some(conflict => conflict.path === item.path)),
+    };
   }
   const merged = merge(tree(base), tree(left), tree(right)),
     conflicts = new Set(merged.conflicts.map(item => item.path));
   const files: NativeFile[] = [];
   for (const [path, variants] of merged.tree)
     if (!conflicts.has(path) && variants[0]) files.push(variants[0]);
-  return { files, conflicts: merged.conflicts };
+  return {
+    files,
+    conflicts: merged.conflicts,
+    resolutions: merged.resolutions.filter(item => !conflicts.has(item.path)),
+  };
 }
