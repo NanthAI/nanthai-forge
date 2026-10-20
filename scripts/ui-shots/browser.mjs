@@ -69,11 +69,13 @@ export async function waitForPage(page, kind) {
       'code-graph': /^Code$/,
       lane: /.+/,
       intent: /.+/,
+      initiative: /.+/,
       view: /^View /,
       review: /.+/,
       device: /terminal|device|computer/i,
     };
     if (!headings.some(h => patterns[kind].test(h))) return false;
+    if (kind === 'initiative' && !main.querySelector('.fx-initiative')) return false;
     if (kind === 'review' && !main.querySelector('.fx-review-page')) return false;
     if (kind === 'lane' && !main.querySelector('.fx-lane-page, .lane-context-bar')) return false;
     return ![...main.querySelectorAll('[role="alert"]')].some(e => visible(e) && e.textContent.trim());

@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+import { InitiativeConversation } from './planning/InitiativePage';
+import { planningGroups } from './planning-rows';
+import { useDestination } from './WorkspaceUI';
+import { useUser } from '@clerk/react';
 import { age } from './ui/status';
 import type { PlanningLane } from './planning-rows';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ActionPanel } from './WorkspaceUI';
 import { useConvex } from 'convex/react';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -156,25 +160,108 @@ function ItemHistory({
     </>
   );
 }
+type Lifecycle = NonNullable<WorkData['intents'][number]['lifecycle']>[number];
+function InitiativeLifecycle({
+  projectId,
+  workspace,
+  id,
+  loaded,
+}: Pick<Context, 'projectId' | 'workspace'> & {
+  id: string;
+  loaded: (id: string, entries: Lifecycle[]) => void;
+}) {
+  const history = useWorkRecords<Lifecycle>(projectId, workspace, 'lifecycle', id);
+  useEffect(() => {
+    loaded(id, history.records);
+  }, [id, loaded, history.records]);
+  return null;
+}
+
 export default function HostedIndexedPlanning(
   props: Context & { exportHistory: () => Promise<PlanningExport> },
 ) {
   const client = useConvex();
+  const { user } = useUser();
+  const [selected] = useDestination('planningItem');
+  const [histories, setHistories] = useState<Record<string, Lifecycle[]>>({});
+  const scope = `${props.projectId}:${props.workspace.generationId}`;
+  const loaded = useCallback(
+    (id: string, entries: Lifecycle[]) =>
+      setHistories(current => ({ ...current, [`${scope}:${id}`]: entries })),
+    [scope],
+  );
   const items = useWorkRecords<PlanningItem>(props.projectId, props.workspace, 'planningItems');
   const lanes = useWorkRecords<PlanningLane>(props.projectId, props.workspace, 'lanes');
+  const comments = useWorkRecords<WorkData['planningComments'][number]>(
+    props.projectId,
+    props.workspace,
+    'planningComments',
+    selected,
+    items.records.some(item => item.id === selected && item.kind === 'initiative'),
+  );
+  const origins = useWorkRecords<PlanningItem>(
+    props.projectId,
+    props.workspace,
+    'planningVersions',
+    selected,
+    items.records.some(item => item.id === selected && item.kind === 'initiative'),
+  );
   const data: PlanningData = {
     revision: props.workspace.revision,
     intents: props.intents,
     lanes: lanes.records,
     planningItems: items.records,
-    planningComments: [],
+    planningComments: comments.records,
     hostedEvents: [],
+  };
+  const selectedGroup = planningGroups(items.records, props.intents, lanes.records).find(
+    group => group.id === selected,
+  );
+  const timelineData: PlanningData = {
+    ...data,
+    intents: props.intents.map(intent => ({
+      ...intent,
+      lifecycle: histories[`${scope}:${intent.id}`] ?? intent.lifecycle,
+    })),
   };
   return (
     <>
+      {selectedGroup?.item &&
+        selectedGroup.rows.flatMap(row =>
+          row.intentId
+            ? [
+                <InitiativeLifecycle
+                  key={`${scope}:${row.intentId}`}
+                  projectId={props.projectId}
+                  workspace={props.workspace}
+                  id={row.intentId}
+                  loaded={loaded}
+                />,
+              ]
+            : [],
+        )}
       {items.loading && <p role="status">Loading planning items…</p>}
       <WorkPlanning
         intentId={props.intentId}
+        timelineData={timelineData}
+        initiativeOrigin={origins.records.find(item => item.version === 1)}
+        renderConversation={item => (
+          <>
+            {comments.loading && <p role="status">Loading conversation…</p>}
+            <InitiativeConversation
+              key={item.id}
+              itemId={item.id}
+              authorLabel={user?.fullName || user?.username || ''}
+              data={data}
+              busy={props.busy}
+              readOnly={props.readOnly}
+              act={props.act}
+              commentContent={comment => (
+                <CommentBody projectId={props.projectId} workspace={props.workspace} comment={comment} />
+              )}
+            />
+          </>
+        )}
         data={data}
         readOnly={props.readOnly}
         busy={props.busy}

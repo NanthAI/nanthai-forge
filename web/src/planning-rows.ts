@@ -6,18 +6,29 @@ import { age, type Tone } from './ui/status';
 
 export type PlanningLane = {
   intentId: string;
+  name?: string;
+  id?: string;
+  startedBy?: { kind: 'person' | 'agent'; name: string };
+  lifecycle?: readonly {
+    from: string;
+    to: string;
+    at: string;
+    actor?: { kind: 'person' | 'agent'; name: string };
+  }[];
   state?: string;
   checkpointCount?: number;
   lastCheckpointAt?: string;
   main?: { included?: boolean | null };
   checkpoints?: readonly { at: string }[];
 };
-type Intent = {
+export type PlanningIntent = {
   id: string;
   outcome: string;
   status: string;
   createdAt?: string;
   updatedAt?: string;
+  agentStart?: { laneId: string };
+  lifecycle?: PlanningLane['lifecycle'];
   memberships?: readonly { initiativeId: string }[];
 };
 export type PlanningRow = {
@@ -30,6 +41,8 @@ export type PlanningRow = {
   at?: string;
   intentId?: string;
   itemId?: string;
+  createdAt?: string;
+  actor?: { kind: 'person' | 'agent'; name: string };
 };
 export type PlanningFilter = IntentFilter;
 export function planningRowMatches(row: Pick<PlanningRow, 'label'>, filter: PlanningFilter) {
@@ -76,6 +89,7 @@ function row(
     intentId?: string;
     itemId?: string;
     at?: string;
+    createdAt?: string;
   },
   lanes: readonly PlanningLane[],
 ): PlanningRow {
@@ -93,7 +107,7 @@ function row(
 /** Each Initiative contains its linked Intents once, including legacy and unified memberships. */
 export function planningGroups(
   items: readonly PlanningItem[],
-  intents: readonly Intent[],
+  intents: readonly PlanningIntent[],
   lanes: readonly PlanningLane[],
 ) {
   const intentById = new Map(intents.map(intent => [intent.id, intent]));
@@ -121,6 +135,7 @@ export function planningGroups(
         { id, intentId: id, title: intent.outcome, label, at: intent.updatedAt ?? intent.createdAt },
         own,
       );
+      value.actor = own.find(lane => lane.startedBy)?.startedBy;
       value.searchText = [rows.get(id)?.searchText, intent.outcome, linkedTitle].filter(Boolean).join(' ');
       rows.set(id, value);
     };
@@ -151,6 +166,7 @@ export function planningGroups(
                 item.status === 'in-progress' ? 1 : 0,
               ),
               at: item.at,
+              ...(item.version === 1 ? { createdAt: item.at } : {}),
             },
             [],
           ),
@@ -158,4 +174,106 @@ export function planningGroups(
     }
     return { ...group, rows: [...rows.values()] };
   });
+}
+
+/** Keep activity first and closed work last, preserving source order within each bucket. */
+export function initiativeRows(rows: readonly PlanningRow[]) {
+  const rank = (row: PlanningRow) =>
+    planningRowMatches(row, 'in-motion') ? 0 : planningRowMatches(row, 'done') ? 2 : 1;
+  return [...rows].sort((a, b) => rank(a) - rank(b));
+}
+export function initiativeProgress(item: PlanningItem, rows: readonly PlanningRow[]) {
+  const done = rows.filter(row => planningRowMatches(row, 'done')).length;
+  const motion = rows.filter(row => planningRowMatches(row, 'in-motion')).length;
+  return {
+    total: rows.length,
+    done,
+    motion,
+    label: item.status === 'closed' ? 'Done' : motion ? 'In motion' : 'Planned',
+  } as const;
+}
+
+/** Flatten deeper retained nesting under the first visible parent without changing stored links. */
+export function childInitiatives(items: readonly PlanningItem[], parentId: string) {
+  const byId = new Map(items.filter(item => item.kind === 'initiative').map(item => [item.id, item]));
+  return [...byId.values()].filter(item => {
+    let parent = item.initiativeId;
+    const seen = new Set([item.id]);
+    while (parent && !seen.has(parent)) {
+      if (parent === parentId) return item.id !== parentId;
+      seen.add(parent);
+      parent = byId.get(parent)?.initiativeId;
+    }
+    return false;
+  });
+}
+
+export function initiativeTimeline(
+  item: PlanningItem,
+  rows: readonly PlanningRow[],
+  intents: readonly PlanningIntent[],
+  lanes: readonly PlanningLane[],
+) {
+  type Event = {
+    id: string;
+    at: string;
+    label: string;
+    detail: string;
+    glyph: 'initiative' | 'intent' | 'lane' | 'passed' | 'stale';
+    intentId?: string;
+    itemId?: string;
+  };
+  const events: Event[] = [];
+  if (item.version === 1)
+    events.push({
+      id: item.operationId ?? item.id,
+      at: item.at,
+      label: 'Created',
+      detail: '',
+      glyph: 'initiative',
+    });
+  for (const row of rows) {
+    const intent = intents.find(value => value.id === row.intentId);
+    const at = intent?.createdAt ?? row.createdAt;
+    const link = { intentId: row.intentId, itemId: row.itemId };
+    if (at)
+      events.push({
+        id: `${row.id}:planned`,
+        at,
+        label: row.label === 'Proposed' ? 'Intent proposed' : 'Intent planned',
+        detail: row.title,
+        glyph: 'intent',
+        ...link,
+      });
+    const own = lanes.filter(lane => lane.intentId === row.intentId);
+    const started = intent?.agentStart && own.find(lane => lane.id === intent.agentStart?.laneId);
+    const first = started && intent?.createdAt ? { at: intent.createdAt, name: started.name } : undefined;
+    if (first)
+      events.push({
+        id: `${row.id}:motion`,
+        at: first.at,
+        label: 'Intent in motion',
+        detail: [row.title, first.name && `Lane ${first.name} started`].filter(Boolean).join(' · '),
+        glyph: 'lane',
+        ...link,
+      });
+    for (const [index, event] of (intent?.lifecycle ?? []).entries()) {
+      if (!['completed', 'abandoned', 'active'].includes(event.to) || event.from === event.to) continue;
+      const label =
+        event.to === 'completed'
+          ? 'Intent done'
+          : event.to === 'abandoned'
+            ? 'Intent abandoned'
+            : 'Intent reopened';
+      events.push({
+        id: `${row.id}:lifecycle:${index}`,
+        at: event.at,
+        label,
+        detail: [row.title, event.actor && `by ${event.actor.name}`].filter(Boolean).join(' · '),
+        glyph: event.to === 'completed' ? 'passed' : event.to === 'abandoned' ? 'stale' : 'intent',
+        ...link,
+      });
+    }
+  }
+  return events.sort((a, b) => b.at.localeCompare(a.at));
 }

@@ -44,6 +44,7 @@ const projectKeys = [
   'session',
   'reviewView',
   'planningItem',
+  'planningRoute',
   'itemTab',
   'projectHome',
   'collection',
@@ -88,6 +89,7 @@ export function HostedFrame({
   const [laneId] = useDestination('lane');
   const [intentId] = useDestination('intent');
   const [viewId] = useDestination('viewId');
+  const [planningItem] = useDestination('planningItem');
   const [section, setSection] = useSection('projectTab', allSections, 'overview');
   const inProject = identity && surface === 'projects' && Boolean(projectId);
   const project = useQuery(
@@ -106,7 +108,11 @@ export function HostedFrame({
       <SourcePinContext.Provider value={{ backupId: project?.work?.backupId }}>
         <HostedAttention key={projectId} projectId={projectId as Id<'hostedProjects'>}>
           <WorkHeaderProvider
-            {...(tab === 'intents' && !laneId && !intentId && !viewId
+            {...(tab === 'intents' &&
+            !laneId &&
+            !intentId &&
+            !viewId &&
+            !(section === 'planning' && planningItem)
               ? { page: (section === 'intent' ? 'intents' : section) as WorkPage }
               : {})}
             onChange={next => setSection(next === 'intents' ? 'intent' : next)}

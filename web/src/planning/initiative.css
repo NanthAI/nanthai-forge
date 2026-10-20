@@ -1,0 +1,55 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.fx-initiative { font: 13px/1.45 var(--fx-font-ui); }
+.fx-initiative .fx-lane-head { margin-bottom: 14px; }
+.fx-initiative h1 { font: 700 20px/1.25 var(--fx-font-head); letter-spacing: -.015em; }
+.fx-initiative .fx-lane-head-main { flex: 1; }
+.fx-initiative .fx-lane-head h1 { overflow-wrap: anywhere; }
+.fx-initiative-status { display: inline-block; border: 0; padding: 0; background: none; vertical-align: 3px; margin-left: 6px; cursor: pointer; font: inherit; }
+.fx-initiative-status .fx-st { gap: 5px; }
+.fx-initiative .fx-lane-meta { gap: 6px 10px; margin-top: 6px; font-size: 12px; }
+.fx-initiative .fx-lane-meta > * + *::before { display: none; }
+.fx-initiative .fx-lane-meta > * + * { border-left: 1px solid var(--fx-line-strong); padding-left: 10px; }
+.fx-initiative .fx-lane-meta a, .fx-initiative .fx-crumbs a { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.fx-initiative-created { color: var(--fx-text-3); }
+.fx-initiative-progress { display: inline-flex; align-items: center; gap: 6px; }
+.fx-initiative-bar { display: inline-flex; gap: 2px; max-width: 120px; min-width: 0; }
+.fx-initiative-bar i { display: block; width: 14px; height: 4px; flex: 0 1 14px; border-radius: 2px; background: var(--fx-rail-off); }
+.fx-initiative-bar i.done { background: var(--fx-passed); }
+.fx-initiative-bar i.motion { background: var(--fx-active); }
+.fx-initiative-body { padding: 12px 14px; font-size: 13px; color: var(--fx-text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.fx-initiative-body p { margin: 0; }
+.fx-initiative .fx-act { min-height: 0; height: auto; padding: 0; background: none; border: 0; color: var(--fx-text-2); font: 12px var(--fx-font-ui); cursor: pointer; }
+.fx-initiative .fx-act:hover { color: var(--fx-accent); }
+.fx-initiative .fx-feed { list-style: none; margin: 0; }
+.fx-initiative .fx-feed-detail a { color: var(--fx-text-2); text-decoration: none; overflow-wrap: anywhere; }
+.fx-initiative .fx-feed-detail a:hover { color: var(--fx-accent); }
+.fx-initiative .fx-compose { flex-wrap: nowrap; margin: 0; max-width: none; }
+.fx-initiative .fx-compose input { flex: 1; min-width: 0; width: 0; height: 30px; font-size: 12.5px; }
+.fx-initiative .fx-msg { padding: 10px 14px; }
+.fx-initiative .fx-msg-head { display: flex; align-items: center; gap: 6px; color: var(--fx-text-3); }
+.fx-initiative .fx-msg p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fx-initiative .planning-grp { border-top: 0; border-bottom: 0; }
+.fx-initiative .planning-grp + .planning-grp { border-top: 1px solid var(--fx-line); }
+.fx-initiative .fx-crumbs { flex-wrap: nowrap; overflow: hidden; }
+.fx-initiative .fx-crumbs > a:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: block; }
+.fx-initiative .fx-crumbs > a:not(:last-child) { flex: none; }
+@media (max-width: 720px) {
+  .fx-initiative .fx-lane-head-actions { width: 100%; }
+  .fx-initiative .fx-lane-head-actions > .fx-btn { flex: 1; justify-content: center; }
+  .fx-initiative .fx-lane-meta > * + * { border: 0; padding-left: 0; }
+  .fx-initiative .fx-lane-head h1 { font-size: 20px; }
+  .fx-initiative .planning-create { padding: 12px 14px; }
+}
+/* Keep the shared controls at the reference geometry despite legacy element minima. */
+.fx-initiative .fx-lane-head h1 { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.fx-initiative .fx-lane-head h1 > .fx-glyph { margin-right: 0; }
+.fx-initiative-status { min-height: 0; height: auto; margin-left: 0; }
+.fx-initiative .fx-collapse { min-height: 0; }
+.fx-initiative .fx-compose .fx-btn { min-height: 26px; height: 26px; }
+.fx-initiative-body { line-height: 1.55; }
+.fx-initiative .fx-detail-side .fx-feed > li { grid-template-columns: 44px 16px minmax(0, 1fr); }
+.fx-initiative .fx-detail-side .fx-feed-time { min-width: 44px; }
+@media (max-width: 720px) {
+  .fx-initiative .planning-grp { flex-wrap: nowrap; gap: 10px; padding: 0 10px 0 14px; }
+  .fx-initiative .planning-group-title { flex: 1; }
+}

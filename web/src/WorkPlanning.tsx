@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from 'react';
+import { InitiativePage, InitiativeConversation, PlanningRowFact } from './planning/InitiativePage';
 import { Menu } from './ui/Menu';
 import { ErrorToast } from './ui/Toast';
 import { Button, Panel, Segmented, StatusPill } from './ui/primitives';
@@ -8,6 +9,8 @@ import { age } from './ui/status';
 import { Glyph } from './ui/Glyph';
 import {
   planningGroups,
+  initiativeProgress,
+  initiativeRows,
   planningRowMatches,
   type PlanningFilter,
   type PlanningLane,
@@ -152,12 +155,18 @@ export function WorkPlanning({
   provenance,
   loadItem,
   renderBody,
+  renderConversation,
+  timelineData,
+  initiativeOrigin,
 }: Props & {
   intentId?: string;
   exportHistory: () => Promise<PlanningExport>;
   renderDetails?: (item: PlanningItem, open: boolean) => ReactNode;
   loadItem?: (id: string) => Promise<PlanningItem>;
   renderBody?: (item: PlanningItem, open: boolean) => ReactNode;
+  renderConversation?: (item: PlanningItem) => ReactNode;
+  timelineData?: PlanningData;
+  initiativeOrigin?: PlanningItem;
 }) {
   const workHeader = useWorkHeader();
   const initiativeWrites = useRef(
@@ -323,11 +332,12 @@ export function WorkPlanning({
       setExporting(false);
     }
   }
-  async function closeInitiative(item: PlanningItem) {
+  async function closeInitiative(item: PlanningItem, nextStatus: PlanningItem['status'] = 'closed') {
     try {
       // Summary bodies are truncated. Always hydrate before replacing a record.
       const full = loadItem ? await loadItem(item.id) : item;
-      const command = initiativeWrites.current.get(item.id) ?? {
+      const writeKey = `${item.id}:${nextStatus}`;
+      const command = initiativeWrites.current.get(writeKey) ?? {
         action: 'put-planning-item',
         operationId: crypto.randomUUID(),
         itemId: full.id,
@@ -335,13 +345,13 @@ export function WorkPlanning({
         kind: full.kind,
         title: full.title,
         body: full.body,
-        status: 'closed',
+        status: nextStatus,
         intentIds: full.intentIds,
         ...(full.initiativeId ? { initiativeId: full.initiativeId } : {}),
       };
-      initiativeWrites.current.set(item.id, command);
+      initiativeWrites.current.set(writeKey, command);
       const acknowledgement = await act(command);
-      if (acknowledgement?.operationId === command.operationId) initiativeWrites.current.delete(item.id);
+      if (acknowledgement?.operationId === command.operationId) initiativeWrites.current.delete(writeKey);
     } catch (error) {
       setError((error as Error).message);
     }
@@ -368,6 +378,7 @@ export function WorkPlanning({
       <label>
         {kind === 'issue' ? 'Initiative' : 'Parent Initiative'}
         <select
+          aria-label={kind === 'issue' ? 'Initiative' : 'Parent Initiative'}
           disabled={loadingItem}
           value={parent}
           onChange={event => {
@@ -388,6 +399,7 @@ export function WorkPlanning({
       <label className="planning-wide">
         Details
         <textarea
+          aria-label="Details"
           disabled={loadingItem}
           value={body}
           onChange={event => {
@@ -435,7 +447,7 @@ export function WorkPlanning({
       href={row.intentId ? intentHref(row.intentId) : itemHref(items.find(item => item.id === row.itemId)!)}
       tone={row.tone}
       label={row.label}
-      fact={row.fact}
+      fact={<PlanningRowFact row={row} />}
       age={row.at ? <time title={row.at}>{age(row.at, Date.now())}</time> : undefined}
       done={planningRowMatches(row, 'done')}
     />
@@ -455,6 +467,51 @@ export function WorkPlanning({
       </Menu>
     </>
   );
+  if (selected && detailItem?.kind === 'initiative')
+    return (
+      <>
+        <InitiativePage
+          key={detailItem.id}
+          item={detailItem}
+          data={data}
+          timelineData={timelineData}
+          origin={
+            initiativeOrigin ??
+            data.planningItems.find(item => item.id === detailItem.id && item.version === 1)
+          }
+          readOnly={readOnly}
+          busy={busy}
+          listHref={listHref}
+          href={(kind, id) => href({ kind, id })}
+          onCreate={(kind, parent) => {
+            setHistoryOpen(false);
+            create(kind, parent);
+          }}
+          onEdit={() => {
+            setHistoryOpen(false);
+            void edit(detailItem.id);
+          }}
+          onStatus={status => void closeInitiative(detailItem, status)}
+          onExport={() => void download()}
+          editor={editor}
+          body={renderBody ? renderBody(detailItem, true) : undefined}
+          conversation={
+            renderConversation ? (
+              renderConversation(detailItem)
+            ) : (
+              <InitiativeConversation
+                itemId={detailItem.id}
+                data={data}
+                act={act}
+                busy={busy}
+                readOnly={readOnly}
+              />
+            )
+          }
+        />
+        {error && <ErrorToast>{error}</ErrorToast>}
+      </>
+    );
   if (selected && detailItem)
     return (
       <section className="planning-board fx-page planning-page">
@@ -598,15 +655,11 @@ export function WorkPlanning({
             const motion = group.rows.filter(row => planningRowMatches(row, 'in-motion')).length;
             const done = group.rows.filter(row => planningRowMatches(row, 'done')).length;
             const children = groups.find(value => value.id === group.id)?.rows ?? [];
-            const label =
-              group.item?.status === 'closed' ||
-              (children.length > 0 && children.every(row => planningRowMatches(row, 'done')))
-                ? 'Done'
-                : children.some(row => planningRowMatches(row, 'in-motion'))
-                  ? 'In motion'
-                  : group.id === 'proposed'
-                    ? 'Proposed'
-                    : 'Planned';
+            const label = group.item
+              ? initiativeProgress(group.item, children).label
+              : group.id === 'proposed'
+                ? 'Proposed'
+                : 'Planned';
             return (
               <section key={group.id} className="planning-group">
                 <header className="planning-grp">
@@ -643,7 +696,13 @@ export function WorkPlanning({
                     </Menu>
                   )}
                 </header>
-                <PagedList rows={group.rows} size={5} label="Intents" className="fx-wrs" render={renderRow} />
+                <PagedList
+                  rows={initiativeRows(group.rows)}
+                  size={5}
+                  label="Intents"
+                  className="fx-wrs"
+                  render={renderRow}
+                />
               </section>
             );
           })}

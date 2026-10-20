@@ -63,7 +63,7 @@ export function options(args) {
   if (
     pages.some(
       p =>
-        !/^(bootstrap|landing|home|now|intents|lanes|planning|activity|code|code-graph|settings(?::(?:general|agents|autonomy|checks|access|backups|appearance|devices|contributions|transfer|github))?|device|(?:lane|review|intent|view):[A-Za-z0-9_-]+)$/.test(
+        !/^(bootstrap|landing|home|now|intents|lanes|planning|activity|code|code-graph|settings(?::(?:general|agents|autonomy|checks|access|backups|appearance|devices|contributions|transfer|github))?|device|(?:lane|review|intent|view|initiative):[A-Za-z0-9_-]+)$/.test(
           p,
         ),
     )
@@ -122,6 +122,7 @@ export function destination(base, project, page, intentId) {
       intents: 'intent',
       lanes: 'lanes',
       planning: 'planning',
+      initiative: 'planning',
       activity: 'coordination',
       code: 'delivery',
       'code-graph': 'delivery',
@@ -134,6 +135,10 @@ export function destination(base, project, page, intentId) {
   );
   if (kind === 'code-graph') url.searchParams.set('codeView', 'graph');
   if (kind === 'settings' && id) url.searchParams.set('settingsSection', id);
+  if (kind === 'initiative') {
+    url.searchParams.set('planningItem', id);
+    url.searchParams.set('planningRoute', `initiative:${id}`);
+  }
   if (kind === 'intent') url.searchParams.set('intent', id);
   if (kind === 'view') url.searchParams.set('viewId', id);
   if (kind === 'lane') url.searchParams.set('lane', id);
