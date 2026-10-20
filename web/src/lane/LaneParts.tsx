@@ -8,10 +8,13 @@ import { Avatar, DiffStat, Dot, StatusPill } from '../ui/primitives';
 import { Rail } from '../ui/Rail';
 import { age, type Tone } from '../ui/status';
 
-export type Step = { tone: Tone; glyph: GlyphName; title: string; body: string };
+export type Step = { tone: Tone; glyph: GlyphName; title: string; body: string; nobody?: true };
 
-/** One sentence about what happens next and whether the viewer is needed. */
-export function nextStep(lane: CockpitLane): Step {
+/**
+ * One sentence about what happens next and whether the viewer is needed.
+ * `since` (e.g. `last save 3 h ago`) marks the page as able to tell that nobody holds an open Lane.
+ */
+export function nextStep(lane: CockpitLane, since?: string): Step {
   if (!lane.open)
     return {
       tone: 'plain',
@@ -60,6 +63,14 @@ export function nextStep(lane: CockpitLane): Step {
           body: 'The check passed, but main has moved since. Finishing again updates the Lane from main and re-checks it.',
         };
     default:
+      if (since !== undefined && lane.tone === 'active' && !lane.session)
+        return {
+          tone: 'waiting',
+          glyph: 'person',
+          title: ['Nobody is working on this Lane', since].filter(Boolean).join(' · '),
+          body: '',
+          nobody: true,
+        };
       return lane.checkpoints
         ? {
             tone: 'active',
@@ -112,6 +123,7 @@ export function LaneHeader({
     <div className="fx-lane-head">
       <div className="fx-lane-head-main">
         <h1>
+          <Glyph name="lane" size={18} />
           {displayLaneName(lane.name, lane.intent)}
           <StatusPill tone={lane.tone}>{lane.label}</StatusPill>
         </h1>

@@ -10,7 +10,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import type { Lane, WorkData } from '../../src/work-types';
 import type { HostedRunSummary, HostedViewSummary } from '../../src/work-hosted-summary';
 import { useWorkRecordResult, type WorkIndexWorkspace, type IntentHeader } from './hosted-work-index';
-import { PageTabs, useDestination, useSection, ActionPanel, Icon, LazyPage } from './WorkspaceUI';
+import { useDestination } from './WorkspaceUI';
 import { Panel, Segmented } from './ui/primitives';
 import { Glyph } from './ui/Glyph';
 import { LaneFactLine, WorkRow } from './ui/WorkRow';
@@ -22,9 +22,7 @@ import { hostedHref } from './cockpit/hosted-links';
 import type { Session } from './coordination-view';
 import { useNow } from './shell/StatusBar';
 import { WorkStatus } from './WorkStatus';
-import { WorkTimeline } from './WorkTimeline';
 import ProjectCoordination from './ProjectCoordination';
-import NativeSourceReview from './NativeSourceReview';
 import { HostedLane } from './lane/HostedLane';
 import { HostedLaneChanges } from './lane/HostedLaneChanges';
 export default function HostedLanes({
@@ -36,10 +34,7 @@ export default function HostedLanes({
   intentId,
   active = true,
   openIntent,
-  embedded = false,
 }: {
-  /** Inside the shared shell: a selected Lane opens the cockpit Lane screen. */
-  embedded?: boolean;
   projectId: Id<'hostedProjects'>;
   workspace: WorkIndexWorkspace;
   lanes: Lane[];
@@ -55,8 +50,7 @@ export default function HostedLanes({
   const runs = useWorkRecords<HostedRunSummary>(projectId, workspace, 'runs');
   const moves = useWorkRecords<WorkData['channelMoves'][number]>(projectId, workspace, 'channelMoves');
   const now = useNow();
-  const [selected, choose] = useDestination('lane'),
-    [tab, setTab] = useSection('laneTab', ['changes', 'history', 'activity'] as const, 'changes');
+  const [selected, choose] = useDestination('lane');
   const sessions = usePresenceSessions(projectId, !selected);
   const selectedLane = useWorkRecordResult<Lane>(projectId, workspace, 'lanes', selected);
   const lane = selectedLane.header;
@@ -73,7 +67,7 @@ export default function HostedLanes({
     }),
     [intents, lanes, intentId, views.records, runs.records, moves.records],
   );
-  if (embedded && selected && current)
+  if (selected && current)
     return (
       <HostedLane
         projectId={projectId}
@@ -107,13 +101,11 @@ export default function HostedLanes({
             <h2>
               {selected ? (current?.name ?? 'Lane details') : intentId ? 'Lanes for this Intent' : 'Lanes'}
             </h2>
-            {(!selected || tab === 'changes') && (
+            {!selected && (
               <p>
-                {selected
-                  ? 'Changes retained in this Lane, compared with its starting source.'
-                  : intentId
-                    ? 'Related Lanes keep their own source changes. Open one to inspect its contribution.'
-                    : 'All project Lanes keep their own source changes. Open one to inspect its contribution.'}
+                {intentId
+                  ? 'Related Lanes keep their own source changes. Open one to inspect its contribution.'
+                  : 'All project Lanes keep their own source changes. Open one to inspect its contribution.'}
               </p>
             )}
           </div>
@@ -145,97 +137,7 @@ export default function HostedLanes({
                 {lane ? 'This Lane belongs to another Intent. Return to the Lane list.' : 'Loading Lane…'}
               </p>
             )
-          ) : (
-            <>
-              <div className="lane-context-bar">
-                <span>
-                  <Icon name="agents" />
-                  {current.assignment || 'No assignment recorded'}
-                </span>
-                <button className="text-action" onClick={() => openIntent(current.intentId)}>
-                  {intents.find(intent => intent.id === current.intentId)?.outcome ?? 'Open parent Intent'}
-                </button>
-              </div>
-              {current.target && <p>{current.target}</p>}
-              <PageTabs
-                label="Lane detail"
-                value={tab}
-                onChange={setTab}
-                items={[
-                  { id: 'changes', label: 'Source changes', icon: 'source-review' },
-                  { id: 'activity', label: 'Activity', icon: 'activity' },
-                  { id: 'history', label: 'Timeline', icon: 'clock' },
-                ]}
-              />
-              <LazyPage active={tab === 'activity'}>
-                <ProjectCoordination
-                  active={active && tab === 'activity'}
-                  key={current.id}
-                  projectId={projectId}
-                  labels={{ intents, lanes }}
-                  scopeIntentId={current.intentId}
-                  scopeLaneId={current.id}
-                  openIntent={openIntent}
-                />
-              </LazyPage>
-              <LazyPage active={tab === 'changes'}>
-                <NativeSourceReview
-                  key={current.id + current.head + workspace.backupDigest}
-                  projectId={projectId}
-                  workspace={workspace}
-                  intentId={current.intentId}
-                  base={current.base}
-                  head={current.head}
-                  editable={false}
-                  busy={false}
-                  act={async () => {}}
-                />
-              </LazyPage>
-              <LazyPage active={tab === 'history'}>
-                <WorkTimeline
-                  label="Lane history"
-                  entries={[
-                    ...current.checkpoints.map((point, index) => ({
-                      id: `checkpoint-${index}`,
-                      at: point.at,
-                      kind: 'Checkpoint',
-                      title: point.message || 'Source checkpoint',
-                      detail: (
-                        <button className="text-action" onClick={() => setTab('changes')}>
-                          Inspect current Lane changes
-                        </button>
-                      ),
-                    })),
-                    ...(current.lifecycle ?? []).map((entry, index) => ({
-                      id: `status-${index}`,
-                      at: entry.at,
-                      kind:
-                        entry.to === 'completed'
-                          ? 'Completed'
-                          : entry.to === 'active'
-                            ? 'Reopened'
-                            : 'Status changed',
-                      title: `Lane ${entry.to}`,
-                      detail: (
-                        <>
-                          <WorkStatus status={entry.to} /> {entry.reason} {entry.actor?.name}
-                        </>
-                      ),
-                    })),
-                  ]}
-                />
-              </LazyPage>
-              <ActionPanel title="Lane source references">
-                <p>
-                  Starting source <code>{current.base}</code>
-                </p>
-                <p>
-                  Retained head <code>{current.head}</code>
-                </p>
-                <p>Changes made locally after this checkpoint are not included.</p>
-              </ActionPanel>
-            </>
-          )}
+          ) : null}
         </>
       ) : (
         <>
@@ -245,10 +147,7 @@ export default function HostedLanes({
             now={now}
             loading={loading || views.loading || runs.loading || moves.loading}
             initiatives={initiativeLinks(planning.records)}
-            open={id => {
-              choose(id);
-              setTab('changes');
-            }}
+            open={choose}
           />
         </>
       )}

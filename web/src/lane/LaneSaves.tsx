@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { Lane } from '../../../src/work-types';
 import { savedLink, codeSourceLink } from '../shell/ObjectActions';
 import { settingsHref } from '../settings/SettingsLayout';
 import { routeUrlState } from '../shell/location';
-import { Button, ExactRecord } from '../ui/primitives';
+import { Button } from '../ui/primitives';
 import { age } from '../ui/status';
 import { ErrorToast } from '../ui/Toast';
 import './lane-saves.css';
@@ -120,6 +120,7 @@ function SaveRow({ save, now, readFiles }: { save: DisplaySave; now: number; rea
   );
 }
 
+/** The Lane's record: Base · Head · Candidate, with saves and full hashes behind one disclosure. */
 export function LaneSaves({
   saves,
   base,
@@ -129,6 +130,7 @@ export function LaneSaves({
   baseLabel = 'Lane starting point',
   folder,
   lastSave,
+  candidate,
 }: {
   saves: readonly Save[];
   base: string;
@@ -138,15 +140,18 @@ export function LaneSaves({
   baseLabel?: string;
   folder?: string;
   lastSave?: DisplaySave;
+  /** The Lane's current Candidate, when the page knows it. */
+  candidate?: ReactNode;
 }) {
   const visible = saves.length ? saves.slice(-5).reverse() : lastSave ? [lastSave] : [];
+  const exact = [
+    ...visible.map(save => [save.message.trim() || 'Saved changes', save.head] as const),
+    ['Base', base] as const,
+    ['Head', head] as const,
+    ...(folder ? [['Folder', folder] as const] : []),
+  ];
   return (
     <div className="fx-lane-saves">
-      <ul aria-label="Saves">
-        {visible.map(save => (
-          <SaveRow key={save.head} save={save} now={now} readFiles={readFiles} />
-        ))}
-      </ul>
       <div className="fx-save-sources">
         <div>
           <span>Base</span>
@@ -158,16 +163,33 @@ export function LaneSaves({
           <CopyHash head={head} />
           <span>Latest saved source</span>
         </div>
+        {candidate && (
+          <div>
+            <span>Candidate</span>
+            {candidate}
+          </div>
+        )}
       </div>
-      <ExactRecord
-        summary="Saves and exact snapshots"
-        rows={[
-          ...visible.map(save => [save.message.trim() || 'Saved changes', save.head] as const),
-          ['Base', base],
-          ['Head', head],
-          ['Folder', folder],
-        ]}
-      />
+      <details className="fx-record">
+        <summary>Saves and exact snapshots</summary>
+        {visible.length > 0 && (
+          <ul aria-label="Saves">
+            {visible.map(save => (
+              <SaveRow key={save.head} save={save} now={now} readFiles={readFiles} />
+            ))}
+          </ul>
+        )}
+        <dl>
+          {exact.map(([label, value], index) => (
+            <div key={`${index}-${label}`}>
+              <dt>{label}</dt>
+              <dd>
+                <code>{value}</code>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </details>
     </div>
   );
 }

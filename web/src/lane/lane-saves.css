@@ -9,4 +9,6 @@
 .fx-save-hash:focus-visible{outline:2px solid var(--fx-active);outline-offset:2px}
 .fx-save-sources{padding:10px 14px;display:grid;gap:4px;font-size:12px;color:var(--fx-text-3)}
 .fx-save-sources>div{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.fx-save-sources>div>span:first-child{width:34px;color:var(--fx-text-2)}
+.fx-save-sources>div>span:first-child{width:64px;color:var(--fx-text-2)}
+.fx-lane-saves .fx-record ul{border-top:1px solid var(--fx-line)}
+.fx-save-sources>div>span:first-child+:not(.fx-save-hash){padding-left:4px}

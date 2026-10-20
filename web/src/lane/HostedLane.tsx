@@ -1,18 +1,18 @@
 import { usePageCritical } from '../ui/page-critical';
-import { age } from '../ui/status';
+import { age, checkStatus } from '../ui/status';
 import { WorkMap } from '../views/WorkMap';
 import { intentViews } from '../views/intent-views';
 import { Breadcrumbs, workHref } from '../shell/Breadcrumbs';
 import { ErrorToast } from '../ui/Toast';
 import type { Lane, WorkData } from '../../../src/work-types';
-import { ObjectActions, codeSourceLink } from '../shell/ObjectActions';
+import { codeSourceLink, savedLink } from '../shell/ObjectActions';
+import { settingsHref } from '../settings/SettingsLayout';
+import { Menu } from '../ui/Menu';
+import { Glyph } from '../ui/Glyph';
 import { routeUrlState } from '../shell/location';
 // SPDX-License-Identifier: Apache-2.0
-import { OwnerLifecycle } from './OwnerLifecycle';
-import { LaneViews } from '../views/LaneViews';
-import { useHostedViewSource } from '../views/source';
+import { useOwnerLifecycle, type LifecycleParts } from './OwnerLifecycle';
 import { hostedViewHref } from '../views/links';
-import type { ReadSource } from '../views/model';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useAction, useConvex, useMutation, useQuery } from 'convex/react';
 import { BriefSourceContext, hostedBriefs, laneBrief } from '../cockpit/brief';
@@ -35,7 +35,7 @@ import {
 } from '../hosted-work-index';
 import { hostedError } from '../snapshot';
 import { useNow } from '../shell/StatusBar';
-import { ButtonLink, Panel } from '../ui/primitives';
+import { Button, ButtonLink, Panel } from '../ui/primitives';
 import { LaneSaves, type SaveFiles } from './LaneSaves';
 import { HostedRunDetail } from './HostedRunDetail';
 import { CheckPanel } from './CheckPanel';
@@ -44,12 +44,52 @@ import { useRef } from 'react';
 import { Conversation } from './Conversation';
 import { LaneHeader, NextStep, nextStep } from './LaneParts';
 import { Feed } from '../cockpit/Feed';
-import { LaneLayout, CollapseSideButton } from './LaneLayout';
+import { WorkDetailLayout, CollapseSideButton } from '../shell/WorkDetailLayout';
 import { laneTimeline } from './timeline';
+import { laneFacts } from '../ui/lane-facts';
 
 type Records = CockpitWork;
 
-/** Pure hosted Lane: next step, check, source changes and the Lane's live conversation. */
+const generic = (name?: string) => !name?.trim() || /^agent workflow$/i.test(name.trim());
+
+/** ⋯ on the Lane header: Copy link, Get code, then the owner lifecycle items. */
+function LaneMoreMenu({ head, lifecycle }: { head: string; lifecycle?: ReactNode }) {
+  const [message, setMessage] = useState('');
+  return (
+    <>
+      <Menu
+        label={<Glyph name="more" size={14} />}
+        ariaLabel="More Lane actions"
+        className="fx-btn fx-btn-ghost fx-btn-sm fx-more"
+      >
+        <Button
+          variant="ghost"
+          onClick={() =>
+            void navigator.clipboard.writeText(savedLink(head)).then(
+              () => setMessage('Link copied'),
+              () => setMessage('Could not copy link. Try again.'),
+            )
+          }
+        >
+          Copy link
+        </Button>
+        <ButtonLink
+          variant="ghost"
+          href={settingsHref(routeUrlState().searchParams.has('project') ? 'transfer' : 'backups')}
+        >
+          Get code
+        </ButtonLink>
+        {lifecycle}
+      </Menu>
+      <span className="fx-sr" role="status">
+        {message === 'Link copied' ? message : ''}
+      </span>
+      {message.startsWith('Could') && <ErrorToast>{message}</ErrorToast>}
+    </>
+  );
+}
+
+/** Pure hosted Lane on the shared detail layout: next step, check, changes, record | timeline, conversation. */
 export function HostedLaneView({
   laneId,
   records,
@@ -59,7 +99,6 @@ export function HostedLaneView({
   changes,
   send,
   back,
-  viewSource,
   lifecycle,
   evidence,
   readSaveFiles,
@@ -72,8 +111,7 @@ export function HostedLaneView({
   changes: ReactNode;
   send?: (text: string) => Promise<boolean>;
   back?: ReactNode;
-  viewSource?: ReadSource;
-  lifecycle?: ReactNode;
+  lifecycle?: LifecycleParts | null;
   evidence?: ReactNode;
   readSaveFiles?: SaveFiles;
 }) {
@@ -91,148 +129,196 @@ export function HostedLaneView({
     return url.pathname + url.search;
   };
   const run = lane.viewId ? latestRun(records.runs, lane.viewId) : undefined;
+  const candidate = lane.viewId ? records.views.find(view => view.id === lane.viewId) : undefined;
+  const lastSave = record.lastCheckpointAt ?? record.checkpoints?.at(-1)?.at;
+  const started =
+    record.lifecycle?.[0]?.at ?? records.intents.find(intent => intent.id === lane.intentId)?.createdAt;
+  const by = lane.session?.name ?? (generic(lane.startedBy?.name) ? undefined : lane.startedBy?.name);
+  const saved = !!(record.checkpoints?.length || record.lastCheckpointAt || record.head !== record.base);
+  const since = lastSave
+    ? `last save ${age(lastSave, now, true)}`
+    : started
+      ? `started ${age(started, now, true)}`
+      : '';
+  const step = nextStep(lane, since);
+  // The header pill uses the same attention word as the Lane's row (Waiting when nobody holds it).
+  const fact = laneFacts(records, [lane], now).get(lane.id);
+  const brief = laneBrief(lane, run?.id);
   return (
-    <div className="fx-page fx-lane-page">
-      <Breadcrumbs
-        items={[
-          { label: lane.intent, href: workHref({ intent: lane.intentId }) },
-          { label: lane.name, href: workHref({ lane: lane.id, projectTab: 'lanes' }) },
-        ]}
-      />
-      {back}
-      <LaneHeader
-        lane={lane}
-        now={now}
-        base={
-          lane.mainIncluded === false
-            ? 'From main · needs update'
-            : lane.mainIncluded === true
-              ? 'From main · up to date'
-              : 'From main'
-        }
-        actions={
-          <>
-            {lifecycle}
-            <ObjectActions head={record.head} />
-            <CopyPrompt
-              request={laneBrief(lane, run?.id)}
-              label="Hand to an agent"
-              variant="secondary"
-              shortcut
-            />
-            <ButtonLink icon="code" href={codeSourceLink(record.head, record.id)}>
-              Browse source
-            </ButtonLink>
-          </>
-        }
-      />
-      <NextStep
-        step={nextStep(lane)}
-        actions={
-          lane.tone === 'passed' && lane.viewId ? (
-            <ButtonLink
-              variant="primary"
-              size="lg"
-              icon="review"
-              href={href('intent', {
-                intent: lane.intentId,
-                intentTab: 'delivery',
-                reviewView: lane.viewId,
-                classic: '1',
-              })}
-            >
-              Review &amp; accept
-            </ButtonLink>
-          ) : undefined
-        }
-      />
-      <LaneLayout
-        timelineCount={timeline.length}
-        messageCount={events.filter(event => event.command.kind === 'message').length}
-        side={
-          <>
-            <Feed
-              {...{ viewHref: hostedViewHref }}
-              title="Timeline"
-              items={timeline}
-              now={now}
-              actions={<CollapseSideButton />}
-            />
-            <Conversation
-              draftKey={laneId}
-              events={events.filter(
-                event => event.command.kind === 'message' || event.command.kind === 'ack',
-              )}
-              sessions={sessions}
-              now={now}
-              {...(send ? { send } : {})}
-            />
-          </>
-        }
-      >
-        <WorkMap
+    <WorkDetailLayout
+      className="fx-lane-page"
+      crumbs={
+        <>
+          <Breadcrumbs
+            items={[
+              { label: lane.intent, href: workHref({ intent: lane.intentId }) },
+              { label: lane.name, href: workHref({ lane: lane.id, projectTab: 'lanes' }) },
+            ]}
+          />
+          {back}
+        </>
+      }
+      header={
+        <LaneHeader
+          lane={fact ? { ...lane, tone: fact.tone, label: fact.label } : lane}
           now={now}
-          compact
-          lanes={[lane]}
-          views={intentViews(records, lane.intentId).filter(view =>
-            view.inputs?.some(input => input.laneId === laneId),
-          )}
-          laneHref={id => href('lane', { lane: id })}
-          viewHref={hostedViewHref}
+          base={[
+            lane.mainIncluded === false
+              ? 'From main · needs update'
+              : lane.mainIncluded === true
+                ? 'From main · up to date'
+                : 'From main',
+            saved && lane.checkpoints
+              ? `${lane.checkpoints} ${lane.checkpoints === 1 ? 'save' : 'saves'}${lastSave ? ` · last save ${age(lastSave, now, true)}` : ''}`
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+          actions={
+            <>
+              {lifecycle?.status}
+              <CopyPrompt request={brief} label="Hand to an agent" variant="secondary" shortcut />
+              <ButtonLink icon="code" href={codeSourceLink(record.head, record.id)}>
+                Browse source
+              </ButtonLink>
+              <LaneMoreMenu head={record.head} lifecycle={lifecycle?.items} />
+              {lifecycle?.dialog}
+            </>
+          }
         />
-        {viewSource && (
-          <LaneViews
-            viewNumber={id => {
-              const selected = records.views.find(v => v.id === id);
-              return selected
-                ? records.views.filter(v => v.intentId === selected.intentId).findIndex(v => v.id === id) + 1
-                : undefined;
-            }}
-            laneId={laneId}
-            intentHref={href('intent', { intent: lane.intentId })}
-            viewHref={hostedViewHref}
-            source={viewSource}
-          />
-        )}
-        <CheckPanel
-          run={run ? { ...run, check: run.checkName ?? run.check?.name } : null}
-          summary={run?.failureSummary ?? null}
-          now={now}
-          mainIncluded={lane.mainIncluded}
-        >
-          {evidence}
-        </CheckPanel>
-        {changes}
-        <Panel>
-          <LaneSaves
-            saves={record.checkpoints ?? []}
-            lastSave={
-              record.lastCheckpointAt
-                ? {
-                    head: record.head,
-                    at: record.lastCheckpointAt,
-                    message: record.lastCheckpointMessage ?? '',
-                  }
-                : undefined
-            }
-            base={record.base}
-            head={record.head}
+      }
+      next={
+        <NextStep
+          step={step}
+          actions={
+            step.nobody ? (
+              <>
+                <CopyPrompt request={brief} label="Hand to an agent" variant="rec" />
+                {send && (
+                  <Button size="sm" variant="secondary" onClick={() => void send('Taking this Lane.')}>
+                    Take it
+                  </Button>
+                )}
+                {lifecycle?.abandon && (
+                  <Button size="sm" variant="ghost" onClick={lifecycle.abandon}>
+                    Abandon…
+                  </Button>
+                )}
+              </>
+            ) : lane.tone === 'passed' && lane.viewId ? (
+              <ButtonLink
+                variant="primary"
+                size="lg"
+                icon="review"
+                href={href('intent', {
+                  intent: lane.intentId,
+                  intentTab: 'delivery',
+                  reviewView: lane.viewId,
+                  classic: '1',
+                })}
+              >
+                Review &amp; accept
+              </ButtonLink>
+            ) : undefined
+          }
+        />
+      }
+      timelineCount={timeline.length}
+      messageCount={events.filter(event => event.command.kind === 'message').length}
+      side={
+        <>
+          <Feed
+            {...{ viewHref: hostedViewHref }}
+            title="Timeline"
+            items={timeline}
             now={now}
-            readFiles={readSaveFiles}
-            baseLabel={(() => {
-              const move = (records.channelMoves ?? [])
-                .filter(
-                  move => move.channel === 'main' && move.status === 'accepted' && move.head === record.base,
-                )
-                .at(-1);
-              return move
-                ? `main${move.at ? ` · accepted ${age(move.at, now, true)}` : ' · accepted source'}`
-                : 'Lane starting point';
-            })()}
+            actions={<CollapseSideButton />}
           />
+          <Conversation
+            draftKey={laneId}
+            events={events.filter(event => event.command.kind === 'message' || event.command.kind === 'ack')}
+            sessions={sessions}
+            now={now}
+            {...(send ? { send } : {})}
+          />
+        </>
+      }
+    >
+      <WorkMap
+        now={now}
+        compact
+        lanes={[lane]}
+        views={intentViews(records, lane.intentId).filter(view =>
+          view.inputs?.some(input => input.laneId === laneId),
+        )}
+        laneHref={id => href('lane', { lane: id })}
+        viewHref={hostedViewHref}
+      />
+      <CheckPanel
+        run={run ? { ...run, check: run.checkName ?? run.check?.name } : null}
+        summary={run?.failureSummary ?? null}
+        now={now}
+        mainIncluded={lane.mainIncluded}
+      >
+        {evidence}
+      </CheckPanel>
+      {saved ? (
+        changes
+      ) : (
+        <Panel title="Changes">
+          <p className="fx-panel-empty">
+            No saves yet
+            {started && ` · started ${age(started, now, true)}`}
+            {by && ` by ${by}`}
+          </p>
         </Panel>
-      </LaneLayout>
-    </div>
+      )}
+      <Panel>
+        <LaneSaves
+          saves={record.checkpoints ?? []}
+          lastSave={
+            record.lastCheckpointAt
+              ? {
+                  head: record.head,
+                  at: record.lastCheckpointAt,
+                  message: record.lastCheckpointMessage ?? '',
+                }
+              : undefined
+          }
+          base={record.base}
+          head={record.head}
+          now={now}
+          readFiles={readSaveFiles}
+          candidate={
+            candidate ? (
+              <>
+                <a href={hostedViewHref(candidate.id)}>
+                  <code>{candidate.head?.slice(0, 8) ?? candidate.id.slice(0, 8)}</code>
+                </a>
+                {run && (
+                  <span>
+                    {(run.checkName ?? run.check?.name)?.trim() || 'Check'}{' '}
+                    {checkStatus(run.status).label.toLowerCase()}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span>none yet</span>
+            )
+          }
+          baseLabel={(() => {
+            const move = (records.channelMoves ?? [])
+              .filter(
+                move => move.channel === 'main' && move.status === 'accepted' && move.head === record.base,
+              )
+              .at(-1);
+            return move
+              ? `main${move.at ? ` · accepted ${age(move.at, now, true)}` : ' · accepted source'}`
+              : 'Lane starting point';
+          })()}
+        />
+      </Panel>
+    </WorkDetailLayout>
   );
 }
 
@@ -265,7 +351,6 @@ export function HostedLane({
     },
     [readSource, projectId, workspace.backupId],
   );
-  const viewSource = useHostedViewSource(projectId, workspace);
   const intents = useWorkRecords<IntentHeader>(projectId, workspace, 'intents');
   const lanes = useWorkRecords<HostedLaneSummary>(projectId, workspace, 'lanes');
   const selectedIntent = useWorkRecordResult<IntentHeader>(
@@ -361,6 +446,15 @@ export function HostedLane({
       return false;
     }
   };
+  const laneRecord = records.lanes.find(l => l.id === laneId) ?? currentLane;
+  const lifecycle = useOwnerLifecycle({
+    projectId,
+    collection: 'lanes',
+    id: laneId,
+    head: laneRecord.head,
+    state: laneRecord.state,
+    editable: workspace.capabilities.owner,
+  });
   const client = useConvex();
   const briefs = useMemo(() => hostedBriefs(client, projectId), [client, projectId]);
   return (
@@ -370,20 +464,7 @@ export function HostedLane({
         <HostedLaneView
           laneId={laneId}
           readSaveFiles={readSaveFiles}
-          lifecycle={
-            records.lanes.find(l => l.id === laneId) && (
-              <OwnerLifecycle
-                key={laneId}
-                projectId={projectId}
-                collection="lanes"
-                id={laneId}
-                head={records.lanes.find(l => l.id === laneId)!.head}
-                state={records.lanes.find(l => l.id === laneId)!.state}
-                editable={workspace.capabilities.owner}
-              />
-            )
-          }
-          viewSource={viewSource}
+          lifecycle={lifecycle}
           evidence={(() => {
             const viewId = cockpitLanes(records).find(item => item.id === laneId)?.viewId;
             const run = viewId ? latestRun(records.runs, viewId) : undefined;

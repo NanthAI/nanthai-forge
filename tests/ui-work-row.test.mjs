@@ -210,3 +210,27 @@ test('a Work row keeps modified clicks as links and marks closed rows', () => {
   assert.match(markup, /<a href="\/x" class="fx-wr-title" title="Done thing">Done thing<\/a>/);
   assert.doesNotMatch(markup, /fx-wr-fact/);
 });
+
+test('a Lane with no saves on an accepted main head is open, not landed; a saved Lane on main is landed', () => {
+  const at = '2026-10-20T10:00:00.000Z',
+    base = 'a'.repeat(64),
+    saved = 'b'.repeat(64);
+  const work = {
+    intents: [{ id: 'i', outcome: 'Fresh work', createdAt: at }],
+    lanes: [
+      { id: 'fresh', intentId: 'i', state: 'active', base, head: base, checkpoints: [] },
+      { id: 'landed', intentId: 'i', state: 'active', base, head: saved, checkpoints: [{ at }] },
+    ],
+    views: [],
+    runs: [],
+    channelMoves: [
+      { channel: 'main', head: base, status: 'accepted' },
+      { channel: 'main', head: saved, status: 'accepted' },
+    ],
+  };
+  const [fresh, landed] = cockpitLanes(work);
+  assert.equal(fresh.open, true);
+  assert.equal(fresh.accepted, false);
+  assert.equal(landed.open, false);
+  assert.equal(landed.accepted, true);
+});

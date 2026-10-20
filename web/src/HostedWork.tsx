@@ -736,7 +736,6 @@ export default function HostedWork({
                 )}
                 <LazyPage active={section === 'lanes'}>
                   <HostedLanes
-                    embedded={embedded}
                     active={section === 'lanes'}
                     projectId={projectId}
                     workspace={workspace!}

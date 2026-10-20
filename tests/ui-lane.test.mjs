@@ -37,6 +37,14 @@ test('the next step says whether the viewer is needed, in one sentence per state
   assert.match(nextStep(lane({ checkpoints: 2 })).body, /2 saves/);
   assert.equal(nextStep(lane({ open: false })).title, 'Done');
   assert.equal(nextStep(lane({ tone: 'waiting', label: 'Needs update' })).title, 'Needs an update from main');
+  const nobody = nextStep(lane(), 'last save 3 h ago');
+  assert.equal(nobody.title, 'Nobody is working on this Lane · last save 3 h ago');
+  assert.equal(nobody.nobody, true);
+  assert.equal(
+    nextStep(lane({ session: { name: 'claude-s5', tone: 'active', lastSeen: 0 } }), '').title,
+    'No saved changes yet',
+  );
+  assert.equal(nextStep(lane({ tone: 'failed' }), '').title, 'Not ready to accept: the check failed');
 });
 
 test('briefings match the situation of each decision and Lane', () => {
@@ -328,4 +336,86 @@ test('unified context has old and new line numbers in two cells of the same row'
     html,
     /<tr class="fx-diff-line fx-diff-context"><td class="fx-diff-n">12<\/td><td class="fx-diff-n">15<\/td>/,
   );
+});
+
+const laneRecords = (extra = {}) => ({
+  intents: [{ id: 'i', outcome: 'Customer exports', createdAt: '2026-10-16T11:00:00Z' }],
+  lanes: [
+    {
+      id: 'l',
+      name: 'Customer exports',
+      intentId: 'i',
+      state: 'active',
+      base: 'a'.repeat(64),
+      head: 'a'.repeat(64),
+      checkpoints: [],
+      lifecycle: [{ to: 'active', at: '2026-10-16T11:56:00Z' }],
+      startedBy: { kind: 'agent', name: 'claude-s5' },
+      ...extra,
+    },
+  ],
+  views: [],
+  runs: [],
+  channelMoves: [],
+});
+const renderLanePage = async (records, sessions = []) => {
+  globalThis.location ??= new URL('http://local/local/project/lanes/l');
+  const { HostedLaneView } = await import(moduleUrl('../web/src/lane/HostedLane.tsx'));
+  return renderToStaticMarkup(
+    h(HostedLaneView, {
+      laneId: 'l',
+      records,
+      sessions,
+      events: [],
+      now: Date.parse('2026-10-16T12:00:00Z'),
+      changes: h('p', null, 'Source changes'),
+      send: async () => true,
+      lifecycle: { items: null, status: null, dialog: null, abandon: () => {} },
+    }),
+  );
+};
+
+test('Lane page: one detail layout, no tab strip, Timeline first in the side column', async () => {
+  const html = await renderLanePage(laneRecords());
+  assert.match(html, /class="fx-page fx-detail fx-lane-page"/);
+  assert.doesNotMatch(html, /role="tablist"|Lane source references/);
+  const side = html.split('class="fx-lane-col fx-detail-side"')[1];
+  assert.ok(side);
+  const panels = side.split('<section class="fx-panel">').slice(1);
+  assert.match(panels[0], /^<header class="fx-panel-h"><h2>Timeline<\/h2>/);
+  assert.match(panels[1], /<h2>Conversation<\/h2>/);
+  assert.match(html, /Saves and exact snapshots/);
+  assert.match(html, /<span>Candidate<\/span><span>none yet<\/span>/);
+});
+
+test('a held Lane with no saves says so in Changes and shows no banner', async () => {
+  const html = await renderLanePage(laneRecords(), [
+    {
+      sessionId: 's',
+      name: 'claude-s5',
+      environment: 'mac',
+      status: 'working',
+      summary: '',
+      lastSeen: Date.parse('2026-10-16T11:59:00Z'),
+      context: { laneId: 'l' },
+    },
+  ]);
+  assert.match(html, /No saves yet · started 4 min ago by claude-s5/);
+  assert.doesNotMatch(html, /class="fx-next/);
+  assert.doesNotMatch(html, />Source changes</);
+});
+
+test('a Lane nobody holds shows the banner with Hand to an agent, Take it and Abandon…', async () => {
+  const html = await renderLanePage(
+    laneRecords({
+      head: 'b'.repeat(64),
+      checkpointCount: 2,
+      lastCheckpointAt: '2026-10-16T09:00:00Z',
+    }),
+  );
+  const banner = html.split('aria-label="What happens next"')[1]?.split('</section>')[0] ?? '';
+  assert.match(banner, /Nobody is working on this Lane · last save 3 h ago/);
+  assert.match(banner, />Take it</);
+  assert.match(banner, />Abandon…</);
+  assert.match(html, />Source changes</);
 });

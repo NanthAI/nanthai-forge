@@ -332,6 +332,8 @@ An optional `.nforge/home.md` becomes a Home tab. It is ordinary Markdown with `
 
 ### Lane screen
 
+Lane pages use one detail layout: header actions Hand to an agent · Browse source · ⋯ (Copy link, Get code, Mark complete, Abandon…); main Work map · Check · Changes · Record; side Timeline · Conversation (collapsible); no tabs. A Lane nobody holds shows *Nobody is working on this Lane* with Hand to an agent · Take it · Abandon…. A Lane with no saves is open, never landed.
+
 Lane pages show the edited → saved → checked → accepted journey, the next step, exact-Candidate check evidence, file changes, and a newest-first timeline. They also show the Lane's live conversation. The delegate sheet opens from **Hand to an agent** or **⌘⇧C** (Ctrl+Shift+C on other keyboards).
 
 The Timeline/Conversation column and file list collapse to 36px rails on desktops; the controls remember `forge.lane.side` and `forge.lane.files` in browser storage. Below 1060px both panels remain expanded. **Unified**, **Split**, and **Inline** word diffs share the selected file's comparison and remember `forge.diff.mode`. Changing modes does not fetch source again. File selection loads that file on demand; counts unavailable from a manifest remain absent until known.

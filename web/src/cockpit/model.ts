@@ -127,16 +127,15 @@ export function cockpitLanes(work: CockpitWork): CockpitLane[] {
     const conflicts = lane.pendingMerge?.conflicts?.map(conflict => conflict.path) ?? [];
     const byAgent =
       agentLanes.has(lane.id) || checkpoints.some(checkpoint => checkpoint.operation !== undefined);
-    const reachedMain =
-      lane.main?.included === true ||
-      acceptedHeads.has(lane.head) ||
-      landedInputs.has(JSON.stringify([lane.id, lane.head]));
-    const open =
-      !['completed', 'abandoned'].includes(lane.state) &&
-      lane.main?.included !== true &&
-      !acceptedHeads.has(lane.head) &&
-      !landedInputs.has(JSON.stringify([lane.id, lane.head]));
     const saves = lane.checkpointCount ?? checkpoints.length;
+    // A Lane with no saves still sits on its base, which is already on main; that is not landing.
+    const untouched = saves === 0 && lane.head === lane.base;
+    const reachedMain =
+      !untouched &&
+      (lane.main?.included === true ||
+        acceptedHeads.has(lane.head) ||
+        landedInputs.has(JSON.stringify([lane.id, lane.head])));
+    const open = !['completed', 'abandoned'].includes(lane.state) && !reachedMain;
     // A Lane without saves is as fresh as its Intent; never call new work quiet.
     const lastAt = [
       created.get(lane.intentId),
