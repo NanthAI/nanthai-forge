@@ -13,7 +13,9 @@ import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { reconcileHostedWork } from '../dist/native-companion.js';
 import { WorkService } from '../dist/work.js';
-import { pushNativeExchange, pullNativeExchange } from '../dist/native-exchange.js';
+import { prepareNativeExchange, pushNativeExchange, pullNativeExchange } from '../dist/native-exchange.js';
+import { metadataRequest, workBytes } from '../dist/work-metadata.js';
+import { NativeSource } from '../dist/native-source.js';
 import { readHosted } from './hosted-read.mjs';
 const names = [
   'projectObjects',
@@ -227,6 +229,136 @@ test('incremental checkpoints use existing hosted Work and source-return authori
     objects.prepare._handler(s.ctx, { projectId: 'project', digest: digest('x'), size: 1 }),
   );
 });
+test('a completed source return predating a new optional collection survives later landings and another push', async t => {
+  const { readFileSync } = await import('node:fs');
+  const s = fixture(),
+    dir = mkdtempSync(join(tmpdir(), 'forge-settled-return-')),
+    root = join(dir, 'owner');
+  mkdirSync(root);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
+  initNative(root);
+  const work = new WorkService(root),
+    store = work.store,
+    act = command => work.dispatch(command, store.revision());
+  const intent = (await act({ action: 'intent', outcome: 'Synthetic return and landing' })).result;
+  const first = await pushNativeExchange(store, store.revision(), randomUUID(), transport(s));
+  await modules.projectWorkActions.initialize._handler(s.ctx, {
+    projectId: 'project',
+    backupId: first.backupId,
+    operationId: randomUUID(),
+  });
+  await act({ action: 'note', intentId: intent.id, text: 'Before return', kind: 'comment' });
+  const operationId = randomUUID(),
+    prepared = await prepareNativeExchange(store, store.revision(), operationId),
+    original = JSON.parse(readFileSync(join(prepared.directory, 'work.json'), 'utf8'));
+  // An older writer completed this return before githubSyncHistory existed.
+  delete original.githubSyncHistory;
+  const originalBytes = workBytes(original),
+    pin = prepared.manifest.files.find(file => file.path === 'work.json');
+  pin.sha256 = digest(originalBytes);
+  pin.size = Buffer.byteLength(originalBytes);
+  writeFileSync(join(prepared.directory, 'work.json'), originalBytes);
+  writeFileSync(join(prepared.directory, 'manifest.json'), JSON.stringify(prepared.manifest));
+  const returned = await pushNativeExchange(
+    store,
+    store.revision(),
+    operationId,
+    transport(s, first.backupId),
+  );
+  const command = {
+    action: 'source-return',
+    archiveSha256: returned.digest,
+    workSha256: pin.sha256,
+    previousArchiveSha256: first.digest,
+    previousRevision: first.revision,
+  };
+  // Publish the old writer's completed receipt through the normal final CAS.
+  const settled = await modules.projectWork.returnSource._handler(s.ctx, {
+    projectId: 'project',
+    owner: 'owner',
+    operationId: randomUUID(),
+    request: metadataRequest(command),
+    command: JSON.stringify(command),
+    backupId: returned.backupId,
+    expectedBackupId: first.backupId,
+    expectedRevision: first.revision,
+    localRevision: original.revision,
+  });
+  const lane = (await act({ action: 'lane', intentId: intent.id, name: 'Later landing' })).result;
+  writeFileSync(join(store.path(lane.id), 'a.ts'), 'export const a = 2;\n');
+  const source = new NativeSource(root);
+  const saved = work.execute(
+    {
+      action: 'checkpoint',
+      laneId: lane.id,
+      expectedHead: lane.head,
+      expectedTree: source.tree(source.capture(store.path(lane.id), false, lane.head)),
+      message: 'Later source',
+    },
+    store.revision(),
+  ).result;
+  const view = (
+    await act({ action: 'compose', intentId: intent.id, inputs: [{ laneId: lane.id, head: saved.head }] })
+  ).result;
+  await act({
+    action: 'accept-channel',
+    operationId: randomUUID(),
+    channel: 'main',
+    viewId: view.id,
+    expectedHead: view.head,
+    expectedPrevious: null,
+  });
+  const journal = await modules.projectWorkActions.exportJournal._handler(s.ctx, { projectId: 'project' }),
+    journalPath = join(dir, 'journal.json');
+  writeFileSync(journalPath, journal);
+  const reconciled = await reconcileHostedWork(
+    store,
+    {
+      action: 'reconcile-hosted-work',
+      transport: 'objects',
+      preserveLocalSource: true,
+      operationId: randomUUID(),
+      projectKey: JSON.parse(journal).projectKey,
+      archivePath: prepared.directory,
+      archiveSha256: returned.digest,
+      journalPath,
+      journalSha256: digest(journal),
+    },
+    store.revision(),
+  );
+  assert.equal(reconciled.result.status, 'reconciled');
+  assert.equal(store.load().channelMoves.at(-1).head, view.head);
+  assert.equal(store.load().hostedEvents.at(-1).id, settled.operationId);
+  const next = await pushNativeExchange(
+    store,
+    store.revision(),
+    randomUUID(),
+    transport(s, returned.backupId),
+  );
+  await completeReturn(s, {
+    projectId: 'project',
+    backupId: next.backupId,
+    expectedBackupId: returned.backupId,
+    revision: settled.revision,
+    operationId: randomUUID(),
+  });
+  const current = JSON.parse(await readHosted(s.ctx, { projectId: 'project' }));
+  assert.equal(current.backupId, next.backupId);
+  assert.equal(current.data.channelMoves.at(-1).head, view.head);
+  assert.equal(current.data.hostedEvents.filter(event => event.id === settled.operationId).length, 1);
+
+  // Settled receipts do not exempt the retained checkpoint from integrity checks.
+  const latest = [...s.tables.projectWorkEvents.values()].at(-1),
+    tampered = { ...JSON.parse(latest.command), workSha256: '0'.repeat(64) };
+  latest.command = JSON.stringify(tampered);
+  latest.request = metadataRequest(tampered);
+  await assert.rejects(
+    modules.projectWorkActions.exportJournal._handler(s.ctx, { projectId: 'project' }),
+    error => error.data?.code === 'INVALID_WORK_JOURNAL',
+  );
+});
+
 test('explicit project deletion removes shared object bytes once, including unresolved uploads, preserves foreign objects and reconciles late uploads', async () => {
   const s = fixture(),
     lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts')),

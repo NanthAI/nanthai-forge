@@ -969,7 +969,8 @@ export const workSchema = z
     lanes: z.array(laneSchema),
     views: z.array(viewSchema),
     githubSync: githubSyncSchema.optional(),
-    githubSyncHistory: z.array(githubSyncHistorySchema).default([]),
+    // New collections stay absent in old checkpoints so journal digests remain exact.
+    githubSyncHistory: z.array(githubSyncHistorySchema).optional(),
     githubAutoPush: githubAutoPushSchema.optional(),
     mirrors: z.array(mirrorSchema).default([]),
     publications: z.array(publicationSchema).default([]),

@@ -194,7 +194,7 @@ export async function githubSync(
           'Another sync changed the binding. Retry to reconcile.',
         );
         if (options.rebind)
-          current.githubSyncHistory.push({
+          (current.githubSyncHistory ??= []).push({
             id: randomUUID(),
             replacedAt: new Date().toISOString(),
             binding: stored!,

@@ -27,6 +27,10 @@ source bytes do not change. Hosted edits are preserved or reported as conflicts.
 its operation ID and pins across unknown replies. Git bound owners retain checkpoint-only push;
 command-file pushes select hosted Work only when `returnSource` is supplied.
 
+Bound exchange reports its local capture, hosted journal reconciliation, upload,
+source return and index refresh phases on stderr, with periodic elapsed-time
+updates while awaiting a reply. JSON stdout remains the final result.
+
 Explicit project IDs and original request files remain supported:
 
 ```sh
@@ -46,6 +50,13 @@ With the token set, `nforge mcp ROOT --agent` also offers `forge_exchange` and `
 ```
 
 `revision` is the local Work revision. The first push sends everything. Later pushes send only new content, and large files send only changed chunks. To return the checkpoint as the project's hosted source, add `"returnSource": {"expectedBackupId": "…", "revision": 120, "operationId": "RETURN_UUID"}`. The nested revision is the hosted one. Hosted edits made in the meantime are kept, and a concurrent return reports a conflict instead of overwriting.
+
+A completed source return remains one original journal event. Reconstructing
+hosted Work validates it against its retained checkpoint, never against later
+local landings. Newly introduced optional collections stay absent when reading
+older checkpoints, preserving their original Work digests; writers initialize
+those collections when used. Neither old receipts nor checkpoint bytes need a
+repair or rewrite.
 
 ## Work record exchange
 

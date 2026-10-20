@@ -379,6 +379,7 @@ test('Git-backed hosting preserves Git source/history and complete Work without 
 test('real CLI uses saved login deployment and bound push/pull/coordination without IDs or request files', async t => {
   let losePublishReply = false,
     loseReturnReply = false,
+    delayJournal = false,
     rejectReturn = 0,
     rejectPublish = 0,
     writeDuring = null;
@@ -402,6 +403,10 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
       routes.push(body.path);
       const [name, method] = body.path.split(':'),
         args = jsonToConvex(body.args[0]);
+      if (body.path === 'projectWorkActions:exportJournal' && delayJournal) {
+        delayJournal = false;
+        await new Promise(resolve => setTimeout(resolve, 10500));
+      }
       // A concurrent local writer (e.g. a post-accept audit) while the push is on the network.
       if (writeDuring?.path === body.path) {
         writeDuring.write();
@@ -526,8 +531,18 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
     { action: 'lane', intentId: f.intent.id, name: 'Lifecycle' },
     f.store.revision(),
   ).result;
-  const initialBackup = hosted.backupId,
-    first = JSON.parse((await cli('exchange', f.root, 'push')).stdout);
+  const initialBackup = hosted.backupId;
+  delayJournal = true;
+  const firstPush = await cli('exchange', f.root, 'push'),
+    first = JSON.parse(firstPush.stdout);
+  assert.match(firstPush.stderr, /capturing local source and Work:/);
+  assert.match(firstPush.stderr, /preparing and uploading checkpoint:/);
+  assert.match(firstPush.stderr, /refreshing hosted Work index:/);
+  const journalProgress = firstPush.stderr
+    .split('\n')
+    .filter(line => line.startsWith('receiving and reconciling hosted Work journal:'));
+  assert(journalProgress.length >= 2, 'a slow journal read reports progress while awaiting its reply');
+  assert.match(journalProgress.at(-1), /elapsed=(?:[5-9]|\d{2,})s/);
   assert.equal(first.revision, f.store.revision());
   await modules.projectWorkActions.command._handler(f.s.ctx, {
     projectId: hosted.projectId,

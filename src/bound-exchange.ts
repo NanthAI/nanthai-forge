@@ -1,7 +1,7 @@
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 // SPDX-License-Identifier: Apache-2.0
 import { withWorkLockOptions } from './work-lock.js';
-import { withWorkProgress } from './work-progress.js';
+import { withWorkProgress, workProgress } from './work-progress.js';
 import { retryExchange } from './exchange-retry.js';
 import { formatSourceReturnProgress } from './source-return-progress.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -37,15 +37,30 @@ const hostedState = async (client: ConvexExchange, projectId: string) =>
 export async function boundExchange(root: string, action: 'push' | 'pull', target?: string) {
   return withWorkLockOptions({ operation: `exchange ${action}` }, () =>
     withWorkProgress({ phase: `exchange ${action}` }, async () => {
+      let phase = `preparing exchange ${action}`;
+      const report = (next: string) => {
+        phase = next;
+        workProgress(phase, 'in progress');
+      };
+      report(phase);
+      const heartbeat = setInterval(() => report(phase), 5000);
+      heartbeat.unref();
       try {
-        return await boundExchangeAction(root, action, target);
+        return await boundExchangeAction(root, action, target, report);
       } catch (error) {
         throw hostedActionError(error, `exchange ${action}`);
+      } finally {
+        clearInterval(heartbeat);
       }
     }),
   );
 }
-async function boundExchangeAction(root: string, action: 'push' | 'pull', target?: string) {
+async function boundExchangeAction(
+  root: string,
+  action: 'push' | 'pull',
+  target: string | undefined,
+  report: (phase: string) => void,
+) {
   const store = new WorkStore(root),
     binding = requireHostedBinding(store);
   const client = new ConvexExchange(
@@ -56,6 +71,7 @@ async function boundExchangeAction(root: string, action: 'push' | 'pull', target
     null,
   );
   if (action === 'pull') {
+    report('checking out hosted main');
     const destination = resolve(target ?? join(dirname(store.root), `${basename(store.root)}-hosted-main`));
     const key = JSON.stringify([binding.deployment, binding.projectId, destination]);
     const operationId = updateHostState(store, state => ((state.pulls ??= {})[key] ??= randomUUID()));
@@ -73,6 +89,7 @@ async function boundExchangeAction(root: string, action: 'push' | 'pull', target
     });
     return result;
   }
+  if (!store.native) report('reading hosted Work state');
   const remote = store.native ? undefined : await hostedState(client, binding.projectId);
   let request: PendingPush = updateHostState(store, state => {
     const original = [...(state.push ? [state.push] : []), ...(state.pendingPushes ?? [])].find(
@@ -98,7 +115,7 @@ async function boundExchangeAction(root: string, action: 'push' | 'pull', target
   for (;;) {
     let result;
     try {
-      result = await pushAttempt(root, store, request);
+      result = await pushAttempt(root, store, request, report);
     } catch (error) {
       // Known stale/conflicting phases can use fresh pins next time. A checkpoint
       // may already be published if source return was stale; it remains retained.
@@ -112,6 +129,7 @@ async function boundExchangeAction(root: string, action: 'push' | 'pull', target
       if ((code === 'PROJECT_CHANGED' || code === 'WORK_STALE') && (request.attempt ?? 0) < REBASE_ATTEMPTS) {
         // A known hosted CAS mismatch: nothing of this attempt was selected. Rebase
         // onto fresh hosted pins with a new, deterministic attempt identity.
+        report('reading hosted Work state');
         const fresh = await hostedState(client, binding.projectId),
           parentId = request.parentId ?? request.operationId,
           attempt = (request.attempt ?? 0) + 1;
@@ -189,7 +207,12 @@ async function boundExchangeAction(root: string, action: 'push' | 'pull', target
   }
 }
 /** One attempt with immutable pins. Its local snapshot is retained before network access. */
-async function pushAttempt(root: string, store: WorkStore, request: PendingPush) {
+async function pushAttempt(
+  root: string,
+  store: WorkStore,
+  request: PendingPush,
+  report: (phase: string) => void,
+) {
   const persist = (update: (pending: PendingPush) => void) =>
     updateHostState(store, state => {
       const pending = [state.push, ...(state.pendingPushes ?? [])].find(
@@ -209,6 +232,7 @@ async function pushAttempt(root: string, store: WorkStore, request: PendingPush)
   // Capture all mutable local inputs before the first hosted read. The separate
   // capture ID stays unchanged across rebases; each attempt overlays only hosted
   // metadata onto these original local bytes.
+  report('capturing local source and Work');
   const captured = request.captureId
     ? await prepareNativeExchange(
         store,
@@ -227,6 +251,7 @@ async function pushAttempt(root: string, store: WorkStore, request: PendingPush)
     });
   }
   if (request.needsBaseline) {
+    report('reading hosted Work state');
     const remote = await hostedState(transport, request.projectId);
     request.previous = remote.currentBackup;
     if (remote.work) {
@@ -244,7 +269,7 @@ async function pushAttempt(root: string, store: WorkStore, request: PendingPush)
       delete pending.needsBaseline;
     });
     // The transport was constructed before observing the hosted baseline.
-    return pushAttempt(root, store, request);
+    return pushAttempt(root, store, request, report);
   }
   const captureBytes = captured ? readFileSync(join(captured.directory, 'work.json')) : undefined;
   if (captured && captureBytes) {
@@ -257,6 +282,7 @@ async function pushAttempt(root: string, store: WorkStore, request: PendingPush)
   }
   let candidate = captureBytes ? parseWorkBytes(captureBytes) : undefined;
   if (request.reconcileId && request.returnSource) {
+    report('receiving and reconciling hosted Work journal');
     const reconcileId = request.reconcileId,
       returnSource = request.returnSource;
     // Hosted WORK_STALE here is a hosted CAS mismatch (rebased by the caller); local
@@ -293,7 +319,8 @@ async function pushAttempt(root: string, store: WorkStore, request: PendingPush)
     request.revision = Math.max(request.revision, reconciled.result.receipt.revision);
     // Retain the derived attempt before recording reconciliation as complete.
     // A crash can repeat the original reconciliation and receive its same receipt.
-    if (captured && candidate)
+    if (captured && candidate) {
+      report('preparing reconciled checkpoint');
       await prepareNativeExchange(
         store,
         request.revision,
@@ -308,12 +335,14 @@ async function pushAttempt(root: string, store: WorkStore, request: PendingPush)
           ...(request.returnSource ? { journalRevision: request.returnSource.revision } : {}),
         },
       );
+    }
     delete request.reconcileId;
     persist(pending => {
       Object.assign(pending, request);
       delete pending.reconcileId;
     });
   }
+  report('preparing and uploading checkpoint');
   const result = await retryExchange(
     'local checkpoint push',
     request.operationId,
@@ -343,6 +372,7 @@ async function pushAttempt(root: string, store: WorkStore, request: PendingPush)
     { localSnapshot: true },
   );
   if (!request.returnSource) return result;
+  report('returning hosted source');
   const sourceReturn = await transport.returnSource(
     result.backupId,
     request.returnSource.expectedBackupId,
@@ -350,6 +380,7 @@ async function pushAttempt(root: string, store: WorkStore, request: PendingPush)
     request.returnSource.operationId,
     result.ownerDerived,
   );
+  report('refreshing hosted Work index');
   await retryExchange('hosted index refresh', request.operationId, () =>
     transport.client.action(makeFunctionReference<'action'>('projectWorkIndexActions:ensure'), {
       projectId: request.projectId,
