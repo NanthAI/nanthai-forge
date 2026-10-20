@@ -4,6 +4,7 @@ export const laneReceipt = (lane: Lane, path: string) => ({
   laneId: lane.id,
   ...(lane.after ? { after: lane.after } : {}),
   ...(lane.startedBy ? { startedBy: lane.startedBy } : {}),
+  ...(lane.startedAt ? { startedAt: lane.startedAt } : {}),
   intentId: lane.intentId,
   base: lane.base,
   head: lane.head,

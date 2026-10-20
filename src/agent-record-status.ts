@@ -1,3 +1,4 @@
+import { agentLaneStatus } from './agent-lane-status.js';
 import { runnerMonthCosts } from './check-cost.js';
 import { modalMonthCost } from './check-backend.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -35,6 +36,8 @@ export function agentRecordStatus(
   const tx = recoverRecordRuns(store, original),
     data = tx.data(),
     environment = checkEnvironment();
+  const lane = command.laneId ? agentLaneStatus(store, command, tx) : undefined;
+  if (lane && !command.detail) return { revision: tx.revision, result: { lane } };
   invariant(
     !command.intentId || tx.positions('intents', command.intentId).length,
     'NOT_FOUND',
@@ -81,6 +84,7 @@ export function agentRecordStatus(
   return {
     revision: tx.revision,
     result: {
+      ...(lane ? { lane } : {}),
       modalCost: modalMonthCost(positions('runs').map(position => tx.at('runs', position))),
       checkCosts: runnerMonthCosts(positions('runs').map(position => tx.at('runs', position))),
       autonomyPolicy: readPolicy(store),

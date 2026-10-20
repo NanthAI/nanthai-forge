@@ -144,6 +144,7 @@ export async function importBundle(store: WorkStore, command: ContributionComman
         retain([command.expectedHead]);
         const lane: Lane = {
           id: command.operationId,
+          startedAt: new Date().toISOString(),
           intentId: command.intentId,
           name: command.name,
           assignment: '',

@@ -136,7 +136,8 @@ export function deriveMakingOf(input: MakingOfInput) {
 
   const lanes = input.lanes.map(lane => {
     seen(lane.startedBy);
-    const startedAt = intent.agentStart?.laneId === lane.id ? intent.createdAt : undefined;
+    const startedAt = lane.startedAt;
+    note(startedAt);
     const ended = (lane.lifecycle ?? [])
       .filter(entry => ['completed', 'abandoned'].includes(entry.to))
       .at(-1);

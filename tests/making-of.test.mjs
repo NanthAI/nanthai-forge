@@ -206,7 +206,7 @@ test('one Lane, one run and one landing: timings, actors and advisory sources', 
       },
     ],
   });
-  assert.equal(record.lanes[0].startedAt, T('10:00:00.000'));
+  assert.ok(!('startedAt' in record.lanes[0]));
   assert.equal(record.lanes[0].endedAt, T('10:10:00.000'));
   assert.deepEqual(
     record.lanes[0].saves.map(save => save.kind),

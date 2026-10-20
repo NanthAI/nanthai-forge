@@ -17,6 +17,7 @@ Use ordinary search/read/edit tools on the selected source. For recorded deliver
 nforge agent ROOT start '{"outcome":"CHANGE"}'                          # laneId + path; edit only that path
 nforge agent ROOT finish '{"laneId":"LANE_ID","message":"CHANGE","accept":true}'
 nforge agent ROOT run '{"laneId":"LANE_ID"}'                            # re-run the default check on the Lane's latest clean Candidate
+nforge agent ROOT status '{"laneId":"LANE_ID"}'                       # compact saved Lane record
 nforge agent ROOT log '{"operationId":"RUN_ID","stream":"stderr","tail":4096}'
 nforge agent ROOT records '{"collection":"lanes","state":"active","merged":false}'
 nforge agent ROOT complete '{"laneId":"LANE_ID"}'                       # or {"intentId":...}; reopen undoes it
@@ -47,7 +48,9 @@ fields `viewId`, `view` and `views` retain their wire names. Work actions use
 corresponding View spellings retained as aliases.
 
 
-`status` and `records` both return `items`, `total`, `more`, `nextOffset` (`records` also keeps `records`). Lane items show `merged` and `mergedInto` when their own head is contained in an accepted Channel. Filters: `state`/`status`, `merged`. Continue with `nextOffset`; compare revisions when consistency across pages matters.
+`status {laneId}` returns only `result.lane`: state, saved head/base, save count, paged Candidates, last check and saved changed-path count. Use this for your own Lane instead of reading owner-wide history. The count compares base to saved head; use `review` for unsaved edits. Missing source reports a null count and a structured error. `status {laneId,detail:true}` adds the existing owner overview; omitting laneId retains the overview, optionally filtered by intentId. New Lanes retain `startedAt`; historical missing times remain unknown. Sync and checkpoint put a one-line `summary` first, preserving existing result fields. Pass `detail:true` for expanded peer details, or read `peers {laneId,detail:true}`.
+
+Overview `status` and `records` both return `items`, `total`, `more`, `nextOffset` (`records` also keeps `records`). Lane items show `merged` and `mergedInto` when their own head is contained in an accepted Channel. Filters: `state`/`status`, `merged`. Continue with `nextOffset`; compare revisions when consistency across pages matters.
 
 Native checkpoint receipts include capture coverage and excluded-path reasons; confirm intended files were captured. Use `start` with `intentId` to add a sibling Lane, checkpoint siblings then `finish` with `with:[laneId]` to land them together; `after:{intentId}` or `after:{viewId}` records a dependency wait, resumed with the original request plus `resolved` or `land-ready` on the same owner.
 

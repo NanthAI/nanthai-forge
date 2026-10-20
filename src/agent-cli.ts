@@ -85,7 +85,7 @@ const examples: Record<string, unknown> = {
   reopen: { laneId: 'LANE_ID' },
   'complete-merged': { channel: 'main' },
   clean: { apply: false, kinds: ['check-workspaces', 'lane-deps', 'lanes'] },
-  status: { intentId: 'INTENT_ID', offset: 0, limit: 5 },
+  status: { laneId: 'LANE_ID' },
   records: { collection: 'lanes', state: 'active', merged: false, offset: 0, limit: 50 },
   'making-of': { intentId: 'INTENT_ID' },
   report: { laneId: 'LANE_ID', harness: 'claude-code', model: 'MODEL', tokens: { input: 1200, output: 340 } },
@@ -121,6 +121,12 @@ function actionHelp(action: string): string {
   if (action === 'finish')
     result +=
       'with:[LANE_ID] includes sibling recorded heads in one Candidate/check/acceptance. after:{intentId} or after:{viewId} records a dependency; rerun the same request or land-ready after it lands. Omit accept to check only. accept:true means main at its current head. If main moved, finish syncs first; a sync conflict stops with phase "sync" and markers in the Lane. CHANNEL_CHANGED automatically retries sync/check/accept under the landing queue (maxRetries:3 by default, 0 disables retries). Receipts include attempts and queue positions. CHANNEL_DIVERGED means the Candidate lacks the Channel head: sync and finish again. CONTRACT_RESYNC_REQUIRED means main changed an export or schema your edits use; finish retries it like CHANNEL_CHANGED.\n';
+  if (action === 'status')
+    result +=
+      'laneId returns one compact Lane: state, saved head/base, save count, paged Candidates, last check and saved changed-path count. detail:true also includes the existing owner overview. Omit laneId for that overview; intentId filters it. Candidate pages use offset/limit. Unsaved changes are available through review.\n';
+  if (action === 'checkpoint' || action === 'sync')
+    result +=
+      'Top-level summary leads with the outcome. Existing result fields remain; detail:true expands peer details (also available with peers {laneId,detail:true}).\n';
   if (action === 'sync')
     result +=
       'Needs a checkpointed Lane (else LANE_DIRTY). Returns up-to-date, merged, or conflict with markers; resolve them and checkpoint or finish.\n';

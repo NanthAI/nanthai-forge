@@ -109,6 +109,7 @@ export function registerNativeContribution(
       );
     const lane: Lane = {
       id: receipt.id,
+      startedAt: new Date().toISOString(),
       intentId: receipt.intentId,
       name,
       assignment: '',

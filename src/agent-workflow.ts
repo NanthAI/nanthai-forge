@@ -1,3 +1,5 @@
+import { agentLaneStatus } from './agent-lane-status.js';
+import { syncSummary } from './agent-operation-summary.js';
 import { runnerMonthCosts } from './check-cost.js';
 import { candidateCommand } from './candidate-names.js';
 import { agentTake } from './agent-take.js';
@@ -195,9 +197,21 @@ export class AgentWorkflow {
       } catch {
         peers.coverage = 'local-incomplete';
       }
-      boundPeers(peers);
+      const detail = 'detail' in command && command.detail === true;
+      if (!detail && ['checkpoint', 'sync'].includes(command.action)) delete peers.changes;
+      boundPeers(peers, detail);
     }
+    const summary =
+      command.action === 'sync'
+        ? syncSummary(response.result as Parameters<typeof syncSummary>[0], command.channel)
+        : command.action === 'checkpoint'
+          ? (response.result as { head: string; parent: string }).head ===
+            (response.result as { parent: string }).parent
+            ? 'Lane checkpoint unchanged'
+            : 'saved Lane checkpoint'
+          : undefined;
     return {
+      ...(summary ? { summary } : {}),
       ...response,
       result: {
         ...(response.result as object),
@@ -289,6 +303,8 @@ export class AgentWorkflow {
           data.revision++;
           store.save(data);
         }
+        const lane = command.laneId ? agentLaneStatus(store, command, undefined, data) : undefined;
+        if (lane && !command.detail) return { revision: data.revision, result: { lane } };
         invariant(
           !command.intentId || data.intents.some(intent => intent.id === command.intentId),
           'NOT_FOUND',
@@ -308,6 +324,7 @@ export class AgentWorkflow {
         return {
           revision: data.revision,
           result: {
+            ...(lane ? { lane } : {}),
             modalCost: modalMonthCost(data.runs),
             checkCosts: runnerMonthCosts(data.runs),
             autonomyPolicy: readPolicy(store),

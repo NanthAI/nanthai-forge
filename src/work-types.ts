@@ -149,6 +149,7 @@ export const laneSchema = z.object({
   after: afterSchema.optional(),
   id,
   startedBy: workActorSchema.optional(),
+  startedAt: z.string().optional(),
   scope: z.object({ paths: z.array(z.string().refine(safeRelative)) }).optional(),
   owner: z.object({ actor: z.string(), at: z.string(), operationId: id, request: z.string() }).optional(),
   handovers: z

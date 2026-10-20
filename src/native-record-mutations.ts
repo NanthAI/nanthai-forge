@@ -97,6 +97,7 @@ function recordNativeLaneLocked(
       id = randomUUID();
       tx.append('lanes', {
         id,
+        startedAt: at,
         intentId,
         name,
         assignment,

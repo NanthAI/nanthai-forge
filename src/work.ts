@@ -200,6 +200,7 @@ export class WorkService {
     const warnings = diskGuard(this.store.root);
     const lane: Lane = {
       id: randomUUID(),
+      startedAt: new Date().toISOString(),
       intentId,
       name,
       assignment,

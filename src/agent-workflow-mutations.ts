@@ -185,6 +185,7 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
               ...(existing ? { agentStart: { id: command.operationId, request: hash } } : {}),
               ...(command.after ? { after: command.after } : {}),
               startedBy: localActor('agent', command.actor, command.tool),
+              startedAt: at,
               ...(command.scope ? { scope: command.scope } : {}),
               setup: localAgentSetup(store.root, liveMcp) as { machine: string; mcpConfigured: boolean },
               intentId: intent.id,

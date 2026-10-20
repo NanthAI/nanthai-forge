@@ -75,6 +75,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   }),
   z.object({
     action: z.literal('checkpoint'),
+    detail: z.boolean().optional(),
     scope: peersScopeSchema.optional(),
     waitMs: z.number().int().nonnegative().safe().optional(),
     ...lockWait,
@@ -113,6 +114,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   }),
   z.object({
     action: z.literal('sync'),
+    detail: z.boolean().optional(),
     scope: peersScopeSchema.optional(),
     waitMs: z.number().int().nonnegative().safe().optional(),
     ...lockWait,
@@ -199,6 +201,8 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('complete-merged'), channel: z.string().trim().min(1).default('main') }),
   z.object({
     action: z.literal('status'),
+    laneId: id.optional(),
+    detail: z.boolean().optional(),
     intentId: id.optional(),
     offset: z.number().int().nonnegative().default(0),
     limit: z.number().int().min(1).max(100).default(5),
