@@ -53,3 +53,69 @@ test('graph columns fit the container and edge endpoints stay on file cards', ()
     assert.ok(edge.endsWith(`${targetX} ${b.y + 21}`));
   }
 });
+
+const model = await import(moduleUrl('../web/src/code-file-model.ts'));
+const { treeCounts } = await import(moduleUrl('../web/src/CodeFileTree.tsx'));
+test('Code tree dots, Lane tones, changed lines and symbols for the This file panels', () => {
+  const lane = (id, tone, paths) => ({
+    id,
+    name: id,
+    holder: id,
+    agent: true,
+    what: '',
+    saves: 0,
+    tone,
+    href: '#',
+    paths,
+  });
+  const touches = model.treeTouches([
+    lane('whos', 'active', ['web/src/cockpit/LaneList.tsx', 'web/src/cockpit/Sessions.tsx']),
+    lane('i4', 'failed', ['web/src/cockpit/LaneList.tsx', 'scripts/ui-shots.mjs']),
+  ]);
+  // A file and every folder above it carry the most urgent tone of the Lanes touching them.
+  assert.deepEqual(touches.get('web/src/cockpit/LaneList.tsx'), { tone: 'failed', lanes: ['whos', 'i4'] });
+  assert.deepEqual(touches.get('web/'), { tone: 'failed', lanes: ['whos', 'i4'] });
+  assert.deepEqual(touches.get('web/src/cockpit/Sessions.tsx'), { tone: 'active', lanes: ['whos'] });
+  assert.equal(touches.get('scripts/').tone, 'failed');
+  assert.equal(touches.has('docs/'), false);
+  assert.match(model.touchTitle(touches.get('web/')), /whos, i4/);
+
+  const views = [{ id: 'v', inputs: [{ laneId: 'l', head: 'h2' }] }];
+  const runs = [
+    { viewId: 'v', status: 'failed', startedAt: '2026-10-20T10:00:00Z' },
+    { viewId: 'v', status: 'passed', startedAt: '2026-10-20T11:00:00Z' },
+  ];
+  assert.equal(model.laneTone({ id: 'l', head: 'h2', assignment: 'gpt' }, views, runs), 'passed');
+  // A Candidate of an older save says nothing about the current head.
+  assert.equal(model.laneTone({ id: 'l', head: 'h3', assignment: 'gpt' }, views, runs), 'active');
+  assert.equal(model.laneTone({ id: 'l', head: 'h3', assignment: '' }, views, runs), 'stale');
+
+  const hunk = {
+    afterStart: 40,
+    lines: ['context', 'removed', 'added', 'added', 'context', 'added'].map(kind => ({ kind })),
+  };
+  assert.deepEqual(model.changedLines([hunk]), [
+    [41, 42],
+    [44, 44],
+  ]);
+  assert.equal(
+    model.rangeLabel([
+      [41, 58],
+      [120, 120],
+    ]),
+    'L41–58, L120',
+  );
+
+  const text =
+    'import { a } from "./a";\n\ntype Props = { a: number };\nexport const FOLD = 6;\nexport function List() {}\nconst fact = () => 1;\nexport default class Thing {}\n';
+  assert.deepEqual(model.fileSymbols('x.tsx', text, 36), [
+    { kind: 'type', name: 'Props', line: 38 },
+    { kind: 'const', name: 'FOLD', line: 39 },
+    { kind: 'fn', name: 'List', line: 40 },
+    { kind: 'fn', name: 'fact', line: 41 },
+    { kind: 'class', name: 'Thing', line: 42 },
+  ]);
+  assert.deepEqual(model.fileSymbols('notes.md', text), []);
+  assert.equal(treeCounts(['README.md', 'web/src/a.ts', 'web/b.ts']), '3 files · 2 folders');
+  assert.equal(treeCounts(['README.md']), '1 file · 0 folders');
+});

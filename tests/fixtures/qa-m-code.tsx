@@ -10,7 +10,7 @@ import '../../web/src/ui/signals.css';
 import '../../web/src/shell/shell.css';
 const head = 'a'.repeat(64);
 const lanes = [
-  { id: 'exports', name: 'Export filenames', intentId: 'intent', base: head, head: 'b'.repeat(64), state: 'active' },
+  { id: 'exports', name: 'Export filenames', intentId: 'intent', base: head, head: 'b'.repeat(64), state: 'active', assignment: 'claude-exports' },
   { id: 'docs', name: 'Explain exports', intentId: 'intent', base: head, head: 'c'.repeat(64), state: 'active' },
 ] as const;
 const params = new URLSearchParams(location.search);
@@ -19,8 +19,8 @@ Object.assign(globalThis, { __forgeTree: {
   queries: { 'projectWorkIndex:detail': () => ({ generationId: 'g1', value: JSON.stringify({ head, files: 3 }) }) },
   pages: { 'projectWorkIndex:records': (args: { collection: string }) => args.collection === 'sourceTreePaths'
     ? [{ value: JSON.stringify({ paths: ['README.md', 'src/export.ts', 'src/untouched.ts'] }) }] : [] },
-  actions: { 'projectSourceReview:read': (args: { file?: string; head: string }) => JSON.stringify(args.file
-    ? { available: true, file: { after: { blob: head } }, after: { kind: 'text', text: 'export const filename = "Report.csv";\n', offset: 0, line: 1, nextOffset: null } }
+  actions: { 'projectSourceReview:read': (args: { file?: string; head: string; base: string }) => JSON.stringify(args.file
+    ? { available: true, file: { after: { blob: head } }, ...(args.base !== args.head ? { comparison: { hunks: [{ afterStart: 1, lines: [{ kind: 'added' }] }] } } : {}), after: { kind: 'text', text: 'export const filename = "Report.csv";\n', offset: 0, line: 1, nextOffset: null } }
     : { available: true, paths: [{ path: args.head === lanes[0].head ? 'src/export.ts' : 'README.md', status: 'modified' }] }) },
 } });
 createRoot(document.getElementById('root')!).render(<div className="fx"><main className="fx-page">

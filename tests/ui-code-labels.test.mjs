@@ -55,29 +55,58 @@ test('Code labels and activity follow file selection; work-map counts use singul
       assert.equal(await page.title(), 'Forge label QA');
       assert.equal(await page.locator('vite-error-overlay').count(), 0);
       assert.equal(await page.getByLabel('Changing now', { exact: true }).count(), 0);
-      assert.equal(await page.locator('.inspector-file').innerText(), 'README.md');
+      assert.equal(await page.locator('.code-file-path').innerText(), 'README.md');
       assert.equal(await page.locator('button[title="README.md"][aria-current="page"]').count(), 1);
       assert.equal(await page.getByText('Select a file').count(), 0);
       assert.equal(await page.locator('.code-main-pin').count(), 0);
       assert.match(await page.getByRole('button', { name: 'Source: main' }).innerText(), /main/);
       if (output)
         await page.screenshot({ path: `${output}/code-default-${width}-${theme}.png`, fullPage: true });
-      await page.locator('.code-folder > summary').click();
-      await page.locator('button[title="src/export.ts"]').waitFor();
-      await page.locator('button[title="src/export.ts"]').click();
+      // The collapsed src folder carries the dot of the Lane touching a file beneath it.
+      assert.equal(await page.locator('.code-folder > summary .code-touched').count(), 1);
+      // Up to 1059 px the tree lives behind `Files`; choosing a file closes the sheet.
+      const narrow = width <= 1059;
+      const tree = async () => {
+        if (!narrow) return page.locator('.workspace > .sidebar');
+        await page.locator('.code-files-btn').click();
+        return page.locator('.fx-sheet');
+      };
+      let files = await tree();
+      await files.locator('.code-folder > summary').click();
+      await files.locator('button[title="src/export.ts"]').click();
       const changing = page.getByLabel('Changing this file', { exact: true });
       await changing.waitFor();
       assert.equal(await page.getByLabel('Changing now', { exact: true }).count(), 0);
       assert.equal(await changing.getByRole('link').count(), 1);
-      assert.match(await changing.innerText(), /Export filenames/);
+      assert.match(await changing.innerText(), /claude-exports/);
       assert.doesNotMatch(await changing.innerText(), /Explain exports/);
-      assert.equal(await page.locator('.inspector .code-changing').count(), 1);
-      assert.match(await page.locator('.source-pane .code-changing').innerText(), /1 Lane on this file/);
+      await changing.getByText('L1', { exact: true }).waitFor();
+      assert.match(
+        await changing.getByRole('link').getAttribute('href'),
+        /\/lanes\/exports\?.*diffFile=src%2Fexport\.ts/,
+      );
+      // The tree dot, the strip, the gutter mark and the This file panel agree on the same Lane.
+      assert.equal(await page.locator('button[title="src/export.ts"] .code-touched').count(), 1);
+      assert.equal(await page.locator('.source-pane .lane-touched-line').count(), 1);
+      assert.equal(await page.locator('.code-this-file .code-lane-row').count(), 1);
+      assert.match(await page.locator('.code-this-file .code-lane-row').innerText(), /Working[\s\S]*L1/);
+      assert.match(await page.locator('.code-this-file .code-symbol').innerText(), /const\s*filename\s*L1/);
+      assert.equal(await page.getByText('Imports', { exact: true }).count(), 0);
+      assert.equal(await page.getByText('Exact record', { exact: true }).count(), 0);
+      const header = await page.locator('.code-file-h').boundingBox();
+      assert.ok(header.x + header.width <= width, `file header ${header.x + header.width} > ${width}`);
+      assert.equal(await page.locator('.code-files-btn').isVisible(), narrow);
+      assert.equal(await page.locator('.workspace > .sidebar').isVisible(), !narrow);
+      assert.equal(await page.locator('.fx-sheet').count(), 0);
       if (output)
         await page.screenshot({ path: `${output}/code-file-${width}-${theme}.png`, fullPage: true });
-      await page.locator('button[title="src/untouched.ts"]').click();
-      await page.locator('button[title="src/untouched.ts"][aria-current="page"]').waitFor();
-      assert.equal(await page.locator('.code-changing').count(), 0);
+      files = await tree();
+      await files.locator('button[title="src/untouched.ts"]').click();
+      await page
+        .locator('button[title="src/untouched.ts"][aria-current="page"]')
+        .waitFor({ state: 'attached' });
+      await page.locator('.code-file-path').filter({ hasText: 'untouched.ts' }).waitFor();
+      assert.equal(await page.locator('.code-changing-strip, .code-lane-row, .lane-touched-line').count(), 0);
       await page.goto(`${base}?theme=${theme}&map=1`);
       await page.getByText('Work map', { exact: true }).waitFor();
       assert.equal(
@@ -95,7 +124,7 @@ test('Code labels and activity follow file selection; work-map counts use singul
     const picker = page.getByRole('button', { name: 'Source: Export filenames' });
     await picker.waitFor();
     assert.equal(await page.locator('.hosted-code .sidebar').count(), 1);
-    assert.equal(await page.locator('.inspector-file').innerText(), 'src/export.ts');
+    assert.equal(await page.locator('.code-file-path').innerText(), 'src/export.ts');
     assert.equal(await page.getByText('Saved source').count(), 0);
     await picker.click();
     const menu = page.getByRole('menu', { name: 'Source: Export filenames' });

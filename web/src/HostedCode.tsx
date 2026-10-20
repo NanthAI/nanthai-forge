@@ -1,29 +1,41 @@
-import { countLabel } from './ui/count';
 import { usePageCritical } from './ui/page-critical';
 import { SourcePicker } from './shell/SourcePicker';
 import { currentSource, sourceOptions } from './shell/source-options';
 import { Breadcrumbs, workHref } from './shell/Breadcrumbs';
 import { useReadRetry } from './ui/read-retry';
 import { ErrorToast } from './ui/Toast';
-import { ObjectActions, codeSourceLink } from './shell/ObjectActions';
+import { ObjectActions, codeSourceLink, savedLink } from './shell/ObjectActions';
 import { useWorkRecords, type IntentHeader } from './hosted-work-index';
 import type { HostedRunSummary, HostedViewSummary } from '../../src/work-hosted-summary';
-import type { MoveRecord } from './cockpit/now-model';
+import { publishedMoves, type MoveRecord } from './cockpit/now-model';
 import { useDestination } from './WorkspaceUI';
 // SPDX-License-Identifier: Apache-2.0
 import './code.css';
 import { useAction, useConvex, useQuery } from 'convex/react';
 import { workIndex } from './hosted-work-index';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { ReviewPath, reviewTextPage } from '../../src/native-source-review';
 import type { Lane } from '../../src/work-types';
 import type { WorkIndexWorkspace } from './hosted-work-index';
-import { CodeFileTree } from './CodeFileTree';
+import { CodeFileTree, treeCounts } from './CodeFileTree';
 import { SourceView } from './Content';
-import { CodeChanges, type CodeLane } from './CodeChanges';
-import { codeImports } from './code-imports';
+import type { CodeLane } from './CodeChanges';
+import { changedLines, fileSymbols, laneTone, treeTouches, type TouchLane } from './code-file-model';
+import {
+  ChangingNowPanel,
+  ChangingStrip,
+  FileHeader,
+  HistoryPanel,
+  SymbolsPanel,
+  type FileChange,
+  type FileLane,
+} from './CodeThisFile';
+import { Button } from './ui/primitives';
+import { Sheet } from './ui/Sheet';
+import { Glyph } from './ui/Glyph';
+import { age } from './ui/status';
 import { navigate } from './ui/navigation';
 import { cleanUrl, routeUrlState } from './shell/location';
 import { hostedError } from './snapshot';
@@ -201,17 +213,12 @@ export default function HostedCode({
               const value = JSON.parse(await read({ projectId, backupId, base, head: laneHead })) as Index;
               if (!current) return;
               if (!value.available) continue;
-              const url = routeUrlState();
-              url.searchParams.set('projectTab', 'lanes');
-              url.searchParams.set('lane', id);
-              url.searchParams.delete('file');
-              url.searchParams.delete('view');
               setChanges(previous => [
                 ...previous,
                 {
                   id,
                   name: lanes.find(lane => lane.id === id)?.name ?? 'Lane',
-                  href: cleanUrl(url.href),
+                  href: laneHref(id),
                   paths: value.paths.filter(path => path.status !== 'unchanged'),
                 },
               ]);
@@ -264,8 +271,86 @@ export default function HostedCode({
       current = false;
     };
   }, [read, projectId, backupId, head, selected, offset, retry, readAttempt]);
-  const touched = new Set(changes.flatMap(lane => lane.paths.map(path => path.path)));
   const now = Date.now();
+  const touchLanes = useMemo(
+    () =>
+      changes.flatMap((change): TouchLane[] => {
+        const lane = lanes.find(lane => lane.id === change.id) as LaneRecord | undefined;
+        if (!lane) return [];
+        const holder = lane.assignment?.trim();
+        return [
+          {
+            id: lane.id,
+            name: lane.name,
+            holder: holder || lane.name,
+            agent: lane.startedBy?.kind === 'agent' || (!!holder && holder !== lane.startedBy?.name),
+            what: intents.records.find(intent => intent.id === lane.intentId)?.outcome ?? '',
+            saves: lane.checkpointCount ?? lane.checkpoints?.length ?? 0,
+            tone: laneTone(lane, views.records, runs.records),
+            href: change.href,
+            paths: change.paths.map(path => path.path),
+          },
+        ];
+      }),
+    [changes, lanes, intents.records, views.records, runs.records],
+  );
+  const touched = useMemo(() => treeTouches(touchLanes), [touchLanes]);
+  const onFile = touchLanes.filter(lane => lane.paths.includes(selected));
+  const onFileKey = onFile.map(lane => lane.id).join(',');
+  // Lines each Lane changes in the selected file: one comparison read per touching Lane, cached.
+  const lineCache = useRef(new Map<string, [number, number][]>());
+  const lineReads = useRef(new Set<string>());
+  const [lineTick, setLineTick] = useState(0);
+  useEffect(() => {
+    for (const id of onFileKey ? onFileKey.split(',') : []) {
+      const lane = lanes.find(lane => lane.id === id);
+      if (!lane) continue;
+      const key = `${backupId}:${lane.base}:${lane.head}:${selected}`;
+      if (lineReads.current.has(key)) continue;
+      lineReads.current.add(key);
+      void read({ projectId, backupId, base: lane.base, head: lane.head, file: selected }).then(
+        value => {
+          const result = JSON.parse(value) as { comparison?: { hunks?: Parameters<typeof changedLines>[0] } };
+          lineCache.current.set(key, changedLines(result.comparison?.hunks ?? []));
+          setLineTick(tick => tick + 1);
+        },
+        // Lines are a hint; the Lane entry still shows without them, and a later visit retries.
+        () => lineReads.current.delete(key),
+      );
+    }
+  }, [read, projectId, backupId, selected, onFileKey, lanes]);
+  const fileLanes: FileLane[] = useMemo(
+    () =>
+      onFile.map(lane => {
+        const record = lanes.find(item => item.id === lane.id)!;
+        const lines = lineCache.current.get(`${backupId}:${record.base}:${record.head}:${selected}`);
+        return {
+          ...lane,
+          href: laneHref(lane.id, selected),
+          ...(lines ? { lines } : {}),
+        };
+      }),
+    // lineTick re-reads the cache after a comparison arrives.
+    [onFileKey, touchLanes, lineTick, backupId, selected],
+  );
+  const accepted = useMemo(
+    () =>
+      publishedMoves(localMoves.records, hostedMoves.records)
+        .filter(move => move.channel === 'main' && (!move.status || move.status === 'accepted'))
+        .sort((a, b) => b.at.localeCompare(a.at))
+        .slice(0, HISTORY_SCAN),
+    [localMoves.records, hostedMoves.records],
+  );
+  const history = useFileHistory({
+    read,
+    projectId,
+    backupId,
+    file: selected,
+    moves: accepted,
+    views: views.records,
+    runs: runs.records,
+    intents: intents.records,
+  });
   const sources = sourceOptions({
     main: currentMain,
     now,
@@ -277,9 +362,87 @@ export default function HostedCode({
     runs: runs.records,
   });
   const page = content?.available && content.after?.kind === 'text' ? content.after : null;
-  const edges = useMemo(
-    () => (page?.offset === 0 ? codeImports(selected, page.text, new Set(paths.map(path => path.path))) : []),
-    [page, selected, paths],
+  const symbols = useMemo(
+    () => (page?.offset === 0 ? fileSymbols(selected, page.text, page.line) : []),
+    [page, selected],
+  );
+  const [sheet, setSheet] = useState(false);
+  const [copied, setCopied] = useState('');
+  useEffect(() => setCopied(''), [selected, head]);
+  const find = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        if (find.current?.offsetParent) find.current.focus();
+        else setSheet(true);
+      }
+    };
+    addEventListener('keydown', key);
+    return () => removeEventListener('keydown', key);
+  }, []);
+  const lineCount = page && page.nextOffset === null ? page.line + page.text.split('\n').length - 1 : 0;
+  // A final newline is not a line of its own.
+  const lines = page?.text.endsWith('\n') && lineCount > 1 ? lineCount - 1 : lineCount;
+  const meta = [
+    lines ? `${lines} ${lines === 1 ? 'line' : 'lines'}` : page ? `lines ${page.line}+` : '',
+    history.changes[0] ? `accepted ${age(history.changes[0].at, now, true)}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const raw = async () => {
+    const parts: string[] = [];
+    let offset: number | null = 0;
+    while (offset !== null) {
+      const value = JSON.parse(
+        await read({ projectId, backupId, base: head, head, file: selected, afterOffset: offset }),
+      ) as File;
+      if (!value.available || value.after?.kind !== 'text')
+        return setError('Raw text is unavailable for this file.');
+      parts.push(value.after.text);
+      offset = value.after.nextOffset;
+    }
+    window.open(
+      URL.createObjectURL(new Blob(parts, { type: 'text/plain;charset=utf-8' })),
+      '_blank',
+      'noopener',
+    );
+  };
+  const fileTree = (input?: boolean) => (
+    <>
+      <label className="search code-find">
+        <Glyph name="search" size={13} />
+        <span className="sr-only">Find a file</span>
+        <input
+          ref={input ? find : undefined}
+          type="search"
+          aria-label="Find a file"
+          placeholder="Find a file"
+          value={query}
+          onChange={event => setQuery(event.target.value)}
+        />
+        <kbd aria-hidden="true">⌘P</kbd>
+      </label>
+      {paths.length > 0 && <p className="code-tree-count">{treeCounts(paths.map(path => path.path))}</p>}
+      {!index && !treeAvailable && (
+        <p role="status" className="code-loading">
+          Loading files…
+        </p>
+      )}
+      <CodeFileTree
+        paths={paths.map(path => path.path)}
+        selected={selected}
+        touched={touched}
+        select={path => {
+          setSheet(false);
+          select(path);
+        }}
+        query={query}
+      />
+      {(index?.available || treeAvailable) && !paths.length && (
+        <p className="code-loading">No files in main.</p>
+      )}
+    </>
   );
   return (
     <section className="code-browser hosted-code" aria-label="Project code">
@@ -331,79 +494,83 @@ export default function HostedCode({
       {index && !index.available && (
         <ErrorToast read error={index.reason} retry={() => setRetry(value => value + 1)} />
       )}
+      {sheet && (
+        <Sheet title="Files" glyph="folder" onClose={() => setSheet(false)} width={360}>
+          <div className="code-browser hosted-code code-files-sheet">{fileTree()}</div>
+        </Sheet>
+      )}
       <div className="workspace">
         <aside className="sidebar" aria-label="Repository files">
-          <label className="search">
-            <span className="sr-only">Find a file</span>
-            <input
-              type="search"
-              aria-label="Find a file"
-              placeholder="Find a file"
-              value={query}
-              onChange={event => setQuery(event.target.value)}
-            />
-          </label>
-          <h2>
-            Files <span>{paths.length}</span>
-          </h2>
-          {!index && !treeAvailable && (
-            <p role="status" className="code-loading">
-              Loading files…
-            </p>
-          )}
-          <CodeFileTree
-            paths={paths.map(path => path.path)}
-            selected={selected}
-            touched={touched}
-            select={select}
-            query={query}
-          />
-          {(index?.available || treeAvailable) && !paths.length && (
-            <p className="code-loading">No files in main.</p>
-          )}
+          {fileTree(true)}
         </aside>
         <main className="main">
           {page && content?.available ? (
-            <>
-              <SourceView
-                head={head}
-                source={{
-                  file: selected,
-                  digest: content.file.after!.blob,
-                  text: page.text,
-                  startLine: page.line,
-                  endLine: page.line + page.text.split('\n').length - 1,
-                  totalLines:
-                    page.nextOffset === null
-                      ? page.line + page.text.split('\n').length - 1
-                      : Number.MAX_SAFE_INTEGER,
-                }}
-                selectedLine={selectedLine}
-                changing={
-                  changes.some(lane => lane.paths.some(path => path.path === selected)) ? (
-                    <div className="code-changing">
-                      <a href="#code-this-file">
-                        {countLabel(
-                          changes.filter(lane => lane.paths.some(path => path.path === selected)).length,
-                          'Lane',
-                        )}{' '}
-                        on this file
-                      </a>
-                    </div>
-                  ) : undefined
-                }
-                navigate={line => {
-                  if (line < page.line) {
-                    const next = [...previous];
-                    setOffset(next.pop() ?? 0);
-                    setPrevious(next);
-                  } else if (page.nextOffset !== null) {
-                    setPrevious(values => [...values, offset]);
-                    setOffset(page.nextOffset);
+            <SourceView
+              head={head}
+              source={{
+                file: selected,
+                digest: content.file.after!.blob,
+                text: page.text,
+                startLine: page.line,
+                endLine: page.line + page.text.split('\n').length - 1,
+                totalLines:
+                  page.nextOffset === null
+                    ? page.line + page.text.split('\n').length - 1
+                    : Number.MAX_SAFE_INTEGER,
+              }}
+              selectedLine={selectedLine}
+              header={
+                <FileHeader
+                  file={selected}
+                  meta={meta}
+                  files={() => setSheet(true)}
+                  actions={
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon="copy"
+                        onClick={() =>
+                          void navigator.clipboard.writeText(savedLink(head, selected, selectedLine)).then(
+                            () => setCopied('Copied'),
+                            () => setCopied('Could not copy'),
+                          )
+                        }
+                      >
+                        {copied || 'Copy link'}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          document.getElementById('code-history')?.scrollIntoView({ block: 'start' })
+                        }
+                        disabled={!history.loading && !history.changes.length}
+                      >
+                        History
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => void raw()}>
+                        Raw
+                      </Button>
+                    </>
                   }
-                }}
-              />
-            </>
+                />
+              }
+              changing={<ChangingStrip lanes={fileLanes} />}
+              touchedLines={fileLanes.flatMap(lane =>
+                (lane.lines ?? []).map(([start, end]) => [start, end, lane.tone] as const),
+              )}
+              navigate={line => {
+                if (line < page.line) {
+                  const next = [...previous];
+                  setOffset(next.pop() ?? 0);
+                  setPrevious(next);
+                } else if (page.nextOffset !== null) {
+                  setPrevious(values => [...values, offset]);
+                  setOffset(page.nextOffset);
+                }
+              }}
+            />
           ) : (
             <div className="empty" role="status">
               {content && !content.available ? (
@@ -416,28 +583,134 @@ export default function HostedCode({
             </div>
           )}
         </main>
-        <aside className="inspector" aria-label="This file" id="code-this-file">
-          <h2>This file</h2>
-          <p className="inspector-file">{selected}</p>
-          {selected && <CodeChanges lanes={changes} file={selected} />}
-          <section className="inspector-section">
-            <h3>Imports</h3>
-            {edges.map(edge => (
-              <button className="file-row" key={edge.to} onClick={() => select(edge.to)}>
-                {edge.to}
-              </button>
-            ))}
-            {selected && !edges.length && <p>No resolved imports in this source page.</p>}
-          </section>
-          <details className="inspector-section">
-            <summary>Exact record</summary>
-            <p>
-              main · <code>{head}</code>
-            </p>
-            {content?.available && <small>{content.file.after?.blob.slice(0, 12)}</small>}
-          </details>
+        <aside className="inspector code-this-file" aria-label="This file" id="code-this-file">
+          <ChangingNowPanel lanes={fileLanes} />
+          <SymbolsPanel symbols={symbols} href={line => href(selected) + `#L${line}`} />
+          <HistoryPanel changes={history.changes} loading={history.loading} now={now} />
         </aside>
       </div>
     </section>
   );
+}
+
+type LaneRecord = Lane & {
+  assignment?: string;
+  checkpointCount?: number;
+  startedBy?: { kind?: string; name?: string };
+};
+/** A Work page link without the Code page's file and source parameters. */
+function pageHref(params: Record<string, string>): string {
+  const url = routeUrlState();
+  for (const key of [
+    'file',
+    'view',
+    'head',
+    'sourceHead',
+    'sourceLane',
+    'sourceBackup',
+    'line',
+    'fileFilter',
+  ])
+    url.searchParams.delete(key);
+  url.hash = '';
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  return cleanUrl(url.href);
+}
+/** The Lane page, with this file selected in its Changes. */
+const laneHref = (lane: string, file?: string) =>
+  pageHref({ projectTab: 'lanes', lane, ...(file ? { diffFile: file } : {}) });
+
+/** Recent acceptances scanned for the selected file's History. */
+const HISTORY_SCAN = 8;
+// Changed paths per exact Candidate; immutable, so shared across files and visits.
+const candidatePaths = new Map<string, Promise<ReadonlySet<string> | null>>();
+
+function useFileHistory({
+  read,
+  projectId,
+  backupId,
+  file,
+  moves,
+  views,
+  runs,
+  intents,
+}: {
+  read: (args: {
+    projectId: Id<'hostedProjects'>;
+    backupId: Id<'projectBackups'>;
+    base: string;
+    head: string;
+  }) => Promise<string>;
+  projectId: Id<'hostedProjects'>;
+  backupId: Id<'projectBackups'>;
+  file: string;
+  moves: readonly MoveRecord[];
+  views: readonly HostedViewSummary[];
+  runs: readonly HostedRunSummary[];
+  intents: readonly IntentHeader[];
+}) {
+  const [state, setState] = useState<{ key: string; changes: FileChange[]; loading: boolean }>({
+    key: '',
+    changes: [],
+    loading: false,
+  });
+  const entries = moves.flatMap(move => {
+    const view = views.find(view => view.id === move.viewId);
+    return view?.base && view.head ? [{ move, view: view as HostedViewSummary & { head: string } }] : [];
+  });
+  const key = `${backupId}:${file}:${entries.map(entry => entry.move.viewId).join(',')}`;
+  useEffect(() => {
+    if (!file || !entries.length) {
+      setState({ key, changes: [], loading: false });
+      return;
+    }
+    let current = true;
+    setState({ key, changes: [], loading: true });
+    void (async () => {
+      const found: FileChange[] = [];
+      for (const { move, view } of entries) {
+        const id = `${backupId}:${view.base}:${view.head}`;
+        let paths = candidatePaths.get(id);
+        if (!paths) {
+          paths = read({ projectId, backupId, base: view.base, head: view.head }).then(
+            value => {
+              const result = JSON.parse(value) as Index;
+              return result.available
+                ? new Set(result.paths.filter(path => path.status !== 'unchanged').map(path => path.path))
+                : null;
+            },
+            () => null,
+          );
+          candidatePaths.set(id, paths);
+        }
+        const changed = await paths;
+        if (!current) return;
+        if (!changed?.has(file)) continue;
+        const run = runs.filter(run => run.viewId === view.id && run.status === 'passed').at(-1);
+        const minutes =
+          run?.endedAt && run.startedAt
+            ? Math.round((Date.parse(run.endedAt) - Date.parse(run.startedAt)) / 60_000)
+            : undefined;
+        found.push({
+          viewId: view.id,
+          title: intents.find(intent => intent.id === view.intentId)?.outcome ?? 'Candidate',
+          href: pageHref({ projectTab: 'views', viewId: view.id }),
+          head: view.head,
+          at: move.at,
+          by: move.acceptedBy?.name ?? move.actorDisplayName,
+          auto: !!move.automatic,
+          ...(run
+            ? { check: `${run.checkName.split(' · ')[0]}${minutes !== undefined ? ` ${minutes} min` : ''}` }
+            : {}),
+        });
+        setState({ key, changes: [...found], loading: true });
+      }
+      if (current) setState({ key, changes: found, loading: false });
+    })();
+    return () => {
+      current = false;
+    };
+    // `key` names the file and the exact Candidates scanned.
+  }, [key, read, projectId]);
+  return state.key === key ? state : { key, changes: [], loading: !!file && entries.length > 0 };
 }

@@ -126,10 +126,14 @@ export function SourceView({
   changing,
   touchedLines = [],
   head,
+  header,
 }: {
   head?: string;
   changing?: ReactNode;
-  touchedLines?: readonly [number, number][];
+  /** Replaces the default heading (hosted Code draws its own file header). */
+  header?: ReactNode;
+  /** Inclusive ranges; an optional tone colours the gutter mark (default `active`). */
+  touchedLines?: readonly (readonly [number, number, string?])[];
   source: Source;
   selectedLine?: number;
   navigate: (line: number) => void;
@@ -140,39 +144,46 @@ export function SourceView({
   }, [source.file, source.digest, selectedLine]);
   return (
     <section className="source-pane source">
-      <div className="pane-heading">
-        <h2>{source.file}</h2>
-        <ObjectActions
-          head={head ?? routeUrlState().searchParams.get('head') ?? undefined}
-          file={source.file}
-          line={selectedLine}
-        />
-        <p>
-          Lines {source.startLine}–{source.endLine}
-        </p>
-      </div>
+      {header ?? (
+        <div className="pane-heading">
+          <h2>{source.file}</h2>
+          <ObjectActions
+            head={head ?? routeUrlState().searchParams.get('head') ?? undefined}
+            file={source.file}
+            line={selectedLine}
+          />
+          <p>
+            Lines {source.startLine}–{source.endLine}
+          </p>
+        </div>
+      )}
       {changing}
       <div className="code-scroll">
         <pre>
-          {source.text.split('\n').map((line, i) => (
-            <div
-              ref={source.startLine + i === selectedLine ? target : undefined}
-              id={`L${source.startLine + i}`}
-              className={`code-line ${source.startLine + i === selectedLine ? 'active-line' : ''} ${touchedLines.some(([start, end]) => source.startLine + i >= start && source.startLine + i <= end) ? 'lane-touched-line' : ''}`}
-              key={i}
-            >
-              <span className="line-number">{source.startLine + i}</span>
-              <code>
-                <SyntaxLine
-                  text={line}
-                  file={source.file}
-                  blob={source.digest}
-                  range={String(source.startLine + i)}
-                  plain={source.text.length > 1_000_000}
-                />
-              </code>
-            </div>
-          ))}
+          {source.text.split('\n').map((line, i) => {
+            const touch = touchedLines.find(
+              ([start, end]) => source.startLine + i >= start && source.startLine + i <= end,
+            );
+            return (
+              <div
+                ref={source.startLine + i === selectedLine ? target : undefined}
+                id={`L${source.startLine + i}`}
+                className={`code-line ${source.startLine + i === selectedLine ? 'active-line' : ''} ${touch ? `lane-touched-line touch-${touch[2] ?? 'active'}` : ''}`}
+                key={i}
+              >
+                <span className="line-number">{source.startLine + i}</span>
+                <code>
+                  <SyntaxLine
+                    text={line}
+                    file={source.file}
+                    blob={source.digest}
+                    range={String(source.startLine + i)}
+                    plain={source.text.length > 1_000_000}
+                  />
+                </code>
+              </div>
+            );
+          })}
         </pre>
       </div>
       <div className="source-controls">
