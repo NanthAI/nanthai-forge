@@ -7,7 +7,7 @@ Four ideas cover most of it:
 - **Intent** — an outcome you want ("fix tax rounding").
 - **Lane** — an isolated working directory where one person or agent makes that change.
 - **Check** — a recorded test run against an exact snapshot of the code.
-- **Channel** — accepted source, like a branch (`main`). Agents accept after a passing check; people can accept a clean View under review. Accepting never drops someone else's accepted work.
+- **Channel** — accepted source, like a branch (`main`). Agents accept after a passing check; people can accept a clean Candidate under review. Accepting never drops someone else's accepted work.
 
 More in [concepts](docs/concepts.md).
 

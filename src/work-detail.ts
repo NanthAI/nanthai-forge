@@ -149,13 +149,13 @@ export function readWorkDetail(store: WorkStore, input: unknown) {
     }
     if (command.kind === 'view') {
       const view = data.views.find(item => item.id === command.id);
-      invariant(view, 'NOT_FOUND', 'View not found.');
+      invariant(view, 'NOT_FOUND', 'Candidate not found.');
       invariant(
         view.head === command.expectedHead &&
           view.base === command.expectedBase &&
           view.status === command.expectedStatus,
         'VIEW_STALE',
-        'Select this View’s original source pins.',
+        'Select this Candidate’s original source pins.',
       );
       return { revision: data.revision, result: { kind: 'view' as const, view: viewReview(store, view) } };
     }

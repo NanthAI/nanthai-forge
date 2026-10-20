@@ -15,8 +15,8 @@ two entries from one submitter, later entries yield one position per round to
 other submitters in that priority class. This changes order without imposing a
 quota. Requeued entries retain their arrival timestamps.
 
-The batch retains its base, ordered entries, cumulative prefix Views, conflict
-Views, deterministic run IDs, attribution and acceptance receipt. Source pins
+The batch retains its base, ordered entries, cumulative prefix Candidates, conflict
+Candidates, deterministic run IDs, attribution and acceptance receipt. Source pins
 are immutable even if an input Lane advances. A composition conflict ejects that
 entry and composition continues. Checks run outside Work, Lane and landing
 locks. The selector receives the union of candidate changed paths, so tooling
@@ -38,17 +38,17 @@ on real main. A restarted driver adopts every recorded batch in order. Local run
 never stack or wait.
 
 A passing batch moves main once, with every included Lane head recorded in its
-View. A remote failure (Modal or GitHub Actions) checks all proper prefixes in one parallel round, lands
+Candidate. A remote failure (Modal or GitHub Actions) checks all proper prefixes in one parallel round, lands
 the longest passing prefix, and attributes the next entry to its exact failed
 run. The remaining entries requeue. Local runners halve the prefix interval
-instead, only accepting a prefix that passed its own exact-View check. Interrupted
+instead, only accepting a prefix that passed its own exact-Candidate check. Interrupted
 or cancelled checks remain distinct from failed checks. `cancel` also accepts a
 queued entry operation ID: it ejects that entry, checks and lands only the prefix
 before it, and requeues the later entries. Already accepted work is retained.
 
 If main advances while checking, acceptance uses the existing manifest-disjoint
 proof when available. Otherwise it retains the old attempt and requeues on the
-new main. A restarted driver adopts persisted Views, runs and acceptance IDs;
+new main. A restarted driver adopts persisted Candidates, runs and acceptance IDs;
 a lost acceptance reply never causes another Channel move.
 
 Every batch acceptance requests the existing coalesced full-main audit, including

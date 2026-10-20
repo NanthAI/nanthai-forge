@@ -43,7 +43,7 @@ Local agent `start` records `startedBy {kind, name, tool?}`. `start`, `finish` a
 
 Hosted readers can call `projectPeopleActions.labels({projectId, actors})` for actors already visible in project Work or server coordination. Owners can also name participants in their existing roster. Imported declarations alone never authorize an unrelated account lookup. Results use display names without email fallback. The project-scoped derived names appear as `actorDisplayName` on hosted Work summaries and coordination rows (`fromDisplayName` in compact inbox items). Access is rechecked before returning names; unrelated account IDs cannot be used as a directory lookup.
 
-Hosted View/run summaries expose `main {head, included}` against the current hosted main (or imported main until a hosted selection exists). Native State parents and Git bundle commit parents (SHA-1/SHA-256, including pack deltas) are indexed during generation preparation; main moves require only indexed membership lookups. `included: null` means source or parent closure is unavailable; derived-data failure does not deny retained Work reads. A run uses its own exact head.
+Hosted Candidate/run summaries expose `main {head, included}` against the current hosted main (or imported main until a hosted selection exists). Native State parents and Git bundle commit parents (SHA-1/SHA-256, including pack deltas) are indexed during generation preparation; main moves require only indexed membership lookups. `included: null` means source or parent closure is unavailable; derived-data failure does not deny retained Work reads. A run uses its own exact head.
 
 ## Coordination
 
@@ -102,7 +102,7 @@ The token goes in the environment only. The server advertises just the granted t
 
 ## Local compute for hosted checks
 
-`nforge local-checks ROOT URL PROJECT_ID --name "My computer"` connects outward and waits. In the hosted Review page, pick a clean View, a check and your computer. The request carries only pins, never a command or source. Ctrl+C disconnects without cancelling a running check. Reconnect to reconcile its result.
+`nforge local-checks ROOT URL PROJECT_ID --name "My computer"` connects outward and waits. In the hosted Review page, pick a clean Candidate, a check and your computer. The request carries only pins, never a command or source. Ctrl+C disconnects without cancelling a running check. Reconnect to reconcile its result.
 
 ## Index-only use
 

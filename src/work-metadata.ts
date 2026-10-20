@@ -144,7 +144,7 @@ export function validateHostedChannel(
         retainedSource(source, command.head, `refs/forge/channel-moves/${command.acceptanceId}`)) &&
       retainedSource(source, command.head, `refs/forge/views/${command.viewId}`),
     'SOURCE_UNAVAILABLE',
-    'Select a retained local acceptance and clean View from this source checkpoint.',
+    'Select a retained local acceptance and clean Candidate from this source checkpoint.',
   );
   invariant(
     (hostedChannels(data).find(move => move.channel === command.channel)?.id ?? null) === command.previousId,

@@ -54,7 +54,7 @@ export function readAgentReview(store: WorkStore, input: AgentReviewInput) {
     const data = store.load(),
       lane = command.kind === 'lane' ? data.lanes.find(item => item.id === command.id) : undefined;
     const view = command.kind === 'view' ? data.views.find(item => item.id === command.id) : undefined;
-    invariant(lane || view, 'NOT_FOUND', 'Select an existing Lane or View.');
+    invariant(lane || view, 'NOT_FOUND', 'Select an existing Lane or Candidate.');
     const base = (lane ?? view)!.base,
       head = (lane ?? view)!.head;
     invariant(head === command.expectedHead, 'VIEW_STALE', 'Select the original retained source head.');
@@ -62,7 +62,7 @@ export function readAgentReview(store: WorkStore, input: AgentReviewInput) {
       invariant(
         base === command.expectedBase && view.status === command.expectedStatus,
         'VIEW_STALE',
-        'Select the exact View base and status.',
+        'Select the exact Candidate base and status.',
       );
     const pins = {
       kind: command.kind,
@@ -79,7 +79,7 @@ export function readAgentReview(store: WorkStore, input: AgentReviewInput) {
           total: 0,
           truncated: false,
           changes: [],
-          unavailable: 'Conflicted View has no composed source; inspect its retained full review.',
+          unavailable: 'Conflicted Candidate has no composed source; inspect its retained full review.',
           coverage: 'unknown',
         },
       };

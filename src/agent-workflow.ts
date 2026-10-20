@@ -1,3 +1,4 @@
+import { candidateCommand } from './candidate-names.js';
 import { agentTake } from './agent-take.js';
 import { duplicateStartWarnings } from './agent-ownership.js';
 import { parseAgentAction } from './agent-action-parse.js';
@@ -57,6 +58,7 @@ export class AgentWorkflow {
     this.work = new WorkService(root, localAgent());
   }
   async dispatch(input: unknown) {
+    input = candidateCommand(input);
     const settings =
       input && typeof input === 'object'
         ? (input as {

@@ -32,8 +32,8 @@ export function selectBrief(input: BriefInput, records: BriefRecords) {
   invariant(!input.runId || run, 'NOT_FOUND', 'Check run not found.');
   const viewId = input.viewId ?? run?.viewId;
   let view = viewId ? records.views.find(v => v.id === viewId) : undefined;
-  invariant(!viewId || view, 'NOT_FOUND', 'View not found.');
-  invariant(!run || !view || run.viewId === view.id, 'BAD_ARGUMENT', 'Run and View differ.');
+  invariant(!viewId || view, 'NOT_FOUND', 'Candidate not found.');
+  invariant(!run || !view || run.viewId === view.id, 'BAD_ARGUMENT', 'Run and Candidate differ.');
   const laneId = input.laneId ?? message?.laneId ?? view?.inputs[0]?.laneId;
   const lane = laneId ? records.lanes.find(l => l.id === laneId) : undefined;
   invariant(!laneId || lane, 'NOT_FOUND', 'Lane not found.');
@@ -41,7 +41,7 @@ export function selectBrief(input: BriefInput, records: BriefRecords) {
   invariant(
     !lane || !view || view.inputs.some(i => i.laneId === lane.id),
     'BAD_ARGUMENT',
-    'Lane and View differ.',
+    'Lane and Candidate differ.',
   );
   const intentId = input.intentId ?? lane?.intentId ?? view?.intentId ?? message?.intentId;
   const intent = intentId ? records.intents.find(i => i.id === intentId) : undefined;
@@ -57,7 +57,7 @@ export function selectBrief(input: BriefInput, records: BriefRecords) {
   if (
     ['continue-lane', 'resolve-conflict', 'fix-failed-check', 'review-and-accept'].includes(input.situation)
   )
-    invariant(lane || view, 'BAD_ARGUMENT', 'Choose a Lane or View.');
+    invariant(lane || view, 'BAD_ARGUMENT', 'Choose a Lane or Candidate.');
   if (input.situation === 'take-handoff' || input.situation === 'answer-message')
     invariant(
       message?.kind === (input.situation === 'take-handoff' ? 'handoff' : 'message'),

@@ -157,7 +157,7 @@ function accept(
               `refs/forge/views/${view.id}^{commit}`,
             ]).trim() === view.head,
             'VIEW_STALE',
-            'The retained clean View ref changed. Existing candidates remain available.',
+            'The retained clean Candidate ref changed. Existing candidates remain available.',
           );
           invariant(
             refHead(store, channelRef(command.channel)) === command.expectedPrevious,
@@ -175,7 +175,7 @@ function accept(
               (actor.kind === 'person' && acceptedOn(data, command.channel, command.expectedHead)) ||
               gitIsAncestor(store.root, command.expectedPrevious, command.expectedHead),
             'CHANNEL_DIVERGED',
-            'The View does not contain the current Channel head, so accepting it would drop accepted work. Merge the Channel into the Lane (git merge), checkpoint and finish again.',
+            'The Candidate does not contain the current Channel head, so accepting it would drop accepted work. Merge the Channel into the Lane (git merge), checkpoint and finish again.',
           );
           const automatic = enforceAcceptance(store, data, view, command.expectedPrevious, actor);
           if (automatic) data.schema = 11;
@@ -195,7 +195,7 @@ function accept(
           invariant(
             !assessment || assessment.satisfied,
             'INVARIANT_UNSATISFIED',
-            'The selected Invariant is not satisfied. Inspect its exact-View evidence; existing Channels and source are retained.',
+            'The selected Invariant is not satisfied. Inspect its exact-Candidate evidence; existing Channels and source are retained.',
           );
           move = {
             id: command.operationId,

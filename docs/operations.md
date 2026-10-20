@@ -11,7 +11,7 @@ nforge restore-native BACKUP.tar.gz NEW_DIR                         # native own
 nforge restore-work BACKUP.tar.gz NEW_DIR                           # Git-backed owners
 ```
 
-Copy the whole export outside the project. It holds private history and logs, so treat it as private. Restore always writes to a new, unused directory. It validates every file against the manifest and recreates Lanes and Views. Unfinished commands are marked interrupted and never restart. The original owner is untouched, so keep it until you have checked the copy.
+Copy the whole export outside the project. It holds private history and logs, so treat it as private. Restore always writes to a new, unused directory. It validates every file against the manifest and recreates Lanes and Candidates. Unfinished commands are marked interrupted and never restart. The original owner is untouched, so keep it until you have checked the copy.
 
 Not included: uncheckpointed edits, ignored credentials, dependency caches and disposable workspaces. Checkpoint what you want first. To move between machines, restore on the target.
 
@@ -83,7 +83,7 @@ including credential expiry and restart, before claiming a live-host speedup.
 
 ### Hosted cockpit index format and team reset
 
-Hosted Work index format **4** includes View Lane/head inputs and dependency counts, run timing,
+Hosted Work index format **4** includes Candidate Lane/head inputs and dependency counts, run timing,
 exit code, a 200-character check name and the retained failure summary (at most 4096 characters),
 and Lane save count plus the last save time and a 200-character message. Full records, messages,
 check definitions, dependencies and logs remain in their existing payloads. Reactive summaries do
@@ -146,7 +146,7 @@ project and seed a replacement instead of migrating it. Only the lead performs t
    nforge hosted-work "$OWNER" '{"action":"records","collection":"runs"}'
    ```
 
-   Confirm save counters/timestamps, View inputs and run names/timing. Exported history may contain
+   Confirm save counters/timestamps, Candidate inputs and run names/timing. Exported history may contain
    runs predating durable failure summaries; those summaries stay absent and local logs remain
    authoritative. Only the lead deploys the Convex schema/functions, hosted browser and rebuilt CLI;
    hosting itself deploys no source or executable.
@@ -160,7 +160,7 @@ Native checks support local, [Modal](operations/modal-checks.md), and [GitHub Ac
 ### Check environment contract
 
 Checks, Playbook steps and event automations use the same clean local runner.
-The command receives a fresh materialized View and private HOME/USERPROFILE,
+The command receives a fresh materialized Candidate and private HOME/USERPROFILE,
 XDG and temporary directories. Ambient Forge/cloud tokens, SSH agent settings,
 credential-file overrides, `NODE_OPTIONS` and npm configuration are omitted.
 Only the runtime allowlist and generated check metadata described in

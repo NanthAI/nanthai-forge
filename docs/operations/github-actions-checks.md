@@ -43,7 +43,7 @@ failures, and rate limits. Authentication, permission, protected-ref, stale-leas
 non-fast-forward and missing-repository failures stay immediate errors. Exhausted
 creation retries interrupt the retained run for reconciliation. The GitHub mirror
 uses the same retry helper while keeping its original exact lease and ancestry
-check. The source State, View, definition, runtime,
+check. The source State, Candidate, definition, runtime,
 selection and shard membership stay digest-bound. The journal also retains the
 target repository and runner label so policy changes cannot redirect adoption.
 Git-backed checks and declared environment/credential inputs keep existing local

@@ -52,7 +52,7 @@ export function recoverPlaybooks(data: WorkData): boolean {
 export function playbookApplicability(data: WorkData, run: PlaybookRun, environment: CheckEnvironment) {
   const reasons = [];
   if (evidenceApplicability(data, run.viewId) === 'historical')
-    reasons.push('A different View is now the latest candidate.');
+    reasons.push('A different Candidate is now the latest candidate.');
   if (data.playbooks.find(p => p.id === run.playbook.id)?.definition !== run.playbook.definition)
     reasons.push('The Playbook definition changed.');
   if (run.steps.some(s => data.checks.find(c => c.id === s.check.id)?.definition !== s.check.definition))

@@ -88,7 +88,7 @@ export async function readFileProvenance(
       labels = next;
     }
     const projected = advanceAttribution(current, after, labels, null);
-    if (!projected) return unavailable('Too large for line attribution when aligning the View version');
+    if (!projected) return unavailable('Too large for line attribution when aligning the Candidate version');
     projected.forEach((label, index) => {
       if (label) output[index]!.push(label);
     });

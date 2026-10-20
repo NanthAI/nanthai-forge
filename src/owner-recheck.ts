@@ -27,11 +27,11 @@ export async function queueOwnerRecheck(
     invariant(
       original?.head === request.head && original.status === 'clean',
       'VIEW_STALE',
-      'Select the retained reviewed View.',
+      'Select the retained reviewed Candidate.',
     );
     const main = nativeChannels(data).find(channel => channel.name === 'main');
     const move = data.channelMoves.find(move => move.id === main?.moveId);
-    invariant(main?.head && move, 'SOURCE_UNAVAILABLE', 'Current main has no retained acceptance View.');
+    invariant(main?.head && move, 'SOURCE_UNAVAILABLE', 'Current main has no retained acceptance Candidate.');
     const pins = [
       { kind: 'view' as const, viewId: move.viewId, head: main.head },
       { kind: 'view' as const, viewId: original.id, head: request.head },

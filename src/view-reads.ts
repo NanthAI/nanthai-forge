@@ -51,7 +51,7 @@ export async function readView(store: WorkStore, input: z.input<typeof viewReadS
   }
   const view = data.views.find(view => view.id === command.viewId),
     model = models.find(view => view.viewId === command.viewId);
-  invariant(view && model, 'NOT_FOUND', 'View not found.');
+  invariant(view && model, 'NOT_FOUND', 'Candidate not found.');
   const source = store.native ? new NativeSource(store.root) : null;
   const states = new Map<string, ProvenanceFile[]>();
   const heads = new Set([view.base, ...(view.head ? [view.head] : [])]);
@@ -77,7 +77,7 @@ export async function readView(store: WorkStore, input: z.input<typeof viewReadS
             }),
     );
   const plans = provenancePlan(data, view, states);
-  invariant(plans, 'SOURCE_UNAVAILABLE', 'View source is unavailable.');
+  invariant(plans, 'SOURCE_UNAVAILABLE', 'Candidate source is unavailable.');
   const selected =
     command.action === 'provenance' && command.file
       ? plans.filter(file => file.path === command.file)
@@ -123,7 +123,7 @@ export async function readView(store: WorkStore, input: z.input<typeof viewReadS
         ...files,
         items,
         ...(view.status === 'conflict'
-          ? { unavailable: 'Conflicted View has no composed file version.' }
+          ? { unavailable: 'Conflicted Candidate has no composed file version.' }
           : {}),
       },
       ...(command.action === 'view' ? { runs: data.runs.filter(run => run.viewId === view.id) } : {}),

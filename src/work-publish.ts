@@ -39,7 +39,7 @@ function pullResult(publication: Publication, pull: Pull) {
       pull.base?.ref === publication.base &&
       pull.base.repo.full_name.toLowerCase() === publication.repository.toLowerCase(),
     'PUBLICATION_CHANGED',
-    'The GitHub candidate or base was changed outside this operation. Its work is preserved; inspect it and compose a new View for another candidate.',
+    'The GitHub candidate or base was changed outside this operation. Its work is preserved; inspect it and compose a new Candidate for another candidate.',
   );
   invariant(
     Number.isSafeInteger(pull.number) &&
@@ -82,7 +82,7 @@ export async function publishWork(store: WorkStore, input: unknown, expectedRevi
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    'Send the selected View, exact commit, repository, PR title and publication operation ID.',
+    'Send the selected Candidate, exact commit, repository, PR title and publication operation ID.',
   );
   invariant(
     Number.isSafeInteger(expectedRevision) && expectedRevision >= 0,
@@ -135,7 +135,7 @@ export async function publishWork(store: WorkStore, input: unknown, expectedRevi
               view.id === command.viewId && view.status === 'clean' && view.head === command.expectedHead,
           ),
           'VIEW_STALE',
-          'Select a retained native clean View.',
+          'Select a retained native clean Candidate.',
         );
         return undefined;
       })
@@ -170,14 +170,14 @@ export async function publishWork(store: WorkStore, input: unknown, expectedRevi
     invariant(
       view?.status === 'clean' && view.head === command.expectedHead,
       'VIEW_STALE',
-      'Select a clean View and its exact composed commit.',
+      'Select a clean Candidate and its exact composed commit.',
     );
     invariant(
       store.native ||
         workGit(store.root, ['rev-parse', '--verify', `refs/forge/views/${view.id}^{commit}`]).trim() ===
           view.head,
       'VIEW_STALE',
-      'The selected View ref changed. Compose a new View; existing commits are preserved.',
+      'The selected Candidate ref changed. Compose a new Candidate; existing commits are preserved.',
     );
     const base = command.base || repo.default_branch;
     try {

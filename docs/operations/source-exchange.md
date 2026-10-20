@@ -96,16 +96,16 @@ Durable return steps store their immutable Work/manifest snapshot once and keep 
 reference in subsequent position cursors. Existing embedded-snapshot cursors
 resume with the same operation and timestamp, and switch on their next committed
 step. These changes reduce duplicate allocations; compatibility validation still
-loads complete Work metadata, and per-View provenance can grow with its changed
+loads complete Work metadata, and per-Candidate provenance can grow with its changed
 paths and retained saves. They do not establish a fixed memory bound for every
 possible project history.
-Selected View steps derive only the requested View's read model, retaining its
+Selected Candidate steps derive only the requested Candidate's read model, retaining its
 supersession and acceptance context; save-index lookup scans backward without
 copying the Lane's save history. The memory fixture uses a producer process to
 write synthetic backups and emitted test handlers to disk, then a separate action
 process under `--max-old-space-size=384`. It reports producer and action lifetime
 peak RSS separately, including Node and imports, plus sampled action heap. Its
-compatibility action has 12,000 saves and 1,425 source files but no Views; it does
+compatibility action has 12,000 saves and 1,425 source files but no Candidates; it does
 not measure historical provenance or establish an O(batch) bound for Work parsing.
 
 Keep the whole request and its operation UUID. A retry of a finished push returns the original result without re-uploading and without moving a later selection. Otherwise it finds what is already stored and sends only what is missing. A changed request under the same UUID is rejected. `previous` must be the project's current checkpoint. If another push landed first, the push fails with `PROJECT_CHANGED`, publishes nothing and forks nothing. Pull the latest checkpoint, reconcile, and push again with a new `previous` and operation UUID. Interrupted preparation publishes nothing. Retry data lives in `.forge/work/exchange-OPERATION_ID`.
@@ -139,7 +139,7 @@ Native pushes prepare an optional owner-derived sidecar alongside their pinned
 Work snapshot. It travels as a project-scoped immutable object and its digest and
 size accompany source return. Selection uses the hosted source-return baseline,
 not merely the previous upload checkpoint: new States' parents and own-parent
-ancestry deltas, changed Lane/View comparisons, changed View provenance and new
+ancestry deltas, changed Lane/Candidate comparisons, changed Candidate provenance and new
 selected trees. Parent references reuse ancestry already hosted; full closures
 are never copied into each new State. Older baseline hints reuse their exact
 locally prepared Work bytes after digest verification. If unavailable, hosted
@@ -162,7 +162,7 @@ removes it, and never contacts hosted or modifies owner transport state. Output
 reports old/new sidecar and cache bytes and delta row counts.
 
 Hosted source return remains owner-only. It checks sidecar shape, Work pin,
-comparison and View keys, counts and object-pin membership using metadata. Valid
+comparison and Candidate keys, counts and object-pin membership using metadata. Valid
 complete sidecars skip source derivation item phases; absent, malformed or
 incomplete ones automatically use the existing hosted computation. Publication
 retains its original operation ID, current authority checks and source/Work CAS.
@@ -170,7 +170,7 @@ No Work format bump, hosted row migration or backfill is required. The sidecar i
 a disposable index supplied under the owner's existing source trust. Contributor
 proposals retain their existing hosted derivation path.
 
-Native object returns reuse the previous generation's State-parent cache, immutable diffstat pairs and unchanged View provenance. Complete and streamed native projections produce identical parent-cache rows and counts, including chunked parents for large fan-in. Only new source heads receive compact, chunked ancestry closures; older pair indexes remain readable, and missing pair membership can be resolved lazily from cached parents. Acceptance and supersession refresh the affected View summaries without rereading unchanged file provenance. Bounded row deltas publish atomically into the selected partition. Larger deltas use the complete staged-partition path. Optional cache fields and record collections require no migration; an older generation reuses its complete ancestry boundaries and caches new States during its next return.
+Native object returns reuse the previous generation's State-parent cache, immutable diffstat pairs and unchanged Candidate provenance. Complete and streamed native projections produce identical parent-cache rows and counts, including chunked parents for large fan-in. Only new source heads receive compact, chunked ancestry closures; older pair indexes remain readable, and missing pair membership can be resolved lazily from cached parents. Acceptance and supersession refresh the affected Candidate summaries without rereading unchanged file provenance. Bounded row deltas publish atomically into the selected partition. Larger deltas use the complete staged-partition path. Optional cache fields and record collections require no migration; an older generation reuses its complete ancestry boundaries and caches new States during its next return.
 
 The CLI writes phase, items done/total, durable step, elapsed time and ETA to stderr, including the saved step when resuming. JSON stdout retains the original final receipt. The server advances many items between durable checkpoints and continues bounded batches within each action; restart always uses the original operation and stored cursor.
 

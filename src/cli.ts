@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { noticeViewAlias } from './candidate-names.js';
 import { refreshOwnerRoot } from './owner-root.js';
 // SPDX-License-Identifier: Apache-2.0
 import { ghCli, forgeVersion } from './gh-cli.js';
@@ -41,8 +42,8 @@ Browse packaged documentation: nforge docs
 Usage:
   nforge docs [name]
   nforge --version
-  nforge pr list|view|create|checks|merge|diff|checkout [LANE_ID] [--repo ROOT] [--json [fields]]
-  nforge repo view [ROOT] [--json [fields]]
+  nforge pr list|candidate|create|checks|merge|diff|checkout [LANE_ID] [--repo ROOT] [--json [fields]]
+  nforge repo candidate [ROOT] [--json [fields]]
   nforge queue list|cancel OPERATION|prioritize OPERATION
   nforge github-sync ROOT [--repo OWNER/NAME] [--branch main] [--dry-run | --push] [--operation-id UUID] [--rebind]
   nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--status | --new]
@@ -86,17 +87,17 @@ MCP defaults to source tools. --work explicitly adds local work commands and Git
 MCP-agent uses FORGE_AGENT_TOKEN from the process environment for explicitly delegated hosted source reads only.
 Source/context commands do not use the network or execute target source. No inference.
 Explicit work run-check/run-playbook and selected events under enabled automations execute configured commands under your OS account; worktrees are not sandboxes.
-Work read-history/export-history reads original local commit ancestry for exact clean Views without fetching.
-Work compare-views observes advisory committed-path overlap between two exact clean Views against their own bases.
+Work read-history/export-history reads original local commit ancestry for exact clean Candidates without fetching.
+Work compare-candidates observes advisory committed-path overlap between two exact clean Candidates against their own bases.
 Work import-discussion records a mapped PR's provider page; read-discussion/export-discussion use its private receipt.
 Work import-native-git-contribution validates an exact native base, original Git commit/ref/full-bundle digest and creates a separate native Lane; authored identity remains an unverified claim, original Work/Channels are preserved, and retries retain the original operationId/pins.
 Work import-native-contribution validates a full native archive/digest/base/candidate and creates a separate Lane, preserving current Work/Channels. Offline claim metadata remains unverified; retries retain operationId and semantic pins.
 Work import-bundle validates a selected local full Git bundle/ref/digest/head and imports original commits into an isolated Lane, without verified contributor identity.
 Work export-work creates a private committed-source/history + Work/evidence directory; restore-work materializes a new local copy without starting recorded commands. Uncommitted edits/credentials/hosted grants are excluded.
 Work accept-channel explicitly advances a local accepted pointer; export-channel creates a full pinned Git bundle.
-Work define-check may select exact artifactPaths to retain build outputs before cleanup. Export-check returns original run/log/selected-output integrity; create-release may explicitly retain exact-View buildRunIds. No command is repeated by export.
-Work define-check may optionally declare source/tool/environment/external inputs; assess-check-inputs compares a retained run with a selected View without executing or reusing it. External claims and undeclared coverage stay unknown.
-Work define-invariant/assess-invariant retain optional named exact-View check and policy-bound review evidence; optional githubReview selects a mapped PR and immutable GitHub account IDs for current source approvals. Accept-channel may explicitly select a policy version.
+Work define-check may select exact artifactPaths to retain build outputs before cleanup. Export-check returns original run/log/selected-output integrity; create-release may explicitly retain exact-Candidate buildRunIds. No command is repeated by export.
+Work define-check may optionally declare source/tool/environment/external inputs; assess-check-inputs compares a retained run with a selected Candidate without executing or reusing it. External claims and undeclared coverage stay unknown.
+Work define-invariant/assess-invariant retain optional named exact-Candidate check and policy-bound review evidence; optional githubReview selects a mapped PR and immutable GitHub account IDs for current source approvals. Accept-channel may explicitly select a policy version.
 Work put-planning-item/comment-planning-item/export-planning retain private local Issues, Initiatives, Intent links and discussion without changing source or acceptance.
 Work create-release pins a named original Channel acceptance; enabled release automations execute their selected local checks. Export-release returns the original Git bundle/digest manifest.
 Semantic coverage is partial. Global/package/tsconfig path resolution is not supported.
@@ -226,6 +227,8 @@ async function main(args: string[]): Promise<unknown> {
     } catch {
       throw new ForgeError('BAD_ARGUMENT', 'Work command must be JSON.');
     }
+    if (command && typeof command === 'object' && 'action' in command && typeof command.action === 'string')
+      noticeViewAlias(command.action);
     return work.dispatch(command, Number(args.at(-1)));
   }
   if (args[0] === 'serve') {
@@ -347,7 +350,7 @@ try {
       const result = (output as { result?: { status?: string } }).result;
       if (result?.status === 'awaiting-review')
         process.stderr.write(
-          `Next: nforge serve ${shellQuote(process.argv[3]!)} — open Review and accept the checked View as a person.\n`,
+          `Next: nforge serve ${shellQuote(process.argv[3]!)} — open Review and accept the checked Candidate as a person.\n`,
         );
     }
   }

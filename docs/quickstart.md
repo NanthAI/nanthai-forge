@@ -49,7 +49,7 @@ records the tool. These names are attribution claims, not authentication.
 nforge agent "$OWNER" finish '{"laneId":"LANE_ID","message":"Improve greeting","accept":true}'
 ```
 
-Finish checkpoints, syncs accepted main when needed, composes a View and runs the
+Finish checkpoints, syncs accepted main when needed, composes a Candidate and runs the
 check. Resolve any reported conflicts in the Lane and finish again. Preserve the
 returned operation ID and `resolved` fields when retrying an unknown outcome.
 
@@ -65,10 +65,10 @@ nforge serve "$OWNER"
 ```
 
 Keep that foreground server running and open its printed private local session
-URL. In Review, open the checked View from the finish receipt, inspect its changes
+URL. In Review, open the checked Candidate from the finish receipt, inspect its changes
 and check result, and select Accept into main as a person. This first acceptance
 establishes main. Future acceptance advances it while retaining accepted work.
-If main moved, re-check the Lane on latest main and review its new View.
+If main moved, re-check the Lane on latest main and review its new Candidate.
 No policy change is needed for this flow.
 
 ## Glossary
@@ -77,9 +77,9 @@ No policy change is needed for this flow.
 | --- | --- | --- |
 | Intent | The outcome someone wants; groups related work. | Yes, also a CLI concept. |
 | Lane | One contributor's isolated working directory and saved source history. | Yes, also a CLI concept. |
-| View (Candidate) | An exact pinned combination of Lane heads for checks and review. View is the current name; Candidate is the planned Stage 4 name. | View is current UI/CLI terminology. |
+| Candidate (formerly View) | An exact pinned combination of Lane heads for checks and review. | Yes, also a CLI concept. |
 | Channel | A named pointer to accepted source, usually main. | Yes, also a CLI concept. |
-| Check | A configured command; a run records its result against an exact View. | Yes, also a CLI concept. |
+| Check | A configured command; a run records its result against an exact Candidate. | Yes, also a CLI concept. |
 | Now | The activity screen showing current work and observed agent presence. | UI navigation label. |
 | Needs you | Work or messages needing your attention, such as review or a reply. | UI label, not a separate source state. |
 

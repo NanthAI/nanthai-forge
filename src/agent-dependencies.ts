@@ -12,7 +12,7 @@ export function validateAfter(store: WorkStore, after: After, intentId?: string)
   if ('intentId' in after) {
     invariant(store.select('intents', after.intentId), 'NOT_FOUND', 'Dependency Intent not found.');
     invariant(after.intentId !== intentId, 'BAD_ARGUMENT', 'An Intent cannot wait for itself.');
-  } else invariant(store.select('views', after.viewId), 'NOT_FOUND', 'Dependency View not found.');
+  } else invariant(store.select('views', after.viewId), 'NOT_FOUND', 'Dependency Candidate not found.');
 }
 /** Landing dependencies are Work records, not mutable source-composition pins.
  * A dependency must have landed in the destination Channel's retained history. */

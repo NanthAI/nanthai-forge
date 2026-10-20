@@ -332,7 +332,7 @@ export async function launchModalRun(
         ? runnerRetryMessage(unavailable)
         : outcome
           ? `Modal outcome bound to the exact source, definition, selection and runtime; compute cost is estimated. ${outcome.details ?? ''} ${assessment?.verdict === 'flake' ? 'Flake verdict (pass after failure); attempts and available named results retained.' : ''} ${assessment?.quarantine.length ? 'Quarantined tests still ran and reported; only their attributed failures are non-blocking.' : ''}`.trim()
-          : `Modal infrastructure interrupted the check; no check failure was recorded. Retry resumes the same pinned View/plan and retains completed shards. ${terminal?.kind === 'error' ? (terminal.details ?? `Modal ${terminal.category} failure.`) : ''}`.trim(),
+          : `Modal infrastructure interrupted the check; no check failure was recorded. Retry resumes the same pinned Candidate/plan and retains completed shards. ${terminal?.kind === 'error' ? (terminal.details ?? `Modal ${terminal.category} failure.`) : ''}`.trim(),
     });
     if (
       ['interrupted', 'runner-unavailable', 'runner-budget-exhausted'].includes(receipt.status) &&
@@ -342,7 +342,9 @@ export async function launchModalRun(
       // Keep intermediate interruption evidence out of result.json: observers must
       // not end finish while its same-View infrastructure recovery is still active.
       durableReplace(join(path, `interruption-${randomUUID()}.json`), JSON.stringify(receipt));
-      progress('Infrastructure interrupted; retrying the same View/plan once; completed shards retained.');
+      progress(
+        'Infrastructure interrupted; retrying the same Candidate/plan once; completed shards retained.',
+      );
       if (cancel) {
         clearInterval(cancel);
         cancel = undefined;

@@ -47,7 +47,7 @@ SIGKILL of a verification child) reports **out of memory (137)**; this is a like
 OOM diagnosis, not a provider-confirmed memory measurement. A completed non-docs
 standard shard with that exit retries once at 16 GiB. The original execution and
 its cost remain recorded; the latest attempt determines that shard's outcome.
-Docs-only and arbitrary commands do not retry for OOM. A failed standard test shard retries once on the same pinned image and View, retaining both attempts. Test-failure, OOM and stall recovery share one retry per shard, including across adoption; they never stack into a third attempt.
+Docs-only and arbitrary commands do not retry for OOM. A failed standard test shard retries once on the same pinned image and Candidate, retaining both attempts. Test-failure, OOM and stall recovery share one retry per shard, including across adoption; they never stack into a third attempt.
 Plans pinned to the older 4 GiB runtime keep that allocation and do not acquire
 the new retry behavior when adopted.
 OOM attempts do not publish artifacts that a retry would supersede. Docs-only checks retain the documentation checks, including
@@ -117,9 +117,9 @@ stacks are not recorded. Local fallback retains the original source and check
 definition, records its route and uses ordinary local admission.
 
 Other infrastructure interruptions receive one automatic recovery attempt on the
-same retained View and plan before publishing a terminal receipt. Completed shards
+same retained Candidate and plan before publishing a terminal receipt. Completed shards
 are retained. Intermediate interruption receipts stay separate so finish observers
-do not mistake active recovery for completion. Source, View, definition, selection,
+do not mistake active recovery for completion. Source, Candidate, definition, selection,
 shard membership, command, artifacts and runtime are digest-bound; changing a
 retained recipe refuses adoption.
 
@@ -130,7 +130,7 @@ names. A failed shard retries once; a named test that passes after failing has a
 `flake` verdict, never a clean verdict. Original exits, named results and attempt
 logs remain available. OOM (137) or a confirmed stopped sandbox without a named
 test failure, followed by a complete passing report for every selected file on
-the same pinned View/plan, is a clean infrastructure recovery. Its attempts and
+the same pinned Candidate/plan, is a clean infrastructure recovery. Its attempts and
 infrastructure reason stay recorded, without flake or quarantine ledger input.
 A named failure before that recovery retains the flake behavior. A nonzero test
 process exit without attributed failures still blocks even if its retry passes;

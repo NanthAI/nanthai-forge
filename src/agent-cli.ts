@@ -1,3 +1,4 @@
+import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, realpathSync } from 'node:fs';
 import { sep } from 'node:path';
@@ -18,7 +19,7 @@ finish checkpoints, syncs the Lane with main if main moved, composes, runs the
 "verify" check (or the only check) and requests acceptance under project policy.
 CHANNEL_CHANGED retries use a per-Channel landing queue (maxRetries defaults to 3);
 receipts list all attempts and waiting positions.
-New supervised projects stop at awaiting-review; a person accepts their checked View.
+New supervised projects stop at awaiting-review; a person accepts their checked Candidate.
 policy reads settings; set-policy selects a preset or edits fields (custom).
 laneUpdates:ask stops at sync-required when main moved; native undo-sync restores
 a recorded pre-sync checkpoint and refuses newer edits unless force:true.
@@ -33,7 +34,7 @@ Omitted operationId and pins are filled from current state and returned under
 "resolved". After an unknown reply, retry with your request plus "resolved".
 
 Actions: peers, peer-ack, link, take, start, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
-         log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, view, provenance, views, review, brief, guidance,
+         log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, brief, guidance,
          making-of, report.
 start intentId adds a sibling Lane; finish with:[laneId] lands siblings together.
 after:{intentId} or after:{viewId} waits for that work to land; land-ready resumes waits.
@@ -44,6 +45,8 @@ start records actor:"agent-name" (or FORGE_AGENT_NAME, then FORGE_ACTOR).
 Use distinct names in concurrent shells; tool optionally names the agent tool.
 making-of reads one Intent's derived record (Lanes, saves, runs with queue/run time,
 landings, sessions); report records self-reported harness, model and token totals.
+candidate and candidates read pinned results; view and views are deprecated aliases (stderr notice only).
+JSON fields (viewId, views) and Work formats are unchanged.
 Read the packaged agent skill: nforge docs agent.
 `;
 
@@ -52,9 +55,9 @@ const examples: Record<string, unknown> = {
   'peer-ack': { laneId: 'LANE_ID', noticeId: 'NOTICE_ID', choice: 'accept-order' },
   take: { laneId: 'LANE_ID', takeover: true },
   link: { laneId: 'LANE_ID', path: 'src/file.ts', line: 42 },
-  view: { viewId: 'VIEW_ID', offset: 0, limit: 20 },
-  provenance: { viewId: 'VIEW_ID', file: 'src/file.ts', lines: true, offset: 0, limit: 20 },
-  views: { laneId: 'LANE_ID', offset: 0, limit: 20 },
+  candidate: { viewId: 'CANDIDATE_ID', offset: 0, limit: 20 },
+  provenance: { viewId: 'CANDIDATE_ID', file: 'src/file.ts', lines: true, offset: 0, limit: 20 },
+  candidates: { laneId: 'LANE_ID', offset: 0, limit: 20 },
   brief: { situation: 'continue-lane', laneId: 'LANE_ID', agent: 'generic' },
   policy: {},
   'set-policy': { operationId: 'UUID', preset: 'trusted' },
@@ -76,7 +79,7 @@ const examples: Record<string, unknown> = {
   observe: { operationId: 'ORIGINAL_UUID', waitMs: 1000 },
   log: { operationId: 'ORIGINAL_UUID', stream: 'stderr', tail: 4096 },
   cancel: { operationId: 'ORIGINAL_UUID' },
-  accept: { viewId: 'VIEW_ID' },
+  accept: { viewId: 'CANDIDATE_ID' },
   complete: { laneId: 'LANE_ID' },
   abandon: { laneId: 'LANE_ID', reason: 'Superseded by accepted work', saveFirst: true },
   reopen: { laneId: 'LANE_ID' },
@@ -98,14 +101,14 @@ const strict: Record<string, unknown> = {
     expectedDefinition: 'DEFINITION',
     accept: { expectedPrevious: 'CURRENT_CHANNEL_HEAD' },
   },
-  accept: { operationId: 'UUID', viewId: 'VIEW_ID', expectedHead: 'HEAD', expectedPrevious: null },
+  accept: { operationId: 'UUID', viewId: 'CANDIDATE_ID', expectedHead: 'HEAD', expectedPrevious: null },
 };
 function actionHelp(action: string): string {
   invariant(action in examples, 'BAD_ARGUMENT', 'Unknown agent action. Use agent --help.');
   let result = `nforge agent ROOT ${action} '${JSON.stringify(examples[action])}'\n`;
   if (strict[action]) result += `Fully pinned: '${JSON.stringify(strict[action])}'\n`;
   if (action === 'review')
-    result += `View: ${JSON.stringify({ kind: 'view', id: 'VIEW_ID', expectedHead: 'HEAD', expectedBase: 'BASE', expectedStatus: 'clean', paths: ['src/file.ts'] })}\nUse full 40- or 64-character source digests; abbreviated heads are invalid. Omit paths for changed-path summaries. Body budget: maxBytes 1024..48000 (default 12000), context 0..10 (default 3), limit 1..100 (default 20), offset 0 or higher. Continue with nextOffset and expectedReviewTree:reviewTree; keep the same source pins.\n`;
+    result += `Candidate: ${JSON.stringify({ kind: 'view', id: 'CANDIDATE_ID', expectedHead: 'HEAD', expectedBase: 'BASE', expectedStatus: 'clean', paths: ['src/file.ts'] })}\nUse full 40- or 64-character source digests; abbreviated heads are invalid. Omit paths for changed-path summaries. Body budget: maxBytes 1024..48000 (default 12000), context 0..10 (default 3), limit 1..100 (default 20), offset 0 or higher. Continue with nextOffset and expectedReviewTree:reviewTree; keep the same source pins.\n`;
   if (action === 'link')
     result +=
       'Select exactly one laneId, viewId or save (full source digest). path is an optional relative source file; line requires path. Links target the hosted app; an unpublished head may be unavailable until source is pushed.\n';
@@ -117,7 +120,7 @@ function actionHelp(action: string): string {
       'Use noticeId from peers detail:true. choice is accept-order, swap or split; optional text explains the advisory proposal. Reuse operationId and inputs after an unknown outcome. This records an answer; it does not resolve source conflicts.\n';
   if (action === 'finish')
     result +=
-      'with:[LANE_ID] includes sibling recorded heads in one View/check/acceptance. after:{intentId} or after:{viewId} records a dependency; rerun the same request or land-ready after it lands. Omit accept to check only. accept:true means main at its current head. If main moved, finish syncs first; a sync conflict stops with phase "sync" and markers in the Lane. CHANNEL_CHANGED automatically retries sync/check/accept under the landing queue (maxRetries:3 by default, 0 disables retries). Receipts include attempts and queue positions. CHANNEL_DIVERGED means the View lacks the Channel head: sync and finish again. CONTRACT_RESYNC_REQUIRED means main changed an export or schema your edits use; finish retries it like CHANNEL_CHANGED.\n';
+      'with:[LANE_ID] includes sibling recorded heads in one Candidate/check/acceptance. after:{intentId} or after:{viewId} records a dependency; rerun the same request or land-ready after it lands. Omit accept to check only. accept:true means main at its current head. If main moved, finish syncs first; a sync conflict stops with phase "sync" and markers in the Lane. CHANNEL_CHANGED automatically retries sync/check/accept under the landing queue (maxRetries:3 by default, 0 disables retries). Receipts include attempts and queue positions. CHANNEL_DIVERGED means the Candidate lacks the Channel head: sync and finish again. CONTRACT_RESYNC_REQUIRED means main changed an export or schema your edits use; finish retries it like CHANNEL_CHANGED.\n';
   if (action === 'sync')
     result +=
       'Needs a checkpointed Lane (else LANE_DIRTY). Returns up-to-date, merged, or conflict with markers; resolve them and checkpoint or finish.\n';
@@ -148,7 +151,9 @@ export async function agentCli(args: string[]): Promise<unknown> {
     process.stdout.write(AGENT_HELP);
     return undefined;
   }
-  const [root, action, option, path] = args;
+  const [root, requestedAction, option, path] = args;
+  if (requestedAction) noticeViewAlias(requestedAction);
+  const action = requestedAction ? canonicalCandidateAction(requestedAction) : undefined;
   if (action === 'help' || action === '--help') {
     process.stdout.write(AGENT_HELP);
     return undefined;
@@ -161,7 +166,9 @@ export async function agentCli(args: string[]): Promise<unknown> {
     'Use agent ROOT ACTION [JSON | --command-file FILE].',
   );
   if (option === '--help') {
-    process.stdout.write(actionHelp(action));
+    process.stdout.write(
+      actionHelp(action === 'view' ? 'candidate' : action === 'views' ? 'candidates' : action),
+    );
     return undefined;
   }
   let text = option ?? '{}';
@@ -185,8 +192,10 @@ export async function agentCli(args: string[]): Promise<unknown> {
     'Command parameters must be a JSON object.',
   );
   const selected = parameters as Record<string, unknown>;
+  if (typeof selected.action === 'string') noticeViewAlias(selected.action);
   invariant(
-    selected.action === undefined || selected.action === action,
+    selected.action === undefined ||
+      (typeof selected.action === 'string' && canonicalCandidateAction(selected.action) === action),
     'BAD_ARGUMENT',
     'Command action differs from the selected action.',
   );

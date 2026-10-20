@@ -21,7 +21,7 @@ export function evidenceView(data: WorkData, id: string, head: string) {
   invariant(
     view?.status === 'clean' && view.head === head,
     'VIEW_STALE',
-    'Choose an existing clean View and its exact committed head. Existing work is preserved.',
+    'Choose an existing clean Candidate and its exact committed head. Existing work is preserved.',
   );
   return view;
 }
@@ -37,7 +37,7 @@ export function recordEvidence(
       invariant(
         current?.definition === command.invariant.definition && current.intentId === view.intentId,
         'INVARIANT_CHANGED',
-        'Select the current Invariant for this View’s Intent. Earlier reviews remain available.',
+        'Select the current Invariant for this Candidate’s Intent. Earlier reviews remain available.',
       );
     }
     const review = {
@@ -87,7 +87,7 @@ export function evidenceApplicability(data: WorkData, viewId: string) {
 export function runApplicability(data: WorkData, run: CheckRun, environment: CheckEnvironment) {
   const reasons = [];
   if (evidenceApplicability(data, run.viewId) === 'historical')
-    reasons.push('A different View is now the latest candidate.');
+    reasons.push('A different Candidate is now the latest candidate.');
   if (data.checks.find(c => c.id === run.check.id)?.definition !== run.check.definition)
     reasons.push('The check definition changed.');
   if (environment.fingerprint !== run.environment.fingerprint)
@@ -148,7 +148,7 @@ export async function importChecks(
         invariant(
           publication?.projection,
           'NOT_FOUND',
-          'Publish this native View to select its exact Git projection before importing provider checks.',
+          'Publish this native Candidate to select its exact Git projection before importing provider checks.',
         );
         return validateNativeProjection(store, command.expectedHead, publication.projection);
       })

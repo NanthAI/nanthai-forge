@@ -350,7 +350,7 @@ class FinishRunner {
         if (reason)
           return this.review(
             attempt,
-            `${command.accept!.channel} moved; re-check needed. Sync and check a new View for a person to review.`,
+            `${command.accept!.channel} moved; re-check needed. Sync and check a new Candidate for a person to review.`,
           );
         if (attempt.number >= (command.maxRetries ?? 3))
           return this.stop(attempt, {

@@ -181,7 +181,7 @@ export async function importNativeGit(input: string, commit: string, target: str
     return {
       root: destination,
       nextCommand: `nforge agent ${"'" + destination.replaceAll("'", "'\\''") + "'"} start '{"outcome":"First change"}'`,
-      main: 'No main Channel yet. Start a Lane, define a check and finish; a person reviews and accepts the checked View to establish main. See nforge docs quickstart.',
+      main: 'No main Channel yet. Start a Lane, define a check and finish; a person reviews and accepts the checked Candidate to establish main. See nforge docs quickstart.',
       head,
       commit,
       format,

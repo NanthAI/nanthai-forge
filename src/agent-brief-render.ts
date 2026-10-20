@@ -10,7 +10,7 @@ const goals: Record<BriefInput['situation'], string> = {
   'continue-lane': 'Continue work in the Lane',
   'resolve-conflict': 'Resolve the conflict',
   'fix-failed-check': 'Fix the failed check',
-  'review-and-accept': 'Review and accept the View',
+  'review-and-accept': 'Review and accept the Candidate',
   'take-handoff': 'Take the handoff',
   'answer-message': 'Answer the message',
 };
@@ -20,14 +20,14 @@ const steps: Record<BriefInput['situation'], string> = {
   'add-lane':
     'Add an isolated Lane to this open Intent with agent start intentId. Inspect sibling Lanes before editing; edit only the returned Lane path.',
   'land-together':
-    'Checkpoint each sibling Lane first. Finish one Lane with with:[siblingLaneId,…] to compose their recorded heads into one View, run one check and request acceptance under project policy. Composition conflicts remain explicit.',
+    'Checkpoint each sibling Lane first. Finish one Lane with with:[siblingLaneId,…] to compose their recorded heads into one Candidate, run one check and request acceptance under project policy. Composition conflicts remain explicit.',
   'continue-lane': 'Inspect the Lane and continue its Intent; edit only the Lane path.',
   'resolve-conflict':
-    'Inspect the conflicting paths and pinned inputs. For a Lane sync conflict, resolve markers in that Lane. For a composed View conflict, use its existing resolution workflow, then check and accept the resolved View. Preserve accepted work.',
+    'Inspect the conflicting paths and pinned inputs. For a Lane sync conflict, resolve markers in that Lane. For a composed Candidate conflict, use its existing resolution workflow, then check and accept the resolved Candidate. Preserve accepted work.',
   'fix-failed-check':
     'Inspect the failed run and its logs. Fix the cause in the Lane and rerun the configured check.',
   'review-and-accept':
-    'Review the exact View and its check evidence. If it is ready, accept against the current main head; if source changes, finish the Lane again.',
+    'Review the exact Candidate and its check evidence. If it is ready, accept against the current main head; if source changes, finish the Lane again.',
   'take-handoff':
     'Read the handoff and linked Intent/Lane. Acknowledge through coordination, then continue the agreed work in the Lane.',
   'answer-message':
@@ -134,15 +134,15 @@ export function renderBriefing(
     input.situation === 'answer-message'
       ? 'Reply through coordination. If source edits are needed, work in a Lane and finish'
       : input.situation === 'resolve-conflict'
-        ? 'For composed conflicts, check and accept the resolved View. Finish ordinary Lane edits'
+        ? 'For composed conflicts, check and accept the resolved Candidate. Finish ordinary Lane edits'
         : 'Work in the Lane and finish';
   const next = `First run: \`${command}\` (or forge_brief) for full, current context. ${delivery} with \`nforge agent ${commandRoot} finish …\`.`;
   const optional = `${toolLine} Optional setup: \`${setupLine}\`.`;
   // Keep complete runnable commands. Only presentation facts are shortened; full context is retained separately.
   const policy = context.autonomyPolicy ?? legacyPolicy();
-  const policyLine = `Acceptance: ${policy.acceptance.mode}. Protected paths: ${clip(policy.acceptance.protectedPaths.length ? policy.acceptance.protectedPaths.map(plain).join(', ') : 'none', 140)}. ${policy.acceptance.mode === 'review' ? 'Agents stop for a person to accept.' : 'Automatic acceptance needs an exact-View passing check; protected paths need a person.'}`;
+  const policyLine = `Acceptance: ${policy.acceptance.mode}. Protected paths: ${clip(policy.acceptance.protectedPaths.length ? policy.acceptance.protectedPaths.map(plain).join(', ') : 'none', 140)}. ${policy.acceptance.mode === 'review' ? 'Agents stop for a person to accept.' : 'Automatic acceptance needs an exact-Candidate passing check; protected paths need a person.'}`;
   const linkRule =
-    'When you cite files, saves, Views or Lanes, give Forge URLs (from `link`), not local paths.';
+    'When you cite files, saves, Candidates or Lanes, give Forge URLs (from `link`), not local paths.';
   const fixed = [repo, policyLine, next, linkRule, optional].filter(Boolean).join('\n');
   // All agent variants share the same presentation budget, including at the cap.
   const maximumFixed =

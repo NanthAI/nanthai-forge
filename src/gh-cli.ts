@@ -1,3 +1,4 @@
+import { noticeViewAlias, canonicalCandidateAction } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, existsSync, lstatSync } from 'node:fs';
 import { AgentWorkflow } from './agent-workflow.js';
@@ -10,18 +11,21 @@ import { readAgentReview } from './agent-review.js';
 
 const help = `nforge --version
 nforge auth status [DEPLOYMENT_URL] [--hostname HOST] [--json [fields]]
-nforge repo view [ROOT] [--repo ROOT] [--json [fields]]
-nforge pr list|view|create|checks|merge|diff|checkout [LANE_ID] [--repo ROOT] [--json [fields]]
+nforge repo candidate [ROOT] [--repo ROOT] [--json [fields]]
+nforge pr list|candidate|create|checks|merge|diff|checkout [LANE_ID] [--repo ROOT] [--json [fields]]
 create: --title TEXT [--body TEXT | --body-file FILE] [--base CHANNEL] [--operation-id UUID]
 list: [--state open|closed|merged|all]
 merge: [--subject TEXT] [--operation-id UUID] [--match-head-commit HEAD]
 diff: [--offset N] [--limit N] (structured live review with contextual hunks)
 checkout returns the existing isolated Lane path; it does not change your shell directory.
+view is a deprecated alias for candidate (one stderr notice per invocation).
 Lane UUIDs are stable PR selectors. merge calls agent finish with normal checks and policy.
 --json without fields returns all fields. --jq and unlisted gh flags are unsupported.
 `;
 export async function ghCli(args: string[]): Promise<unknown> {
-  const [family, verb, ...rest] = args;
+  const [family, requestedVerb, ...rest] = args;
+  if (requestedVerb) noticeViewAlias(requestedVerb);
+  const verb = requestedVerb ? canonicalCandidateAction(requestedVerb) : undefined;
   invariant(family === 'pr' || family === 'repo', 'BAD_ARGUMENT', help);
   if (verb === '--help' || (rest.length === 1 && rest[0] === '--help')) {
     process.stdout.write(help);

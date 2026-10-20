@@ -37,18 +37,18 @@ function laneHead(store: WorkStore, laneId: string) {
 }
 /** The latest clean View that composed this Lane. */
 function laneView(store: WorkStore, laneId: string | undefined): string {
-  invariant(laneId, 'BAD_ARGUMENT', 'Send viewId, or laneId to use that Lane’s latest clean View.');
+  invariant(laneId, 'BAD_ARGUMENT', 'Send viewId, or laneId to use that Lane’s latest clean Candidate.');
   invariant(store.select('lanes', laneId, 'id', true), 'NOT_FOUND', 'Lane not found.');
   const views = allRecords<WorkView>(store, 'views').filter(
     view => view.status === 'clean' && view.head && view.inputs.some(input => input.laneId === laneId),
   );
-  invariant(views.length, 'NOT_FOUND', 'No clean View for this Lane. Run finish first.');
+  invariant(views.length, 'NOT_FOUND', 'No clean Candidate for this Lane. Run finish first.');
   return views[views.length - 1]!.id;
 }
 function viewHead(store: WorkStore, viewId: string) {
   const view = store.select('views', viewId);
-  invariant(view, 'NOT_FOUND', 'View not found.');
-  invariant(view.status === 'clean' && view.head, 'VIEW_STALE', 'Select a clean View.');
+  invariant(view, 'NOT_FOUND', 'Candidate not found.');
+  invariant(view.status === 'clean' && view.head, 'VIEW_STALE', 'Select a clean Candidate.');
   return view.head;
 }
 /** Fill omitted pins from current state before any request identity is hashed.

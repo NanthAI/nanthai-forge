@@ -812,7 +812,7 @@ test('retained Modal plan binds the View and exact shard membership before clien
     });
     assert.equal(called, false);
     assert.equal(read(join(path, 'result.json')).status, 'interrupted');
-    assert.match(read(join(path, 'result.json')).details, /View or plan digest changed/);
+    assert.match(read(join(path, 'result.json')).details, /Candidate or plan digest changed/);
   }
 });
 
@@ -1018,7 +1018,7 @@ test('automatic infrastructure recovery keeps finish active and reuses the exact
   );
   assert.equal(calls, 2);
   assert.equal(read(join(path, 'result.json')).status, 'passed');
-  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /retrying the same View\/plan once/);
+  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /retrying the same Candidate\/plan once/);
 });
 
 test('monthly Modal estimate sums recorded billed quantities once, preserves legacy and fallback costs, and distinguishes billing', () => {

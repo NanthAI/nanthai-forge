@@ -120,8 +120,8 @@ export function compareViews(store: WorkStore, command: InteractionCommand, revi
       nextOffset: common && next < common.length ? next : null,
       sharedPaths: common?.slice(command.offset, next).map(pathFact) ?? [],
       provenance: store.native
-        ? 'Original retained native State manifests; exact changed path/blob/mode intersection against each View’s own base.'
-        : 'Original retained View/head/base/input/dependency pins; exact local Git changed-path byte intersection against each View’s own base.',
+        ? 'Original retained native State manifests; exact changed path/blob/mode intersection against each Candidate’s own base.'
+        : 'Original retained Candidate/head/base/input/dependency pins; exact local Git changed-path byte intersection against each Candidate’s own base.',
       coverage:
         'Committed path changes only, including original and new paths for renames. Distinct bases are separate comparisons. Uncommitted work, runtime/contract dependencies and conflict/independence are unknown. No fetch, execution, validation reuse or publication decision.',
     },

@@ -238,7 +238,7 @@ export async function composeBatch(work: WorkService, batch: LandingBatch) {
       at: batch.arrivedAt,
       inputs,
       dependencies,
-      details: 'Cumulative landing prefix; exact-View check required before acceptance.',
+      details: 'Cumulative landing prefix; exact-Candidate check required before acceptance.',
     });
     prefixes.push({
       entryIds: [...(prefixes.at(-1)?.entryIds ?? []), entryId],

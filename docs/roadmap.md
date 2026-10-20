@@ -18,7 +18,7 @@ Delivered:
 
 - Prettier on all TypeScript; `format:check` is part of `verify`.
 - One standard in-repo check (`scripts/forge-check.mjs`, Forge check `verify`).
-- Accepted work is never lost: acceptance refuses stale Views; `finish` syncs `main`; a `sync` action; optional pins.
+- Accepted work is never lost: acceptance refuses stale Candidates; `finish` syncs `main`; a `sync` action; optional pins.
 - Docs and process reset ([AGENTS.md](../AGENTS.md), about a dozen docs instead of about ninety).
 - A first cost model (summarised in [status](status.md)): reads and file egress dominate at scale; identity is free; storage at rest is minor.
 - A multi-agent benchmark harness and a Git-worktree baseline, kept outside this repository. Four scenarios (related tasks, mid-task contract change, disconnect and recovery, human redirect) by three agent mixes by two repetitions.
@@ -32,8 +32,8 @@ Goal: the product behaves correctly with several agents at once, and a human can
 Delivered:
 
 - Cockpit and UI rebuild: one screen answering who is working, what is changing, what is related and what needs a decision.
-- Incremental Work metadata: source bytes, missing-object negotiation and binding validation reuse earlier checkpoints, and hosted source returns stage per-View changed-path provenance.
-- Native bound exchange pushes, the hosted index, presence, Lanes, Views, Checks and the acceptance ledger.
+- Incremental Work metadata: source bytes, missing-object negotiation and binding validation reuse earlier checkpoints, and hosted source returns stage per-Candidate changed-path provenance.
+- Native bound exchange pushes, the hosted index, presence, Lanes, Candidates, Checks and the acceptance ledger.
 - The Forge arm of the benchmark harness.
 
 Closed on 2026-10-16.
@@ -91,7 +91,7 @@ Open: the Forge arm of the benchmark against GitHub. Single landings measured fo
 
 Done: Issue and Intent merged into one concept (Proposed, Planned, In motion, Done; optional kind; Initiatives kept as grouping; hosted migration run on the development deployment).
 
-Open: View becomes Candidate everywhere (UI, CLI with aliases and a deprecation notice, MCP, docs, tests), as one cohort off one mapping file. The name Channel stays and gets a glossary entry.
+Open: qualify Candidate terminology throughout the UI, CLI (with aliases and a deprecation notice), MCP, docs and tests, as one cohort. The name Channel stays and gets a glossary entry.
 
 ### Stage 5: hosted canonical
 
@@ -117,7 +117,7 @@ Lessons from the first month of hosted use are in the [R2 storage plan](r2-stora
 2. Measured performance: the harness run against the deployed site; Now and Work, first Lane diff and one-file push recorded against budgets; misses listed.
 3. Cost and safety: one measured hosted push shows the egress fix works; monthly running cost under the owner's limit; weekly backup running with one passed restore drill; an idle tab verified to cost nothing.
 4. Runners: own machine, GitHub Actions and Modal (project's own key) selectable per project with cost per check recorded; the self-hosted worker and the contributor first-click rule specified and handed to Phase 4.
-5. Vocabulary and UI: Issue to Intent complete; View to Candidate landed everywhere with CLI aliases; coherence slices 3a to 7b landed with reviewed screenshots.
+5. Vocabulary and UI: Issue to Intent complete; Candidate terminology consistent everywhere with CLI aliases; coherence slices 3a to 7b landed with reviewed screenshots.
 6. Benchmarks published: single-landing and burst numbers on the same compute, and the first coordination pilot result, with void runs listed; the bar from the fair-test plan stated as met or not. The longer coordination series may continue into Phase 4.
 7. Hosted groundwork: hosted main, bootstrap and lossless import landed and qualified; remaining Stage 5 slices written up with sizes as the Phase 4 queue.
 8. Public readiness: a fresh public repository from one clean commit, the old one archived privately, automatic mirroring enabled, current docs and agent docs.

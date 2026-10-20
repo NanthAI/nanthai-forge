@@ -103,7 +103,7 @@ export async function observeGithubReviews(
       if (!complete)
         reasons.push('Provider pages or PR pins changed during observation; approval coverage is unknown.');
       if (before.head.sha !== head || after.head.sha !== head)
-        reasons.push('The current GitHub candidate differs from this exact View commit.');
+        reasons.push('The current GitHub candidate differs from this exact Candidate commit.');
       if (!item) reasons.push('No submitted decision from this GitHub User account is available.');
       else {
         if (item.commit_id !== head) reasons.push('The latest account decision names another commit.');

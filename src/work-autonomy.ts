@@ -121,13 +121,13 @@ export function enforceAcceptance(
   invariant(
     run,
     'CHECK_REQUIRED',
-    'Automatic acceptance requires a passing check on this exact View with its recorded check definition.',
+    'Automatic acceptance requires a passing check on this exact Candidate with its recorded check definition.',
   );
   return {
     actor: actor.id,
     runId: run.id,
     policy,
-    summary: `Automatically accepted View ${view.id}`,
-    undo: 'Accepted work is retained. To undo, propose a compensating change in a new Lane and accept its checked View; do not rewind main.',
+    summary: `Automatically accepted Candidate ${view.id}`,
+    undo: 'Accepted work is retained. To undo, propose a compensating change in a new Lane and accept its checked Candidate; do not rewind main.',
   };
 }

@@ -21,7 +21,7 @@ export function composeOwnerAcceptance(
   invariant(
     source.ancestors(view.head!).has(base),
     'NEEDS_RECHECK',
-    'Needs re-check: the requested View does not contain expected main.',
+    'Needs re-check: the requested Candidate does not contain expected main.',
   );
   const changed = (head: string) => {
     const before = new Map(source.state(base).files.map(f => [f.path, f])),
@@ -35,7 +35,7 @@ export function composeOwnerAcceptance(
   invariant(
     !viewPaths.some(a => mainPaths.some(b => a === b || a.startsWith(b + '/') || b.startsWith(a + '/'))),
     'NEEDS_RECHECK',
-    'Needs re-check: main moved and changed paths overlap the requested View.',
+    'Needs re-check: main moved and changed paths overlap the requested Candidate.',
   );
   const merged = source.compose(
     currentMain,
@@ -52,7 +52,7 @@ export function composeOwnerAcceptance(
     status: 'clean',
     id: randomUUID(),
     head: merged.head,
-    details: `Owner-approved disjoint composition of View ${view.id} on main ${currentMain}; no re-check.`,
+    details: `Owner-approved disjoint composition of Candidate ${view.id} on main ${currentMain}; no re-check.`,
     at: new Date().toISOString(),
   };
   data.views.push(composed);

@@ -47,7 +47,7 @@ import { digest } from './hash.js';
 import { laneReview, viewReview } from './work-detail.js';
 
 export const CHANNEL_DIVERGED =
-  'The View does not contain the current Channel head, so accepting it would drop accepted work. Sync the Lane with the Channel (or compose with it) and finish again.';
+  'The Candidate does not contain the current Channel head, so accepting it would drop accepted work. Sync the Lane with the Channel (or compose with it) and finish again.';
 /** True when this Channel already accepted `head`; re-accepting it is an explicit rollback. */
 export const acceptedOn = (data: WorkData, channel: string, head: string) =>
   data.channelMoves.some(
@@ -420,7 +420,7 @@ export function nativeExecute(
               item =>
                 item.id === command.viewId && item.head === command.expectedHead && item.status === 'clean',
             );
-            invariant(view, 'VIEW_STALE', 'Select a retained native clean View.');
+            invariant(view, 'VIEW_STALE', 'Select a retained native clean Candidate.');
             const batchPrefix = data.landingBatches
               ?.flatMap(batch => batch.prefixes)
               .find(prefix => prefix.viewId === command.viewId);
@@ -529,7 +529,7 @@ export function nativeExecute(
             invariant(
               !assessment || assessment.satisfied,
               'INVARIANT_UNSATISFIED',
-              'The selected Invariant is not satisfied. Inspect its exact-View evidence; existing Channels and source are retained.',
+              'The selected Invariant is not satisfied. Inspect its exact-Candidate evidence; existing Channels and source are retained.',
             );
             result = {
               id: command.operationId,

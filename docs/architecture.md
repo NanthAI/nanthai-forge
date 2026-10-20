@@ -14,7 +14,7 @@ Forge has five parts. Each owns one kind of data, and no part quietly takes over
                                           Netlify worker (public analysis)
 ```
 
-For the vocabulary used below (Intent, Lane, View, Channel, State), see [concepts](concepts.md).
+For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [concepts](concepts.md).
 
 ## Who owns what
 
@@ -23,7 +23,7 @@ For the vocabulary used below (Intent, Lane, View, Channel, State), see [concept
 | Native store | Immutable source: file blobs (SHA-256), State manifests and disposable owner-computed source indexes | `src/native-source.ts` |
 | Work store | Mutable metadata: Intents, Lanes, notes, check runs, selections | `src/work-store.ts`, `src/work.ts`, `src/native-work.ts` |
 | Analysis | Derived, partial code graph with exact locators | `src/snapshot.ts`, `src/analyze.ts`, `src/graph-query.ts` |
-| Local execution | Check and Playbook processes in materialized Views | `src/work-run.ts`, `src/work-playbook.ts` |
+| Local execution | Check and Playbook processes in materialized Candidates | `src/work-run.ts`, `src/work-playbook.ts` |
 | Agent interface | Short commands over the same owners | `src/agent-workflow.ts`, `src/mcp-agent-workflow.ts` |
 | Convex | Hosted checkpoints, the Work event journal, sessions, messages, current access | `convex/` |
 | Web | Hosted browser UI (the only browser UI) | `web/src/` |
@@ -40,7 +40,7 @@ The local native owner is canonical for Forge's own development. A hosted projec
 - **Work** is changing collaboration data.
 - **Authorization** is what a caller may access right now.
 
-Changing one never silently changes another. A View pins its base, ordered Lane heads and dependencies. A Channel records which View was accepted. Repeating a mutation with the same operation UUID returns the original result. It never moves a Channel backward or reruns a finished check.
+Changing one never silently changes another. A Candidate pins its base, ordered Lane heads and dependencies. A Channel records which Candidate was accepted. Repeating a mutation with the same operation UUID returns the original result. It never moves a Channel backward or reruns a finished check.
 
 ## Source analysis
 
@@ -64,7 +64,7 @@ Freshness comes from rereading source, never from timestamps. Re-indexing captur
 
 Lock admission uses FIFO filesystem tickets with process-start identities. Writers wait up to ten minutes by default (`FORGE_WORK_LOCK_WAIT_MS`); agent `start`, `checkpoint` and `sync` accept `waitMs`, and `lockWaitMs` selects lock patience separately from finish's existing observation window. Waiting emits compact stderr progress initially and every five seconds with queue position, operation/run identity, elapsed time and published holder phase. Check observation reports queued/preparing/running phases without taking a writer lock. Finish-driver and landing queues also use bounded waits (`FORGE_LANDING_LOCK_WAIT_MS`, falling back to the Work lock setting); timeout returns a typed, retryable outcome. `WORK_BUSY` after timeout includes available holder identity and instructions to replay the original operation. A not-yet-published holder is described as pending admission. Dead local holders and queue tickets recover; ambiguous/remote locks remain intact. All writers must use the current queue-aware CLI for FIFO ordering; the exclusive owner file still protects against older writers. `FORGE_WORK_LOCK_TRACE=/absolute/file.jsonl` records operation, actor, lock path, wait and hold milliseconds for each released lock. No source or prompt bytes enter this optional trace. Nothing is capped or deleted automatically.
 
-Native composition prepares its pinned source merge outside the owner lock. Publication checks the Work revision again, restores any newly merged objects collected during preparation, and writes the View in the short owner critical section. A stale revision retries with the same composition operation ID.
+Native composition prepares its pinned source merge outside the owner lock. Publication checks the Work revision again, restores any newly merged objects collected during preparation, and writes the Candidate in the short owner critical section. A stale revision retries with the same composition operation ID.
 
 **Owner working copy.** Optional `ownerRootUpdates` (default off) refreshes tracked
 owner files after durable main acceptance, inside the same owner lock. It uses
@@ -110,7 +110,7 @@ requests retain their exact revision checks.
 Native owners attach an optional content-addressed derived-row sidecar to source
 return. Selection happens before derivation against the exact hosted source-return
 baseline, which may differ from the checkpoint used for upload negotiation. Only
-new State parents/ancestry, comparisons for changed Lane/View records, changed View
+new State parents/ancestry, comparisons for changed Lane/Candidate records, changed Candidate
 provenance and new selected trees are supplied. Ancestry is a State's own parents;
 hosted chunks reference those parent boundaries rather than copying full closures.
 Readers compose these references with previously hosted closures and parent caches.
@@ -122,31 +122,31 @@ budget. Oversized legacy caches are skipped before reading. The client stops
 accumulating derived rows at the budget and omits oversized sidecars; the hosted
 action checks declared bytes before any object read, then validates actual bytes,
 digest and JSON. A budget miss falls back to hosted computation and never denies
-a push. The cache retains only the latest bounded delta, not historical View rows
+a push. The cache retains only the latest bounded delta, not historical Candidate rows
 or transitive closures. Original prepared operations retain their pins on retry;
 oversized original sidecars are omitted without changing source publication pins.
 Work and hosted schema versions stay unchanged.
 
 The existing owner-only source-return action validates the Work digest, shape,
-counts, unique keys, source pins, comparison pairs and View identities without
+counts, unique keys, source pins, comparison pairs and Candidate identities without
 reading source blobs. Valid complete sidecars bypass the parent, diffstat,
-ancestry and View item phases and use the existing staged delta publication.
+ancestry and Candidate item phases and use the existing staged delta publication.
 Missing, oversized, legacy or incomplete sidecars retain hosted computation, as do
 contributor sources. Final authority and source/Work CAS checks stay in the same
 publication transaction. A sidecar carries the existing owner's source trust;
 its metadata is disposable and never becomes source authority.
 
-Native object source returns compare the validated metadata with the selected generation, reuse immutable diffstat pairs and unchanged View provenance, and derive only new source prefixes and affected Views. State-parent caches and complete legacy ancestry boundaries carry earlier work across receipts. New ancestry closures store bounded chunks of hashes instead of expanding a new head into individual historical pair rows. Reads compose those closures with legacy positive pairs; previously retained ancestors absent from an older candidate-pair table can be resolved from cached parents. Existing generations require no schema migration or backfill.
+Native object source returns compare the validated metadata with the selected generation, reuse immutable diffstat pairs and unchanged Candidate provenance, and derive only new source prefixes and affected Candidates. State-parent caches and complete legacy ancestry boundaries carry earlier work across receipts. New ancestry closures store bounded chunks of hashes instead of expanding a new head into individual historical pair rows. Reads compose those closures with legacy positive pairs; previously retained ancestors absent from an older candidate-pair table can be resolved from cached parents. Existing generations require no schema migration or backfill.
 
 A private return generation holds its computational cursor in file storage. Small deltas keep the selected physical record partition: the final source/Work CAS applies their changed rows and removals atomically with the receipt. The publication budget accounts for new rows, old rows read, protocol bytes and payload-cleanup scheduling. Larger deltas use the existing complete private-partition rebuild and atomic switch. These are internal transaction budgets, not limits on retained source or Work.
 
-The initial metadata reader has an 8 MiB byte memo. Derived steps share a 2 MiB immutable State-byte memo within an action, checking current authority and storage on every use. A logical step reads at most 16 States or roughly 2 MiB of source (one larger State remains readable), and drains at most 100 rows or about 500 KB. Steps checkpoint many logical items together: native delta cursors after at most 64 items or about a second of computation, full partitions once the step's State, byte or row budget is used. The server loops over committed steps for up to 30 seconds (or 1,000 steps) per invocation rather than requiring a client round trip per item, because every cold invocation rereads the cursor and snapshot. State comparison and View provenance still discard historical file lists; arbitrary individual metadata or States do not have a flat-memory guarantee. The [documented action execution limit](https://docs.convex.dev/production/state/limits) remains ten minutes.
+The initial metadata reader has an 8 MiB byte memo. Derived steps share a 2 MiB immutable State-byte memo within an action, checking current authority and storage on every use. A logical step reads at most 16 States or roughly 2 MiB of source (one larger State remains readable), and drains at most 100 rows or about 500 KB. Steps checkpoint many logical items together: native delta cursors after at most 64 items or about a second of computation, full partitions once the step's State, byte or row budget is used. The server loops over committed steps for up to 30 seconds (or 1,000 steps) per invocation rather than requiring a client round trip per item, because every cold invocation rereads the cursor and snapshot. State comparison and Candidate provenance still discard historical file lists; arbitrary individual metadata or States do not have a flat-memory guarantee. The [documented action execution limit](https://docs.convex.dev/production/state/limits) remains ten minutes.
 
 Cursor contents and validated metadata travel through file storage as gzip JSON; legacy plain JSON cursors still resume. A warm worker reuses a cursor or snapshot body it stored or read, after checking current storage size and SHA-256. Each committed cursor carries the push's running storage reads, bytes, steps and invocations; the completing call returns them as `accounting` (the stored receipt is unchanged) and the CLI prints them. Setting `FORGE_SOURCE_RETURN_MAX_STEPS` or `FORGE_SOURCE_RETURN_MAX_STORAGE_BYTES` on the deployment pauses a return after a committed step with `SOURCE_RETURN_BUDGET`; pushing the same operation again resumes once the limit is raised or unset. Both are unset by default. The cursor and private rows commit atomically under a step CAS; replaced disposable cursors are removed. An old R3 partition without a computational cursor restarts its disposable rows with the original operation timestamp. Only the final source/Work CAS selects the complete result. Lost replies resume the original cursor or return the exact final receipt. Older CLIs receive `SOURCE_RETURN_PENDING` rather than mistaking partial preparation for success; current CLIs continue automatically and print phase, items done/total, durable step, elapsed time, ETA and saved restart position on stderr. JSON stdout retains the original final receipt.
 
 Diagnostics log `source-return prepare`, `prepared`, `step` (phase, durable step, row count/bytes, State count/bytes, derived rows, elapsed milliseconds and CAS result), and `complete` (published revision). No source payloads are logged. Unavailable optional ancestry/provenance remains explicitly unknown and does not deny a source return; each staging/final mutation still checks current owner authority. Unknown hosted failures remain typed `HOSTED_ACTION_FAILED` and preserve pending push pins. Full fallback Work validation and manifest/catalog processing still scale with retained metadata. Legacy archive/Git projection retains its existing full reconstruction path. The target of under 200 MB on the dogfooding project needs live post-deployment measurement. Retained-byte coverage lives in `tests/hosted-source-memory.test.mjs`; transaction/RPC budgets and the 9,200-object/854 MiB logical-source regression live in `tests/hosted-return-progress.test.mjs`. Incremental landing fixtures live in `tests/source-return-incremental.test.mjs`. See [source exchange](operations/source-exchange.md).
 
-Without a valid owner sidecar, hosted native Lane/View diffstats advance through the same durable return cursor. Only changed records schedule comparisons; a step advances as many records as its State and byte budget allows, looks up immutable base/head totals in batches, compares changed files in batches of up to 100, and publishes each summary once with the index. A partly compared pair resumes from its saved offset. Unavailable or inexact source keeps line totals unknown.
+Without a valid owner sidecar, hosted native Lane/Candidate diffstats advance through the same durable return cursor. Only changed records schedule comparisons; a step advances as many records as its State and byte budget allows, looks up immutable base/head totals in batches, compares changed files in batches of up to 100, and publishes each summary once with the index. A partly compared pair resumes from its saved offset. Unavailable or inexact source keeps line totals unknown.
 
 **Archives.** `export-work` writes the full retained closure: source States, Work and recorded run files. It can pack this as a `.tar.gz`. Source-only release archives are narrower and contain empty Work. Browser backup and contributor-proposal imports unpack local exports and upload reusable logical objects. New hosted archive registrations are retired; historical stored archives and pending uploads retain read/resume support. Object proposals pull as validated unpacked exports for direct native contribution import. Older hosted archives are still readable and can be converted explicitly. See [operations](operations.md).
 
@@ -172,7 +172,7 @@ preparation, catalog reads and this hashing still scale with retained metadata.
 An exchange-only journal adapter replays hosted events over touched records,
 checks retained history by ordered record hashes, and uses the existing
 source-return event with its whole-JSON digest. It hydrates affected dependants,
-referenced records, View families, the default Intent and selected Channels for
+referenced records, Candidate families, the default Intent and selected Channels for
 the existing derived-index planner. Small updates publish through the original
 atomic source/Work CAS and operation receipt. No new writer authority or portable
 Work event is introduced.
@@ -213,7 +213,7 @@ See [Modal checks](operations/modal-checks.md) and [GitHub Actions and Blacksmit
 
 Modal interruptions preserve completed exact-plan shards. Failed test shards retry once; two named flake verdicts within seven days quarantine that exact test identity. Quarantined tests continue running without blocking on fully attributed failures; twenty consecutive clean passes or an explicit fix release quarantine. Infrastructure recovery keeps its attempts without contributing flake verdicts. See [flakes and quarantine](operations/modal-checks.md#flakes-and-quarantine).
 
-A check is an executable, its arguments, an optional environment label and explicit environment/credential passthrough names. A run records the pinned View, the check definition, an environment fingerprint and the process owner. It runs in a fresh workspace under your OS account with private HOME/XDG/temp directories and a clean runtime allowlist plus declared passthrough. Passthrough values are transient; receipts retain names only. It is not sandboxed. The runner keeps outcomes, logs and chosen build outputs. Cancelled, interrupted and failed are different results. After a lost reply, a retry observes the existing run and does not start another.
+A check is an executable, its arguments, an optional environment label and explicit environment/credential passthrough names. A run records the pinned Candidate, the check definition, an environment fingerprint and the process owner. It runs in a fresh workspace under your OS account with private HOME/XDG/temp directories and a clean runtime allowlist plus declared passthrough. Passthrough values are transient; receipts retain names only. It is not sandboxed. The runner keeps outcomes, logs and chosen build outputs. Cancelled, interrupted and failed are different results. After a lost reply, a retry observes the existing run and does not start another.
 
 Playbooks run a sequence of checks. Automation rules start a Playbook on an event. Evidence is reused only under the explicit native disjoint fast-path policy; acceptance revalidates the exact check and manifest-path proof and schedules full main verification. Missing coverage is unknown. A passing check, a model critique and a human review are separate facts. Accepting a Channel is an explicit step against an observed previous head. An optional Invariant can require specific evidence first.
 
@@ -221,7 +221,7 @@ A hosted project can ask a connected local computer to run a check. The request 
 
 ## Making-of record
 
-`making-of` is a read model over existing records: the Intent, its Lanes (by `intentId`), its Views, their runs and accepted Channel moves (by `viewId`), plus local presence and self-reports from `hosted-binding.json`. Records-v2 owners read only those indexed records; older owners read loaded Work. The derivation (`src/making-of.ts`) is pure and omits values whose inputs are missing; loading and the `report` mutation live in `src/making-of-read.ts`. Runs record `queuedAt` at creation and move `startedAt` forward when the command spawns, which separates queue from running time. Self-reports are keyed by Lane, actor and optional session, keep their applied operation IDs for replay, and never change the Work revision or format.
+`making-of` is a read model over existing records: the Intent, its Lanes (by `intentId`), its Candidates, their runs and accepted Channel moves (by `viewId`), plus local presence and self-reports from `hosted-binding.json`. Records-v2 owners read only those indexed records; older owners read loaded Work. The derivation (`src/making-of.ts`) is pure and omits values whose inputs are missing; loading and the `report` mutation live in `src/making-of-read.ts`. Runs record `queuedAt` at creation and move `startedAt` forward when the command spawns, which separates queue from running time. Self-reports are keyed by Lane, actor and optional session, keep their applied operation IDs for replay, and never change the Work revision or format.
 
 Designed, not built: an opt-in OpenTelemetry intake. Claude Code and Codex can export OTLP metrics (token and cost counters with model and session attributes) when the user enables telemetry. `nforge serve` would accept OTLP/HTTP JSON on its existing token-authenticated loopback listener, map the session to a Lane through a `forge.lane_id` resource attribute set from the Lane environment, and write the same self-report record. It stays off unless the user configures the exporter, and it drops prompt and tool-content attributes.
 
@@ -230,7 +230,7 @@ Designed, not built: an opt-in OpenTelemetry intake. Claude Code and Codex can e
 A native project created by `nforge host` remains canonical on its bound local
 owner. The hosting key and native backup format distinguish it from Git-backed
 and hosted-canonical projects. Hosted Accept records an owner-scoped request,
-not a `hostedChannelMoves` selection: operation UUID, exact View/head, expected
+not a `hostedChannelMoves` selection: operation UUID, exact Candidate/head, expected
 main, server-attributed requester and person/agent classification. The original
 request survives source/index refreshes. Bound pulls materialize source client directories without native Work or
 acceptance authority. Existing independent bound owners can exchange source and
@@ -257,10 +257,10 @@ and cannot acquire person acceptance authority. If main advanced after a person
 request, the owner-approved fast-path compares source manifests against the
 expected main. Only disjoint changed paths (including directory-prefix clashes)
 compose on current main without a new check. The receipt records the comparison base, both path sets,
-original View/head and current main. Before the first main acceptance, the retained
+original Candidate/head and current main. Before the first main acceptance, the retained
 native bootstrap supplies the comparison base. Overlap or unavailable ancestry rejects as
 needs re-check; original source, checks and accepted work remain. The composed
-View has a new identity; it does not inherit a passing run on that identity.
+Candidate has a new identity; it does not inherit a passing run on that identity.
 
 Local Channel moves are durable before network delivery. The binding retains
 terminal receipts and exact metadata publication payloads for lost-reply replay.
@@ -273,18 +273,18 @@ projects retain their existing hosted selection path.
 
 Revert creates a compensating-change Intent and a hand-to-agent prompt. The agent
 must create a reverse-diff Lane on current main, preserve later work, then check
-and accept the new View normally. Creating the Intent does not reverse source.
+and accept the new Candidate normally. Creating the Intent does not reverse source.
 Main is never rewound by this action.
 
 ## Collaboration
 
 Source changes and live coordination are separate. Convex stores sessions and an append-only message feed outside the Work journal. A session is an attributed claim: who, where, status and optional Intent, Lane or path. Last-seen is the time a report arrived. A heartbeat touch moves only receipt time (`lastSeen`), preserving `lastActivity` and `activityKind`; real MCP activity advances both. Bound owner observations pin activity time before transport, so delayed delivery cannot look like fresh editing. CLI lifecycle calls persist local session observations; one process-owned observer with per-Lane filesystem watchers coalesces edits about once per minute without reading or hashing source. Its minute tick also observes queued/running checks. Presence observers validate the current Work format before creating owner or Lane queue tickets; unsupported formats leave the owner untouched. HTTP and MCP own their in-process presence observers: closing the last handle aborts watchers and waits for Lane queue releases. Standalone CLI lifecycle observations retain their detached worker. HTTP shutdown also clears the acceptance interval and waits for its active poll before returning. Hosted Now uses shared 15-minute working and 90-minute folding defaults, keep quiet sessions visible, and collapse duplicate name+Lane observations. Silence never completes a session; explicit completion or accepted/closed Lanes do. Messages and handoffs target a session, a participant or the project; acknowledgements refer to the original and are recorded per participant. Claims are advisory path scopes with an expiry. Hosted Work writes, exchange publishes and source returns insert `change` events in the same transaction. Events carry denormalized kind, recipient, Intent and Lane for indexed inbox and scoped feeds. Nothing pauses an agent, locks a file or accepts source.
 
-Hosted Intent, note and Channel operations use a derived indexed Work generation, rebuilt from the checkpoint and the event journal. Source return updates a ready generation in place: small deltas modify changed rows, while larger deltas stage a replacement record partition before an atomic switch under the same public generation. Browser query identities stay stable; CLI pagination cursors additionally pin the source revision, and multi-part record hydration retries if that revision changes. Unavailable derived indexes retain the rebuild fallback. The cockpit strip selects the latest accepted `main` move from the pushed local `channelMoves` and hosted selection records, including its recorded timestamp, actor and exact-View check. Indexed Lane `main.included` means main contains that Lane head; View/run `main.included` means the checked head contains main. These opposite ancestry directions are kept separate, with unavailable ancestry reported as unknown. Accepted moves and their exact View inputs also identify landed Lane heads in older indexes. Unanchored notes, Intent creation/status and planning comments use `projectWorkCommand.command`, a single mutation with an operation UUID and no client-held revision. It reads current headers, applies the shared reducer and assigns the next journal revision atomically; Convex retries concurrent transactions. Coordination messages and heartbeat touches are already independent server mutations.
+Hosted Intent, note and Channel operations use a derived indexed Work generation, rebuilt from the checkpoint and the event journal. Source return updates a ready generation in place: small deltas modify changed rows, while larger deltas stage a replacement record partition before an atomic switch under the same public generation. Browser query identities stay stable; CLI pagination cursors additionally pin the source revision, and multi-part record hydration retries if that revision changes. Unavailable derived indexes retain the rebuild fallback. The cockpit strip selects the latest accepted `main` move from the pushed local `channelMoves` and hosted selection records, including its recorded timestamp, actor and exact-Candidate check. Indexed Lane `main.included` means main contains that Lane head; Candidate/run `main.included` means the checked head contains main. These opposite ancestry directions are kept separate, with unavailable ancestry reported as unknown. Accepted moves and their exact Candidate inputs also identify landed Lane heads in older indexes. Unanchored notes, Intent creation/status and planning comments use `projectWorkCommand.command`, a single mutation with an operation UUID and no client-held revision. It reads current headers, applies the shared reducer and assigns the next journal revision atomically; Convex retries concurrent transactions. Coordination messages and heartbeat touches are already independent server mutations.
 
 The `projectWorkHeads` row owns the mutable Work revision and projection metadata. Legacy project/generation fields seed it lazily; ordinary writes leave those shared documents unchanged. Revision-sensitive reads (Work state, workspace, provenance plans, exports and source return) hydrate the head; collection/detail reads depend on the stable generation and their selected record ranges. Index preparation remains the existing hosted-open step. Anchored notes still validate source bytes in an action; planning-item replacement, Channel acceptance and source return retain their pinned revision checks. The legacy command action remains compatible. Source return atomically selects the new checkpoint and head; journal replay and operation receipts retain contiguous revisions and original retry identities.
 
-Related work is found by comparing changed paths against each View's base. Composition merges independent text-line changes. Overlaps, binary changes and add/delete conflicts stay explicit. Agents should announce scope, watch related activity, message when needed and acknowledge agreements. See [agents](agents.md) and [decisions](decisions.md).
+Related work is found by comparing changed paths against each Candidate's base. Composition merges independent text-line changes. Overlaps, binary changes and add/delete conflicts stay explicit. Agents should announce scope, watch related activity, message when needed and acknowledge agreements. See [agents](agents.md) and [decisions](decisions.md).
 
 
 ## Source durability and interrupted workspace updates
@@ -344,15 +344,15 @@ observations from a complete absence of a participant.
 
 Activity counts range-read optional derived `projectWorkRecords.activityAt` through
 `by_generation_and_collection_and_activityAt`, selecting only recent Lane saves
-and runs before resolving their Views. All index writers derive the timestamps.
+and runs before resolving their Candidates. All index writers derive the timestamps.
 Existing rows are populated by the bounded, idempotent internal
 `coordinationBackfill:activity({cursor})` mutation, repeating the returned cursor
 until `isDone`; counts for unbackfilled imported history are incomplete until then.
 
 
 Hosted Review uses this owner request path for native projects and offers every
-retained clean View, including Views without a previous acceptance. People may
-accept clean unchecked Views; agents still need exact-View passing evidence and
+retained clean Candidate, including Candidates without a previous acceptance. People may
+accept clean unchecked Candidates; agents still need exact-Candidate passing evidence and
 the current autonomy policy. `hosted-work` CLI and `forge_hosted_work` expose
 `accept` with operationId, revision, viewId, head, archiveSha256, channel and
 previousId. The CLI/MCP command explicitly downscopes to agent authority even
@@ -370,10 +370,10 @@ and Git projects retain their existing Intent status controls.
 
 
 An overlap rejection offers **Re-check on latest main**. It queues a separate
-owner request, composes the pinned reviewed View with the latest local main using
-normal View dependencies, and queues the configured check through the existing
+owner request, composes the pinned reviewed Candidate with the latest local main using
+normal Candidate dependencies, and queues the configured check through the existing
 runner. It never accepts source. Original request ids replay the same composed
-View and run even if main advances later. A text conflict retains a conflict View
+Candidate and run even if main advances later. A text conflict retains a conflict Candidate
 and reports why no check was queued. Re-check receipts are separate from acceptance
 receipts; new source/check artifacts still use explicit exchange. Deterministic
 acceptance failures do not offer an unchanged acceptance retry; transient owner
@@ -386,7 +386,7 @@ are prepared during source indexing; older or unavailable tree indexes use the
 existing exact-source review reader. File text is read only for the selected
 file, independently of the tree. The project frame shares summary pages and
 coordination subscriptions with its child pages. Summary pages start with 20 rows and continue through all history in 100-record
-pages. Non-summary readers retain the backend's existing 100-record page size. Code and View
+pages. Non-summary readers retain the backend's existing 100-record page size. Code and Candidate
 chunks are warmed when their navigation links receive hover or keyboard focus;
 module preloading never caches project data.
 
@@ -407,7 +407,7 @@ actor within a records query; that reuse ends with the query and never skips a
 fresh name or authority read on a later request.
 
 Lane headers use the indexed header immediately while save payloads hydrate in
-the background. Selected Intent, View and run summaries use the existing keyed
+the background. Selected Intent, Candidate and run summaries use the existing keyed
 and parent indexes rather than waiting for unrelated project history. For native
 object checkpoints, source-pin lookups recognize an absent base or head before
 starting a manifest read that would return the same source-unavailable error.

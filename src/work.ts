@@ -1,3 +1,4 @@
+import { candidateCommand } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
 import { executionBase } from './work-intent-local.js';
 import { migrateIntentWork } from './work-intent-migration.js';
@@ -336,7 +337,7 @@ export class WorkService {
               invariant(
                 existing.operation?.request === this.compositionRequest(command),
                 'WORK_OPERATION_CHANGED',
-                'This composition operation has different inputs; its original View and runs are retained.',
+                'This composition operation has different inputs; its original Candidate and runs are retained.',
               );
               return { revision: data.revision, result: existing };
             }
@@ -370,6 +371,7 @@ export class WorkService {
       ownerRequest?: boolean;
     } = {},
   ) {
+    input = candidateCommand(input);
     const operation = input && typeof input === 'object' && 'action' in input ? String(input.action) : 'work';
     return withWorkLockOptions({ operation }, () => this.dispatchAction(input, expectedRevision, options));
   }
@@ -408,7 +410,7 @@ export class WorkService {
               )
                 throw new ForgeError(
                   error.code,
-                  `${command.channel} moved; re-check needed. Sync and check a new View, then review and accept that View. ${error.message}`,
+                  `${command.channel} moved; re-check needed. Sync and check a new Candidate, then review and accept that Candidate. ${error.message}`,
                 );
               throw error;
             }
@@ -592,7 +594,7 @@ export class WorkService {
         invariant(
           parsed.success,
           'BAD_ARGUMENT',
-          'Send an Invariant definition with its original operation ID, or exact policy and View pins.',
+          'Send an Invariant definition with its original operation ID, or exact policy and Candidate pins.',
         );
         return invariantWork(this.store, parsed.data, expectedRevision);
       }
@@ -601,7 +603,7 @@ export class WorkService {
         invariant(
           parsed.success,
           'BAD_ARGUMENT',
-          'Send the exact clean View and observed Channel pointer, or a retained acceptance ID.',
+          'Send the exact clean Candidate and observed Channel pointer, or a retained acceptance ID.',
         );
         return channelWork(this.store, parsed.data, expectedRevision, this.actor, options.attribution);
       }
@@ -619,7 +621,7 @@ export class WorkService {
         invariant(
           parsed.success,
           'BAD_ARGUMENT',
-          'Invalid comparison command. Send both exact clean View pins and pagination.',
+          'Invalid comparison command. Send both exact clean Candidate pins and pagination.',
         );
         return compareViews(this.store, parsed.data, expectedRevision);
       }
@@ -628,7 +630,7 @@ export class WorkService {
         invariant(
           parsed.success,
           'BAD_ARGUMENT',
-          'Invalid history command. Send the exact clean View and pagination.',
+          'Invalid history command. Send the exact clean Candidate and pagination.',
         );
         return historyWork(this.store, parsed.data, expectedRevision);
       }
@@ -668,7 +670,11 @@ export class WorkService {
     const at = new Date().toISOString();
     switch (command.action) {
       case 'resolve-native-view':
-        invariant(false, 'UNSUPPORTED_NATIVE_WORK', 'Select a native source owner to resolve a native View.');
+        invariant(
+          false,
+          'UNSUPPORTED_NATIVE_WORK',
+          'Select a native source owner to resolve a native Candidate.',
+        );
       case 'define-automation':
       case 'automation-enabled':
         return automationCommand(data, command, at);
@@ -829,7 +835,7 @@ export class WorkService {
       invariant(
         source && (pin.kind === 'pr' && pin.part === 'base' ? source.base : source.head) === pin.head,
         'BAD_ARGUMENT',
-        'Dependency must pin an existing clean View or retained PR observation exactly.',
+        'Dependency must pin an existing clean Candidate or retained PR observation exactly.',
       );
       invariant(
         workGit(this.store.root, ['rev-parse', '--verify', `${pin.head}^{commit}`]).trim() === pin.head,

@@ -141,5 +141,5 @@ export function validateModalPlan(plan: ModalPlan, run: CheckRun) {
       }),
     ) !== plan.pin
   )
-    throw new Error('Retained Modal source, View or plan digest changed.');
+    throw new Error('Retained Modal source, Candidate or plan digest changed.');
 }

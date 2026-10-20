@@ -373,7 +373,7 @@ test('same-account sessions remain visible in briefings and composed View input 
   });
   assert.equal(result.context.claims.find(c => c.id === 'same-account').sessionId, sessionId);
   assert.deepEqual(result.context.view.inputs, records.views[0].inputs);
-  assert.match(result.full, /composed View conflict.*resolution workflow/);
+  assert.match(result.full, /composed Candidate conflict.*resolution workflow/);
 });
 
 test('briefing and guidance registrations enforce current CLI credential scope and revocation', async () => {

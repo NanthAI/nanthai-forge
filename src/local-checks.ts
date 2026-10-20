@@ -86,7 +86,7 @@ export async function executeLocalCheck(
   if (original && !matches(original)) {
     await noRun(
       'error',
-      'This operation already belongs to a different local View or check. Its original evidence is preserved.',
+      'This operation already belongs to a different local Candidate or check. Its original evidence is preserved.',
     );
     return;
   }

@@ -83,7 +83,7 @@ export async function importNativeContribution(store: WorkStore, input: unknown,
               view.status === 'clean',
           ),
           'CONTRIBUTION_CHANGED',
-          'The selected proposal View differs from its original native candidate.',
+          'The selected proposal Candidate differs from its original native candidate.',
         );
       const ids = new Set<string>();
       for (const id of ancestry.ancestors(command.expectedHead)) {

@@ -49,7 +49,7 @@ export function nativeDependencyHead(
             view => view.id === pin.viewId && view.head === pin.head && view.status === 'clean',
           ),
       'BAD_ARGUMENT',
-      'Select an exact retained native clean View dependency.',
+      'Select an exact retained native clean Candidate dependency.',
     );
     return pin.head;
   }

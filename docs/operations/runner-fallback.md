@@ -29,7 +29,7 @@ nforge agent OWNER set-policy '{"checks":{"fallback":"local"}}'
 
 Local fallback is available only for owner-originated Lanes. Imported native or
 Git contributions, external PR work, and candidates containing them through Lane
-parents or View dependencies cannot automatically fall back locally. Changing the
+parents or Candidate dependencies cannot automatically fall back locally. Changing the
 fallback setting does not change their provenance. Ambiguous remote outcomes
 remain interrupted and require reconciliation of the retained execution IDs;
 they never automatically repeat locally. Test failures remain failed tests and

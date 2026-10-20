@@ -111,13 +111,20 @@ test('unsupported flags and JSON fields fail before mutations with structured er
     ['pr', 'create', '--title', 'Invalid', '--draft'],
     ['pr', 'merge', '--admin'],
     ['pr', 'list', '--jq', '.[].id'],
+    ['pr', 'candidate', '--web'],
     ['pr', 'view', '--web'],
+    ['repo', 'candidate', '--branch', 'main'],
     ['repo', 'view', '--branch', 'main'],
     ['auth', 'status', '--show-token'],
   ]) {
     const result = await run(args, p.root);
     assert.equal(result.code, 1);
-    const error = JSON.parse(result.stderr).error;
+    const lines = result.stderr.trim().split('\n');
+    if (args[1] === 'view') {
+      assert.equal(lines.length, 2);
+      assert.equal(lines[0], 'Deprecated: view is an alias for candidate; use candidate.');
+    } else assert.equal(lines.length, 1);
+    const error = JSON.parse(lines.at(-1)).error;
     assert.equal(error.code, 'UNSUPPORTED_FLAG');
     assert.ok(error.message.includes(args.at(-1).startsWith('--') ? args.at(-1) : args.at(-2)));
   }

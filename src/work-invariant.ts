@@ -28,7 +28,7 @@ export function assessInvariant(
         `refs/forge/views/${view.id}^{commit}`,
       ]).trim() === view.head,
       'VIEW_STALE',
-      'The retained View ref changed. Source and evidence are preserved.',
+      'The retained Candidate ref changed. Source and evidence are preserved.',
     );
   const policy = data.invariants.find(
     item => item.id === command.id && item.definition === command.definition,
@@ -36,7 +36,7 @@ export function assessInvariant(
   invariant(
     policy && policy.intentId === view.intentId,
     'NOT_FOUND',
-    'Select a retained Invariant for this View’s Intent.',
+    'Select a retained Invariant for this Candidate’s Intent.',
   );
   const currentPolicy =
     data.invariants.filter(item => item.id === policy.id).at(-1)?.definition === policy.definition;
@@ -46,7 +46,7 @@ export function assessInvariant(
     const run = data.runs.filter(item => item.viewId === view.id && item.check.id === id).at(-1);
     const reasons: string[] = [];
     if (!check) reasons.push('The check definition is unavailable.');
-    if (!run) reasons.push('No run exists for this exact View.');
+    if (!run) reasons.push('No run exists for this exact Candidate.');
     if (run) {
       if (
         run.head !== view.head ||
@@ -98,7 +98,7 @@ export function assessInvariant(
         ? review.decision === 'approve'
           ? []
           : ['Latest policy-bound review does not approve.']
-        : ['No review names this exact View and policy version.'],
+        : ['No review names this exact Candidate and policy version.'],
     };
   });
   const providerSatisfied =

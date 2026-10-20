@@ -181,7 +181,9 @@ function validationApplicability(
   const reasons: string[] = [];
   if (!successfulOutcome) reasons.push('A complete successful command outcome is unavailable.');
   if (!exactView)
-    reasons.push('The selected View, source, ordered inputs or dependencies differ from the original run.');
+    reasons.push(
+      'The selected Candidate, source, ordered inputs or dependencies differ from the original run.',
+    );
   if (checkDefinition !== 'current') reasons.push('The original check definition is changed or unavailable.');
   if (recordedRuntime !== 'current') reasons.push('Recorded runtime settings changed.');
   return {
@@ -253,7 +255,7 @@ export function assessCheckInputs(store: WorkStore, input: unknown, revision: nu
   invariant(
     parsed.success && Number.isSafeInteger(revision) && revision >= 0,
     'BAD_ARGUMENT',
-    'Choose a retained check run and exact clean View.',
+    'Choose a retained check run and exact clean Candidate.',
   );
   return store.locked(() => {
     const data = store.load(),
@@ -264,7 +266,7 @@ export function assessCheckInputs(store: WorkStore, input: unknown, revision: nu
     invariant(
       view?.status === 'clean' && view.head === command.expectedHead,
       'VIEW_STALE',
-      'Choose an existing clean View and exact source head.',
+      'Choose an existing clean Candidate and exact source head.',
     );
     return {
       revision: data.revision,

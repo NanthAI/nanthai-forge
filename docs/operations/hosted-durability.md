@@ -117,7 +117,7 @@ under its own credential, then compare the local ZIPs.
 The JSON report contains:
 
 - Selected accepted `main` head per active hosted Work project, preferring
-  `hostedChannels/main` over local `channels/main`, and Intent/Lane/View counts
+  `hostedChannels/main` over local `channels/main`, and Intent/Lane/Candidate counts
   from the selected ready generation's actual record partition.
 - Counts and SHA-256 digests of every exported table's canonical full records,
   including IDs, creation times, payload chunks, journals, other projects and
@@ -140,7 +140,7 @@ No index rebuild or other mutation runs automatically.
 Equal hashes establish snapshot data equality, not source-closure validity,
 application health, an off-machine recovery or a power-loss guarantee. To qualify
 the drill, the lead should open the restored project under its configured auth,
-confirm accepted main and selected Lane/View/Intent detail, download the preserved
+confirm accepted main and selected Lane/Candidate/Intent detail, download the preserved
 checkpoint through the existing recovery path, restore into a new local directory
 and check its source/Work integrity. Record only observed results and elapsed
 restore/verify times. Keep the source and local owner unchanged throughout.

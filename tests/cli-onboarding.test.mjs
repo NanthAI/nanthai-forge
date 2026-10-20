@@ -51,7 +51,7 @@ test('HEAD rejection explains exact commit selection; import prints the main boo
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /git rev-parse HEAD/);
   const imported = JSON.parse(cli(['import-native-git', root, git(['rev-parse', 'HEAD']), target]).stdout);
-  assert.match(imported.main, /accepts the checked View to establish main/);
+  assert.match(imported.main, /accepts the checked Candidate to establish main/);
   assert.match(imported.nextCommand, /nforge agent .* start/);
   assert.equal(new WorkStore(target).load().channelMoves.length, 0);
 });
@@ -91,7 +91,7 @@ test('start records explicit and environment actor names; supervised finish ends
   assert.equal(JSON.parse(finished.stdout).result.status, 'awaiting-review');
   assert.equal(
     finished.stderr.trim().split('\n').at(-1),
-    `Next: nforge serve '${root}' — open Review and accept the checked View as a person.`,
+    `Next: nforge serve '${root}' — open Review and accept the checked Candidate as a person.`,
   );
 });
 test('lock diagnostics appear once, followed by throttled progress', () => {

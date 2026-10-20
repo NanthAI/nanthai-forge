@@ -21,7 +21,7 @@ export async function nativeChannelGit(
   invariant(
     move?.status === 'accepted' && retainedAcceptance(store, data, move),
     'NOT_FOUND',
-    'Select a retained native Channel acceptance and its original clean View/source.',
+    'Select a retained native Channel acceptance and its original clean Candidate/source.',
   );
   const moves = history
     ? data.channelMoves.filter(item => item.channel === move.channel && item.status === 'accepted')

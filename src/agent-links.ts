@@ -71,7 +71,7 @@ export async function agentLinks(store: WorkStore, input: LinkInput) {
   const lane = input.laneId ? store.select('lanes', input.laneId, 'id', true) : undefined;
   const view = input.viewId ? store.select('views', input.viewId) : undefined;
   const head = input.save ?? lane?.head ?? view?.head;
-  invariant(head, 'NOT_FOUND', 'Lane or clean View not found.');
+  invariant(head, 'NOT_FOUND', 'Lane or clean Candidate not found.');
   const binding = readHostState(store).binding;
   let owner: string | undefined;
   let hostedSlug: string | undefined;

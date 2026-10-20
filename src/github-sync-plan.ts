@@ -53,7 +53,7 @@ export function appendCommits(
 ) {
   const moves = mainMoves(data),
     latest = moves.at(-1);
-  invariant(latest, 'GITHUB_SYNC_NO_MAIN', 'Accept a native View into main before syncing.');
+  invariant(latest, 'GITHUB_SYNC_NO_MAIN', 'Accept a native Candidate into main before syncing.');
   let selected: ChannelMove[];
   if (binding) {
     const last = binding.commits.at(-1)!;
@@ -72,7 +72,7 @@ export function appendCommits(
     const view = data.views.find(
       view => view.id === move.viewId && view.head === move.head && view.status === 'clean',
     );
-    invariant(view, 'GITHUB_SYNC_HISTORY', 'An accepted View is unavailable.');
+    invariant(view, 'GITHUB_SYNC_HISTORY', 'An accepted Candidate is unavailable.');
     const intent = data.intents.find(intent => intent.id === view.intentId);
     invariant(intent, 'GITHUB_SYNC_HISTORY', 'The accepted Intent is unavailable.');
     const message = [

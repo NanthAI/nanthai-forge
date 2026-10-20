@@ -228,28 +228,28 @@ export async function validateChangedRecords(
       invariant(
         lanes.get(input.laneId)?.intentId === view.intentId,
         'INVALID_WORK_BACKUP',
-        'A changed View input belongs to another Intent.',
+        'A changed Candidate input belongs to another Intent.',
       );
     for (const dependency of view.dependencies ?? [])
       if (dependency.kind === 'view')
         invariant(
           views.get(dependency.viewId)?.head === dependency.head,
           'INVALID_WORK_BACKUP',
-          'A changed View dependency differs from its pinned head.',
+          'A changed Candidate dependency differs from its pinned head.',
         );
   }
   for (const run of candidate.runs)
     invariant(
       views.get(run.viewId)?.head === run.head,
       'INVALID_WORK_BACKUP',
-      'A changed check run differs from its pinned View.',
+      'A changed check run differs from its pinned Candidate.',
     );
   for (const move of candidate.channelMoves)
     if (move.status === 'accepted')
       invariant(
         views.get(move.viewId)?.status === 'clean' && views.get(move.viewId)?.head === move.head,
         'INVALID_WORK_BACKUP',
-        'A changed Channel receipt differs from its clean View.',
+        'A changed Channel receipt differs from its clean Candidate.',
       );
   for (const head of workSourcePins(context))
     invariant(sourcePins.has(head), 'INVALID_WORK_BACKUP', 'Changed Work record names unavailable source.');

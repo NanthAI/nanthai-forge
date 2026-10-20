@@ -16,7 +16,7 @@ export function validateAnchorView(
       view.base === anchor.base &&
       view.head === anchor.head,
     'SOURCE_CHANGED',
-    'Choose a line in an exact View for this Intent. Your comment remains available.',
+    'Choose a line in an exact Candidate for this Intent. Your comment remains available.',
   );
 }
 export function validateAnchorFile(

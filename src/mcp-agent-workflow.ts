@@ -1,3 +1,4 @@
+import { candidateActionSchema } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
 import { agentPeers, peersInputSchema } from './agent-peers.js';
 import { controlQueue } from './queue-control.js';
@@ -122,13 +123,13 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
         'peer-ack',
       ],
       description:
-        'Receipts include local peers and pre-compose conflict notices; peers detail:true returns exact hunks, intents, messages and known owner sessions. peer-ack records accept-order, swap or split advisory choices using noticeId and laneId; it never pauses or resolves source. start scope.paths retains planned claims; other calls add relevance for that call. take transfers an open Lane with context; takeover:true is required for another actor’s Lane, and ownership remains advisory. Clean checkpoints reuse the unchanged head. Start isolated work (intentId adds a sibling Lane; after records a landing dependency), checkpoint edits, sync a Lane with main, undo-sync, set-policy, compose Lane heads, finish (checkpoint, sync, compose, check, optional accept:true) or accept a View; finish with:[laneId] composes sibling recorded heads together; land-ready resumes dependency waits. Acceptance follows project policy and completes input Lanes when completeOnAccept is enabled unless keepOpen:true. Finish retries CHANNEL_CHANGED up to maxRetries (default 3), checking without Work/Lane/Channel locks and queuing only acceptance; receipts list attempts and waiting positions. Supervised finish stops at awaiting-review. Automatic sync/acceptance records undo instructions. abandon a Lane or Intent with a reason (saveFirst saves dirty edits; cascade closes open child Lanes); complete/reopen a Lane or Intent; complete-merged completes Lanes already in main. clean lists (default) or with apply:true deletes regenerable local disk: finished check workspaces, build dirs and fully captured directories of completed Lanes (reopen restores them). Work/Lane locks wait FIFO (default ten minutes; lockWaitMs or FORGE_WORK_LOCK_WAIT_MS), with periodic stderr phase/run/queue/holder progress; start/checkpoint/sync also accept waitMs. Omitted pins are filled and returned as resolved; retry an unknown outcome with them.',
+        'Receipts include local peers and pre-compose conflict notices; peers detail:true returns exact hunks, intents, messages and known owner sessions. peer-ack records accept-order, swap or split advisory choices using noticeId and laneId; it never pauses or resolves source. start scope.paths retains planned claims; other calls add relevance for that call. take transfers an open Lane with context; takeover:true is required for another actor’s Lane, and ownership remains advisory. Clean checkpoints reuse the unchanged head. Start isolated work (intentId adds a sibling Lane; after records a landing dependency), checkpoint edits, sync a Lane with main, undo-sync, set-policy, compose Lane heads, finish (checkpoint, sync, compose, check, optional accept:true) or accept a Candidate; finish with:[laneId] composes sibling recorded heads together; land-ready resumes dependency waits. Acceptance follows project policy and completes input Lanes when completeOnAccept is enabled unless keepOpen:true. Finish retries CHANNEL_CHANGED up to maxRetries (default 3), checking without Work/Lane/Channel locks and queuing only acceptance; receipts list attempts and waiting positions. Supervised finish stops at awaiting-review. Automatic sync/acceptance records undo instructions. abandon a Lane or Intent with a reason (saveFirst saves dirty edits; cascade closes open child Lanes); complete/reopen a Lane or Intent; complete-merged completes Lanes already in main. clean lists (default) or with apply:true deletes regenerable local disk: finished check workspaces, build dirs and fully captured directories of completed Lanes (reopen restores them). Work/Lane locks wait FIFO (default ten minutes; lockWaitMs or FORGE_WORK_LOCK_WAIT_MS), with periodic stderr phase/run/queue/holder progress; start/checkpoint/sync also accept waitMs. Omitted pins are filled and returned as resolved; retry an unknown outcome with them.',
     },
     {
       name: 'forge_check',
       actions: ['define-check', 'run', 'observe', 'log', 'cancel'],
       description:
-        'Configure and run exact-View local checks, observe the original run, read a log page or cancel. Runs use a clean environment with private HOME/XDG/temp. Define env/credentials variable names for explicit passthrough; values are not retained. Runs are local OS processes, not sandboxes.',
+        'Configure and run exact-Candidate local checks, observe the original run, read a log page or cancel. Runs use a clean environment with private HOME/XDG/temp. Define env/credentials variable names for explicit passthrough; values are not retained. Runs are local OS processes, not sandboxes.',
     },
     {
       name: 'forge_work_overview',
@@ -140,13 +141,13 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
       name: 'forge_review',
       actions: ['review', 'view', 'provenance', 'views'],
       description:
-        'Read an exact Lane or View changed-path summary or selected contextual hunks. Truncation and unknown coverage stay explicit.',
+        'Read an exact Lane or Candidate changed-path summary or selected contextual hunks. Use candidate and candidates; view and views are deprecated aliases. JSON fields (viewId, views) are unchanged. Truncation and unknown coverage stay explicit.',
     },
   ];
   for (const group of groups) {
-    const options = agentActionSchema.options.filter(option =>
-      group.actions.includes(option.shape.action.value),
-    );
+    const options = agentActionSchema.options
+      .filter(option => group.actions.includes(option.shape.action.value))
+      .map(option => candidateActionSchema(option, option.shape.action.value));
     const schema =
       options.length === 1 ? options[0]! : z.union([options[0]!, options[1]!, ...options.slice(2)]);
     server.registerTool(
