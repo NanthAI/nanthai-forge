@@ -31,7 +31,11 @@ function inventory(directory) {
   for (const item of readdirSync(directory, { withFileTypes: true })) {
     const path = `${directory}/${item.name}`;
     if (item.isDirectory()) inventory(path);
-    else assert.ok(expected.has(path), `Unlisted packaged document: ${path}`);
+    else
+      assert.ok(
+        expected.has(path),
+        `Unlisted packaged document: ${path}. Add it to packageDocuments in scripts/package-documents.mjs.`,
+      );
   }
 }
 inventory('docs');

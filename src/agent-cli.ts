@@ -32,7 +32,7 @@ finish again. Inside a Lane directory laneId may be omitted.
 Omitted operationId and pins are filled from current state and returned under
 "resolved". After an unknown reply, retry with your request plus "resolved".
 
-Actions: peers, link, take, start, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
+Actions: peers, peer-ack, link, take, start, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, view, provenance, views, review, brief, guidance,
          making-of, report.
 start intentId adds a sibling Lane; finish with:[laneId] lands siblings together.
@@ -49,6 +49,7 @@ Read the packaged agent skill: nforge docs agent.
 
 const examples: Record<string, unknown> = {
   peers: { laneId: 'LANE_ID', detail: true },
+  'peer-ack': { laneId: 'LANE_ID', noticeId: 'NOTICE_ID', choice: 'accept-order' },
   take: { laneId: 'LANE_ID', takeover: true },
   link: { laneId: 'LANE_ID', path: 'src/file.ts', line: 42 },
   view: { viewId: 'VIEW_ID', offset: 0, limit: 20 },
@@ -104,7 +105,16 @@ function actionHelp(action: string): string {
   let result = `nforge agent ROOT ${action} '${JSON.stringify(examples[action])}'\n`;
   if (strict[action]) result += `Fully pinned: '${JSON.stringify(strict[action])}'\n`;
   if (action === 'review')
-    result += `View: ${JSON.stringify({ kind: 'view', id: 'VIEW_ID', expectedHead: 'HEAD', expectedBase: 'BASE', expectedStatus: 'clean', paths: ['src/file.ts'] })}\nOmit paths for changed-path summaries. Continue with nextOffset and expectedReviewTree:reviewTree; keep the same source pins.\n`;
+    result += `View: ${JSON.stringify({ kind: 'view', id: 'VIEW_ID', expectedHead: 'HEAD', expectedBase: 'BASE', expectedStatus: 'clean', paths: ['src/file.ts'] })}\nUse full 40- or 64-character source digests; abbreviated heads are invalid. Omit paths for changed-path summaries. Body budget: maxBytes 1024..48000 (default 12000), context 0..10 (default 3), limit 1..100 (default 20), offset 0 or higher. Continue with nextOffset and expectedReviewTree:reviewTree; keep the same source pins.\n`;
+  if (action === 'link')
+    result +=
+      'Select exactly one laneId, viewId or save (full source digest). path is an optional relative source file; line requires path. Links target the hosted app; an unpublished head may be unavailable until source is pushed.\n';
+  if (action === 'observe' || action === 'log' || action === 'cancel')
+    result +=
+      'operationId is the nested check run operation ID, not the finish operation ID. Resume a finish by replaying its original finish request plus resolved pins.\n';
+  if (action === 'peer-ack')
+    result +=
+      'Use noticeId from peers detail:true. choice is accept-order, swap or split; optional text explains the advisory proposal. Reuse operationId and inputs after an unknown outcome. This records an answer; it does not resolve source conflicts.\n';
   if (action === 'finish')
     result +=
       'with:[LANE_ID] includes sibling recorded heads in one View/check/acceptance. after:{intentId} or after:{viewId} records a dependency; rerun the same request or land-ready after it lands. Omit accept to check only. accept:true means main at its current head. If main moved, finish syncs first; a sync conflict stops with phase "sync" and markers in the Lane. CHANNEL_CHANGED automatically retries sync/check/accept under the landing queue (maxRetries:3 by default, 0 disables retries). Receipts include attempts and queue positions. CHANNEL_DIVERGED means the View lacks the Channel head: sync and finish again. CONTRACT_RESYNC_REQUIRED means main changed an export or schema your edits use; finish retries it like CHANNEL_CHANGED.\n';

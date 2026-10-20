@@ -197,15 +197,21 @@ outcome. Each attempt has immutable pins and its own deterministic operation ID
 under the retained parent push ID. Unknown outcomes reconcile that attempt's
 receipt before any rebase; reusing an ID with changed pins remains invalid.
 
+Hosted publication, Work metadata loading and source-return continuation reuse verified immutable storage bytes in bounded process memos, including recipe nodes and leaves. Every reuse resolves current project authority and checks current storage metadata; recipe closures are revalidated. CLI exchange sessions retain bounded downloaded objects by content hash and size and recheck current project bindings before returning cached bytes. Warm reuse is expendable and does not establish production savings.
+
+Imported Code subscribes to source-free import/status-derivative invalidations. Changes, focus, network recovery and explicit reads trigger current GitHub authority and latest-head checks. Persisted endpoint derivatives and process-local public JWKS reuse avoid repeated derivation; idle tabs do not periodically invoke status actions.
+
 ## Checks and evidence
 
-Native checks select local or Modal execution through `checks.runner` in project
+Native checks select local, Modal or GitHub Actions execution through `checks.runner` in project
 autonomy policy. The Modal owner-side adapter pins source, definition, selection
 and runtime, verifies snapshot hashes remotely, uses independent remote capacity,
 and binds the terminal receipt to those pins. Owner credentials stay on the
 controller; declared secret inputs stay local. Infrastructure fallback is explicit;
 unknown executions retain IDs for adoption rather than repeating commands.
-See [Modal checks](operations/modal-checks.md) for execution and cost details.
+See [Modal checks](operations/modal-checks.md) and [GitHub Actions and Blacksmith checks](operations/github-actions-checks.md) for execution and cost details. `checks.fallback` is `manual` by default for existing and new policies; automatic local fallback requires explicit opt-in and owner-originated candidates. Confirmed runner outages and budget exhaustion produce retryable infrastructure outcomes, not failed-test evidence; see [runner fallback](operations/runner-fallback.md).
+
+Modal interruptions preserve completed exact-plan shards. Failed test shards retry once; two named flake verdicts within seven days quarantine that exact test identity. Quarantined tests continue running without blocking on fully attributed failures; twenty consecutive clean passes or an explicit fix release quarantine. Infrastructure recovery keeps its attempts without contributing flake verdicts. See [flakes and quarantine](operations/modal-checks.md#flakes-and-quarantine).
 
 A check is an executable, its arguments, an optional environment label and explicit environment/credential passthrough names. A run records the pinned View, the check definition, an environment fingerprint and the process owner. It runs in a fresh workspace under your OS account with private HOME/XDG/temp directories and a clean runtime allowlist plus declared passthrough. Passthrough values are transient; receipts retain names only. It is not sandboxed. The runner keeps outcomes, logs and chosen build outputs. Cancelled, interrupted and failed are different results. After a lost reply, a retry observes the existing run and does not start another.
 

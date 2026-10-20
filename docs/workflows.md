@@ -122,6 +122,10 @@ nforge agent ROOT define-check '{"name":"integration","executable":"node","args"
 
 `env` and `credentials` contain environment variable names, never values. Both are explicit passthrough; the latter identifies credentials separately. They change the definition digest and appear in check definitions and receipts. They do not inject Secret Objects. Omitted variables are absent; failed runs suggest omitted names that may need passthrough. Values are not retained by the runner, but commands can print them into logs. See [security](security.md#clean-check-environments) for the complete allowlist and filesystem limitations. A clean environment is not an OS sandbox.
 
+Configured native runners batch queued code candidates as checked prefixes. `land-ready` resumes retained batches; cancellation preserves earlier passing prefixes. Batches retain the selecting driver's clean environment for resumed runs and identify incompatible entries by changed environment field. See [landing batches](operations/landing-batches.md) and [agent workflow](agents/workflow.md#landing-queue).
+
+Modal interruptions preserve completed exact-plan shards; failed test shards retry once. Two named flake verdicts within seven days quarantine the exact test, which continues running without blocking on fully attributed failures. Twenty consecutive clean passes or an explicit fix release quarantine. See [Modal checks](operations/modal-checks.md#flakes-and-quarantine) for attribution, infrastructure recovery and retained attempts.
+
 ## Channels and releases
 
 A Channel is a named pointer to accepted source. Accept a clean View with the expected previous head. A person can explicitly select an earlier accepted View to roll back. Automatic acceptance cannot rewind a Channel.

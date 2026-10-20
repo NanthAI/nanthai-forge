@@ -186,7 +186,10 @@ test('docs checks preserve package inventory and original-notice validation with
     });
   assert.match(check().toString(), /original notice hashes verified/);
   writeFileSync(join(cwd, 'docs/unlisted.md'), 'Unlisted packaged prose\n');
-  assert.throws(check, /Unlisted packaged document/);
+  assert.throws(
+    check,
+    /Unlisted packaged document: docs\/unlisted\.md\. Add it to packageDocuments in scripts\/package-documents\.mjs/,
+  );
   rmSync(join(cwd, 'docs/unlisted.md'));
   rmSync(join(cwd, 'docs/concepts.md'));
   assert.throws(check, /Missing packaged document/);

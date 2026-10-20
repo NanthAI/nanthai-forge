@@ -151,6 +151,10 @@ project and seed a replacement instead of migrating it. Only the lead performs t
    authoritative. Only the lead deploys the Convex schema/functions, hosted browser and rebuilt CLI;
    hosting itself deploys no source or executable.
 
+## Native runner selection
+
+Native checks support local, [Modal](operations/modal-checks.md), and [GitHub Actions or Blacksmith](operations/github-actions-checks.md) runners. `checks.fallback` accepts `manual` or `local` and defaults to `manual`, including existing policies. Automatic local fallback requires explicit opt-in and owner-originated work. Confirmed runner outages and budget exhaustion return retryable infrastructure outcomes rather than failed-test evidence. See [runner fallback](operations/runner-fallback.md) for policy commands and recovery.
+
 ## Local check reliability
 
 ### Check environment contract

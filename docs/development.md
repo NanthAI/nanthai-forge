@@ -28,6 +28,16 @@ Interaction finish fixtures isolate the outer `FORGE_CHECK_FULL` override so the
 
 `npm run check` fails if `docs/dependency-licenses.md` is out of date. After changing dependencies, run `node scripts/render-dependency-licenses.mjs`.
 
+### Targeted test preparation
+
+Run `npm ci --ignore-scripts` and `npm run build:core` before focused core tests. Run `npm run build:web` as well before browser asset inspection or hosted UI checks; assets build into `hosted-web-dist`. The companion HTTP fixtures no longer require the retired local explorer build. Run focused tests with the private queue preload:
+
+```sh
+node --import ./tests/check-runtime.mjs --test tests/agent-action-parse.test.mjs
+```
+
+For new prose under `docs/`, add its path to `packageDocuments` in `scripts/package-documents.mjs`; the explicit inventory avoids packaging private output. `node scripts/check-documents.mjs` validates the inventory without building.
+
 ### The standard check
 
 `scripts/forge-check.mjs` installs locked dependencies, selects impact from the runner’s pinned View comparison, and verifies with the Node that launches it. The existing `verify` check ID stays unchanged. Forge-launched checks share the machine queue and disk guards described in [operations](operations.md). Validated native standard-check docs-overlap retries classify immutable merged bytes with the installed selector before admission and run merged static checks outside the heavyweight queue; disk guards still apply. Unclassified changes and code interactions keep ordinary admission. Direct `npm run verify` / `node scripts/forge-check.mjs` invocations bypass Forge's queue; use recorded `run` / `finish` to coordinate dogfood checks. Test execution preloads `tests/check-runtime.mjs` so synthetic fixture checks use a private queue per test process, separate from real dogfood checks. The automatic-cleanup tests also import that setup themselves, so direct focused runs stay isolated without a preload flag; their process coverage uses one mutable mock per test. Cross-process reliability tests explicitly share one queue. For focused check-run tests use `node --import ./tests/check-runtime.mjs --test tests/local-reliability.test.mjs`. No test assertion is bypassed.

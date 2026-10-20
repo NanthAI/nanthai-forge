@@ -1,5 +1,6 @@
 import { agentTake } from './agent-take.js';
 import { duplicateStartWarnings } from './agent-ownership.js';
+import { parseAgentAction } from './agent-action-parse.js';
 import { undoOptimisticRevert } from './optimistic-undo.js';
 import { indexPeerSource } from './agent-peers-index.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
@@ -32,12 +33,7 @@ import { nativeChannels } from './native-work.js';
 import { channelStatus } from './work-channel.js';
 import { evidenceApplicability, runApplicability, recordEvidence } from './work-evidence.js';
 import { ForgeError, invariant } from './errors.js';
-import {
-  agentActionSchema,
-  type FinishAction,
-  type RunAction,
-  type StartAction,
-} from './agent-workflow-schema.js';
+import { type FinishAction, type RunAction, type StartAction } from './agent-workflow-schema.js';
 import { runReceiptWithFailure } from './agent-run-failure.js';
 import { annotateLanes, completeMerged, setLifecycle } from './agent-lifecycle.js';
 import { agentClean } from './agent-clean.js';
@@ -100,9 +96,8 @@ export class AgentWorkflow {
     );
   }
   private async dispatchAction(input: unknown) {
-    const parsed = agentActionSchema.safeParse(input);
-    invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid agent action.');
-    const { lockWaitMs: _lockWaitMs, ...identity } = parsed.data as typeof parsed.data & {
+    const parsed = parseAgentAction(input);
+    const { lockWaitMs: _lockWaitMs, ...identity } = parsed as typeof parsed & {
       lockWaitMs?: number;
     };
     void _lockWaitMs;

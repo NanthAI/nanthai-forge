@@ -1,6 +1,6 @@
 # Runner fallback
 
-The autonomy policy exposes `checks.runner` (`local` or `modal`) and
+The autonomy policy exposes `checks.runner` (`local`, `modal` or `github-actions`) and
 `checks.fallback` (`manual` or `local`). Fallback defaults to `manual`, including
 policies written before the fallback field existed. Policy and agent status
 responses include the effective fallback when a runner is configured. Policies
@@ -37,3 +37,5 @@ do not trigger fallback.
 
 Declared environment or credential inputs and Git-backed checks retain their
 existing local routing behavior; these routes are selected before Modal runs.
+
+[GitHub Actions and Blacksmith checks](github-actions-checks.md) use their configured runner labels and retained workflow dispatch identities; see that guide for setup and recovery.
