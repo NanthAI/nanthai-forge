@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -309,6 +317,8 @@ test('actual transfer receipts distinguish missing offers from objects concurren
   assert.equal(retry.uploadedObjects, 0);
 });
 test('running output is pinned with the atomic request so appends do not break the original exchange retry', async t => {
+  let releaseRun;
+  t.after(async () => releaseRun?.());
   const { prepareNativeExchange } = await import('../dist/native-exchange.js');
   const f = fixture(t),
     view = f.act({
@@ -317,11 +327,15 @@ test('running output is pinned with the atomic request so appends do not break t
       intentId: f.intent.id,
       inputs: [{ laneId: f.lane.id, head: f.lane.head }],
     }),
+    release = join(f.dir, 'release-log'),
     check = f.act({
       action: 'define-check',
       name: 'Live log',
       executable: process.execPath,
-      args: ['-e', "console.log('started');setTimeout(()=>console.log('later'),150);setTimeout(()=>{},400)"],
+      args: [
+        '-e',
+        `const fs=require('node:fs');console.log('started');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)})){console.log('later');clearInterval(timer)}},20);`,
+      ],
     }),
     operationId = randomUUID(),
     status = f.w.status();
@@ -337,6 +351,25 @@ test('running output is pinned with the atomic request so appends do not break t
     },
     status.revision,
   );
+  const output = join(f.w.store.directory, `check-${operationId}`, 'stdout.log');
+  async function until(condition) {
+    const end = Date.now() + 30000;
+    while (!condition()) {
+      assert.ok(Date.now() < end, 'live-log fixture did not reach its barrier');
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+  // Hold the writer between messages: a real snapshot may reject a concurrent
+  // append with SOURCE_CHANGED. This test exercises appends after preparation.
+  releaseRun = async () => {
+    writeFileSync(release, 'release');
+    const { AgentWorkflow } = await import('../dist/agent-workflow.js');
+    const observed = (
+      await new AgentWorkflow(f.root).dispatch({ action: 'observe', operationId, waitMs: 30000 })
+    ).result;
+    assert.equal(observed.status, 'passed');
+  };
+  await until(() => existsSync(output) && readFileSync(output, 'utf8').includes('started'));
   f.w.store.locked(() => {
     const data = f.w.store.load();
     data.futureExtension = { retained: 'original' };
@@ -350,7 +383,10 @@ test('running output is pinned with the atomic request so appends do not break t
     stdout = prepared.manifest.files.find(file => file.path === `check-${operationId}/stdout.log`);
   assert.ok(stdout);
   const captured = readFileSync(join(prepared.directory, `pinned-${stdout.sha256}`));
-  await new Promise(resolve => setTimeout(resolve, 550));
+  assert.equal(captured.toString(), 'started\n');
+  writeFileSync(release, 'release');
+  await until(() => readFileSync(output, 'utf8').includes('later'));
+  assert.equal(readFileSync(output, 'utf8'), 'started\nlater\n');
   const first = await pushNativeExchange(f.w.store, revision, exchange, f.transport),
     retry = await pushNativeExchange(f.w.store, revision, exchange, f.transport);
   assert.equal(retry.uploadedBytes, 0);

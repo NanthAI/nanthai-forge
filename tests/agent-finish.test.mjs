@@ -80,6 +80,10 @@ function readRunWhileStarting(store) {
     throw error;
   }
 }
+// Peers are a fresh, bounded observation; only the recorded finish receipt replays.
+function canonicalReceipt({ peers: _peers, ...receipt }) {
+  return receipt;
+}
 function pins(data) {
   return {
     checkpoints: data.lanes.flatMap(l => l.checkpoints).map(c => c.head),
@@ -114,7 +118,10 @@ for (const native of [true, false])
         executable: process.execPath,
         args: ['-e', 'process.exit(1)'],
       });
-      assert.deepEqual((await new AgentWorkflow(root).dispatch(request)).result, receipt);
+      assert.deepEqual(
+        canonicalReceipt((await new AgentWorkflow(root).dispatch(request)).result),
+        canonicalReceipt(receipt),
+      );
       assert.deepEqual(pins(agent.work.store.load()), originalPins);
       assert.equal(readFileSync(join(lane.path, 'file.txt'), 'utf8'), 'later live bytes\n');
       // A later Channel move does not replace the finish operation's original receipt.
@@ -185,7 +192,10 @@ for (const native of [true, false])
         executable: process.execPath,
         args: ['-e', 'process.exit(0)'],
       });
-      assert.deepEqual((await new AgentWorkflow(root).dispatch(request)).result, receipt);
+      assert.deepEqual(
+        canonicalReceipt((await new AgentWorkflow(root).dispatch(request)).result),
+        canonicalReceipt(receipt),
+      );
       assert.equal(agent.work.store.load().runs.length, 1);
       await assert.rejects(
         agent.dispatch({ action: 'accept', viewId: receipt.view.viewId }),
@@ -202,7 +212,7 @@ for (const native of [true, false])
         })
       ).result;
       assert.equal(acceptance.status, 'accepted');
-      assert.deepEqual((await agent.dispatch(request)).result, receipt);
+      assert.deepEqual(canonicalReceipt((await agent.dispatch(request)).result), canonicalReceipt(receipt));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -260,7 +270,7 @@ test('finish binds check, acceptance, environment and checkpoint inputs before w
       }),
       e => e.code === 'WORK_OPERATION_CHANGED',
     );
-    assert.deepEqual((await agent.dispatch(command)).result, receipt);
+    assert.deepEqual(canonicalReceipt((await agent.dispatch(command)).result), canonicalReceipt(receipt));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -293,7 +303,10 @@ for (const native of [true, false])
         assert.equal(after.views.length, 1);
         assert.equal(after.runs.length, 1);
         assert.equal(after.moves.length, 1);
-        assert.deepEqual((await new AgentWorkflow(root).dispatch(request)).result, receipt);
+        assert.deepEqual(
+          canonicalReceipt((await new AgentWorkflow(root).dispatch(request)).result),
+          canonicalReceipt(receipt),
+        );
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -398,7 +411,7 @@ test('finish bounded busy reconciliation keeps original phase IDs and never retr
   }
 });
 for (const native of [true, false])
-  test(`finish ${native ? 'native' : 'Git'} conflict retains original composition and never runs or accepts`, async () => {
+  test(`finish ${native ? 'native' : 'Git'} conflict retains original composition and never runs or accepts`, async t => {
     const { root, agent, lane, command } = await setup(native);
     try {
       const other = (
@@ -449,7 +462,18 @@ for (const native of [true, false])
       assert.equal(receipt.acceptance, null);
       assert.equal(agent.work.store.load().runs.length, 0);
       assert.equal(agent.work.store.load().channelMoves.length, 0);
-      assert.deepEqual((await new AgentWorkflow(root).dispatch(request)).result, receipt);
+      // Reproduce the load-sensitive read-budget expiry without delaying the test.
+      let elapsed = 0;
+      const clock = t.mock.method(performance, 'now', () => (elapsed += 3000));
+      let replay;
+      try {
+        replay = (await new AgentWorkflow(root).dispatch(request)).result;
+      } finally {
+        clock.mock.restore();
+      }
+      assert.equal(replay.peers.coverage, 'local-incomplete');
+      assert.match(replay.peers.next, /read budget elapsed/);
+      assert.deepEqual(canonicalReceipt(replay), canonicalReceipt(receipt));
       assert.equal(readFileSync(join(lane.path, 'file.txt'), 'utf8'), 'changed\n');
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -476,7 +500,10 @@ for (const native of [true, false])
       assert.equal(receipt.complete, false);
       assert.equal(receipt.acceptance, null);
       assert.equal(agent.work.store.load().channelMoves.length, 0);
-      assert.deepEqual((await new AgentWorkflow(root).dispatch(request)).result, receipt);
+      assert.deepEqual(
+        canonicalReceipt((await new AgentWorkflow(root).dispatch(request)).result),
+        canonicalReceipt(receipt),
+      );
       assert.equal(agent.work.store.load().runs.length, 1);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -508,7 +535,7 @@ test('finish reconciles a phase under a real concurrent lock; a terminal parent 
       calls.push(command);
       throw new ForgeError('WORK_BUSY', 'Persistently busy');
     };
-    assert.deepEqual((await restarted.dispatch(command)).result, receipt);
+    assert.deepEqual(canonicalReceipt((await restarted.dispatch(command)).result), canonicalReceipt(receipt));
     assert.equal(calls.length, 0);
     assert.equal(agent.work.store.load().views.length, 1);
     assert.equal(agent.work.store.load().runs.length, 1);
@@ -604,7 +631,10 @@ for (const native of [true, false])
           new NativeSource(root).state(receipt.view.head).files.some(f => f.path === 'dependency.txt'),
         );
       else assert.equal(git(root, ['show', `${receipt.view.head}:dependency.txt`]), 'selected dependency');
-      assert.deepEqual((await new AgentWorkflow(root).dispatch(request)).result, receipt);
+      assert.deepEqual(
+        canonicalReceipt((await new AgentWorkflow(root).dispatch(request)).result),
+        canonicalReceipt(receipt),
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -618,7 +648,10 @@ test('finish checkpoint reconciles original parents and bounds fresh-operation c
     // A replay may now finish before the simulated holder releases; wait for that release
     // so it cannot remove the second simulated lock below.
     const released = new Promise(resolve => setTimeout(() => resolve(unlinkSync(lock)), 200));
-    assert.deepEqual((await new AgentWorkflow(root).dispatch(command)).result, receipt);
+    assert.deepEqual(
+      canonicalReceipt((await new AgentWorkflow(root).dispatch(command)).result),
+      canonicalReceipt(receipt),
+    );
     await released;
     assert.equal(agent.work.store.load().lanes[0].checkpoints.length, 1);
     writeFileSync(lock, JSON.stringify({ pid: process.pid, host: hostname() }));
@@ -651,7 +684,7 @@ test('finish actual CLI and SDK MCP share original canonical receipts and discov
     assert.equal(receipt.status, 'accepted');
     assert.equal(receipt.complete, true);
     assert.equal(receipt.terminal, true);
-    assert.deepEqual(invoke(), receipt);
+    assert.deepEqual(canonicalReceipt(invoke()), canonicalReceipt(receipt));
     await client.connect(
       new StdioClientTransport({
         command: process.execPath,
@@ -665,7 +698,10 @@ test('finish actual CLI and SDK MCP share original canonical receipts and discov
     assert.equal(task.annotations.openWorldHint, true);
     const response = await client.callTool({ name: 'forge_task', arguments: { command: request } });
     assert.ok(!response.isError);
-    assert.deepEqual(JSON.parse(response.content[0].text).result, receipt);
+    assert.deepEqual(
+      canonicalReceipt(JSON.parse(response.content[0].text).result),
+      canonicalReceipt(receipt),
+    );
     writeFileSync(join(lane.path, 'file.txt'), 'later dirty bytes\n');
     const changed = await client.callTool({
       name: 'forge_task',
@@ -722,7 +758,10 @@ for (const native of [true, false])
       assert.equal(receipt.acceptance, null);
       assert.equal(agent.work.store.load().runs.length, 1);
       assert.equal(agent.work.store.load().channelMoves.length, 0);
-      assert.deepEqual((await new AgentWorkflow(root).dispatch(request)).result, receipt);
+      assert.deepEqual(
+        canonicalReceipt((await new AgentWorkflow(root).dispatch(request)).result),
+        canonicalReceipt(receipt),
+      );
     } finally {
       if (child?.exitCode === null && child?.signalCode === null) child.kill('SIGKILL');
       if (run?.childPid) {

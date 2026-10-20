@@ -6,7 +6,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { spawn, execFileSync } from 'node:child_process';
+import childProcess, { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { WorkService } from '../dist/work.js';
@@ -71,15 +71,38 @@ async function fixture(t, native = true) {
   const saved = { queue: process.env.FORGE_CHECK_QUEUE_DIR, limit: process.env.FORGE_MAX_CONCURRENT_CHECKS };
   process.env.FORGE_CHECK_QUEUE_DIR = join(store.directory, 'test-check-queue');
   process.env.FORGE_MAX_CONCURRENT_CHECKS = '4';
-  t.after(() => {
-    for (const [key, value] of [
-      ['FORGE_CHECK_QUEUE_DIR', saved.queue],
-      ['FORGE_MAX_CONCURRENT_CHECKS', saved.limit],
-    ])
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    // A detached post-accept helper may still be releasing its queue files.
-    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+  const children = new Set();
+  const originalSpawn = childProcess.spawn;
+  childProcess.spawn = (...args) => {
+    const child = originalSpawn(...args);
+    children.add(
+      new Promise(resolve => {
+        child.once('close', resolve);
+        child.once('error', resolve);
+      }),
+    );
+    return child;
+  };
+  syncBuiltinESMExports();
+  t.after(async () => {
+    try {
+      await drainPostAccept(store);
+      // Draining may spawn another check. Join every helper before removing its owner.
+      for (let observed = -1; observed !== children.size;) {
+        observed = children.size;
+        await Promise.all(children);
+      }
+    } finally {
+      childProcess.spawn = originalSpawn;
+      syncBuiltinESMExports();
+      for (const [key, value] of [
+        ['FORGE_CHECK_QUEUE_DIR', saved.queue],
+        ['FORGE_MAX_CONCURRENT_CHECKS', saved.limit],
+      ])
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+    }
   });
   await agent.dispatch({
     action: 'define-check',
