@@ -214,12 +214,18 @@ export function commandProjection(
       if (beforeIntents.get(intent.id) !== JSON.stringify(intent)) {
         const old = unique.find(row => row.collection === 'intents' && row.key === intent.id);
         const counts = old ? JSON.parse(old.value) : null;
+        const lifecycleCount = counts?.lifecycleCount ?? 0;
+        for (const [index, entry] of (intent.lifecycle ?? []).entries())
+          update('lifecycle', `${intent.id}:${lifecycleCount + index}`, intent.id, {
+            ...entry,
+            intentId: intent.id,
+            index: lifecycleCount + index,
+          });
         update('intents', intent.id, '', attributes(intent), {
           ...intentHeader(intent),
           noteCount: counts?.noteCount ?? intent.notes.length,
-          ...(counts?.lifecycleCount === undefined
-            ? {}
-            : { lifecycle: [], lifecycleCount: counts.lifecycleCount }),
+          lifecycle: [],
+          lifecycleCount: lifecycleCount + (intent.lifecycle?.length ?? 0),
         });
         const creator = (intent as Record<string, unknown>).creatorAccountId;
         if (typeof creator === 'string' && !beforeIntents.has(intent.id))

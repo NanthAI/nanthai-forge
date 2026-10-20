@@ -49,6 +49,58 @@ export function agentAbandon(store: WorkStore, command: Command, attribution?: W
   invariant(!command.expectedHead || command.laneId, 'BAD_ARGUMENT', 'expectedHead applies to a Lane.');
   const hash = digest(JSON.stringify(command)),
     actor = attribution ?? localActor('agent', command.actor, command.tool);
+  // Legacy planning-only records have no Lane or execution pin. Keep their version chain.
+  if (command.intentId) {
+    const planning = store.locked(() => {
+      const tx = store.records();
+      const prior = tx.find('planningItems', command.operationId, 'operationId')?.record;
+      if (prior)
+        invariant(prior.request === hash, 'WORK_OPERATION_CHANGED', 'Abandon operation inputs changed.');
+      if (!prior && tx.find('intents', command.intentId!)) return null;
+      const current = prior ?? tx.find('planningItems', command.intentId!, 'id', true)?.record;
+      invariant(current, 'NOT_FOUND', 'Intent or Initiative not found.');
+      const item = prior ?? {
+        ...current,
+        operationId: command.operationId,
+        request: hash,
+        previousVersion: current.version,
+        version: current.version + 1,
+        status: 'abandoned' as const,
+        reason: command.reason,
+        at: new Date().toISOString(),
+      };
+      if (!prior) {
+        tx.append('planningItems', item);
+        const group = tx.find('initiatives' as never, item.id);
+        if (group)
+          tx.replace('initiatives' as never, group.position, {
+            ...(group.record as object),
+            ...item,
+          } as never);
+      }
+      return {
+        revision: prior ? tx.revision : store.commitRecords(tx),
+        result: {
+          operationId: command.operationId,
+          intentId: command.intentId,
+          status: 'abandoned',
+          lifecycle: {
+            from: prior
+              ? (tx
+                  .all('planningItems', item.id, 'id')
+                  .find(version => version.version === item.previousVersion)?.status ?? current.status)
+              : current.status,
+            to: 'abandoned',
+            at: item.at,
+            actor,
+            reason: item.reason,
+            operation: { id: command.operationId, request: hash },
+          },
+        },
+      };
+    });
+    if (planning) return planning;
+  }
   const select = () => {
     const tx = store.records();
     const target = command.laneId

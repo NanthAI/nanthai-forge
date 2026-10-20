@@ -4,7 +4,7 @@ import { Glyph } from '../ui/Glyph';
 import { Button, StatusPill } from '../ui/primitives';
 import type { Tone } from '../ui/status';
 
-export type IntentAction = 'plan' | 'complete' | 'abandon' | 'reopen';
+export type IntentAction = 'propose' | 'plan' | 'complete' | 'abandon' | 'reopen';
 export function StatusMenu({
   label,
   tone,
@@ -14,6 +14,7 @@ export function StatusMenu({
   busy,
   onAction,
   abandon,
+  canPropose,
 }: {
   label: string;
   tone: Tone;
@@ -23,6 +24,7 @@ export function StatusMenu({
   busy?: boolean;
   onAction: (action: IntentAction) => void;
   abandon?: boolean;
+  canPropose?: boolean;
 }) {
   return (
     <Menu
@@ -47,7 +49,7 @@ export function StatusMenu({
             </Button>
           ) : (
             <>
-              <Button disabled title="Proposed is not stored for this Intent">
+              <Button disabled={busy || !canPropose} onClick={() => onAction('propose')}>
                 Proposed
               </Button>
               <Button

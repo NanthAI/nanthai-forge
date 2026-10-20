@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { LifecycleDialog } from './lane/LifecycleDialog';
+import { planningIntentStatus, planningLabel } from '../../src/work-planning-lifecycle';
 import { intentProgress } from '../../src/work-intent-progress';
 import { PagedList } from './cockpit/ScaleList';
 import { StatusPill } from './ui/primitives';
@@ -83,6 +85,7 @@ export function PlanningIntentPage({
   lifecycle?: LifecycleParts | null;
 }) {
   const [saved, setSaved] = useState<PlanningItem>();
+  const [savedStatusLabel, setSavedStatusLabel] = useState('Details edited');
   const [hydrated, setHydrated] = useState<PlanningItem>();
   const loader = useRef(loadItem);
   loader.current = loadItem;
@@ -108,21 +111,26 @@ export function PlanningIntentPage({
   const [title, setTitle] = useState(current.title);
   const [error, setError] = useState('');
   const [working, setWorking] = useState(false);
+  const [abandoning, setAbandoning] = useState(false);
+  const [reason, setReason] = useState('');
   const pending = useRef<Extract<PlanningWrite, { action: 'put-planning-item' }> | undefined>(undefined);
   const pendingInput = useRef('');
   const pendingFull = useRef<PlanningItem | undefined>(undefined);
   const started = detail.row.lanes.length > 0;
+  const planningClosed = ['closed', 'abandoned'].includes(current.status);
   const closed =
     !started && saved && saved.version >= item.version
-      ? current.status === 'closed'
-      : detail.row.status === 'abandoned' || detail.row.status === 'completed';
+      ? planningClosed
+      : planningClosed || ['completed', 'abandoned'].includes(detail.row.status);
   const groups = initiatives.filter(group => group.kind === 'initiative');
   const linked = groups.filter(
     group => group.id === current.initiativeId || detail.planning.some(link => link.id === group.id),
   );
   const fullItem = async () =>
     saved && saved.version > item.version ? saved : loadItem ? loadItem() : current;
-  async function write(changes: Partial<Pick<PlanningItem, 'title' | 'body' | 'initiativeId' | 'status'>>) {
+  async function write(
+    changes: Partial<Pick<PlanningItem, 'title' | 'body' | 'initiativeId' | 'status' | 'reason'>>,
+  ) {
     if (!act) return 'Editing is not available for this Intent.';
     setWorking(true);
     try {
@@ -142,6 +150,7 @@ export function PlanningIntentPage({
         title: next.title,
         body: next.body,
         status: next.status,
+        ...(next.reason !== undefined ? { reason: next.reason } : {}),
         intentIds: full.intentIds,
         ...(next.initiativeId ? { initiativeId: next.initiativeId } : {}),
       };
@@ -159,6 +168,7 @@ export function PlanningIntentPage({
       if (acknowledgement?.operationId !== operationId)
         return 'The request did not complete. Retry keeps its original operation.';
       pending.current = undefined;
+      setSavedStatusLabel(full.status !== next.status ? planningLabel(next.status) : 'Details edited');
       setSaved({
         ...next,
         version: full.version + 1,
@@ -189,7 +199,7 @@ export function PlanningIntentPage({
     }
   }
   async function status(action: IntentAction) {
-    if (lifecycle && action !== 'plan') {
+    if (lifecycle && action !== 'plan' && action !== 'propose') {
       if (action === 'abandon') lifecycle.abandon?.();
       else if (action === 'complete') lifecycle.complete?.();
       else lifecycle.reopen?.();
@@ -202,18 +212,29 @@ export function PlanningIntentPage({
       setError(problem ?? '');
       return;
     }
-    const problem = await write({ status: action === 'complete' ? 'closed' : 'open' });
+    if (action === 'abandon') {
+      setAbandoning(true);
+      return;
+    }
+    const problem = await write({
+      status: action === 'complete' ? 'closed' : action === 'propose' ? 'proposed' : 'open',
+    });
     setError(problem ?? '');
   }
   const row = {
     ...detail.row,
     outcome: editing ? title : current.title,
     constraints: current.body,
-    ...(!started && saved
+    ...(!started && (saved || planningClosed || !['completed', 'abandoned'].includes(detail.row.status))
       ? {
-          status: closed ? ('completed' as const) : ('active' as const),
-          label: closed ? 'Done' : 'Planned',
-          tone: closed ? ('passed' as const) : ('plain' as const),
+          status: planningIntentStatus(current.status),
+          label: planningLabel(current.status),
+          tone:
+            current.status === 'abandoned'
+              ? ('stale' as const)
+              : current.status === 'closed'
+                ? ('passed' as const)
+                : ('plain' as const),
         }
       : {}),
   };
@@ -224,9 +245,8 @@ export function PlanningIntentPage({
     timeline.unshift({
       id: `planning:${saved.operationId}`,
       at: saved.at,
-      text:
-        saved.status !== item.status ? (saved.status === 'closed' ? 'Done' : 'Planned') : 'Details edited',
-      detail: `version ${saved.version}`,
+      text: savedStatusLabel,
+      detail: [`version ${saved.version}`, saved.reason].filter(Boolean).join(' · '),
       glyph: 'file',
       tone: 'plain',
     });
@@ -247,8 +267,8 @@ export function PlanningIntentPage({
                 label: current.title,
                 href: workHref(
                   planningDestination({
-                    kind: detail.canStart === false ? 'planning' : 'intent',
-                    id: detail.canStart === false ? current.id : (detail.startIntentId ?? row.id),
+                    kind: current.intentIds.length === 0 ? 'planning' : 'intent',
+                    id: current.intentIds.length === 0 ? current.id : (detail.startIntentId ?? row.id),
                   }),
                 ),
               },
@@ -299,8 +319,10 @@ export function PlanningIntentPage({
               tone={row.tone}
               closed={closed}
               planned={!started}
+              proposed={!started && current.status === 'proposed'}
+              canPropose={!started && Boolean(act)}
               busy={busy || working || Boolean(lifecycle && !lifecycle.complete && !lifecycle.reopen)}
-              abandon={Boolean(lifecycle?.abandon || (started && detail.setStatus))}
+              abandon={Boolean(act || lifecycle?.abandon || (started && detail.setStatus))}
               onAction={action => void status(action)}
             />
           ) : undefined
@@ -312,6 +334,26 @@ export function PlanningIntentPage({
           </>
         }
       />
+      {abandoning && (
+        <LifecycleDialog
+          action="abandon"
+          collection="planning"
+          reason={reason}
+          setReason={setReason}
+          saveFirst={false}
+          setSaveFirst={() => {}}
+          cascade={false}
+          setCascade={() => {}}
+          busy={busy || working}
+          close={() => setAbandoning(false)}
+          submit={() => {
+            void write({ status: 'abandoned', reason }).then(problem => {
+              setError(problem ?? '');
+              if (!problem) setAbandoning(false);
+            });
+          }}
+        />
+      )}
       {lifecycle?.dialog}
       <ErrorToast error={error} />
     </>

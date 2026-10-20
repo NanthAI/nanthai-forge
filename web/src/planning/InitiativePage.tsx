@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { planningVersionLabel } from '../../../src/work-planning-lifecycle';
+import { LifecycleDialog } from '../lane/LifecycleDialog';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { PlanningItem, PlanningWrite } from '../../../src/work-planning-types';
 import type { PlanningAct, PlanningData } from '../WorkPlanning';
@@ -156,6 +158,7 @@ export function InitiativePage({
   conversation,
   timelineData,
   origin = item,
+  versions = data.planningItems.filter(version => version.id === item.id),
 }: {
   item: PlanningItem;
   data: PlanningData;
@@ -165,27 +168,49 @@ export function InitiativePage({
   listHref: string;
   onCreate: (kind: PlanningItem['kind'], parent: string) => void;
   onEdit: () => void;
-  onStatus: (status: PlanningItem['status']) => void;
+  onStatus: (status: PlanningItem['status'], reason?: string) => Promise<string | null> | void;
   onExport: () => void;
   editor?: ReactNode;
   body?: ReactNode;
   conversation: ReactNode;
   timelineData?: PlanningData;
   origin?: AttributedPlanningItem;
+  versions?: readonly AttributedPlanningItem[];
 }) {
   const [copyError, setCopyError] = useState('');
+  const [abandoning, setAbandoning] = useState(false);
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const groups = planningGroups(data.planningItems, data.intents, data.lanes ?? []);
   const rows = initiativeRows(groups.find(group => group.id === item.id)?.rows ?? []);
   const progress = initiativeProgress(item, rows);
   const children = childInitiatives(data.planningItems, item.id);
   const parent = data.planningItems.find(value => value.id === item.initiativeId);
-  const timeline = initiativeTimeline(
-    origin,
-    rows,
-    (timelineData ?? data).intents,
-    (timelineData ?? data).lanes ?? [],
-  );
-  const tone = progress.label === 'Done' ? 'passed' : progress.label === 'In motion' ? 'active' : 'plain';
+  const timeline = [
+    ...initiativeTimeline(origin, rows, (timelineData ?? data).intents, (timelineData ?? data).lanes ?? []),
+    ...versions
+      .filter(version => version.version > 1)
+      .map(version => ({
+        id: `planning:${version.operationId}`,
+        at: version.at,
+        label: planningVersionLabel(
+          version,
+          versions.find(previous => previous.version === version.previousVersion),
+        ),
+        detail: [`version ${version.version}`, version.reason].filter(Boolean).join(' · '),
+        glyph: 'initiative' as const,
+        intentId: undefined,
+        itemId: item.id,
+      })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+  const tone =
+    progress.label === 'Abandoned'
+      ? 'stale'
+      : progress.label === 'Done'
+        ? 'passed'
+        : progress.label === 'In motion'
+          ? 'active'
+          : 'plain';
   const rowHref = (row: PlanningRow) =>
     href(row.intentId ? 'intent' : 'planning', row.intentId ?? row.itemId!);
   const addIntent = () => onCreate('issue', item.id);
@@ -230,7 +255,7 @@ export function InitiativePage({
                 pill
               ) : (
                 <Menu ariaLabel="Initiative status" className="fx-initiative-status" label={pill}>
-                  {item.status === 'closed' ? (
+                  {['closed', 'abandoned'].includes(item.status) ? (
                     <button disabled={busy} onClick={() => onStatus('open')}>
                       Reopen
                     </button>
@@ -244,7 +269,7 @@ export function InitiativePage({
                         Mark done
                       </button>
                       <hr />
-                      <button disabled title="Initiatives have no abandoned state">
+                      <button disabled={busy} onClick={() => setAbandoning(true)}>
                         Abandon…
                       </button>
                     </>
@@ -303,7 +328,7 @@ export function InitiativePage({
                   Copy link
                 </button>
                 <button onClick={onExport}>Export</button>
-                <button disabled title="Initiatives have no abandoned state">
+                <button disabled={busy} onClick={() => setAbandoning(true)}>
                   Abandon…
                 </button>
               </Menu>
@@ -355,6 +380,30 @@ export function InitiativePage({
         <p role="alert" className="fx-feedback-error">
           {copyError}
         </p>
+      )}
+      {abandoning && (
+        <LifecycleDialog
+          action="abandon"
+          collection="planning"
+          reason={reason}
+          setReason={setReason}
+          saveFirst={false}
+          setSaveFirst={() => {}}
+          cascade={false}
+          setCascade={() => {}}
+          busy={busy || submitting}
+          close={() => setAbandoning(false)}
+          submit={() => {
+            setSubmitting(true);
+            void Promise.resolve(onStatus('abandoned', reason))
+              .then(problem => {
+                if (problem) setCopyError(problem);
+                else setAbandoning(false);
+              })
+              .catch(error => setCopyError((error as Error).message))
+              .finally(() => setSubmitting(false));
+          }}
+        />
       )}
       <Panel title="Details" actions={edit}>
         {editor || <div className="fx-initiative-body">{body ?? <DetailsText text={item.body} />}</div>}
@@ -409,7 +458,15 @@ export function InitiativePage({
                 {own.length} {own.length === 1 ? 'Intent' : 'Intents'}
               </span>
               <StatusPill
-                tone={state.label === 'Done' ? 'passed' : state.label === 'In motion' ? 'active' : 'plain'}
+                tone={
+                  state.label === 'Abandoned'
+                    ? 'stale'
+                    : state.label === 'Done'
+                      ? 'passed'
+                      : state.label === 'In motion'
+                        ? 'active'
+                        : 'plain'
+                }
               >
                 {state.label}
               </StatusPill>

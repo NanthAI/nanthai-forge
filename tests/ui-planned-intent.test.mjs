@@ -87,6 +87,23 @@ async function harness() {
     Breadcrumbs: 'crumbs',
     ErrorToast: 'error-toast',
     Glyph: 'glyph',
+    LifecycleDialog: 'lifecycle-dialog',
+    planningIntentStatus: status =>
+      status === 'closed'
+        ? 'completed'
+        : status === 'abandoned'
+          ? 'abandoned'
+          : status === 'proposed'
+            ? 'proposed'
+            : 'active',
+    planningLabel: status =>
+      status === 'closed'
+        ? 'Done'
+        : status === 'abandoned'
+          ? 'Abandoned'
+          : status === 'proposed'
+            ? 'Proposed'
+            : 'Planned',
     age: () => '3 d ago',
     workHref: () => '/work',
     planningDestination: value => value,
@@ -227,5 +244,111 @@ test('native lifecycle uses existing owner actions; read-only pages expose no st
   const readOnly = find(harnessed.render({ ...props, readOnly: true }), node => node.type === 'detail');
   assert.equal(readOnly.props.onEdit, undefined);
   assert.equal(readOnly.props.statusControl, undefined);
+  harnessed.clear();
+});
+
+test('planning-only Proposed, Plan it, Abandon confirmation and Reopen update versioned status', async () => {
+  const harnessed = await harness();
+  const calls = [];
+  const props = {
+    item: { ...item, intentIds: [], status: 'proposed' },
+    act: async command => {
+      calls.push(command);
+      return { operationId: command.operationId };
+    },
+  };
+  let page = find(harnessed.render(props), node => node.type === 'detail');
+  assert.equal(page.props.row.label, 'Proposed');
+  assert.equal(page.props.statusControl.props.proposed, true);
+  page.props.statusControl.props.onAction('plan');
+  await tick();
+  page = find(harnessed.render(props), node => node.type === 'detail');
+  assert.equal(page.props.row.label, 'Planned');
+  assert.equal(page.props.statusControl.props.canPropose, true);
+  page.props.statusControl.props.onAction('abandon');
+  await tick();
+  assert.equal(calls.length, 1, 'opening confirmation does not mutate');
+  let dialog = find(harnessed.render(props), node => node.type === 'lifecycle-dialog');
+  dialog.props.close();
+  assert.equal(calls.length, 1, 'cancelling does not mutate');
+  page.props.statusControl.props.onAction('abandon');
+  await tick();
+  dialog = find(harnessed.render(props), node => node.type === 'lifecycle-dialog');
+  dialog.props.setReason('Superseded');
+  dialog = find(harnessed.render(props), node => node.type === 'lifecycle-dialog');
+  dialog.props.submit();
+  await tick();
+  page = find(harnessed.render(props), node => node.type === 'detail');
+  assert.equal(page.props.row.label, 'Abandoned');
+  assert.equal(page.props.statusControl.props.closed, true);
+  assert.equal(calls[1].reason, 'Superseded');
+  assert.equal(calls[1].expectedVersion, 4);
+  page.props.statusControl.props.onAction('reopen');
+  await tick();
+  assert.equal(find(harnessed.render(props), node => node.type === 'detail').props.row.label, 'Planned');
+  harnessed.clear();
+});
+test('Proposed menu is enabled for planning-only Intents and Plan it / Decline use lifecycle actions', () => {
+  const actions = [];
+  const planned = StatusMenu({
+    label: 'Planned',
+    tone: 'plain',
+    closed: false,
+    planned: true,
+    canPropose: true,
+    abandon: true,
+    onAction: action => actions.push(action),
+  });
+  const proposed = find(planned, node => node.props?.children === 'Proposed');
+  assert.equal(Boolean(proposed.props.disabled), false);
+  proposed.props.onClick();
+  const menu = StatusMenu({
+    label: 'Proposed',
+    tone: 'plain',
+    closed: false,
+    proposed: true,
+    abandon: true,
+    onAction: action => actions.push(action),
+  });
+  find(menu, node => node.props?.children === 'Plan it').props.onClick();
+  find(menu, node => node.props?.children === 'Decline…').props.onClick();
+  assert.deepEqual(actions, ['propose', 'plan', 'abandon']);
+});
+
+test('closed zero-Lane execution status survives an older open planning version', async () => {
+  const harnessed = await harness();
+  const page = find(
+    harnessed.render({
+      detail: { ...detail, row: { ...detail.row, status: 'completed', label: 'Done', tone: 'passed' } },
+      act: async () => {},
+    }),
+    node => node.type === 'detail',
+  );
+  assert.equal(page.props.row.label, 'Done');
+  assert.equal(page.props.statusControl.props.closed, true);
+  harnessed.clear();
+});
+
+test('reactive planning acknowledgement keeps the status transition label in Timeline', async () => {
+  const harnessed = await harness();
+  let command;
+  const props = {
+    act: async value => {
+      command = value;
+      return { operationId: value.operationId };
+    },
+  };
+  find(harnessed.render(props), node => node.type === 'detail').props.statusControl.props.onAction(
+    'complete',
+  );
+  await tick();
+  const page = find(
+    harnessed.render({
+      ...props,
+      item: { ...item, status: 'closed', version: 4, operationId: command.operationId },
+    }),
+    node => node.type === 'detail',
+  );
+  assert.equal(page.props.timeline[0].text, 'Done');
   harnessed.clear();
 });

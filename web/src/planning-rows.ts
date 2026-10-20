@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { planningIntentStatus } from '../../src/work-planning-lifecycle';
 import type { AttributedPlanningItem } from './planning/attribution';
 import { intentProgress } from '../../src/work-intent-progress';
 import type { PlanningItem } from '../../src/work-planning-types';
@@ -151,8 +152,11 @@ export function planningGroups(
         addIntent(intent.id);
     }
     for (const item of items.filter(
-      item => item.kind === 'issue' && (item.initiativeId ?? '') === group.id,
+      item =>
+        item.kind === 'issue' &&
+        (item.initiativeId ?? (item.status === 'proposed' ? 'proposed' : '')) === group.id,
     )) {
+      if (intentById.has(item.id)) continue;
       if (item.intentIds?.length) item.intentIds.forEach(id => addIntent(id, item.title));
       else
         rows.set(
@@ -162,10 +166,10 @@ export function planningGroups(
               id: `planning:${item.id}`,
               itemId: item.id,
               title: item.title,
-              label: intentProgress(
-                item.status === 'closed' ? 'completed' : 'active',
-                item.status === 'in-progress' ? 1 : 0,
-              ),
+              label:
+                item.status === 'proposed'
+                  ? 'Proposed'
+                  : intentProgress(planningIntentStatus(item.status), item.status === 'in-progress' ? 1 : 0),
               at: item.at,
               ...(item.version === 1 ? { createdAt: item.at } : {}),
             },
@@ -190,7 +194,14 @@ export function initiativeProgress(item: PlanningItem, rows: readonly PlanningRo
     total: rows.length,
     done,
     motion,
-    label: item.status === 'closed' ? 'Done' : motion ? 'In motion' : 'Planned',
+    label:
+      item.status === 'abandoned'
+        ? 'Abandoned'
+        : item.status === 'closed'
+          ? 'Done'
+          : motion
+            ? 'In motion'
+            : 'Planned',
   } as const;
 }
 

@@ -366,6 +366,50 @@ test('a legacy Intent edit timestamp is not displayed as its planning event', ()
   );
 });
 
+test('abandoned Initiative stays readable, keeps children Planned and exposes a versioned Timeline', () => {
+  const abandoned = {
+    ...initiative,
+    status: 'abandoned',
+    version: 2,
+    previousVersion: 1,
+    operationId: 'abandon-group',
+    reason: 'Different direction',
+  };
+  const html = renderToStaticMarkup(
+    h(InitiativePage, { ...props, item: abandoned, versions: [initiative, abandoned], origin: initiative }),
+  );
+  assert.match(html, /Abandoned/);
+  assert.match(html, /Different direction/);
+  assert.match(html, /version 2/);
+  assert.match(html, /Initiative status/);
+  assert.equal(model.initiativeProgress(abandoned, [{ label: 'Planned' }]).label, 'Abandoned');
+});
+test('planning lifecycle buckets count unlinked Proposed and Abandoned once, including unified records', () => {
+  const proposed = item('proposal', {
+    kind: 'issue',
+    status: 'proposed',
+    initiativeId: undefined,
+    intentIds: [],
+  });
+  const abandoned = item('abandoned', {
+    kind: 'issue',
+    status: 'abandoned',
+    initiativeId: undefined,
+    intentIds: [],
+  });
+  const groups = model.planningGroups([proposed, abandoned], [], []);
+  assert.equal(groups.find(group => group.id === 'proposed').rows[0].label, 'Proposed');
+  const rows = groups.flatMap(group => group.rows);
+  assert.equal(rows.filter(row => model.planningRowMatches(row, 'proposed')).length, 1);
+  assert.equal(rows.filter(row => model.planningRowMatches(row, 'done')).length, 1);
+  const unified = model.planningGroups(
+    [proposed],
+    [{ id: 'proposal', outcome: proposed.title, status: 'proposed' }],
+    [],
+  );
+  assert.equal(unified.flatMap(group => group.rows).length, 1);
+});
+
 test('Initiative creation byline uses the recorded origin actor and omits unknown authors', () => {
   const known = renderToStaticMarkup(
     h(InitiativePage, { ...props, origin: { ...initiative, actorDisplayName: 'Dino' } }),

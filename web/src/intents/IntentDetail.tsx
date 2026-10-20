@@ -92,7 +92,7 @@ export function IntentDetailView({
   back?: ReactNode;
   addLane?: (name: string) => Promise<string | null>;
   addNote?: (text: string, kind: NoteRow['kind']) => Promise<string | null>;
-  setStatus?: (status: IntentStatus) => Promise<string | null>;
+  setStatus?: (status: Exclude<IntentStatus, 'proposed'>) => Promise<string | null>;
   more?: ReactNode;
   records?: CockpitWork;
   timeline?: readonly TimelineEvent[];

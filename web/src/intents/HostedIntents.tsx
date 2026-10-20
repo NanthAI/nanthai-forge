@@ -1,3 +1,4 @@
+import { planningVersionLabel } from '../../../src/work-planning-lifecycle';
 import { usePlanningActors } from '../planning/usePlanningActors';
 import type { AttributedPlanningItem } from '../planning/attribution';
 import { usePageCritical } from '../ui/page-critical';
@@ -70,7 +71,7 @@ export default function HostedIntents({
   intentId?: string;
   create?: (outcome: string, constraints: string) => Promise<string | null>;
   addNote?: (intentId: string, text: string, kind: 'comment' | 'decision') => Promise<string | null>;
-  setStatus?: (intentId: string, status: IntentStatus) => Promise<string | null>;
+  setStatus?: (intentId: string, status: Exclude<IntentStatus, 'proposed'>) => Promise<string | null>;
   addLane?: (intentId: string, name: string) => Promise<string | null>;
   combine?: (intentId: string, inputs: { laneId: string; head: string }[]) => Promise<string | null>;
 }) {
@@ -289,7 +290,7 @@ export function HostedIntentsView({
   loading?: boolean;
   create?: (outcome: string, constraints: string) => Promise<string | null>;
   addNote?: (intentId: string, text: string, kind: 'comment' | 'decision') => Promise<string | null>;
-  setStatus?: (intentId: string, status: IntentStatus) => Promise<string | null>;
+  setStatus?: (intentId: string, status: Exclude<IntentStatus, 'proposed'>) => Promise<string | null>;
   addLane?: (intentId: string, name: string) => Promise<string | null>;
   combine?: (intentId: string, inputs: { laneId: string; head: string }[]) => Promise<string | null>;
 }) {
@@ -354,8 +355,15 @@ export function HostedIntentsView({
       timeline.push({
         id: `planning:${version.operationId}`,
         at: version.at,
-        text: version.version === 1 ? 'Planned' : version.status === 'closed' ? 'Done' : 'Details edited',
-        detail: [version.actorDisplayName && `by ${version.actorDisplayName}`, `version ${version.version}`]
+        text: planningVersionLabel(
+          version,
+          records.planningVersions?.find(previous => previous.version === version.previousVersion),
+        ),
+        detail: [
+          version.actorDisplayName && `by ${version.actorDisplayName}`,
+          `version ${version.version}`,
+          version.reason,
+        ]
           .filter(Boolean)
           .join(' · '),
         glyph: 'file',
@@ -462,7 +470,7 @@ export function HostedIntentsView({
             ? { addNote: (text: string, kind: 'comment' | 'decision') => addNote(intentId, text, kind) }
             : {}),
           ...(setStatus && !lifecycle
-            ? { setStatus: (status: IntentStatus) => setStatus(intentId, status) }
+            ? { setStatus: (status: Exclude<IntentStatus, 'proposed'>) => setStatus(intentId, status) }
             : {}),
           more: (
             <ButtonLink variant="ghost" href={classic({ intent: intentId, intentTab: 'discussion' })}>

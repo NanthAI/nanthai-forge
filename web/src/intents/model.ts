@@ -3,7 +3,7 @@ import { intentProgress } from '../../../src/work-intent-progress';
 import type { CockpitLane } from '../cockpit/model';
 import { attentionRank, toneLabel, type Tone } from '../ui/status';
 
-export type IntentStatus = 'active' | 'ready' | 'abandoned' | 'completed';
+export type IntentStatus = 'proposed' | 'active' | 'ready' | 'abandoned' | 'completed';
 export type IntentRow = {
   id: string;
   outcome: string;
@@ -36,6 +36,7 @@ type IntentInput = {
 };
 
 const statusTone: Record<IntentStatus, [Tone, string]> = {
+  proposed: ['plain', 'Proposed'],
   active: ['waiting', 'Waiting'],
   ready: ['passed', 'Ready'],
   completed: ['passed', 'Done'],
@@ -103,8 +104,7 @@ export function filterIntents(rows: readonly IntentRow[], filter: IntentFilter):
     filter === 'all'
       ? true
       : filter === 'proposed'
-        ? // Work Intents are created by someone with plan rights, so none is Proposed.
-          false
+        ? row.status === 'proposed'
         : filter === 'planned'
           ? row.planned
           : filter === 'done'

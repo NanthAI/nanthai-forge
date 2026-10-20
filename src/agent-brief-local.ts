@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { currentPlanning } from './work-planning-state.js';
+import { planningBriefIntent } from './work-planning-lifecycle.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { laneOwnership } from './agent-ownership.js';
 import { localAgentSetup } from './agent-setup.js';
@@ -19,7 +21,12 @@ export function localBrief(store: WorkStore, input: unknown, liveMcp = false) {
   const data = store.load();
   const coordination = new CoordinationJournal(store).context(parsed.data.laneId);
   const records: BriefRecords = {
-    intents: data.intents,
+    intents: [
+      ...data.intents,
+      ...currentPlanning(data)
+        .filter(item => !data.intents.some(intent => intent.id === item.id))
+        .flatMap(item => planningBriefIntent(item) ?? []),
+    ],
     lanes: data.lanes,
     views: data.views,
     runs: data.runs,

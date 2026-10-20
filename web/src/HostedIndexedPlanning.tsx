@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { planningIntentStatus, planningVersionLabel } from '../../src/work-planning-lifecycle';
 import { InitiativeConversation } from './planning/InitiativePage';
 import { usePlanningActors } from './planning/usePlanningActors';
 import { DetailsText } from './ui/DetailsText';
@@ -222,7 +223,7 @@ function PlannedIntentRoute({
     id: item.id,
     outcome: item.title,
     constraints: item.body,
-    status: item.status === 'closed' ? ('completed' as const) : ('active' as const),
+    status: planningIntentStatus(item.status),
     createdAt:
       versions.find(version => version.version === 1)?.at ?? (item.version === 1 ? item.at : undefined),
   };
@@ -241,8 +242,15 @@ function PlannedIntentRoute({
       at: version.at,
       tone: 'plain' as const,
       glyph: 'file' as const,
-      text: version.version === 1 ? 'Planned' : version.status === 'closed' ? 'Done' : 'Details edited',
-      detail: [version.actorDisplayName && `by ${version.actorDisplayName}`, `version ${version.version}`]
+      text: planningVersionLabel(
+        version,
+        history.records.find(previous => previous.version === version.previousVersion),
+      ),
+      detail: [
+        version.actorDisplayName && `by ${version.actorDisplayName}`,
+        `version ${version.version}`,
+        version.reason,
+      ]
         .filter(Boolean)
         .join(' · '),
     })),
@@ -267,8 +275,8 @@ function PlannedIntentRoute({
           planning: [],
           now,
           timeline,
-          canStart: Boolean(intent),
-          startIntentId: intent?.id,
+          canStart: true,
+          startIntentId: intent?.id ?? item.id,
           laneHref: id => hostedHref({ projectTab: 'lanes', lane: id }),
           conversation: (
             <Conversation
@@ -386,6 +394,7 @@ export default function HostedIndexedPlanning(
         intentId={props.intentId}
         timelineData={timelineData}
         initiativeOrigin={attributedOrigins.find(item => item.version === 1)}
+        initiativeVersions={attributedOrigins}
         renderConversation={item => (
           <>
             {comments.loading && <p role="status">Loading conversation…</p>}

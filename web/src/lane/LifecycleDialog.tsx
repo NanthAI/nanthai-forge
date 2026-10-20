@@ -17,7 +17,7 @@ export function LifecycleDialog({
   close,
 }: {
   action: 'complete' | 'abandon';
-  collection: 'intents' | 'lanes';
+  collection: 'intents' | 'lanes' | 'planning';
   reason: string;
   setReason: (value: string) => void;
   saveFirst: boolean;
@@ -57,7 +57,7 @@ export function LifecycleDialog({
             rows={3}
           />
         </label>
-        {action === 'abandon' && (
+        {action === 'abandon' && collection !== 'planning' && (
           <>
             <label>
               <input

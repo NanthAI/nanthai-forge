@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { planningIntentStatus } from './work-planning-lifecycle.js';
 import { invariant } from './errors.js';
 import { digest } from './portable-hash.js';
 import { workSchema, type WorkData } from './work-types.js';
@@ -101,7 +102,7 @@ export function convertWork15To16(
         outcome: issue.title,
         description: issue.body,
         constraints: '',
-        status: issue.status === 'closed' ? 'completed' : 'active',
+        status: planningIntentStatus(issue.status),
         notes: [],
         createdAt: source.planningItems.find(item => item.id === issue.id)!.at,
         updatedAt: issue.at,

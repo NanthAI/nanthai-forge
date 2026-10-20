@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { applyPlanningMetadata } from './work-planning-state.js';
+import { finishChild } from './agent-finish-journal.js';
 import { syncDirectory } from './native-durability.js';
 import { dirname } from 'node:path';
 import { derivedLaneName } from './lane-name.js';
@@ -115,10 +117,47 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
 
             const at = new Date().toISOString(),
               laneId = randomUUID();
-            const existing = command.intentId ? tx.fields('intents', command.intentId)?.record : undefined;
+            const alias = command.intentId
+              ? (tx.find('intentAliases' as never, command.intentId, 'aliasId')?.record as unknown as
+                  { intentId: string } | undefined)
+              : undefined;
+            const selectedId = alias?.intentId ?? command.intentId;
+            let existing = selectedId ? tx.fields('intents', selectedId)?.record : undefined;
+            const planning =
+              !existing && selectedId ? tx.find('planningItems', selectedId, 'id', true)?.record : undefined;
+            if (planning?.kind === 'issue') {
+              existing = applyIntentMetadata(
+                data,
+                { action: 'intent', outcome: planning.title, constraints: planning.body, base },
+                { id: planning.id, at },
+              );
+              tx.append('intents', existing);
+              data.planningItems.push(planning);
+              if (planning.initiativeId) {
+                const group = tx.find('planningItems', planning.initiativeId, 'id', true)?.record;
+                if (group) data.planningItems.push(group);
+              }
+              const version = applyPlanningMetadata(
+                data,
+                {
+                  action: 'put-planning-item',
+                  operationId: finishChild(command.operationId, 'planning-start'),
+                  itemId: planning.id,
+                  expectedVersion: planning.version,
+                  kind: planning.kind,
+                  title: planning.title,
+                  body: planning.body,
+                  status: 'open',
+                  intentIds: [existing.id],
+                  ...(planning.initiativeId ? { initiativeId: planning.initiativeId } : {}),
+                },
+                at,
+              );
+              tx.append('planningItems', version as typeof planning);
+            }
             invariant(!command.intentId || existing, 'NOT_FOUND', 'Intent not found.');
             invariant(
-              !existing || ['active', 'ready'].includes(existing.status),
+              !existing || ['active', 'ready', 'proposed'].includes(existing.status),
               'INTENT_CLOSED',
               'Add a Lane to an open Intent.',
             );
@@ -161,6 +200,15 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
             if (!existing) tx.append('intents', intent);
             // A planned schema-16 Intent's first Lane captures its exact source pin.
             else if (!existing.base) tx.patchFields('intents', existing.id, { base });
+            if ((existing as { status?: string } | undefined)?.status === 'proposed') {
+              tx.appendField('intents', existing!.id, 'lifecycle', {
+                from: 'proposed',
+                to: 'active',
+                at,
+                actor: localActor('agent', command.actor, command.tool),
+              });
+              tx.patchFields('intents', existing!.id, { status: 'active' });
+            }
             tx.append('lanes', lane);
             store.commitRecords(tx);
             tx = store.records();

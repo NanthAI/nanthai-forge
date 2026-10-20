@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { planningIntentStatus } from './work-planning-lifecycle.js';
 import { invariant } from './errors.js';
 import { resolveIntentId, type IntentAlias } from './work-intent-local.js';
 import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
@@ -110,6 +111,7 @@ export function applyUnifiedPlanning(
     title: command.title,
     body: command.body,
     status: command.status,
+    ...(command.reason !== undefined ? { reason: command.reason } : {}),
     intentIds: [...new Set(command.intentIds)].sort(),
     ...(command.initiativeId ? { initiativeId: command.initiativeId } : {}),
     at,
@@ -152,7 +154,19 @@ export function applyUnifiedPlanning(
     updatedAt: at,
   });
   // Once a Lane captured an execution pin, execution lifecycle owns status; the planning word stays history.
-  if (!intent.base) intent.status = item.status === 'closed' ? 'completed' : 'active';
+  if (!intent.base) {
+    const status = planningIntentStatus(item.status);
+    if (intent.status !== status) {
+      (intent.lifecycle ??= []).push({
+        from: intent.status,
+        to: status,
+        at,
+        ...(item.reason !== undefined ? { reason: item.reason } : {}),
+        operation: { id: item.operationId, request },
+      });
+      intent.status = status;
+    }
+  }
   intent.historyRefs.push({ itemId: item.id, version: item.version });
   // Current links replace current relations; original links remain in planning history.
   const nextRelated = linked.filter(id => id !== intent.id);

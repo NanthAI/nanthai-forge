@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { LifecycleDialog } from './lane/LifecycleDialog';
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from 'react';
 import { planningActor, type AttributedPlanningItem } from './planning/attribution';
 import { InitiativePage, InitiativeConversation, PlanningRowFact } from './planning/InitiativePage';
@@ -159,6 +160,7 @@ export function WorkPlanning({
   renderConversation,
   timelineData,
   initiativeOrigin,
+  initiativeVersions,
 }: Props & {
   intentId?: string;
   exportHistory: () => Promise<PlanningExport>;
@@ -168,12 +170,16 @@ export function WorkPlanning({
   renderConversation?: (item: PlanningItem) => ReactNode;
   timelineData?: PlanningData;
   initiativeOrigin?: AttributedPlanningItem;
+  initiativeVersions?: readonly AttributedPlanningItem[];
 }) {
   const workHeader = useWorkHeader();
   const initiativeWrites = useRef(
     new Map<string, Extract<PlanningCommand, { action: 'put-planning-item' }>>(),
   );
   const [selected] = useDestination('planningItem');
+  const [abandoning, setAbandoning] = useState<PlanningItem>();
+  const [abandonReason, setAbandonReason] = useState('');
+  const [abandonBusy, setAbandonBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [search, setSearch] = useState(''),
     [initiative, setInitiative] = useState('');
@@ -333,11 +339,15 @@ export function WorkPlanning({
       setExporting(false);
     }
   }
-  async function closeInitiative(item: PlanningItem, nextStatus: PlanningItem['status'] = 'closed') {
+  async function closeInitiative(
+    item: PlanningItem,
+    nextStatus: PlanningItem['status'] = 'closed',
+    reason?: string,
+  ) {
     try {
       // Summary bodies are truncated. Always hydrate before replacing a record.
       const full = loadItem ? await loadItem(item.id) : item;
-      const writeKey = `${item.id}:${nextStatus}`;
+      const writeKey = JSON.stringify([item.id, nextStatus, reason]);
       const command = initiativeWrites.current.get(writeKey) ?? {
         action: 'put-planning-item',
         operationId: crypto.randomUUID(),
@@ -347,14 +357,19 @@ export function WorkPlanning({
         title: full.title,
         body: full.body,
         status: nextStatus,
+        ...(reason !== undefined ? { reason } : {}),
         intentIds: full.intentIds,
         ...(full.initiativeId ? { initiativeId: full.initiativeId } : {}),
       };
       initiativeWrites.current.set(writeKey, command);
       const acknowledgement = await act(command);
-      if (acknowledgement?.operationId === command.operationId) initiativeWrites.current.delete(writeKey);
+      if (acknowledgement?.operationId !== command.operationId)
+        return 'The request did not complete. Retry keeps its original operation.';
+      initiativeWrites.current.delete(writeKey);
+      return null;
     } catch (error) {
       setError((error as Error).message);
+      return (error as Error).message;
     }
   }
   const editor = !readOnly && editorOpen && (
@@ -476,6 +491,7 @@ export function WorkPlanning({
           item={detailItem}
           data={data}
           timelineData={timelineData}
+          versions={initiativeVersions ?? data.planningItems.filter(version => version.id === detailItem.id)}
           origin={
             initiativeOrigin ??
             (() => {
@@ -497,7 +513,7 @@ export function WorkPlanning({
             setHistoryOpen(false);
             void edit(detailItem.id);
           }}
-          onStatus={status => void closeInitiative(detailItem, status)}
+          onStatus={(status, reason) => closeInitiative(detailItem, status, reason)}
           onExport={() => void download()}
           editor={editor}
           body={renderBody ? renderBody(detailItem, true) : undefined}
@@ -587,6 +603,29 @@ export function WorkPlanning({
       className={`work-section planning-board${workHeader ? ' fx-page' : ''}`}
       aria-label="Intents and Initiatives"
     >
+      {abandoning && (
+        <LifecycleDialog
+          action="abandon"
+          collection="planning"
+          reason={abandonReason}
+          setReason={setAbandonReason}
+          saveFirst={false}
+          setSaveFirst={() => {}}
+          cascade={false}
+          setCascade={() => {}}
+          busy={busy || abandonBusy}
+          close={() => setAbandoning(undefined)}
+          submit={() => {
+            setAbandonBusy(true);
+            void closeInitiative(abandoning, 'abandoned', abandonReason)
+              .then(problem => {
+                if (!problem) setAbandoning(undefined);
+                else setError(problem);
+              })
+              .finally(() => setAbandonBusy(false));
+          }}
+        />
+      )}
       <PageHead title="Planning" actions={actions} />
       <div className="planning-list fx-panel">
         <div className="planning-toolbar">
@@ -687,7 +726,15 @@ export function WorkPlanning({
                   </span>
                   {(group.item || group.id === 'proposed') && (
                     <StatusPill
-                      tone={label === 'Done' ? 'passed' : label === 'In motion' ? 'active' : 'plain'}
+                      tone={
+                        label === 'Abandoned'
+                          ? 'stale'
+                          : label === 'Done'
+                            ? 'passed'
+                            : label === 'In motion'
+                              ? 'active'
+                              : 'plain'
+                      }
                     >
                       {label}
                     </StatusPill>
@@ -698,6 +745,15 @@ export function WorkPlanning({
                       <button onClick={() => create('issue', group.id)}>Add Intent</button>
                       <button disabled={busy} onClick={() => void closeInitiative(group.item!)}>
                         Mark done
+                      </button>
+                      <button
+                        disabled={busy}
+                        onClick={() => {
+                          setAbandonReason('');
+                          setAbandoning(group.item!);
+                        }}
+                      >
+                        Abandon…
                       </button>
                     </Menu>
                   )}

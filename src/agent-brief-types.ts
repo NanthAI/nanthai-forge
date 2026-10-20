@@ -2,7 +2,7 @@
 import type { AutonomyPolicy } from './autonomy-policy.js';
 import { z } from 'zod';
 import type { Lane, WorkData, WorkView, CheckRun } from './work-types.js';
-type Intent = WorkData['intents'][number];
+type Intent = Omit<WorkData['intents'][number], 'base' | 'status'> & { base?: string; status: string };
 export const BRIEF_SITUATIONS = [
   'start-intent',
   'add-lane',

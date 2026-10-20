@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { planningBriefIntent } from '../src/work-planning-lifecycle';
+import type { PlanningItem } from '../src/work-planning-types';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
@@ -70,7 +72,9 @@ export async function hostedBriefRecords(ctx: QueryCtx, project: Doc<'hostedProj
   const view = await get<WorkView>('views', input.viewId ?? run?.viewId);
   const lane = await get<Lane>('lanes', input.laneId ?? selectedEvent?.laneId ?? view?.inputs[0]?.laneId);
   const intentId = input.intentId ?? lane?.intentId ?? view?.intentId ?? selectedEvent?.intentId;
-  const intent = await get<WorkData['intents'][number]>('intents', intentId);
+  const storedIntent = await get<WorkData['intents'][number]>('intents', intentId);
+  const planning = !storedIntent && intentId ? await get<PlanningItem>('planningItems', intentId) : undefined;
+  const intent = storedIntent ?? (planning ? planningBriefIntent(planning) : undefined);
   if (intent) intent.notes = await page('notes', intent.id);
   const views: WorkView[] = view ? [view] : intent ? await page('views', intent.id) : [];
   // View summaries carry input pins but defer details/dependencies. Hydrate selected candidates.

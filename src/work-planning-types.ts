@@ -7,7 +7,8 @@ const planningFields = {
   kind: z.enum(['issue', 'initiative']),
   title: z.string().trim().min(1),
   body: z.string().default(''),
-  status: z.enum(['open', 'in-progress', 'closed']).default('open'),
+  status: z.enum(['proposed', 'open', 'in-progress', 'closed', 'abandoned']).default('open'),
+  reason: z.string().optional(),
   intentIds: z.array(id).default([]),
   initiativeId: id.optional(),
 };
