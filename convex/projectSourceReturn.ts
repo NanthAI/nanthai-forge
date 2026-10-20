@@ -108,7 +108,7 @@ export const returnSource = action({
         return {
           pending: true as const,
           ...(stage?.returnProgress ? { progress: stage.returnProgress } : {}),
-          resumed: !!priorStage?.returnCursor,
+          resumed: !!(priorStage?.returnCursor || priorStage?.returnMetadataCursor),
         };
       };
       const priorStage: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
@@ -134,9 +134,10 @@ export const returnSource = action({
               elapsedMs: 0,
               etaSeconds: null,
             }),
-          resumed: !!priorStage?.returnCursor,
+          resumed: !!(priorStage?.returnCursor || priorStage?.returnMetadataCursor),
         };
-      if (priorStage?.returnCursor) return pending(await returnProgress(ctx, priorStage, input, owner));
+      if (priorStage?.returnCursor || priorStage?.returnMetadataCursor)
+        return pending(await returnProgress(ctx, priorStage, input, owner));
       console.log('source-return prepare', { revision: input.revision });
       const reader = exchangeObjectReader(ctx, true);
       const records = await recordReturn(
@@ -149,13 +150,13 @@ export const returnSource = action({
         priorStage?.returnAt,
       );
       if (records) return pending(records.receipt);
-      const current = await load(ctx, input.projectId, owner, reader);
+      const current = await load(ctx, input.projectId, owner, reader, { metadata: true });
       invariant(
         current.backup._id === input.expectedBackupId && current.data.revision === input.revision,
         'WORK_STALE',
         'Hosted source or Work changed. The uploaded checkpoint and current work remain available.',
       );
-      const candidate = await source(ctx, input.backupId, owner, reader);
+      const candidate = await source(ctx, input.backupId, owner, reader, true);
       validateSourceReturn(current.data, candidate.data, candidate.manifest);
       console.log('source-return prepared', {
         objects: candidate.manifest.files.length,
@@ -163,10 +164,12 @@ export const returnSource = action({
         views: candidate.data.views.length,
         lanes: candidate.data.lanes.length,
       });
-      const ownerDerived = await readOwnerDerived(
-        input.ownerDerived,
-        async () => (await reader.read(input.projectId, owner, [input.ownerDerived!]))[0]!,
-      );
+      const ownerDerived =
+        candidate.publication?.ownerDerived ??
+        (await readOwnerDerived(
+          input.ownerDerived,
+          async () => (await reader.read(input.projectId, owner, [input.ownerDerived!]))[0]!,
+        ));
       const command = sourceReturnSchema.parse({
           action: 'source-return',
           archiveSha256: candidate.backup.digest,
@@ -241,12 +244,19 @@ export const returnSource = action({
             current.data,
             candidate.data,
             candidate.manifest,
+            candidate.publication ? { trees: candidate.publication.ownerDerived.trees } : undefined,
           );
           return pending(
             await returnProgress(ctx, stage, input, owner, {
-              snapshot: { data: candidate.data, manifest: candidate.manifest, backup: candidate.backup },
+              snapshot: {
+                data: candidate.data,
+                manifest: candidate.manifest,
+                backup: candidate.backup,
+                closure: candidate.publication?.edges.map(e => [e.head, e.parents]),
+              },
               generationId: generation._id,
               ownerDerived,
+              metadataOnly: candidate.publication?.work !== undefined,
               generation,
               previous: { data: current.data, manifest: current.manifest, backup: current.backup },
               final: {
@@ -285,6 +295,7 @@ export const returnSource = action({
         current.data,
         candidate.data,
         candidate.manifest,
+        candidate.publication ? { trees: candidate.publication.ownerDerived.trees } : undefined,
       );
       return await ctx.runMutation(internal.projectWork.returnSource, {
         projectId: input.projectId,

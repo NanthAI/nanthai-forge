@@ -28,6 +28,8 @@ export type PublicationMetadata = {
   /** Blob edges inherited through parent States are omitted; closure remains complete. */
   edges: { head: string; parents: string[]; blobs: string[] }[];
   ownerDerived: OwnerDerived;
+  /** Exact pinned Work JSON, consumed as metadata without fetching archival bytes. */
+  work?: string;
 };
 /** Split text, not encoded bytes, so each JSON argument is valid Unicode. Even
  * all control characters fit the per-page encoded budget after JSON escaping. */

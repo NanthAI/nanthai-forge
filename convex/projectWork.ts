@@ -272,7 +272,18 @@ export const returnSource = internalMutation({
             );
             if (stage.returnCursor) await blobStore(ctx).delete(stage.returnCursor);
             if (stage.returnSnapshot) await blobStore(ctx).delete(stage.returnSnapshot);
-            await ctx.db.patch(stage._id, { returnCursor: undefined, returnSnapshot: undefined });
+            for (const ref of [stage.returnMetadataCursor, stage.returnMetadataSnapshot])
+              if (ref)
+                await ctx.scheduler.runAfter(0, internal.projectReturnMetadataStore.retire, {
+                  partitionId: stage._id,
+                  key: JSON.parse(ref).key,
+                });
+            await ctx.db.patch(stage._id, {
+              returnCursor: undefined,
+              returnSnapshot: undefined,
+              returnMetadataCursor: undefined,
+              returnMetadataSnapshot: undefined,
+            });
           }
           const oldPartition = recordPartition(generation);
           const partition = input.projection.partitionId ?? oldPartition;
@@ -286,10 +297,21 @@ export const returnSource = internalMutation({
               'WORK_STALE',
               'Return index staging changed.',
             );
-            if (staged.returnCursor) {
-              await blobStore(ctx).delete(staged.returnCursor);
+            if (staged.returnCursor || staged.returnMetadataCursor) {
+              if (staged.returnCursor) await blobStore(ctx).delete(staged.returnCursor);
+              for (const ref of [staged.returnMetadataCursor, staged.returnMetadataSnapshot])
+                if (ref)
+                  await ctx.scheduler.runAfter(0, internal.projectReturnMetadataStore.retire, {
+                    partitionId: staged._id,
+                    key: JSON.parse(ref).key,
+                  });
               if (staged.returnSnapshot) await blobStore(ctx).delete(staged.returnSnapshot);
-              await ctx.db.patch(staged._id, { returnCursor: undefined, returnSnapshot: undefined });
+              await ctx.db.patch(staged._id, {
+                returnCursor: undefined,
+                returnSnapshot: undefined,
+                returnMetadataCursor: undefined,
+                returnMetadataSnapshot: undefined,
+              });
             }
           }
           for (const pin of input.projection.removed) {

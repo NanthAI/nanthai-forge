@@ -94,9 +94,33 @@ owner-only `projectObjectCommit:setR2Writes` `{ projectId, enabled: false }`;
 this also stops new R2 writes. Already stored objects remain readable. No
 forced CLI upgrade or server fallback removal is part of R3a.
 
-`projectBackups.metadataPublication` points to the immutable metadata session;
-R3b can page its payload with `projectPublicationStore.read`. Source return,
-its cursor blobs and its existing byte-reading fallback are unchanged here.
+## R3b source return
+
+`projectBackups.metadataPublication` selects the validated immutable session.
+Current CLIs include exact pinned Work JSON in those pages, alongside the
+manifest, closure edges and derived display rows. Source return reads the pages
+through `projectPublicationStore.read`, checks their digest/root/session binding,
+and replays the authoritative hosted journal before the usual revision/main/CAS
+checks. Complete metadata returns read zero stored bytes. Their snapshot and
+computational cursor use bounded DB pages; each committed step atomically selects
+its new cursor. Successful publication releases cursor/snapshot pages through the
+same cleanup boundary as legacy cursor blobs. Project deletion includes these
+pages in its existing bounded purge.
+
+The optional 4 MiB sidecar now retains fitting items when another item is too
+large. Missing exact baseline Work causes full owner facts to be supplied for
+server selection. The server validates and uses coverage per item and phase;
+missing Views or comparisons do not discard valid parents, trees or diffstats.
+Large-delta rebuilds retain this coverage. Complete deltas keep the existing
+fast installation path. This applies to every project, independently of R2 opt-in.
+
+Ancestry walks checkpoint within a head, and file comparisons checkpoint their
+offset between batches. Progress includes visited/pending ancestors, compared
+files and pending output rows. Old CLIs, old publications and incomplete derived
+items retain server computation. Already published R3a sessions that predate the
+Work field still require the original Work-byte compatibility path; no metadata
+can reconstruct those omitted bodies. No forced upgrade or fallback removal is
+part of R3b.
 
 ## Spike findings
 
@@ -153,3 +177,47 @@ What remains after R2 is realtime: database I/O and calls from open tabs and bou
 7. Unverified: the Professional-tier base fee, and whether websocket query results are ever billed as egress (inferred not).
 8. The hosted account has a spend limit that disables the deployment when reached; watch it until the fixes are verified.
 9. The browser path (CORS, client-side hunks) is untested against a real bucket.
+
+### Lead qualification
+
+Run from the landed runtime after the lead's dev deployment, with the existing
+account login and existing bound owners. Do not use the checkpoint-only
+`measure-exchange-latency` push as a source-return measurement: that harness
+intentionally does not return source.
+
+For each owner, set `R3B_OWNER` to its path and `R3B_RESULT` to a private output
+file, then run:
+
+```sh
+npm run build:core
+node --input-type=module - <<'JS'
+import { writeFileSync } from 'node:fs';
+import { boundExchange } from './dist/bound-exchange.js';
+const started = performance.now();
+const result = await boundExchange(process.env.R3B_OWNER, 'push');
+const receipt = { elapsedMs: Math.round(performance.now() - started), result };
+writeFileSync(process.env.R3B_RESULT, JSON.stringify(receipt, null, 2), { mode: 0o600 });
+console.log(JSON.stringify({ elapsedMs: receipt.elapsedMs, backupId: result.backupId,
+  accounting: result.sourceReturn?.accounting }));
+JS
+```
+
+1. Use the real dogfood owner with its normal pending landings. Compare the
+   observed total against push #10's 5,731 seconds, recording the source-return
+   action time separately from publication/upload. In dev logs, retain
+   `source-return owner-derived` coverage counts and `fastPath`, every
+   `source-return step`, and `source-return complete` accounting. A partial
+   sidecar should still have covered phases/items supplied; a fallback must
+   identify the missing coverage rather than discard all rows. Do not infer
+   the cause of a previous push without its retained sidecar/baseline evidence.
+2. Use the existing opted-in R2 throwaway. Seed a checkpoint with this CLI first
+   if its current source predates the publication Work field, then return a
+   second synthetic multi-landing push. Match its publication/return operation
+   IDs in dev logs. Require `metadata-publication complete` and
+   `source-return complete` to report `storageReads: 0`, `storageBytes: 0`;
+   confirm `metadataOnly: true` on the coverage log. Repeat an interrupted push
+   with its retained operation, then verify one final receipt and unchanged
+   source/Work authority. A progress probe must show inner ancestry/file/output
+   counters during a long step, with no gap over roughly 60 seconds.
+
+These commands are lead-only live qualification, not local fixture results.

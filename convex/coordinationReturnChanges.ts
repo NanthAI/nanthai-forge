@@ -29,6 +29,7 @@ export async function returnChanges(
   before: WorkData,
   after: WorkData,
   manifest: Manifest,
+  metadata?: { trees: import('../src/owner-derived').OwnerDerived['trees'] },
 ): Promise<ReturnChange[]> {
   const previous = new Map(before.lanes.map(lane => [lane.id, lane.head]));
   const sizes = new Map(
@@ -45,11 +46,21 @@ export async function returnChanges(
       b = sizes.get(lane.head);
     if (index < PATH_DIFF_LANES && a !== undefined && b !== undefined)
       try {
-        const [old, next] = await reader.read(projectId, owner, [
-          { sha256: from, size: a },
-          { sha256: lane.head, size: b },
-        ]);
-        const paths = reviewPaths(parseNativeState(old!).files, parseNativeState(next!).files)
+        const trees = new Map(metadata?.trees);
+        if (metadata && (!trees.has(from) || !trees.has(lane.head))) {
+          changes.push(change);
+          continue;
+        }
+        const [old, next] = metadata
+          ? []
+          : await reader.read(projectId, owner, [
+              { sha256: from, size: a },
+              { sha256: lane.head, size: b },
+            ]);
+        const paths = reviewPaths(
+          trees.get(from) ?? parseNativeState(old!).files,
+          trees.get(lane.head) ?? parseNativeState(next!).files,
+        )
           .filter(item => item.status !== 'unchanged')
           .map(item => item.path);
         change.paths = paths.slice(0, COORDINATION_LIMITS.changePaths);

@@ -1,3 +1,4 @@
+import type * as projectReturnMetadataStore from "../projectReturnMetadataStore.js";
 import type * as projectPublicationStore from "../projectPublicationStore.js";
 import type * as importStatus from "../importStatus.js";
 import type * as projectBootstrap from "../projectBootstrap.js";
@@ -159,6 +160,7 @@ declare const fullApi: ApiFromModules<{
   ownerAcceptance: typeof ownerAcceptance;
   projectSourceReturnProgress: typeof projectSourceReturnProgress;
   projectReturnIndexStage: typeof projectReturnIndexStage;
+  projectReturnMetadataStore: typeof projectReturnMetadataStore;
   projectProposalObjects: typeof projectProposalObjects;
   projectBackupObjects: typeof projectBackupObjects;
   projectWorkCommand: typeof projectWorkCommand;

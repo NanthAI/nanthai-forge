@@ -53,6 +53,7 @@ export function nativePublicationMetadata(
     states: string[] = JSON.parse(readFileSync(join(directory, 'states.json'), 'utf8'));
   return {
     schema: 1,
+    work: readFileSync(join(directory, 'work.json'), 'utf8'),
     manifest,
     pins: pins.map(({ sha256, size }) => ({ sha256, size })),
     preview: {

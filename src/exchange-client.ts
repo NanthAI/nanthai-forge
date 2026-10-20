@@ -513,9 +513,42 @@ export class ConvexExchange implements ExchangeTransport {
     operationId: string,
     ownerDerived?: ContentPin,
   ) {
+    let active = true,
+      probing = false;
+    const started = Date.now();
+    const probe = this.onReturnProgress
+      ? setInterval(() => {
+          if (probing) return;
+          probing = true;
+          void this.client
+            .action(action('projectSourceReturn:returnSource'), {
+              projectId: this.projectId,
+              backupId,
+              expectedBackupId,
+              revision,
+              operationId,
+              continuation: true,
+              statusOnly: true,
+              ...(ownerDerived ? { ownerDerived } : {}),
+            })
+            .then(result => {
+              if (active && result?.pending && result.progress)
+                this.onReturnProgress?.({
+                  ...JSON.parse(result.progress),
+                  elapsedMs: Date.now() - started,
+                  resumed: false,
+                });
+            })
+            .catch(() => {
+              // A progress probe is advisory; the original action reports its result/error.
+            })
+            .finally(() => {
+              probing = false;
+            });
+        }, 30000)
+      : undefined;
     try {
       let first = true;
-      const started = Date.now();
       while (true) {
         const result = await retryExchange('source return', operationId, () =>
           this.client.action(action('projectSourceReturn:returnSource'), {
@@ -553,6 +586,9 @@ export class ConvexExchange implements ExchangeTransport {
       }
     } catch (error) {
       throw hostedActionError(error, 'source return');
+    } finally {
+      active = false;
+      clearInterval(probe);
     }
   }
 }

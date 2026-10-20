@@ -7,6 +7,10 @@ export type SourceReturnProgress = {
   elapsedMs: number;
   etaSeconds: number | null;
   resumed: boolean;
+  itemDone?: number;
+  itemTotal?: number;
+  itemPending?: number;
+  rowsPending?: number;
   /** Per-push totals so far (servers before accounting omit them). */
   storageReads?: number;
   storageBytes?: number;
@@ -22,5 +26,5 @@ export function formatSourceReturnProgress(event: SourceReturnProgress) {
         ? ''
         : `, ${event.steps} steps in ${event.invocations} calls, ${megabytes(event.storageBytes)} read from storage`
     }\n`;
-  return `${event.resumed ? `source return: resuming from step ${event.step}\n` : ''}source return ${event.phase}: ${event.done}/${event.total} items (step ${event.step}), elapsed ${elapsed}s, ETA ${event.etaSeconds === null ? 'pending' : `${event.etaSeconds}s`}\n`;
+  return `${event.resumed ? `source return: resuming from step ${event.step}\n` : ''}source return ${event.phase}: ${event.done}/${event.total} items${event.itemDone === undefined ? '' : `, current item ${event.itemDone}${event.itemTotal === undefined ? ` visited, ${event.itemPending} pending` : `/${event.itemTotal}`}`}${event.rowsPending ? `, ${event.rowsPending} rows pending` : ''} (step ${event.step}), elapsed ${elapsed}s, ETA ${event.etaSeconds === null ? 'pending' : `${event.etaSeconds}s`}\n`;
 }

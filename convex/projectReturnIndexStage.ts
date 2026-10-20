@@ -114,6 +114,8 @@ export const batch = internalMutation({
     last: v.boolean(),
     metadata: v.optional(v.string()),
     cursor: v.optional(v.id('_storage')),
+    metadataCursor: v.optional(v.string()),
+    metadataSnapshot: v.optional(v.string()),
     snapshot: v.optional(v.id('_storage')),
     progress: v.optional(v.string()),
     step: v.optional(v.number()),
@@ -145,10 +147,26 @@ export const batch = internalMutation({
         'WORK_OPERATION_CHANGED',
         'Resume the original source-return snapshot.',
       );
+      invariant(
+        !partition.returnMetadataSnapshot ||
+          !input.metadataSnapshot ||
+          partition.returnMetadataSnapshot === input.metadataSnapshot,
+        'WORK_OPERATION_CHANGED',
+        'Resume the original source-return metadata snapshot.',
+      );
       if (input.cursor && partition.returnCursor) await blobStore(ctx).delete(partition.returnCursor);
+      if (input.metadataCursor && partition.returnMetadataCursor)
+        await ctx.scheduler.runAfter(0, internal.projectReturnMetadataStore.retire, {
+          partitionId: partition._id,
+          key: JSON.parse(partition.returnMetadataCursor).key,
+        });
       await ctx.db.patch(partition._id, {
         nextBatch: input.batch + 1,
         ...(input.snapshot ? { returnSnapshot: input.snapshot } : {}),
+        ...(input.metadataSnapshot ? { returnMetadataSnapshot: input.metadataSnapshot } : {}),
+        ...(input.metadataCursor
+          ? { returnMetadataCursor: input.metadataCursor, returnStep: (input.step ?? 0) + 1 }
+          : {}),
         ...(input.progress ? { returnProgress: input.progress } : {}),
         ...(input.cursor ? { returnCursor: input.cursor, returnStep: (input.step ?? 0) + 1 } : {}),
         ...(input.last ? { status: 'ready' as const } : {}),

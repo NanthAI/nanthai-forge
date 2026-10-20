@@ -8,6 +8,8 @@ import {
 } from './projectSourceReturnDelta';
 export { RETURN_BUDGET } from './projectSourceReturnStep';
 import { installOwnerDerived } from './projectOwnerDerived';
+import { ownerCoverage } from './projectOwnerCoverage';
+import { storeReturnMetadata, readReturnMetadata, type ReturnRef } from './projectSourceReturnMetadata';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { advance, RETURN_BUDGET, type Cursor, type ReturnAccounting } from './projectSourceReturnStep';
 import { storeReturnJson, readReturnJson, deleteReturnJson } from './projectSourceReturnCursor';
@@ -40,27 +42,34 @@ export async function returnProgress(
     ownerDerived?: unknown;
     generation?: Doc<'projectWorkGenerations'>;
     partial?: boolean;
+    metadataOnly?: boolean;
   },
 ): Promise<(Doc<'projectWorkEvents'> & { accounting?: ReturnAccounting }) | null> {
   const started = Date.now();
   let c: Cursor;
-  if (stage.returnCursor) {
-    c = await readReturnJson<Cursor>(
-      ctx,
-      stage.returnCursor,
+  function read<T>(ref: ReturnRef, message: string): Promise<T> {
+    return typeof ref === 'string'
+      ? readReturnJson<T>(ctx, ref, message)
+      : readReturnMetadata<T>(ctx, input.projectId, owner, ref);
+  }
+  const resuming = stage.returnCursor || stage.returnMetadataCursor;
+  if (resuming) {
+    c = await read<Cursor>(
+      stage.returnCursor ?? JSON.parse(stage.returnMetadataCursor!),
       'The original source-return cursor is unavailable.',
     );
     if (c.snapshotRef)
-      c.snapshot = await readReturnJson<Cursor['snapshot']>(
-        ctx,
+      c.snapshot = await read<Cursor['snapshot']>(
         c.snapshotRef,
         'The original source-return snapshot is unavailable.',
       );
+    if (c.snapshot.coverage) c.supplied = c.snapshot.coverage;
   } else {
     invariant(initial, 'WORK_STALE', 'Resume the original return preparation.');
     const { data } = initial.snapshot;
     c = {
       snapshot: initial.snapshot,
+      metadataOnly: initial.metadataOnly,
       final: initial.final,
       generationId: initial.generationId,
       phase: 'parents',
@@ -157,7 +166,18 @@ export async function returnProgress(
       }
     }
   }
-  if (initial?.ownerDerived && !stage.returnCursor) await installOwnerDerived(ctx, c, initial.ownerDerived);
+  if (initial?.ownerDerived && !resuming) {
+    c.supplied = ownerCoverage(c, initial.ownerDerived);
+    await installOwnerDerived(ctx, c, initial.ownerDerived);
+    console.log('source-return owner-derived', {
+      parents: c.supplied?.parents.length ?? 0,
+      stats: c.supplied?.stats.length ?? 0,
+      views: c.supplied?.views.length ?? 0,
+      trees: c.supplied?.trees.length ?? 0,
+      fastPath: c.phase === 'done',
+      metadataOnly: c.metadataOnly === true,
+    });
+  }
   invariant(
     c.final.owner === owner &&
       c.final.projectId === input.projectId &&
@@ -333,6 +353,17 @@ export async function returnProgress(
       const progress = JSON.stringify({
         ...c.accounting,
         phase: c.phase,
+        ...(c.ancestryProgress
+          ? {
+              item: c.ancestryProgress.head,
+              itemDone: c.ancestryProgress.seen.length,
+              itemPending: c.ancestryProgress.pending.length,
+            }
+          : {}),
+        ...(c.rows.length ? { rowsPending: c.rows.length } : {}),
+        ...(c.diffstats?.pending?.files
+          ? { itemDone: c.diffstats.pending.offset, itemTotal: c.diffstats.pending.files.length }
+          : {}),
         step: step + 1,
         done,
         total,
@@ -346,10 +377,15 @@ export async function returnProgress(
       // cursor. Legacy cursors with an embedded snapshot upgrade on their next
       // successful step without changing the operation or original timestamp.
       const freshSnapshot = !c.snapshotRef;
-      const snapshot = c.snapshotRef ?? (await storeReturnJson(ctx, c.snapshot));
+      const store = (value: unknown) =>
+        c.metadataOnly
+          ? storeReturnMetadata(ctx, input.projectId, owner, stage._id, value)
+          : storeReturnJson(ctx, value);
+      if (c.metadataOnly && c.supplied) c.snapshot.coverage = c.supplied;
+      const snapshot = c.snapshotRef ?? (await store(c.snapshot));
       c.snapshotRef = snapshot;
-      const position = { ...c, snapshot: undefined };
-      const cursor = await storeReturnJson(ctx, position);
+      const position = { ...c, snapshot: undefined, ...(c.metadataOnly ? { supplied: undefined } : {}) };
+      const cursor = await store(position);
       const committed = await ctx.runMutation(internal.projectReturnIndexStage.batch, {
         projectId: input.projectId,
         owner,
@@ -359,8 +395,8 @@ export async function returnProgress(
         batch,
         step,
         progress,
-        cursor,
-        snapshot,
+        ...(typeof cursor === 'string' ? { cursor } : { metadataCursor: JSON.stringify(cursor) }),
+        ...(typeof snapshot === 'string' ? { snapshot } : { metadataSnapshot: JSON.stringify(snapshot) }),
         entries: pending,
         last: result.last,
         ...(c.metadata ? { metadata: JSON.stringify(c.metadata) } : {}),
@@ -379,8 +415,8 @@ export async function returnProgress(
         committed,
       });
       if (!committed) {
-        await deleteReturnJson(ctx, cursor);
-        if (freshSnapshot) await deleteReturnJson(ctx, snapshot);
+        if (typeof cursor === 'string') await deleteReturnJson(ctx, cursor);
+        if (freshSnapshot && typeof snapshot === 'string') await deleteReturnJson(ctx, snapshot);
         const current = await ctx.runQuery(internal.projectWork.get, { projectId: input.projectId, owner });
         invariant(
           current.work?.backupId === input.expectedBackupId && current.work.revision === input.revision,

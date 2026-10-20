@@ -12,11 +12,13 @@ import { sourceManifestSchema } from '../src/work-archive-metadata';
 import type { ExchangeObjectReader } from './projectExchangeReader';
 import { exchangeMetadata } from './projectExchangeActions';
 import { projectArchiveMetadata } from './projectArchiveMetadata';
+import { publicationSnapshot } from './projectSourceReturnMetadata';
 export async function source(
   ctx: ActionCtx,
   backupId: Id<'projectBackups'>,
   owner: string,
   reader?: ExchangeObjectReader,
+  metadata = false,
 ) {
   const original: { backup: Doc<'projectBackups'>; project: Doc<'hostedProjects'> } = await ctx.runQuery(
     internal.projectBackups.get,
@@ -28,16 +30,21 @@ export async function source(
     'PROJECT_UNAVAILABLE',
     'Select a stored source and Work backup.',
   );
+  // Only source return opts into owner publication metadata. Existing source
+  // reads retain their current byte reader and access behavior.
+  const publication = metadata ? await publicationSnapshot(ctx, original.backup, owner) : undefined;
   const bytes =
-      original.backup.transport === 'objects'
-        ? await exchangeMetadata(ctx, original.backup, owner, reader)
-        : await projectArchiveMetadata(
-            ctx,
-            original.backup.storageId!,
-            original.backup.size,
-            original.backup.digest,
-            () => ctx.runQuery(internal.projectBackups.get, { id: backupId, owner }),
-          ),
+      publication?.work !== undefined
+        ? { manifest: Buffer.from(JSON.stringify(publication.manifest)), work: Buffer.from(publication.work) }
+        : original.backup.transport === 'objects'
+          ? await exchangeMetadata(ctx, original.backup, owner, reader)
+          : await projectArchiveMetadata(
+              ctx,
+              original.backup.storageId!,
+              original.backup.size,
+              original.backup.digest,
+              () => ctx.runQuery(internal.projectBackups.get, { id: backupId, owner }),
+            ),
     manifest = sourceManifestSchema.parse(JSON.parse(Buffer.from(bytes.manifest).toString('utf8')));
   const file = manifest.files.find(item => item.path === 'work.json');
   invariant(
@@ -61,7 +68,7 @@ export async function source(
     'Source format or Work revision differs from its manifest.',
   );
   await ctx.runQuery(internal.projectBackups.get, { id: backupId, owner });
-  return { ...original, manifest, data, originalWorkDigest: file.sha256 };
+  return { ...original, manifest, data, originalWorkDigest: file.sha256, publication };
 }
 const event = (projectKey: string, archiveSha256: string, item: Doc<'projectWorkEvents'>): HostedEvent => ({
   projectKey,
@@ -79,7 +86,7 @@ export async function load(
   projectId: Id<'hostedProjects'>,
   owner: string,
   reader?: ExchangeObjectReader,
-  options: { requireCurrent?: boolean } = {},
+  options: { requireCurrent?: boolean; metadata?: boolean } = {},
 ) {
   const project: Doc<'hostedProjects'> = await ctx.runQuery(internal.projectWork.get, { projectId, owner });
   invariant(project.work, 'PROJECT_WORK_MISSING', 'Start hosted Work from a stored source backup.');
@@ -94,7 +101,7 @@ export async function load(
     );
   };
   try {
-    const snapshot = await source(ctx, project.work.backupId, owner, reader),
+    const snapshot = await source(ctx, project.work.backupId, owner, reader, options.metadata),
       events: HostedEvent[] = [];
     let cursor: string | null = null;
     invariant(

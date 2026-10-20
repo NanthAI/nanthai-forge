@@ -31,13 +31,16 @@ export function ownerDerivedBytes(
   } catch {
     /* cold cache; legacy full-history caches are not read */
   }
-  // Without exact baseline metadata, do not guess which hosted rows need replacing.
+  // Missing exact baseline metadata means supply full facts; the server selects
+  // the replacements against its authoritative generation.
   let result;
   try {
-    result =
-      baseline && !baseline.data
-        ? undefined
-        : computeOwnerDerived(data, new NativeSource(store.root), previous, baseline);
+    result = computeOwnerDerived(
+      data,
+      new NativeSource(store.root),
+      previous,
+      baseline?.data ? baseline : undefined,
+    );
   } catch (error) {
     if (!(error instanceof OwnerDerivedCapacity)) throw error;
   }
@@ -55,8 +58,14 @@ export function ownerDerivedBytes(
       flag: 'wx',
     });
     renameSync(temporary, path);
+  } catch {
+    // The cache is disposable; a persistence failure must not discard computed rows.
   } finally {
-    rmSync(temporary, { force: true });
+    try {
+      rmSync(temporary, { force: true });
+    } catch {
+      /* disposable cache cleanup */
+    }
   }
   return bounded;
 }

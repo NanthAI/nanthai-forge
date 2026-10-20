@@ -18,6 +18,7 @@ import {
   type IndexMetadata,
 } from '../src/work-hosted-index';
 import { hostedAncestry } from '../src/work-hosted-ancestry';
+import type { OwnerCoverage } from './projectOwnerCoverage';
 import { viewContributors } from '../src/view-read-model';
 import { viewIndexEntries } from '../src/view-hosted-index';
 import { reviewPaths } from '../src/native-source-review';
@@ -30,10 +31,14 @@ type Snapshot = {
   data: WorkData;
   manifest: z.infer<typeof sourceManifestSchema>;
   backup: Doc<'projectBackups'>;
+  closure?: [string, string[]][];
+  coverage?: OwnerCoverage;
 };
 export type Cursor = {
   snapshot: Snapshot;
-  snapshotRef?: Id<'_storage'>;
+  snapshotRef?: import('./projectSourceReturnMetadata').ReturnRef;
+  metadataOnly?: boolean;
+  supplied?: OwnerCoverage;
   final: Final;
   generationId: Id<'projectWorkGenerations'>;
   phase: 'parents' | 'base' | 'diffstats' | 'ancestry' | 'views' | 'done';
@@ -51,6 +56,7 @@ export type Cursor = {
   delta?: Delta;
   phaseStarted?: number;
   accounting?: ReturnAccounting;
+  ancestryProgress?: { head: string; pending: string[]; seen: string[]; complete: boolean };
 };
 /** Per-push storage reads (bytes), durable steps and action invocations so far. */
 export type ReturnAccounting = {
@@ -73,6 +79,7 @@ export const RETURN_BUDGET = {
   commitMs: 1000,
   actionMs: 30000,
   actionSteps: 1000,
+  ancestryItems: 1000,
 };
 export type StepUse = { states: number; sourceBytes: number; rows: number; rowBytes: number };
 const unused: StepUse = { states: 0, sourceBytes: 0, rows: 0, rowBytes: 0 };
@@ -110,7 +117,21 @@ export async function advance(
         break;
       c.pending.shift();
       try {
-        save(head, await read(head));
+        const supplied =
+          c.phase === 'parents'
+            ? (c.supplied?.parents.find(([h]) => h === head) ??
+              c.snapshot.closure?.find(([h]) => h === head) ??
+              c.parents.find(([h]) => h === head))
+            : undefined;
+        const tree = c.supplied?.trees.find(([h]) => h === head);
+        const needsTree =
+          head === manifest.head ||
+          archiveChannels(manifest, data).some(ch => ch.name === 'main' && ch.head === head) ||
+          (data.hostedChannelMoves ?? []).filter(ch => ch.channel === 'main').at(-1)?.head === head;
+        if (supplied && (!needsTree || tree)) {
+          states++;
+          save(head, { parents: supplied[1], files: tree?.[1] ?? [] } as ReturnType<typeof parseNativeState>);
+        } else save(head, await read(head));
       } catch {
         derivedReadFailures++;
       }
@@ -168,6 +189,7 @@ export async function advance(
             sourceBytes: RETURN_BUDGET.sourceBytes - used.sourceBytes - sourceBytes,
             fresh: fresh && !states && !sourceBytes,
           },
+          c.supplied?.stats,
         );
         c.rows = step.entries;
         sourceBytes += step.sourceBytes;
@@ -179,11 +201,57 @@ export async function advance(
         }
       }
     } else if (c.phase === 'ancestry') {
-      const head = c.heads[c.head++];
+      const head = c.heads[c.head];
       if (head) {
-        if (c.delta) c.rows.push(...ancestryEntries(head, new Map(c.parents)));
-        else {
+        if (c.supplied?.parents.some(([h]) => h === head)) {
+          const list = c.supplied.parents.find(([h]) => h === head)![1];
+          // A compact own-parent boundary composes with retained caches in readers.
+          const entries = ancestryEntries(head, new Map([[head, list]]));
+          c.rows.push(...entries);
+          if (!c.delta)
+            for (const row of entries)
+              c.metadata!.counts[row.collection] = (c.metadata!.counts[row.collection] ?? 0) + 1;
+          c.head++;
+        } else if (c.delta) {
+          const state = c.ancestryProgress ?? { head, pending: [head], seen: [], complete: true };
+          const seen = new Set(state.seen),
+            parents = new Map(c.parents);
+          let count = 0;
+          while (state.pending.length && count++ < RETURN_BUDGET.ancestryItems) {
+            const next = state.pending.pop()!;
+            if (seen.has(next)) continue;
+            seen.add(next);
+            const list = parents.get(next);
+            if (list) state.pending.push(...list);
+            else state.complete = false;
+          }
+          state.seen = [...seen];
+          c.ancestryProgress = state;
+          if (!state.pending.length) {
+            const chunks = Math.ceil(state.seen.length / 1000);
+            c.rows.push({
+              collection: 'sourceAncestryClosure',
+              key: head,
+              parent: '',
+              position: 0,
+              value: JSON.stringify({ head, chunks, complete: state.complete }),
+            });
+            for (let i = 0; i < chunks; i++) {
+              const ancestors = state.seen.slice(i * 1000, (i + 1) * 1000);
+              c.rows.push({
+                collection: 'sourceAncestryChunk',
+                key: `${head}:${i}`,
+                parent: head,
+                position: i,
+                value: JSON.stringify({ ancestors, boundaries: ancestors.filter(h => !parents.has(h)) }),
+              });
+            }
+            delete c.ancestryProgress;
+            c.head++;
+          }
+        } else {
           const ancestry = hostedAncestry(data, new Map(c.parents), { head });
+          c.head++;
           for (const [collection, values] of [
             ['sourceAncestry', ancestry.pairs],
             ['sourceAncestryHeads', ancestry.complete],
@@ -211,8 +279,12 @@ export async function advance(
       const view = viewIndex === undefined ? undefined : data.views[viewIndex];
       if (!view) c.phase = 'done';
       else {
+        const supplied = c.supplied?.views.find(([index]) => index === viewIndex)?.[1];
         try {
-          if (!c.paths) {
+          if (supplied) {
+            c.paths = [];
+            c.pending = [];
+          } else if (!c.paths) {
             if (view.head && view.status !== 'conflict') {
               const idle = { entries: [], sourceBytes, states, derivedReadFailures, last: false };
               if (!c.states.length) {
@@ -255,7 +327,9 @@ export async function advance(
         }
         if (!c.pending.length) {
           const positions = new Map(c.positions);
-          c.rows = viewIndexEntries(data, new Map(c.states), { index: viewIndex!, positions });
+          c.rows = supplied
+            ? structuredClone(supplied)
+            : viewIndexEntries(data, new Map(c.states), { index: viewIndex!, positions });
           if (c.delta) {
             let cursor: string | null = null;
             const keys = new Set(c.rows.filter(r => r.collection === 'viewFiles').map(r => r.key));

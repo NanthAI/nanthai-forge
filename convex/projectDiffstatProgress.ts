@@ -18,7 +18,7 @@ export type DiffstatProgress = {
   pending?: { before?: Files; files?: Pair[]; offset: number; add: number; del: number; exact: boolean };
 };
 const LOOKUP_KEYS = 16,
-  COMPARE_FILES = 100;
+  COMPARE_FILES = 16;
 
 /** Many records per durable return step, within the caller's remaining State and
  * byte budget; a partly compared pair resumes from its saved offset. Cached
@@ -32,6 +32,7 @@ export async function advanceDiffstats(
   pins: ReadonlyMap<string, Pin>,
   readState: (head: string) => Promise<ReturnType<typeof parseNativeState>>,
   budget: { states: number; sourceBytes: number; fresh: boolean },
+  supplied?: [string, Stats][],
 ) {
   const result = { entries: [] as IndexEntry[], sourceBytes: 0, failures: 0, done: false };
   let states = 0,
@@ -98,7 +99,10 @@ export async function advanceDiffstats(
     };
     try {
       if (!cursor.pending) {
-        const stats = cursor.cache.find(([cached]) => cached === key)?.[1] ?? (await lookup(key));
+        const stats =
+          supplied?.find(([cached]) => cached === key)?.[1] ??
+          cursor.cache.find(([cached]) => cached === key)?.[1] ??
+          (await lookup(key));
         if (stats) {
           emit(stats);
           continue;
@@ -152,6 +156,7 @@ export async function advanceDiffstats(
         pending.add += totals.add;
         pending.del += totals.del;
         pending.exact &&= totals.exact;
+        if (pending.offset < pending.files.length) return result;
       }
       emit({
         files: pending.files.length,

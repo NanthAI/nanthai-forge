@@ -55,3 +55,45 @@ test('completed source return prints the per-push storage accounting from its re
     'source return complete: elapsed 0s\n',
   );
 });
+
+test('CLI probes saved inner progress while a long return action is still running and stops after completion', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const exchange = new ConvexExchange('https://test.convex.cloud', 'fixture', 'project', '', null);
+  const events = [],
+    calls = [];
+  exchange.onReturnProgress = event => events.push(event);
+  let complete;
+  exchange.client.action = async (_ref, args) => {
+    calls.push(args);
+    if (args.statusOnly)
+      return {
+        pending: true,
+        resumed: false,
+        progress: JSON.stringify({
+          phase: 'ancestry',
+          done: 0,
+          total: 1,
+          step: 4,
+          itemDone: 1000,
+          itemPending: 1,
+          elapsedMs: 30000,
+          etaSeconds: null,
+        }),
+      };
+    return new Promise(resolve => {
+      complete = resolve;
+    });
+  };
+  const running = exchange.returnSource('next', 'old', 0, 'op');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 2);
+  t.mock.timers.tick(30000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 3);
+  assert.equal(events.at(-1).itemDone, 1000);
+  complete({ revision: 1 });
+  await running;
+  t.mock.timers.tick(90000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 3);
+});

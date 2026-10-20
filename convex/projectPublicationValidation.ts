@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { z } from 'zod';
+import { parseWorkBytes } from '../src/work-metadata';
 import { nativeManifestSchema } from '../src/work-archive-metadata';
 import { ownerDerivedSchema } from '../src/owner-derived';
 import { ForgeError, invariant } from '../src/errors';
@@ -26,6 +27,7 @@ const schema = z
     pins: z.array(pin),
     edges: z.array(z.object({ head: hash, parents: z.array(hash), blobs: z.array(hash) }).strict()),
     ownerDerived: ownerDerivedSchema,
+    work: z.string().optional(),
     preview: z
       .object({
         manifestDigest: hash,
@@ -75,6 +77,21 @@ export function validatePublicationMetadata(value: unknown, root: { sha256: stri
     'INVALID_WORK_BACKUP',
     'Publication metadata differs from its pinned manifest.',
   );
+  if (data.work !== undefined) {
+    const bytes = Buffer.from(data.work),
+      pin = files.get('work.json');
+    invariant(
+      pin && digest(bytes) === pin.sha256 && bytes.length === pin.size,
+      'INVALID_WORK_BACKUP',
+      'Publication Work differs from its pinned bytes.',
+    );
+    const work = parseWorkBytes(bytes);
+    invariant(
+      work.revision === manifest.revision && work.nativeHead === manifest.head,
+      'INVALID_WORK_BACKUP',
+      'Publication Work differs from its source revision.',
+    );
+  }
   for (const file of manifest.files)
     invariant(
       file.path === 'work.json' || pins.get(file.sha256) === file.size,

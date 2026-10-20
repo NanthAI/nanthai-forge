@@ -24,6 +24,8 @@ export const generationFields = {
   intentMigrationOperationId: v.optional(v.string()),
   retainedForIntentMigration: v.optional(v.string()),
   returnProgress: v.optional(v.string()),
+  returnMetadataCursor: v.optional(v.string()),
+  returnMetadataSnapshot: v.optional(v.string()),
   returnCursor: v.optional(v.id('_storage')),
   returnSnapshot: v.optional(v.id('_storage')),
   returnStep: v.optional(v.number()),
@@ -57,6 +59,15 @@ export const generationDocument = v.object({
   ...generationFields,
 });
 export const indexTables = {
+  projectReturnPages: defineTable({
+    projectId: v.id('hostedProjects'),
+    partitionId: v.id('projectWorkGenerations'),
+    key: v.string(),
+    position: v.number(),
+    body: v.string(),
+  })
+    .index('by_partition_and_key_and_position', ['partitionId', 'key', 'position'])
+    .index('by_project', ['projectId']),
   projectWorkGenerations: defineTable(generationFields)
     .index('by_project_and_intent_migration_and_revision', [
       'projectId',

@@ -84,11 +84,12 @@ export function computeOwnerDerived(
   previous?: OwnerDerived,
   baseline?: OwnerDerivedBaseline,
 ): OwnerDerived {
-  let derivedBytes = 0;
+  let derivedBytes = 1024;
   const charge = (value: unknown) => {
-    derivedBytes += Buffer.byteLength(JSON.stringify(value)) + 2;
-    if (derivedBytes > OWNER_DERIVED_MAX_BYTES)
-      throw new OwnerDerivedCapacity('Optional sidecar exceeds byte budget');
+    const bytes = Buffer.byteLength(JSON.stringify(value)) + 2;
+    if (derivedBytes + bytes > OWNER_DERIVED_MAX_BYTES) return false;
+    derivedBytes += bytes;
+    return true;
   };
   const parents = new Map<string, string[]>(),
     stats = new Map<string, OwnerDerived['stats'][number][1]>();
@@ -116,13 +117,19 @@ export function computeOwnerDerived(
   ];
   const pending = [...heads];
   const cachedParents = new Map(previous?.parents);
+  const visited = new Set<string>();
   while (pending.length) {
     const head = pending.pop()!;
-    if (parents.has(head) || baseline?.states.has(head)) continue;
+    if (visited.has(head) || baseline?.states.has(head)) continue;
+    visited.add(head);
     const list = cachedParents.get(head) ?? source.state(head).parents;
-    charge([head, list]);
-    charge([head, list]);
-    parents.set(head, list);
+    if (
+      charge([
+        [head, list],
+        [head, list],
+      ])
+    )
+      parents.set(head, list);
     pending.push(...list);
   }
   // Compare the same Lane/View summaries as the hosted delta planner, including
@@ -161,8 +168,7 @@ export function computeOwnerDerived(
     if (stats.has(key)) continue;
     const cached = cachedStats.get(key);
     if (cached) {
-      charge([key, cached]);
-      stats.set(key, cached);
+      if (charge([key, cached])) stats.set(key, cached);
       continue;
     }
     const changed = reviewPaths(files(record.base), files(record.head)).filter(f => f.status !== 'unchanged');
@@ -194,16 +200,14 @@ export function computeOwnerDerived(
           }
     }
     const changes = { files: changed.length, ...(exact ? { add, del } : {}) };
-    charge([key, changes]);
-    stats.set(key, changes);
+    if (charge([key, changes])) stats.set(key, changes);
     states.clear();
   }
   const cachedViews = new Map(previous?.views.map(([id, fingerprint, rows]) => [id, { fingerprint, rows }]));
   const priorViews = new Map(baseline?.data?.views.map((v, i) => [v.id, viewFingerprint(baseline.data!, i)]));
   const views: OwnerDerived['views'] = [];
   const addView = (value: OwnerDerived['views'][number]) => {
-    charge(value);
-    views.push(value);
+    if (charge(value)) views.push(value);
   };
   data.views.forEach((view, index) => {
     const fingerprint = viewFingerprint(data, index),
@@ -238,8 +242,8 @@ export function computeOwnerDerived(
       .filter(head => !baseline?.data || !selectedTreeHeads(baseline.data).includes(head))
       .map(head => {
         const row: OwnerDerived['trees'][number] = [head, files(head)];
-        charge(row);
-        return row;
-      }),
+        return charge(row) ? row : undefined;
+      })
+      .filter((row): row is OwnerDerived['trees'][number] => row !== undefined),
   };
 }

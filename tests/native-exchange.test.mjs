@@ -685,11 +685,11 @@ test('large owner sidecars use their prepared directory with file transport', as
   assert.deepEqual(result.ownerDerived, { sha256: digest(bytes), size: bytes.length });
 });
 
-test('optional owner derivation cache failures preserve a permitted checkpoint push', async t => {
+test('optional owner derivation cache failures retain computed sidecar rows', async t => {
   const f = fixture(t);
   mkdirSync(join(f.w.store.directory, 'owner-derived-cache.json'));
   const result = await pushNativeExchange(f.w.store, f.w.store.revision(), randomUUID(), f.transport);
-  assert.equal(result.ownerDerived, undefined);
+  assert.ok(result.ownerDerived, 'cache persistence does not discard computed owner data');
   assert.equal(result.archiveCreated, false);
 });
 
@@ -731,11 +731,14 @@ test('local derivation caps new sidecars and cache, and does not read oversized 
     status: 'clean',
     at: 'a',
   });
-  assert.equal(ownerDerivedBytes(f.w.store, data), undefined);
+  const partial = JSON.parse(ownerDerivedBytes(f.w.store, data));
+  assert.ok(partial.parents.length > 0, 'oversized View retains usable State facts');
+  assert.equal(partial.views.length, 0);
+  assert.ok(Buffer.byteLength(JSON.stringify(partial)) <= OWNER_DERIVED_MAX_BYTES);
   assert.ok(statSync(cache).size <= OWNER_DERIVED_MAX_BYTES);
 });
 
-test('legacy baseline recovery uses exact pinned Work and missing metadata omits derivation', async t => {
+test('legacy baseline recovery uses exact pinned Work and missing metadata supplies full facts', async t => {
   const { retainExchangeBaseline, exchangeBaseline } = await import('../dist/native-exchange-baseline.js');
   const { ownerDerivedBytes } = await import('../dist/owner-derived-local.js');
   const f = fixture(t),
@@ -760,5 +763,6 @@ test('legacy baseline recovery uses exact pinned Work and missing metadata omits
   writeFileSync(join(prepared.directory, 'work.json'), '{}');
   const unavailable = exchangeBaseline(f.w.store, key);
   assert.equal(unavailable.data, undefined);
-  assert.equal(ownerDerivedBytes(f.w.store, original, unavailable), undefined);
+  const derived = JSON.parse(ownerDerivedBytes(f.w.store, original, unavailable));
+  assert.ok(derived.parents.length > 0, 'server can select from full facts when baseline Work is missing');
 });
