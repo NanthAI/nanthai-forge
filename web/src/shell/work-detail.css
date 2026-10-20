@@ -45,3 +45,7 @@
   .fx-detail .fx-next-actions { width: 100%; margin-left: 0; }
   .fx-detail .fx-next-actions .fx-btn { flex: 1; justify-content: center; }
 }
+
+/* Keep both side-panel headers on the same 42 px rhythm as the main column. */
+.fx-detail-side .fx-panel-h { min-height: 42px; height: 42px; }
+.fx-detail-side .fx-collapse { height: 22px; }

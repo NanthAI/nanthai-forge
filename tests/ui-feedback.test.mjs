@@ -143,17 +143,17 @@ test('a rejected note result keeps the actual textarea draft; success clears it'
   const h = await formHarness();
   let result = 'WORK_STALE';
   const props = { notes: [], now: 0, add: async () => result };
-  let tree = h.render('Notes', props);
+  let tree = h.render('Conversation', props);
   find(tree, node => node.type === 'textarea').props.onChange({ target: { value: 'Keep this decision' } });
-  tree = h.render('Notes', props);
+  tree = h.render('Conversation', props);
   find(tree, node => node.type === 'form').props.onSubmit({ preventDefault() {} });
   await tick();
-  tree = h.render('Notes', props);
+  tree = h.render('Conversation', props);
   assert.equal(find(tree, node => node.type === 'textarea').props.value, 'Keep this decision');
   result = null;
   find(tree, node => node.type === 'form').props.onSubmit({ preventDefault() {} });
   await tick();
-  assert.equal(find(h.render('Notes', props), node => node.type === 'textarea').props.value, '');
+  assert.equal(find(h.render('Conversation', props), node => node.type === 'textarea').props.value, '');
   h.clear();
 });
 test('failed Add Lane keeps both its name and open form', async () => {
@@ -249,12 +249,12 @@ test('a thrown Intent write keeps its draft and sends its error to a toast', asy
       throw new TypeError('Failed to fetch');
     },
   };
-  let tree = h.render('Notes', props);
+  let tree = h.render('Conversation', props);
   find(tree, node => node.type === 'textarea').props.onChange({ target: { value: 'Keep this note' } });
-  tree = h.render('Notes', props);
+  tree = h.render('Conversation', props);
   find(tree, node => node.type === 'form').props.onSubmit({ preventDefault() {} });
   await tick();
-  tree = h.render('Notes', props);
+  tree = h.render('Conversation', props);
   assert.equal(find(tree, node => node.type === 'textarea').props.value, 'Keep this note');
   const error = find(
     find(tree, node => node.type === 'form'),

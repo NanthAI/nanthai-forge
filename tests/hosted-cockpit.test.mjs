@@ -185,7 +185,9 @@ test('current-Lane heads exclude stale Views and summary runs show passed and qu
   const f = hostedCockpitFixture();
   f.records.runs[0].status = 'passed';
   assert.match(renderNow(f), /Ready<\/span>[\s\S]*passed[\s\S]*waiting for a person/);
-  assert.match(renderIntents(f, true), /Check passed/);
+  const intent = renderIntents(f, true);
+  assert.match(intent, /verify passed/);
+  assert.match(intent, /Review &amp; accept/);
   f.records.runs[0].status = 'queued';
   assert.match(renderNow(f), /Queued/);
   assert.match(renderLane(f), /Queued/);

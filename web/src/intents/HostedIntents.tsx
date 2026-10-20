@@ -9,9 +9,14 @@ import { intentBoardFacts } from './board-facts';
 import { useUser } from '@clerk/react';
 import { intentViews } from '../views/intent-views';
 import { hostedViewHref } from '../views/links';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
+import { PendingWrite } from '../pending-write';
+import { hostedError } from '../snapshot';
+import { hostedFeed } from '../cockpit/coordination';
+import { intentTimeline, intentEvents } from './intent-timeline';
+import { activityAuthor, eventContext, type ActivityEvent } from '../coordination-view';
 import { go, useCreatedIntent } from './useCreatedIntent';
-import { useConvex, useQuery } from 'convex/react';
+import { useConvex, useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { WorkData } from '../../../src/work-types';
@@ -27,7 +32,7 @@ import type {
 import { cockpitLanes, type CockpitWork } from '../cockpit/model';
 import { useWorkRecords, type IntentHeader, type WorkIndexWorkspace } from '../hosted-work-index';
 import { useNow } from '../shell/StatusBar';
-import { ButtonLink, Empty } from '../ui/primitives';
+import { Button, ButtonLink, Empty } from '../ui/primitives';
 import { IntentDetailView, type NoteRow } from './IntentDetail';
 import { IntentListView } from './IntentList';
 import { intentRows, type IntentStatus } from './model';
@@ -87,6 +92,27 @@ export default function HostedIntents({
     moves: !moves.initialLoading,
   });
   const sessions = usePresenceSessions(projectId);
+  const feed = usePaginatedQuery(api.projectCoordination.feed, intentId ? { projectId, intentId } : 'skip', {
+    initialNumItems: 100,
+  });
+  const publish = useMutation(api.projectCoordination.publish);
+  const writer = useRef<PendingWrite<
+    import('../../../src/coordination-types').CoordinationCommand,
+    unknown
+  > | null>(null);
+  writer.current ??= new PendingWrite(attempt => publish({ projectId, ...attempt }));
+  const sendMessage = async (text: string, laneId?: string): Promise<string | null> => {
+    try {
+      await writer.current!.send({
+        kind: 'message',
+        text,
+        context: { intentId: intentId!, ...(laneId ? { laneId } : {}) },
+      });
+      return null;
+    } catch (error) {
+      return hostedError(error);
+    }
+  };
   const client = useConvex();
   const briefs = useMemo(() => hostedBriefs(client, projectId), [client, projectId]);
   const records = useMemo(
@@ -114,6 +140,20 @@ export default function HostedIntents({
       <HostedIntentsView
         preferenceScope={`hosted:${user?.id ?? 'signed-out'}:${projectId}`}
         records={records}
+        events={feed.results as ActivityEvent[]}
+        activityMore={
+          feed.status === 'CanLoadMore' || feed.status === 'LoadingMore' ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={feed.status === 'LoadingMore'}
+              onClick={() => feed.loadMore(100)}
+            >
+              {feed.status === 'LoadingMore' ? 'Reading activity…' : 'Earlier activity'}
+            </Button>
+          ) : undefined
+        }
+        sendMessage={sendMessage}
         sessions={sessions.results as Session[]}
         now={now}
         intentId={intentId}
@@ -161,8 +201,14 @@ export function HostedIntentsView({
   addLane,
   combine,
   lifecycle,
+  events = [],
+  activityMore,
+  sendMessage,
 }: {
   lifecycle?: (intent: IntentHeader) => ReactNode;
+  events?: readonly ActivityEvent[];
+  activityMore?: ReactNode;
+  sendMessage?: (text: string, laneId?: string) => Promise<string | null>;
   preferenceScope?: string;
   records: CockpitWork & {
     planningItems?: readonly PlanningItem[];
@@ -231,14 +277,46 @@ export function HostedIntentsView({
         </div>
       );
     const viewRows = intentViews(records, intentId);
-    const noteRows: NoteRow[] = records.notes.map(note => ({
+    const scopedEvents = intentEvents(records, intentId, events);
+    const timeline = intentTimeline(
+      records,
+      intentId,
+      hostedFeed(scopedEvents, sessions, records.lanes, scopedEvents.length),
+    );
+    const noteRows: NoteRow[] = [
+      ...records.notes,
+      ...scopedEvents.flatMap(event => {
+        if (event.command.kind !== 'message') return [];
+        const context = eventContext(event, scopedEvents);
+        const lane = records.lanes.find(lane => lane.id === context.laneId);
+        return [
+          {
+            text: event.command.text,
+            kind: 'comment' as const,
+            at: new Date(event.at).toISOString(),
+            actor: {
+              name: activityAuthor(event, [...sessions]),
+              kind: event.command.sessionId ? ('agent' as const) : ('human' as const),
+            },
+            ...(lane ? { lane: { id: lane.id, name: lane.name } } : {}),
+          },
+        ];
+      }),
+    ].map(note => ({
       text: note.text,
       kind: note.kind,
       at: note.at,
+      ...('actor' in note && note.actor ? { actor: note.actor } : {}),
+      ...('lane' in note && note.lane ? { lane: note.lane } : {}),
     }));
     return (
       <IntentDetailView
         row={row}
+        records={records}
+        timeline={timeline}
+        activityMore={activityMore}
+        base={(records.intents as readonly IntentHeader[]).find(intent => intent.id === intentId)?.base}
+        {...(sendMessage ? { sendMessage } : {})}
         {...(addLane ? { addLane: (name: string) => addLane(intentId, name) } : {})}
         {...(combine
           ? { combine: (inputs: { laneId: string; head: string }[]) => combine(intentId, inputs) }

@@ -143,10 +143,11 @@ test('Intent exposes passed candidates through Review and omits repeated parent 
       reviewHref: id => `/review/${id}`,
     }),
   );
-  assert.match(html, /class="fx-btn fx-btn-primary" href="\/review\/v16">Review and accept/);
+  assert.match(html, /class="fx-btn fx-btn-secondary fx-btn-sm" href="\/review\/v16">Review &amp; accept/);
   assert.doesNotMatch(html, /What and why|No Issues|No decisions/);
   assert.match(html, /Candidates/);
-  assert.match(html, /<b>Candidate 16<\/b>/);
+  assert.match(html, /href="\/view\/v16">Candidate of<\/a>/);
+  assert.match(html, /11 more Candidates/);
   assert.doesNotMatch(html, />Views?\b|\bViews? \d/);
   assert.equal((html.match(/class="fx-map-label"[^>]*>Long parent title</g) ?? []).length, 1); // Lane row names it once; hidden tooltips list included Lanes
   const accepted = render(
@@ -160,7 +161,7 @@ test('Intent exposes passed candidates through Review and omits repeated parent 
       reviewHref: id => `/review/${id}`,
     }),
   );
-  assert.doesNotMatch(accepted, /Review and accept/);
+  assert.doesNotMatch(accepted, /Review &amp; accept/);
 });
 
 test('Review actions exclude accepted, superseded and mismatched-head evidence', () => {
@@ -193,7 +194,7 @@ test('Review actions exclude accepted, superseded and mismatched-head evidence',
       reviewHref: id => `/review/${id}`,
     }),
   );
-  assert.doesNotMatch(html, /Review and accept|fx-situation/);
+  assert.doesNotMatch(html, /Review &amp; accept|fx-situation/);
 });
 
 test('Intent check evidence follows the current View head, not a passing older head', () => {

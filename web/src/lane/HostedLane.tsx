@@ -121,7 +121,12 @@ export function HostedLaneView({
   );
   const record = records.lanes.find(item => item.id === laneId);
   if (!lane || !record) return null;
-  const timeline = laneTimeline(records, laneId, hostedFeed(events, sessions, records.lanes, events.length));
+  const timeline = laneTimeline(
+    records,
+    laneId,
+    hostedFeed(events, sessions, records.lanes, events.length),
+    true,
+  );
   const href = (section: string, extra: Record<string, string> = {}) => {
     const url = routeUrlState();
     url.searchParams.set('projectTab', section);

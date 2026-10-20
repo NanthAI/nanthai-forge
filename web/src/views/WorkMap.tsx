@@ -86,6 +86,93 @@ export function WorkMap({
         : view.check === 'failed' || view.status === 'conflict'
           ? 'failed'
           : 'current';
+  if (compact) {
+    const canvasWidth = Math.max(600, width);
+    const canvasHeight = Math.max(112, lanes.length * 38 + 36);
+    const trackY = (index: number) => 18 + index * 38;
+    const mainY = canvasHeight - 16;
+    const start = 190;
+    const pointX = (index: number) =>
+      start + ((index + 1) * (canvasWidth - start - 20)) / Math.max(1, visible.length);
+    return (
+      <Panel title={title}>
+        <div className="fx-work-map" data-compact ref={ref}>
+          <svg
+            viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
+            style={{ width: canvasWidth, height: canvasHeight, maxWidth: 'none' }}
+            role="group"
+            aria-label={`${lanes.length} Lanes, ${views.length} Candidates`}
+          >
+            {lanes.map((lane, index) => (
+              <g key={lane.id}>
+                <path
+                  d={`M${start} ${trackY(index)}H${canvasWidth - 20}`}
+                  fill="none"
+                  stroke={lane.accepted ? 'var(--fx-passed)' : 'var(--fx-active)'}
+                  strokeWidth="2"
+                />
+                <a href={laneHref(lane.id)}>
+                  <title>{lane.name}</title>
+                  <text className="fx-map-label" x="0" y={trackY(index) + 4}>
+                    {lane.name.length > 26 ? `${lane.name.slice(0, 25)}…` : lane.name}
+                  </text>
+                  <text className="fx-map-count" x="0" y={trackY(index) + 19}>
+                    {countLabel(lane.checkpoints, 'save')}
+                  </text>
+                </a>
+              </g>
+            ))}
+            <path
+              d={`M${start} ${mainY}H${canvasWidth - 20}`}
+              fill="none"
+              stroke="var(--fx-passed)"
+              strokeWidth="2"
+            />
+            <text className="fx-map-label" x="0" y={mainY + 4}>
+              main
+            </text>
+            {visible.map((view, index) => {
+              const x = pointX(index),
+                inputs = (view.inputs ?? []).filter(input => lanes.some(lane => lane.id === input.laneId));
+              const colour =
+                view.accepted || view.check === 'passed'
+                  ? 'var(--fx-passed)'
+                  : view.supersededBy
+                    ? 'var(--fx-text-3)'
+                    : view.check === 'failed' || view.status === 'conflict'
+                      ? 'var(--fx-failed)'
+                      : 'var(--fx-active)';
+              return (
+                <g key={view.id}>
+                  {inputs.map(input => {
+                    const y = trackY(lanes.findIndex(lane => lane.id === input.laneId));
+                    return (
+                      <g key={input.laneId}>
+                        {view.accepted && (
+                          <path d={`M${x} ${y}V${mainY}`} fill="none" stroke={colour} strokeWidth="1.5" />
+                        )}
+                        <a href={viewHref?.(view.id) ?? viewsHref}>
+                          <title>{`Candidate · ${candidateState(view)} · ${age(view.acceptedAt ?? view.at, now)}`}</title>
+                          <circle
+                            cx={x}
+                            cy={y}
+                            r="4"
+                            fill="var(--fx-surface)"
+                            stroke={colour}
+                            strokeWidth="2"
+                          />
+                        </a>
+                      </g>
+                    );
+                  })}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </Panel>
+    );
+  }
   return (
     <Panel title={title}>
       <div className="fx-work-map" data-compact={compact || undefined} ref={ref}>

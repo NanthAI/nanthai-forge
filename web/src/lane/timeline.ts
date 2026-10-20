@@ -2,12 +2,15 @@
 import { checkMeaning } from '../cockpit/check-meaning';
 import type { FeedItem } from '../cockpit/attention';
 import type { CockpitWork } from '../cockpit/model';
+export type TimelineEvent = FeedItem & { lane?: { id: string; name: string } };
+
 /** Work evidence and the Lane feed share one chronological timeline, newest first. */
 export function laneTimeline(
   records: CockpitWork,
   laneId: string,
   events: readonly FeedItem[] = [],
-): FeedItem[] {
+  includeMilestones = false,
+): TimelineEvent[] {
   const lane = records.lanes.find(lane => lane.id === laneId);
   if (!lane) return [];
   const views = new Set(
@@ -32,14 +35,55 @@ export function laneTimeline(
     });
   return [
     ...saves,
-    ...(lane.lifecycle ?? []).map((entry, index): FeedItem => ({
-      id: `lifecycle:${lane.id}:${index}`,
-      at: entry.at,
-      tone: 'plain',
-      glyph: 'file',
-      text: entry.to.charAt(0).toUpperCase() + entry.to.slice(1),
-      detail: [entry.reason, entry.actor?.name].filter(Boolean).join(' · '),
-    })),
+    ...(includeMilestones && lane.lifecycle?.[0]?.at
+      ? [
+          {
+            id: `started:${lane.id}`,
+            at: lane.lifecycle[0].at,
+            tone: 'plain' as const,
+            glyph: 'claim' as const,
+            text: 'Lane started',
+            ...(lane.startedBy?.name ? { detail: `by ${lane.startedBy.name}` } : {}),
+          },
+        ]
+      : []),
+    ...(includeMilestones ? records.views : [])
+      .filter(view => views.has(view.id))
+      .map(view => ({
+        id: `candidate:${view.id}`,
+        at: view.at,
+        tone: 'plain' as const,
+        glyph: 'file' as const,
+        text: 'Candidate composed',
+      })),
+    ...(includeMilestones ? (records.channelMoves ?? []) : [])
+      .filter(move => views.has(move.viewId) && move.status === 'accepted' && move.at)
+      .map(move => ({
+        id: `accepted:${move.viewId}:${move.at}`,
+        at: move.at!,
+        tone: 'passed' as const,
+        glyph: 'passed' as const,
+        text: `Accepted on ${move.channel}`,
+      })),
+    ...(lane.lifecycle ?? []).flatMap((entry, index): FeedItem[] =>
+      includeMilestones && index === 0 && entry.to === 'active'
+        ? []
+        : [
+            {
+              id: `lifecycle:${lane.id}:${index}`,
+              at: entry.at,
+              tone: 'plain',
+              glyph: 'file',
+              text:
+                entry.to === 'completed'
+                  ? 'Done'
+                  : entry.to === 'active'
+                    ? 'Reopened'
+                    : entry.to.charAt(0).toUpperCase() + entry.to.slice(1),
+              detail: [entry.reason, entry.actor?.name].filter(Boolean).join(' · '),
+            },
+          ],
+    ),
     ...records.runs
       .filter(run => views.has(run.viewId))
       .map((run): FeedItem => {
