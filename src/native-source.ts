@@ -127,10 +127,12 @@ export function nativePaths(
         descendant = retainedDirectories.has(path);
       const stat = lstatSync(join(root, path));
       // Analysis name heuristics must not drop source modules such as secrets.ts.
-      // Keep credential/config exclusions and explicit ignore rules unchanged.
+      // Real credential/config names and explicit ignore rules stay excluded.
       const sourceName =
         !stat.isDirectory() && /^(credentials?|secrets?)[.-]/i.test(name) && sourceLanguage(path);
-      const reason = sourceName && exclusion(path) === 'sensitive-name' ? null : exclusion(path);
+      const envExample = !stat.isDirectory() && /(?:^|\.)env\.(example|sample|template)$/i.test(name);
+      const reason =
+        (sourceName || envExample) && exclusion(path) === 'sensitive-name' ? null : exclusion(path);
       if (reason && !selected && !descendant) {
         excluded?.push({ path, reason });
         continue;

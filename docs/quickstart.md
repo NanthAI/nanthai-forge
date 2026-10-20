@@ -95,5 +95,8 @@ Native capture includes source modules such as `src/secret-crypto.ts`,
 `convex/secrets.ts`, and `web/src/Secrets.tsx`; a secret or credential prefix does
 not exclude recognized TypeScript, JavaScript, Python, Java or Rust source files.
 Explicit `.gitignore` rules still apply to new files. Credential/config names
-such as `.env`, `.env.example`, and `credentials.json` retain their exclusions and
-appear in coverage. Already retained source stays captured through ignore rules.
+such as `.env`, `.env.local`, `.env.production`, and `credentials.json` retain their
+exclusions and appear in coverage. Placeholder files named `.env.example`,
+`.env.sample`, `.env.template`, or ending in `.env.example`, `.env.sample`, or
+`.env.template` are captured unless explicitly ignored. Already retained source
+stays captured through ignore rules.

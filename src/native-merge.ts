@@ -49,6 +49,7 @@ export function mergeNativeFiles(
         source.object(original.blob),
         source.object(x.blob),
         source.object(y.blob),
+        x.path,
       );
       if (bytes) blob = source.put(bytes);
     }

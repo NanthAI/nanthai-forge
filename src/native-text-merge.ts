@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { reconcileNativeImports } from './native-import-merge.js';
 /** Conservative line-based diff3. Ambiguous/expensive or non-text edits stay conflicts. */
 type Edit = { start: number; end: number; lines: string[] };
 function lines(bytes: Buffer): string[] | null {
@@ -82,7 +83,7 @@ function edits(before: string[], after: string[]): Edit[] | null {
   }
   return null;
 }
-export function mergeNativeText(base: Buffer, left: Buffer, right: Buffer): Buffer | null {
+export function mergeNativeText(base: Buffer, left: Buffer, right: Buffer, path?: string): Buffer | null {
   const original = lines(base),
     a = lines(left),
     b = lines(right);
@@ -124,7 +125,8 @@ export function mergeNativeText(base: Buffer, left: Buffer, right: Buffer): Buff
     cursor = edit.end;
   }
   output.push(...original.slice(cursor));
-  return Buffer.from(output.join(''));
+  const reconciled = reconcileNativeImports(original, a, b, output, path);
+  return reconciled ? Buffer.from(reconciled.join('')) : null;
 }
 type Side = Edit & { side: 0 | 1 };
 function overlaps(edit: Edit, other: Edit) {

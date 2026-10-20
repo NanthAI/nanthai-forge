@@ -32,6 +32,90 @@ test('native diff3 merges independent edits byte-exactly and retains overlapping
     assert.equal(merge(base, after, base)?.toString(), after);
   }
 });
+test('native import merge coalesces identical additions at the same or different positions', () => {
+  const base =
+    "import { join } from 'node:path';\nimport { tmpdir } from 'node:os';\nexport const value = 1;\n";
+  for (const statement of [
+    "import { readFileSync } from 'node:fs';\n",
+    "import type { Stats } from 'node:fs';\n",
+    "import 'node:fs';\n",
+  ]) {
+    const left = statement + base;
+    for (const right of [left, base.replace('export const', statement + 'export const')]) {
+      for (const [a, c] of [
+        [left, right],
+        [right, left],
+      ]) {
+        const result = mergeNativeText(b(base), b(a), b(c), 'file.ts');
+        assert.equal(result?.toString(), left);
+      }
+    }
+  }
+});
+
+test('native import merge retains distinct imports, existing duplicates and scoped requires', () => {
+  const base = "import { join } from 'node:path';\nexport const value = 1;\n",
+    added = "import { readFileSync } from 'node:fs';\n",
+    different = "import { writeFileSync } from 'node:fs';\n";
+  assert.equal(
+    mergeNativeText(b(base), b(added + base), b(base + different), 'file.ts')?.toString(),
+    added + base + different,
+  );
+  const existing = added + base;
+  assert.equal(
+    mergeNativeText(b(existing), b(added + existing), b(existing + different), 'file.ts')?.toString(),
+    added + existing + different,
+  );
+  const scoped = "function a() {\n  const fs = require('node:fs');\n}\n";
+  assert.equal(
+    mergeNativeText(b(base), b(scoped + base), b(base + scoped.replace('a()', 'c()')), 'file.js')?.toString(),
+    scoped + base + scoped.replace('a()', 'c()'),
+  );
+  assert.equal(
+    mergeNativeText(b(base), b(added + base), b(base + added), 'notes.txt')?.toString(),
+    added + base + added,
+  );
+});
+
+test('native import merge conflicts instead of deleting order-sensitive require additions', () => {
+  const base = "const path = require('node:path');\nexports.value = 1;\n";
+  for (const added of [
+    "const fs = require('node:fs');\n",
+    "require('node:fs');\n",
+    "import fs = require('node:fs');\n",
+    "import { readFileSync } from 'node:fs'; // keep this comment\n",
+  ]) {
+    assert.equal(mergeNativeText(b(base), b(added + base), b(base + added), 'file.ts'), null);
+  }
+});
+
+test('native State composition uses import reconciliation and preserves ambiguous conflicts', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-native-imports-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const origin = initNative(root).head,
+    source = new NativeSource(root),
+    baseText =
+      "import { join } from 'node:path';\nimport { tmpdir } from 'node:os';\nexport const value = 1;\n",
+    state = (text, parent, message) =>
+      source.writeState(
+        [{ path: 'file.ts', mode: 'file', blob: source.put(b(text)) }],
+        [parent],
+        message,
+        'now',
+      ),
+    base = state(baseText, origin, 'Base');
+  for (const added of ["import { readFileSync } from 'node:fs';\n", "const fs = require('node:fs');\n"]) {
+    const left = state(added + baseText, base, 'Left'),
+      right = state(baseText.replace('export const', added + 'export const'), base, 'Right'),
+      result = source.compose(left, right, 'Combine', 'now');
+    if (added.startsWith('const')) assert.deepEqual(result.conflicts, ['file.ts']);
+    else {
+      assert.deepEqual(result.conflicts, []);
+      assert.equal(source.object(source.state(result.head).files[0].blob).toString(), added + baseText);
+    }
+  }
+});
+
 test('native retained Views expose shared paths and compose non-overlapping text edits', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-native-collab-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

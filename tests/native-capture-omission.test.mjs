@@ -39,12 +39,11 @@ test('native init captures secret-named source and reports excluded config on re
     source = new NativeSource(root);
   assert.deepEqual(
     source.state(initial.head).files.map(f => f.path),
-    ['.gitignore', ...archivedSource],
+    ['.env.example', '.gitignore', ...archivedSource],
   );
-  assert.equal(initial.captureCoverage.included, 5);
+  assert.equal(initial.captureCoverage.included, 6);
   assert.deepEqual(initial.captureCoverage.excluded, [
     { path: '.env', reason: 'sensitive-name' },
-    { path: '.env.example', reason: 'sensitive-name' },
     { path: 'credentials.json', reason: 'sensitive-name' },
     { path: 'src/secret-ignored.ts', reason: 'gitignored' },
   ]);
@@ -69,7 +68,7 @@ test('interrupted init preserves exact original capture coverage', t => {
   const recovered = initNative(root);
   assert.equal(recovered.head, receipt.head);
   assert.deepEqual(recovered.captureCoverage, receipt.captureCoverage);
-  assert.equal(recovered.captureCoverage.included, 1);
+  assert.equal(recovered.captureCoverage.included, 2);
 });
 
 test('new secret-named Lane modules survive checkpoint, acceptance and materialization', t => {
@@ -115,4 +114,36 @@ test('new secret-named Lane modules survive checkpoint, acceptance and materiali
   assert.equal(accepted.status, 'accepted');
   source.materialize(accepted.head, join(root, 'materialized'), false);
   for (const name of names) assert.equal(readFileSync(join(root, 'materialized', name), 'utf8'), content);
+});
+
+test('native capture includes only exact env template suffixes and respects explicit ignores', t => {
+  const root = fixture(t),
+    included = [
+      '.env.example',
+      '.env.sample',
+      '.env.template',
+      'app.env.example',
+      'nested/app.env.sample',
+      'nested/.env.template',
+    ],
+    excluded = [
+      '.env',
+      '.env.local',
+      '.env.production',
+      '.env.example.local',
+      '.env.examples',
+      '.env.sample.bak',
+    ];
+  for (const name of [...included, ...excluded, 'ignored/.env.example'])
+    put(root, name, 'SYNTHETIC=placeholder\n');
+  put(root, '.gitignore', 'ignored/\n');
+  const initial = initNative(root),
+    source = new NativeSource(root);
+  assert.deepEqual(
+    source.state(initial.head).files.map(f => f.path),
+    ['.gitignore', ...included].sort(),
+  );
+  for (const path of excluded)
+    assert(initial.captureCoverage.excluded.some(f => f.path === path && f.reason === 'sensitive-name'));
+  assert(initial.captureCoverage.excluded.some(f => f.path === 'ignored' && f.reason === 'gitignored'));
 });
