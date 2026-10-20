@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { openSync, closeSync, fstatSync, lstatSync, realpathSync, readSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
+const started = performance.now();
 const plan = JSON.parse(process.env.FORGE_MODAL_COMMAND);
 delete process.env.FORGE_MODAL_COMMAND;
 const child = spawn(plan.command[0], plan.command.slice(1), { stdio: 'inherit' });
@@ -56,4 +57,5 @@ for (const [index, sourcePath] of (code === 137 ? [] : plan.artifacts).entries()
     if (fd !== undefined) closeSync(fd);
   }
 }
+process.stdout.write(`__FORGE_USAGE__${JSON.stringify({ seconds: (performance.now() - started) / 1000 })}\n`);
 process.exitCode = code;

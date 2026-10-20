@@ -1020,3 +1020,51 @@ test('automatic infrastructure recovery keeps finish active and reuses the exact
   assert.equal(read(join(path, 'result.json')).status, 'passed');
   assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /retrying the same View\/plan once/);
 });
+
+test('monthly Modal estimate sums recorded billed quantities once, preserves legacy and fallback costs, and distinguishes billing', () => {
+  const usage = (executionId, seconds, memoryGiB = 4) => ({
+    executionId,
+    seconds,
+    cpuCoreSeconds: 2 * seconds,
+    memoryGiBSeconds: memoryGiB * seconds,
+    basis: 'worker-runtime',
+  });
+  const first = usage('sb-first', 30),
+    retry = usage('sb-retry', 10, 16),
+    sibling = usage('sb-static', 20, 8);
+  const startedAt = '2026-10-02T12:00:00Z';
+  const runs = [
+    { startedAt, backend: { actual: 'modal', estimatedCostUsd: 999, costUsage: [first, retry, sibling] } },
+    { startedAt, backend: { actual: 'local', estimatedCostUsd: 999, costUsage: [first, retry] } },
+    { startedAt, backend: { actual: 'local', estimatedCostUsd: 0.25 } },
+    { startedAt: '2026-09-30T23:59:59Z', backend: { estimatedCostUsd: 1000 } },
+  ];
+  const result = modalMonthCost(runs, new Date('2026-10-20T12:00:00Z'));
+  assert.ok(Math.abs(result.estimatedCostUsd - (120 * 0.00003942 + 440 * 0.00000667 + 0.25)) < 1e-10);
+  assert.equal(result.recordedRuns, 3);
+  assert.equal(result.legacyRuns, 1);
+  assert.match(result.basis, /before credits/);
+  assert.match(result.basis, /Billed spend is unknown/);
+});
+
+test('Modal receipt retains per-execution quantities and their measurement basis', async t => {
+  const { work, run, path } = fixture(t);
+  const costUsage = [
+    {
+      executionId: 'sb-usage-fixture',
+      seconds: 30,
+      cpuCoreSeconds: 60,
+      memoryGiBSeconds: 120,
+      basis: 'worker-runtime',
+    },
+  ];
+  await launchModalRun(work.store, run, async (file, emit) => {
+    const plan = read(file);
+    emit({ kind: 'execution', executionId: costUsage[0].executionId, image: 'im-fixture' });
+    emit(result(plan, { estimatedCostUsd: 60 * 0.00003942 + 120 * 0.00000667, costUsage }));
+  });
+  const receipt = read(join(path, 'result.json'));
+  assert.equal(receipt.status, 'passed');
+  assert.deepEqual(receipt.backend.costUsage, costUsage);
+  assert.equal(modalMonthCost([{ ...run, backend: receipt.backend }]).legacyRuns, 0);
+});

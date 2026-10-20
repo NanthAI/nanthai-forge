@@ -2,6 +2,7 @@
 """Bounded collection of retained Modal executions; never infer a stopped command."""
 import asyncio
 import json
+import math
 import time
 
 POLL_SECONDS = 5
@@ -33,6 +34,16 @@ async def collect(sandbox, item, *, observe, emit, persist, cancelled):
                     continue
                 seen[channel] = number
                 last_output = time.monotonic()
+                if channel == 'stdout' and line.startswith('__FORGE_USAGE__'):
+                    try:
+                        seconds = json.loads(line[len('__FORGE_USAGE__'):])['seconds']
+                        if not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds < 0:
+                            raise ValueError('Invalid runtime')
+                        item['seconds'] = seconds
+                        persist()
+                        continue
+                    except (ValueError, KeyError, TypeError):
+                        pass
                 if channel == 'stdout' and line.startswith('__FORGE_TESTS__'):
                     try:
                         event = json.loads(line[len('__FORGE_TESTS__'):])

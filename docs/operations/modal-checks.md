@@ -158,19 +158,37 @@ snapshot used by hosted Needs you; a local fix alone does not publish hosted Wor
 Older candidate sources without named reports retain their failures; quarantine
 never guesses which tests failed from interleaved console output.
 
-`agent status` includes `modalCost`: the current UTC month's recorded allocation
-estimate and run count. Each completed remote run retains its estimated compute
-cost. Selected output files stream back with offsets and verified hashes; unsafe
-or missing outputs remain explicitly unavailable. Native process resource metrics
+`agent status` includes `modalCost`: the current UTC month's gross Sandbox
+compute estimate and run count, including charges retained before a local fallback.
+`legacyRuns` counts runs without quantity records. It is **not billed spend**:
+workspace credits, discounts, taxes, subscription charges and unrelated usage are
+unknown locally. Historical allocation estimates stay identifiable; Forge does
+not halve them or assume a credit balance to match a dashboard number.
+
+New shard journals record worker elapsed seconds and the corresponding physical
+core-seconds and GiB-seconds. The request and limit are both two physical cores
+and the selected 4/8/16 GiB memory, so billed resources are the request (Modal bills
+`max(request, actual)`). Each recorded attempt contributes once, including failed
+attempts and retries; controller adoption never adds a second copy of its quantities.
+Worker elapsed time excludes controller queues, reconnection and log draining.
+Older journals use controller elapsed time, bounded by the Sandbox's 900-second
+lifetime, and label that basis explicitly. Worker timing excludes container
+startup/teardown; it remains an estimate, not provider metering.
+
+The published [Sandbox prices](https://modal.com/pricing) are
+$0.00003942/physical-core-second and $0.00000667/GiB-second, with minimum requests
+of 0.125 physical cores and 128 MiB. [Resource billing](https://modal.com/docs/guide/sandbox-resources)
+uses the higher of request and usage; there is no minimum usage-time increment
+([billing](https://modal.com/docs/guide/billing)). An 8 GiB allocation adds
+$0.00002668/second over 4 GiB for equal runtime; a 16 GiB retry costs
+$0.00018556/second in addition to its first attempt. These estimates exclude image
+builds and egress. Failed preparation or unknown outcomes may have unrecorded
+charges. Modal billing and the owner's existing spending cap are authoritative;
+Forge adds no spending limit.
+
+Selected output files stream back with offsets and verified hashes; unsafe or
+missing outputs remain explicitly unavailable. Native process resource metrics
 are unavailable remotely and are reported separately from compute cost.
-Estimates use each sandbox's recorded memory allocation (older execution journals
-default to 4 GiB) and two CPUs. At the published sandbox rates, 8 GiB adds
-$0.00002668/second ($0.0016008/minute) over 4 GiB for equal runtime; a 16 GiB retry
-costs $0.00018556/second ($0.0111336/minute), in addition to its first attempt.
-Concurrency changes can change wall time; no runtime savings are assumed. Estimates
-exclude image builds and egress and are not billing receipts. Failed preparation
-or unknown outcomes may have unrecorded charges. [Modal billing](https://modal.com/pricing) and the owner's
-existing spending cap are authoritative; Forge adds no spending limit.
 
 Tests mock the Modal client. Remote admission uses `modal-check-queue` under
 `FORGE_CHECK_QUEUE_DIR` (default `~/.forge`), independently of the local test

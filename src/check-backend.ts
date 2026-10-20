@@ -2,6 +2,16 @@
 import { z } from 'zod';
 import type { CheckRun } from './work-types.js';
 
+export const modalCostUsageSchema = z.array(
+  z.object({
+    executionId: z.string(),
+    seconds: z.number().nonnegative().finite(),
+    cpuCoreSeconds: z.number().nonnegative().finite(),
+    memoryGiBSeconds: z.number().nonnegative().finite(),
+    basis: z.enum(['worker-runtime', 'controller-time']),
+  }),
+);
+
 export const checkBackendSchema = z.object({
   retryable: z.boolean().optional(),
   verdict: z.enum(['clean', 'flake', 'quarantined']).optional(),
@@ -20,6 +30,7 @@ export const checkBackendSchema = z.object({
   lockfile: z.string().optional(),
   executionIds: z.array(z.string()).optional(),
   billableMinutes: z.array(z.object({ jobId: z.number(), minutes: z.number().nonnegative() })).optional(),
+  costUsage: modalCostUsageSchema.optional(),
   estimatedCostUsd: z.number().nonnegative().finite().optional(),
 });
 export function checkRoute(
@@ -57,16 +68,30 @@ export function balanceShards(files: string[], durations: Record<string, number>
 export function modalMonthCost(runs: Iterable<Pick<CheckRun, 'startedAt' | 'backend'>>, now = new Date()) {
   const month = now.toISOString().slice(0, 7);
   let estimatedCostUsd = 0,
-    recordedRuns = 0;
-  for (const run of runs)
-    if (run.startedAt.startsWith(month) && run.backend?.estimatedCostUsd !== undefined) {
+    recordedRuns = 0,
+    legacyRuns = 0;
+  const executions = new Set<string>();
+  for (const run of runs) {
+    if (!run.startedAt.startsWith(month) || run.backend?.estimatedCostUsd === undefined) continue;
+    recordedRuns++;
+    if (!run.backend.costUsage) {
       estimatedCostUsd += run.backend.estimatedCostUsd;
-      recordedRuns++;
+      legacyRuns++;
+      continue;
     }
+    for (const usage of run.backend.costUsage) {
+      // Controller adoption and retries can report the same retained attempt.
+      if (executions.has(usage.executionId)) continue;
+      executions.add(usage.executionId);
+      estimatedCostUsd += usage.cpuCoreSeconds * 0.00003942 + usage.memoryGiBSeconds * 0.00000667;
+    }
+  }
   return {
     month,
     estimatedCostUsd,
     recordedRuns,
-    basis: 'Compute allocation estimate; excludes image builds and egress. Modal billing is authoritative.',
+    legacyRuns,
+    basis:
+      'Gross Sandbox compute estimate before credits and billing adjustments; CPU $0.00003942/core-second, memory $0.00000667/GiB-second at max(request, usage). Worker runtime when recorded; legacy controller-time estimates otherwise. Excludes startup/teardown, image builds and egress. Billed spend is unknown; Modal billing is authoritative.',
   };
 }

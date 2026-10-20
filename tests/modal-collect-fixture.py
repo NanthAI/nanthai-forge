@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Mock streams/status RPCs: no SDK, credentials, or network."""
 import asyncio
+import json
 from pathlib import Path
 import sys
 import types
@@ -19,6 +20,8 @@ class Sandbox:
     def stdout(self):
         async def lines():
             yield 'synthetic output\n'
+            for seconds in getattr(self, 'usage', []):
+                yield '__FORGE_USAGE__' + json.dumps(dict(seconds=seconds)) + '\n'
             if self.mode == 'broken': raise ConnectionError('secret provider diagnostics')
             if self.mode in ['silent', 'ended', 'unknown', 'unacknowledged']:
                 await asyncio.Event().wait()
@@ -61,6 +64,13 @@ class CollectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.saved[-1]['exitCode'], 7)
         self.assertEqual(self.observations, [])
         self.assertEqual(sandbox.terminations, 0)
+
+    async def test_worker_runtime_survives_collection_and_rejects_invalid_quantities(self):
+        sandbox = Sandbox()
+        sandbox.usage = [12.5, -1, 'invalid', float('nan')]
+        self.assertFalse(await self.run_collect(sandbox, sandbox))
+        self.assertEqual(self.item['seconds'], 12.5)
+        self.assertTrue(any(item.get('seconds') == 12.5 for item in self.saved))
 
     async def test_broken_stream_reconnects_same_id_without_repeating_command(self):
         self.assertFalse(await self.run_collect(Sandbox('broken'), Sandbox()))

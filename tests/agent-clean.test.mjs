@@ -74,7 +74,7 @@ test('a Lane with uncaptured edits is skipped, active Lanes are untouched, excha
   const dry = await clean(agent, { kinds: ['lanes', 'exchange-staging'] });
   assert.equal(group(dry, 'lanes'), undefined);
   assert.match(dry.skipped.find(item => item.laneId === lane.laneId).reason, /uncaptured edits/);
-  assert.equal(dry.skippedKinds[0].kind, 'exchange-staging');
+  assert.deepEqual(dry.skippedKinds, [], 'unreferenced old staging now participates in retention');
   const applied = await clean(agent, { apply: true });
   assert.ok(existsSync(join(lane.path, 'late.txt')));
   assert.ok(existsSync(open.path));

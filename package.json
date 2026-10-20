@@ -80,6 +80,7 @@
     "scripts/github-actions-check.mjs",
     "scripts/modal-check/runner.py",
     "scripts/modal-check/collect.py",
+    "scripts/modal-check/cost.py",
     "scripts/modal-check/worker.mjs",
     "scripts/test-impact.mjs",
     "scripts/script-impact.mjs",

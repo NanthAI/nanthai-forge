@@ -522,6 +522,30 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(events[-1]['kind'], 'error')
         self.assertFalse(events[-1]['safeFallback'])
 
+    def test_recorded_shard_runtime_quantities_ignore_controller_reconnection_and_keep_retries(self):
+        executions = [
+            dict(id='sb-first', started=0, ended=7200, seconds=30, memory=4096, index=0, attempt=0),
+            dict(id='sb-retry', started=7200, ended=14400, seconds=10, memory=16384, index=0, attempt=1),
+            dict(id='sb-static', started=0, ended=600, seconds=20, memory=8192, index=1, attempt=0),
+        ]
+        estimate = bridge.compute_estimate(executions)
+        self.assertAlmostEqual(estimate['estimatedCostUsd'],
+                               30 * bridge.allocation_rate(executions[0]) +
+                               10 * bridge.allocation_rate(executions[1]) +
+                               20 * bridge.allocation_rate(executions[2]))
+        self.assertEqual([e['cpuCoreSeconds'] for e in estimate['costUsage']], [60, 20, 40])
+        self.assertEqual([e['memoryGiBSeconds'] for e in estimate['costUsage']], [120, 160, 160])
+        self.assertTrue(all(e['basis'] == 'worker-runtime' for e in estimate['costUsage']))
+        self.assertEqual(bridge.compute_estimate(executions), estimate, 'adoption does not add wall time')
+
+    def test_legacy_controller_time_is_bounded_by_sandbox_lifetime_and_labeled(self):
+        estimate = bridge.compute_estimate([dict(id='sb-old', started=0, ended=86400)])
+        self.assertEqual(estimate['costUsage'][0]['seconds'], 900)
+        self.assertEqual(estimate['costUsage'][0]['basis'], 'controller-time')
+        self.assertAlmostEqual(estimate['estimatedCostUsd'], 900 * bridge.allocation_rate({}))
+        self.assertAlmostEqual(bridge.allocation_rate(dict(cpu=0, memory=0)),
+                               0.125 * 0.00003942 + 0.125 * 0.00000667)
+
     def test_changed_source_is_rejected_before_upload(self):
         (self.source / 'fixture.txt').write_text('changed')
         events = self.run_bridge()

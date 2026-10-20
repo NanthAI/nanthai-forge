@@ -10,7 +10,7 @@ import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
 export const modalRuntime =
-  'node:24.19.0-trixie-slim;git;time;python3;modal-sdk:1.6.2;cpu:2;memory:4096;static-memory:8192;static-oom-retry:16384;static-workers:2;static-heap:3072;flake-retry:1;resume:1;timeout:900';
+  'node:24.19.0-trixie-slim;git;time;python3;modal-sdk:1.6.2;cpu:2;memory:4096;static-memory:8192;static-oom-retry:16384;static-workers:2;static-heap:3072;flake-retry:1;resume:1;cost:worker-runtime-1;timeout:900';
 export const modalBridge = fileURLToPath(new URL('../scripts/modal-check/runner.py', import.meta.url));
 export async function modalPlan(
   store: WorkStore,

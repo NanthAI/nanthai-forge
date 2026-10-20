@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { modalCostUsageSchema } from './check-backend.js';
 import { modalBridge } from './modal-plan.js';
 import type { ModalPlan } from './modal-plan.js';
 import { invariant } from './errors.js';
@@ -51,6 +52,7 @@ export const modalEventSchema = z.discriminatedUnion('kind', [
     head: z.string(),
     definition: z.string(),
     exitCode: z.number().int(),
+    costUsage: modalCostUsageSchema.optional(),
     estimatedCostUsd: z.number().nonnegative().finite(),
     executions: z
       .array(
@@ -80,6 +82,7 @@ export const modalEventSchema = z.discriminatedUnion('kind', [
     category: z.enum(['auth', 'network', 'billing', 'execution', 'unknown']),
     safeFallback: z.boolean(),
     details: z.string().optional(),
+    costUsage: modalCostUsageSchema.optional(),
     estimatedCostUsd: z.number().nonnegative().finite().optional(),
   }),
 ]);

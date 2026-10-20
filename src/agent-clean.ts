@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retentionPlan, removeRetention } from './clean-retention.js';
 import { readPolicy } from './work-autonomy.js';
 import { checkCleanupBlocker } from './clean-check-safety.js';
 import { processBlocker, workingProcesses } from './clean-processes.js';
@@ -15,10 +16,23 @@ import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun, Lane } from './work-types.js';
 
-export const CLEAN_KINDS = ['check-workspaces', 'lane-deps', 'lanes', 'exchange-staging', 'objects'] as const;
+export const CLEAN_KINDS = [
+  'check-workspaces',
+  'check-retention',
+  'lane-deps',
+  'lanes',
+  'exchange-staging',
+  'objects',
+] as const;
 type Kind = (typeof CLEAN_KINDS)[number];
 /** `objects` rewrites shared storage, so it only runs when named. */
-const DEFAULT_KINDS: Kind[] = ['check-workspaces', 'lane-deps', 'lanes', 'exchange-staging'];
+const DEFAULT_KINDS: Kind[] = [
+  'check-workspaces',
+  'check-retention',
+  'lane-deps',
+  'lanes',
+  'exchange-staging',
+];
 export const cleanSchema = z.object({
   action: z.literal('clean'),
   /** Delete. Without it nothing changes and the candidates are only listed. */
@@ -36,6 +50,7 @@ type Item = {
   reason: string;
   laneId?: string;
   runId?: string;
+  tail?: true;
 };
 type Skipped = { kind: Kind; id: string; reason: string; laneId?: string; runId?: string };
 const BUILD_DIRS = new Set([
@@ -281,26 +296,16 @@ function laneDirectories(
   }
 }
 
-function stagingDirectories(store: WorkStore) {
-  const dirs = readdirSync(store.directory).filter(name => /^exchange-[0-9a-f-]{36}$/i.test(name));
-  return {
-    kind: 'exchange-staging' as const,
-    reason:
-      'Not removable locally: whether the hosted operation finished is recorded only on the host, and these directories (exchange.json, work.json) are what a reconcile needs after a lost reply. Removal needs a recorded terminal result; none exists locally.',
-    observed: {
-      directories: dirs.length,
-      bytes: dirs.reduce((sum, name) => sum + (measured(join(store.directory, name)) ?? 0), 0),
-    },
-  };
-}
-
 type Automatic = { id: string; actor: string; laneIds?: string[]; runId?: string };
-function plan(store: WorkStore, kinds: Kind[], automatic?: Automatic) {
+function plan(store: WorkStore, kinds: Kind[], automatic?: Automatic, selected?: Set<string>) {
   const items: Item[] = [],
     skipped: Skipped[] = [];
-  const processes = automatic ? workingProcesses() : undefined;
+  const processes = workingProcesses();
   if (kinds.includes('check-workspaces')) checkWorkspaces(store, items, skipped, automatic, processes);
   laneDirectories(store, kinds, items, skipped, automatic, processes);
+  const retention = retentionPlan(store, kinds, processes, Date.now(), selected);
+  items.push(...retention.items.filter(item => !items.some(existing => existing.path === item.path)));
+  skipped.push(...retention.skipped);
   return { items, skipped };
 }
 const objectItems = (store: WorkStore) =>
@@ -320,11 +325,13 @@ const objectItems = (store: WorkStore) =>
 function remove(store: WorkStore, item: Item): string | undefined {
   // Re-check immediately before deleting: inside the owner's Work directory, and not a link.
   const inside = (path: string) => path.startsWith(store.directory + '/');
-  if (!inside(item.path) || !plainDirectory(item.path))
+  if (!inside(item.path) || (!item.tail && !plainDirectory(item.path)))
     return 'Path changed or is no longer a plain directory.';
   if (!plainDirectory(dirname(item.path))) return 'Parent directory changed.';
   try {
-    rmSync(item.path, { recursive: true, force: true });
+    if (item.kind === 'check-retention' || item.kind === 'exchange-staging')
+      removeRetention({ ...item, kind: item.kind });
+    else rmSync(item.path, { recursive: true, force: true });
     return undefined;
   } catch {
     return 'Removal failed part-way; remaining files stay and a retry continues.';
@@ -351,7 +358,7 @@ function cleanupResult(
     skippedKinds,
     totals: { count: listed.length, bytes: listed.reduce((sum, item) => sum + item.bytes, 0) },
     note: command.apply
-      ? 'Removed items were re-validated under the owner lock. Work records, State objects, check results, logs and artifacts are untouched; repeating is safe.'
+      ? 'Removed items were re-validated under the owner lock. Work records, State objects, check results, log tails and artifacts remain; repeating is safe.'
       : 'No files were deleted. Send {"apply":true} (optionally with these item ids) to delete; every item is re-validated at that time.',
   };
 }
@@ -361,19 +368,17 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
   if (automatic) {
     invariant(
       command.apply &&
-        command.kinds?.every(kind => ['check-workspaces', 'lane-deps', 'lanes'].includes(kind)),
+        command.kinds?.every(kind =>
+          ['check-workspaces', 'check-retention', 'exchange-staging', 'lane-deps', 'lanes'].includes(kind),
+        ),
       'BAD_ARGUMENT',
-      'Automatic cleanup supports regenerable check-workspaces, lane-deps and closed lanes only.',
+      'Automatic cleanup supports regenerable copies and seven-day retention only.',
     );
     const original = store.select('automaticActions', automatic.id);
     if (original?.result) return { revision: store.revision(), result: JSON.parse(original.result) };
   }
   const kinds = command.kinds ?? DEFAULT_KINDS,
     skippedKinds: { kind: Kind; reason: string; observed?: object }[] = [];
-  if (kinds.includes('exchange-staging')) {
-    const { observed, ...rest } = stagingDirectories(store);
-    skippedKinds.push({ ...rest, observed });
-  }
   let items: Item[], skipped: Skipped[];
   const removed: Item[] = [];
   if (command.apply) {
@@ -394,7 +399,7 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
                   },
                 ] as Skipped[],
               }
-            : plan(store, kinds, automatic),
+            : plan(store, kinds, automatic, command.items ? new Set(command.items) : undefined),
         wanted = command.items ? new Set(command.items) : undefined,
         chosen = wanted ? current.items.filter(item => wanted.has(item.id)) : current.items;
       if (wanted)
@@ -419,14 +424,22 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
               summary: chosen.length
                 ? `Clean regenerable copies: ${chosen.map(i => i.path).join(', ')}`
                 : 'No eligible regenerable copies to clean',
-              undo: 'Run reopen with the Lane id to re-materialize its retained head. Checks reconstruct workspaces when run again. Restore Lane dependencies with npm ci --ignore-scripts and rerun the build; retained source, logs and artifacts remain.',
+              undo: 'Run reopen with the Lane id to re-materialize its retained head. Checks reconstruct workspaces when run again. Restore Lane dependencies with npm ci --ignore-scripts and rerun the build; retained source, log tails and artifacts remain. Seven-day retention removes older copies and log prefixes; those prefixes cannot be reconstructed.',
             },
           });
           store.commitRecords(tx);
         }
       }
+      let exchangeFailed = false;
+      // Retained exchange manifests pin exact log bytes. Remove staging first;
+      // if that fails, no check retention from this plan may invalidate it.
+      chosen.sort((a, b) => Number(b.kind === 'exchange-staging') - Number(a.kind === 'exchange-staging'));
       for (const item of chosen) {
-        const failure = remove(store, item);
+        const failure =
+          item.kind === 'check-retention' && exchangeFailed
+            ? 'Exchange removal failed; its selected check bytes remain pinned.'
+            : remove(store, item);
+        if (failure && item.kind === 'exchange-staging') exchangeFailed = true;
         if (failure) current.skipped.push({ kind: item.kind, id: item.id, reason: failure });
         else removed.push(item);
       }
@@ -459,8 +472,7 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
       }
     }
   } else {
-    store.locked(() => recoverRecordRuns(store, store.records()));
-    ({ items, skipped } = plan(store, kinds));
+    ({ items, skipped } = store.locked(() => plan(store, kinds)));
     if (kinds.includes('objects')) items.push(...objectItems(store));
   }
   void items;

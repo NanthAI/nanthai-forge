@@ -216,7 +216,12 @@ test('another live runner is preserved; dead runner and reused PID are interrupt
     data.revision++;
     store.save(data);
   });
+  // A dry run must not reconcile Work; applying cleanup still reconciles dead runners.
+  const beforeClean = store.pointer();
   await s.agent.dispatch({ action: 'clean', kinds: ['check-workspaces'] });
+  assert.ok(store.pointer().equals(beforeClean));
+  assert.equal(store.select('runs', id).status, 'running');
+  await s.agent.dispatch({ action: 'clean', kinds: ['check-workspaces'], apply: true });
   assert.equal(store.select('runs', id).status, 'interrupted');
 });
 

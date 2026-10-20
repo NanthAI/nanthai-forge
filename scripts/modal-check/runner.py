@@ -12,11 +12,9 @@ import time
 
 import modal
 from collect import collect_all, stop_all
+from cost import allocation_rate, compute_estimate
 
 LOCK = threading.Lock()
-def allocation_rate(item):
-    return 2 * 0.00003942 + item.get('memory', 4096) / 1024 * 0.00000667
-
 
 def exit_summary(code):
     return 'out of memory (137)' if code == 137 else 'exit ' + str(code)
@@ -182,7 +180,7 @@ def main():
             sandboxes.append(sandbox)
             previous = [item for item in journal['executions'] if item['index'] == index]
             journal['executions'].append({'id': sandbox.object_id, 'started': time.time(), 'index': index,
-                                          'memory': memory, 'attempt': len(previous)})
+                                          'memory': memory, 'cpu': 2, 'attempt': len(previous)})
             journal['creating'] = False
             save(journal_path, journal)
             emit('execution', executionId=sandbox.object_id, image=journal['image'], index=index, attempt=len(previous))
@@ -276,7 +274,7 @@ def main():
                                  {'infrastructure': 'sandbox-stopped'} if 'stopped' in item and 'exitCode' not in item else {}))
                          for position, item in enumerate(journal['executions'])],
              details='; '.join('Shard ' + str(item['index']) + ': ' + (exit_summary(item['exitCode']) if 'exitCode' in item else 'stopped after collection stall') for item in journal['executions']),
-             estimatedCostUsd=sum(max(0, item.get('ended', item.get('stopped', time.time()))-item['started']) * allocation_rate(item) for item in journal['executions']))
+             **compute_estimate(journal['executions']))
     except Exception as error:
         category = classify(error)
         rejected = isinstance(error, (modal.exception.AuthError, modal.exception.ResourceExhaustedError)) and category in ['auth', 'billing']
@@ -292,7 +290,7 @@ def main():
         # Remote failure is not a successful command. Only confirmed infrastructure failures fall back.
         emit('error', category=category, safeFallback=safe and category in ['auth', 'network', 'billing'],
              details='Modal ' + category + ' failure during ' + ('sandbox creation' if journal.get('creating') else 'preparation or collection') + '; executions: ' + ', '.join(item['id'] for item in journal['executions']),
-             estimatedCostUsd=sum(max(0, item.get('ended', item.get('stopped', time.time())) - item['started']) * allocation_rate(item) for item in journal['executions']))
+             **compute_estimate(journal['executions']))
 
     finally:
         journal['complete'] = True

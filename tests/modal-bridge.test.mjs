@@ -47,7 +47,16 @@ test('installed remote worker preserves command failure and streams only safe se
   const events = output
     .trim()
     .split('\n')
+    .filter(line => line.startsWith('__FORGE_ARTIFACT__'))
     .map(line => JSON.parse(line.slice('__FORGE_ARTIFACT__'.length)));
+  const usage = JSON.parse(
+    output
+      .trim()
+      .split('\n')
+      .find(line => line.startsWith('__FORGE_USAGE__'))
+      .slice('__FORGE_USAGE__'.length),
+  );
+  assert.ok(usage.seconds > 0 && Number.isFinite(usage.seconds));
   assert.equal(events[0].kind, 'artifactChunk');
   assert.equal(events[1].sha256, createHash('sha256').update('synthetic artifact').digest('hex'));
   assert.equal(events[2].kind, 'artifactUnavailable');
@@ -66,7 +75,12 @@ for (const body of ['process.exit(137)', "process.kill(process.pid, 'SIGKILL')"]
           },
           stdio: ['ignore', 'pipe', 'pipe'],
         }),
-      error => error.status === 137 && error.stdout.length === 0,
+      error => {
+        assert.equal(error.status, 137);
+        assert.doesNotMatch(error.stdout.toString(), /__FORGE_ARTIFACT__/);
+        assert.match(error.stdout.toString(), /__FORGE_USAGE__/);
+        return true;
+      },
     );
   });
 }

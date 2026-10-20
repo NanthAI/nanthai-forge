@@ -236,6 +236,7 @@ export async function launchModalRun(
           }
           if (event.kind === 'error') {
             if (event.estimatedCostUsd !== undefined) run.backend!.estimatedCostUsd = event.estimatedCostUsd;
+            if (event.costUsage) run.backend!.costUsage = event.costUsage;
             terminal = event;
           }
         },
@@ -265,7 +266,10 @@ export async function launchModalRun(
           ? 'runner-budget-exhausted'
           : 'runner-unavailable'
         : undefined;
-    if (outcome) run.backend!.estimatedCostUsd = outcome.estimatedCostUsd;
+    if (outcome) {
+      run.backend!.estimatedCostUsd = outcome.estimatedCostUsd;
+      if (outcome.costUsage) run.backend!.costUsage = outcome.costUsage;
+    }
     const endedAt = new Date().toISOString();
     const summary = outcome ? shardLogs.failureSummary(outcome) : '';
     const assessment =
@@ -304,7 +308,7 @@ export async function launchModalRun(
             resourceUsage: {
               status: 'unavailable',
               details:
-                'Remote compute allocation cost is recorded separately; native process resource measurement is unavailable.',
+                'Remote gross compute cost is estimated separately; native process resource measurement is unavailable.',
             },
           }
         : {}),
