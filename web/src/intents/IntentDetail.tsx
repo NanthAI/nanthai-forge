@@ -1,3 +1,4 @@
+import { useGenerationFreshness } from '../ui/generation-freshness';
 // SPDX-License-Identifier: Apache-2.0
 import { useState, type ReactNode } from 'react';
 import { Menu } from '../ui/Menu';
@@ -107,6 +108,7 @@ export function IntentDetailView({
   startIntentId?: string;
   canStart?: boolean;
 }) {
+  const freshness = useGenerationFreshness();
   const [error, setError] = useState('');
   const [dismissed, setDismissed] = useState<string | null>(null);
   const run = async (action: Promise<string | null>) => {
@@ -127,7 +129,9 @@ export function IntentDetailView({
     records?.runs
       .filter(run => run.viewId === ready.id && run.head === ready.head && run.status === 'passed')
       .sort((a, b) => (b.endedAt ?? '').localeCompare(a.endedAt ?? ''))[0]?.endedAt;
-  const facts = records ? laneFacts(records, row.lanes, now) : new Map();
+  const facts = records ? laneFacts(records, row.lanes, now, freshness.value !== null) : new Map();
+  // Hosted copies can lag the owner machine; don't count unsynced completions as not landed.
+  const unsynced = [...facts.values()].filter(fact => fact.text === 'Completed on owner machine').length;
   const details = (
     <Panel
       title="Details"
@@ -189,10 +193,13 @@ export function IntentDetailView({
                   <span>
                     {row.lanes.length} {row.lanes.length === 1 ? 'Lane' : 'Lanes'} ·{' '}
                     {row.lanes.filter(lane => lane.accepted).length} landed
+                    {unsynced > 0 && <> · {unsynced} not yet synced</>}
                   </span>
                   <span>
-                    {views.length} {views.length === 1 ? 'Candidate' : 'Candidates'} ·{' '}
-                    {views.filter(view => view.accepted).length} accepted
+                    {views.length} {views.length === 1 ? 'Candidate' : 'Candidates'}
+                    {(unsynced === 0 || views.some(view => view.accepted)) && (
+                      <> · {views.filter(view => view.accepted).length} accepted</>
+                    )}
                   </span>
                   {row.createdAt && (
                     <span>

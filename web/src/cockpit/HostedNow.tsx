@@ -1,3 +1,4 @@
+import { useGenerationFreshness } from '../ui/generation-freshness';
 import { usePageCritical } from '../ui/page-critical';
 import { ErrorToast } from '../ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
@@ -107,6 +108,7 @@ export function HostedNowView({
   project?: string;
 }) {
   const shared = useAttention();
+  const freshness = useGenerationFreshness();
   const attention = useMemo(
     () => shared ?? hostedAttention(records, live, now),
     [shared, records, live, now],
@@ -131,7 +133,10 @@ export function HostedNowView({
   const week = accepted(startOfDay(now - (ACCEPTED_DAYS - 1) * 86_400_000));
   const todayStart = startOfDay(now);
   const today = week.filter(row => Date.parse(row.at) >= todayStart);
-  const facts = useMemo(() => laneFacts(records, lanes, now), [records, lanes, now]);
+  const facts = useMemo(
+    () => laneFacts(records, lanes, now, freshness.value !== null),
+    [records, lanes, now, freshness.value],
+  );
   const reviewHref = (id: string) => hostedHref({ projectTab: 'intent', reviewView: id });
   const lastVisit = useLastVisit(example ? 'example' : project, now);
   const [dismissed, setDismissed] = useState(false);

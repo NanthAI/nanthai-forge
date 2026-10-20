@@ -101,7 +101,7 @@ export function LaneRow({
               }
               size={12}
             />
-            <span title={freshness.behind ? `${text} · ${freshness.asOf}` : text}>
+            <span title={fact?.detail ?? (freshness.behind ? `${text} · ${freshness.asOf}` : text)}>
               {text}
               {lane.laterViewId && viewHref && (
                 <>

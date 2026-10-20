@@ -72,7 +72,7 @@ export function LaneFactLine({ fact, showIntent = true }: { fact: LaneFact; show
   parts.push(
     <span className="fx-wr-what">
       {fact.glyph && <Glyph name={fact.glyph} size={12} className={`fx-wr-g-${fact.tone}`} />}
-      <span>{fact.text}</span>
+      <span title={fact.detail}>{fact.text}</span>
       {fact.auto && <span className="fx-wr-auto">auto</span>}
     </span>,
   );

@@ -234,3 +234,21 @@ test('a Lane with no saves on an accepted main head is open, not landed; a saved
   assert.equal(landed.open, false);
   assert.equal(landed.accepted, true);
 });
+
+test('hosted completion without landing evidence is unknown, while local and recorded outcomes stay exact', () => {
+  const records = work();
+  const synced = laneFacts(records, cockpitLanes(records), now, true);
+  assert.match(synced.get('l3').text, /^Landed on main/);
+  assert.equal(synced.get('l3').detail, undefined);
+  assert.equal(synced.get('l4').label, 'Abandoned');
+  assert.match(synced.get('l4').text, /^Closed without landing .*superseded$/);
+  records.channelMoves = [];
+  const lanes = cockpitLanes(records);
+  const unknown = laneFacts(records, lanes, now, true).get('l3');
+  assert.equal(unknown.text, 'Completed on owner machine');
+  assert.equal(unknown.detail, 'Landing details arrive with the next push');
+  assert.equal(unknown.tone, 'plain');
+  assert.equal(unknown.glyph, undefined);
+  assert.match(html(h(LaneFactLine, { fact: unknown })), /title="Landing details arrive with the next push"/);
+  assert.match(laneFacts(records, lanes, now).get('l3').text, /^Closed without landing/);
+});

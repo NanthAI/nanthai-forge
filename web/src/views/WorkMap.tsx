@@ -1,3 +1,5 @@
+import { useGenerationFreshness } from '../ui/generation-freshness';
+import { candidateCheckUnsynced } from './intent-views';
 import { countLabel } from '../ui/count';
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useRef, useState } from 'react';
@@ -18,14 +20,14 @@ export function mapViews(views: readonly ViewRow[]) {
   };
 }
 
-export function candidateState(view: ViewRow) {
+export function candidateState(view: ViewRow, unsynced = false) {
   if (view.accepted) return 'Accepted';
   if (view.supersededBy) return 'Superseded';
   if (view.check === 'failed') return 'Check failed';
   if (view.status === 'conflict') return 'Conflict';
   if (['running', 'queued', 'preparing'].includes(view.check ?? '')) return 'Checking';
   if (view.check === 'passed') return 'Ready';
-  return 'Not checked';
+  return unsynced ? 'Check result not synced' : 'Not checked';
 }
 
 /** Each time column pins its input saves directly above its candidate, avoiding long diagonal joins.
@@ -40,7 +42,8 @@ export function WorkMap({
   compact = false,
   now = Date.now(),
 }: {
-  lanes: readonly Pick<CockpitLane, 'id' | 'name' | 'checkpoints' | 'accepted'>[];
+  lanes: readonly (Pick<CockpitLane, 'id' | 'name' | 'checkpoints' | 'accepted'> &
+    Partial<Pick<CockpitLane, 'head' | 'label'>>)[];
   views: readonly ViewRow[];
   laneHref: (id: string) => string;
   viewHref?: (id: string) => string;
@@ -50,6 +53,7 @@ export function WorkMap({
   compact?: boolean;
   now?: number;
 }) {
+  const freshness = useGenerationFreshness();
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(1000);
   useEffect(() => {
@@ -152,7 +156,7 @@ export function WorkMap({
                           <path d={`M${x} ${y}V${mainY}`} fill="none" stroke={colour} strokeWidth="1.5" />
                         )}
                         <a href={viewHref?.(view.id) ?? viewsHref}>
-                          <title>{`Candidate · ${candidateState(view)} · ${age(view.acceptedAt ?? view.at, now)}`}</title>
+                          <title>{`Candidate · ${candidateState(view, candidateCheckUnsynced(view, lanes, freshness.value))} · ${age(view.acceptedAt ?? view.at, now)}`}</title>
                           <circle
                             cx={x}
                             cy={y}
@@ -244,7 +248,7 @@ export function WorkMap({
             ))}
           </svg>
           {points.map(({ view, inputs, x, y }) => {
-            const state = candidateState(view),
+            const state = candidateState(view, candidateCheckUnsynced(view, lanes, freshness.value)),
               elapsed = age(view.acceptedAt ?? view.at, now);
             const label = `${state}${elapsed && ['Accepted', 'Check failed'].includes(state) ? ` · ${elapsed}` : ''}`;
             const href = viewHref?.(view.id);

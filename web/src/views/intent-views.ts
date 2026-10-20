@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedFreshness, type HostedFreshness } from '../../../src/hosted-freshness';
+import type { CockpitLane } from '../cockpit/model';
 import type { ViewRow } from '../intents/IntentDetail';
 import { latestRun, type CockpitWork } from '../cockpit/model';
 /** Same Intent + Lane identities is the H17 supersession family; heads can change. */
@@ -60,5 +62,24 @@ export function canReviewView(view: ViewRow): boolean {
     view.check === 'passed' &&
     Boolean(view.head) &&
     view.checkHead === view.head
+  );
+}
+
+/** Missing hosted evidence is unknown while the owner is ahead or an exact input is completed. */
+export function candidateCheckUnsynced(
+  view: ViewRow,
+  lanes: readonly (Pick<CockpitLane, 'id'> & Partial<Pick<CockpitLane, 'head' | 'label'>>)[],
+  freshness: HostedFreshness | null,
+): boolean {
+  return Boolean(
+    freshness &&
+    !view.check &&
+    !view.accepted &&
+    !view.supersededBy &&
+    view.status !== 'conflict' &&
+    (hostedFreshness(freshness).behind ||
+      view.inputs?.some(input =>
+        lanes.some(lane => lane.id === input.laneId && lane.head === input.head && lane.label === 'Done'),
+      )),
   );
 }

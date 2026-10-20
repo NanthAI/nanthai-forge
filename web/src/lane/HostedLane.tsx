@@ -1,3 +1,4 @@
+import { useGenerationFreshness } from '../ui/generation-freshness';
 import { usePageCritical } from '../ui/page-critical';
 import { age, checkStatus } from '../ui/status';
 import { WorkMap } from '../views/WorkMap';
@@ -120,6 +121,7 @@ export function HostedLaneView({
     [records, sessions, now, laneId],
   );
   const record = records.lanes.find(item => item.id === laneId);
+  const freshness = useGenerationFreshness();
   if (!lane || !record) return null;
   const timeline = laneTimeline(
     records,
@@ -147,7 +149,7 @@ export function HostedLaneView({
       : '';
   const step = nextStep(lane, since);
   // The header pill uses the same attention word as the Lane's row (Waiting when nobody holds it).
-  const fact = laneFacts(records, [lane], now).get(lane.id);
+  const fact = laneFacts(records, [lane], now, freshness.value !== null).get(lane.id);
   const brief = laneBrief(lane, run?.id);
   return (
     <WorkDetailLayout

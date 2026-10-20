@@ -14,6 +14,7 @@ export type LaneFact = {
   /** Status glyph before the text. */
   glyph?: GlyphName;
   text: string;
+  detail?: string;
   /** The acceptance was automatic. */
   auto?: boolean;
   /** The Intent title, only when the Lane name says something different. */
@@ -42,7 +43,12 @@ const clock = (at: number) =>
   new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
 
 /** Fact lines for Lane rows (concept model §3), derived only from recorded Work and live sessions. */
-export function laneFacts(work: Work, lanes: readonly CockpitLane[], now: number): Map<string, LaneFact> {
+export function laneFacts(
+  work: Work,
+  lanes: readonly CockpitLane[],
+  now: number,
+  hosted = false,
+): Map<string, LaneFact> {
   const records = new Map(work.lanes.map(lane => [lane.id, lane]));
   const landings = (work.channelMoves ?? []).filter(
     move => move.channel === 'main' && (!move.status || move.status === 'accepted'),
@@ -67,7 +73,10 @@ export function laneFacts(work: Work, lanes: readonly CockpitLane[], now: number
           tone: 'stale',
           label: 'Abandoned',
           pillGlyph: 'failed',
-          text: [`Abandoned${closed ? ` ${age(closed.at, now, true)}` : ''}${by}`, closed?.reason]
+          text: [
+            `${hosted ? 'Closed without landing' : 'Abandoned'}${closed ? ` ${age(closed.at, now, true)}` : ''}${by}`,
+            closed?.reason,
+          ]
             .filter(Boolean)
             .join(' · '),
         });
@@ -107,7 +116,10 @@ export function laneFacts(work: Work, lanes: readonly CockpitLane[], now: number
           open: false,
           tone: 'plain',
           label: 'Done',
-          text: `Closed without landing${closed ? ` ${age(closed.at, now, true)}` : ''}`,
+          text: hosted
+            ? 'Completed on owner machine'
+            : `Closed without landing${closed ? ` ${age(closed.at, now, true)}` : ''}`,
+          ...(hosted ? { detail: 'Landing details arrive with the next push' } : {}),
         });
       continue;
     }

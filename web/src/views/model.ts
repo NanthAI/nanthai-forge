@@ -37,7 +37,11 @@ export type ReadRequest = {
 export type ReadSource = (
   request: ReadRequest,
 ) => Promise<ViewModel & { items?: ViewReadModel[]; nextCursor?: string | null; nextOffset?: number | null }>;
-export function viewStatus(view: Pick<ViewReadModel, 'status'>, check?: string): [Tone, string] {
+export function viewStatus(
+  view: Pick<ViewReadModel, 'status'>,
+  check?: string,
+  behind = false,
+): [Tone, string] {
   if (view.status === 'accepted') return ['passed', 'Accepted'];
   if (view.status === 'superseded') return ['stale', 'Superseded'];
   if (view.status === 'conflict') return ['conflict', 'Conflict'];
@@ -46,5 +50,5 @@ export function viewStatus(view: Pick<ViewReadModel, 'status'>, check?: string):
   if (check === 'cancelled' || check === 'interrupted')
     return ['stale', check === 'cancelled' ? 'Cancelled' : 'Interrupted'];
   if (check && ['queued', 'preparing', 'running'].includes(check)) return ['running', `Check ${check}`];
-  return ['plain', 'Not checked'];
+  return ['plain', behind ? 'Check result not synced' : 'Not checked'];
 }
