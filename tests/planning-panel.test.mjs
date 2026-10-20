@@ -49,18 +49,16 @@ function render(selected, linked) {
     else globalThis.location = previous;
   }
 }
-test('Planning Intent selection shows compact metadata and an existing Intent destination', () => {
+test('Planning selection uses a full page with breadcrumbs and no side panel', () => {
   const html = render('intent', true);
-  assert.match(html, /Open Intent →/);
-  assert.match(html, /href="\/local\/project\/intents\/intent"/);
-  assert.match(html, /updated just now/);
+  assert.match(html, /aria-label="Breadcrumb"/);
+  assert.match(html, /Keep context while browsing/);
   assert.match(html, />History<\/button>/);
-  assert.match(html, /data-selected="true"/);
-  assert.doesNotMatch(html, /Entry provenance|Planning history|1 versions/);
+  assert.doesNotMatch(html, /planning-detail|<aside|Open Intent|Edit item|Entry provenance/);
 });
-test('legacy unlinked Planning details remain readable without inventing an Intent action', () => {
+test('legacy unlinked Planning full pages retain readable details', () => {
   const html = render('plan', false);
   assert.match(html, /Keep context while browsing/);
-  assert.match(html, /Clear navigation/);
-  assert.doesNotMatch(html, /Open Intent|Start work|Entry provenance|1 versions/);
+  assert.match(html, /aria-label="Breadcrumb"/);
+  assert.doesNotMatch(html, /Open Intent|Start work|Entry provenance|1 versions|<aside/);
 });

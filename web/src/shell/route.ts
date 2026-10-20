@@ -43,3 +43,12 @@ export function entryFor(signedIn: boolean, search: string): 'public' | 'account
   if (!signedIn) return 'public';
   return params.get('project') ? 'project' : 'account';
 }
+
+/** Planning keeps the existing full-page destinations until the dedicated pages land. */
+export function planningDestination(
+  target: { kind: 'intent' | 'planning' | 'initiative'; id: string } | { kind: 'list' },
+): Record<string, string> {
+  if (target.kind === 'intent') return { projectTab: 'intent', intent: target.id };
+  if (target.kind === 'list') return { projectTab: 'planning' };
+  return { projectTab: 'planning', planningItem: target.id, planningRoute: `${target.kind}:${target.id}` };
+}

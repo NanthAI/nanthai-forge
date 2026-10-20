@@ -8,6 +8,7 @@ import ts from 'typescript';
 import { moduleUrl } from './convex-module.mjs';
 const planningRows = await import(moduleUrl('../web/src/planning-rows.ts'));
 const intentProgress = await import(moduleUrl('../src/work-intent-progress.ts'));
+const route = await import(moduleUrl('../web/src/shell/route.ts'));
 const intentModel = await import(moduleUrl('../web/src/intents/model.ts'));
 
 // Exercise the actual editor handlers with deterministic state and deferred network
@@ -67,7 +68,13 @@ function editor() {
                       ? { PageHead: 'header' }
                       : name === './WorkspaceUI'
                         ? { useDestination: () => hooks.useState(''), ActionPanel: 'section' }
-                        : {},
+                        : name === './shell/location'
+                          ? { routeUrlState: () => new URL('http://localhost/'), cleanUrl: value => value }
+                          : name === './shell/route'
+                            ? route
+                            : name === './ui/primitives'
+                              ? { Button: 'button' }
+                              : {},
   });
   const data = { revision: 1, intents: [], planningItems: [], planningComments: [], hostedEvents: [] };
   const props = { data, busy: false, scope: 'hosted', act: async () => {} };
@@ -88,7 +95,10 @@ function editor() {
     return row.props.children[1];
   };
   const submit = () => find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
-  return { props, field, submit };
+  const click = label =>
+    find(node => node.type === 'button' && node.props.children === label).props.onClick();
+  click('New Intent');
+  return { props, field, submit, click, find };
 }
 const deferred = () => {
   let resolve;
@@ -123,7 +133,7 @@ test('successful save retains its created item identity when a newer remote vers
   ui.field('Details').props.onChange({ target: { value: 'My continued draft' } });
   reply.resolve({ operationId: original.operationId });
   await saving;
-  assert.equal(ui.field('Planning item').props.value, original.itemId);
+  assert.equal(ui.find(node => node.type === 'form').props['aria-label'], 'Edit item');
   assert.equal(ui.field('Details').props.value, 'My continued draft');
   assert.equal(ui.field('Title').props.value, 'My item');
   await ui.submit();
@@ -169,9 +179,18 @@ test('late acknowledgement does not replace another selected editor or its draft
       intentIds: [],
     },
   ];
-  await ui.field('Planning item').props.onChange({ target: { value: 'other' } });
+  ui.click('New Initiative');
+  ui.field('Title').props.onChange({ target: { value: 'Other item' } });
+  ui.field('Details').props.onChange({ target: { value: 'Other draft' } });
   reply.resolve({ operationId: original.operationId });
   await saving;
-  assert.equal(ui.field('Planning item').props.value, 'other');
+  assert.equal(ui.find(node => node.type === 'form').props['aria-label'], 'New Initiative');
   assert.equal(ui.field('Details').props.value, 'Other draft');
+});
+
+test('an empty filter does not claim no Intents exist when ungrouped Work Intents are loaded', () => {
+  const ui = editor();
+  ui.props.data.intents = [{ id: 'existing', outcome: 'Already planned', status: 'active' }];
+  ui.find(node => node.props?.label === 'Planning status').props.onChange('proposed');
+  assert.ok(ui.find(node => node.type === 'p' && node.props.children === 'No Intents match this view.'));
 });

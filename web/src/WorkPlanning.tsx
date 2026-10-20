@@ -1,26 +1,32 @@
+// SPDX-License-Identifier: Apache-2.0
+import { useEffect, useRef, useState, type ReactNode, type FormEvent } from 'react';
 import { Menu } from './ui/Menu';
 import { ErrorToast } from './ui/Toast';
-// SPDX-License-Identifier: Apache-2.0
-import { PlanningDetail } from './PlanningDetail';
-import { intentProgress } from '../../src/work-intent-progress';
-import { PlanningIntents } from './PlanningIntents';
-import { planningGroups, planningRowMatches, type PlanningFilter } from './planning-rows';
+import { Button, Panel, Segmented, StatusPill } from './ui/primitives';
+import { WorkRow } from './ui/WorkRow';
+import { age } from './ui/status';
+import { Glyph } from './ui/Glyph';
+import {
+  planningGroups,
+  planningRowMatches,
+  type PlanningFilter,
+  type PlanningLane,
+  type PlanningRow,
+} from './planning-rows';
 import { intentFilterLabels, intentFilters } from './intents/model';
 import { PagedList } from './cockpit/ScaleList';
-import { Segmented, StatusPill } from './ui/primitives';
-import { age } from './ui/status';
+import { CopyPrompt } from './cockpit/CopyPrompt';
 import { cleanUrl, routeUrlState } from './shell/location';
+import { planningDestination } from './shell/route';
 import { PageHead } from './shell/Shell';
 import { useWorkHeader } from './shell/WorkHeader';
-import { Icon } from './Icons';
 import { ActionPanel, useDestination } from './WorkspaceUI';
-import { useEffect, useState, useRef, type ReactNode } from 'react';
 import type { PlanningCommand, PlanningItem, PlanningWrite, WorkData } from '../../src/work-types';
 
 export type PlanningData = Pick<
   WorkData,
   'revision' | 'intents' | 'planningItems' | 'planningComments' | 'hostedEvents'
-> & { lanes?: readonly { intentId: string }[] };
+> & { lanes?: readonly PlanningLane[] };
 export type PlanningExport = { json: string; filename: string; sha256: string };
 export type PlanningAct = (command: PlanningWrite) => Promise<{ operationId: string } | void>;
 type Props = {
@@ -154,51 +160,21 @@ export function WorkPlanning({
   renderBody?: (item: PlanningItem, open: boolean) => ReactNode;
 }) {
   const workHeader = useWorkHeader();
-  const loadSequence = useRef(0),
-    [loadingItem, setLoadingItem] = useState(false);
-  const [selected, choose] = useDestination('planningItem');
-  const [historyItem, setHistoryItem] = useState('');
-  const selectionOrigin = useRef<HTMLElement | null>(null);
-  function closeDetails() {
-    const origin = selectionOrigin.current?.isConnected
-      ? selectionOrigin.current
-      : document.querySelector<HTMLElement>('.planning-list [aria-expanded="true"]');
-    choose('');
-    requestAnimationFrame(() => origin?.focus());
-  }
-  function selectItem(id: string) {
-    if (selected === id) return closeDetails();
-    if (document.activeElement instanceof HTMLElement && !document.activeElement.closest('.planning-detail'))
-      selectionOrigin.current = document.activeElement;
-    setHistoryItem('');
-    choose(id);
-  }
+  const initiativeWrites = useRef(
+    new Map<string, Extract<PlanningCommand, { action: 'put-planning-item' }>>(),
+  );
+  const [selected] = useDestination('planningItem');
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [search, setSearch] = useState(''),
-    [editorOpen, setEditorOpen] = useState(false);
-  const items = [...new Map(data.planningItems.map(item => [item.id, item])).values()].map(item => ({
-    ...item,
-    intentIds: item.intentIds ?? [],
-  }));
-  const selectedIntent = data.intents.find(intent => intent.id === selected);
-  const detailItem =
-    items.find(item => item.id === selected) ??
-    items.find(item => item.kind !== 'initiative' && item.intentIds.includes(selected)) ??
-    items.find(item => item.intentIds.includes(selected));
-  const detailIntent =
-    selectedIntent ?? data.intents.find(intent => detailItem?.intentIds.includes(intent.id));
-  const detailStatus = detailIntent
-    ? intentProgress(
-        detailIntent.status,
-        (data.lanes ?? []).filter(lane => lane.intentId === detailIntent.id).length,
-      )
-    : intentProgress(
-        detailItem?.status === 'closed' ? 'completed' : 'active',
-        detailItem?.status === 'in-progress' ? 1 : 0,
-      );
+    [initiative, setInitiative] = useState('');
+  const [filter, setFilter] = useState<PlanningFilter>('all');
+  const [linkedOnly, setLinkedOnly] = useState(!!intentId);
+  const [editorOpen, setEditorOpen] = useState(false),
+    [loadingItem, setLoadingItem] = useState(false);
   const [editing, setEditing] = useState(''),
     [version, setVersion] = useState(0);
-  const [kind, setKind] = useState<PlanningItem['kind']>('issue'),
-    [status, setStatus] = useState<PlanningItem['status']>('open');
+  const [kind, setKind] = useState<PlanningItem['kind']>('issue');
+  const [status, setStatus] = useState<PlanningItem['status']>('open');
   const [title, setTitle] = useState(''),
     [body, setBody] = useState(''),
     [parent, setParent] = useState('');
@@ -206,14 +182,12 @@ export function WorkPlanning({
   const [pending, setPending] = useState<Extract<PlanningCommand, { action: 'put-planning-item' }> | null>(
     null,
   );
-  const [filter, setFilter] = useState<PlanningFilter>('all'),
-    [initiative, setInitiative] = useState(''),
-    [linkedOnly, setLinkedOnly] = useState(!!intentId);
+  const [handoff, setHandoff] = useState('');
+  const loadSequence = useRef(0),
+    submission = useRef(false);
   const [exporting, setExporting] = useState(false),
-    [error, setError] = useState(''),
-    [hash, setHash] = useState('');
-  const current = items.find(item => item.id === editing),
-    confirmed = data.planningItems.find(item => item.operationId === pending?.operationId);
+    [error, setError] = useState('');
+  const items = [...new Map(data.planningItems.map(item => [item.id, item])).values()];
   const groups = planningGroups(items, data.intents, data.lanes ?? []);
   const needle = search.trim().toLowerCase();
   const scopedGroups = groups
@@ -228,29 +202,27 @@ export function WorkPlanning({
             group.title.toLowerCase().includes(needle)),
       ),
     }));
-  const countRows = [
-    ...new Map(scopedGroups.flatMap(group => group.rows).map(row => [row.id, row])).values(),
-  ];
+  const countRows = scopedGroups.flatMap(group => group.rows);
   const visibleGroups = scopedGroups.map(group => ({
     ...group,
     rows: group.rows.filter(row => planningRowMatches(row, filter)),
   }));
-  const emptyGroups = scopedGroups.filter(
-    group =>
-      group.id &&
-      !group.rows.length &&
-      !groups.find(value => value.id === group.id)?.rows.length &&
-      (!needle || group.title.toLowerCase().includes(needle)) &&
-      filter === 'all' &&
-      !linkedOnly,
-  );
-  const intentHref = (id: string) => {
+  const emptyGroups = visibleGroups.filter(group => group.item && !group.rows.length);
+  const detailItem =
+    items.find(item => item.id === selected) ?? items.find(item => item.intentIds?.includes(selected));
+  function href(destination: Parameters<typeof planningDestination>[0]) {
     const url = routeUrlState();
-    url.searchParams.set('projectTab', 'intent');
-    url.searchParams.set('intent', id);
-    url.searchParams.delete('planningItem');
+    for (const key of ['intent', 'lane', 'viewId', 'reviewView', 'planningItem', 'planning', 'planningRoute'])
+      url.searchParams.delete(key);
+    for (const [key, value] of Object.entries(planningDestination(destination)))
+      url.searchParams.set(key, value);
     return cleanUrl(url.href);
-  };
+  }
+  const intentHref = (id: string) => href({ kind: 'intent', id });
+  const itemHref = (item: PlanningItem) =>
+    href({ kind: item.kind === 'initiative' ? 'initiative' : 'planning', id: item.id });
+  const listHref = href({ kind: 'list' });
+  const confirmed = data.planningItems.find(item => item.operationId === pending?.operationId);
   useEffect(() => {
     if (confirmed) {
       setEditing(confirmed.id);
@@ -258,493 +230,443 @@ export function WorkPlanning({
       setPending(null);
     }
   }, [confirmed]);
+  function create(nextKind: PlanningItem['kind'], initiativeId = '') {
+    ++loadSequence.current;
+    setEditing('');
+    setVersion(0);
+    setKind(nextKind);
+    setStatus('open');
+    setTitle('');
+    setBody('');
+    setParent(initiativeId);
+    setLinks(intentId ? [intentId] : []);
+    setPending(null);
+    setError('');
+    setLoadingItem(false);
+    setEditorOpen(true);
+  }
   async function edit(id: string) {
     const sequence = ++loadSequence.current;
     setError('');
-    let item = items.find(value => value.id === id);
-    if (item && loadItem) {
-      setLoadingItem(true);
-      try {
-        item = await loadItem(id);
-      } catch (error) {
-        if (sequence === loadSequence.current) {
-          setLoadingItem(false);
-          setError((error as Error).message);
-        }
-        return;
-      }
-      if (sequence !== loadSequence.current) return;
+    setLoadingItem(true);
+    setEditorOpen(true);
+    try {
+      const item = loadItem ? await loadItem(id) : items.find(item => item.id === id);
+      if (sequence !== loadSequence.current || !item) return;
+      setEditing(id);
+      setVersion(item.version);
+      setKind(item.kind);
+      setStatus(item.status);
+      setTitle(item.title);
+      setBody(item.body);
+      setParent(item.initiativeId ?? '');
+      setLinks(item.intentIds ?? []);
+      setPending(null);
+    } catch (error) {
+      if (sequence === loadSequence.current) setError((error as Error).message);
+    } finally {
+      if (sequence === loadSequence.current) setLoadingItem(false);
     }
-    setLoadingItem(false);
-    setEditing(id);
-    setVersion(item?.version ?? 0);
-    setPending(null);
-    setKind(item?.kind ?? 'issue');
-    setStatus(item?.status ?? 'open');
-    setTitle(item?.title ?? '');
-    setBody(item?.body ?? '');
-    setParent(item?.initiativeId ?? '');
-    setLinks(item?.intentIds ?? (intentId ? [intentId] : []));
+  }
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (loadingItem || submission.current) return;
+    const delegate = (event.nativeEvent as SubmitEvent)?.submitter?.getAttribute('value') === 'delegate';
+    const command = pending ?? {
+      action: 'put-planning-item' as const,
+      operationId: crypto.randomUUID(),
+      itemId: editing || crypto.randomUUID(),
+      expectedVersion: version,
+      kind,
+      title,
+      body,
+      status,
+      intentIds: links,
+      ...(parent ? { initiativeId: parent } : {}),
+    };
+    const sequence = loadSequence.current;
+    setPending(command);
+    setError('');
+    submission.current = true;
+    try {
+      const acknowledgement = await act(command);
+      if (acknowledgement?.operationId === command.operationId && sequence === loadSequence.current) {
+        setEditing(command.itemId);
+        setVersion(command.expectedVersion + 1);
+        setPending(current => (current?.operationId === command.operationId ? null : current));
+        // A response can overtake the reactive current-only page. Keep this exact
+        // item/version for a continued draft, rather than creating a second item.
+        if (delegate) setHandoff(command.itemId);
+      }
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      submission.current = false;
+    }
   }
   async function download() {
     setExporting(true);
     setError('');
     try {
       const result = await exportHistory();
-      const url = URL.createObjectURL(new Blob([result.json], { type: 'application/json' })),
-        anchor = document.createElement('a');
+      const url = URL.createObjectURL(new Blob([result.json], { type: 'application/json' }));
+      const anchor = document.createElement('a');
       anchor.href = url;
       anchor.download = result.filename;
       document.body.append(anchor);
       anchor.click();
       anchor.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      setHash(result.sha256);
-    } catch (e) {
-      setError((e as Error).message);
+    } catch (error) {
+      setError((error as Error).message);
     } finally {
       setExporting(false);
     }
   }
-  const editor = readOnly ? undefined : (
-    <ActionPanel title={editing ? 'Edit Intent' : 'New Intent'} open={editorOpen} onChange={setEditorOpen}>
-      <form
-        onSubmit={async event => {
-          event.preventDefault();
-          if (loadingItem) return;
-          const command = pending ?? {
-            action: 'put-planning-item' as const,
-            operationId: crypto.randomUUID(),
-            itemId: editing || crypto.randomUUID(),
-            expectedVersion: version,
-            kind,
-            title,
-            body,
-            status,
-            intentIds: links,
-            ...(kind === 'issue' && parent ? { initiativeId: parent } : {}),
-          };
-          const selection = loadSequence.current;
-          setPending(command);
-          const acknowledgement = await act(command);
-          // Current-only hosted pages may already show a later agent's version. A
-          // successful original operation still identifies the item that we saved.
-          if (acknowledgement?.operationId === command.operationId && selection === loadSequence.current) {
-            setEditing(command.itemId);
-            setVersion(command.expectedVersion + 1);
-            setPending(current => (current?.operationId === command.operationId ? null : current));
-          }
-        }}
-      >
-        <label>
-          Planning item
-          <select value={editing} onChange={event => edit(event.target.value)}>
-            <option value="">New item</option>
-            {items.map(item => (
+  async function closeInitiative(item: PlanningItem) {
+    try {
+      // Summary bodies are truncated. Always hydrate before replacing a record.
+      const full = loadItem ? await loadItem(item.id) : item;
+      const command = initiativeWrites.current.get(item.id) ?? {
+        action: 'put-planning-item',
+        operationId: crypto.randomUUID(),
+        itemId: full.id,
+        expectedVersion: full.version,
+        kind: full.kind,
+        title: full.title,
+        body: full.body,
+        status: 'closed',
+        intentIds: full.intentIds,
+        ...(full.initiativeId ? { initiativeId: full.initiativeId } : {}),
+      };
+      initiativeWrites.current.set(item.id, command);
+      const acknowledgement = await act(command);
+      if (acknowledgement?.operationId === command.operationId) initiativeWrites.current.delete(item.id);
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  }
+  const editor = !readOnly && editorOpen && (
+    <form
+      className="planning-create"
+      aria-label={editing ? 'Edit item' : kind === 'issue' ? 'New Intent' : 'New Initiative'}
+      onSubmit={save}
+    >
+      <label>
+        Title
+        <input
+          autoFocus
+          required
+          disabled={loadingItem}
+          value={title}
+          onChange={event => {
+            setTitle(event.target.value);
+            setPending(null);
+          }}
+        />
+      </label>
+      <label>
+        {kind === 'issue' ? 'Initiative' : 'Parent Initiative'}
+        <select
+          disabled={loadingItem}
+          value={parent}
+          onChange={event => {
+            setParent(event.target.value);
+            setPending(null);
+          }}
+        >
+          <option value="">No Initiative</option>
+          {items
+            .filter(item => item.kind === 'initiative' && item.id !== editing)
+            .map(item => (
               <option key={item.id} value={item.id}>
-                {item.kind === 'issue' ? 'Intent' : 'Initiative'}: {item.title} · version {item.version}
+                {item.title}
               </option>
             ))}
-          </select>
-        </label>
-        {loadingItem && <p role="status">Loading the complete planning item…</p>}
-        <fieldset disabled={loadingItem} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-          {current ? (
-            <p className="provenance">
-              {current.kind === 'issue' ? 'Intent' : 'Initiative'} · loaded version {version}
-              {version !== current.version && (
-                <>
-                  {' '}
-                  · Newer version available.{' '}
-                  <button type="button" onClick={() => edit(editing)}>
-                    Load current planning item
-                  </button>
-                </>
-              )}
-            </p>
-          ) : (
-            <label>
-              Item kind
-              <select
-                value={kind}
-                onChange={event => {
-                  setKind(event.target.value as typeof kind);
-                  setParent('');
-                  setPending(null);
-                }}
-              >
-                <option value="issue">Intent</option>
-                <option value="initiative">Initiative</option>
-              </select>
-            </label>
-          )}
-          <label>
-            Title
-            <input
-              required
-              value={title}
-              onChange={event => {
-                setTitle(event.target.value);
-                setPending(null);
-              }}
-            />
-          </label>
-          <label>
-            Details
-            <textarea
-              value={body}
-              onChange={event => {
-                setBody(event.target.value);
-                setPending(null);
-              }}
-            />
-          </label>
-          <label>
-            Status
-            <select
-              value={status}
-              onChange={event => {
-                setStatus(event.target.value as typeof status);
-                setPending(null);
-              }}
-            >
-              <option value="open">Open</option>
-              <option value="in-progress">In progress</option>
-              <option value="closed">Closed</option>
-            </select>
-          </label>
-          {kind === 'issue' && (
-            <label>
-              Parent Initiative (optional)
-              <select
-                value={parent}
-                onChange={event => {
-                  setParent(event.target.value);
-                  setPending(null);
-                }}
-              >
-                <option value="">None</option>
-                {items
-                  .filter(item => item.kind === 'initiative')
-                  .map(item => (
-                    <option key={item.id} value={item.id}>
-                      {item.title}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          )}
-          <ActionPanel title={`Linked Intents · ${links.length}`}>
-            <fieldset>
-              <legend>Linked Intents</legend>
-              {!data.intents.length && <p>No Intents yet. You can link them later.</p>}
-              {data.intents.map(intent => (
-                <label className="publication-draft" key={intent.id}>
-                  <input
-                    type="checkbox"
-                    checked={links.includes(intent.id)}
-                    onChange={event => {
-                      setLinks(previous =>
-                        event.target.checked
-                          ? [...previous, intent.id]
-                          : previous.filter(id => id !== intent.id),
-                      );
-                      setPending(null);
-                    }}
-                  />
-                  {intent.outcome}
-                </label>
-              ))}
-            </fieldset>
-          </ActionPanel>
-          <button disabled={busy || !title.trim()}>{pending ? 'Reconcile item' : 'Save item'}</button>
-        </fieldset>
-      </form>
-    </ActionPanel>
+        </select>
+      </label>
+      <label className="planning-wide">
+        Details
+        <textarea
+          disabled={loadingItem}
+          value={body}
+          onChange={event => {
+            setBody(event.target.value);
+            setPending(null);
+          }}
+        />
+      </label>
+      <div className="planning-create-actions">
+        <Button variant="primary" type="submit" disabled={busy || loadingItem || !title.trim()}>
+          {editing ? 'Save' : 'Create'}
+        </Button>
+        {kind === 'issue' && !editing && (
+          <Button
+            type="submit"
+            value="delegate"
+            icon="handoff"
+            disabled={busy || loadingItem || !title.trim()}
+          >
+            Create &amp; hand to an agent
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          onClick={() => {
+            ++loadSequence.current;
+            setEditorOpen(false);
+          }}
+        >
+          Cancel
+        </Button>
+        {!editing && kind === 'issue' && (
+          <span className="planning-create-hint">
+            Starts as Planned · In motion begins with its first Lane
+          </span>
+        )}
+        {loadingItem && <span role="status">Loading item…</span>}
+      </div>
+    </form>
   );
+  const renderRow = (row: PlanningRow) => (
+    <WorkRow
+      key={row.id}
+      title={row.title}
+      href={row.intentId ? intentHref(row.intentId) : itemHref(items.find(item => item.id === row.itemId)!)}
+      tone={row.tone}
+      label={row.label}
+      fact={row.fact}
+      age={row.at ? <time title={row.at}>{age(row.at, Date.now())}</time> : undefined}
+      done={planningRowMatches(row, 'done')}
+    />
+  );
+  const actions = !readOnly && (
+    <>
+      <Button variant="ghost" icon="initiative" onClick={() => create('initiative')}>
+        New Initiative
+      </Button>
+      <Button variant="primary" icon="plus" onClick={() => create('issue')}>
+        New Intent
+      </Button>
+      <Menu label="⋯" ariaLabel="More planning actions">
+        <button disabled={exporting} onClick={() => void download()}>
+          Export planning history
+        </button>
+      </Menu>
+    </>
+  );
+  if (selected && detailItem)
+    return (
+      <section className="planning-board fx-page planning-page">
+        <nav className="planning-crumbs" aria-label="Breadcrumb">
+          <a href={listHref}>Work</a>
+          <span>›</span>
+          <a href={listHref}>Planning</a>
+          <span>›</span>
+          <span title={detailItem.title}>{detailItem.title}</span>
+        </nav>
+        <PageHead
+          title={detailItem.title}
+          actions={
+            !readOnly && (
+              <Button variant="ghost" onClick={() => void edit(detailItem.id)}>
+                Edit
+              </Button>
+            )
+          }
+        />
+        {editor}
+        <Panel title="Details">{renderBody ? renderBody(detailItem, true) : <p>{detailItem.body}</p>}</Panel>
+        {detailItem.kind === 'initiative' && (
+          <Panel title="Intents">
+            <PagedList
+              rows={groups.find(group => group.id === detailItem.id)?.rows ?? []}
+              size={5}
+              label="Intents"
+              className="fx-wrs"
+              render={renderRow}
+            />
+          </Panel>
+        )}
+        <Button variant="ghost" onClick={() => setHistoryOpen(!historyOpen)}>
+          History
+        </Button>
+        {historyOpen && (
+          <div className="planning-detail-history">
+            {provenance ? (
+              provenance(detailItem.operationId)
+            ) : (
+              <PlanningProvenance operationId={detailItem.operationId} data={data} />
+            )}
+            {!renderDetails &&
+              data.planningItems
+                .filter(item => item.id === detailItem.id)
+                .map(item => (
+                  <div key={item.version}>
+                    <p>
+                      Version {item.version}: {item.title} · {item.status} · {item.at}
+                    </p>
+                    <p>{item.body}</p>
+                  </div>
+                ))}
+          </div>
+        )}
+        {renderDetails ? (
+          renderDetails(detailItem, historyOpen)
+        ) : (
+          <PlanningThread itemId={detailItem.id} data={data} busy={busy} readOnly={readOnly} act={act} />
+        )}
+        {error && <ErrorToast>{error}</ErrorToast>}
+      </section>
+    );
   return (
     <section
       className={`work-section planning-board${workHeader ? ' fx-page' : ''}`}
       aria-label="Intents and Initiatives"
     >
-      <PageHead title="Planning" actions={editor} />
-      <div className="planning-toolbar">
-        <div className="planning-filters">
-          <Segmented
-            label="Planning status"
-            value={filter}
-            onChange={setFilter}
-            options={intentFilters.map(id => ({
-              id,
-              label: (
-                <>
-                  {intentFilterLabels[id]}{' '}
-                  <span className="fx-count">
-                    {countRows.filter(row => planningRowMatches(row, id)).length}
-                  </span>
-                </>
-              ),
-            }))}
-          />
-        </div>
-        <label>
-          <span className="sr-only">Search Intents</span>
-          <input
-            type="search"
-            placeholder="Find an Intent"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </label>
-        <label>
-          <span className="sr-only">Initiative</span>
-          <select
-            aria-label="Initiative"
-            value={initiative}
-            onChange={event => setInitiative(event.target.value)}
-          >
-            <option value="">All Initiatives</option>
-            {groups
-              .filter(group => group.id)
-              .map(group => (
-                <option key={group.id} value={group.id}>
-                  {group.title}
-                </option>
-              ))}
-          </select>
-        </label>
-        {!readOnly && (
-          <Menu label="⋯" ariaLabel="More planning actions">
-            <button disabled={exporting} onClick={() => void download()}>
-              Export planning history
-            </button>
-          </Menu>
-        )}
-      </div>
-      {intentId && (
-        <label className="lane-select">
-          <input
-            type="checkbox"
-            checked={linkedOnly}
-            onChange={event => setLinkedOnly(event.target.checked)}
-          />
-          Linked to the selected Intent
-        </label>
-      )}
-      <div className={`planning-layout ${selected ? 'has-selection' : ''}`}>
-        <div className="planning-list">
-          <div className="planning-columns">
-            <span>Intent</span>
-            <span>Status</span>
+      <PageHead title="Planning" actions={actions} />
+      <div className="planning-list fx-panel">
+        <div className="planning-toolbar">
+          <div className="planning-filters">
+            <Segmented
+              label="Planning status"
+              value={filter}
+              onChange={setFilter}
+              options={intentFilters.map(id => ({
+                id,
+                label: (
+                  <>
+                    {intentFilterLabels[id]}{' '}
+                    <span className="fx-count">
+                      {countRows.filter(row => planningRowMatches(row, id)).length}
+                    </span>
+                  </>
+                ),
+              }))}
+            />
           </div>
-          {emptyGroups.length > 0 && (
-            <details className="planning-empty-initiatives">
-              <summary>
-                {emptyGroups.length} {emptyGroups.length === 1 ? 'Initiative' : 'Initiatives'} with no
-                matching Intents
-              </summary>
-              {emptyGroups.map(group => (
-                <button
-                  key={group.id}
-                  aria-expanded={selected === group.id}
-                  aria-controls="planning-detail"
-                  onClick={() => selectItem(group.id)}
-                >
-                  <Icon name="initiative" />
-                  {group.title}
-                </button>
-              ))}
-            </details>
-          )}
-          {visibleGroups
-            .filter(group => group.rows.length)
-            .map(group => (
-              <section key={group.id} className="planning-group">
-                <header>
-                  <button
-                    className="text-button"
-                    aria-expanded={selected === group.id}
-                    aria-controls="planning-detail"
-                    disabled={!group.id}
-                    onClick={() => selectItem(group.id)}
-                  >
-                    <Icon name="initiative" />
+          <label className="planning-search">
+            <span className="sr-only">Find an Intent or Initiative</span>
+            <input
+              type="search"
+              placeholder="Find an Intent or Initiative"
+              value={search}
+              onChange={event => setSearch(event.target.value)}
+            />
+          </label>
+          <label className="planning-initiative-filter">
+            <span className="sr-only">Initiative</span>
+            <select
+              aria-label="Initiative"
+              value={initiative}
+              onChange={event => setInitiative(event.target.value)}
+            >
+              <option value="">All Initiatives</option>
+              {groups
+                .filter(group => group.item)
+                .map(group => (
+                  <option key={group.id} value={group.id}>
                     {group.title}
-                  </button>
-                  <span>
-                    {group.rows.length} {group.rows.length === 1 ? 'Intent' : 'Intents'}
-                    {group.rows.some(row => planningRowMatches(row, 'in-motion')) && (
-                      <>
-                        {' '}
-                        · {group.rows.filter(row => planningRowMatches(row, 'in-motion')).length} in motion
-                      </>
-                    )}
-                  </span>
-                </header>
-                <PagedList
-                  rows={group.rows}
-                  size={5}
-                  label="Intents"
-                  className="planning-linked-intents"
-                  render={row => (
-                    <li key={row.id} data-selected={selected === (row.intentId ?? row.itemId)}>
-                      <button
-                        className="planning-row-title"
-                        aria-expanded={selected === (row.intentId ?? row.itemId)}
-                        aria-controls="planning-detail"
-                        onClick={() => selectItem((row.intentId ?? row.itemId)!)}
-                      >
-                        {row.title}
-                      </button>
-                      <StatusPill
-                        tone={
-                          row.label === 'Planned' || row.label === 'Abandoned'
-                            ? 'plain'
-                            : row.label === 'Working'
-                              ? 'active'
-                              : 'passed'
-                        }
-                      >
-                        {row.label}
-                      </StatusPill>
-                    </li>
-                  )}
-                />
-              </section>
-            ))}
+                  </option>
+                ))}
+            </select>
+          </label>
         </div>
-        {selected && (
-          <PlanningDetail
-            onClose={closeDetails}
-            title={
-              <>
-                <Icon name="intent" />
-                {detailIntent?.outcome ?? detailItem?.title}
-              </>
-            }
-          >
-            {[detailItem]
-              .filter((item): item is NonNullable<typeof item> => !!item)
-              .map(item => (
-                <article className="work-note" key={item.id}>
-                  {renderBody ? renderBody(item, true) : <p>{item.body}</p>}
-                  <div className="planning-detail-meta">
-                    {item.initiativeId && (
-                      <>
-                        <button className="text-button" onClick={() => choose(item.initiativeId!)}>
-                          {items.find(parent => parent.id === item.initiativeId)?.title ??
-                            'Linked Initiative'}
-                        </button>
-                        <span>·</span>
-                      </>
-                    )}
-                    <span>{detailStatus}</span>
-                    <span>·</span>
-                    <time title={item.at}>updated {age(item.at, Date.now())}</time>
-                    <span>·</span>
-                    <button
-                      className="text-button"
-                      aria-expanded={historyItem === selected}
-                      onClick={() => setHistoryItem(historyItem === selected ? '' : selected)}
-                    >
-                      History
-                    </button>
-                  </div>
-                  <div className="planning-detail-actions">
-                    {detailIntent && (
-                      <a className="fx-btn fx-btn-primary" href={intentHref(detailIntent.id)}>
-                        Open Intent →
-                      </a>
-                    )}
-                    {!readOnly && (
-                      <button
-                        className="text-button"
-                        onClick={() => {
-                          void edit(item.id);
-                          setEditorOpen(true);
-                        }}
-                      >
-                        Edit item
-                      </button>
-                    )}
-                  </div>
-                  {historyItem === selected && (
-                    <div className="planning-detail-history">
-                      {provenance ? (
-                        provenance(item.operationId)
-                      ) : (
-                        <PlanningProvenance operationId={item.operationId} data={data} />
-                      )}
-                    </div>
-                  )}
-                  {item.kind === 'initiative' && (
-                    <ul>
-                      {items
-                        .filter(child => child.initiativeId === item.id)
-                        .map(child => (
-                          <li key={child.id}>
-                            <button className="text-button" onClick={() => choose(child.id)}>
-                              <Icon name="issue" />
-                              {child.title}
-                            </button>{' '}
-                            · {child.status}
-                          </li>
-                        ))}
-                    </ul>
-                  )}
-                  {item.intentIds.length > 1 && (
-                    <PlanningIntents
-                      ids={item.intentIds}
-                      intents={data.intents}
-                      lanes={data.lanes ?? []}
-                      href={intentHref}
-                    />
-                  )}
-                  {renderDetails ? (
-                    renderDetails(item, historyItem === selected)
+        {editor}
+        {handoff && data.intents.some(intent => intent.id === handoff) && (
+          <CopyPrompt
+            key={handoff}
+            request={{ situation: 'start-intent', intentId: handoff }}
+            label="Hand to an agent"
+            initiallyOpen
+            onClose={() => setHandoff('')}
+          />
+        )}
+        {intentId && (
+          <label className="lane-select">
+            <input
+              type="checkbox"
+              checked={linkedOnly}
+              onChange={event => setLinkedOnly(event.target.checked)}
+            />
+            Linked to the selected Intent
+          </label>
+        )}
+        {visibleGroups
+          .filter(group => group.rows.length)
+          .map(group => {
+            const motion = group.rows.filter(row => planningRowMatches(row, 'in-motion')).length;
+            const done = group.rows.filter(row => planningRowMatches(row, 'done')).length;
+            const children = groups.find(value => value.id === group.id)?.rows ?? [];
+            const label =
+              group.item?.status === 'closed' ||
+              (children.length > 0 && children.every(row => planningRowMatches(row, 'done')))
+                ? 'Done'
+                : children.some(row => planningRowMatches(row, 'in-motion'))
+                  ? 'In motion'
+                  : group.id === 'proposed'
+                    ? 'Proposed'
+                    : 'Planned';
+            return (
+              <section key={group.id} className="planning-group">
+                <header className="planning-grp">
+                  {group.item ? (
+                    <a className="planning-group-title" href={itemHref(group.item)}>
+                      <Glyph name="initiative" size={16} />
+                      {group.title}
+                    </a>
                   ) : (
-                    <>
-                      {historyItem === selected && (
-                        <div className="planning-detail-history">
-                          {data.planningItems
-                            .filter(value => value.id === item.id)
-                            .map(value => (
-                              <div key={value.version}>
-                                <p>
-                                  Version {value.version}: {value.title} · {value.status} · {value.at}
-                                </p>
-                                <p>{value.body}</p>
-                                <p className="provenance">
-                                  Intent IDs: {value.intentIds.join(', ') || 'None'} · Initiative:{' '}
-                                  {value.initiativeId ?? 'None'}
-                                </p>
-                                <PlanningProvenance operationId={value.operationId} data={data} />
-                              </div>
-                            ))}
-                        </div>
-                      )}
-                      <PlanningThread
-                        itemId={item.id}
-                        data={data}
-                        busy={busy}
-                        act={act}
-                        readOnly={readOnly}
-                      />
-                    </>
+                    <span className="planning-group-title">
+                      <Glyph name="initiative" size={16} />
+                      {group.title}
+                    </span>
                   )}
-                </article>
-              ))}
-          </PlanningDetail>
+                  <span className="planning-group-count">
+                    {group.rows.length} {group.rows.length === 1 ? 'Intent' : 'Intents'}
+                    {motion > 0 && <> · {motion} in motion</>}
+                    {done > 0 && <> · {done} done</>}
+                  </span>
+                  {(group.item || group.id === 'proposed') && (
+                    <StatusPill
+                      tone={label === 'Done' ? 'passed' : label === 'In motion' ? 'active' : 'plain'}
+                    >
+                      {label}
+                    </StatusPill>
+                  )}
+                  {group.item && !readOnly && (
+                    <Menu label="⋯" ariaLabel={`Actions for ${group.title}`}>
+                      <button onClick={() => void edit(group.item!.id)}>Edit</button>
+                      <button onClick={() => create('issue', group.id)}>Add Intent</button>
+                      <button disabled={busy} onClick={() => void closeInitiative(group.item!)}>
+                        Mark done
+                      </button>
+                    </Menu>
+                  )}
+                </header>
+                <PagedList rows={group.rows} size={5} label="Intents" className="fx-wrs" render={renderRow} />
+              </section>
+            );
+          })}
+        {emptyGroups.length > 0 && (
+          <details className="planning-empty-initiatives">
+            <summary>
+              {emptyGroups.length} {emptyGroups.length === 1 ? 'Initiative' : 'Initiatives'} with no matching
+              Intents
+            </summary>
+            {emptyGroups.map(group => (
+              <a key={group.id} href={itemHref(group.item!)}>
+                <Glyph name="initiative" size={16} />
+                {group.title}
+              </a>
+            ))}
+          </details>
+        )}
+        {!countRows.filter(row => planningRowMatches(row, filter)).length && (
+          <p className="planning-empty">
+            {items.length || data.intents.length ? 'No Intents match this view.' : 'No Intents yet.'}
+          </p>
         )}
       </div>
-      {!visibleGroups.some(group => group.rows.length) && !emptyGroups.length && (
-        <p>{items.length ? 'No Intents match this view.' : 'No Intents yet.'}</p>
-      )}
-      {hash && (
-        <p className="provenance">
-          Private JSON export · SHA-256 <code>{hash}</code>
-        </p>
-      )}
       {error && <ErrorToast>{error}</ErrorToast>}
     </section>
   );

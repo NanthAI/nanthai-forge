@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { age } from './ui/status';
+import type { PlanningLane } from './planning-rows';
 import { useState } from 'react';
 import { ActionPanel } from './WorkspaceUI';
 import { useConvex } from 'convex/react';
@@ -160,7 +161,7 @@ export default function HostedIndexedPlanning(
 ) {
   const client = useConvex();
   const items = useWorkRecords<PlanningItem>(props.projectId, props.workspace, 'planningItems');
-  const lanes = useWorkRecords<{ intentId: string }>(props.projectId, props.workspace, 'lanes');
+  const lanes = useWorkRecords<PlanningLane>(props.projectId, props.workspace, 'lanes');
   const data: PlanningData = {
     revision: props.workspace.revision,
     intents: props.intents,

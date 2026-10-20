@@ -129,7 +129,8 @@ test('Planning filters and group totals count the displayed Intent states, inclu
     />Issue<|Find an issue|No Intent yet|>Working\s*<span class="fx-count"|New planning item|>Updated</,
   );
   assert.match(html, /Find an Intent/);
-  assert.match(html, /<span>Intent<\/span><span>Status<\/span>/);
+  assert.doesNotMatch(html, /planning-columns|<span>Intent<\/span><span>Status<\/span>/);
+  assert.match(html, /fx-wr-title/);
   assert.match(html, /aria-label="More planning actions"[^>]*aria-haspopup="menu"[^>]*aria-expanded="false"/);
   assert.doesNotMatch(html, /planning-more|<details[^>]*>[^]*Export planning history/);
 });
