@@ -200,7 +200,7 @@ export function InitiativePage({
   );
   return (
     <WorkDetailLayout
-      className="fx-initiative planning-board"
+      className="fx fx-initiative planning-board"
       timelineCount={timeline.length}
       messageCount={data.planningComments.filter(comment => comment.itemId === item.id).length}
       crumbs={

@@ -144,6 +144,8 @@ test('Initiative uses the shared detail layout and WorkRows, with parent and chi
     h(InitiativePage, { ...props, item: { ...initiative, initiativeId: 'parent' } }),
   );
   assert.match(html, /fx-detail-grid/);
+  // Hosted renders it inside the legacy planning section; its own cockpit scope keeps it full width.
+  assert.match(html, /^<div class="fx-page fx-detail fx /);
   assert.match(html, /href="\/initiative\/parent"/);
   assert.match(html, /href="\/initiative\/child"/);
   assert.match(html, />Timeline<\/h2>/);
