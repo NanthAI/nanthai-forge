@@ -47,4 +47,4 @@ links (`src/agent-links.ts`), and CLI hosting output (`convex/projectHosting.ts`
 
 ## More
 
-[Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md) · [Development](docs/development.md) · [Security](docs/security.md) · [Operations](docs/operations.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE.md)
+[Documentation](docs/README.md) · [Why Forge](docs/why-forge.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md) · [Development](docs/development.md) · [Security](docs/security.md) · [Operations](docs/operations.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE.md)

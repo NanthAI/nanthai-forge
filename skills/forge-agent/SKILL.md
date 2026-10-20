@@ -5,6 +5,12 @@ description: Concise recorded Forge Intent/Lane/check/acceptance workflow and op
 
 Use ordinary search/read/edit tools on the selected source. For recorded delivery use the installed `nforge` command; `nforge agent ROOT ACTION --help` gives parameters (`--command-file FILE` avoids JSON quoting).
 
+## Working on Forge, not GitHub
+
+- Run only the tests your change affects, plus typecheck, lint and format checks on touched files. Never run the full suite locally: `finish` runs the project's check on the project's runner for the combined work of concurrent Lanes.
+- Let `finish` compose concurrent Lanes into one check. If a Lane fails, Forge drops it from the batch and the others still land after passing; a failed candidate never turns main red. Do not rebase, babysit a merge queue or rerun CI per PR. Configured native runners batch code changes; other paths retain ordinary checks and project acceptance policy.
+- Read peers and presence before editing to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
+
 ## Short forms
 
 ```sh

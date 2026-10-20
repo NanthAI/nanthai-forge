@@ -2,6 +2,8 @@
 // Explicit installed documentation inventory. Review additions alongside package contents;
 // do not replace this list with a docs/** wildcard that would admit private output.
 export const packageDocuments = [
+  'docs/README.md',
+  'docs/why-forge.md',
   'docs/quickstart.md',
   'docs/agents.md',
   'docs/agents/briefings.md',

@@ -2,6 +2,12 @@
 
 The installed package includes `skills/forge-agent/SKILL.md`. Install it in your coding agent's skill directory for recorded Work or graph context. It is optional and self-contained; ordinary local-file questions use normal tools without loading workflow guidance. Use supported Node 22 or 24. `nforge agent --help` lists actions; `nforge agent ROOT ACTION --help` gives required parameters. Use `--command-file FILE` for parameters that are awkward to quote.
 
+## Working on Forge, not GitHub
+
+- Run only the tests your change affects, plus typecheck, lint and format checks on touched files. Never run the full suite locally: `finish` runs the project's check on the project's runner for the combined work of concurrent Lanes.
+- Let `finish` compose concurrent Lanes into one check. If a Lane fails, Forge drops it from the batch and the others still land after passing; a failed candidate never turns main red. Do not rebase, babysit a merge queue or rerun CI per PR. Configured native runners batch code changes; other paths retain ordinary checks and project acceptance policy.
+- Read peers and presence before editing to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
+
 For a known-file question, search and read the selected directory normally. Do not create Work or index simply to read source. For symbol/dependency investigation, `nforge mcp ROOT --agent` supplies the eight existing source tools and four concise workflow tools. It awaits the existing index worker when a source query needs missing/stale analysis. CLI graph queries still use explicit `nforge index ROOT`. Partial analysis never establishes complete independence.
 
 For a change, run `nforge agent ROOT start '{"outcome":"Describe the change"}'`. The receipt gives the Lane `laneId` and `path`; edit only that path. Start uses accepted main when present; `channel:null` uses workspace source.

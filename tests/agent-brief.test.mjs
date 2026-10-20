@@ -24,6 +24,11 @@ for (const situation of BRIEF_SITUATIONS)
       assert.ok(actual.copyText.length <= COPY_TEXT_CAP);
       assert.ok(actual.full.length <= FULL_BRIEF_CAP);
       assert.match(actual.copyText, /give Forge URLs \(from `link`\), not local paths/);
+      assert.match(actual.full, /## Working on Forge, not GitHub/);
+      assert.match(actual.full, /Never run the full suite locally/);
+      assert.match(actual.full, /combined work of concurrent Lanes/);
+      assert.match(actual.full, /failing Lane drops out and the others land after passing/);
+      assert.match(actual.full, /Read peers\/presence/);
       assert.match(actual.full, /give Forge URLs \(from `link`\), not local paths/);
       assert.match(actual.copyText, /First run:.* brief /);
       assert.match(
