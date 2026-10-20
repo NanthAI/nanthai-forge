@@ -54,6 +54,7 @@ export const publish = internalMutation({
     retainCandidate: v.optional(v.boolean()),
     validatedClosure: v.optional(v.literal(1)),
     validatedWorkRecords: v.optional(v.literal(1)),
+    metadataPublication: v.optional(v.id('projectPublications')),
   },
   returns: v.id('projectBackups'),
   handler: async (ctx, input) => {
@@ -72,6 +73,26 @@ export const publish = internalMutation({
           'Reconcile this exchange using its original manifest and previous checkpoint.',
         );
         return original._id;
+      }
+      if (input.metadataPublication) {
+        const metadata = await ctx.db.get(input.metadataPublication);
+        invariant(
+          project.r2Writes,
+          'PUBLICATION_CAPABILITY_CHANGED',
+          'Use the existing publication path after R2 opt-out.',
+        );
+        invariant(
+          metadata &&
+            metadata.validated &&
+            metadata.projectId === input.projectId &&
+            metadata.owner === input.owner &&
+            metadata.operationId === input.operationId &&
+            metadata.request === input.request &&
+            metadata.digest === input.digest &&
+            metadata.size === input.size,
+          'WORK_OPERATION_CHANGED',
+          'Publish only the validated original metadata session.',
+        );
       }
       // Compare-and-set: a stale `previous` must fail loudly instead of forking
       // the checkpoint chain. Uploaded objects are immutable, so a retry after
@@ -113,6 +134,7 @@ export const publish = internalMutation({
         ...(input.validatedWorkRecords ? { validatedWorkRecords: input.validatedWorkRecords } : {}),
         ...(content.storageId ? { storageId: content.storageId } : {}),
         transport: 'objects',
+        ...(input.metadataPublication ? { metadataPublication: input.metadataPublication } : {}),
       });
       await ctx.db.patch(project._id, {
         currentBackup: project.currentBackup === input.previous ? id : project.currentBackup,

@@ -18,6 +18,8 @@ import { isStored, isR2Object } from './projectObjectFields';
 import { report } from './errors';
 import { exchangeObjectReader, bytesFromRow, type ExchangeObjectReader } from './projectExchangeReader';
 import { resolveExchangeRoot, isExchangeRoot } from '../src/native-exchange-tree';
+import { meteredStorage, storageMeter } from './storageMeter';
+import { metadataPublication } from './projectPublicationValidation';
 import { recordPublication, recordExchange, verifyRecordSeed } from './projectWorkRecordExchange';
 
 async function caller(ctx: ActionCtx) {
@@ -187,17 +189,41 @@ export const published = action({
   },
 });
 export const publish = action({
-  args: publicationFields,
+  args: { ...publicationFields, metadataOnly: v.optional(v.literal(1)) },
   returns: v.id('projectBackups'),
   handler: async (ctx, input): Promise<Id<'projectBackups'>> => {
     try {
       const { owner, request, original } = await publicationReceipt(ctx, input);
       if (original) return original;
+      const { metadataOnly, ...legacyInput } = input;
+      if (metadataOnly) {
+        const started = Date.now(),
+          metadataCtx = meteredStorage(ctx);
+        const metadata = await metadataPublication(metadataCtx, input, owner, request);
+        const { deferHistory: _deferHistory, ...publication } = legacyInput;
+        void _deferHistory;
+        const id = await metadataCtx.runMutation(internal.projectExchange.publish, {
+          ...publication,
+          owner,
+          request,
+          ...metadata,
+          validatedClosure: 1,
+        });
+        const meter = storageMeter(metadataCtx);
+        console.info('metadata-publication complete', {
+          projectId: input.projectId,
+          operationId: input.operationId,
+          elapsedMs: Date.now() - started,
+          storageReads: meter.reads,
+          storageBytes: meter.bytes,
+        });
+        return id;
+      }
       const reader = exchangeObjectReader(ctx, true);
       const records = await recordPublication(ctx, input, owner, reader);
       if (records) {
         await validateExchangePins(ctx, input.projectId, owner, records.contentPins);
-        const { deferHistory: _deferHistory, ...publication } = input;
+        const { deferHistory: _deferHistory, ...publication } = legacyInput;
         void _deferHistory;
         return await ctx.runMutation(internal.projectExchange.publish, {
           ...publication,
@@ -313,7 +339,7 @@ export const publish = action({
         unavailable: manifest.unavailable.length,
         channels: archiveChannels(manifest, data),
       };
-      const { deferHistory, ...publication } = input;
+      const { deferHistory, ...publication } = legacyInput;
       return await ctx.runMutation(internal.projectExchange.publish, {
         ...publication,
         owner,

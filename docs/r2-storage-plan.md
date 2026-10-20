@@ -19,7 +19,7 @@ Principle: R2 holds every blob. No database function receives or returns file by
 - **Browser.** The bucket gets a CORS rule for the web origin. The code view and diff fetch blobs directly, verify sha256 with `crypto.subtle` and compute hunks client-side.
 - **Access control.** Private projects: the bucket is private, and the only way to obtain bytes is a URL signed after a current access check. Revocation applies immediately to new URLs; issued URLs live at most 5 minutes (GET) or 15 minutes (PUT). Public projects may be signed without sign-in, limited to 100 keys per call plus a per-project anonymous budget. The signing secret is a bucket-scoped token held only as a server environment variable.
 - **Retention.** Objects are never overwritten. Project purge lists and deletes a prefix (deletes are free). Prepared-but-uncommitted uploads are swept after 24 hours. Optional later: a weekly copy to a second bucket and a bucket lock.
-- **Moving byte processing.** Diffstats, views and tree derivation move to the CLI (it already holds the bytes and sends derived data); publication validation becomes database lookups over a bounded manifest the CLI supplies; source-return cursors become database rows; the web code view runs in the browser; GitHub-import artifacts are built by a runner or the CLI. The trust shift: derived display data is client-supplied, so a malicious pusher can mislabel only their own project's display data. Authority (who may land, main heads) stays server-side. Old CLIs must upgrade to push.
+- **Moving byte processing.** Diffstats, views and tree derivation move to the CLI (it already holds the bytes and sends derived data); publication validation becomes database lookups over a bounded manifest the CLI supplies; source-return cursors become database rows; the web code view runs in the browser; GitHub-import artifacts are built by a runner or the CLI. The trust shift: derived display data is client-supplied, so a malicious pusher can mislabel only their own project's display data. Authority (who may land, main heads) stays server-side. The R3a rollout preserves the existing publication path for older CLIs and projects without R2 opt-in.
 - **Public reads at scale (later).** A small Worker with an R2 binding and edge cache on a project subdomain, so anonymous reads need no database call. Presigned URLs do not work on custom domains, so this is a separate path.
 
 ## Slices
@@ -29,7 +29,7 @@ Principle: R2 holds every blob. No database function receives or returns file by
 | R0 | A single blob-store seam in the backend and CLI (no behaviour change), `location` and key fields on object rows, and a presigner using `crypto.subtle` with the AWS reference test vector | Landed |
 | R1 | Signed PUT write path behind a flag and per-project opt-in; commit step with HEAD checks; CLI direct upload with PUT concurrency of 8 or more | Landed |
 | R2 | Signed GET read path; readers dispatch on each row's location; browser sha256 helper; mixed-location tests, revoked members, expired URLs | In review (tested against a local fake; real-bucket smoke pending) |
-| R3 | Metadata-only publication (split R3a publish, R3b source return and cursors). Heaviest slice and on the landing hot path | Not started |
+| R3 | Metadata-only publication (split R3a publish, R3b source return and cursors). Heaviest slice and on the landing hot path | R3a implemented and tested locally; R3b source return and cursors remain |
 | R4 | Browser bytes: code view, review and archive download through signed URLs; CORS | Not started |
 | R5 | Imports, zones, agents and proposals build artifacts into R2 | Not started |
 | R6 | Backfill: export, upload each file after checking its digest, flip rows in pages; keep old storage 14 days as fallback | Needs owner run approval |
@@ -68,6 +68,35 @@ Server-side readers that still need bytes inside Convex fetch a signed GET insid
 | Publication parsing (root manifest, `work.json`, States), derived views, diffstats, recipe ranges | Fetch via signed GET inside the action. R3 removes these byte reads. |
 | `downloadBatch`, and `downloadPart` of a raw R2 object | Same fetch, for callers that do not sign. |
 | Large files (recipes) | The CLI still reads them through `downloadPart`, so leaf bytes cross Convex until R3 or R4 moves recipe reading to the client. |
+
+## R3a metadata-only publication
+
+A current CLI asks `projectPublicationStore:capabilities` before selecting
+`metadata-publication-v1`. The server advertises it only for owner-opted-in
+`r2Writes` projects. The CLI sends its parsed manifest, committed object pins,
+State-to-parent/blob edges and schema-2 owner-derived display rows in bounded
+DB pages. Each page fits a 128 KiB encoded argument budget. The session retains
+its operation, payload digest, page count and append cursor; same-operation
+retries reconcile the same pages and the original publication receipt.
+
+Publication checks committed object rows in groups of 100 (including mixed
+Convex/R2 rows), validates the manifest and derived closure references, then
+uses the existing owner authority and previous-checkpoint CAS. It reads no
+stored object bytes. Missing committed pins return `PUBLISH_PIN_MISSING`;
+derived references outside the manifest return `DERIVED_ROW_UNPINNED`.
+Derived display data can mislabel only the publishing owner's project and
+never grants Work or Channel authority. Readers still verify source bytes.
+
+Older CLIs and servers, projects without opt-in, deferred-history seeds and
+pushes without a valid optional owner-derived sidecar keep the existing
+byte-reading publication path. Turn the new path off with the existing
+owner-only `projectObjectCommit:setR2Writes` `{ projectId, enabled: false }`;
+this also stops new R2 writes. Already stored objects remain readable. No
+forced CLI upgrade or server fallback removal is part of R3a.
+
+`projectBackups.metadataPublication` points to the immutable metadata session;
+R3b can page its payload with `projectPublicationStore.read`. Source return,
+its cursor blobs and its existing byte-reading fallback are unchanged here.
 
 ## Spike findings
 

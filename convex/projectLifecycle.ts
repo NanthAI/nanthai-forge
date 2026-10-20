@@ -261,6 +261,8 @@ export const purge = internalMutation({
     }
 
     for (const table of [
+      'projectPublicationPages',
+      'projectPublications',
       'projectCheckRequests',
       'projectCheckRunners',
       'projectWorkRecords',

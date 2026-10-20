@@ -9,6 +9,7 @@ import { indexTables } from './projectWorkIndexFields';
 import { checkTables } from './projectCheckFields';
 import { coordinationTables } from './coordinationFields';
 import { githubImportTables } from './projectGithubImportFields';
+import { publicationTables } from './projectPublicationFields';
 import { objectTables } from './projectObjectFields';
 import { derivedFields } from './derivedArtifactFields';
 import { defineSchema, defineTable } from 'convex/server';
@@ -291,6 +292,7 @@ const projectFields = {
   ),
 };
 const projectBackupFields = {
+  metadataPublication: v.optional(v.id('projectPublications')),
   validatedWorkRecords: v.optional(v.literal(1)),
   validatedClosure: v.optional(v.literal(1)),
   historyBackfilling: v.optional(v.boolean()),
@@ -452,6 +454,7 @@ export default defineSchema({
     .index('by_owner', ['owner'])
     .index('by_owner_and_key', ['owner', 'key'])
     .index('by_owner_and_slug', ['owner', 'slug']),
+  ...publicationTables,
   projectBackups: defineTable(projectBackupFields)
     .index('by_project', ['projectId'])
     .index('by_project_and_operation', ['projectId', 'operationId'])

@@ -1,3 +1,4 @@
+import type * as projectPublicationStore from "../projectPublicationStore.js";
 import type * as importStatus from "../importStatus.js";
 import type * as projectBootstrap from "../projectBootstrap.js";
 import type * as projectBootstrapStore from "../projectBootstrapStore.js";
@@ -216,6 +217,7 @@ declare const fullApi: ApiFromModules<{
   projectCoordination: typeof projectCoordination;
   projectCoordinationReads: typeof projectCoordinationReads;
   projectExchange: typeof projectExchange;
+  projectPublicationStore: typeof projectPublicationStore;
   projectExchangeActions: typeof projectExchangeActions;
   projectExchangeCache: typeof projectExchangeCache;
   projectExchangeMigration: typeof projectExchangeMigration;

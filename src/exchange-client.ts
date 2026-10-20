@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  METADATA_PUBLICATION,
+  publicationPages,
+  publicationHash,
+  type PublicationMetadata,
+} from './publication-metadata.js';
 import { ExchangeDownloadCache } from './exchange-download-cache.js';
 import { SignedDownloadCache } from './exchange-r2-read.js';
 import { hostedMainSchema, type MainExpectation } from './hosted-main.js';
@@ -20,6 +26,7 @@ import { SourceFileReader } from './source-file-reader.js';
 import { downloadExchangeFile } from './exchange-download-file.js';
 import { resolveExchangeRoot, isExchangeRoot } from './native-exchange-tree.js';
 const query = (name: string) => makeFunctionReference<'query'>(name);
+const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 const action = (name: string) => makeFunctionReference<'action'>(name);
 const chunked = (pin: ContentPin) => {
   const path = (pin as ContentPin & { path?: string }).path;
@@ -221,7 +228,59 @@ export class ConvexExchange implements ExchangeTransport {
       }),
     );
   }
-  async publish(pin: ContentPin): Promise<string> {
+  async publishMetadata(pin: ContentPin, build: () => PublicationMetadata): Promise<string | null> {
+    if (this.proposalId || this.deferHistory) return null;
+    const capability = await retryExchange('publication capabilities', this.operationId, async () => {
+      try {
+        return await this.client.query(query('projectPublicationStore:capabilities'), {
+          projectId: this.projectId,
+        });
+      } catch (error) {
+        // An older deployment has no capability endpoint. Other failures stay
+        // explicit and must never silently select another publication route.
+        if (
+          error instanceof Error &&
+          error.message.includes('projectPublicationStore:capabilities') &&
+          /Could not find public function|Function .* is unavailable/.test(error.message)
+        )
+          return null;
+        throw error;
+      }
+    });
+    if (capability !== METADATA_PUBLICATION) return null;
+    const payload = build(),
+      { pages, digest: metadataDigest } = publicationPages(payload),
+      request = publicationHash(
+        JSON.stringify([this.projectId, this.operationId, this.previous, pin.sha256, pin.size]),
+      );
+    let cursor: { id: string; cursor: number; chain: string } = await retryExchange(
+      'publication begin',
+      this.operationId,
+      () =>
+        this.client.mutation(mutation('projectPublicationStore:begin'), {
+          projectId: this.projectId,
+          operationId: this.operationId,
+          request,
+          digest: pin.sha256,
+          size: pin.size,
+          metadataDigest,
+          pages: pages.length,
+        }),
+    );
+    while (cursor.cursor < pages.length) {
+      const args = {
+        id: cursor.id,
+        position: cursor.cursor,
+        previous: cursor.chain,
+        body: pages[cursor.cursor]!,
+      };
+      cursor = await retryExchange('publication page', this.operationId, () =>
+        this.client.mutation(mutation('projectPublicationStore:append'), args),
+      );
+    }
+    return this.publish(pin, true);
+  }
+  async publish(pin: ContentPin, metadataOnly = false): Promise<string> {
     try {
       return await retryExchange('checkpoint publication', this.operationId, () =>
         this.client.action(action('projectExchangeActions:publish'), {
@@ -229,6 +288,7 @@ export class ConvexExchange implements ExchangeTransport {
           operationId: this.operationId,
           previous: this.previous,
           ...(this.deferHistory ? { deferHistory: true } : {}),
+          ...(metadataOnly ? { metadataOnly: 1 } : {}),
           digest: pin.sha256,
           size: pin.size,
         }),

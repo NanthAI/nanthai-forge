@@ -37,6 +37,8 @@ import type { hostProgress } from './host-progress.js';
 import { sourceManifestSchema } from './work-archive-metadata.js';
 import { exchangeBaseline, retainExchangeBaseline } from './native-exchange-baseline.js';
 import { ownerDerivedBytes, preparedOwnerDerived } from './owner-derived-local.js';
+import { nativePublicationMetadata } from './native-publication.js';
+import type { PublicationMetadata } from './publication-metadata.js';
 import { preparedMetadata } from './native-exchange-prepared.js';
 import type { WorkData } from './work-types.js';
 export type CapturedExchange = { directory: string; data: WorkData };
@@ -60,6 +62,7 @@ export interface ExchangeTransport {
   uploadFile?(pin: ContentPin, root: string, path: string): Promise<TransferReceipt>;
   published?(pin: ContentPin): Promise<string | null>;
   publish(pin: ContentPin): Promise<string>;
+  publishMetadata?(pin: ContentPin, build: () => PublicationMetadata): Promise<string | null>;
   manifest(backupId: string): Promise<{ json: string; digest: string; size: number; sourceDigest?: string }>;
   download(pin: ContentPin): Promise<Buffer>;
   downloadBatch?(pins: ContentPin[]): Promise<Buffer[]>;
@@ -485,7 +488,15 @@ export async function pushNativeExchange(
     { bytes: 32 * 1024 * 1024, size: page => page.reduce((sum, pin) => sum + pin.size, 0) },
   );
   options.progress?.phase('validating checkpoint');
-  const backupId = await transport.publish(manifestPin);
+  const nativeManifest =
+    prepared.manifest.kind === 'forge-native-work-backup' ? prepared.manifest : undefined;
+  const metadataId =
+    nativeManifest && store.native && derivedBytes && !options.stage && transport.publishMetadata
+      ? await transport.publishMetadata(manifestPin, () =>
+          nativePublicationMetadata(store, prepared.directory, nativeManifest, pins, derivedBytes),
+        )
+      : null;
+  const backupId = metadataId ?? (await transport.publish(manifestPin));
   const baselineKey = transport.checkpointKey?.(backupId);
   if (store.native && baselineKey && prepared.manifest.kind === 'forge-native-work-backup') {
     try {
