@@ -5,9 +5,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { exportActionsSnapshot } from '../dist/github-actions-export.js';
+import { exportActionsSnapshot, deleteActionsRef } from '../dist/github-actions-export.js';
 import { controlActions } from '../dist/github-actions-controller.js';
-import { GitSyncError } from '../dist/github-sync-git.js';
+import { GitSyncError, transientGitFailure } from '../dist/github-sync-git.js';
 
 // A fake check repo that, like a loaded remote, rejects pushes when too many arrive at once and
 // transiently rejects the first push of every other run (a lost race on the repo).
@@ -163,4 +163,142 @@ test('permanent git failures are not retried; transient ones give up after bound
     err => err instanceof GitSyncError && err.detail === 'fatal: nope',
   );
   assert.equal(tries, 5);
+});
+
+const rejectedPush = () => {
+  const detail = '! [remote rejected] a -> forge-check/run (failed)';
+  return new GitSyncError(detail, transientGitFailure(detail));
+};
+test('a transient check-ref rejection reports a retry, then dispatches and passes', async t => {
+  const { plan, journal, commit } = controller(t, 7),
+    calls = [],
+    waits = [],
+    progress = [],
+    dispatched = [];
+  let pushes = 0;
+  await exportActionsSnapshot(
+    plan,
+    journal,
+    () => {},
+    async (_, args) => {
+      calls.push(args[0]);
+      if (args[0] === 'push' && ++pushes === 1) throw rejectedPush();
+      return '';
+    },
+    () => commit,
+    async ms => waits.push(ms),
+    line => progress.push(line),
+  );
+  assert.deepEqual(calls, ['ls-remote', 'push', 'ls-remote', 'push']);
+  assert.equal(waits.length, 1);
+  assert.match(progress[0], /retry 2\/5/);
+  assert.equal(journal.pushed, true);
+  const result = await controlActions(
+    plan,
+    journal,
+    () => {},
+    dispatchApi(plan, journal, dispatched),
+    () => false,
+    () => {},
+  );
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(dispatched, [plan.runId]);
+});
+test('a transient lost push reply reconciles the exact commit without another push', async t => {
+  const { plan, journal, commit } = controller(t, 8);
+  let remote = '',
+    pushes = 0;
+  await exportActionsSnapshot(
+    plan,
+    journal,
+    () => {},
+    async (_, args) => {
+      if (args[0] === 'ls-remote') return remote;
+      pushes++;
+      remote = `${commit}\trefs/heads/forge-check/${plan.runId}`;
+      throw rejectedPush();
+    },
+    () => commit,
+    async () => {},
+  );
+  assert.equal(journal.pushed, true);
+  assert.equal(pushes, 1);
+});
+test('a ref changed after a transient rejection stops before another push', async t => {
+  const { plan, journal, commit } = controller(t, 9);
+  let pushes = 0;
+  await assert.rejects(
+    exportActionsSnapshot(
+      plan,
+      journal,
+      () => {},
+      async (_, args) => {
+        if (args[0] === 'ls-remote') return pushes ? `other\trefs/heads/forge-check/${plan.runId}` : '';
+        pushes++;
+        throw rejectedPush();
+      },
+      () => commit,
+      async () => {},
+    ),
+    error => error.code === 'EVIDENCE_CHANGED',
+  );
+  assert.equal(pushes, 1);
+  assert.equal(journal.pushed, undefined);
+});
+for (const landed of [false, true]) {
+  test(`cleanup retries transient failures with the original exact lease (landed=${landed})`, async t => {
+    const { plan, journal, commit } = controller(t, 10);
+    journal.commit = commit;
+    const ref = `refs/heads/forge-check/${plan.runId}`,
+      waits = [],
+      progress = [];
+    let remote = `${commit}\t${ref}`,
+      pushes = 0;
+    await deleteActionsRef(
+      plan,
+      journal,
+      () => {},
+      async (_, args) => {
+        if (args[0] === 'ls-remote') return remote;
+        assert.ok(args.includes(`--force-with-lease=${ref}:${commit}`));
+        assert.equal(args.at(-1), `:${ref}`);
+        pushes++;
+        if (pushes === 1) {
+          if (landed) remote = '';
+          throw rejectedPush();
+        }
+        remote = '';
+        return '';
+      },
+      async ms => waits.push(ms),
+      line => progress.push(line),
+    );
+    assert.equal(journal.deleted, true);
+    assert.equal(pushes, landed ? 1 : 2);
+    assert.equal(waits.length, 1);
+    assert.match(progress[0], /retry 2\/5/);
+  });
+}
+
+test('a permanent check-ref push failure keeps its error and never retries', async t => {
+  const { plan, journal, commit } = controller(t, 11),
+    calls = [],
+    failure = new GitSyncError('remote: Permission to synthetic/checks denied', false);
+  await assert.rejects(
+    exportActionsSnapshot(
+      plan,
+      journal,
+      () => {},
+      async (_, args) => {
+        calls.push(args[0]);
+        if (args[0] === 'ls-remote') return '';
+        throw failure;
+      },
+      () => commit,
+      async () => assert.fail('permanent failures must not back off'),
+    ),
+    error => error === failure,
+  );
+  assert.deepEqual(calls, ['ls-remote', 'push']);
+  assert.equal(journal.pushed, undefined);
 });

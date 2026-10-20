@@ -90,7 +90,8 @@ export async function launchGithubActionsRun(
     progress(
       `Pinned ${run.head}; ${plan.selection.scope}; ${plan.groups.length} test shards plus static checks; ${journal.repo} (${journal.runsOn})`,
     );
-    if (!cancelled() || journal.dispatching) await exportSnapshot(plan, journal, save);
+    if (!cancelled() || journal.dispatching)
+      await exportSnapshot(plan, journal, save, undefined, undefined, ms => api.sleep(ms), progress);
     const outcome = await controlActions(plan, journal, save, api, cancelled, progress);
     run.backend.executionIds = journal.runId ? [String(journal.runId)] : [];
     run.backend.billableMinutes = outcome.billableMinutes;
@@ -114,7 +115,7 @@ export async function launchGithubActionsRun(
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
     if (outcome.status === 'passed') {
       try {
-        await deleteRef(plan, journal, save);
+        await deleteRef(plan, journal, save, undefined, ms => api.sleep(ms), progress);
         progress('Removed run-owned ref after recording result.');
       } catch {
         progress('Result recorded; run-owned ref cleanup requires reconciliation.');

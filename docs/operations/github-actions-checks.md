@@ -33,7 +33,17 @@ Actions-aware standard check script to use standard sharding.
 The owner exports the same immutable State used by Modal and adds a generated
 workflow and recipe to that export only. The exported commit is pushed only to
 `refs/heads/forge-check/<runId>`, using a compare-and-swap creation. A changed or
-colliding ref is never overwritten. The source State, View, definition, runtime,
+colliding ref is never overwritten. Check-ref creation and cleanup retry recognized
+transient Git failures with at most five attempts, using exponential backoff and jitter
+(up to 45 seconds of total backoff). Each attempt observes the exact remote ref:
+an already-completed push succeeds without another push; different source is an
+error. Progress reports each retry. Transient failures include GitHub's remote
+`(failed)` or `(internal server error)` rejection, HTTP 5xx, RPC/EOF and connection
+failures, and rate limits. Authentication, permission, protected-ref, stale-lease,
+non-fast-forward and missing-repository failures stay immediate errors. Exhausted
+creation retries interrupt the retained run for reconciliation. The GitHub mirror
+uses the same retry helper while keeping its original exact lease and ancestry
+check. The source State, View, definition, runtime,
 selection and shard membership stay digest-bound. The journal also retains the
 target repository and runner label so policy changes cannot redirect adoption.
 Git-backed checks and declared environment/credential inputs keep existing local

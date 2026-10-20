@@ -34,7 +34,39 @@ export class GitSyncError extends ForgeError {
   }
 }
 const permanentGit =
-  /authentication failed|could not read (username|password)|repository not found|permission denied|invalid credentials|bad credentials/i;
+  /authentication failed|could not read (username|password)|repository not found|permission[^\n]*denied|access denied|write access[^\n]*not granted|not authorized|invalid credentials|bad credentials|protected (branch|ref)|GH0(?:0[136]|13)|non-fast-forward|fetch first|stale info|HTTP(?:\/\S+)?[ :]+(401|404)\b|error: (401|404)\b/i;
+const rateLimitedGit = /rate.?limit|HTTP 429\b|error: 429\b|too many requests|abuse detection/i;
+const forbiddenGit = /HTTP(?:\/\S+)?[ :]+403\b|error: 403\b/i;
+const transientGit =
+  /\[remote rejected\][^\n]*\((failed|internal server error)\)|HTTP(?:\/\S+)?[ :]+5\d\d\b|error: 5\d\d\b|RPC failed|early EOF|connection[^\n]*(reset|timed? out|timeout)|operation timed out|could not resolve host|failed to connect|cannot lock ref/i;
+/** Explicit permanent failures win over transport symptoms; unknown failures are not retried. */
+export function transientGitFailure(detail: string) {
+  return (
+    !permanentGit.test(detail) &&
+    (!forbiddenGit.test(detail) || rateLimitedGit.test(detail)) &&
+    (transientGit.test(detail) || rateLimitedGit.test(detail))
+  );
+}
+export const syncGitSleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+/** The caller must observe its exact ref and lease on every attempt before pushing. */
+export async function retrySyncGit<T>(
+  attempt: () => Promise<T>,
+  sleep = syncGitSleep,
+  progress?: (message: string) => void,
+) {
+  for (let tries = 1; ; tries++) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (tries >= 5 || !(error instanceof GitSyncError) || !error.transient) throw error;
+      const ms = Math.min(16_000, 2_000 * 2 ** (tries - 1)) * (0.5 + Math.random());
+      progress?.(
+        `Git push transient failure; retry ${tries + 1}/5 in ${Math.ceil(ms / 1000)} s after checking the exact remote ref.`,
+      );
+      await sleep(ms);
+    }
+  }
+}
 
 // Read user credentials/identity, but no target checkout config, hooks, filters or source code.
 export function syncGit(root: string, args: string[]): Promise<string> {
@@ -67,8 +99,15 @@ export function syncGit(root: string, args: string[]): Promise<string> {
       },
       (error, stdout, stderr) => {
         if (!error) return resolve(stdout);
-        const detail = redactGitStderr(String(stderr || (error as Error).message || ''));
-        reject(new GitSyncError(detail, !permanentGit.test(detail)));
+        const detail = String(stderr || (error as Error).message || '');
+        reject(
+          new GitSyncError(
+            redactGitStderr(detail),
+            transientGitFailure(
+              detail + (error.killed && error.signal === 'SIGTERM' ? '\nOperation timed out' : ''),
+            ),
+          ),
+        );
       },
     );
   });

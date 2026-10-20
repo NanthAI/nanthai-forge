@@ -18,7 +18,7 @@ import { NativeSource } from '../dist/native-source.js';
 import { standardSelection } from '../scripts/test-impact.mjs';
 import { githubActionsWorkflow, githubActionsRecipe } from '../dist/github-actions-workflow.js';
 import { actionsApi, observe } from '../dist/github-actions-api.js';
-import { syncGit, redactGitStderr } from '../dist/github-sync-git.js';
+import { syncGit, redactGitStderr, GitSyncError, transientGitFailure } from '../dist/github-sync-git.js';
 import { checkRoute } from '../dist/check-backend.js';
 import { editedPolicy, policyPreset } from '../dist/autonomy-policy.js';
 
@@ -924,4 +924,42 @@ test('benchmark one and four shard plans match the Forge Actions plan and execut
   assert.equal(docs.selection.scope, 'full');
   assert.equal(scopedDocs.selection.scope, 'docs');
   assert.deepEqual(scopedDocs.groups, []);
+});
+
+test('exhausted transient check-ref pushes interrupt with the retained-run message', async t => {
+  const { work, run, path } = fixture(t);
+  let pushes = 0;
+  const waits = [];
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    { sleep: async ms => waits.push(ms) },
+    async (plan, journal, save, _git, _commit, sleep, progress) => {
+      await exportActionsSnapshot(
+        plan,
+        journal,
+        save,
+        async (_, args) => {
+          if (args[0] === 'ls-remote') return '';
+          pushes++;
+          const detail = '! [remote rejected] a -> forge-check/run (failed)';
+          throw new GitSyncError(detail, transientGitFailure(detail));
+        },
+        () => 'a'.repeat(40),
+        sleep,
+        progress,
+      );
+    },
+  );
+  const receipt = read(join(path, 'result.json'));
+  assert.equal(receipt.status, 'interrupted');
+  assert.match(receipt.details, /GITHUB_SYNC_GIT_FAILED/);
+  assert.match(receipt.details, /reconcile the retained run/);
+  assert.match(receipt.details, /source export, dispatch intent and job identities are retained/);
+  assert.equal(pushes, 5);
+  assert.equal(waits.length, 4);
+  waits.forEach((ms, i) => assert.ok(ms >= 1000 * 2 ** i && ms <= 3000 * 2 ** i));
+  assert.ok(waits.reduce((sum, ms) => sum + ms, 0) <= 45_000);
+  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /retry 5\/5/);
+  assert.equal(read(join(path, 'github-actions.json')).dispatching, undefined);
 });

@@ -2,7 +2,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { commitActionsSnapshot } from './github-actions-commit.js';
-import { GitSyncError, syncGit } from './github-sync-git.js';
+import { retrySyncGit, syncGit, syncGitSleep } from './github-sync-git.js';
 import { durableReplace } from './native-durability.js';
 import { invariant } from './errors.js';
 import { githubActionsRecipe, githubActionsWorkflow } from './github-actions-workflow.js';
@@ -31,20 +31,6 @@ export function actionsJournal(path: string, plan: ModalPlan, repo: string, runs
   invariant(journal.pin === plan.pin, 'EVIDENCE_CHANGED', 'Retained Actions plan changed.');
   return { journal, save: () => durableReplace(filename, JSON.stringify(journal)) };
 }
-const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-// Controllers of one burst push to the same check repo at once. GitHub can reject some of those
-// pushes transiently, so each Git step observes first, then retries with jittered backoff.
-// Only the idempotent run-owned ref is ever retried, and only after re-observing it.
-async function retried<T>(sleep: (ms: number) => Promise<void>, attempt: () => Promise<T>) {
-  for (let tries = 1; ; tries++) {
-    try {
-      return await attempt();
-    } catch (error) {
-      if (tries >= 5 || !(error instanceof GitSyncError) || !error.transient) throw error;
-      await sleep(Math.min(16_000, 2_000 * 2 ** (tries - 1)) * (0.5 + Math.random()));
-    }
-  }
-}
 // At most two pushes per check repo at once inside this process.
 const pushGates = new Map<string, Promise<void>[]>();
 async function gated<T>(repo: string, use: () => Promise<T>) {
@@ -70,7 +56,8 @@ export async function exportActionsSnapshot(
   save: () => void,
   git = syncGit,
   commit = commitActionsSnapshot,
-  sleep = wait,
+  sleep = syncGitSleep,
+  progress?: (message: string) => void,
 ) {
   const root = plan.source,
     ref = `refs/heads/forge-check/${plan.runId}`;
@@ -102,20 +89,24 @@ export async function exportActionsSnapshot(
   }
   const remote = `https://github.com/${journal.repo}.git`;
   // A lost push response is reconciled by observing this exact run-owned ref.
-  await retried(sleep, async () => {
-    const observed = (await git(root, ['ls-remote', '--refs', remote, ref])).trim();
-    if (observed) {
-      invariant(
-        observed === `${journal.commit}\t${ref}`,
-        'EVIDENCE_CHANGED',
-        'Actions run ref already names different source.',
-      );
-    } else {
-      await gated(journal.repo, () =>
-        git(root, ['push', `--force-with-lease=${ref}:`, remote, `${journal.commit}:${ref}`]),
-      );
-    }
-  });
+  await retrySyncGit(
+    async () => {
+      const observed = (await git(root, ['ls-remote', '--refs', remote, ref])).trim();
+      if (observed) {
+        invariant(
+          observed === `${journal.commit}\t${ref}`,
+          'EVIDENCE_CHANGED',
+          'Actions run ref already names different source.',
+        );
+      } else {
+        await gated(journal.repo, () =>
+          git(root, ['push', `--force-with-lease=${ref}:`, remote, `${journal.commit}:${ref}`]),
+        );
+      }
+    },
+    sleep,
+    progress,
+  );
   journal.pushed = true;
   save();
 }
@@ -124,19 +115,27 @@ export async function deleteActionsRef(
   journal: ActionsJournal,
   save: () => void,
   git = syncGit,
+  sleep = syncGitSleep,
+  progress?: (message: string) => void,
 ) {
   if (journal.deleted) return;
   const ref = `refs/heads/forge-check/${plan.runId}`,
     remote = `https://github.com/${journal.repo}.git`;
-  const observed = (await git(plan.source, ['ls-remote', '--refs', remote, ref])).trim();
-  if (observed) {
-    invariant(
-      observed === `${journal.commit}\t${ref}`,
-      'EVIDENCE_CHANGED',
-      'Actions cleanup refused changed ref.',
-    );
-    await git(plan.source, ['push', `--force-with-lease=${ref}:${journal.commit}`, remote, `:${ref}`]);
-  }
+  await retrySyncGit(
+    async () => {
+      const observed = (await git(plan.source, ['ls-remote', '--refs', remote, ref])).trim();
+      if (observed) {
+        invariant(
+          observed === `${journal.commit}\t${ref}`,
+          'EVIDENCE_CHANGED',
+          'Actions cleanup refused changed ref.',
+        );
+        await git(plan.source, ['push', `--force-with-lease=${ref}:${journal.commit}`, remote, `:${ref}`]);
+      }
+    },
+    sleep,
+    progress,
+  );
   journal.deleted = true;
   save();
 }

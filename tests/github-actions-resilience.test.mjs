@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { controlActions } from '../dist/github-actions-controller.js';
 import { actionsApi, mutate, observe } from '../dist/github-actions-api.js';
+import { syncGit } from '../dist/github-sync-git.js';
 import { ForgeError } from '../dist/errors.js';
 
 const limited = () => new ForgeError('GITHUB_ACTIONS_RATE_LIMITED', 'synthetic rate limit');
@@ -218,4 +219,61 @@ test('gh transport classifies rate-limit stderr without exposing it', async t =>
   });
   const reset = await actionsApi.rateLimitResetMs();
   assert.ok(reset > 60_000 && reset <= 90_000);
+});
+
+test('git transport classifies push failures before truncating redacted diagnostics', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-push-failure-'));
+  const previous = process.env.PATH;
+  t.after(() => {
+    process.env.PATH = previous;
+    rmSync(root, { recursive: true, force: true });
+  });
+  const cases = [
+    ['! [remote rejected] a -> forge-check/run (failed)', true],
+    ['! [remote rejected] a -> forge-check/run (internal server error)', true],
+    ['fatal: unable to access synthetic: The requested URL returned error: 502', true],
+    ['remote: HTTP 503 Service Unavailable', true],
+    ['HTTP/2 500', true],
+    ['error: RPC failed; curl 18 transfer closed', true],
+    ['fatal: early EOF', true],
+    ['Connection reset by peer', true],
+    ['fatal: Connection timed out', true],
+    ['Operation timed out', true],
+    ['remote: rate limit exceeded (HTTP 403)', true],
+    ['HTTP 429: Too Many Requests', true],
+    ['RPC failed; HTTP 403: secondary rate limit exceeded', true],
+    ['RPC failed; The requested URL returned error: 403', false],
+    ['HTTP/2 403 Forbidden', false],
+    ['RPC failed; HTTP/2 401', false],
+    ['RPC failed; HTTP/2 404', false],
+    ['remote: Permission denied; rate limit exceeded', false],
+    ['fatal: Authentication failed', false],
+    ['fatal: could not read Username', false],
+    ['remote: Permission to synthetic/checks denied', false],
+    ['remote: Write access to repository not granted.', false],
+    ['remote: GH006: Protected branch update failed', false],
+    ['! [remote rejected] a -> main (failed)\nremote: GH013: Repository rule violations found', false],
+    ['! [rejected] main -> main (non-fast-forward)', false],
+    ['! [rejected] main -> main (stale info)', false],
+    ['remote: Repository not found.', false],
+    ['RPC failed; HTTP 401 Authentication failed', false],
+    ['an unknown git error', false],
+    [`${'padding '.repeat(100)}! [remote rejected] a -> forge-check/run (failed)`, true],
+    ['! [remote rejected] a -> run (failed)\nremote: Permission to synthetic/checks denied', false],
+  ];
+  writeFileSync(
+    join(root, 'git'),
+    `#!${process.execPath}\nprocess.stderr.write(process.argv.at(-1));process.exit(1);\n`,
+    { mode: 0o755 },
+  );
+  process.env.PATH = `${root}:${previous}`;
+  for (const [detail, transient] of cases) {
+    await assert.rejects(syncGit(root, ['push', detail]), error => {
+      assert.equal(error.code, 'GITHUB_SYNC_GIT_FAILED');
+      assert.equal(error.transient, transient, detail);
+      assert.ok(error.detail.length <= 604);
+      assert.match(error.message, /Retry to reconcile the retained operation/);
+      return true;
+    });
+  }
 });

@@ -117,11 +117,15 @@ const save=()=>writeFileSync(file,JSON.stringify(state));
 if(args.includes('ls-remote')&&state.failObserve){state.failObserve=false;save();process.exit(91);}
 if(args.includes('push')){
  state.pushes=(state.pushes??0)+1;
+ (state.pushLeases??=[]).push(args.find(a=>a.startsWith('--force-with-lease=')));
  if(state.raceHead){spawnSync(real,['--git-dir='+(state.raceGit??remote),'update-ref','refs/heads/main',state.raceHead]);delete state.raceHead;}
  save();
+ if(state.transientPush){state.transientPush--;save();process.stderr.write('! [remote rejected] a -> main (failed)');process.exit(1);}
+ if(state.permanentPush){process.stderr.write('remote: Permission to tests/sync denied');process.exit(1);}
 }
 const out=spawnSync(real,['-c','user.name=Configured Human','-c','user.email=configured@example.test','-c','forge.githubSync.coAuthor=Synthetic lead <lead@example.test>',...(state.config??[]).flatMap(c=>['-c',c]),...args],{encoding:'utf8',env:{...process.env,GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_NOSYSTEM:'1'},...(args.includes('--stdin')||args.includes('mktree')?{input:readFileSync(0)}:{})});
 process.stdout.write(out.stdout??'');process.stderr.write(out.stderr??'');
+if(args.includes('push')&&state.lostTransientReply){state.lostTransientReply=false;save();process.stderr.write('RPC failed: connection reset');process.exit(1);}
 if(args.includes('push')&&state.lostReply){state.lostReply=false;state.failObserve=true;save();process.exit(92);}
 process.exit(out.status??1);
 `,
@@ -770,4 +774,37 @@ test('incremental commits keep the accepting actor name but use the sync-only em
     git(f.remote, ['show', '-s', '--format=%an|%ae|%cn|%ce', 'main']).trim(),
     'Real Person|cfg@users.noreply.github.com|Configured Human|cfg@users.noreply.github.com',
   );
+});
+
+test('mirror retries a transient rejection with the same exact lease', async t => {
+  const f = fixture(t, { transientPush: 1 });
+  const before = f.head();
+  const result = await f.sync({ push: true });
+  assert.equal(result.pushed, true);
+  assert.equal(f.controlState().pushes, 2);
+  assert.deepEqual(
+    f.controlState().pushLeases,
+    Array(2).fill(`--force-with-lease=refs/heads/main:${before}`),
+  );
+  assert.equal(f.head(), f.work.store.load().githubSync.commits.at(-1).commit);
+});
+test('mirror reconciles a transient lost push reply without pushing twice', async t => {
+  const f = fixture(t, { lostTransientReply: true });
+  assert.equal((await f.sync({ push: true })).pushed, true);
+  assert.equal(f.controlState().pushes, 1);
+});
+test('mirror stops when a transient rejection observes a different remote head', async t => {
+  const f = fixture(t);
+  const before = f.head();
+  const tree = git(f.remote, ['rev-parse', `${before}^{tree}`]).trim();
+  const outside = git(f.remote, ['commit-tree', tree, '-p', before, '-m', 'Synthetic outside change']).trim();
+  f.change({ transientPush: 1, raceHead: outside });
+  await assert.rejects(f.sync({ push: true }), code('GITHUB_SYNC_CHANGED'));
+  assert.equal(f.controlState().pushes, 1);
+  assert.equal(f.head(), outside);
+});
+test('mirror permission rejection keeps the existing error and does not retry', async t => {
+  const f = fixture(t, { permanentPush: true });
+  await assert.rejects(f.sync({ push: true }), code('GITHUB_SYNC_GIT_FAILED'));
+  assert.equal(f.controlState().pushes, 1);
 });

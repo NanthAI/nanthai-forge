@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workProgress } from './work-progress.js';
 import { requestPushAudit } from './pre-push-audit.js';
 import { drainPostAccept } from './post-accept-main.js';
 import { exclusion } from './files.js';
@@ -14,6 +15,7 @@ import { ForgeError, invariant } from './errors.js';
 import {
   remoteSyncHead,
   syncGit,
+  retrySyncGit,
   syncIdentity,
   withSyncGit,
   defaultSyncRepository,
@@ -211,31 +213,38 @@ export async function githubSync(
           'Automatic mirror policy changed.',
         );
       }
-      remoteHead = await remoteSyncHead(root, remote, ref, !expected);
-      if (remoteHead !== expected)
-        throw changed({ expectedHead: expected, remoteHead, localHead: entries.at(-1)!.commit });
       const head = entries.at(-1)!.commit;
       invariant(
         !expected || workGit(root, ['merge-base', expected, head]).trim() === expected,
         'GITHUB_SYNC_HISTORY',
         'Sync must fast-forward its exact adopted GitHub head.',
       );
-      try {
-        // An exact lease is CAS, never permission to replace history: ancestry is checked above.
-        await syncGit(root, [
-          'push',
-          '--porcelain',
-          `--force-with-lease=${ref}:${expected}`,
-          remote,
-          `${head}:${ref}`,
-        ]);
-      } catch (error) {
-        remoteHead = await remoteSyncHead(root, remote, ref, !expected);
-        if (remoteHead !== head) {
+      await retrySyncGit(
+        async () => {
+          remoteHead = await remoteSyncHead(root, remote, ref, !expected);
+          if (remoteHead === head) return;
           if (remoteHead !== expected) throw changed({ expectedHead: expected, remoteHead, localHead: head });
-          throw error;
-        }
-      }
+          try {
+            // An exact lease is CAS, never permission to replace history: ancestry is checked above.
+            await syncGit(root, [
+              'push',
+              '--porcelain',
+              `--force-with-lease=${ref}:${expected}`,
+              remote,
+              `${head}:${ref}`,
+            ]);
+          } catch (error) {
+            remoteHead = await remoteSyncHead(root, remote, ref, !expected);
+            if (remoteHead !== head) {
+              if (remoteHead !== expected)
+                throw changed({ expectedHead: expected, remoteHead, localHead: head });
+              throw error;
+            }
+          }
+        },
+        undefined,
+        message => workProgress('github-sync', message),
+      );
       remoteHead = await remoteSyncHead(root, remote, ref, !expected);
       if (remoteHead !== head) throw changed({ expectedHead: expected, remoteHead, localHead: head });
     }
