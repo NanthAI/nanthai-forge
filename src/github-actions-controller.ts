@@ -5,6 +5,7 @@ import { mutate, observe, type ActionsApi, type ActionsJob, type ActionsRun } fr
 import type { ActionsJournal } from './github-actions-export.js';
 import type { ModalPlan } from './modal-plan.js';
 import { ModalShardLogs } from './modal-shard-logs.js';
+import { actionsCost, actionsRate } from './check-cost.js';
 import { invariant } from './errors.js';
 
 // Runner "exit code 137", a SIGKILL/OOM error annotation, or the kernel OOM killer.
@@ -22,10 +23,18 @@ export async function controlActions(
   cancelled: () => boolean,
   progress: (message: string) => void,
 ) {
+  const cost = () =>
+    actionsCost(
+      journal.runsOn ?? 'ubuntu-latest',
+      journal.rateUsdPerMinute === undefined
+        ? actionsRate(journal.runsOn ?? 'ubuntu-latest')
+        : journal.rateUsdPerMinute,
+      journal.jobUsage ?? [],
+    );
   const base = `repos/${journal.repo}/actions`,
     branch = `forge-check/${plan.runId}`;
   if (cancelled() && !journal.dispatching && !journal.runId)
-    return { status: 'cancelled' as const, exitCode: null, billableMinutes: [] };
+    return { status: 'cancelled' as const, exitCode: null, billableMinutes: [], cost: cost() };
   if (!journal.runId) {
     if (!journal.dispatching) {
       journal.dispatching = true;
@@ -88,6 +97,19 @@ export async function controlActions(
       () => api.pages<ActionsJob>(`${base}/runs/${journal.runId}/jobs?filter=all&per_page=100`, 'jobs'),
       progress,
     );
+    const usage = new Map((journal.jobUsage ?? []).map(job => [job.id, job]));
+    for (const job of jobs) {
+      if (job.name !== 'forge-static' && !/^forge-shard-\d+$/.test(job.name)) continue;
+      const previous = usage.get(job.id);
+      usage.set(job.id, {
+        id: job.id,
+        status: job.status,
+        started_at: job.started_at ?? previous?.started_at ?? null,
+        completed_at: job.completed_at ?? previous?.completed_at ?? null,
+      });
+    }
+    journal.jobUsage = [...usage.values()];
+    save();
     const latest = new Map<number, ActionsJob>();
     for (const job of jobs) {
       const index =
@@ -151,7 +173,7 @@ export async function controlActions(
         await api.sleep(10_000);
         continue;
       }
-      return { status: 'interrupted' as const, exitCode: null, billableMinutes: [] };
+      return { status: 'interrupted' as const, exitCode: null, billableMinutes: [], cost: cost() };
     }
     const unfinished = [...latest.entries()].filter(([, job]) =>
       ['cancelled', 'timed_out', 'stale', 'startup_failure'].includes(job.conclusion ?? ''),
@@ -174,7 +196,7 @@ export async function controlActions(
     try {
       timing = await observe(api, () => api.request<Cost>(`${base}/runs/${journal.runId}/timing`), progress);
     } catch {
-      progress('Actions timing unavailable; no billable-minute estimate recorded.');
+      progress('Actions timing API unavailable; retaining job timestamp estimates when available.');
     }
     const billableMinutes = Object.values(timing.billable ?? {}).flatMap(value =>
       (Array.isArray(value.job_runs) ? value.job_runs : []).map(job => ({
@@ -207,6 +229,7 @@ export async function controlActions(
           ? null
           : 0,
       billableMinutes,
+      cost: cost(),
       failureSummary: [...latest.values()]
         .filter(job => job.conclusion !== 'success')
         .map(

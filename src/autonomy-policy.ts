@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { invariant } from './errors.js';
+import { modalCredentialsRefSchema } from './check-runner-settings.js';
 /** Portable API shape, shared by local owners, hosted projects and UI clients. */
 export const autonomyPolicySchema = z.object({
   githubMirror: z
@@ -34,6 +35,8 @@ export const autonomyPolicySchema = z.object({
         .optional(),
       runsOn: z.string().min(1).optional(),
       shards: z.number().int().positive().optional(),
+      credentialsRef: modalCredentialsRefSchema.optional(),
+      ratesUsdPerMinute: z.record(z.string().min(1), z.number().nonnegative().finite()).optional(),
       /** Remote runners only: landing batches checked at once (stacked on one another). */
       concurrency: z.number().int().min(1).max(16).optional(),
     })

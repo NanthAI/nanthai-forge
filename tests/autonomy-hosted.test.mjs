@@ -134,6 +134,20 @@ test('new hosted project gets supervised; contributors cannot set policy or acce
     errorCode('PROJECT_UNAVAILABLE'),
   );
   await assert.rejects(
+    policies.set._handler(s.ctx, {
+      projectId: s.projectId,
+      command: JSON.stringify({
+        action: 'set-policy',
+        operationId: randomUUID(),
+        checks: {
+          runner: 'modal',
+          credentialsRef: { kind: 'env', tokenId: 'PROJECT_ID', tokenSecret: 'PROJECT_SECRET' },
+        },
+      }),
+    }),
+    errorCode('PROJECT_UNAVAILABLE'),
+  );
+  await assert.rejects(
     actions.acceptChannel._handler(s.ctx, s.selection()),
     errorCode('PROJECT_UNAVAILABLE'),
   );

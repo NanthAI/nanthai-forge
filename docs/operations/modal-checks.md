@@ -3,7 +3,7 @@
 The native owner selects the backend through project autonomy policy:
 
 ```sh
-nforge agent OWNER set-policy '{"checks":{"runner":"modal"}}'
+nforge agent OWNER set-policy '{"checks":{"runner":"modal","credentialsRef":{"kind":"env","tokenId":"PROJECT_MODAL_ID","tokenSecret":"PROJECT_MODAL_SECRET"}}}'
 nforge agent OWNER set-policy '{"checks":{"runner":"local"}}'
 ```
 
@@ -14,7 +14,12 @@ check requests share the same check execution boundary.
 
 The owner installs Python Modal SDK **1.6.2** in
 `~/.local/venvs/forge-modal`, or selects its Python with `FORGE_MODAL_PYTHON`.
-The SDK reads the owner's existing local Modal credentials. There is no deployed
+The SDK receives only the explicitly referenced project's token values, with an
+empty config instead of the owner's default account. Configure `checks.credentialsRef`
+with environment variable names or an absolute external local JSON secret file
+containing `tokenId` and `tokenSecret`; values never enter Work or hosted storage.
+Missing project credentials return `MODAL_CREDENTIALS_REQUIRED` without local
+fallback. See [runner selection](../operations.md#native-runner-selection). There is no deployed
 function, public trigger, hosted token, shared volume or tunnel. Only an
 authenticated process on the owner machine starts remote checks. Credentials and
 SDK diagnostics are never sent to check containers or copied into check logs.

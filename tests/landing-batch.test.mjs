@@ -30,6 +30,13 @@ import { trustAgents } from './autonomy-fixture.mjs';
 
 async function fixture(t, { remote = true, delay = 25 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-batch-'));
+  const credentialRoot = mkdtempSync(join(tmpdir(), 'forge-batch-credentials-'));
+  const credentialsRef = { kind: 'file', path: join(credentialRoot, 'modal.json') };
+  writeFileSync(
+    credentialsRef.path,
+    JSON.stringify({ tokenId: 'synthetic-project-id', tokenSecret: 'synthetic-project-secret' }),
+    { mode: 0o600 },
+  );
   writeFileSync(join(root, 'same.txt'), 'original\n');
   initNative(root);
   trustAgents(root);
@@ -64,7 +71,7 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
   await agent.dispatch({
     action: 'set-policy',
     operationId: randomUUID(),
-    checks: { runner: remote ? 'modal' : 'local' },
+    checks: { runner: remote ? 'modal' : 'local', credentialsRef },
   });
   t.after(async () => {
     // All remote calls, including detached audits, use the synthetic client above.
@@ -77,6 +84,7 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
       else process.env[name] = value;
     }
     rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+    rmSync(credentialRoot, { recursive: true, force: true });
   });
   const pending = [];
   async function candidate(path, text = `${path}\n`, enqueue = true) {

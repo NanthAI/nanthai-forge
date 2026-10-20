@@ -22,6 +22,13 @@ export const autonomyPolicy = v.object({
       repo: v.optional(v.string()),
       runsOn: v.optional(v.string()),
       shards: v.optional(v.number()),
+      credentialsRef: v.optional(
+        v.union(
+          v.object({ kind: v.literal('env'), tokenId: v.string(), tokenSecret: v.string() }),
+          v.object({ kind: v.literal('file'), path: v.string() }),
+        ),
+      ),
+      ratesUsdPerMinute: v.optional(v.record(v.string(), v.number())),
       concurrency: v.optional(v.number()),
       fallback: v.optional(v.union(v.literal('manual'), v.literal('local'))),
     }),

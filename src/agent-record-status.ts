@@ -1,3 +1,4 @@
+import { runnerMonthCosts } from './check-cost.js';
 import { modalMonthCost } from './check-backend.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readPolicy } from './work-autonomy.js';
@@ -81,7 +82,9 @@ export function agentRecordStatus(
     revision: tx.revision,
     result: {
       modalCost: modalMonthCost(positions('runs').map(position => tx.at('runs', position))),
+      checkCosts: runnerMonthCosts(positions('runs').map(position => tx.at('runs', position))),
       autonomyPolicy: readPolicy(store),
+      checkRunner: { runner: 'local', ...readPolicy(store).checks },
       engine: store.native ? 'forge-native' : 'git',
       automaticActions: records(
         'automaticActions',

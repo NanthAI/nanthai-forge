@@ -8,6 +8,8 @@ export type ActionsJob = {
   status: string;
   conclusion: string | null;
   run_attempt: number;
+  started_at?: string | null;
+  completed_at?: string | null;
   steps?: { conclusion: string | null; number: number; name: string }[];
 };
 export type ActionsRun = {

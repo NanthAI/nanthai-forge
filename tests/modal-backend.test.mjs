@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync
 import { dirname, join } from 'node:path';
 import { tmpdir, hostname } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
+import { setPolicy, localPerson } from '../dist/work-autonomy.js';
 import { WorkService } from '../dist/work.js';
 import { initNative } from '../dist/native-work.js';
 import { checkEnvironment, recoverRuns, adoptModalRun } from '../dist/work-run.js';
@@ -32,6 +33,27 @@ function fixture(t, files = {}) {
   }
   initNative(root);
   const work = new WorkService(root);
+  const tokenId = 'FORGE_SYNTHETIC_MODAL_ID',
+    tokenSecret = 'FORGE_SYNTHETIC_MODAL_SECRET';
+  const previous = { [tokenId]: process.env[tokenId], [tokenSecret]: process.env[tokenSecret] };
+  process.env[tokenId] = 'synthetic-project-id';
+  process.env[tokenSecret] = 'synthetic-project-secret';
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  setPolicy(
+    work.store,
+    {
+      action: 'set-policy',
+      operationId: randomUUID(),
+      checks: { runner: 'modal', credentialsRef: { kind: 'env', tokenId, tokenSecret } },
+    },
+    localPerson(),
+    work.store.revision(),
+  );
   const act = command => work.execute(command, work.store.load().revision).result;
   const intent = act({ action: 'intent', outcome: 'Synthetic Modal check' });
   const lane = act({ action: 'lane', intentId: intent.id, name: 'Candidate' });
@@ -268,6 +290,12 @@ test(
   { skip: process.env.FORGE_MODAL_SMOKE !== '1' },
   async t => {
     const { work, run, path } = fixture(t);
+    // Live opt-in now needs explicit project token variables, just like production.
+    run.backend.credentialsRef = {
+      kind: 'env',
+      tokenId: 'MODAL_TOKEN_ID',
+      tokenSecret: 'MODAL_TOKEN_SECRET',
+    };
     assert.equal(await launchModalRun(work.store, run, modalClient), true);
     const receipt = read(join(path, 'result.json'));
     assert.equal(receipt.status, 'passed');
@@ -1067,4 +1095,66 @@ test('Modal receipt retains per-execution quantities and their measurement basis
   assert.equal(receipt.status, 'passed');
   assert.deepEqual(receipt.backend.costUsage, costUsage);
   assert.equal(modalMonthCost([{ ...run, backend: receipt.backend }]).legacyRuns, 0);
+});
+
+test('missing project Modal credentials produce typed error without calling SDK or local fallback', async t => {
+  const { work, run, path } = fixture(t);
+  await work.dispatch(
+    { action: 'set-policy', operationId: randomUUID(), checks: { fallback: 'local' } },
+    work.store.revision(),
+  );
+  run.backend.credentialsRef = {
+    kind: 'env',
+    tokenId: 'FORGE_ABSENT_PROJECT_ID',
+    tokenSecret: 'FORGE_ABSENT_PROJECT_SECRET',
+  };
+  assert.equal(await launchModalRun(work.store, run, async () => assert.fail('no SDK invocation')), true);
+  const receipt = read(join(path, 'result.json'));
+  assert.equal(receipt.status, 'runner-unavailable');
+  assert.equal(receipt.error.code, 'MODAL_CREDENTIALS_REQUIRED');
+  assert.match(receipt.error.message, /checks.credentialsRef/);
+  assert.equal(receipt.backend.actual, 'modal');
+  assert.equal(receipt.backend.cost.estimatedCostUsd, null);
+  assert.equal(existsSync(join(path, 'modal-plan.json')), false);
+});
+
+test('project token values stay out of Work, plans, receipts and logs', async t => {
+  const { work, run, path } = fixture(t);
+  await launchModalRun(work.store, run, async (file, emit, _driver, credentials) => {
+    assert.equal(credentials.MODAL_TOKEN_ID, 'synthetic-project-id');
+    assert.equal(credentials.MODAL_TOKEN_SECRET, 'synthetic-project-secret');
+    emit(result(read(file)));
+  });
+  for (const text of [
+    JSON.stringify(work.store.load()),
+    readFileSync(join(path, 'modal-plan.json'), 'utf8'),
+    readFileSync(join(path, 'result.json'), 'utf8'),
+    readFileSync(join(path, 'stdout.log'), 'utf8'),
+  ]) {
+    assert.doesNotMatch(text, /synthetic-project-secret|synthetic-project-id/);
+  }
+});
+
+test('external project file tokens are redacted even when controller exceptions contain them', async t => {
+  const { work, run, path } = fixture(t);
+  const external = mkdtempSync(join(tmpdir(), 'forge-project-modal-secret-'));
+  t.after(() => rmSync(external, { recursive: true, force: true }));
+  const file = join(external, 'credentials.json');
+  writeFileSync(
+    file,
+    JSON.stringify({ tokenId: 'synthetic-external-id', tokenSecret: 'synthetic-external-secret' }),
+  );
+  run.backend.credentialsRef = { kind: 'file', path: file };
+  await launchModalRun(work.store, run, async (_, _emit, _driver, credentials) => {
+    throw new Error(`Synthetic SDK failure ${credentials.MODAL_TOKEN_ID} ${credentials.MODAL_TOKEN_SECRET}`);
+  });
+  assert.equal(read(join(path, 'result.json')).status, 'interrupted');
+  for (const text of [
+    JSON.stringify(work.store.load()),
+    readFileSync(join(path, 'result.json'), 'utf8'),
+    readFileSync(join(path, 'stdout.log'), 'utf8'),
+  ]) {
+    assert.doesNotMatch(text, /synthetic-external-id|synthetic-external-secret/);
+  }
+  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /\[redacted\]/);
 });

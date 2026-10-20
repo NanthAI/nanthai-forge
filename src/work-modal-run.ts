@@ -1,3 +1,7 @@
+import { modalCredentials } from './modal-credentials.js';
+import { readPolicy } from './work-autonomy.js';
+import { modalRunCost } from './check-cost.js';
+import { ForgeError } from './errors.js';
 import { localFallbackAllowed, runnerRetryMessage } from './check-fallback.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { pollCancellation } from './work-cancel-poll.js';
@@ -14,7 +18,7 @@ import { modalPlan, validateModalPlan, type ModalPlan } from './modal-plan.js';
 import { bindModalResult, modalClient, type ModalClient, type ModalEvent } from './modal-client.js';
 import { workProgress } from './work-progress.js';
 import { modalControllerError } from './modal-controller-error.js';
-import { receiptSchema } from './work-run-receipt.js';
+import { createRunReceipt } from './work-run-receipt.js';
 import { durableReplace, syncDirectory, syncFile } from './native-durability.js';
 import type { CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
@@ -63,7 +67,14 @@ export async function launchModalRun(
     workProgress('modal check', line, `${run.id}:${sequence}`);
   };
   let plan: ModalPlan | undefined;
+  let credentials: ReturnType<typeof modalCredentials> | undefined;
   try {
+    run.backend!.credentialsRef =
+      run.backend!.credentialsRef === undefined
+        ? (readPolicy(store).checks?.credentialsRef ?? null)
+        : run.backend!.credentialsRef;
+    updateModalRun(store, run);
+    credentials = modalCredentials(store.root, run.backend!.credentialsRef);
     if (existsSync(join(path, 'modal-plan.json'))) {
       plan = JSON.parse(readFileSync(join(path, 'modal-plan.json'), 'utf8')) as ModalPlan;
       validateModalPlan(plan, run);
@@ -71,7 +82,7 @@ export async function launchModalRun(
       plan = (await modalPlan(store, run, path)) ?? undefined;
       if (!plan) {
         if (!localFallbackAllowed(store, run)) {
-          const receipt = receiptSchema.parse({
+          const receipt = createRunReceipt({
             status: 'runner-unavailable',
             backend: run.backend,
             endedAt: new Date().toISOString(),
@@ -241,6 +252,7 @@ export async function launchModalRun(
           }
         },
         pid => queue?.child(pid, processStartTime(pid)),
+        credentials,
       ),
     ]);
     if (
@@ -270,6 +282,7 @@ export async function launchModalRun(
       run.backend!.estimatedCostUsd = outcome.estimatedCostUsd;
       if (outcome.costUsage) run.backend!.costUsage = outcome.costUsage;
     }
+    run.backend!.cost = modalRunCost(run.backend!);
     const endedAt = new Date().toISOString();
     const summary = outcome ? shardLogs.failureSummary(outcome) : '';
     const assessment =
@@ -291,7 +304,7 @@ export async function launchModalRun(
             .slice(0, 4096) ||
           'Failed shard retry has no complete attributed test report; inspect retained attempts.'
         : '');
-    const receipt = receiptSchema.parse({
+    const receipt = createRunReceipt({
       status: cancelled
         ? 'cancelled'
         : outcome
@@ -360,14 +373,37 @@ export async function launchModalRun(
     syncDirectory(path);
     return true;
   } catch (error) {
-    const message = modalControllerError(error);
+    if (error instanceof ForgeError && error.code === 'MODAL_CREDENTIALS_REQUIRED') {
+      const receipt = createRunReceipt({
+        status: 'runner-unavailable',
+        backend: run.backend,
+        endedAt: new Date().toISOString(),
+        exitCode: null,
+        signal: null,
+        error: { code: error.code, message: error.message },
+        details: error.message,
+      });
+      durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
+      return true;
+    }
+    run.backend!.cost = modalRunCost(run.backend!);
+    const redacted =
+      error instanceof Error && credentials
+        ? new Error(
+            Object.values(credentials).reduce(
+              (message, value) => message.split(value).join('[redacted]'),
+              error.message,
+            ),
+          )
+        : error;
+    const message = modalControllerError(redacted);
     // No inferred success or automatic retry following an ambiguous creation/transport result.
     progress(`Controller interrupted: ${message}; retained execution IDs and source pins are preserved.`);
     run.backend!.retryable = false;
     run.status = 'interrupted';
     run.endedAt = new Date().toISOString();
     run.details = `Modal controller interrupted: ${message}. No command was repeated. Retained execution IDs require reconciliation.`;
-    const receipt = receiptSchema.parse({
+    const receipt = createRunReceipt({
       status: run.status,
       backend: run.backend,
       endedAt: run.endedAt,

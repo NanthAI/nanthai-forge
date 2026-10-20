@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -91,6 +91,7 @@ export type ModalClient = (
   path: string,
   event: (event: ModalEvent) => void,
   driver?: (pid: number) => void,
+  credentials?: { MODAL_TOKEN_ID: string; MODAL_TOKEN_SECRET: string },
 ) => Promise<void>;
 export function bindModalResult(plan: ModalPlan, result: Extract<ModalEvent, { kind: 'result' }>) {
   invariant(
@@ -101,19 +102,22 @@ export function bindModalResult(plan: ModalPlan, result: Extract<ModalEvent, { k
   return result;
 }
 /** SDK errors/stdout are private transport data; only schema-valid events are returned. */
-export const modalClient: ModalClient = (path, event, driver) =>
+export const modalClient: ModalClient = (path, event, driver, credentials) =>
   new Promise((resolve, reject) => {
-    const names = [
-      'HOME',
-      'PATH',
-      'MODAL_TOKEN_ID',
-      'MODAL_TOKEN_SECRET',
-      'MODAL_CONFIG_PATH',
-      'MODAL_ENVIRONMENT',
-    ];
-    const env = Object.fromEntries(
-      names.flatMap(name => (process.env[name] === undefined ? [] : [[name, process.env[name]!]])),
+    // Both explicit project token values are mandatory. Never discover owner credentials.
+    invariant(
+      credentials?.MODAL_TOKEN_ID && credentials.MODAL_TOKEN_SECRET,
+      'MODAL_CREDENTIALS_REQUIRED',
+      'Configure checks.credentialsRef before starting Modal.',
     );
+    const config = join(dirname(path), 'modal-project-config.toml');
+    writeFileSync(config, '', { mode: 0o600 });
+    const env = {
+      ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+      ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+      ...credentials,
+      MODAL_CONFIG_PATH: config,
+    };
     const child = spawn(
       process.env.FORGE_MODAL_PYTHON ?? join(homedir(), '.local', 'venvs', 'forge-modal', 'bin', 'python'),
       [modalBridge, path],

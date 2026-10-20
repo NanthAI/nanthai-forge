@@ -84,6 +84,8 @@ function transport(plan, journal, options = {}) {
   const job = {
     id: 20,
     name: 'forge-static',
+    started_at: '2026-10-01T12:00:00Z',
+    completed_at: '2026-10-01T12:01:01Z',
     run_attempt: 1,
     status: 'completed',
     conclusion: options.conclusion ?? 'success',
@@ -962,4 +964,78 @@ test('exhausted transient check-ref pushes interrupt with the retained-run messa
   assert.ok(waits.reduce((sum, ms) => sum + ms, 0) <= 45_000);
   assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /retry 5\/5/);
   assert.equal(read(join(path, 'github-actions.json')).dispatching, undefined);
+});
+
+test('Blacksmith zero API billing still records timestamp USD, retries and pinned rate on adoption', async t => {
+  const { work, run, path } = fixture(t);
+  setPolicy(
+    work.store,
+    {
+      action: 'set-policy',
+      operationId: randomUUID(),
+      checks: {
+        runsOn: 'blacksmith-4vcpu-ubuntu-2404',
+        ratesUsdPerMinute: { 'blacksmith-4vcpu-ubuntu-2404': 0.008 },
+      },
+    },
+    localPerson(),
+    work.store.revision(),
+  );
+  let api;
+  const proxy = {
+    request: (...args) => api.request(...args),
+    pages: (...args) => api.pages(...args),
+    log: (...args) => api.log(...args),
+    sleep: async () => {},
+  };
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    proxy,
+    async (plan, journal, save) => {
+      journal.commit = 'a'.repeat(40);
+      journal.pushed = true;
+      save();
+      api = transport(plan, journal, { conclusion: 'timed_out' }).api;
+      const request = api.request;
+      api.request = async (...args) =>
+        args[0].endsWith('/timing')
+          ? { billable: { SELF_HOSTED: { jobs: 1, job_runs: [] } } }
+          : request(...args);
+    },
+    async () => {},
+  );
+  const receipt = read(join(path, 'result.json'));
+  assert.equal(receipt.status, 'passed');
+  assert.deepEqual(receipt.backend.billableMinutes, []);
+  assert.equal(receipt.backend.cost.billedMinutes, 4);
+  assert.equal(receipt.backend.estimatedCostUsd, 0.032);
+  assert.deepEqual(
+    receipt.backend.cost.items.map(item => item.id),
+    ['20', '21'],
+  );
+  setPolicy(
+    work.store,
+    {
+      action: 'set-policy',
+      operationId: randomUUID(),
+      checks: {
+        runner: 'local',
+        runsOn: 'ubuntu-latest',
+        ratesUsdPerMinute: { 'blacksmith-4vcpu-ubuntu-2404': 100 },
+      },
+    },
+    localPerson(),
+    work.store.revision(),
+  );
+  run.status = 'running';
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    proxy,
+    async () => {},
+    async () => {},
+  );
+  assert.equal(read(join(path, 'result.json')).backend.cost.estimatedCostUsd, 0.032);
+  assert.equal(read(join(path, 'github-actions.json')).rateUsdPerMinute, 0.008);
 });

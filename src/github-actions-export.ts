@@ -6,12 +6,15 @@ import { retrySyncGit, syncGit, syncGitSleep } from './github-sync-git.js';
 import { durableReplace } from './native-durability.js';
 import { invariant } from './errors.js';
 import { githubActionsRecipe, githubActionsWorkflow } from './github-actions-workflow.js';
+import type { JobUsage } from './check-cost.js';
 import type { ModalPlan } from './modal-plan.js';
 
 export type ActionsJournal = {
   pin: string;
   repo: string;
   runsOn: string;
+  rateUsdPerMinute?: number | null;
+  jobUsage?: JobUsage[];
   commit?: string;
   pushed?: boolean;
   dispatching?: boolean;

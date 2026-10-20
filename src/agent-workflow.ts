@@ -1,3 +1,4 @@
+import { runnerMonthCosts } from './check-cost.js';
 import { candidateCommand } from './candidate-names.js';
 import { agentTake } from './agent-take.js';
 import { duplicateStartWarnings } from './agent-ownership.js';
@@ -308,7 +309,9 @@ export class AgentWorkflow {
           revision: data.revision,
           result: {
             modalCost: modalMonthCost(data.runs),
+            checkCosts: runnerMonthCosts(data.runs),
             autonomyPolicy: readPolicy(store),
+            checkRunner: { runner: 'local', ...readPolicy(store).checks },
             automaticActions: page(data.automaticActions ?? []),
             engine: store.native ? 'forge-native' : 'git',
             channels: page(store.native ? nativeChannels(data) : channelStatus(store, data)),

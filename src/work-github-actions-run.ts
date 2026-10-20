@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { actionsCost, actionsRate, unknownCost } from './check-cost.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +13,7 @@ import { pollCancellation } from './work-cancel-poll.js';
 import { updateModalRun } from './work-modal-run.js';
 import { CheckQueue } from './check-queue.js';
 import { workProgress } from './work-progress.js';
-import { receiptSchema } from './work-run-receipt.js';
+import { createRunReceipt } from './work-run-receipt.js';
 import { invariant } from './errors.js';
 import { GitSyncError } from './github-sync-git.js';
 import type { WorkStore } from './work-store.js';
@@ -65,7 +66,7 @@ export async function launchGithubActionsRun(
         durableReplace(
           join(path, 'result.json'),
           JSON.stringify(
-            receiptSchema.parse({
+            createRunReceipt({
               status: 'runner-unavailable',
               backend: run.backend,
               endedAt: new Date().toISOString(),
@@ -84,6 +85,9 @@ export async function launchGithubActionsRun(
     run.status = 'running';
     updateModalRun(store, run);
     const { journal, save } = actionsJournal(path, plan, repo, runsOn);
+    if (journal.rateUsdPerMinute === undefined) {
+      journal.rateUsdPerMinute = policy?.ratesUsdPerMinute?.[runsOn] ?? actionsRate(runsOn);
+    }
     save();
     const cancelled = () =>
       signalled || control.cancelled() || pollCancellation(() => store.select('runs', run.id));
@@ -95,7 +99,10 @@ export async function launchGithubActionsRun(
     const outcome = await controlActions(plan, journal, save, api, cancelled, progress);
     run.backend.executionIds = journal.runId ? [String(journal.runId)] : [];
     run.backend.billableMinutes = outcome.billableMinutes;
-    const receipt = receiptSchema.parse({
+    run.backend.cost = outcome.cost;
+    if (outcome.cost.estimatedCostUsd !== null) run.backend.estimatedCostUsd = outcome.cost.estimatedCostUsd;
+    else delete run.backend.estimatedCostUsd;
+    const receipt = createRunReceipt({
       ...outcome,
       backend: run.backend,
       checkSelection: plan.standard ? plan.selection : undefined,
@@ -110,7 +117,7 @@ export async function launchGithubActionsRun(
             })),
           }
         : {}),
-      details: `GitHub Actions result bound to the pinned source, check and shard plan. API billable minutes per job are an allocation estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}. ${outcome.status === 'passed' ? 'Run ref is removed after recording this result.' : 'Run ref and logs retained for diagnosis; remove the run-owned ref after inspection.'}`,
+      details: `GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}. ${outcome.status === 'passed' ? 'Run ref is removed after recording this result.' : 'Run ref and logs retained for diagnosis; remove the run-owned ref after inspection.'}`,
     });
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
     if (outcome.status === 'passed') {
@@ -122,8 +129,27 @@ export async function launchGithubActionsRun(
       }
     }
   } catch (error) {
+    try {
+      const journalFile = join(path, 'github-actions.json');
+      if (existsSync(journalFile)) {
+        const journal = JSON.parse(
+          readFileSync(journalFile, 'utf8'),
+        ) as import('./github-actions-export.js').ActionsJournal;
+        run.backend!.cost = actionsCost(
+          journal.runsOn,
+          journal.rateUsdPerMinute === undefined ? actionsRate(journal.runsOn) : journal.rateUsdPerMinute,
+          journal.jobUsage ?? [],
+        );
+        if (run.backend!.cost.estimatedCostUsd !== null)
+          run.backend!.estimatedCostUsd = run.backend!.cost.estimatedCostUsd;
+        else delete run.backend!.estimatedCostUsd;
+      }
+    } catch {
+      run.backend!.cost = unknownCost('github-actions');
+      delete run.backend!.estimatedCostUsd;
+    }
     // Never serialize raw transport errors or stacks. Git's stderr is kept only after redaction.
-    const receipt = receiptSchema.parse({
+    const receipt = createRunReceipt({
       status: 'interrupted',
       backend: run.backend,
       endedAt: new Date().toISOString(),

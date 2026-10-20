@@ -72,10 +72,13 @@ retained Actions run and records cancellation only after observing it terminal.
 A failed job whose log has the runner's `exit code 137`, a SIGKILL/out-of-memory
 error annotation or a kernel `Killed process` line gets a likely-OOM diagnosis
 (exit 137); test names in passing logs do not count. This is not a
-provider-confirmed memory measurement. Job API timing records rounded billable
-minutes per job, including attempts, in `backend.billableMinutes`; no dollar price
-is inferred for custom runner labels. These estimates are separate from Modal
-allocation estimates. Selected output files are currently marked unavailable;
+provider-confirmed memory measurement. The timing API remains in `backend.billableMinutes` for compatibility, but can
+report zero for Blacksmith. `backend.cost` estimates each retained job attempt
+from its start/end timestamps, rounds up to whole minutes separately and applies
+the pinned per-label rate. Unknown timestamps or unpriced custom labels retain
+unknown quantities, not zero. Blacksmith Ubuntu x64 defaults to vCPU/2 ×
+$0.004/job-minute, before its shared free allowance. Override any label through
+`checks.ratesUsdPerMinute`; see [cost basis and summaries](../operations.md#native-runner-selection). Selected output files are currently marked unavailable;
 remote native process resource metrics are unavailable.
 
 The result is recorded before deleting a successful run's ref. Failed/interrupted

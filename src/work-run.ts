@@ -2,6 +2,7 @@ import { launchGithubActionsRun } from './work-github-actions-run.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { pollCancellation } from './work-cancel-poll.js';
 import { shardLogName } from './modal-shard-logs.js';
+import { localCost, modalRunCost } from './check-cost.js';
 import { checkRoute } from './check-backend.js';
 import { launchModalRun } from './work-modal-run.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -11,7 +12,7 @@ import { lightweightDocsRun } from './work-docs-admission.js';
 import { interactionEvidence } from './work-interaction.js';
 import { writeCheckScope } from './work-check-scope.js';
 import { failureSummary } from './agent-run-failure.js';
-import { receiptSchema } from './work-run-receipt.js';
+import { receiptSchema, createRunReceipt } from './work-run-receipt.js';
 import { automaticCleanup } from './work-auto-clean.js';
 import { readPolicy } from './work-autonomy.js';
 import { CheckQueue, foregroundQueued } from './check-queue.js';
@@ -328,8 +329,18 @@ async function launchLocal(
     } catch {
       /* Optional command-reported selection is unavailable; logs retain command output. */
     }
-    const receipt = receiptSchema.parse({
-      ...(run.backend ? { backend: run.backend } : {}),
+    const receipt = createRunReceipt({
+      backend: {
+        ...(run.backend ?? { requested: 'local', actual: 'local' }),
+        cost:
+          run.backend?.costUsage ||
+          (run.backend?.requested === 'modal' && run.backend.estimatedCostUsd !== undefined)
+            ? {
+                ...modalRunCost(run.backend),
+                basis: modalRunCost(run.backend).basis + ' Local fallback adds no provider runner charge.',
+              }
+            : localCost(run.id),
+      },
       status: stopping ? 'cancelled' : code === 0 && !failure ? 'passed' : 'failed',
       ...(!stopping && (code !== 0 || failure) ? { failureSummary: failureSummary(store, run) } : {}),
       exitCode: code,
@@ -740,8 +751,13 @@ export function runWork(
     );
     const warnings = diskGuard(store.root);
     const inputObservations = observeCheckInputs(store, check, command.expectedHead, environment);
+    const policy = readPolicy(store).checks;
+    const route = checkRoute(policy?.runner ?? 'local', check, store.native);
     started = {
-      backend: checkRoute(readPolicy(store).checks?.runner ?? 'local', check, store.native),
+      backend: {
+        ...route,
+        ...(route.actual === 'modal' ? { credentialsRef: policy?.credentialsRef ?? null } : {}),
+      },
       id: command.operationId,
       viewId: view.id,
       head: command.expectedHead,

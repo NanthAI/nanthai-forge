@@ -122,6 +122,18 @@ nforge agent ROOT define-check '{"name":"integration","executable":"node","args"
 
 `env` and `credentials` contain environment variable names, never values. Both are explicit passthrough; the latter identifies credentials separately. They change the definition digest and appear in check definitions and receipts. They do not inject Secret Objects. Omitted variables are absent; failed runs suggest omitted names that may need passthrough. Values are not retained by the runner, but commands can print them into logs. See [security](security.md#clean-check-environments) for the complete allowlist and filesystem limitations. A clean environment is not an OS sandbox.
 
+Choose the native project's runner once through the existing owner-only
+`set-policy` command: `checks.runner` is `local` (default), `github-actions`
+(`repo`, `runsOn`, optional `shards`), or `modal` (`credentialsRef` naming the
+project's token variables or an external local JSON secret file). Use `policy` to
+show it; `status` also includes it. Modal never discovers the owner's default
+account; missing project credentials are a typed infrastructure error. Token values
+stay outside Work, source and hosting. Each terminal receipt records `backend.cost`
+with billed quantities, estimated USD and its basis; `status.checkCosts.months`
+summarizes available estimates per month and runner, marking unknown and legacy
+inputs. See [runner selection and cost basis](operations.md#native-runner-selection)
+for commands, configurable label rates and allowance exclusions.
+
 Configured native runners batch queued code candidates as checked prefixes. `land-ready` resumes retained batches; cancellation preserves earlier passing prefixes. Batches retain the selecting driver's clean environment for resumed runs and identify incompatible entries by changed environment field. See [landing batches](operations/landing-batches.md) and [agent workflow](agents/workflow.md#landing-queue).
 
 Modal interruptions preserve completed exact-plan shards; failed test shards retry once. Two named flake verdicts within seven days quarantine the exact test, which continues running without blocking on fully attributed failures. Twenty consecutive clean passes or an explicit fix release quarantine. See [Modal checks](operations/modal-checks.md#flakes-and-quarantine) for attribution, infrastructure recovery and retained attempts.

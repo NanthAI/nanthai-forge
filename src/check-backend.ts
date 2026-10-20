@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { modalCredentialsRefSchema } from './check-runner-settings.js';
+import { checkCostSchema } from './check-cost.js';
 import type { CheckRun } from './work-types.js';
 
 export const modalCostUsageSchema = z.array(
@@ -13,6 +15,8 @@ export const modalCostUsageSchema = z.array(
 );
 
 export const checkBackendSchema = z.object({
+  cost: checkCostSchema.optional(),
+  credentialsRef: modalCredentialsRefSchema.nullable().optional(),
   retryable: z.boolean().optional(),
   verdict: z.enum(['clean', 'flake', 'quarantined']).optional(),
   testVerdicts: z
@@ -72,6 +76,7 @@ export function modalMonthCost(runs: Iterable<Pick<CheckRun, 'startedAt' | 'back
     legacyRuns = 0;
   const executions = new Set<string>();
   for (const run of runs) {
+    if (run.backend?.actual === 'github-actions') continue;
     if (!run.startedAt.startsWith(month) || run.backend?.estimatedCostUsd === undefined) continue;
     recordedRuns++;
     if (!run.backend.costUsage) {

@@ -155,6 +155,57 @@ project and seed a replacement instead of migrating it. Only the lead performs t
 
 Native checks support local, [Modal](operations/modal-checks.md), and [GitHub Actions or Blacksmith](operations/github-actions-checks.md) runners. `checks.fallback` accepts `manual` or `local` and defaults to `manual`, including existing policies. Automatic local fallback requires explicit opt-in and owner-originated work. Confirmed runner outages and budget exhaustion return retryable infrastructure outcomes rather than failed-test evidence. See [runner fallback](operations/runner-fallback.md) for policy commands and recovery.
 
+The existing owner-only project policy is the single runner setting. CLI-created
+owners default to the own machine. Show it with `nforge policy OWNER` or
+`nforge agent OWNER status`; edit with a fresh operation UUID (replay that UUID
+and payload after an unknown reply):
+
+```sh
+nforge set-policy OWNER '{"operationId":"UUID","checks":{"runner":"local"}}'
+nforge set-policy OWNER '{"operationId":"UUID","checks":{"runner":"github-actions","repo":"OWNER/REPO","runsOn":"blacksmith-4vcpu-ubuntu-2404","shards":4}}'
+nforge set-policy OWNER '{"operationId":"UUID","checks":{"runner":"modal","credentialsRef":{"kind":"env","tokenId":"PROJECT_MODAL_ID","tokenSecret":"PROJECT_MODAL_SECRET"}}}'
+```
+
+For Modal, set the two named variables in the owner process environment using the
+project's own account/key. Alternatively use
+`"credentialsRef":{"kind":"file","path":"/absolute/external/project-modal.json"}`.
+That local JSON file contains `tokenId` and `tokenSecret` values and must resolve
+outside the owner, including its Lanes; symlinks into source are rejected. Only the
+reference enters policy/Work. Values are read immediately before SDK invocation,
+kept in process memory and passed only to the owner-side SDK process; they never
+enter source, plans, Work, logs or hosted storage. The SDK gets an empty config and
+no ambient Modal account/environment selectors. Missing, unreadable or invalid
+credentials return `MODAL_CREDENTIALS_REQUIRED` naming `checks.credentialsRef`,
+without using the owner's account or falling back locally. Existing Modal owners
+must explicitly configure their reference. No hosted runner account funds checks.
+
+Every new terminal check receipt has `backend.cost`: the runner/label, estimated
+billed seconds/minutes, estimated USD, per-execution quantities and the basis.
+Unavailable quantities are `null`, never an inferred zero. Local provider usage
+and charge are zero; hardware and electricity are outside the estimate.
+Actions estimates use each job's `started_at`/`completed_at`, rounded up separately
+to minutes, including retained retry attempts. GitHub's timing API is retained in
+`backend.billableMinutes` for compatibility but is not the USD basis: Blacksmith
+jobs can report zero there. Built-in standard x64 rates are Linux $0.006,
+Windows $0.010 and macOS $0.062 per minute ([GitHub pricing](https://docs.github.com/en/billing/reference/actions-runner-pricing)).
+Blacksmith Ubuntu x64 labels use vCPU/2 × $0.004/job-minute; the 3,000 free
+2-vCPU minutes/month are noted, not deducted because account-wide consumption is
+unknown ([Blacksmith pricing](https://www.blacksmith.sh/pricing)). Set or override
+any label's estimate with `checks.ratesUsdPerMinute`, for example
+`{"blacksmith-4vcpu-ubuntu-2404":0.008}`. Unknown labels retain usage with unknown USD
+until configured. The journal pins the selected rate for adoption.
+
+Modal uses recorded Sandbox core-seconds × $0.00003942 plus GiB-seconds ×
+$0.00000667, measured at worker runtime when available
+([Modal pricing](https://modal.com/pricing), [resource basis](https://modal.com/docs/guide/sandbox-resources)).
+`status.checkCosts.months` groups all retained months (UTC run start) by runner
+and label, deduplicates remote execution identities and reports unknown/legacy
+run counts. Totals sum available estimates before allowances, credits and billing
+adjustments; provider invoices remain authoritative. Legacy Modal controller-time
+and aggregate estimates remain explicitly labelled, may overstate spend and are
+not reconciled against invoices. `modalCost` remains the current-month compatibility
+summary with its historical basis; it excludes Actions. No backfill is performed.
+
 ## Local check reliability
 
 ### Check environment contract
