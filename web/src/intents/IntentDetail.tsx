@@ -8,7 +8,7 @@ import { clearDelegate, delegateRequested } from './useCreatedIntent';
 import { canReviewView } from '../views/intent-views';
 import { Combine } from '../views/Combine';
 import { WorkMap } from '../views/WorkMap';
-import { AddLane, Candidates, Conversation, LaneTag } from './IntentParts';
+import { AddLane, AddLaneHandoff, Candidates, Conversation, CopyStartCommand, LaneTag } from './IntentParts';
 import { WorkDetailLayout, CollapseSideButton } from '../shell/WorkDetailLayout';
 import { WorkRow, LaneFactLine } from '../ui/WorkRow';
 import { laneFacts } from '../ui/lane-facts';
@@ -70,6 +70,13 @@ export function IntentDetailView({
   activityMore,
   sendMessage,
   editHref,
+  onEdit,
+  editor,
+  statusControl,
+  meta,
+  conversation,
+  startIntentId = row.id,
+  canStart = true,
 }: {
   row: IntentRow;
   views: readonly ViewRow[];
@@ -91,6 +98,13 @@ export function IntentDetailView({
   activityMore?: ReactNode;
   sendMessage?: (text: string, laneId?: string) => Promise<string | null>;
   editHref?: string;
+  onEdit?: () => void;
+  editor?: ReactNode;
+  statusControl?: ReactNode;
+  meta?: ReactNode;
+  conversation?: ReactNode;
+  startIntentId?: string;
+  canStart?: boolean;
 }) {
   const [error, setError] = useState('');
   const [dismissed, setDismissed] = useState<string | null>(null);
@@ -113,6 +127,36 @@ export function IntentDetailView({
       .filter(run => run.viewId === ready.id && run.head === ready.head && run.status === 'passed')
       .sort((a, b) => (b.endedAt ?? '').localeCompare(a.endedAt ?? ''))[0]?.endedAt;
   const facts = records ? laneFacts(records, row.lanes, now) : new Map();
+  const details = (
+    <Panel
+      title="Details"
+      actions={
+        onEdit ? (
+          <Button variant="ghost" size="sm" onClick={onEdit}>
+            Edit
+          </Button>
+        ) : (
+          editHref && <a href={editHref}>Edit</a>
+        )
+      }
+    >
+      {editor ?? (
+        <>
+          {row.constraints && row.constraints !== row.outcome && (
+            <div className="fx-intent-why">{row.constraints}</div>
+          )}
+          {(row.lanes.length > 0 || base) && (
+            <ExactRecord
+              rows={[
+                ['Intent', row.id],
+                ['Base', base],
+              ]}
+            />
+          )}
+        </>
+      )}
+    </Panel>
+  );
   return (
     <WorkDetailLayout
       className="fx-intent-page"
@@ -123,35 +167,58 @@ export function IntentDetailView({
             <h1>
               <Glyph name="intent" size={18} />
               {row.outcome}
-              <StatusPill tone={row.tone}>{row.label}</StatusPill>
+              {statusControl ?? <StatusPill tone={row.tone}>{row.label}</StatusPill>}
             </h1>
             <div className="fx-lane-meta">
-              {planning
-                .filter(item => item.kind === 'initiative')
-                .map(item => (
-                  <span key={item.id}>
-                    <Glyph name="initiative" size={12} /> {item.title}
+              {meta ?? (
+                <>
+                  {planning
+                    .filter(item => item.kind === 'initiative')
+                    .map(item => (
+                      <span key={item.id}>
+                        <Glyph name="initiative" size={12} /> {item.title}
+                      </span>
+                    ))}
+                  <span>
+                    {row.lanes.length} {row.lanes.length === 1 ? 'Lane' : 'Lanes'} ·{' '}
+                    {row.lanes.filter(lane => lane.accepted).length} landed
                   </span>
-                ))}
-              <span>
-                {row.lanes.length} {row.lanes.length === 1 ? 'Lane' : 'Lanes'} ·{' '}
-                {row.lanes.filter(lane => lane.accepted).length} landed
-              </span>
-              <span>
-                {views.length} {views.length === 1 ? 'Candidate' : 'Candidates'} ·{' '}
-                {views.filter(view => view.accepted).length} accepted
-              </span>
-              {row.createdAt && <span>started {age(row.createdAt, now, true)}</span>}
+                  <span>
+                    {views.length} {views.length === 1 ? 'Candidate' : 'Candidates'} ·{' '}
+                    {views.filter(view => view.accepted).length} accepted
+                  </span>
+                  {row.createdAt && <span>started {age(row.createdAt, now, true)}</span>}
+                </>
+              )}
             </div>
           </div>
           <div className="fx-lane-head-actions">
             {addLane && <AddLane add={name => run(addLane(name))} />}
-            <CopyPrompt
-              request={{ situation: 'start-intent', intentId: row.id }}
-              label="Hand to an agent"
-              initiallyOpen={delegateRequested()}
-              onClose={clearDelegate}
-            />
+            {!canStart && (
+              <>
+                <Button variant="ghost" disabled title="This planning item has no linked Work Intent yet">
+                  Add Lane
+                </Button>
+                <Button disabled title="This planning item has no linked Work Intent yet">
+                  Hand to an agent
+                </Button>
+              </>
+            )}
+            {!addLane && canStart && <AddLaneHandoff intentId={startIntentId} />}
+            {canStart && (
+              <CopyPrompt
+                variant="secondary"
+                request={{ situation: 'start-intent', intentId: startIntentId }}
+                label="Hand to an agent"
+                initiallyOpen={delegateRequested()}
+                onClose={clearDelegate}
+              />
+            )}
+            {onEdit && (
+              <Button variant="ghost" onClick={onEdit}>
+                Edit
+              </Button>
+            )}
             {editHref && (
               <ButtonLink variant="ghost" href={editHref}>
                 Edit
@@ -236,16 +303,19 @@ export function IntentDetailView({
               <p className="fx-panel-note">No activity yet.</p>
             )}
           </Panel>
-          <Conversation
-            notes={notes}
-            now={now}
-            laneHref={laneHref}
-            {...(addNote ? { add: addNote } : {})}
-            {...(sendMessage ? { send: sendMessage } : {})}
-          />
+          {conversation ?? (
+            <Conversation
+              notes={notes}
+              now={now}
+              laneHref={laneHref}
+              {...(addNote ? { add: addNote } : {})}
+              {...(sendMessage ? { send: sendMessage } : {})}
+            />
+          )}
         </>
       }
     >
+      {row.lanes.length === 0 && details}
       {row.lanes.length > 0 && (
         <WorkMap
           compact
@@ -278,30 +348,50 @@ export function IntentDetailView({
             })}
           </ul>
         ) : (
-          <p className="fx-panel-note">No Lanes yet.</p>
+          <div className="fx-intent-empty">
+            <span>No Lane yet.</span>
+            {canStart && (
+              <>
+                <CopyPrompt
+                  variant="secondary"
+                  request={{ situation: 'start-intent', intentId: startIntentId }}
+                  label="Hand to an agent"
+                />
+                <CopyStartCommand intentId={startIntentId} />
+              </>
+            )}
+            {!canStart && (
+              <>
+                <Button size="sm" disabled title="This planning item has no linked Work Intent yet">
+                  Hand to an agent
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled
+                  title="This planning item has no linked Work Intent yet"
+                >
+                  Copy start command
+                </Button>
+              </>
+            )}
+          </div>
         )}
       </Panel>
-      <Candidates
-        row={row}
-        views={views}
-        now={now}
-        laneHref={laneHref}
-        reviewHref={reviewHref}
-        viewHref={viewHref}
-        records={records}
-        base={base}
-      />
-      <Panel title="Details" actions={editHref && <a href={editHref}>Edit</a>}>
-        {row.constraints && row.constraints !== row.outcome && (
-          <div className="fx-intent-why">{row.constraints}</div>
-        )}
-        <ExactRecord
-          rows={[
-            ['Intent', row.id],
-            ['Base', base],
-          ]}
+      {views.length > 0 && (
+        <Candidates
+          row={row}
+          views={views}
+          now={now}
+          laneHref={laneHref}
+          reviewHref={reviewHref}
+          viewHref={viewHref}
+          records={records}
+          base={base}
         />
-      </Panel>
+      )}
+
+      {row.lanes.length > 0 && details}
     </WorkDetailLayout>
   );
 }

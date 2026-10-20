@@ -691,6 +691,7 @@ export default function HostedWork({
                   <HostedIntents
                     projectId={projectId}
                     workspace={workspace!}
+                    {...(owner ? { planningAct: act } : {})}
                     {...(intentId ? { intentId } : {})}
                     // Commands go through this page's retry-safe act: an unknown outcome keeps its original operation.
                     {...(owner && selectedSource

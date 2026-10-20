@@ -1,11 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 import { InitiativeConversation } from './planning/InitiativePage';
+import { PlanningIntentPage } from './PlanningIntents';
+import { Conversation } from './intents/IntentParts';
+import { intentRows } from './intents/model';
+import { cockpitLanes, type CockpitWork } from './cockpit/model';
+import { intentViews } from './views/intent-views';
+import { intentTimeline } from './intents/intent-timeline';
+import { hostedHref } from './cockpit/HostedNow';
+import { BriefSourceContext, hostedBriefs } from './cockpit/brief';
 import { planningGroups } from './planning-rows';
 import { useDestination } from './WorkspaceUI';
 import { useUser } from '@clerk/react';
 import { age } from './ui/status';
 import type { PlanningLane } from './planning-rows';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ActionPanel } from './WorkspaceUI';
 import { useConvex } from 'convex/react';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -177,6 +185,126 @@ function InitiativeLifecycle({
   return null;
 }
 
+function PlannedIntentRoute({
+  item,
+  items,
+  ...props
+}: Context & { item: PlanningItem; items: PlanningItem[] }) {
+  const client = useConvex();
+  const { user } = useUser();
+  const briefs = useMemo(() => hostedBriefs(client, props.projectId), [client, props.projectId]);
+  const value = useResolvedWorkValue(props.projectId, props.workspace, 'planningItems', item);
+  const history = useWorkRecords<PlanningItem>(props.projectId, props.workspace, 'planningVersions', item.id);
+  const comments = useWorkRecords<WorkData['planningComments'][number]>(
+    props.projectId,
+    props.workspace,
+    'planningComments',
+    item.id,
+  );
+  const lanes = useWorkRecords<WorkData['lanes'][number]>(props.projectId, props.workspace, 'lanes');
+  const views = useWorkRecords<WorkData['views'][number]>(props.projectId, props.workspace, 'views');
+  const runs = useWorkRecords<WorkData['runs'][number]>(props.projectId, props.workspace, 'runs');
+  const messages = useRef<
+    | Extract<import('../../src/work-planning-types').PlanningWrite, { action: 'comment-planning-item' }>
+    | undefined
+  >(undefined);
+  const intent = props.intents.find(intent => intent.id === item.id || item.intentIds.includes(intent.id));
+  const work: CockpitWork = {
+    intents: intent ? [intent] : [],
+    lanes: lanes.records,
+    views: views.records,
+    runs: runs.records,
+  };
+  const source = intent ?? {
+    id: item.id,
+    outcome: item.title,
+    constraints: item.body,
+    status: item.status === 'closed' ? ('completed' as const) : ('active' as const),
+    createdAt:
+      history.records.find(version => version.version === 1)?.at ??
+      (item.version === 1 ? item.at : undefined),
+  };
+  const row = intentRows([source], cockpitLanes(work))[0]!;
+  const now = Date.now();
+  const notes = comments.records.map(comment => ({
+    text: comment.text,
+    kind: 'comment' as const,
+    at: comment.at,
+    ...(comment.authorLabel ? { actor: { name: comment.authorLabel, kind: 'human' as const } } : {}),
+  }));
+  if (!value) return <p role="status">Loading Intent…</p>;
+  const timeline = [
+    ...history.records.map(version => ({
+      id: `planning:${version.operationId}`,
+      at: version.at,
+      tone: 'plain' as const,
+      glyph: 'file' as const,
+      text: version.version === 1 ? 'Planned' : version.status === 'closed' ? 'Done' : 'Details edited',
+      detail: `version ${version.version}`,
+    })),
+    ...(intent ? intentTimeline(work, intent.id) : []),
+  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+  return (
+    <BriefSourceContext.Provider value={briefs}>
+      <PlanningIntentPage
+        item={value}
+        initiatives={items}
+        readOnly={props.readOnly}
+        busy={props.busy}
+        act={props.act}
+        loadItem={() =>
+          readWorkRecord<PlanningItem>(client, props.projectId, props.workspace, 'planningItems', item.id)
+        }
+        detail={{
+          row,
+          views: intent ? intentViews(work, intent.id) : [],
+          notes,
+          planning: [],
+          now,
+          timeline,
+          canStart: Boolean(intent),
+          startIntentId: intent?.id,
+          laneHref: id => hostedHref({ projectTab: 'lanes', lane: id }),
+          conversation: (
+            <Conversation
+              notes={notes}
+              now={now}
+              laneHref={id => hostedHref({ projectTab: 'lanes', lane: id })}
+              placeholder="Add to the conversation…"
+              {...(!props.readOnly
+                ? {
+                    add: async (text: string) => {
+                      const command =
+                        messages.current?.text === text
+                          ? messages.current
+                          : {
+                              action: 'comment-planning-item' as const,
+                              operationId: crypto.randomUUID(),
+                              itemId: item.id,
+                              text,
+                              authorLabel: user?.fullName || user?.username || '',
+                            };
+                      messages.current = command;
+                      try {
+                        const ack = await props.act(command);
+                        if (ack?.operationId !== command.operationId)
+                          return 'The request did not complete. Retry keeps its original operation.';
+                        messages.current = undefined;
+                        return null;
+                      } catch (error) {
+                        return (error as Error).message;
+                      }
+                    },
+                  }
+                : {})}
+            />
+          ),
+        }}
+      />
+    </BriefSourceContext.Provider>
+  );
+}
+
 export default function HostedIndexedPlanning(
   props: Context & { exportHistory: () => Promise<PlanningExport> },
 ) {
@@ -224,6 +352,13 @@ export default function HostedIndexedPlanning(
       lifecycle: histories[`${scope}:${intent.id}`] ?? intent.lifecycle,
     })),
   };
+  const selectedIntent = items.records.find(item => item.id === selected && item.kind === 'issue');
+  if (selectedIntent)
+    return (
+      <div className="fx">
+        <PlannedIntentRoute key={selectedIntent.id} {...props} item={selectedIntent} items={items.records} />
+      </div>
+    );
   return (
     <>
       {selectedGroup?.item &&

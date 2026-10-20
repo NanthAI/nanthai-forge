@@ -1,8 +1,7 @@
 import { usePageCritical } from '../ui/page-critical';
-import { Breadcrumbs, workHref } from '../shell/Breadcrumbs';
 // SPDX-License-Identifier: Apache-2.0
 import type { ReactNode } from 'react';
-import { OwnerLifecycle } from '../lane/OwnerLifecycle';
+import { useOwnerLifecycle, type LifecycleParts } from '../lane/OwnerLifecycle';
 import { initiativeLinks } from '../cockpit/scale-model';
 import type { PlanningItem } from '../../../src/work-planning-types';
 import { intentBoardFacts } from './board-facts';
@@ -33,10 +32,18 @@ import { cockpitLanes, type CockpitWork } from '../cockpit/model';
 import { useWorkRecords, type IntentHeader, type WorkIndexWorkspace } from '../hosted-work-index';
 import { useNow } from '../shell/StatusBar';
 import { Button, ButtonLink, Empty } from '../ui/primitives';
-import { IntentDetailView, type NoteRow } from './IntentDetail';
+import { type NoteRow } from './IntentDetail';
 import { IntentListView } from './IntentList';
+import { PlanningIntentPage } from '../PlanningIntents';
+import type { PlanningAct } from '../WorkPlanning';
+import { readWorkRecord } from '../hosted-work-index';
 import { intentRows, type IntentStatus } from './model';
 
+type EditableIntent = IntentHeader & {
+  description?: string;
+  updatedAt?: string;
+  memberships?: { initiativeId: string }[];
+};
 const laneHref = (id: string) => hostedHref({ projectTab: 'lanes', lane: id });
 const intentHref = (id: string) => hostedHref({ projectTab: 'intent', intent: id });
 const openDelegate = (id: string) => go(hostedHref({ projectTab: 'intent', intent: id, delegate: '1' }));
@@ -53,7 +60,9 @@ export default function HostedIntents({
   setStatus,
   addLane,
   combine,
+  planningAct,
 }: {
+  planningAct?: PlanningAct;
   projectId: Id<'hostedProjects'>;
   workspace: WorkIndexWorkspace;
   intentId?: string;
@@ -83,6 +92,49 @@ export default function HostedIntents({
     intentId,
     Boolean(intentId),
   );
+  const selectedPlanning = planning.records.find(
+    item => item.kind === 'issue' && (item.id === intentId || item.intentIds.includes(intentId ?? '')),
+  );
+  const planningComments = useWorkRecords<WorkData['planningComments'][number]>(
+    projectId,
+    workspace,
+    'planningComments',
+    selectedPlanning?.id ?? intentId,
+    Boolean(intentId),
+  );
+  const planningVersions = useWorkRecords<PlanningItem>(
+    projectId,
+    workspace,
+    'planningVersions',
+    selectedPlanning?.id ?? intentId,
+    Boolean(intentId),
+  );
+  const commentWrite = useRef<
+    | Extract<import('../../../src/work-planning-types').PlanningWrite, { action: 'comment-planning-item' }>
+    | undefined
+  >(undefined);
+  const addPlanningComment = async (id: string, text: string): Promise<string | null> => {
+    const command =
+      commentWrite.current?.text === text
+        ? commentWrite.current
+        : {
+            action: 'comment-planning-item' as const,
+            operationId: crypto.randomUUID(),
+            itemId: selectedPlanning?.id ?? id,
+            text,
+            authorLabel: user?.fullName || user?.username || '',
+          };
+    commentWrite.current = command;
+    try {
+      const ack = await planningAct!(command);
+      if (ack?.operationId !== command.operationId)
+        return 'The request did not complete. Retry keeps its original operation.';
+      commentWrite.current = undefined;
+      return null;
+    } catch (error) {
+      return hostedError(error);
+    }
+  };
   usePageCritical('Work', {
     intents: !intents.initialLoading,
     lanes: !lanes.initialLoading,
@@ -124,6 +176,8 @@ export default function HostedIntents({
       runs: runs.records,
       channelMoves: moves.records,
       notes: notes.records,
+      planningComments: planningComments.records,
+      planningVersions: planningVersions.records,
     }),
     [
       planning.records,
@@ -133,8 +187,19 @@ export default function HostedIntents({
       runs.records,
       moves.records,
       notes.records,
+      planningComments.records,
+      planningVersions.records,
     ],
   );
+  const selectedIntent = intents.records.find(intent => intent.id === intentId);
+  const lifecycle = useOwnerLifecycle({
+    projectId,
+    collection: 'intents',
+    id: intentId ?? '',
+    head: selectedIntent?.base ?? '',
+    state: selectedIntent?.status ?? 'creating',
+    editable: workspace.capabilities.owner && Boolean(selectedIntent?.base),
+  });
   return (
     <BriefSourceContext.Provider value={briefs}>
       <HostedIntentsView
@@ -165,23 +230,14 @@ export default function HostedIntents({
         {...(create ? { create } : {})}
         {...(addLane ? { addLane } : {})}
         {...(combine ? { combine } : {})}
-        {...(addNote ? { addNote } : {})}
+        {...(planningAct ? { addNote: addPlanningComment } : addNote ? { addNote } : {})}
         {...(setStatus && ownerStatus && !ownerStatus.native ? { setStatus } : {})}
-        {...(ownerStatus?.native
-          ? {
-              lifecycle: (intent: IntentHeader) => (
-                <OwnerLifecycle
-                  key={intent.id}
-                  projectId={projectId}
-                  collection="intents"
-                  id={intent.id}
-                  head={intent.base}
-                  state={intent.status}
-                  editable={workspace.capabilities.owner}
-                />
-              ),
-            }
-          : {})}
+        lifecycle={lifecycle}
+        planningAct={planningAct}
+        loadPlanningItem={async item =>
+          readWorkRecord<PlanningItem>(client, projectId, workspace, 'planningItems', item.id)
+        }
+        loadIntent={async id => readWorkRecord<IntentHeader>(client, projectId, workspace, 'intents', id)}
       />
     </BriefSourceContext.Provider>
   );
@@ -204,14 +260,22 @@ export function HostedIntentsView({
   events = [],
   activityMore,
   sendMessage,
+  planningAct,
+  loadPlanningItem,
+  loadIntent,
 }: {
-  lifecycle?: (intent: IntentHeader) => ReactNode;
+  lifecycle?: LifecycleParts | null;
+  planningAct?: PlanningAct;
+  loadPlanningItem?: (item: PlanningItem) => Promise<PlanningItem>;
+  loadIntent?: (id: string) => Promise<IntentHeader>;
   events?: readonly ActivityEvent[];
   activityMore?: ReactNode;
   sendMessage?: (text: string, laneId?: string) => Promise<string | null>;
   preferenceScope?: string;
   records: CockpitWork & {
     planningItems?: readonly PlanningItem[];
+    planningComments?: readonly WorkData['planningComments'][number][];
+    planningVersions?: readonly PlanningItem[];
     intents: readonly IntentHeader[];
     channelMoves: readonly WorkData['channelMoves'][number][];
     notes: readonly NoteRow[];
@@ -283,8 +347,24 @@ export function HostedIntentsView({
       intentId,
       hostedFeed(scopedEvents, sessions, records.lanes, scopedEvents.length),
     );
+    for (const version of records.planningVersions ?? [])
+      timeline.push({
+        id: `planning:${version.operationId}`,
+        at: version.at,
+        text: version.version === 1 ? 'Planned' : version.status === 'closed' ? 'Done' : 'Details edited',
+        detail: `version ${version.version}`,
+        glyph: 'file',
+        tone: 'plain',
+      });
+    timeline.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
     const noteRows: NoteRow[] = [
       ...records.notes,
+      ...(records.planningComments ?? []).map(comment => ({
+        text: comment.text,
+        kind: 'comment' as const,
+        at: comment.at,
+        ...(comment.authorLabel ? { actor: { name: comment.authorLabel, kind: 'human' as const } } : {}),
+      })),
       ...scopedEvents.flatMap(event => {
         if (event.command.kind !== 'message') return [];
         const context = eventContext(event, scopedEvents);
@@ -309,48 +389,81 @@ export function HostedIntentsView({
       ...('actor' in note && note.actor ? { actor: note.actor } : {}),
       ...('lane' in note && note.lane ? { lane: note.lane } : {}),
     }));
+    const intent = (records.intents as readonly EditableIntent[]).find(intent => intent.id === intentId)!;
+    const item = records.planningItems?.find(
+      item => item.kind === 'issue' && (item.id === intentId || item.intentIds.includes(intentId)),
+    );
+    const memberships = intent.memberships?.map(link => link.initiativeId) ?? [];
+    const initiatives = (records.planningItems ?? []).filter(group => group.kind === 'initiative');
+    const planningItem = (full: EditableIntent): PlanningItem => ({
+      id: full.id,
+      operationId: '',
+      request: '',
+      version: 0,
+      previousVersion: 0,
+      kind: 'issue',
+      title: full.outcome,
+      body: full.description ?? full.constraints,
+      status: full.status === 'completed' || full.status === 'abandoned' ? 'closed' : 'open',
+      intentIds: [],
+      at: full.updatedAt ?? full.createdAt,
+      provenance: 'user-declared-local',
+      ...(memberships[0] ? { initiativeId: memberships[0] } : {}),
+    });
     return (
-      <IntentDetailView
-        row={row}
-        records={records}
-        timeline={timeline}
-        activityMore={activityMore}
-        base={(records.intents as readonly IntentHeader[]).find(intent => intent.id === intentId)?.base}
-        {...(sendMessage ? { sendMessage } : {})}
-        {...(addLane ? { addLane: (name: string) => addLane(intentId, name) } : {})}
-        {...(combine
-          ? { combine: (inputs: { laneId: string; head: string }[]) => combine(intentId, inputs) }
-          : {})}
-        views={viewRows}
-        notes={noteRows}
-        planning={[]}
-        now={now}
-        laneHref={laneHref}
-        viewHref={hostedViewHref}
-        reviewHref={id =>
-          hostedHref({
-            projectTab: 'intent',
-            intent: intentId,
-            intentTab: 'delivery',
-            reviewView: id,
-            classic: '1',
-          })
+      <PlanningIntentPage
+        item={item ?? planningItem(intent)}
+        initiatives={initiatives}
+        readOnly={!planningAct && !setStatus && !lifecycle}
+        act={planningAct}
+        lifecycle={lifecycle}
+        loadItem={async () =>
+          item && loadPlanningItem
+            ? loadPlanningItem(item)
+            : planningItem(loadIntent ? await loadIntent(intentId) : intent)
         }
-        back={<Breadcrumbs items={[{ label: row.outcome, href: workHref({ intent: row.id }) }]} />}
-        {...(addNote
-          ? { addNote: (text: string, kind: 'comment' | 'decision') => addNote(intentId, text, kind) }
-          : {})}
-        {...(setStatus && !lifecycle
-          ? { setStatus: (status: IntentStatus) => setStatus(intentId, status) }
-          : {})}
-        more={
-          <>
-            {lifecycle?.((records.intents as readonly IntentHeader[]).find(i => i.id === intentId)!)}
+        detail={{
+          row,
+          records,
+          timeline,
+          activityMore,
+          base: intent.base,
+          ...(sendMessage ? { sendMessage } : {}),
+          ...(addLane ? { addLane: (name: string) => addLane(intentId, name) } : {}),
+          ...(combine
+            ? { combine: (inputs: { laneId: string; head: string }[]) => combine(intentId, inputs) }
+            : {}),
+          views: viewRows,
+          notes: noteRows,
+          planning: initiatives.filter(
+            group =>
+              group.intentIds.includes(intentId) ||
+              memberships.includes(group.id) ||
+              item?.initiativeId === group.id,
+          ),
+          now,
+          laneHref,
+          viewHref: hostedViewHref,
+          reviewHref: id =>
+            hostedHref({
+              projectTab: 'intent',
+              intent: intentId,
+              intentTab: 'delivery',
+              reviewView: id,
+              classic: '1',
+            }),
+          ...(addNote
+            ? { addNote: (text: string, kind: 'comment' | 'decision') => addNote(intentId, text, kind) }
+            : {}),
+          ...(setStatus && !lifecycle
+            ? { setStatus: (status: IntentStatus) => setStatus(intentId, status) }
+            : {}),
+          more: (
             <ButtonLink variant="ghost" href={classic({ intent: intentId, intentTab: 'discussion' })}>
               Discuss, plan and review
             </ButtonLink>
-          </>
-        }
+          ),
+        }}
       />
     );
   };

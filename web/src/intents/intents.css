@@ -186,3 +186,20 @@ input.fx-input {
   .fx-intent-page .fx-inline-form { flex-wrap: wrap; max-width: 100%; }
 }
 .fx-intent-page .fx-intent-why { padding: 14px; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; }
+
+.fx-intent-status { padding: 0; margin-left: 10px; border: 0; background: transparent; cursor: pointer; vertical-align: 2px; font: inherit; }
+.fx-intent-status .fx-st { gap: 5px; }
+.fx-intent-empty { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px; font-size: 12.5px; color: var(--fx-text-2); }
+.fx-intent-edit { margin: 0; border: 0; }
+.fx-intent-page .fx-lane-meta a { display: inline-flex; align-items: center; gap: 4px; overflow-wrap: anywhere; }
+.fx-intent-page .fx-intent-why { overflow-wrap: anywhere; }
+@media (max-width: 720px) { .fx-intent-status { margin-left: 0; margin-top: 6px; } }
+
+@media (max-width: 720px) {
+  .fx-intent-page .fx-lane-head-actions { justify-content: flex-start; }
+  .fx-intent-page .fx-lane-head-actions > .fx-btn { flex: none; min-height: 32px; padding: 0 8px; }
+  .fx-intent-page .fx-compose .fx-btn { min-height: 32px; height: 32px; padding: 0 10px; }
+}
+
+.fx-menu .fx-intent-current { background: var(--fx-hover); }
+.fx-intent-status-separator { align-self: stretch; width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--fx-line); }

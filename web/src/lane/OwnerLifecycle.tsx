@@ -26,6 +26,8 @@ export type LifecycleParts = {
   dialog: ReactNode;
   /** Opens the Abandon dialog; absent when the record is closed or a request is in flight. */
   abandon?: () => void;
+  complete?: () => void;
+  reopen?: () => void;
 };
 
 /** The same owner queue as acceptance, with terminal lifecycle receipts kept distinct. */
@@ -97,6 +99,9 @@ export function useOwnerLifecycle({
     }
   };
   return {
+    ...(!pending && !waiting
+      ? { complete: () => setDialog('complete'), reopen: () => void run('reopen') }
+      : {}),
     items: pending ? (
       <Button disabled={busy} onClick={() => void run('complete')}>
         Retry request
