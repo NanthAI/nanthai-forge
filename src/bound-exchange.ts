@@ -1,5 +1,6 @@
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 // SPDX-License-Identifier: Apache-2.0
+import { withQueueSlot } from './landing-queue.js';
 import { withWorkLockOptions } from './work-lock.js';
 import { withWorkProgress, workProgress } from './work-progress.js';
 import { retryExchange } from './exchange-retry.js';
@@ -7,7 +8,7 @@ import { formatSourceReturnProgress } from './source-return-progress.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { ConvexError } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { WorkStore } from './work-store.js';
@@ -46,7 +47,17 @@ export async function boundExchange(root: string, action: 'push' | 'pull', targe
       const heartbeat = setInterval(() => report(phase), 5000);
       heartbeat.unref();
       try {
-        return await boundExchangeAction(root, action, target, report);
+        if (action === 'pull') return await boundExchangeAction(root, action, target, report);
+        const store = new WorkStore(root);
+        // Serialize the complete transport operation, not local Work writers. A
+        // second process must not rebase/remove the request another is using.
+        const queued = await withQueueSlot(
+          join(store.directory, 'bound-push-queue'),
+          () => boundExchangeAction(root, action, target, report),
+          { anchor: store.directory, phase: 'exchange push' },
+        );
+        invariant('value' in queued, 'WORK_BUSY', 'A bound push is still running. Retry to resume it.');
+        return queued.value;
       } catch (error) {
         throw hostedActionError(error, `exchange ${action}`);
       } finally {
@@ -133,6 +144,12 @@ async function boundExchangeAction(
         const fresh = await hostedState(client, binding.projectId),
           parentId = request.parentId ?? request.operationId,
           attempt = (request.attempt ?? 0) + 1;
+        // The original capture may predate hosted events already merged into
+        // this attempt. Its retained candidate is the next common source; using
+        // the older capture again would manufacture an original-prefix conflict.
+        const prepared =
+          request.captureId &&
+          existsSync(join(store.directory, `exchange-${request.operationId}`, 'manifest.json'));
         const next: PendingPush = {
           operationId: pushAttemptId(parentId, attempt, 'push'),
           parentId,
@@ -142,7 +159,10 @@ async function boundExchangeAction(
           previous: fresh.currentBackup,
           revision: request.revision,
           ...(request.captureId
-            ? { captureId: request.captureId, captureRevision: request.captureRevision }
+            ? {
+                captureId: prepared ? request.operationId : request.captureId,
+                captureRevision: prepared ? request.revision : request.captureRevision,
+              }
             : {}),
           ...(store.native && fresh.work
             ? {
@@ -311,11 +331,18 @@ async function pushAttempt(
         },
       ),
     );
-    invariant(
-      reconciled.result.status === 'reconciled',
-      'WORK_CONFLICT',
-      'Hosted and local metadata conflict. Reconcile the retained Work before pushing again.',
-    );
+    if (reconciled.result.status !== 'reconciled') {
+      // Values may contain complete Work collections. Identify a bounded set of
+      // items without serializing source, notes, or whole histories into errors.
+      const conflicts = reconciled.result.conflicts;
+      const items = conflicts
+        .slice(0, 20)
+        .map(({ collection, id, field }) => JSON.stringify({ collection, ...(id ? { id } : {}), field }));
+      throw new ForgeError(
+        'WORK_CONFLICT',
+        `Hosted and local metadata conflict (${conflicts.length} items). Reconcile the retained Work before pushing again. Conflicts: ${items.join(', ')}${conflicts.length > items.length ? `; ${conflicts.length - items.length} more` : ''}. Reconcile operation: ${reconcileId}.`,
+      );
+    }
     request.revision = Math.max(request.revision, reconciled.result.receipt.revision);
     // Retain the derived attempt before recording reconciliation as complete.
     // A crash can repeat the original reconciliation and receive its same receipt.

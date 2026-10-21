@@ -7,10 +7,9 @@ import { action, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { exportPlanning as planningExport } from '../src/work-planning-state';
-import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 import { metadataCommandSchema, hostedChannelCommandSchema } from '../src/work-types';
-import { metadataRequest, workBytes } from '../src/work-metadata';
+import { metadataRequest, workDigest } from '../src/work-metadata';
 import { report } from './errors';
 import { indexedCommand } from './projectWorkIndexedCommand';
 import { projectDocument, hostedWorkEventDocument } from './schema';
@@ -22,6 +21,7 @@ export async function caller(ctx: ActionCtx) {
 }
 export { source, load } from './projectWorkLoad';
 import { source, load } from './projectWorkLoad';
+import { exchangeObjectReader } from './projectExchangeReader';
 export const initialize = action({
   args: { projectId: v.id('hostedProjects'), backupId: v.id('projectBackups'), operationId: v.string() },
   returns: projectDocument,
@@ -118,7 +118,9 @@ export const exportJournal = action({
   returns: v.string(),
   handler: async (ctx, { projectId }): Promise<string> => {
     try {
-      const snapshot = await load(ctx, projectId, await caller(ctx), undefined, { requireCurrent: true });
+      const snapshot = await load(ctx, projectId, await caller(ctx), exchangeObjectReader(ctx, false, 0), {
+        requireCurrent: true,
+      });
       return (
         JSON.stringify(
           {
@@ -142,7 +144,7 @@ export const exportJournal = action({
               ? { intentMigration: snapshot.project.work.intentMigration }
               : {}),
             revision: snapshot.data.revision,
-            workSha256: digest(workBytes(snapshot.data)),
+            workSha256: workDigest(snapshot.data),
             coverage:
               'Hosted authorized project operations over the pinned private source/Work checkpoint. Returned Lane/check/evidence provenance remains local and owner-supplied. Actor identities are server-recorded observations, not offline authenticated authorship. Local restore creates an independent owner and never starts commands.',
           },

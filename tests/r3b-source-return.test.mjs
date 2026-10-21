@@ -243,3 +243,57 @@ test('ancestry checkpoints inside one deep head and CLI renders its inner progre
     /current item 1000 visited, 1 pending/,
   );
 });
+
+test('simultaneous public returns replay the winner when preparation races publication', async t => {
+  const s = fixture(),
+    base = await checkpoint(t, s);
+  const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, base.input);
+  await initialize(s, backupId);
+  land(base.store, 2);
+  const next = await preparedCheckpoint(s, base.store);
+  next.input.previous = backupId;
+  const candidate = await modules.projectExchangeActions.publish._handler(s.ctx, next.input);
+  const args = {
+    projectId: 'project',
+    backupId: candidate,
+    expectedBackupId: backupId,
+    revision: 0,
+    operationId: randomUUID(),
+    continuation: true,
+  };
+  const mutate = s.ctx.runMutation;
+  let enter,
+    release,
+    held = false;
+  const entered = new Promise(resolve => {
+    enter = resolve;
+  });
+  const wait = new Promise(resolve => {
+    release = resolve;
+  });
+  s.ctx.runMutation = async (ref, input) => {
+    if (getFunctionName(ref) === 'projectReturnIndexStage:begin' && !held) {
+      held = true;
+      enter();
+      await wait;
+    }
+    return mutate(ref, input);
+  };
+  const duplicate = modules.projectSourceReturn.returnSource._handler(s.ctx, args);
+  await entered;
+  let receipt;
+  do {
+    receipt = await modules.projectSourceReturn.returnSource._handler(s.ctx, args);
+  } while (receipt.pending);
+  release();
+  const { accounting: _accounting, ...stored } = receipt;
+  assert.deepEqual(await duplicate, stored);
+  assert.equal(
+    [...s.tables.projectWorkEvents.values()].filter(e => e.operationId === args.operationId).length,
+    1,
+  );
+  await assert.rejects(
+    modules.projectSourceReturn.returnSource._handler(s.ctx, { ...args, revision: 1 }),
+    e => e.data?.code === 'WORK_OPERATION_CHANGED',
+  );
+});

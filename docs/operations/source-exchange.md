@@ -17,7 +17,12 @@ re-running after an unknown outcome resumes those exact pins. Pull materializes 
 `restore` command described below. Known hosted checkpoint or Work CAS mismatches trigger up to three automatic rebases
 after the initial attempt. Each rebase reconciles current hosted metadata and derives
 a fresh candidate with deterministic child operation IDs under the parent push ID.
-A checkpoint published before a stale source return stays retained. Git-backed exchange preserves its source
+Rebases carry forward the prior attempt's reconciled candidate, including hosted events
+already received, while retaining the original local source and mutable-output capture.
+Bound pushes on one owner serialize transport work across processes; local Work writes
+continue under their short owner locks. A concurrent continuation that loses the cursor
+CAS returns current progress or the original completed receipt. Status probes never
+advance the cursor. A checkpoint published before a stale source return stays retained. Git-backed exchange preserves its source
 bundle and complete Work, uploading only missing objects/chunks, without a compressed Work archive.
 For native bound owners, push first retains local Work and available mutable run outputs,
 then reconciles supported hosted metadata into the captured candidate and current local Work, stores the checkpoint,
@@ -29,7 +34,10 @@ command-file pushes select hosted Work only when `returnSource` is supplied.
 
 Bound exchange reports its local capture, hosted journal reconciliation, upload,
 source return and index refresh phases on stderr, with periodic elapsed-time
-updates while awaiting a reply. JSON stdout remains the final result.
+updates while awaiting a reply. JSON stdout remains the final result. `WORK_CONFLICT`
+identifies up to 20 conflicting collection/record/field items, the total count and
+retained reconcile operation ID. Complete values remain in the pinned local receive
+files rather than being copied into the error.
 
 Explicit project IDs and original request files remain supported:
 
@@ -159,6 +167,12 @@ metadata into newer local Work under its final owner lock. Unknown outcomes reta
 the original snapshot and request; retries never recapture them. Explicit revision-pinned
 requests keep their revision checks. Inconsistent hosted snapshot reads report
 `WORK_CHANGED_DURING_PUSH`; exhausted hosted transaction conflicts report `HOSTED_CONFLICT`. Opaque platform failures become `HOSTED_ACTION_FAILED` with a safe request ID when available, rather than a bare `INTERNAL_ERROR`. Authentication, changed-operation payloads and stable validation failures remain typed and do not retry. A known stale bound push allows the next invocation to select fresh pins; an unknown outcome preserves the pending request. No retry silently changes a source revision or overwrites hosted edits.
+
+Journal export pages hosted events and streams checkpoint byte reconstruction. Schema-1
+Work reconstruction reads four byte chunks at a time; record checkpoints keep their
+bounded record windows. Export hashes parsed Work with a streaming JSON digest rather
+than building a second complete Work string. Export still materializes complete parsed
+Work and the returned journal; it is not a proportional metadata read API.
 
 Zero bytes uploaded does not mean zero work. Validation and hashing still happen locally. To time one request, run `node scripts/measure-exchange-latency.mjs REQUEST_JSON RESULT_JSON`.
 

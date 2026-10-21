@@ -105,7 +105,10 @@ export async function resolveExchangeWork(bytes: Buffer, read: (pins: BytePin[])
     'Work tree differs from its manifest.',
   );
   if (root.schema === 1)
-    return { manifest, data: (await parseJsonStream(byteTreeChunks(root.work, read, options))) as WorkData };
+    return {
+      manifest,
+      data: (await parseJsonStream(byteTreeChunks(root.work, read, { batchSize: 4 }))) as WorkData,
+    };
   const records = workRecordRootSchema.parse(
     await parseJsonStream(byteTreeChunks(root.records, read, options)),
   );

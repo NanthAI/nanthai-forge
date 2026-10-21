@@ -73,7 +73,15 @@ if (mode === 'fixture') {
   }
   writeFileSync(
     join(directory, 'fixture.json'),
-    JSON.stringify({ backup, empty, chunks, workBytes: work.length, objects: 22845, records: 22845 }),
+    JSON.stringify({
+      backup,
+      empty,
+      chunks,
+      workDigest: digest(work),
+      workBytes: work.length,
+      objects: 22845,
+      records: 22845,
+    }),
   );
   console.log(
     JSON.stringify({ workBytes: work.length, objects: 22845, records: 22845, chunks: chunks.length }),
@@ -114,6 +122,7 @@ if (mode === 'fixture') {
     sampledHeap = Math.max(sampledHeap, process.memoryUsage().heapUsed);
   };
   const ctx = {
+    auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
     runQuery: async (ref, args) => {
       sample();
       switch (getFunctionName(ref)) {
@@ -128,6 +137,8 @@ if (mode === 'fixture') {
           );
         case 'projectWork:get':
           return project;
+        case 'projectWork:events':
+          return { page: [], isDone: true, continueCursor: '' };
         case 'projectBackups:get':
           return { backup, project };
         case 'projectReturnMetadataStore:read':
@@ -171,7 +182,16 @@ if (mode === 'fixture') {
   const reader = exchangeObjectReader(ctx, mode === 'before', mode === 'before' ? 8 * 1024 * 1024 : 0);
   const started = performance.now();
   global.gc();
-  if (mode === 'before') {
+  if (mode === 'journal') {
+    const { exportJournal } = await import(moduleUrl('../convex/projectWorkActions.ts'));
+    project.name = 'Synthetic';
+    project.work = { backupId: backup._id, revision: 16481, initialRevision: 16481 };
+    const journal = JSON.parse(await exportJournal._handler(ctx, { projectId: 'project' }));
+    assert.equal(journal.revision, 16481);
+    assert.equal(journal.workSha256, config.workDigest);
+    assert.deepEqual(journal.events, []);
+    sample();
+  } else if (mode === 'before') {
     // Exact pre-change candidate load/validate and snapshot compression behavior.
     async function candidateLoad() {
       const resolved = await resolveExchangeRoot(

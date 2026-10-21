@@ -67,12 +67,14 @@ export const begin = internalMutation({
           .unique();
         if (original) {
           invariant(
-            original.backupId === input.backupId &&
-              original.revision === input.localRevision + 1 &&
-              original.returnAt === input.at,
+            original.backupId === input.backupId && original.revision === input.localRevision + 1,
             'WORK_OPERATION_CHANGED',
-            'Resume the original source-return checkpoint and timestamp.',
+            'Resume the original source-return checkpoint.',
           );
+          // Two actions can choose timestamps before either reserves the stage.
+          // Only the first timestamp belongs to this operation. Let the loser
+          // observe its receipt/cursor without throwing from this mutation.
+          if (original.returnAt !== input.at) return null;
           if (input.progress && original.returnStep === undefined && original.nextBatch > 0) {
             // R3 persisted write-only batch numbers, not computational cursors.
             // Keep its timestamp but restart only the disposable private rows.

@@ -57,3 +57,21 @@ test('streamed snapshot compression rejects encoder failures without storing par
   );
   assert.equal(stores, 0);
 });
+
+// Keep fixture creation and compilation outside the action's measured process.
+test('journal export hashes 100 MB of retained Work without a whole Work string below 512 MB', async t => {
+  moduleUrl('../convex/projectWorkActions.ts');
+  const directory = mkdtempSync(join(tmpdir(), 'forge-journal-memory-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const worker = new URL('./source-return-prepare-memory-worker.mjs', import.meta.url).pathname;
+  await exec(process.execPath, [worker, 'fixture', directory], { maxBuffer: 1024 * 1024 });
+  const { stdout } = await exec(
+    process.execPath,
+    ['--expose-gc', '--max-old-space-size=384', worker, 'journal', directory],
+    { env: { ...process.env, FORGE_TEST_PRECOMPILED: '1' }, maxBuffer: 1024 * 1024 },
+  );
+  const result = JSON.parse(stdout.match(/MEMORY_RESULT (.+)/)[1]);
+  assert.ok(result.workBytes >= 100_000_000);
+  assert.ok(result.maxRSS < 512 * 1024 * 1024, `peak RSS ${result.maxRSS}`);
+  t.diagnostic(JSON.stringify(result));
+});

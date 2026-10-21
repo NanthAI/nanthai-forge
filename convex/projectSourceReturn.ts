@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
-import { v } from 'convex/values';
+import { v, ConvexError } from 'convex/values';
 import { action } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { caller, source, load } from './projectWorkActions';
-import { invariant } from '../src/errors';
+import { invariant, ForgeError } from '../src/errors';
 import { sourceReturnSchema } from '../src/work-types';
 import { applyHostedEvent, metadataRequest, workDigest, validateWorkSize } from '../src/work-metadata';
 import { hostedWorkEventDocument } from './schema';
@@ -56,6 +56,8 @@ export const returnSource = action({
     input,
   ): Promise<Receipt | { pending: true; progress?: string; resumed: boolean }> => {
     const ctx = meteredStorage(unmetered);
+    let raced:
+      (() => Promise<Receipt | { pending: true; progress?: string; resumed: boolean } | null>) | undefined;
     try {
       invariant(
         /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.operationId) &&
@@ -75,23 +77,28 @@ export const returnSource = action({
         'PROJECT_UNAVAILABLE',
         'Select stored checkpoints from this Forge project.',
       );
-      const original: Doc<'projectWorkEvents'> | null = await ctx.runQuery(internal.projectWork.find, {
-        projectId: input.projectId,
-        owner,
-        operationId: input.operationId,
-      });
-      if (original) {
-        const command = sourceReturnSchema.safeParse(JSON.parse(original.command));
-        invariant(
-          command.success &&
-            command.data.archiveSha256 === candidateInfo.backup.digest &&
-            command.data.previousArchiveSha256 === previousInfo.backup.digest &&
-            command.data.previousRevision === input.revision,
-          'WORK_OPERATION_CHANGED',
-          'Reconcile this return’s original source, Work and hosted base.',
-        );
-        return original;
-      }
+      const replay = async () => {
+        const original: Doc<'projectWorkEvents'> | null = await ctx.runQuery(internal.projectWork.find, {
+          projectId: input.projectId,
+          owner,
+          operationId: input.operationId,
+        });
+        if (original) {
+          const command = sourceReturnSchema.safeParse(JSON.parse(original.command));
+          invariant(
+            command.success &&
+              command.data.archiveSha256 === candidateInfo.backup.digest &&
+              command.data.previousArchiveSha256 === previousInfo.backup.digest &&
+              command.data.previousRevision === input.revision,
+            'WORK_OPERATION_CHANGED',
+            'Reconcile this return’s original source, Work and hosted base.',
+          );
+          return original;
+        }
+        return null;
+      };
+      const original = await replay();
+      if (original) return original;
       const pending = async (receipt: Receipt | null) => {
         if (receipt) return receipt;
         invariant(
@@ -126,6 +133,35 @@ export const returnSource = action({
           operationId: input.operationId,
         },
       );
+      raced = async () => {
+        const receipt = await replay();
+        if (receipt) return receipt;
+        const latest: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
+          internal.projectReturnIndexStage.resume,
+          {
+            projectId: input.projectId,
+            owner,
+            backupId: input.backupId,
+            revision: candidateInfo.backup.preview.revision + 1,
+            operationId: input.operationId,
+          },
+        );
+        if (
+          latest &&
+          input.continuation &&
+          (!priorStage ||
+            latest.returnStep !== priorStage.returnStep ||
+            latest.returnPrepareCursor !== priorStage.returnPrepareCursor ||
+            latest.returnMetadataCursor !== priorStage.returnMetadataCursor ||
+            latest.returnCursor !== priorStage.returnCursor)
+        )
+          return {
+            pending: true,
+            resumed: true,
+            ...(latest.returnProgress ? { progress: latest.returnProgress } : {}),
+          };
+        return null;
+      };
       if (input.statusOnly)
         return {
           pending: true,
@@ -352,6 +388,20 @@ export const returnSource = action({
         changes,
       });
     } catch (error) {
+      const code =
+        error instanceof ForgeError
+          ? error.code
+          : error instanceof ConvexError && error.data && typeof error.data === 'object'
+            ? (error.data as { code?: unknown }).code
+            : undefined;
+      if (raced && (code === 'WORK_STALE' || code === 'WORK_OPERATION_CHANGED')) {
+        try {
+          const recovered = await raced();
+          if (recovered) return recovered;
+        } catch (recoveryError) {
+          return report(recoveryError);
+        }
+      }
       return report(error);
     }
   },

@@ -382,7 +382,10 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
     delayJournal = false,
     rejectReturn = 0,
     rejectPublish = 0,
-    writeDuring = null;
+    writeDuring = null,
+    staleAfterReturn = false,
+    rejectIndex = false,
+    blockedJournal = null;
   const f = setup(t),
     routes = [],
     coordination = await import(moduleUrl('../convex/projectCoordination.ts'));
@@ -403,6 +406,24 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
       routes.push(body.path);
       const [name, method] = body.path.split(':'),
         args = jsonToConvex(body.args[0]);
+      if (body.path === 'projectWorkIndexActions:ensure' && rejectIndex) {
+        rejectIndex = false;
+        response.writeHead(560, { 'Content-Type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            status: 'error',
+            errorMessage: 'Interrupted refresh',
+            errorData: { code: 'AUTH_REQUIRED', message: 'Interrupted refresh' },
+          }),
+        );
+        return;
+      }
+      if (body.path === 'projectWorkActions:exportJournal' && blockedJournal) {
+        const gate = blockedJournal;
+        blockedJournal = null;
+        gate.enter();
+        await gate.wait;
+      }
       if (body.path === 'projectWorkActions:exportJournal' && delayJournal) {
         delayJournal = false;
         await new Promise(resolve => setTimeout(resolve, 10500));
@@ -441,6 +462,18 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
         name === 'projectCoordination'
           ? await coordination[method]._handler(f.s.ctx, args)
           : await f.s.ctx.runQuery(ref, args);
+      if (body.path === 'projectSourceReturn:returnSource' && staleAfterReturn && !args.statusOnly) {
+        staleAfterReturn = false;
+        response.writeHead(560, { 'Content-Type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            status: 'error',
+            errorMessage: 'Late duplicate',
+            errorData: { code: 'WORK_STALE', message: 'Late duplicate' },
+          }),
+        );
+        return;
+      }
       if (body.path === 'projectSourceReturn:returnSource' && loseReturnReply) {
         loseReturnReply = false;
         response.destroy();
@@ -708,13 +741,68 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
   );
   const afterFirstRead = JSON.parse((await cli('exchange', f.root, 'push')).stdout);
   assert((await indexed('intents')).some(intent => intent.id === duringFirstRead));
+  // A stale reply after a completed source return rebases using the previous
+  // reconciled candidate, never the older original capture's hosted-event prefix.
+  staleAfterReturn = true;
+  const completedRebase = JSON.parse((await cli('exchange', f.root, 'push')).stdout);
+  assert.equal(staleAfterReturn, false);
+  assert.equal(completedRebase.rebases, 1);
+  assert.equal(f.s.tables.hostedProjects.get(hosted.projectId).work.backupId, completedRebase.backupId);
+
+  // A completed return whose index refresh failed retains the same pending
+  // push. Its next invocation replays the return receipt and completes refresh.
+  rejectIndex = true;
+  await assert.rejects(
+    cli('exchange', f.root, 'push'),
+    error => JSON.parse(error.stderr.trim().split('\n').at(-1)).error.code === 'AUTH_REQUIRED',
+  );
+  const retainedAfterReturn = readHostState(f.store).push;
+  assert(retainedAfterReturn);
+  const publishedCount = f.s.tables.projectBackups.size;
+  const resumedRefresh = JSON.parse((await cli('exchange', f.root, 'push')).stdout);
+  assert.equal(resumedRefresh.operationId, retainedAfterReturn.operationId);
+  assert.equal(f.s.tables.projectBackups.size, publishedCount);
+  assert.equal(readHostState(f.store).push, undefined);
+
+  // Real independent CLI processes share transport admission; ordinary owner
+  // metadata writes continue while the first process awaits its journal.
+  let enter, release;
+  const entered = new Promise(resolve => {
+    enter = resolve;
+  });
+  blockedJournal = {
+    enter,
+    wait: new Promise(resolve => {
+      release = resolve;
+    }),
+  };
+  const pushing = cli('exchange', f.root, 'push');
+  await entered;
+  const pendingId = readHostState(f.store).push.operationId;
+  const competing = cli('exchange', f.root, 'push');
+  const routeCount = routes.length;
+  await new Promise(resolve => setTimeout(resolve, 150));
+  assert.equal(routes.length, routeCount, 'second CLI waits before reading hosted state');
+  updateHostState(f.store, state => {
+    (state.acceptanceReceipts ??= {}).synthetic = 'receipt';
+  });
+  assert.equal(readHostState(f.store).push.operationId, pendingId);
+  release();
+  const [pushed, competed] = await Promise.all([pushing, competing]);
+  const firstConcurrent = JSON.parse(pushed.stdout),
+    secondConcurrent = JSON.parse(competed.stdout);
+  assert.notEqual(firstConcurrent.operationId, secondConcurrent.operationId);
+  assert.equal(f.s.tables.projectBackups.get(secondConcurrent.backupId).previous, firstConcurrent.backupId);
+  assert.equal(readHostState(f.store).acceptanceReceipts.synthetic, 'receipt');
+  assert.equal(readHostState(f.store).push, undefined);
+
   const sessions = JSON.parse((await cli('coordination', f.root, '{"action":"sessions"}')).stdout);
   assert.equal(sessions.page.length, 0);
   const retained = {
     operationId: randomUUID(),
     projectId: hosted.projectId,
     deployment,
-    previous: afterFirstRead.backupId,
+    previous: secondConcurrent.backupId,
     revision: f.store.revision(),
   };
   updateHostState(f.store, state => {
@@ -791,6 +879,25 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
     cli('host', f.root, '--wait'),
     error => JSON.parse(error.stderr).error.code === 'HOST_ALREADY_BOUND',
   );
+  await modules.projectWorkActions.command._handler(f.s.ctx, {
+    projectId: hosted.projectId,
+    operationId: randomUUID(),
+    revision: f.s.tables.hostedProjects.get(hosted.projectId).work.revision,
+    command: JSON.stringify({ action: 'intent-status', intentId: f.intent.id, status: 'completed' }),
+  });
+  service.execute(
+    { action: 'intent-status', intentId: f.intent.id, status: 'abandoned' },
+    f.store.revision(),
+  );
+  await assert.rejects(cli('exchange', f.root, 'push'), error => {
+    const problem = JSON.parse(error.stderr.trim().split('\n').at(-1)).error;
+    assert.equal(problem.code, 'WORK_CONFLICT');
+    assert.match(problem.message, /"collection":"intents"/);
+    assert(problem.message.includes(f.intent.id));
+    assert.match(problem.message, /"field":"status"/);
+    assert.match(problem.message, /Reconcile operation: [a-f0-9-]+/);
+    return true;
+  });
   const missingEnv = { ...env, XDG_CONFIG_HOME: join(f.directory, 'empty-config') };
   await assert.rejects(
     promisify(execFile)(

@@ -18,13 +18,14 @@ import { checkReturnBudget } from './projectSourceReturnBudget';
 import type { ActionCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
-import { invariant } from '../src/errors';
+import { invariant, ForgeError } from '../src/errors';
+import { ConvexError } from 'convex/values';
 import type { IndexEntry } from '../src/work-hosted-index';
 import { workSourcePins } from '../src/work-archive-metadata';
 import { viewIndexEntries } from '../src/view-hosted-index';
 type Snapshot = Cursor['snapshot'];
 type Final = Cursor['final'];
-export async function returnProgress(
+async function advanceReturnProgress(
   ctx: ActionCtx,
   stage: Doc<'projectWorkGenerations'>,
   input: {
@@ -469,4 +470,46 @@ export async function returnProgress(
     ...total,
   });
   return { ...receipt, accounting: total };
+}
+
+/** Concurrent continuations use the same immutable cursor and CAS. A loser
+ * observes the winning cursor/receipt instead of reporting a stale operation. */
+export async function returnProgress(...args: Parameters<typeof advanceReturnProgress>) {
+  const [ctx, stage, input, owner] = args;
+  try {
+    return await advanceReturnProgress(...args);
+  } catch (error) {
+    const code =
+      error instanceof ForgeError
+        ? error.code
+        : error instanceof ConvexError && error.data && typeof error.data === 'object'
+          ? (error.data as { code?: unknown }).code
+          : undefined;
+    if (code !== 'WORK_STALE') throw error;
+    const current: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
+      internal.projectReturnIndexStage.resume,
+      {
+        projectId: input.projectId,
+        owner,
+        backupId: stage.backupId,
+        revision: stage.revision,
+        operationId: input.operationId,
+      },
+    );
+    if (current) {
+      const original: Doc<'projectWorkEvents'> | null = await ctx.runQuery(internal.projectWork.find, {
+        projectId: input.projectId,
+        owner,
+        operationId: input.operationId,
+      });
+      if (original) return original;
+      if (
+        current.returnStep !== stage.returnStep ||
+        current.returnCursor !== stage.returnCursor ||
+        current.returnMetadataCursor !== stage.returnMetadataCursor
+      )
+        return null;
+    }
+    throw error;
+  }
 }

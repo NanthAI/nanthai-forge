@@ -608,3 +608,107 @@ test('an optional per-push budget stops after a committed step and resumes once 
   assert.equal(receipt.at, 'now');
   assert.equal(s.tables.hostedProjects.get('project').work.backupId, 'candidate');
 });
+
+test('a duplicate continuation that reads a replaced cursor returns pending', async t => {
+  const s = await setup(t, 8),
+    saved = { ...progress.RETURN_BUDGET };
+  Object.assign(progress.RETURN_BUDGET, { actionSteps: 1, states: 1, rows: 5 });
+  t.after(() => Object.assign(progress.RETURN_BUDGET, saved));
+  await progress.returnProgress(
+    s.ctx,
+    structuredClone(s.tables.projectWorkGenerations.get(s.partitionId)),
+    s.input,
+    'owner',
+    s.initial,
+  );
+  const stage = structuredClone(s.tables.projectWorkGenerations.get(s.partitionId));
+  assert(stage.returnCursor);
+  const getMetadata = s.ctx.storage.getMetadata;
+  let enter,
+    release,
+    held = false;
+  const entered = new Promise(resolve => {
+    enter = resolve;
+  });
+  const wait = new Promise(resolve => {
+    release = resolve;
+  });
+  s.ctx.storage.getMetadata = async id => {
+    if (id === stage.returnCursor && !held) {
+      held = true;
+      enter();
+      await wait;
+    }
+    return getMetadata(id);
+  };
+  const duplicate = progress.returnProgress(s.ctx, stage, s.input, 'owner');
+  await entered;
+  await progress.returnProgress(s.ctx, structuredClone(stage), s.input, 'owner');
+  release();
+  assert.equal(await duplicate, null);
+});
+
+test('a late duplicate batch after publication returns the original receipt', async t => {
+  const s = await setup(t, 3),
+    mutate = s.ctx.runMutation;
+  let enter,
+    release,
+    held = false;
+  const entered = new Promise(resolve => {
+    enter = resolve;
+  });
+  const wait = new Promise(resolve => {
+    release = resolve;
+  });
+  s.ctx.runMutation = async (ref, input) => {
+    if (getFunctionName(ref) === 'projectReturnIndexStage:batch' && !held) {
+      held = true;
+      enter();
+      await wait;
+    }
+    return mutate(ref, input);
+  };
+  const stage = structuredClone(s.tables.projectWorkGenerations.get(s.partitionId));
+  const duplicate = progress.returnProgress(s.ctx, stage, s.input, 'owner', s.initial);
+  await entered;
+  let receipt;
+  do {
+    receipt = await progress.returnProgress(
+      s.ctx,
+      structuredClone(s.tables.projectWorkGenerations.get(s.partitionId)),
+      s.input,
+      'owner',
+      s.initial,
+    );
+  } while (!receipt);
+  release();
+  const { accounting: _accounting, ...stored } = receipt;
+  assert.deepEqual(await duplicate, stored);
+  assert.equal(
+    [...s.tables.projectWorkEvents.values()].filter(e => e.operationId === s.input.operationId).length,
+    1,
+  );
+});
+
+test('competing preparation timestamps preserve the reserved stage without a mutation error', async t => {
+  const s = await setup(t, 3),
+    before = structuredClone(s.tables.projectWorkGenerations.get(s.partitionId));
+  const args = {
+    projectId: 'project',
+    owner: 'owner',
+    generationId: s.initial.generationId,
+    revision: s.input.revision,
+    backupId: before.backupId,
+    localRevision: 1,
+    metadata: '{}',
+    operationId: s.input.operationId,
+    at: 'competing timestamp',
+    progress: true,
+  };
+  assert.equal(await stageStore.begin._handler(s.ctx, args), null);
+  assert.deepEqual(s.tables.projectWorkGenerations.get(s.partitionId), before);
+  await assert.rejects(
+    stageStore.begin._handler(s.ctx, { ...args, backupId: 'other' }),
+    error => error.data?.code === 'WORK_OPERATION_CHANGED',
+  );
+});
