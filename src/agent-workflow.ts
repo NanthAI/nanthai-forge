@@ -1,3 +1,5 @@
+import { land } from './land.js';
+import type { LandCommand } from './land-schema.js';
 import { agentLaneTests } from './agent-lane-tests.js';
 import { agentLaneStatus } from './agent-lane-status.js';
 import { syncSummary } from './agent-operation-summary.js';
@@ -231,6 +233,7 @@ export class AgentWorkflow {
   }
   private async action(command: AgentAction): Promise<{ revision: number; result: unknown }> {
     const store = this.work.store;
+    if (command.action === 'land') return land(this.work, command as LandCommand);
     if (command.action === 'tests') return agentLaneTests(store, command.laneId);
     if (command.action === 'take') return agentTake(store, command);
     if (command.action === 'peer-ack') {

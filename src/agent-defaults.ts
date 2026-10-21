@@ -67,6 +67,7 @@ export function resolveAgentDefaults(
     case 'start':
       next = { ...command, operationId: pin('operationId', command.operationId, randomUUID) };
       break;
+    case 'land':
     case 'take':
     case 'abandon':
     case 'undo-sync':

@@ -18,6 +18,47 @@ Multi-Lane work: `start` with `intentId` adds a Lane to an open Intent and retur
 
 Omitted `operationId`, `expectedHead`, `checkId`, `expectedDefinition` and `accept.expectedPrevious` are filled from current state and echoed under `resolved`. After an unknown reply, resend the request plus `resolved`: it reconciles without repeating the check. Fully pinned requests behave as before. Failures, cancellations and conflicts stay recorded and never accept.
 
+To land a selected set of already saved Lanes, use:
+
+```sh
+nforge land ROOT LANE_ID OTHER_LANE_ID --operation-id UUID
+# Optional shared message:
+nforge land ROOT LANE_ID OTHER_LANE_ID --operation-id UUID --message "Land selected changes"
+```
+
+`land` pins each recorded head once and leaves unsaved files untouched. Inputs
+from the same Intent share a Candidate (the same grouping as `finish with`);
+compatible cross-Intent entries enter the existing landing batch before its check
+starts. Existing runner compatibility and batch sizes still apply. Dependency
+chains advance in waves; unselected or unresolved dependencies return `waiting`.
+The default message for each group is its Intent outcome. Duplicate Lane ids are
+rejected before submission.
+
+The result includes `counts` by Lane and `entries` by Candidate, with exact input
+heads and `accepted`, `failed`, `conflict`, `review-needed` or `waiting` outcomes.
+Entries include available batch, check and acceptance ids. Incompatible entries
+use their own exact-Candidate checks; partial success retains all successful
+landings. Supervised and protected inputs keep the existing person-review path.
+A changed recorded head before composition fails that entry; it never silently
+selects a newer save. Checks and acceptance use the existing project authority.
+
+The CLI prints a replay request to stderr before starting. Retain its operation
+UUID: replaying the original request resumes waiting entries and reconciles
+unknown outcomes without repeating recorded checks or acceptances. Transient
+lock contention or source observation changes return `waiting` with their code;
+replay the same request to continue. A terminal
+failure or review result stays original; use a new operation after resolving it.
+Parent selection/driver state lives in local `agent-land/`; canonical source,
+Candidates, runs and acceptances remain in Work. Preserve that directory for
+parent replay; copying portable Work alone does not retain this local driver.
+Deployment and installation remain separate explicit workflows. Existing
+acceptance automations still follow project policy.
+
+The agent CLI/MCP equivalent is `nforge agent ROOT land
+'{"operationId":"UUID","laneIds":["LANE_ID","OTHER_LANE_ID"]}'`, or
+`forge_task` with the same `action:"land"` command. It additionally accepts
+`channel`, `checkId`, `waitMs` and `keepOpen` through the structured request.
+
 Concurrent operations wait in a FIFO lock queue instead of immediately failing `WORK_BUSY`. The default lock wait is ten minutes; set `FORGE_WORK_LOCK_WAIT_MS` for CLI/MCP processes, or pass `waitMs` to `start`, `checkpoint` or `sync`. `lockWaitMs` overrides lock patience on those actions and on `finish`, `compose`, `run` and `accept`; finish's existing `waitMs` still bounds observation, not lock patience. `0` gives an immediate contention timeout. Lock patience options do not change mutation identity, so changing them on a retry retains the original operation. Waiters print the lock holder diagnostic once, then compact stderr queue progress at most every five seconds, including phase, operation/run IDs when assigned, queue position and elapsed time. Before a writer publishes its details the line identifies pending admission instead of inventing a holder. Finish reports queued/preparing/running checks and landing as well as owner/Lane waits. Each retry run reports its own initial check phase immediately, even when its queue details match the previous run. Its receipt-reconciled phases back off through metadata revision races for the configured lock patience, starting at the first contention failure, instead of failing after a fixed number of FIFO turns. Finish reads phase revisions without the owner lock and reconciles concurrent publication with the original phase IDs. A source change outside phase dispatch returns a resumable `source-changed`, `terminal:false` result; retry the same finish operation. Exact Candidate/check pins and acceptance guards remain unchanged. Owner, Lane, finish-driver and landing queues have bounded waits; `FORGE_LANDING_LOCK_WAIT_MS` can select queue patience separately (otherwise it follows `FORGE_WORK_LOCK_WAIT_MS`). Timeout returns typed `WORK_BUSY` with the queue/holder details and a retry instruction; preserve the operation ID and retry. Dead local holders recover automatically; never remove a live or ambiguous lock. Upgrade concurrent writers together for FIFO ordering.
 
 Checkpoint, sync and Lane metadata serialize within one Lane. Different Lanes can capture/checkpoint/sync while a finish check runs. Native sync publishes its Lane against its original source fields into current Work, retaining unrelated concurrent metadata. Checks, including rechecks after main moves, hold no Work/Lane/Channel lock; a busy final pre-spawn lock retries with the same run ID, prepared workspace/logs and machine-capacity ticket, checking cancellation before execution; only final acceptance joins the Channel queue and uses expected-head CAS. For diagnostics, `FORGE_WORK_LOCK_TRACE=/absolute/file.jsonl` records each lock's operation, actor, wait and hold milliseconds.

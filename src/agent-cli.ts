@@ -33,7 +33,7 @@ finish again. Inside a Lane directory laneId may be omitted.
 Omitted operationId and pins are filled from current state and returned under
 "resolved". After an unknown reply, retry with your request plus "resolved".
 
-Actions: tests, peers, peer-ack, link, take, start, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
+Actions: tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
          making-of, report.
 start intentId adds a sibling Lane; finish with:[laneId] lands siblings together.
@@ -66,6 +66,7 @@ const examples: Record<string, unknown> = {
   guidance: { operationId: 'UUID', scope: 'project', agentGuidance: 'How agents should work' },
   'land-ready': {},
   start: { outcome: 'Describe the intended change' },
+  land: { operationId: 'UUID', laneIds: ['LANE_ID', 'OTHER_LANE_ID'] },
   checkpoint: { laneId: 'LANE_ID', message: 'Describe the checkpoint' },
   sync: { laneId: 'LANE_ID' },
   compose: { operationId: 'UUID', intentId: 'INTENT_ID', inputs: [{ laneId: 'LANE_ID', head: 'HEAD' }] },
@@ -130,6 +131,9 @@ function actionHelp(action: string): string {
   if (action === 'finish')
     result +=
       'with:[LANE_ID] includes sibling recorded heads in one Candidate/check/acceptance. after:{intentId} or after:{viewId} records a dependency; rerun the same request or land-ready after it lands. Omit accept to check only. accept:true means main at its current head. If main moved, finish syncs first; a sync conflict stops with phase "sync" and markers in the Lane. CHANNEL_CHANGED automatically retries sync/check/accept under the landing queue (maxRetries:3 by default, 0 disables retries). Receipts include attempts and queue positions. CHANNEL_DIVERGED means the Candidate lacks the Channel head: sync and finish again. CONTRACT_RESYNC_REQUIRED means main changed an export or schema your edits use; finish retries it like CHANNEL_CHANGED.\n';
+  if (action === 'land')
+    result +=
+      'Land selected recorded heads (unsaved edits remain untouched). Same-Intent inputs share a Candidate; compatible cross-Intent entries share a batch. Keep the operationId and replay the original request after a lost reply. Outcomes: accepted, failed, conflict, review-needed, waiting.\n';
   if (action === 'tests')
     result +=
       'Read the scoped landing test selection for the Lane saved head versus current main. Returns scope, reason, tests, command and source pins; command is null when no test files are selected. Run it in the Lane after building. Checkpoint edits and ask again after sync or main changes. Read-only; no check is started.\n';

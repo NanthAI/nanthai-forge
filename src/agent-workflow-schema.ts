@@ -1,3 +1,4 @@
+import { landSchema } from './land-schema.js';
 import { peerAckSchema } from './agent-coordination-journal.js';
 // SPDX-License-Identifier: Apache-2.0
 import { viewReadSchemas } from './view-reads.js';
@@ -28,6 +29,7 @@ const acceptPin = z.object({
 });
 export const agentActionSchema = z.discriminatedUnion('action', [
   ...viewReadSchemas,
+  landSchema,
   peerAckSchema,
   peersInputSchema.extend({ action: z.literal('peers') }),
   z.object({
