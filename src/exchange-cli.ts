@@ -1,3 +1,4 @@
+import { acknowledgePendingExchange } from './pending-exchange.js';
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 import { mainExpectationSchema } from './hosted-main.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -211,6 +212,7 @@ async function executeExchangeCommand(root: string, action: string, input: unkno
           transport,
           request.returnSource
             ? {
+                deferPendingAcknowledgement: true,
                 workBaselineKey: transport.checkpointKey(request.returnSource.expectedBackupId)!,
                 ownerDerivedBaselineKey: transport.checkpointKey(request.returnSource.expectedBackupId)!,
                 journalRevision: request.returnSource.revision,
@@ -219,7 +221,7 @@ async function executeExchangeCommand(root: string, action: string, input: unkno
         ),
       { localSnapshot: true },
     );
-    return request.returnSource
+    const completed = request.returnSource
       ? {
           ...result,
           sourceReturn: await transport.returnSource(
@@ -231,6 +233,8 @@ async function executeExchangeCommand(root: string, action: string, input: unkno
           ),
         }
       : result;
+    if (completed.pendingCoverage) acknowledgePendingExchange(new WorkStore(root), completed.pendingCoverage);
+    return completed;
   }
   const request = exchangePullSchema.parse(input),
     transport = new ConvexExchange(request.url, process.env.FORGE_AUTH_TOKEN, request.projectId, '', null);

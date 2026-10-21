@@ -1,3 +1,4 @@
+import { acknowledgePendingExchange } from './pending-exchange.js';
 import { supersedeRetainedPush } from './bound-exchange-supersede.js';
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -225,6 +226,7 @@ async function boundExchangeAction(
       if (state.pendingPushes)
         state.pendingPushes = state.pendingPushes.filter(push => push.operationId !== request.operationId);
     });
+    if (result.pendingCoverage) acknowledgePendingExchange(store, result.pendingCoverage);
     return {
       ...result,
       operationId: request.operationId,
@@ -383,6 +385,7 @@ async function pushAttempt(
     request.operationId,
     () =>
       pushNativeExchange(store, request.revision, request.operationId, transport, {
+        deferPendingAcknowledgement: true,
         ...(captured && candidate ? { captured: { directory: captured.directory, data: candidate } } : {}),
         ...(request.returnSource
           ? {

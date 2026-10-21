@@ -2,6 +2,11 @@
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import { modalCredentialsRefSchema } from './check-runner-settings.js';
+export const autoExchangeSchema = z.object({
+  enabled: z.boolean().default(false),
+  debounceMs: z.number().safe().nonnegative().default(30_000),
+  maxPendingAgeMs: z.number().safe().nonnegative().default(300_000),
+});
 /** Portable API shape, shared by local owners, hosted projects and UI clients. */
 export const autonomyPolicySchema = z.object({
   githubMirror: z
@@ -14,6 +19,7 @@ export const autonomyPolicySchema = z.object({
       laneRefs: z.literal(false),
     })
     .optional(),
+  autoExchange: autoExchangeSchema.optional(),
   preset: z.enum(['supervised', 'trusted', 'autonomous', 'custom']),
   acceptance: z.object({
     mode: z.enum(['review', 'auto-on-pass']),
@@ -51,6 +57,7 @@ export type AcceptanceActor = { kind: 'person' | 'agent'; id: string };
 export function policyPreset(preset: Exclude<AutonomyPolicy['preset'], 'custom'>): AutonomyPolicy {
   return {
     preset,
+    autoExchange: autoExchangeSchema.parse({}),
     acceptance: {
       mode: preset === 'supervised' ? 'review' : 'auto-on-pass',
       disjointFastPath: false,
@@ -68,7 +75,8 @@ export function legacyPolicy(): AutonomyPolicy {
   return { ...policyPreset('trusted'), preset: 'custom' };
 }
 export function effectivePolicy(data: { autonomyPolicy?: AutonomyPolicy | undefined }): AutonomyPolicy {
-  const policy = data.autonomyPolicy ? autonomyPolicySchema.parse(data.autonomyPolicy) : legacyPolicy();
+  let policy = data.autonomyPolicy ? autonomyPolicySchema.parse(data.autonomyPolicy) : legacyPolicy();
+  policy = { ...policy, autoExchange: policy.autoExchange ?? autoExchangeSchema.parse({}) };
   // An absent runner policy preserves the legacy finish protocol. Fallback is
   // manual unless explicitly opted in, including when no checks policy exists.
   return policy.checks ? { ...policy, checks: { fallback: 'manual', ...policy.checks } } : policy;
@@ -87,6 +95,13 @@ export const policyWriteSchema = z
     lifecycle: autonomyPolicySchema.shape.lifecycle.partial().optional(),
     notify: autonomyPolicySchema.shape.notify.partial().optional(),
     githubMirror: autonomyPolicySchema.shape.githubMirror,
+    autoExchange: z
+      .object({
+        enabled: z.boolean().optional(),
+        debounceMs: autoExchangeSchema.shape.debounceMs.removeDefault().optional(),
+        maxPendingAgeMs: autoExchangeSchema.shape.maxPendingAgeMs.removeDefault().optional(),
+      })
+      .optional(),
   })
   .strict();
 export type PolicyWrite = z.infer<typeof policyWriteSchema>;
@@ -98,6 +113,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
         ? policyPreset(command.preset)
         : previous;
   const edited =
+    command.autoExchange ||
     command.checks ||
     command.acceptance ||
     command.ownerRootUpdates !== undefined ||
@@ -109,6 +125,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
   const policy = autonomyPolicySchema.parse({
     ...base,
     ...(githubMirror ? { githubMirror } : {}),
+    autoExchange: { ...autoExchangeSchema.parse({}), ...previous.autoExchange, ...command.autoExchange },
     ...(edited ? { preset: 'custom' } : {}),
     ...(command.checks
       ? { checks: { runner: 'local', fallback: 'manual', ...base.checks, ...command.checks } }

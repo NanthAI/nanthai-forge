@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { recordPendingExchange } from './pending-exchange.js';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { readSource } from './files.js';
@@ -354,6 +355,7 @@ export function publishRecords(directory: string, manifest: RecordManifest) {
   } finally {
     closeSync(fd);
   }
+  recordPendingExchange(directory, manifest.fields.revision as number);
   renameSync(temp, join(directory, 'work.json'));
   syncDirectory(directory);
 }

@@ -1,3 +1,5 @@
+import { capturePendingExchange } from './pending-exchange.js';
+import { digest } from './hash.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, readFileSync, renameSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,6 +28,7 @@ export async function prepareGitExchange(
     return { directory, json, manifest };
   }
   invariant(store.revision() === revision, 'WORK_STALE', 'Work changed before exchange.');
+  const capture = store.locked(() => capturePendingExchange(store.directory, store.pointer()));
   const exported = await exportWork(store, revision, false),
     staged = exported.result.path;
   try {
@@ -34,6 +37,15 @@ export async function prepareGitExchange(
     manifest.id = operationId;
     const json = JSON.stringify(manifest);
     writeFileSync(join(staged, 'manifest.json'), json, { mode: 0o600 });
+    writeFileSync(
+      join(staged, 'pending-work.json'),
+      JSON.stringify({
+        ...capture,
+        workRevision: manifest.revision,
+        workSha256: digest(readFileSync(join(staged, 'work.json'))),
+      }),
+      { mode: 0o600 },
+    );
     if (trees) {
       const tree = buildExchangeRoot(Buffer.from(json), readFileSync(join(staged, 'work.json')));
       writeFileSync(join(staged, 'exchange.json'), tree.bytes, { mode: 0o600 });

@@ -1,3 +1,4 @@
+import { exchangeBookkeeping } from './pending-exchange.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
   convertHostedIntents,
@@ -450,7 +451,7 @@ export async function reconcileHostedWork(
       };
       data.nativeCompanionReceipts = [...(data.nativeCompanionReceipts ?? []), receipt];
       validateWorkSize(data);
-      store.save(data);
+      exchangeBookkeeping(() => store.save(data));
       return { revision: data.revision, result: { status: 'reconciled' as const, receipt } };
     });
     if (candidate?.merged && publication.result.status === 'reconciled') {

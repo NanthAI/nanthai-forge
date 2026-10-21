@@ -2,6 +2,9 @@
 import { v } from 'convex/values';
 import { defineTable } from 'convex/server';
 export const autonomyPolicy = v.object({
+  autoExchange: v.optional(
+    v.object({ enabled: v.boolean(), debounceMs: v.number(), maxPendingAgeMs: v.number() }),
+  ),
   preset: v.union(
     v.literal('supervised'),
     v.literal('trusted'),

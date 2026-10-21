@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  acknowledgePendingExchange,
+  capturePendingExchange,
+  pendingExchangeCaptureSchema,
+} from './pending-exchange.js';
 import { hostedPushWork } from './work-intent-local.js';
 import {
   copyFileSync,
@@ -118,12 +123,18 @@ export async function prepareNativeExchange(
   const baseline = exchangeBaseline(store, baselineKey);
   // Only the small commit pointer is read under the owner lock. Its records are
   // immutable and retained, so materializing them needs no lock.
-  const pointer = options.captured
-    ? null
-    : store.locked(() => store.pointer(), { operation: 'exchange snapshot' });
+  const localCapture = options.captured
+    ? undefined
+    : store.locked(
+        () => {
+          const pointer = store.pointer();
+          return { pointer, pending: capturePendingExchange(store.directory, pointer) };
+        },
+        { operation: 'exchange snapshot' },
+      );
   const snapshot = (() => {
     // Rollout: hosted still reads schema 15 until the hosted converter lands.
-    const data = hostedPushWork(options.captured?.data ?? store.pinnedData(pointer));
+    const data = hostedPushWork(options.captured?.data ?? store.pinnedData(localCapture?.pointer ?? null));
     if (options.pinCurrent)
       invariant(
         data.revision >= revision,
@@ -261,7 +272,19 @@ export async function prepareNativeExchange(
       ? baseline
       : exchangeBaseline(store, ownerDerivedBaselineKey ?? undefined),
   );
+  const pendingCapture = options.captured
+    ? readPendingCapture(options.captured.directory)
+    : localCapture?.pending;
   commitExchangeDirectory(directory, {
+    ...(pendingCapture
+      ? {
+          'pending-work.json': JSON.stringify({
+            ...pendingCapture,
+            workRevision: snapshot.data.revision,
+            workSha256: digest(snapshot.bytes),
+          }),
+        }
+      : {}),
     'current.json': JSON.stringify([...current]),
     'states.json': JSON.stringify([...states]),
     'work.json': snapshot.bytes,
@@ -273,6 +296,21 @@ export async function prepareNativeExchange(
     ...mutable,
   });
   return { directory, json, manifest, fresh: true };
+}
+function readPendingCapture(directory: string) {
+  const path = join(directory, 'pending-work.json');
+  if (!existsSync(path)) return undefined; // Older retained captures cannot acknowledge pending work.
+  const capture = pendingExchangeCaptureSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+  const manifest = sourceManifestSchema.parse(
+    JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')),
+  );
+  invariant(
+    capture.workRevision === manifest.revision &&
+      capture.workSha256 === manifest.files.find(file => file.path === 'work.json')?.sha256,
+    'WORK_OPERATION_CHANGED',
+    'Pending-work coverage differs from its captured Work.',
+  );
+  return capture;
 }
 export async function pushNativeExchange(
   store: WorkStore,
@@ -290,6 +328,8 @@ export async function pushNativeExchange(
     captured?: CapturedExchange;
     /** Runs after the snapshot is durably retained and before any network access. */
     onPrepared?: (revision: number) => void;
+    /** Bound push must finish source return before acknowledging this capture. */
+    deferPendingAcknowledgement?: boolean;
   } = {},
 ) {
   const prepared = await prepareNativeExchange(
@@ -370,8 +410,17 @@ export async function pushNativeExchange(
   let uploadedBytes = 0,
     uploadedObjects = 0,
     uploadedLogicalObjects = 0;
+  const capture = readPendingCapture(prepared.directory);
+  const pendingCoverage = capture
+    ? {
+        capture,
+        completeHistory: options.stage !== 'current',
+        unavailable: prepared.manifest.unavailable,
+      }
+    : undefined;
   const result = (backupId: string) => ({
     backupId,
+    ...(pendingCoverage ? { pendingCoverage } : {}),
     digest: manifestPin.sha256,
     revision,
     transport: 'objects' as const,
@@ -414,6 +463,8 @@ export async function pushNativeExchange(
       ? await transport.publishedOwnerDerived(original)
       : ownerDerived;
     retainBaseline(original);
+    if (pendingCoverage && !options.deferPendingAcknowledgement)
+      acknowledgePendingExchange(store, pendingCoverage);
     return { ...result(original), ownerDerived: pinned ?? undefined };
   }
   const baseline = exchangeBaseline(store, transport.checkpointKey?.());
@@ -568,6 +619,8 @@ export async function pushNativeExchange(
       : null;
   const backupId = metadataId ?? (await transport.publish(manifestPin, false, ownerDerived));
   retainBaseline(backupId);
+  if (pendingCoverage && !options.deferPendingAcknowledgement)
+    acknowledgePendingExchange(store, pendingCoverage);
   return result(backupId);
 }
 export async function pullNativeExchange(

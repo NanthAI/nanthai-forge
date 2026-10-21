@@ -451,3 +451,31 @@ projection consume bounded page groups in separate resumable steps. The final
 staging cursor retains compact relationship context and output references rather
 than complete Intent notes and lifecycle history. Owner-supplied display facts
 remain required; the server does not derive source or provenance.
+
+## Pending saved work
+
+Each owner durably records saved mutations in `pending-exchange.json` beside its
+Work store, independently of hosting enablement. Lane checkpoints (including
+unlanded saves), Work edits, check completion and acceptance all pass through the
+same commit boundary. A burst coalesces while retaining its first and last pending
+times and revision range. The pending write is fsynced before publishing the Work
+pointer; an interrupted commit can conservatively leave extra pending work.
+
+An exchange capture seals that burst under the owner lock. Later writes form a
+new batch and retain their own first-pending time. The retained exchange directory's
+`pending-work.json` pins the owner queue identity, covered sequence, capture time,
+Work revision and Work digest. These are local transport records, excluded from
+portable Work. Older captures without these pins cannot clear the queue. A
+successful complete-history push with no unavailable evidence acknowledges only
+its captured batches. Bound pushes acknowledge after source return and index
+refresh; failed or unknown outcomes stay pending for original-operation retry.
+Current-first hosting leaves history and evidence pending until its full transfer
+completes. Capturing, updating transport receipts and importing already-hosted
+metadata do not enqueue new work themselves.
+
+The project policy has a separate `autoExchange` preference: `enabled:false`,
+`debounceMs:30000`, `maxPendingAgeMs:300000` by default. Partial `set-policy` edits
+preserve unspecified fields; changing an acceptance preset preserves this project
+preference. This persistence layer starts no driver, timers or background pushes,
+even when the preference is enabled. Binding `autoSync` and GitHub mirror
+`autoPush` retain their existing meanings. Manual exchange remains available.
