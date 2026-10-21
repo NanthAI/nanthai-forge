@@ -17,7 +17,7 @@ import { composedNativeMain } from '../dist/native-composition-candidate.js';
 import { NativeSource } from '../dist/native-source.js';
 import { standardSelection } from '../scripts/test-impact.mjs';
 import { githubActionsWorkflow, githubActionsRecipe } from '../dist/github-actions-workflow.js';
-import { actionsApi, observe } from '../dist/github-actions-api.js';
+import { actionsApi, ActionsApiError, observe } from '../dist/github-actions-api.js';
 import { syncGit, redactGitStderr, GitSyncError, transientGitFailure } from '../dist/github-sync-git.js';
 import { checkRoute } from '../dist/check-backend.js';
 import { editedPolicy, policyPreset } from '../dist/autonomy-policy.js';
@@ -95,6 +95,7 @@ function transport(plan, journal, options = {}) {
   const api = {
     async request(endpoint, method = 'GET', body) {
       calls.push({ endpoint, method, body });
+      if (endpoint.includes('/branches/')) return { commit: { sha: journal.commit } };
       if (endpoint.endsWith('/dispatches')) {
         if (options.dispatchError) throw Error('synthetic-secret-token');
         return;
@@ -208,17 +209,6 @@ test('dispatch, log collection and job timing use the retained run identity', as
 test('ambiguous dispatch is reconciled without a second mutation', async t => {
   const { plan, journal } = controllerFixture(t),
     { api, calls } = transport(plan, journal, { dispatchError: true });
-  await assert.rejects(
-    controlActions(
-      plan,
-      journal,
-      () => {},
-      api,
-      () => false,
-      () => {},
-    ),
-  );
-  assert.equal(journal.dispatching, true);
   assert.equal(
     (
       await controlActions(
@@ -232,6 +222,7 @@ test('ambiguous dispatch is reconciled without a second mutation', async t => {
     ).status,
     'passed',
   );
+  assert.equal(journal.dispatching, true);
   assert.equal(calls.filter(call => call.endpoint.endsWith('/dispatches')).length, 1);
 });
 test('observed failures and OOM remain failed without retries', async t => {
@@ -1258,3 +1249,172 @@ test('acceptance racing supersession observation prevents cancellation of the ac
   assert.equal(read(join(path, 'result.json')).status, 'passed');
   assert.equal(calls.filter(call => call.endpoint.endsWith('/cancel')).length, 0);
 });
+
+test('exhausted dispatch rejections record failed with HTTP status, not interrupted', async t => {
+  const { work, run, path } = fixture(t);
+  let dispatches = 0;
+  const api = {
+    async request(endpoint) {
+      if (endpoint.includes('/branches/')) return { commit: { sha: 'a'.repeat(40) } };
+      assert.ok(endpoint.endsWith('/dispatches'));
+      dispatches++;
+      throw new ActionsApiError(404);
+    },
+    async sleep() {},
+    async pages() {
+      assert.fail('no run lookup after definitive rejection');
+    },
+  };
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    api,
+    async (_plan, journal, save) => {
+      journal.commit = 'a'.repeat(40);
+      journal.pushed = true;
+      save();
+    },
+    async () => assert.fail('failed ref must be retained'),
+  );
+  const receipt = read(join(path, 'result.json'));
+  assert.equal(receipt.status, 'failed');
+  assert.equal(receipt.exitCode, 1);
+  assert.match(receipt.details, /GITHUB_ACTIONS_DISPATCH_REJECTED.*HTTP 404/);
+  assert.equal(dispatches, 5);
+  const journal = read(join(path, 'github-actions.json'));
+  assert.equal(journal.dispatching, false);
+  assert.equal(journal.dispatchOutcome, 'rejected');
+  assert.equal(journal.dispatchStatus, 404);
+});
+
+for (const via of ['run-check', 'finish', 'observation']) {
+  test(`same-op ${via} retry recovers a retained interrupted dispatch without new source or run`, async t => {
+    const { work, run, path } = fixture(t);
+    const commit = 'a'.repeat(40);
+    await launchGithubActionsRun(
+      work.store,
+      run,
+      {
+        async request(endpoint) {
+          if (endpoint.includes('/branches/')) return { commit: { sha: commit } };
+          throw new Error('synthetic lost response');
+        },
+        async pages() {
+          return [];
+        },
+        async sleep() {},
+      },
+      async (_plan, journal, save) => {
+        journal.commit = commit;
+        journal.pushed = true;
+        save();
+      },
+    );
+    assert.equal(recoverRuns(work.store, { runs: [run] }), true);
+    assert.equal(run.status, 'interrupted');
+    // Model an old stranded journal as well as the new ambiguous journal.
+    const retained = read(join(path, 'github-actions.json'));
+    if (via === 'observation') {
+      retained.dispatchRecoveryUsed = true;
+      writeFileSync(join(path, 'github-actions.json'), JSON.stringify(retained));
+    }
+    if (via === 'finish') {
+      delete retained.dispatchOutcome;
+      delete retained.dispatchLookupExhausted;
+      writeFileSync(join(path, 'github-actions.json'), JSON.stringify(retained));
+    }
+    work.store.locked(() => {
+      const tx = work.store.records();
+      tx.replace('runs', tx.find('runs', run.id).position, run);
+      work.store.commitRecords(tx);
+    });
+    const previousPath = process.env.PATH;
+    const bin = join(path, 'fake-bin');
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, 'git'),
+      `#!${process.execPath}\nif(process.argv.includes('ls-remote'))process.stdout.write(${JSON.stringify(`${commit}\trefs/heads/forge-check/${run.id}`)});else if(!process.argv.includes('push'))process.exit(1);\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}:${previousPath}`;
+    t.after(() => {
+      process.env.PATH = previousPath;
+    });
+    const plan = read(join(path, 'modal-plan.json'));
+    const fake = transport(plan, retained);
+    let dispatches = 0;
+    t.mock.method(actionsApi, 'request', async (...args) => {
+      if (args[0].endsWith('/dispatches')) dispatches++;
+      return fake.api.request(...args);
+    });
+    t.mock.method(actionsApi, 'pages', async (...args) => {
+      if (args[0].includes('/runs?') && !dispatches && via !== 'observation') return [];
+      return fake.api.pages(...args);
+    });
+    t.mock.method(actionsApi, 'log', (...args) => fake.api.log(...args));
+    t.mock.method(actionsApi, 'sleep', async () => {});
+    const { waitForAgentRun } = await import('../dist/agent-run-observer.js');
+    const command = {
+      action: 'run-check',
+      operationId: run.id,
+      viewId: run.viewId,
+      expectedHead: run.head,
+      checkId: run.check.id,
+      expectedDefinition: run.check.definition,
+      expectedEnvironment: run.environment.fingerprint,
+    };
+    if (via !== 'finish') {
+      await work.dispatch(command, work.store.revision());
+      await work.dispatch(command, work.store.revision());
+      await waitForAgentRun(work.store, run.id, 10_000);
+    } else {
+      const { FinishJournal } = await import('../dist/agent-finish-journal.js');
+      const { agentFinish } = await import('../dist/agent-finish.js');
+      const finish = {
+        action: 'finish',
+        operationId: randomUUID(),
+        laneId: run.inputs[0].laneId,
+        expectedHead: run.inputs[0].head,
+        message: 'Synthetic dispatch recovery',
+        checkId: run.check.id,
+        expectedDefinition: run.check.definition,
+        expectedEnvironment: run.environment.fingerprint,
+        waitMs: 10_000,
+      };
+      const journal = new FinishJournal(work.store, finish, run.head);
+      const attempt = journal.state.attempts[0];
+      attempt.operations.run = run.id;
+      attempt.view = { viewId: run.viewId, head: run.head, status: 'clean' };
+      journal.state.result = { phase: 'check', status: 'interrupted', terminal: true };
+      journal.save();
+      const result = await agentFinish(work, finish, {
+        checkpoint: async () => ({ result: { head: run.head } }),
+        phase: command => work.dispatch(command, work.store.revision()),
+        wait: id => waitForAgentRun(work.store, id, 10_000),
+        sync: async () => assert.fail('no source sync needed'),
+        review: async () => assert.fail('no acceptance requested'),
+      });
+      assert.equal(result.result.status, 'passed');
+    }
+    // A result receipt precedes ref cleanup. Keep this fixture and its fake Git
+    // alive until the controller has published its final cleanup progress.
+    const deadline = Date.now() + 10_000;
+    while (
+      !readFileSync(join(path, 'stdout.log'), 'utf8').includes(
+        'Removed run-owned ref after recording result.',
+      )
+    ) {
+      assert.ok(Date.now() < deadline, 'controller cleanup must complete');
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(dispatches, via === 'observation' ? 0 : 1);
+    assert.equal(work.store.select('runs', run.id).status, 'passed');
+    assert.equal(work.store.load().runs.length, 1);
+    assert.equal(read(join(path, 'github-actions.json')).dispatchRecoveryUsed, true);
+    const { readdirSync } = await import('node:fs');
+    const previous = readdirSync(path).find(file => file.startsWith('result.json.interrupted-'));
+    assert.ok(previous, 'old interrupted receipt remains available');
+    assert.equal(read(join(path, previous)).status, 'interrupted');
+  });
+}

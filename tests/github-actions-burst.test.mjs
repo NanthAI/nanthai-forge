@@ -57,6 +57,7 @@ function controller(t, index) {
 function dispatchApi(plan, journal, dispatched) {
   return {
     async request(endpoint, method) {
+      if (endpoint.includes('/branches/')) return { commit: { sha: journal.commit } };
       if (endpoint.endsWith('/dispatches')) return void dispatched.push(plan.runId);
       if (endpoint.endsWith('/timing')) return {};
       return { id: 10, head_sha: journal.commit, status: 'completed', conclusion: 'success' };

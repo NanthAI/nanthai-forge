@@ -51,14 +51,32 @@ routing. The shared Modal export rules for local credential configuration apply.
 No owner token is sent in the plan or check environment; checkout does not retain
 its credential, and raw gh/git error output is never logged.
 
-The controller records dispatch intent before sending it and finds the execution
-by runId and commit. An unknown dispatch or rerun outcome is never repeated.
+Before dispatch, the controller waits for GitHub's branch API to report the pushed
+commit (up to sixty seconds of backoff). It records dispatch intent before sending
+it and finds the execution by runId and commit. Dispatch HTTP 404/422 responses
+are definitive rejections: the journal records the status, clears dispatch intent,
+and retries up to five attempts with seventy-five seconds of total backoff.
+Exhaustion records a failed check with `GITHUB_ACTIONS_DISPATCH_REJECTED` and its
+HTTP status, rather than an interrupted check.
+
+An ambiguous dispatch response (transport failure, HTTP 5xx or unknown status)
+is reconciled by looking up the run. If that lookup window ends without a run,
+a later retry of the same operation may send one recovery dispatch, only after
+another lookup window and a fresh complete branch query confirm zero runs.
+Historical stranded dispatch journals use the same recovery. Retrying the original
+`run-check` or interrupted `finish` operation reopens only this unresolved-dispatch
+case, preserving its source, run ID and landing-batch pins. The previous interrupted
+receipt is retained beside `result.json` with an `interrupted-<id>` suffix.
+The journal records
+the recovery allowance before sending; further ambiguous retries only observe.
+An acknowledged dispatch is never sent again, and duplicate matching runs remain
+an evidence error. Unknown rerun outcomes are never repeated.
 Read-only API calls back off up to sixty seconds between attempts; job polling
 uses ten seconds. A GitHub rate-limit rejection never interrupts a check: the
 controller waits until the reported `x-ratelimit-reset` (at least a minute, at most
 an hour per wait), says so in progress, and continues. Because GitHub performed
 nothing, a rate-limited dispatch, rerun or cancel is sent again after the wait; any
-other mutation failure is still never repeated. Cancellation is observed after a
+other rerun or cancel failure is still never repeated. Cancellation is observed after a
 wait ends. A run reported completed while its job list still shows unfinished or
 missing jobs is polled again for up to five minutes before it counts as interrupted. Each shard status transition appears in numbered progress.
 Completed job logs, including failures, use the existing `shards/<index>.log` and

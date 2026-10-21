@@ -2,6 +2,7 @@
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mutate, observe, type ActionsApi, type ActionsJob, type ActionsRun } from './github-actions-api.js';
+import { ensureActionsDispatch } from './github-actions-dispatch.js';
 import type { ActionsJournal } from './github-actions-export.js';
 import type { ModalPlan } from './modal-plan.js';
 import { ModalShardLogs } from './modal-shard-logs.js';
@@ -31,54 +32,12 @@ export async function controlActions(
         : journal.rateUsdPerMinute,
       journal.jobUsage ?? [],
     );
-  const base = `repos/${journal.repo}/actions`,
-    branch = `forge-check/${plan.runId}`;
+  const base = `repos/${journal.repo}/actions`;
   if (cancelled() && !journal.dispatching && !journal.runId)
     return { status: 'cancelled' as const, exitCode: null, billableMinutes: [], cost: cost() };
-  if (!journal.runId) {
-    if (!journal.dispatching) {
-      journal.dispatching = true;
-      save();
-      // Intent is durable before dispatch. Unknown outcomes are found by runId, never dispatched again.
-      await mutate(
-        api,
-        () =>
-          api.request(`${base}/workflows/forge-check.yml/dispatches`, 'POST', {
-            ref: branch,
-            inputs: { runId: plan.runId, plan: JSON.stringify(plan.groups.map((_, index) => index)) },
-          }),
-        progress,
-      );
-    }
-    for (let attempt = 0; attempt < 12 && !journal.runId; attempt++) {
-      const runs = await observe(
-        api,
-        () =>
-          api.pages<ActionsRun>(
-            `${base}/runs?branch=${encodeURIComponent(branch)}&event=workflow_dispatch&per_page=100`,
-            'workflow_runs',
-          ),
-        progress,
-      );
-      const matches = runs.filter(
-        run => run.head_sha === journal.commit && run.display_title === `forge-check/${plan.runId}`,
-      );
-      invariant(
-        matches.length <= 1,
-        'EVIDENCE_CHANGED',
-        'Multiple Actions runs match the retained dispatch.',
-      );
-      if (matches[0]) {
-        journal.runId = matches[0].id;
-        save();
-      } else await api.sleep(Math.min(60_000, 5_000 * (attempt + 1)));
-    }
-    invariant(
-      journal.runId,
-      'GITHUB_ACTIONS_UNKNOWN',
-      'Actions dispatch outcome unknown; retained dispatch must be reconciled.',
-    );
-  }
+  await ensureActionsDispatch(plan, journal, save, api, cancelled, progress);
+  if (!journal.runId)
+    return { status: 'cancelled' as const, exitCode: null, billableMinutes: [], cost: cost() };
   const logs = new ModalShardLogs(plan.output, plan.groups.length);
   let cancelSent = false,
     retryPolls = 0,

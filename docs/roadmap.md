@@ -96,7 +96,7 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 
 - A launchd `.plist` template selects the full test suite as an unclassified path. Finite agents forbidden from full verification must use affected backup/signer tests instead; the selector needs explicit template ownership.
 
-- Central agent lifecycle edits produce a broad local scoped selection: predictive-overlap work selected 210 files, and a two-worker run was interrupted after 49.5 minutes with unrelated synthetic Git setup timeouts. Local task validation needs a focused selection distinct from the combined remote landing selection; it must retain coverage and report any unrun files rather than silently treating the broad selection as passed.
+- Central agent lifecycle edits produce a broad local scoped selection: predictive-overlap work selected 210 files, and a two-worker run was interrupted after 49.5 minutes with unrelated synthetic Git setup timeouts. Actions dispatch edits likewise select over 220 files through Work's transitive importers; finite local validation needs the Actions and affected replay suites and must report the other selected files as unrun. Local task validation needs a focused selection distinct from the combined remote landing selection; it must retain coverage and report any unrun files rather than silently treating the broad selection as passed.
 
 - Browser byte work touching one Convex endpoint selects the whole backend namespace and shared native parser consumers (311 test files). This scoped selection is nearly a full suite for a finite implementation Lane. Expose narrower endpoint dependencies while retaining broad combined landing validation.
 

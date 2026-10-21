@@ -1,5 +1,10 @@
 import { prepareRunRegistration } from './work-run-preparation.js';
 import { localActor } from './work-actor.js';
+import {
+  strandedActionsRun,
+  retainInterruptedActionsReceipt,
+  reopenActionsLanding,
+} from './github-actions-recovery.js';
 import { launchGithubActionsRun } from './work-github-actions-run.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { pollCancellation } from './work-cancel-poll.js';
@@ -725,6 +730,18 @@ export function runWork(
         'EVIDENCE_CHANGED',
         'This run operation already has different pins. Its command is not repeated.',
       );
+      if (strandedActionsRun(store, existing)) {
+        retainInterruptedActionsReceipt(store, existing);
+        existing.status = 'running';
+        existing.runner = { ...processIdentity(), host: hostname() };
+        delete existing.endedAt;
+        delete existing.exitCode;
+        delete existing.signal;
+        tx.replace('runs', selected!.position, existing);
+        reopenActionsLanding(tx, existing);
+        data.revision = store.commitRecords(tx);
+        started = existing;
+      }
       return { revision: data.revision, result: existing };
     }
     invariant(data.revision === revision, 'WORK_STALE', 'Work changed. Refresh before starting a new run.');

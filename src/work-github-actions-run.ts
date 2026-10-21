@@ -5,8 +5,9 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readPolicy } from './work-autonomy.js';
 import { modalPlan, validateModalPlan, type ModalPlan } from './modal-plan.js';
-import { actionsApi, type ActionsApi } from './github-actions-api.js';
+import { actionsApi, ActionsApiError, type ActionsApi } from './github-actions-api.js';
 import { actionsJournal, deleteActionsRef, exportActionsSnapshot } from './github-actions-export.js';
+import { ActionsDispatchRejected, ActionsDispatchUnknown } from './github-actions-dispatch.js';
 import { controlActions } from './github-actions-controller.js';
 import { durableReplace } from './native-durability.js';
 import { remoteCancellation, cancellationDetails } from './work-run-cancellation.js';
@@ -156,14 +157,17 @@ export async function launchGithubActionsRun(
       delete run.backend!.estimatedCostUsd;
     }
     // Never serialize raw transport errors or stacks. Git's stderr is kept only after redaction.
+    const dispatchRejected = error instanceof ActionsDispatchRejected;
     const receipt = createRunReceipt({
-      status: 'interrupted',
+      status: dispatchRejected ? 'failed' : 'interrupted',
       cancellation: run.cancellation,
       backend: run.backend,
       endedAt: new Date().toISOString(),
-      exitCode: null,
+      exitCode: dispatchRejected ? 1 : null,
       signal: null,
-      details: `GitHub Actions controller interrupted (${errorKind(error)}${error instanceof GitSyncError && error.detail ? `: git said "${error.detail}"` : ''}); source export, dispatch intent and job identities are retained. Check gh access and workflow registration, then reconcile the retained run. No ambiguous mutation was repeated.`,
+      details: dispatchRejected
+        ? `${error.code}: ${error.message} Source export and dispatch rejections are retained.`
+        : `GitHub Actions controller interrupted (${errorKind(error)}${error instanceof GitSyncError && error.detail ? `: git said "${error.detail}"` : ''}); source export, dispatch intent and job identities are retained. Check gh access and workflow registration, then reconcile the retained run. Retained dispatch outcomes govern recovery; ambiguous reruns are never repeated.`,
     });
     progress(receipt.details);
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
@@ -175,6 +179,8 @@ export async function launchGithubActionsRun(
 
 // Only a stable code or error class: transport messages can contain credentials.
 function errorKind(error: unknown) {
+  if (error instanceof ActionsApiError || error instanceof ActionsDispatchUnknown)
+    return `${error.code}: ${error instanceof ActionsApiError ? error.outcome : 'ambiguous'}${error.httpStatus === undefined ? '' : ` HTTP ${error.httpStatus}`}`;
   const code = (error as { code?: unknown })?.code;
   if (typeof code === 'string' && /^[A-Z_]{3,64}$/.test(code)) return code;
   return error instanceof Error && /^[A-Za-z]{1,40}$/.test(error.name) ? error.name : 'unknown';

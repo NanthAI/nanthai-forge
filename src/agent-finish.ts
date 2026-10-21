@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { strandedActionsRun } from './github-actions-recovery.js';
 import { CheckQueue, cancelTickets } from './check-queue.js';
 import { withWorkLockOptions } from './work-lock.js';
 import { finishQueuedBatch } from './agent-finish-batch.js';
@@ -310,9 +311,30 @@ class FinishRunner {
   }
   private async drive() {
     const { journal, command } = this;
-    if (journal.state.result)
-      return { revision: await this.observedRevision(), result: journal.state.result };
     let attempt = journal.state.attempts.at(-1)!;
+    if (journal.state.result) {
+      const run = this.store.select('runs', attempt.operations.run);
+      if (
+        journal.state.result.phase !== 'check' ||
+        journal.state.result.status !== 'interrupted' ||
+        !strandedActionsRun(this.store, run)
+      )
+        return { revision: await this.observedRevision(), result: journal.state.result };
+      // Replay this exact run through normal registration, before a retained
+      // landing batch is observed. Only its unresolved dispatch may recover.
+      await this.phases.phase({
+        action: 'run-check',
+        operationId: run!.id,
+        viewId: run!.viewId,
+        expectedHead: run!.head,
+        checkId: run!.check.id,
+        expectedDefinition: run!.check.definition,
+        expectedEnvironment: run!.environment.fingerprint,
+        ...(run!.interaction ? { interaction: run!.interaction } : {}),
+      });
+      delete journal.state.result;
+      journal.save();
+    }
     const waiting = waitingDependencies(
       this.store,
       [command.laneId, ...(command.with ?? [])],

@@ -18,6 +18,11 @@ export type ActionsJournal = {
   commit?: string;
   pushed?: boolean;
   dispatching?: boolean;
+  dispatchOutcome?: 'accepted' | 'rejected' | 'ambiguous';
+  dispatchStatus?: number;
+  dispatchRejections?: number;
+  dispatchLookupExhausted?: boolean;
+  dispatchRecoveryUsed?: boolean;
   runId?: number;
   retrying: number[];
   retrySources: Record<string, number>;

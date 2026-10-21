@@ -30,7 +30,19 @@ export interface ActionsApi {
 }
 /** GitHub rejected the request for budget (primary/secondary limit). Nothing was performed. */
 export const RATE_LIMITED = 'GITHUB_ACTIONS_RATE_LIMITED';
-// gh prints GitHub's message on stderr; only the class is kept (stderr can carry account data).
+/** Only status and outcome survive transport classification; stderr may carry account data. */
+export class ActionsApiError extends ForgeError {
+  readonly outcome: 'rejected' | 'ambiguous';
+  constructor(readonly httpStatus?: number) {
+    const outcome = httpStatus === 404 || httpStatus === 422 ? 'rejected' : 'ambiguous';
+    super(
+      'GITHUB_ACTIONS_API',
+      `GitHub Actions request ${outcome}${httpStatus === undefined ? '' : ` (HTTP ${httpStatus})`}; retained operation requires reconciliation.`,
+    );
+    this.outcome = outcome;
+  }
+}
+// Rate-limit detection retains the existing primary/secondary-budget handling.
 const rateLimitText = /rate limit|HTTP 429|abuse detection/i;
 function gh(args: string[], input?: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -43,20 +55,16 @@ function gh(args: string[], input?: string): Promise<string> {
         timeout: 120_000,
         maxBuffer: 32 * 1024 * 1024,
       },
-      (error, stdout, stderr) =>
-        error
-          ? reject(
-              rateLimitText.test(String(stderr))
-                ? new ForgeError(
-                    RATE_LIMITED,
-                    'GitHub API rate limit reached; waiting for the budget to reset.',
-                  )
-                : new ForgeError(
-                    'GITHUB_ACTIONS_API',
-                    'GitHub Actions request failed; retained operation requires reconciliation. Check gh authentication and API availability.',
-                  ),
-            )
-          : resolve(stdout),
+      (error, stdout, stderr) => {
+        if (!error) return resolve(stdout);
+        const status = /\bHTTP(?:\/\d(?:\.\d)?)?\s+(\d{3})\b/i.exec(String(stderr))?.[1];
+        const failure = new ActionsApiError(status === undefined ? undefined : Number(status));
+        reject(
+          failure.httpStatus === 429 || (failure.httpStatus === 403 && rateLimitText.test(String(stderr)))
+            ? new ForgeError(RATE_LIMITED, 'GitHub API rate limit reached; waiting for the budget to reset.')
+            : failure,
+        );
+      },
     );
     child.stdin?.end(input);
   });
