@@ -237,6 +237,12 @@ export async function recordReturn(
     }),
   );
   context.current.revision++;
+  input.ownerDerived ??= backup.ownerDerived;
+  const ownerDerived = await readOwnerDerived(
+    input.ownerDerived,
+    async () => (await reader.read(input.projectId, owner, [input.ownerDerived!]))[0]!,
+    pins => reader.read(input.projectId, owner, pins),
+  );
   const final = {
     projectId: input.projectId,
     owner,
@@ -255,6 +261,7 @@ export async function recordReturn(
       context.previous,
       context.current,
       candidate.manifest,
+      ownerDerived as import('../src/owner-derived').OwnerDerived,
     ),
   };
   const generation: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
@@ -266,8 +273,9 @@ export async function recordReturn(
     recordsRead: context.recordsRead,
     revision: input.revision,
   });
-  if (!generation || generation.backupId !== input.expectedBackupId || generation.revision !== input.revision)
-    return { receipt: await ctx.runMutation(internal.projectWork.returnSource, final) };
+  if (!generation) return skip('index-unavailable');
+  if (generation.backupId !== input.expectedBackupId || generation.revision !== input.revision)
+    return skip('index-changed');
   const partitionId = await ctx.runMutation(internal.projectReturnIndexStage.begin, {
     projectId: input.projectId,
     owner,
@@ -292,10 +300,6 @@ export async function recordReturn(
     },
   );
   invariant(stage, 'WORK_STALE', 'Record-delta staging changed.');
-  const ownerDerived = await readOwnerDerived(
-    input.ownerDerived,
-    async () => (await reader.read(input.projectId, owner, [input.ownerDerived!]))[0]!,
-  );
   return {
     receipt: await returnProgress(ctx, stage, input, owner, {
       snapshot: { data: context.current, manifest: candidate.manifest, backup },
@@ -305,6 +309,7 @@ export async function recordReturn(
       generation,
       ownerDerived,
       partial: true,
+      metadataOnly: true,
     }),
   };
 }

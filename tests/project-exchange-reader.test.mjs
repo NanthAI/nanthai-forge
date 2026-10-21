@@ -155,7 +155,8 @@ test('fresh source return reuses shared checkpoint bytes within the action while
   const shared = [...base.tree.objects.keys()].filter(key => next.tree.objects.has(key));
   assert(shared.length > 5, 'fixture contains substantial reusable metadata');
   counts.clear();
-  assert.deepEqual(await modules.projectSourceReturn.returnSource._handler(s.ctx, input), returned);
+  const { accounting: _accounting, ...originalReceipt } = returned;
+  assert.deepEqual(await modules.projectSourceReturn.returnSource._handler(s.ctx, input), originalReceipt);
   assert.equal(counts.size, 0, 'original return retry remains early');
   const result = JSON.parse(await readHosted(s.ctx, { projectId: 'project' }));
   assert.deepEqual(result.data.intents, candidateData.intents);
@@ -257,7 +258,8 @@ test('object source return resumes a committed staging batch and publishes one c
   );
   assert.ok(returned.accounting.steps > 0);
   delete returned.accounting;
-  assert.deepEqual(await modules.projectSourceReturn.returnSource._handler(s.ctx, input), returned);
+  const { accounting: _accounting, ...originalReceipt } = returned;
+  assert.deepEqual(await modules.projectSourceReturn.returnSource._handler(s.ctx, input), originalReceipt);
   await assert.rejects(
     modules.projectSourceReturn.returnSource._handler(s.ctx, { ...input, backupId }),
     code('WORK_OPERATION_CHANGED'),

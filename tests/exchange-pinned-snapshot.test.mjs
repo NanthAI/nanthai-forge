@@ -82,8 +82,10 @@ test('reconcile for a push merges hosted metadata into local Work written during
     upload: async (_pin, bytes) => {
       await upload(s, bytes);
     },
-    publish: p =>
+    publish: (p, _metadataOnly, ownerDerived) =>
       modules.projectExchangeActions.publish._handler(s.ctx, {
+        displayProtocol: 3,
+        ownerDerived,
         projectId: 'project',
         operationId: randomUUID(),
         previous: null,

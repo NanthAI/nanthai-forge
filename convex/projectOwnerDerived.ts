@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
-import { ownerDerivedSchema, viewFingerprint, OWNER_DERIVED_MAX_BYTES } from '../src/owner-derived';
+import { ownerDerivedSchema, OWNER_DERIVED_MAX_BYTES } from '../src/owner-derived';
 import { digest } from '../src/hash';
 import { stateParentEntries } from '../src/source-state-parent-index';
 import { sourceTreeEntries } from '../src/source-tree-index';
-import { viewIndexEntries } from '../src/view-hosted-index';
+import { invariant, ForgeError } from '../src/errors';
+import { resolveOwnerDerived } from '../src/owner-derived-pages';
+import { safeRelative } from '../src/files';
 import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Cursor } from './projectSourceReturnStep';
 import type { IndexEntry } from '../src/work-hosted-index';
 
-/** Metadata-only validation. Failure is an optimization miss, never a source denial. */
+/** Validate owner display facts without reading source or recomputing provenance. */
 export function ownerDerivedRows(c: Cursor, value: unknown): IndexEntry[] | undefined {
   try {
-    if (!c.delta || Buffer.byteLength(JSON.stringify(value)) > OWNER_DERIVED_MAX_BYTES) return;
+    if (!c.delta) return;
     const parsed = ownerDerivedSchema.safeParse(value);
     if (!parsed.success) return;
     const d = parsed.data,
@@ -21,7 +23,7 @@ export function ownerDerivedRows(c: Cursor, value: unknown): IndexEntry[] | unde
         c.snapshot.manifest.files.filter(p => p.path === `objects/${p.sha256}`).map(p => p.sha256),
       );
     if (
-      d.work !== JSON.parse(c.final.command).workSha256 ||
+      d.work !== c.snapshot.manifest.files.find(file => file.path === 'work.json')?.sha256 ||
       !unique(d.parents) ||
       !unique(d.ancestry) ||
       !unique(d.stats) ||
@@ -91,7 +93,7 @@ export function ownerDerivedRows(c: Cursor, value: unknown): IndexEntry[] | unde
     for (const index of c.delta.views) {
       const view = c.snapshot.data.views[index]!,
         supplied = views.get(view.id);
-      if (!supplied || supplied.fingerprint !== viewFingerprint(c.snapshot.data, index)) return;
+      if (!supplied || !/^[a-f0-9]{64}$/.test(supplied.fingerprint)) return;
       const ids = new Set<string>();
       for (const row of supplied.rows) {
         const identity = JSON.stringify([row.collection, row.key]);
@@ -111,6 +113,14 @@ export function ownerDerivedRows(c: Cursor, value: unknown): IndexEntry[] | unde
         )
           return;
         if (row.collection.startsWith('viewFiles') && !row.key.startsWith(`${view.id}:`)) return;
+        if (Buffer.byteLength(row.value) > 500000) return;
+        if (row.collection === 'viewDetails' && (row.key !== view.id || row.parent !== view.intentId)) return;
+        if (row.collection === 'viewAcceptances' && row.parent !== view.id) return;
+        if (
+          row.collection === 'laneViews' &&
+          !view.inputs.some(input => row.key === `${input.laneId}:${view.id}` && row.parent === input.laneId)
+        )
+          return;
         if (row.collection.endsWith(':payload')) {
           if (
             !supplied.rows.some(
@@ -127,6 +137,12 @@ export function ownerDerivedRows(c: Cursor, value: unknown): IndexEntry[] | unde
       const summary = unpack(detail, supplied.rows);
       const fileRows = supplied.rows.filter(r => r.collection === 'viewFiles');
       if (
+        summary.viewId !== view.id ||
+        summary.intentId !== view.intentId ||
+        summary.base !== view.base ||
+        summary.head !== (view.head ?? null) ||
+        !Array.isArray(summary.inputs) ||
+        !['accepted', 'superseded', 'ready', 'conflict'].includes(summary.status) ||
         typeof summary.provenanceAvailable !== 'boolean' ||
         (summary.fileCount !== null &&
           (!Number.isSafeInteger(summary.fileCount) ||
@@ -146,6 +162,8 @@ export function ownerDerivedRows(c: Cursor, value: unknown): IndexEntry[] | unde
           fileRow.parent !== view.id ||
           fileRow.key !== `${view.id}:${file.path}` ||
           !['added', 'deleted', 'modified'].includes(file.status) ||
+          typeof file.path !== 'string' ||
+          !safeRelative(file.path) ||
           typeof file.historyComplete !== 'boolean' ||
           !Array.isArray(file.contributors)
         )
@@ -160,16 +178,6 @@ export function ownerDerivedRows(c: Cursor, value: unknown): IndexEntry[] | unde
           )
             return;
       }
-      const expected = viewIndexEntries(c.snapshot.data, undefined, {
-        index,
-        positions: new Map(),
-        cachedProvenance: { fileCount: summary.fileCount, provenanceAvailable: summary.provenanceAvailable },
-      });
-      if (
-        JSON.stringify(supplied.rows.filter(r => !r.collection.startsWith('viewFiles'))) !==
-        JSON.stringify(expected)
-      )
-        return;
       rows.push(...supplied.rows);
     }
     const main = c.snapshot.manifest.head;
@@ -189,7 +197,7 @@ export function ownerDerivedRows(c: Cursor, value: unknown): IndexEntry[] | unde
       if (
         !files ||
         new Set(files.map(f => f.path)).size !== files.length ||
-        files.some(f => !pins.has(f.blob))
+        files.some(f => !safeRelative(f.path) || !pins.has(f.blob))
       )
         return;
       rows.push(...sourceTreeEntries(head, files));
@@ -235,10 +243,19 @@ function unpack(row: IndexEntry, rows: IndexEntry[]) {
 
 /** Keep validated rows private until the original return cursor publishes them. */
 export async function installOwnerDerived(ctx: ActionCtx, c: Cursor, value: unknown) {
+  requireOwnerDerived(value);
   const supplied = ownerDerivedRows(c, value);
-  if (supplied) {
+  invariant(
+    supplied,
+    'INVALID_OWNER_DATA',
+    'Owner display data is incomplete or invalid. Prepare it locally with the current nforge CLI.',
+  );
+  {
+    const newViews = new Set(c.delta!.newViews);
     for (const index of c.delta!.views) {
       const view = c.snapshot.data.views[index]!;
+      if (c.full || newViews.has(view.id)) continue;
+      invariant(c.generationId, 'WORK_STALE', 'The original display generation is unavailable.');
       const keys = new Set(supplied.filter(r => r.collection === 'viewFiles').map(r => r.key));
       let cursor: string | null = null;
       do {
@@ -263,22 +280,50 @@ export async function installOwnerDerived(ctx: ActionCtx, c: Cursor, value: unkn
     c.phase = 'done';
     c.pending = [];
     c.parents = [];
+    c.heads = [];
     delete c.diffstats;
   }
 }
 
-/** Reject the declared size before any object read (including legacy retry pins). */
+export const CLI_UPGRADE_MESSAGE =
+  'This push requires owner display protocol 3. Upgrade nforge with `npm install -g /path/to/current/nanthai-forge.tgz`, then prepare a new push. Existing hosted reads remain available.';
+export function requireOwnerDerived(value: unknown) {
+  invariant(
+    value && typeof value === 'object' && (value as { schema?: unknown }).schema === 3,
+    'CLI_UPGRADE_REQUIRED',
+    CLI_UPGRADE_MESSAGE,
+  );
+}
+/** Check size/hash before parsing; each continuation page has its own pin. */
 export async function readOwnerDerived(
   pin: { sha256: string; size: number } | undefined,
   read: () => Promise<Buffer>,
+  readPages?: (pins: { sha256: string; size: number }[]) => Promise<Buffer[]>,
 ): Promise<unknown> {
-  if (!pin || !Number.isSafeInteger(pin.size) || pin.size < 1 || pin.size > OWNER_DERIVED_MAX_BYTES) return;
+  invariant(pin, 'CLI_UPGRADE_REQUIRED', CLI_UPGRADE_MESSAGE);
+  invariant(
+    Number.isSafeInteger(pin.size) && pin.size > 0 && pin.size <= OWNER_DERIVED_MAX_BYTES,
+    'INVALID_OWNER_DATA',
+    'Owner display root size is out of bounds.',
+  );
   try {
     const bytes = await read();
-    if (bytes.length !== pin.size || bytes.length > OWNER_DERIVED_MAX_BYTES || digest(bytes) !== pin.sha256)
-      return;
-    return JSON.parse(bytes.toString('utf8'));
-  } catch {
-    return undefined;
+    invariant(
+      bytes.length === pin.size && digest(bytes) === pin.sha256,
+      'INVALID_OWNER_DATA',
+      'Owner display root hash or size changed.',
+    );
+    const value = await resolveOwnerDerived(
+      bytes,
+      readPages ??
+        (async () => {
+          throw Error('Missing display pages');
+        }),
+    );
+    requireOwnerDerived(value);
+    return value;
+  } catch (error) {
+    if (error instanceof ForgeError) throw error;
+    throw new ForgeError('INVALID_OWNER_DATA', 'Invalid owner display document or page.');
   }
 }

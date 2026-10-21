@@ -8,7 +8,6 @@ import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 import {
   computeOwnerDerived,
-  OwnerDerivedCapacity,
   ownerDerivedSchema,
   OWNER_DERIVED_MAX_BYTES,
   type OwnerDerivedBaseline,
@@ -25,7 +24,7 @@ export function ownerDerivedBytes(
   try {
     if (statSync(path).size <= OWNER_DERIVED_MAX_BYTES) {
       const record = JSON.parse(readFileSync(path, 'utf8'));
-      if (record.schema === 2 && digest(JSON.stringify(record.derived)) === record.sha256)
+      if (record.schema === 3 && digest(JSON.stringify(record.derived)) === record.sha256)
         previous = ownerDerivedSchema.parse(record.derived);
     }
   } catch {
@@ -33,27 +32,21 @@ export function ownerDerivedBytes(
   }
   // Missing exact baseline metadata means supply full facts; the server selects
   // the replacements against its authoritative generation.
-  let result;
-  try {
-    result = computeOwnerDerived(
-      data,
-      new NativeSource(store.root),
-      previous,
-      baseline?.data ? baseline : undefined,
-    );
-  } catch (error) {
-    if (!(error instanceof OwnerDerivedCapacity)) throw error;
-  }
-  const bytes = result ? Buffer.from(JSON.stringify(result)) : undefined;
-  const bounded = bytes && bytes.length <= OWNER_DERIVED_MAX_BYTES ? bytes : undefined;
+  const result = computeOwnerDerived(
+    data,
+    new NativeSource(store.root),
+    previous,
+    baseline?.data ? baseline : undefined,
+  );
+  const bytes = Buffer.from(JSON.stringify(result));
   const cache = JSON.stringify({
-    schema: 2,
-    derived: bounded ? result : null,
-    sha256: digest(bounded ?? 'null'),
+    schema: 3,
+    derived: result,
+    sha256: digest(bytes),
   });
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(temporary, Buffer.byteLength(cache) <= OWNER_DERIVED_MAX_BYTES ? cache : '{"schema":2}', {
+    writeFileSync(temporary, Buffer.byteLength(cache) <= OWNER_DERIVED_MAX_BYTES ? cache : '{"schema":3}', {
       mode: 0o600,
       flag: 'wx',
     });
@@ -67,9 +60,9 @@ export function ownerDerivedBytes(
       /* disposable cache cleanup */
     }
   }
-  return bounded;
+  return bytes;
 }
 export function preparedOwnerDerived(directory: string) {
   const path = join(directory, 'owner-derived.json');
-  return existsSync(path) && statSync(path).size <= OWNER_DERIVED_MAX_BYTES ? readFileSync(path) : undefined;
+  return existsSync(path) ? readFileSync(path) : undefined;
 }

@@ -693,24 +693,88 @@ test('optional owner derivation cache failures retain computed sidecar rows', as
   assert.equal(result.archiveCreated, false);
 });
 
-test('oversized prepared legacy sidecars are omitted on push and retry without denying publication', async t => {
-  const { OWNER_DERIVED_MAX_BYTES } = await import('../dist/owner-derived.js');
+test('a missing retained display document is recomputed from pinned Work before upload', async t => {
   const f = fixture(t),
     operationId = randomUUID(),
     revision = f.w.store.revision();
   const prepared = await prepareNativeExchange(f.w.store, revision, operationId);
-  const path = join(prepared.directory, 'owner-derived.json');
-  writeFileSync(path, Buffer.alloc(OWNER_DERIVED_MAX_BYTES + 1, 32));
+  rmSync(join(prepared.directory, 'owner-derived.json'));
+  const result = await pushNativeExchange(f.w.store, revision, operationId, f.transport);
+  assert.ok(result.ownerDerived);
+  assert.equal(JSON.parse(readFileSync(join(prepared.directory, 'owner-derived.json'))).schema, 3);
+});
+
+test('receipt replay reports the stored display pin after local display metadata changes', async t => {
+  const f = fixture(t),
+    operationId = randomUUID(),
+    revision = f.w.store.revision();
   const first = await pushNativeExchange(f.w.store, revision, operationId, f.transport);
-  assert.equal(first.ownerDerived, undefined);
-  assert.ok(first.backupId);
+  f.transport.published = async () => first.backupId;
+  f.transport.publishedOwnerDerived = async id => {
+    assert.equal(id, first.backupId);
+    return first.ownerDerived;
+  };
+  f.transport.missing = async () => {
+    throw Error('receipt replay must not negotiate again');
+  };
+  const prepared = await prepareNativeExchange(f.w.store, revision, operationId);
+  writeFileSync(join(prepared.directory, 'owner-derived.json'), JSON.stringify({ schema: 3, changed: true }));
   const retry = await pushNativeExchange(f.w.store, revision, operationId, f.transport);
-  assert.equal(retry.backupId, first.backupId);
-  assert.equal(retry.ownerDerived, undefined);
+  assert.deepEqual(retry.ownerDerived, first.ownerDerived);
   assert.equal(retry.uploadedObjects, 0);
 });
 
-test('local derivation caps new sidecars and cache, and does not read oversized legacy caches', async t => {
+test('owner display capability is queried only after the durable snapshot and capture callback', async t => {
+  const f = fixture(t),
+    operationId = randomUUID(),
+    revision = f.w.store.revision();
+  let captured = false;
+  f.transport.ownerDisplayBaseline = async () => {
+    assert.equal(captured, true);
+    const preparedWork = JSON.parse(
+      readFileSync(join(f.w.store.directory, `exchange-${operationId}`, 'work.json')),
+    );
+    assert.equal(preparedWork.revision, revision);
+    throw Error('synthetic capability outage');
+  };
+  await assert.rejects(
+    pushNativeExchange(f.w.store, revision, operationId, f.transport, {
+      onPrepared: observed => {
+        assert.equal(observed, revision);
+        captured = true;
+      },
+    }),
+    /synthetic capability outage/,
+  );
+  assert.equal(f.uploads(), 0);
+  assert.ok(existsSync(join(f.w.store.directory, `exchange-${operationId}`, 'manifest.json')));
+  f.transport.ownerDisplayBaseline = async () => false;
+  assert.ok((await pushNativeExchange(f.w.store, revision, operationId, f.transport)).ownerDerived);
+});
+
+test('a fresh captured push supplies full local facts when the hosted display baseline is absent', async t => {
+  const { retainExchangeBaseline } = await import('../dist/native-exchange-baseline.js');
+  const f = fixture(t),
+    key = 'synthetic/existing-baseline';
+  const base = await prepareNativeExchange(f.w.store, f.w.store.revision(), randomUUID());
+  retainExchangeBaseline(
+    f.w.store,
+    key,
+    base.manifest,
+    f.w.store.load(),
+    [],
+    JSON.parse(readFileSync(join(base.directory, 'states.json'))),
+  );
+  f.act({ action: 'note', intentId: f.intent.id, kind: 'comment', text: 'New metadata' });
+  f.transport.checkpointKey = () => key;
+  f.transport.ownerDisplayBaseline = async () => false;
+  const result = await pushNativeExchange(f.w.store, f.w.store.revision(), randomUUID(), f.transport);
+  const document = JSON.parse(f.objects.get(result.ownerDerived.sha256));
+  assert.equal(document.complete, true);
+  assert.ok(document.parents.length > 0);
+});
+
+test('local derivation retains oversized Views, bounds its cache and ignores oversized legacy caches', async t => {
   const { OWNER_DERIVED_MAX_BYTES } = await import('../dist/owner-derived.js');
   const { ownerDerivedBytes } = await import('../dist/owner-derived-local.js');
   const { statSync } = await import('node:fs');
@@ -733,8 +797,8 @@ test('local derivation caps new sidecars and cache, and does not read oversized 
   });
   const partial = JSON.parse(ownerDerivedBytes(f.w.store, data));
   assert.ok(partial.parents.length > 0, 'oversized View retains usable State facts');
-  assert.equal(partial.views.length, 0);
-  assert.ok(Buffer.byteLength(JSON.stringify(partial)) <= OWNER_DERIVED_MAX_BYTES);
+  assert.equal(partial.views.length, 1);
+  assert.ok(Buffer.byteLength(JSON.stringify(partial)) > OWNER_DERIVED_MAX_BYTES);
   assert.ok(statSync(cache).size <= OWNER_DERIVED_MAX_BYTES);
 });
 

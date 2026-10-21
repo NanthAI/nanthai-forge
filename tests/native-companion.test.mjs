@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { currentOwnerDisplay } from './project-exchange-fixture.mjs';
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -132,6 +133,7 @@ async function setup(t) {
       size: bytes.length,
       preview,
       status: 'stored',
+      ...(await currentOwnerDisplay(s, w.store, records, projectId)),
       storageId: id,
     });
     s.files.set(id, { blob: new Blob([bytes], { type: 'application/gzip' }) });

@@ -114,7 +114,7 @@ test('streaming JSON preserves supplementary characters at chunk boundaries', ()
   }
 });
 
-test('complete compatibility preparation measures fixture build and action RSS separately under a 384 MiB V8 heap', async t => {
+test('an old publication is rejected before loading large retained Work, within the existing heap budget', async t => {
   const { spawnSync } = await import('node:child_process');
   const { mkdtempSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
@@ -146,7 +146,8 @@ test('complete compatibility preparation measures fixture build and action RSS s
   };
   const build = run('build'),
     evidence = run('step');
-  assert.equal(evidence.receiptRevision, 12002);
+  assert.equal(evidence.code, 'CLI_UPGRADE_REQUIRED');
+  assert.equal(evidence.preparedReads, 0);
   assert.equal(evidence.revisions, 12000);
   assert.equal(evidence.files, 1425);
   assert.equal(evidence.largeFiles, 3);

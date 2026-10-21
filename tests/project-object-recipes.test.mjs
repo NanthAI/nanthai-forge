@@ -270,6 +270,8 @@ test('a recipe-bound logical manifest publishes and opens Work without mislabeli
   assert(row(s, digest(bytes)).recipe);
   assert.equal(row(s, digest(bytes)).storageId, undefined);
   const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, {
+    displayProtocol: 3,
+    ownerDerived: base.input.ownerDerived,
     projectId: 'project',
     operationId: randomUUID(),
     previous: null,

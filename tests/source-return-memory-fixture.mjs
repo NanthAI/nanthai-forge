@@ -195,12 +195,12 @@ const input = {
   operationId: randomUUID(),
   continuation: true,
 };
-const receipt = await modules.projectSourceReturn.returnSource._handler(s.ctx, input);
-assert.equal(receipt.revision, 12002, JSON.stringify(receipt));
-assert.equal(receipt.operationId, input.operationId);
+await assert.rejects(
+  modules.projectSourceReturn.returnSource._handler(s.ctx, input),
+  e => e.data?.code === 'CLI_UPGRADE_REQUIRED',
+);
+assert.equal(reads, 0, 'old pushes are rejected before loading retained Work bytes');
 const preparedReads = reads;
-assert.deepEqual(await modules.projectSourceReturn.returnSource._handler(s.ctx, input), receipt);
-assert.equal(reads, preparedReads, 'original-operation retry reads no metadata again');
 sampledPeakHeap = Math.max(sampledPeakHeap, process.memoryUsage().heapUsed);
 assert(sampledPeakHeap < 384 * 1024 * 1024, `sampled heap ${sampledPeakHeap}`);
 console.log(
@@ -215,6 +215,6 @@ console.log(
     baselineMaxRssKiB,
     finalRss: process.memoryUsage().rss,
     preparedReads,
-    receiptRevision: receipt.revision,
+    code: 'CLI_UPGRADE_REQUIRED',
   }),
 );

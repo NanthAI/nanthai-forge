@@ -37,6 +37,7 @@ import type { hostProgress } from './host-progress.js';
 import { sourceManifestSchema } from './work-archive-metadata.js';
 import { exchangeBaseline, retainExchangeBaseline } from './native-exchange-baseline.js';
 import { ownerDerivedBytes, preparedOwnerDerived } from './owner-derived-local.js';
+import { ownerDerivedPages } from './owner-derived-pages.js';
 import { nativePublicationMetadata } from './native-publication.js';
 import type { PublicationMetadata } from './publication-metadata.js';
 import { preparedMetadata } from './native-exchange-prepared.js';
@@ -61,8 +62,14 @@ export interface ExchangeTransport {
   ): Promise<TransferReceipt>;
   uploadFile?(pin: ContentPin, root: string, path: string): Promise<TransferReceipt>;
   published?(pin: ContentPin): Promise<string | null>;
-  publish(pin: ContentPin): Promise<string>;
-  publishMetadata?(pin: ContentPin, build: () => PublicationMetadata): Promise<string | null>;
+  ownerDisplayBaseline?(): Promise<boolean>;
+  publishedOwnerDerived?(backupId: string): Promise<ContentPin | null>;
+  publish(pin: ContentPin, metadataOnly?: false, ownerDerived?: ContentPin): Promise<string>;
+  publishMetadata?(
+    pin: ContentPin,
+    build: () => PublicationMetadata,
+    ownerDerived?: ContentPin,
+  ): Promise<string | null>;
   manifest(backupId: string): Promise<{ json: string; digest: string; size: number; sourceDigest?: string }>;
   download(pin: ContentPin): Promise<Buffer>;
   downloadBatch?(pins: ContentPin[]): Promise<Buffer[]>;
@@ -79,7 +86,7 @@ export async function prepareNativeExchange(
   operationId: string,
   incrementalMetadata = false,
   baselineKey?: string,
-  ownerDerivedBaselineKey = baselineKey,
+  ownerDerivedBaselineKey: string | null | undefined = baselineKey,
   options: {
     pinCurrent?: boolean;
     captured?: CapturedExchange;
@@ -106,7 +113,7 @@ export async function prepareNativeExchange(
       'WORK_OPERATION_CHANGED',
       'Reconcile the exchange with its original revision and operation.',
     );
-    return { directory, json, manifest };
+    return { directory, json, manifest, fresh: false };
   }
   const baseline = exchangeBaseline(store, baselineKey);
   // Only the small commit pointer is read under the owner lock. Its records are
@@ -247,16 +254,13 @@ export async function prepareNativeExchange(
     for (const file of state.files) current.add(file.blob);
     if (state.git) current.add(state.git.bundle);
   }
-  let derivedBytes: Buffer | undefined;
-  try {
-    derivedBytes = ownerDerivedBytes(
-      store,
-      snapshot.data,
-      ownerDerivedBaselineKey === baselineKey ? baseline : exchangeBaseline(store, ownerDerivedBaselineKey),
-    );
-  } catch {
-    // Disposable derivation/cache failures preserve the hosted computation path.
-  }
+  const derivedBytes = ownerDerivedBytes(
+    store,
+    snapshot.data,
+    ownerDerivedBaselineKey === baselineKey
+      ? baseline
+      : exchangeBaseline(store, ownerDerivedBaselineKey ?? undefined),
+  );
   commitExchangeDirectory(directory, {
     'current.json': JSON.stringify([...current]),
     'states.json': JSON.stringify([...states]),
@@ -268,7 +272,7 @@ export async function prepareNativeExchange(
       : {}),
     ...mutable,
   });
-  return { directory, json, manifest };
+  return { directory, json, manifest, fresh: true };
 }
 export async function pushNativeExchange(
   store: WorkStore,
@@ -278,7 +282,7 @@ export async function pushNativeExchange(
   options: {
     progress?: ReturnType<typeof hostProgress>;
     stage?: 'current' | 'history';
-    ownerDerivedBaselineKey?: string;
+    ownerDerivedBaselineKey?: string | null;
     journalRevision?: number;
     /** Pin the current local Work revision (at least `revision`) under the short owner lock. */
     pinCurrent?: boolean;
@@ -304,8 +308,34 @@ export async function pushNativeExchange(
     manifestBytes = Buffer.from(prepared.json);
   revision = prepared.manifest.revision;
   options.onPrepared?.(revision);
-  const derivedBytes = preparedOwnerDerived(prepared.directory);
-  const ownerDerived = derivedBytes ? { sha256: digest(derivedBytes), size: derivedBytes.length } : undefined;
+  const displayBaseline = (await transport.ownerDisplayBaseline?.()) ?? true;
+  let derivedBytes = preparedOwnerDerived(prepared.directory);
+  if (store.native) {
+    let current = false;
+    try {
+      const value = JSON.parse(derivedBytes?.toString('utf8') ?? 'null');
+      current =
+        value?.schema === 3 &&
+        (!('fresh' in prepared && prepared.fresh) || displayBaseline || value.complete === true);
+    } catch {
+      /* rebuild disposable metadata */
+    }
+    if (!current) {
+      const bytes = readFileSync(join(prepared.directory, 'work.json'));
+      const pin = prepared.manifest.files.find(file => file.path === 'work.json');
+      invariant(
+        pin && bytes.length === pin.size && digest(bytes) === pin.sha256,
+        'WORK_OPERATION_CHANGED',
+        'Prepare owner display data from the original pinned Work.',
+      );
+      derivedBytes = ownerDerivedBytes(store, JSON.parse(bytes.toString('utf8')));
+      writeFileSync(join(prepared.directory, 'owner-derived.json'), derivedBytes, { mode: 0o600 });
+    }
+  }
+  const derivedPages = derivedBytes ? ownerDerivedPages(derivedBytes) : undefined;
+  const ownerDerived = derivedPages
+    ? { sha256: digest(derivedPages.root), size: derivedPages.root.length }
+    : undefined;
   const tree = preparedMetadata(prepared.directory, manifestBytes);
   const publishedBytes = tree?.bytes ?? manifestBytes,
     manifestPin = { sha256: digest(publishedBytes), size: publishedBytes.length };
@@ -321,6 +351,11 @@ export async function pushNativeExchange(
         ...(tree ? tree.pins : []),
         { path: 'manifest.json', ...manifestPin },
         ...(ownerDerived ? [{ path: 'owner-derived.json', ...ownerDerived }] : []),
+        ...[...(derivedPages?.objects ?? [])].map(([sha256, bytes]) => ({
+          path: 'owner-derived-page',
+          sha256,
+          size: bytes.length,
+        })),
       ].map(pin => [pin.sha256, pin]),
     ).values(),
   ];
@@ -348,7 +383,12 @@ export async function pushNativeExchange(
     ...(ownerDerived ? { ownerDerived } : {}),
   });
   const original = options.stage === 'history' ? null : await transport.published?.(manifestPin);
-  if (original) return result(original);
+  if (original) {
+    const pinned = transport.publishedOwnerDerived
+      ? await transport.publishedOwnerDerived(original)
+      : ownerDerived;
+    return { ...result(original), ownerDerived: pinned ?? undefined };
+  }
   const baseline = exchangeBaseline(store, transport.checkpointKey?.());
   const negotiate = pins.filter(pin => baseline?.objects.get(pin.sha256) !== pin.size);
   const pages: (typeof pins)[] = [];
@@ -389,10 +429,11 @@ export async function pushNativeExchange(
         const staged = `pinned-${pin.sha256}`,
           bytes =
             pin.path === 'owner-derived.json'
-              ? derivedBytes
+              ? derivedPages?.root
               : pin.path === 'manifest.json'
                 ? publishedBytes
-                : (tree?.read(pin.sha256) ??
+                : (derivedPages?.objects.get(pin.sha256) ??
+                  tree?.read(pin.sha256) ??
                   (existsSync(join(prepared.directory, staged))
                     ? readSource(prepared.directory, staged, pin.size + 1, pin.sha256)
                     : readSource(base, pin.path, pin.size + 1, pin.sha256)));
@@ -437,7 +478,7 @@ export async function pushNativeExchange(
             pinned = existsSync(join(prepared.directory, staged));
           const sent = await transport.uploadFile(
             first,
-            pinned || !store.native || first.path === 'owner-derived.json'
+            pinned || !store.native || first.path.startsWith('owner-derived')
               ? prepared.directory
               : store.directory,
             pinned ? staged : first.path,
@@ -492,11 +533,13 @@ export async function pushNativeExchange(
     prepared.manifest.kind === 'forge-native-work-backup' ? prepared.manifest : undefined;
   const metadataId =
     nativeManifest && store.native && derivedBytes && !options.stage && transport.publishMetadata
-      ? await transport.publishMetadata(manifestPin, () =>
-          nativePublicationMetadata(store, prepared.directory, nativeManifest, pins, derivedBytes),
+      ? await transport.publishMetadata(
+          manifestPin,
+          () => nativePublicationMetadata(store, prepared.directory, nativeManifest, pins, derivedBytes),
+          ownerDerived,
         )
       : null;
-  const backupId = metadataId ?? (await transport.publish(manifestPin));
+  const backupId = metadataId ?? (await transport.publish(manifestPin, false, ownerDerived));
   const baselineKey = transport.checkpointKey?.(backupId);
   if (store.native && baselineKey && prepared.manifest.kind === 'forge-native-work-backup') {
     try {

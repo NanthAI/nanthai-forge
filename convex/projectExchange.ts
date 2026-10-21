@@ -53,8 +53,10 @@ export const publish = internalMutation({
     historyBackfilling: v.optional(v.boolean()),
     retainCandidate: v.optional(v.boolean()),
     validatedClosure: v.optional(v.literal(1)),
+    displayProtocol: v.optional(v.literal(3)),
     validatedWorkRecords: v.optional(v.literal(1)),
     metadataPublication: v.optional(v.id('projectPublications')),
+    ownerDerived: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   },
   returns: v.id('projectBackups'),
   handler: async (ctx, input) => {
@@ -135,6 +137,8 @@ export const publish = internalMutation({
         ...(content.storageId ? { storageId: content.storageId } : {}),
         transport: 'objects',
         ...(input.metadataPublication ? { metadataPublication: input.metadataPublication } : {}),
+        ...(input.ownerDerived ? { ownerDerived: input.ownerDerived } : {}),
+        ...(input.displayProtocol ? { displayProtocol: input.displayProtocol } : {}),
       });
       await ctx.db.patch(project._id, {
         currentBackup: project.currentBackup === input.previous ? id : project.currentBackup,

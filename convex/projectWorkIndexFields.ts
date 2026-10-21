@@ -14,7 +14,7 @@ export const indexEntry = v.object({
 export const returnProjection = v.object({
   deltaPartitionId: v.optional(v.id('projectWorkGenerations')),
   partitionId: v.optional(v.id('projectWorkGenerations')),
-  generationId: v.id('projectWorkGenerations'),
+  generationId: v.optional(v.id('projectWorkGenerations')),
   metadata: v.string(),
   entries: v.array(indexEntry),
   removed: v.array(v.object({ collection: v.string(), key: v.string() })),

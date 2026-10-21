@@ -1,3 +1,4 @@
+import { currentOwnerDisplay } from './project-exchange-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
@@ -341,6 +342,7 @@ test('hosted schema2/3 operations, source return and fresh journal recovery pres
       digest: digest(nextBytes),
       size: nextBytes.length,
       preview: await previewWorkArchive(new File([nextBytes], 'return.tar.gz')),
+      ...(await currentOwnerDisplay(s, recovered.store)),
     });
     s.files.set(id, { blob: new Blob([nextBytes]) });
     return { id, value };

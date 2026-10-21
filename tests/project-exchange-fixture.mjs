@@ -9,6 +9,8 @@ import { digest } from '../dist/hash.js';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { prepareNativeExchange } from '../dist/native-exchange.js';
+import { ownerDerivedBytes } from '../dist/owner-derived-local.js';
+import { ownerDerivedPages } from '../dist/owner-derived-pages.js';
 import { buildExchangeRoot } from '../dist/native-exchange-tree.js';
 const names = [
   'projectObjects',
@@ -95,10 +97,44 @@ export async function preparedCheckpoint(s, store, additionalObjects = 0, baseli
     tree = buildExchangeRoot(manifest, work, recordOptions);
   for (const bytes of tree.objects.values()) await upload(s, bytes);
   const pin = await upload(s, tree.bytes);
+  const derived = ownerDerivedPages(readFileSync(join(prepared.directory, 'owner-derived.json')));
+  for (const page of derived.objects.values()) await upload(s, page);
+  const ownerDerived = await upload(s, derived.root);
   return {
-    input: { projectId: 'project', operationId, previous: null, digest: pin.sha256, size: pin.size },
+    input: {
+      projectId: 'project',
+      operationId,
+      previous: null,
+      digest: pin.sha256,
+      size: pin.size,
+      displayProtocol: 3,
+      ownerDerived,
+    },
     tree,
     manifest: prepared.manifest,
     store,
   };
+}
+
+const displayObjectContexts = new WeakSet();
+/** Current archive fixtures retain their exact archive bytes and supply the same
+ * local display facts as a current native CLI. Source access assertions stay unchanged. */
+export async function currentOwnerDisplay(s, store, data = store.load(), projectId = 'project') {
+  if (!store.native) return { displayProtocol: 3 };
+  if (!displayObjectContexts.has(s.ctx)) {
+    displayObjectContexts.add(s.ctx);
+    s.ctx.storage.generateUploadUrl ??= async () => 'https://fixture.invalid/upload';
+    for (const method of ['runQuery', 'runMutation', 'runAction']) {
+      const run = s.ctx[method];
+      s.ctx[method] = (ref, args) => {
+        const [name, action] = getFunctionName(ref).split(':');
+        return name.startsWith('projectObject') && modules[name]?.[action]
+          ? modules[name][action]._handler(s.ctx, args)
+          : run(ref, args);
+      };
+    }
+  }
+  const pages = ownerDerivedPages(ownerDerivedBytes(store, data));
+  for (const bytes of pages.objects.values()) await upload(s, bytes, projectId);
+  return { displayProtocol: 3, ownerDerived: await upload(s, pages.root, projectId) };
 }

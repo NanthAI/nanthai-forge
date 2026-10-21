@@ -192,7 +192,7 @@ for (const records of [true, false])
     );
   });
 
-test('old CLI large prepare resume rechecks authority, hosted revision and original operation pins', async t => {
+test('legacy transport large prepare resume rechecks authority, hosted revision and original operation pins', async t => {
   const f = await setup(t, false),
     { s, input } = f;
   await modules.projectSourceReturn.returnSource._handler(s.ctx, input);

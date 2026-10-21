@@ -6,7 +6,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { ConvexError } from 'convex/values';
-import { fixture, checkpoint, preparedCheckpoint, modules, upload } from './project-exchange-fixture.mjs';
+import {
+  fixture,
+  checkpoint,
+  preparedCheckpoint,
+  modules,
+  upload,
+  currentOwnerDisplay,
+} from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { land } from './source-landings-fixture.mjs';
 import { retainExchangeBaseline } from '../dist/native-exchange-baseline.js';
@@ -49,6 +56,7 @@ test('complete record publication validates the original field order rather than
     previous: initialBackup,
     digest: pin.sha256,
     size: pin.size,
+    ...(await currentOwnerDisplay(s, first.store, data)),
   });
   assert.equal(s.tables.projectBackups.get(backupId).validatedWorkRecords, 1);
   const receipt = await complete(s, {

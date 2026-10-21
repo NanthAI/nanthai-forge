@@ -50,6 +50,31 @@ nforge exchange ROOT migrate-archive --command-file forge-migrate.json
 
 With the token set, `nforge mcp ROOT --agent` also offers `forge_exchange` and `forge_migrate_archive` over the same code.
 
+## CLI upgrade
+
+New pushes require owner display protocol 3. Older CLIs and publications without
+complete owner display data receive the typed `CLI_UPGRADE_REQUIRED` error.
+Install the current Forge CLI package (for the offline distribution, run
+`npm install -g /path/to/current/nanthai-forge.tgz`) and prepare a new push.
+Existing hosted reads and successful original-operation receipt replay keep
+working. A retained operation that predates the new display protocol must be
+reprepared from its local source with a new operation UUID; its existing
+checkpoint and hosted history are preserved. There is no server derivation
+fallback and no hosted backfill command.
+
+Current CLIs compute missing display items locally before upload. Large owner
+display payloads are split into hash-checked 128 KiB pages, so a backlog does
+not omit comparisons, ancestry, Views or Code trees to fit a 4 MiB sidecar.
+The server validates owner facts and stores them; owner-supplied display data
+never changes who may land or bypasses revision, main-history or final CAS
+checks. Coordination changed-path lists also come from the CLI, avoiding State
+reads solely for advisory display. Large index deltas copy existing database
+rows into a private partition and switch only after all replacements are ready.
+When a hosted index is missing, the CLI automatically supplies complete local
+facts and source return publishes a new private index under the original CAS.
+Large immutable output is retained once; durable cursors carry its offset.
+Legacy hosted reads retain their existing read-index compatibility behavior.
+
 ## Push
 
 ```json
@@ -93,9 +118,8 @@ of the candidate action. Record reads keep four bounded batches ahead
 to overlap storage latency while preserving canonical order and digest checks. Each validation invocation checks up to eight chunks (a 256 KiB target,
 with indivisible records preserved) against the pinned candidate, then saves its
 position. Large compatibility returns build a complete private index partition
-through the existing durable phases. Small returns keep their incremental index
-comparison. These thresholds schedule work; they do not limit accepted Work or
-require a CLI upgrade. Old retained operations use the same checkpoint, hosted
+from validated owner rows through durable commits. Small returns keep their incremental index comparison. Display rows always come from the owner; full metadata validation does not derive them. These thresholds schedule work; they do not limit accepted Work or
+limit retained Work. Current pushes require the CLI upgrade above. Current-protocol retained operations use the same checkpoint, hosted
 revision, operation UUID and timestamp when preparation resumes.
 
 Publication validation is coordinated by project and original operation UUID in
@@ -266,24 +290,16 @@ This downloads and validates the proposal, then imports it into a separate Lane 
 
 Warm native pushes keep a checksummed preparation hint per project/checkpoint. It reuses retained source and finished-run content and omits known uploaded pins from negotiation. Corrupt or missing hints fall back to full preparation. The server validates changed digest/size bindings against a fully validated prior immutable closure; old or incomplete checkpoints take the full path. Access and current project state are checked again at publication. Source returns retain the public Work generation, including when a larger record partition is staged. CLI cursors pin the source revision to prevent mixing pages across returns.
 
-Native pushes prepare an optional owner-derived sidecar alongside their pinned
-Work snapshot. It travels as a project-scoped immutable object and its digest and
-size accompany source return. Selection uses the hosted source-return baseline,
-not merely the previous upload checkpoint: new States' parents and own-parent
-ancestry deltas, changed Lane/Candidate comparisons, changed Candidate provenance and new
-selected trees. Parent references reuse ancestry already hosted; full closures
-are never copied into each new State. Older baseline hints reuse their exact
-locally prepared Work bytes after digest verification. If unavailable, hosted
-computation supplies the missing derivation.
-
-The sidecar and local `owner-derived-cache.json` each have a 4 MiB byte budget.
-Only the latest delta is cached. Oversized old caches are skipped before reading;
-new derived rows stop accumulating at the budget. If the sidecar cannot fit, the
-client omits it and the push continues using hosted computation. The server checks
-the declared size before fetching bytes, then checks actual size, digest and JSON.
-Malformed, legacy and oversized sidecars are optimization misses. Original source
-and publication pins remain stable across retries, including oversized legacy
-prepared sidecars.
+Native pushes prepare a required protocol-3 owner display document alongside
+pinned Work. Selection uses the hosted source-return baseline, independently of
+the previous upload checkpoint. New States carry own-parent ancestry boundaries;
+changed comparisons, Views, selected trees and coordination paths are computed
+locally. Missing baseline metadata supplies full local facts for server selection.
+The disposable local cache remains bounded to 4 MiB; an uncached item is computed
+locally. The upload document has no total 4 MiB item budget: larger documents use
+hash-checked pages. Invalid or incomplete current documents fail explicitly;
+older documents report `CLI_UPGRADE_REQUIRED`. Source/Work pins and original
+successful receipts remain stable across retries.
 
 For a read-only offline measurement of a retained pending push, build core and run
 `node scripts/measure-owner-derived.mjs OWNER`. Add `--current` to measure current
@@ -294,14 +310,14 @@ reports old/new sidecar and cache bytes and delta row counts.
 
 Hosted source return remains owner-only. It checks sidecar shape, Work pin,
 comparison and Candidate keys, counts and object-pin membership using metadata. Valid
-complete sidecars skip source derivation item phases; absent, malformed or
-incomplete ones automatically use the existing hosted computation. Publication
+complete sidecars supply the staged index rows; absent, malformed or incomplete
+current data fails explicitly. The server never fills display gaps during push. Publication
 retains its original operation ID, current authority checks and source/Work CAS.
 No Work format bump, hosted row migration or backfill is required. The sidecar is
 a disposable index supplied under the owner's existing source trust. Contributor
 proposals retain their existing hosted derivation path.
 
-Native object returns reuse the previous generation's State-parent cache, immutable diffstat pairs and unchanged Candidate provenance. Complete and streamed native projections produce identical parent-cache rows and counts, including chunked parents for large fan-in. Only new source heads receive compact, chunked ancestry closures; older pair indexes remain readable, and missing pair membership can be resolved lazily from cached parents. Acceptance and supersession refresh the affected Candidate summaries without rereading unchanged file provenance. Bounded row deltas publish atomically into the selected partition. Larger deltas use the complete staged-partition path. Optional cache fields and record collections require no migration; an older generation reuses its complete ancestry boundaries and caches new States during its next return.
+Native object returns copy retained database index rows for State parents, immutable diffstat pairs and unchanged Candidate provenance. Complete and streamed native projections produce identical parent-cache rows and counts, including chunked parents for large fan-in. Only new source heads receive compact, chunked ancestry closures; older pair indexes remain readable, and missing pair membership can be resolved lazily from cached parents. Acceptance and supersession refresh the affected Candidate summaries without rereading unchanged file provenance. Bounded row deltas publish atomically into the selected partition. Larger deltas use the complete staged-partition path. Optional cache fields and record collections require no migration; an older generation reuses its complete ancestry boundaries and caches new States during its next return.
 
 The CLI writes phase, items done/total, durable step, elapsed time and ETA to stderr, including the saved step when resuming. JSON stdout retains the original final receipt. The server advances many items between durable checkpoints and continues bounded batches within each action; restart always uses the original operation and stored cursor.
 

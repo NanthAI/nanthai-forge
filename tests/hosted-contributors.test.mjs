@@ -971,6 +971,7 @@ test('new contributor proposals transfer objects, preserve old archives, pull di
   });
   const backupPin = await uploadArchiveObjects(client, projectId, new File([c.bytes], 'backup.tar.gz'));
   const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, {
+    displayProtocol: 3,
     projectId,
     operationId: randomUUID(),
     previous: null,
@@ -978,6 +979,7 @@ test('new contributor proposals transfer objects, preserve old archives, pull di
   });
   assert.equal(s.tables.projectBackups.get(backupId).transport, 'objects');
   const retained = await modules.projectExchangeActions.publish._handler(s.ctx, {
+    displayProtocol: 3,
     projectId,
     operationId: randomUUID(),
     previous: null,

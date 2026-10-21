@@ -11,10 +11,10 @@ import { sourceReturnSchema } from '../src/work-types';
 import { applyHostedEvent, metadataRequest, workDigest, validateWorkSize } from '../src/work-metadata';
 import { hostedWorkEventDocument } from './schema';
 import { report } from './errors';
-import { sourceReturnIndex } from './projectSourceReturnIndex';
 import { validateSourceReturn } from '../src/work-source-return';
 import { returnProgress } from './projectSourceReturnProgress';
-import { readOwnerDerived } from './projectOwnerDerived';
+import { readOwnerDerived, requireOwnerDerived, CLI_UPGRADE_MESSAGE } from './projectOwnerDerived';
+import { gitReturnIndex } from './projectGitReturnIndex';
 import { returnChanges } from './coordinationReturnChanges';
 import { recordReturn } from './projectWorkRecordReturn';
 import { meteredStorage } from './storageMeter';
@@ -136,6 +136,9 @@ export const returnSource = action({
       raced = async () => {
         const receipt = await replay();
         if (receipt) return receipt;
+        const selected = await ctx.runQuery(internal.projectWork.get, { projectId: input.projectId, owner });
+        if (selected.work?.backupId !== input.expectedBackupId || selected.work.revision !== input.revision)
+          return null;
         const latest: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
           internal.projectReturnIndexStage.resume,
           {
@@ -181,6 +184,7 @@ export const returnSource = action({
             priorStage?.returnPrepareCursor
           ),
         };
+      invariant(candidateInfo.backup.displayProtocol === 3, 'CLI_UPGRADE_REQUIRED', CLI_UPGRADE_MESSAGE);
       if (priorStage?.returnCursor || priorStage?.returnMetadataCursor)
         return pending(await returnProgress(ctx, priorStage, input, owner));
       console.log('source-return prepare', { revision: input.revision });
@@ -235,12 +239,17 @@ export const returnSource = action({
         views: candidate.data.views.length,
         lanes: candidate.data.lanes.length,
       });
+      input.ownerDerived ??= candidate.backup.ownerDerived;
       const ownerDerived =
-        candidate.publication?.ownerDerived ??
-        (await readOwnerDerived(
-          input.ownerDerived,
-          async () => (await reader.read(input.projectId, owner, [input.ownerDerived!]))[0]!,
-        ));
+        candidate.manifest.kind === 'forge-native-work-backup'
+          ? (candidate.publication?.ownerDerived ??
+            (await readOwnerDerived(
+              input.ownerDerived,
+              async () => (await reader.read(input.projectId, owner, [input.ownerDerived!]))[0]!,
+              pins => reader.read(input.projectId, owner, pins),
+            )))
+          : undefined;
+      if (candidate.manifest.kind === 'forge-native-work-backup') requireOwnerDerived(ownerDerived);
       const command = sourceReturnSchema.parse({
           action: 'source-return',
           archiveSha256: candidate.backup.digest,
@@ -271,23 +280,24 @@ export const returnSource = action({
         command,
       });
       validateWorkSize(candidate.data);
-      if (
-        candidate.backup.transport === 'objects' &&
-        candidate.manifest.kind === 'forge-native-work-backup'
-      ) {
+      if (candidate.manifest.kind === 'forge-native-work-backup') {
         const generation: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
           internal.projectWorkIndexStore.current,
           { projectId: input.projectId, owner },
         );
         if (
-          generation &&
-          generation.backupId === input.expectedBackupId &&
-          generation.revision === input.revision
+          !generation ||
+          (generation.backupId === input.expectedBackupId && generation.revision === input.revision)
         ) {
+          invariant(
+            generation || (ownerDerived as import('../src/owner-derived').OwnerDerived).complete,
+            'WORK_STALE',
+            'The display baseline changed. Prepare complete owner display data locally.',
+          );
           const partitionId = await ctx.runMutation(internal.projectReturnIndexStage.begin, {
             projectId: input.projectId,
             owner,
-            generationId: generation._id,
+            generationId: generation?._id,
             revision: input.revision,
             backupId: input.backupId,
             localRevision: candidate.manifest.revision,
@@ -315,7 +325,7 @@ export const returnSource = action({
             prepared?.before ?? current.data,
             candidate.data,
             candidate.manifest,
-            candidate.publication ? { trees: candidate.publication.ownerDerived.trees } : undefined,
+            ownerDerived as import('../src/owner-derived').OwnerDerived,
           );
           return pending(
             await returnProgress(ctx, stage, input, owner, {
@@ -324,12 +334,11 @@ export const returnSource = action({
                 data: candidate.data,
                 manifest: candidate.manifest,
                 backup: candidate.backup,
-                closure: candidate.publication?.edges.map(e => [e.head, e.parents]),
               },
-              generationId: generation._id,
+              generationId: generation?._id,
               ownerDerived,
-              metadataOnly: candidate.publication?.work !== undefined,
-              ...(!prepared
+              metadataOnly: true,
+              ...(!prepared && generation
                 ? {
                     generation,
                     previous: { data: current.data, manifest: current.manifest, backup: current.backup },
@@ -352,18 +361,20 @@ export const returnSource = action({
           );
         }
       }
-      const projection = await sourceReturnIndex(ctx, {
-        projectId: input.projectId,
-        owner,
-        expectedBackupId: input.expectedBackupId,
-        revision: input.revision,
-        operationId: input.operationId,
-        at,
-        data: candidate.data,
-        backup: candidate.backup,
-        manifest: candidate.manifest,
-        transport: candidate.backup.transport,
-      });
+      const projection =
+        candidate.manifest.kind === 'forge-source-and-work'
+          ? await gitReturnIndex(ctx, {
+              projectId: input.projectId,
+              owner,
+              expectedBackupId: input.expectedBackupId,
+              revision: input.revision,
+              operationId: input.operationId,
+              at,
+              data: candidate.data,
+              backup: candidate.backup,
+              manifest: candidate.manifest,
+            })
+          : undefined;
       const changes = await returnChanges(
         reader,
         input.projectId,
@@ -371,7 +382,7 @@ export const returnSource = action({
         prepared?.before ?? current.data,
         candidate.data,
         candidate.manifest,
-        candidate.publication ? { trees: candidate.publication.ownerDerived.trees } : undefined,
+        ownerDerived as import('../src/owner-derived').OwnerDerived,
       );
       return await ctx.runMutation(internal.projectWork.returnSource, {
         projectId: input.projectId,

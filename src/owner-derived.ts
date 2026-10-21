@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { COORDINATION_LIMITS } from './coordination-types.js';
 import { digest } from './hash.js';
 import { reviewPaths } from './native-source-review.js';
 import { contextualHunks } from './review-hunks.js';
@@ -23,8 +24,9 @@ const row = z
   .strict();
 export const ownerDerivedSchema = z
   .object({
-    schema: z.literal(2),
+    schema: z.union([z.literal(2), z.literal(3)]),
     work: hash,
+    complete: z.boolean().default(false),
     parents: z.array(z.tuple([hash, z.array(hash)])),
     ancestry: z.array(z.tuple([hash, z.array(hash)])),
     stats: z.array(
@@ -34,6 +36,19 @@ export const ownerDerivedSchema = z
       ]),
     ),
     views: z.array(z.tuple([z.string(), z.string(), z.array(row)])),
+    changes: z
+      .array(
+        z
+          .object({
+            laneId: z.string(),
+            from: hash,
+            head: hash,
+            paths: z.array(z.string()),
+            pathCount: count,
+          })
+          .strict(),
+      )
+      .default([]),
     trees: z.array(
       z.tuple([
         hash,
@@ -47,7 +62,7 @@ export const ownerDerivedSchema = z
   })
   .strict();
 export const OWNER_DERIVED_MAX_BYTES = 4 * 1024 * 1024;
-export class OwnerDerivedCapacity extends Error {}
+export const OWNER_DISPLAY_PROTOCOL = 3 as const;
 export type OwnerDerivedBaseline = { states: ReadonlySet<string>; data?: WorkData | undefined };
 export type OwnerDerived = z.infer<typeof ownerDerivedSchema>;
 export const viewFingerprint = (data: WorkData, index: number) => {
@@ -55,6 +70,7 @@ export const viewFingerprint = (data: WorkData, index: number) => {
   return digest(
     JSON.stringify([
       view,
+      viewReadModels(data, index)[0],
       viewContributors(data, view).map(c => [
         c,
         data.intents.find(i => i.id === data.lanes.find(l => l.id === c.laneId)?.intentId)?.outcome,
@@ -84,13 +100,6 @@ export function computeOwnerDerived(
   previous?: OwnerDerived,
   baseline?: OwnerDerivedBaseline,
 ): OwnerDerived {
-  let derivedBytes = 1024;
-  const charge = (value: unknown) => {
-    const bytes = Buffer.byteLength(JSON.stringify(value)) + 2;
-    if (derivedBytes + bytes > OWNER_DERIVED_MAX_BYTES) return false;
-    derivedBytes += bytes;
-    return true;
-  };
   const parents = new Map<string, string[]>(),
     stats = new Map<string, OwnerDerived['stats'][number][1]>();
   const cachedStats = new Map(previous?.stats);
@@ -123,13 +132,7 @@ export function computeOwnerDerived(
     if (visited.has(head) || baseline?.states.has(head)) continue;
     visited.add(head);
     const list = cachedParents.get(head) ?? source.state(head).parents;
-    if (
-      charge([
-        [head, list],
-        [head, list],
-      ])
-    )
-      parents.set(head, list);
+    parents.set(head, list);
     pending.push(...list);
   }
   // Compare the same Lane/View summaries as the hosted delta planner, including
@@ -168,7 +171,7 @@ export function computeOwnerDerived(
     if (stats.has(key)) continue;
     const cached = cachedStats.get(key);
     if (cached) {
-      if (charge([key, cached])) stats.set(key, cached);
+      stats.set(key, cached);
       continue;
     }
     const changed = reviewPaths(files(record.base), files(record.head)).filter(f => f.status !== 'unchanged');
@@ -200,14 +203,14 @@ export function computeOwnerDerived(
           }
     }
     const changes = { files: changed.length, ...(exact ? { add, del } : {}) };
-    if (charge([key, changes])) stats.set(key, changes);
+    stats.set(key, changes);
     states.clear();
   }
   const cachedViews = new Map(previous?.views.map(([id, fingerprint, rows]) => [id, { fingerprint, rows }]));
   const priorViews = new Map(baseline?.data?.views.map((v, i) => [v.id, viewFingerprint(baseline.data!, i)]));
   const views: OwnerDerived['views'] = [];
   const addView = (value: OwnerDerived['views'][number]) => {
-    if (charge(value)) views.push(value);
+    views.push(value);
   };
   data.views.forEach((view, index) => {
     const fingerprint = viewFingerprint(data, index),
@@ -232,7 +235,8 @@ export function computeOwnerDerived(
     states.clear();
   });
   return {
-    schema: 2,
+    schema: 3,
+    complete: !baseline?.data,
     work: digest(JSON.stringify(data, null, 2)),
     parents: [...parents],
     ancestry: [...parents],
@@ -240,10 +244,29 @@ export function computeOwnerDerived(
     views,
     trees: selectedTreeHeads(data)
       .filter(head => !baseline?.data || !selectedTreeHeads(baseline.data).includes(head))
-      .map(head => {
-        const row: OwnerDerived['trees'][number] = [head, files(head)];
-        return charge(row) ? row : undefined;
-      })
-      .filter((row): row is OwnerDerived['trees'][number] => row !== undefined),
+      .map(head => [head, files(head)]),
+    changes: data.lanes
+      .filter(l => baseline?.data?.lanes.find(old => old.id === l.id)?.head !== l.head)
+      .flatMap(lane => {
+        const known = baseline?.data?.lanes.find(old => old.id === lane.id)?.head;
+        return [...new Set(known ? [known] : [lane.base, ...lane.checkpoints.map(save => save.head)])].map(
+          from => {
+            const cached = previous?.changes.find(
+              row => row.laneId === lane.id && row.from === from && row.head === lane.head,
+            );
+            if (cached) return cached;
+            const paths = reviewPaths(files(from), files(lane.head))
+              .filter(f => f.status !== 'unchanged')
+              .map(f => f.path);
+            return {
+              laneId: lane.id,
+              from,
+              head: lane.head,
+              paths: paths.slice(0, COORDINATION_LIMITS.changePaths),
+              pathCount: paths.length,
+            };
+          },
+        );
+      }),
   };
 }

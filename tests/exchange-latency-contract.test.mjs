@@ -17,6 +17,7 @@ const names = [
   'projectObjects',
   'projectExchange',
   'projectExchangeActions',
+  'projectPublicationStore',
   'projectExchangeCache',
   'projectBackups',
   'projectWork',
@@ -111,7 +112,11 @@ test('real client original retry preserves old prepared manifest identity after 
   assert.equal(f.counts.posts, posts);
   assert.deepEqual(readFileSync(path), retained);
   assert.equal(f.s.tables.projectBackups.size, 1);
-  assert.deepEqual(f.calls, ['projectExchangeActions:published']);
+  assert.deepEqual(f.calls, [
+    'projectPublicationStore:displayBaseline',
+    'projectExchangeActions:published',
+    'projectPublicationStore:publishedDisplay',
+  ]);
   assert.equal(
     f.storageReads(),
     readsBeforeRetry,

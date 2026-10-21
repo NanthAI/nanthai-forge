@@ -8,7 +8,7 @@ import { viewIndexEntries } from '../dist/view-hosted-index.js';
 import { stateParentEntries } from '../dist/source-state-parent-index.js';
 import { sourceTreeEntries } from '../dist/source-tree-index.js';
 import { moduleUrl } from './convex-module.mjs';
-const { ancestryEntries } = await import(moduleUrl('../convex/projectSourceReturnDelta.ts'));
+import { ancestryEntries } from './ancestry-fixture.mjs';
 const { ownerDerivedRows, readOwnerDerived } = await import(moduleUrl('../convex/projectOwnerDerived.ts'));
 function fixture() {
   const objects = new Map(),
@@ -82,11 +82,14 @@ function fixture() {
       data,
       manifest: {
         head,
-        files: [...objects].map(([sha256, bytes]) => ({
-          path: `objects/${sha256}`,
-          sha256,
-          size: bytes.length,
-        })),
+        files: [
+          { path: 'work.json', sha256: derived.work, size: Buffer.byteLength(JSON.stringify(data, null, 2)) },
+          ...[...objects].map(([sha256, bytes]) => ({
+            path: `objects/${sha256}`,
+            sha256,
+            size: bytes.length,
+          })),
+        ],
       },
     },
     final: { command: JSON.stringify({ workSha256: digest(JSON.stringify(data, null, 2)) }) },
@@ -178,6 +181,30 @@ test('immutable cache reuses source facts and View rows without object reads', (
   assert.deepEqual(next, f.derived);
   assert.equal(states, 0, 'unchanged source trees are reused');
 });
+for (const missing of ['parents', 'stats', 'views', 'trees'])
+  test(`missing ${missing} cache items are computed locally before upload`, () => {
+    const f = fixture(),
+      cache = structuredClone(f.derived);
+    cache[missing] = [];
+    let reads = 0;
+    const result = computeOwnerDerived(
+      f.data,
+      {
+        state: head => {
+          reads++;
+          return f.source.state(head);
+        },
+        object: hash => {
+          reads++;
+          return f.source.object(hash);
+        },
+      },
+      cache,
+    );
+    assert.deepEqual(result, f.derived);
+    assert.ok(reads > 0);
+  });
+
 for (const [name, mutate] of [
   [
     'wrong Work pin',
@@ -225,7 +252,7 @@ for (const [name, mutate] of [
     },
   ],
 ])
-  test(`invalid owner rows fall back: ${name}`, () => {
+  test(`invalid owner rows are rejected: ${name}`, () => {
     const f = fixture();
     mutate(f.derived);
     assert.equal(ownerDerivedRows(f.cursor, f.derived), undefined);
@@ -237,6 +264,7 @@ test('chunked provenance payloads retain parity and reject corrupt chunks', () =
   const derived = computeOwnerDerived(f.data, f.source);
   assert.ok(derived.views[0][2].some(r => r.collection === 'viewFiles:payload'));
   f.cursor.final.command = JSON.stringify({ workSha256: derived.work });
+  f.cursor.snapshot.manifest.files.find(file => file.path === 'work.json').sha256 = derived.work;
   assert.ok(ownerDerivedRows(f.cursor, derived));
   derived.views[0][2].find(r => r.collection === 'viewFiles:payload').value += 'changed';
   assert.equal(ownerDerivedRows(f.cursor, derived), undefined);
@@ -284,7 +312,7 @@ test('exact owner totals include deletion and a mode-only file without extra lin
   assert.deepEqual(new Map(result.stats).get(`${f.base}:${f.head}`), { files: 3, add: 1, del: 2 });
 });
 
-test('server checks declared sidecar size before reading and parses defensively', async () => {
+test('server rejects invalid roots before reads and validates bytes and protocol', async () => {
   const { OWNER_DERIVED_MAX_BYTES } = await import('../dist/owner-derived.js');
   let reads = 0;
   const read = async () => {
@@ -292,17 +320,34 @@ test('server checks declared sidecar size before reading and parses defensively'
     throw Error('must not read');
   };
   for (const size of [OWNER_DERIVED_MAX_BYTES + 1, -1, 0, Infinity, 1.5])
-    assert.equal(await readOwnerDerived({ sha256: '0'.repeat(64), size }, read), undefined);
+    await assert.rejects(
+      readOwnerDerived({ sha256: '0'.repeat(64), size }, read),
+      e => e.code === 'INVALID_OWNER_DATA',
+    );
   assert.equal(reads, 0);
-  for (const text of ['{broken', '{"schema":2}']) {
+  await assert.rejects(
+    readOwnerDerived(undefined, read),
+    e => e.code === 'CLI_UPGRADE_REQUIRED' && /nforge/.test(e.message),
+  );
+  for (const [text, code] of [
+    ['{broken', 'INVALID_OWNER_DATA'],
+    ['{"schema":2}', 'CLI_UPGRADE_REQUIRED'],
+  ]) {
     const bytes = Buffer.from(text);
-    const value = await readOwnerDerived({ sha256: digest(bytes), size: bytes.length }, async () => bytes);
-    if (text === '{broken') assert.equal(value, undefined);
-    else assert.equal(ownerDerivedRows(fixture().cursor, value), undefined);
+    await assert.rejects(
+      readOwnerDerived({ sha256: digest(bytes), size: bytes.length }, async () => bytes),
+      e => e.code === code,
+    );
   }
   const bytes = Buffer.from('{}');
-  assert.equal(await readOwnerDerived({ sha256: digest(bytes), size: 1 }, async () => bytes), undefined);
-  assert.equal(await readOwnerDerived({ sha256: '0'.repeat(64), size: 2 }, async () => bytes), undefined);
+  await assert.rejects(
+    readOwnerDerived({ sha256: digest(bytes), size: 1 }, async () => bytes),
+    e => e.code === 'INVALID_OWNER_DATA',
+  );
+  await assert.rejects(
+    readOwnerDerived({ sha256: '0'.repeat(64), size: 2 }, async () => bytes),
+    e => e.code === 'INVALID_OWNER_DATA',
+  );
 });
 
 test('sidecar rows and bytes scale with 1/20 new landings, not 10/1000 history States', () => {
@@ -396,7 +441,7 @@ test('supersession supplies the changed old summary comparison while retaining i
   const derived = computeOwnerDerived(f.data, f.source, undefined, baseline);
   assert.deepEqual(
     derived.views.map(([id]) => id),
-    ['next-view'],
+    ['view', 'next-view'],
   );
   assert.ok(derived.stats.some(([key]) => key === `${f.base}:${f.head}`));
   assert.ok(derived.stats.some(([key]) => key === `${f.base}:${next}`));

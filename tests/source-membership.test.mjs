@@ -5,9 +5,8 @@ import { moduleUrl } from './convex-module.mjs';
 import { fixture } from './project-exchange-fixture.mjs';
 import { materializeWork } from '../dist/work-hosted-index.js';
 import { workSchema } from '../dist/work-types.js';
-const { ancestryEntries, stateParentEntries, deltaFits } = await import(
-  moduleUrl('../convex/projectSourceReturnDelta.ts')
-);
+import { ancestryEntries } from './ancestry-fixture.mjs';
+const { stateParentEntries, deltaFits } = await import(moduleUrl('../convex/projectSourceReturnDelta.ts'));
 const { sourceMembership } = await import(moduleUrl('../convex/projectSourceMembership.ts'));
 function insert(s, entries) {
   for (const entry of entries)

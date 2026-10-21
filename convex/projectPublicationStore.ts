@@ -6,6 +6,8 @@ import { activeOwnedProject } from './projectAuthority';
 import { publicationDocument } from './projectPublicationFields';
 import { METADATA_PUBLICATION, PUBLICATION_PAGE_BYTES, publicationChain } from '../src/publication-metadata';
 import { invariant } from '../src/errors';
+import { workProject } from './projectWorkHead';
+import { selectedGeneration } from './projectWorkIndexStore';
 import { isStored } from './projectObjectFields';
 import { report } from './errors';
 const status = v.object({ id: v.id('projectPublications'), cursor: v.number(), chain: v.string() });
@@ -21,6 +23,42 @@ export const capabilities = query({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
       const project = await activeOwnedProject(ctx, projectId, user.subject);
       return project.r2Writes ? METADATA_PUBLICATION : null;
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+/** Receipt replay retains its original display pin even if a local cache was lost. */
+export const publishedDisplay = query({
+  args: { projectId: v.id('hostedProjects'), backupId: v.id('projectBackups') },
+  returns: v.union(v.object({ sha256: v.string(), size: v.number() }), v.null()),
+  handler: async (ctx, { projectId, backupId }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
+      await activeOwnedProject(ctx, projectId, user.subject);
+      const backup = await ctx.db.get(backupId);
+      invariant(
+        backup?.projectId === projectId && backup.status === 'stored',
+        'PROJECT_UNAVAILABLE',
+        'Select this project’s stored checkpoint.',
+      );
+      return backup.ownerDerived ?? null;
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+/** A missing derived index asks the owner for complete display facts automatically. */
+export const displayBaseline = query({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.boolean(),
+  handler: async (ctx, { projectId }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
+      const project = await workProject(ctx, await activeOwnedProject(ctx, projectId, user.subject));
+      return (await selectedGeneration(ctx, project)) !== null;
     } catch (error) {
       return report(error);
     }

@@ -16,6 +16,7 @@ import { viewContributors } from '../src/view-read-model';
 import { viewIndexEntries } from '../src/view-hosted-index';
 import type { ProvenanceFile } from '../src/view-provenance-plan';
 import { materializeWork, indexBatches } from '../src/work-hosted-index';
+import { ownerProjection } from './projectOwnerProjection';
 import { invariant } from '../src/errors';
 
 type Snapshot = {
@@ -89,6 +90,8 @@ export async function viewStates(ctx: ActionCtx, snapshot: Snapshot, owner: stri
  * is a resumable cursor. No array of all historical State file lists or View
  * provenance rows is retained. Work/manifest metadata remains fully validated. */
 export async function workProjection(ctx: ActionCtx, snapshot: Snapshot, owner: string) {
+  const supplied = await ownerProjection(ctx, snapshot, owner);
+  if (supplied) return supplied;
   const streamed =
     snapshot.backup.transport === 'objects' && snapshot.manifest.kind === 'forge-native-work-backup';
   const parents = await sourceParents(

@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
-import {
-  prepareDelta,
-  cachedParents,
-  deltaFits,
-  derivedCollections as derived,
-} from './projectSourceReturnDelta';
+import { prepareDelta } from './projectSourceReturnDelta';
 export { RETURN_BUDGET } from './projectSourceReturnStep';
 import { installOwnerDerived } from './projectOwnerDerived';
-import { ownerCoverage } from './projectOwnerCoverage';
+import { CLI_UPGRADE_MESSAGE } from './projectOwnerDerived';
 import { storeReturnMetadata, readReturnMetadata, type ReturnRef } from './projectSourceReturnMetadata';
-import { exchangeObjectReader } from './projectExchangeReader';
+import { prepareOwnerIndexRows } from './projectOwnerIndexRows';
 import { advance, RETURN_BUDGET, type Cursor, type ReturnAccounting } from './projectSourceReturnStep';
 import { storeReturnJson, readReturnJson, deleteReturnJson } from './projectSourceReturnCursor';
 import { storageMeter } from './storageMeter';
@@ -22,7 +17,8 @@ import { invariant, ForgeError } from '../src/errors';
 import { ConvexError } from 'convex/values';
 import type { IndexEntry } from '../src/work-hosted-index';
 import { workSourcePins } from '../src/work-archive-metadata';
-import { viewIndexEntries } from '../src/view-hosted-index';
+import { materializeWork } from '../src/work-hosted-index';
+import { selectedTreeHeads } from '../src/owner-derived';
 type Snapshot = Cursor['snapshot'];
 type Final = Cursor['final'];
 async function advanceReturnProgress(
@@ -38,7 +34,7 @@ async function advanceReturnProgress(
   initial?: {
     snapshot: Snapshot;
     final: Final;
-    generationId: Id<'projectWorkGenerations'>;
+    generationId?: Id<'projectWorkGenerations'>;
     previous?: Snapshot;
     ownerDerived?: unknown;
     generation?: Doc<'projectWorkGenerations'>;
@@ -65,17 +61,18 @@ async function advanceReturnProgress(
         c.snapshotRef,
         'The original source-return snapshot is unavailable.',
       );
-    if (c.snapshot.coverage) c.supplied = c.snapshot.coverage;
+    invariant(c.protocol === 3 && c.phase === 'done', 'CLI_UPGRADE_REQUIRED', CLI_UPGRADE_MESSAGE);
   } else {
     invariant(initial, 'WORK_STALE', 'Resume the original return preparation.');
     const { data } = initial.snapshot;
     c = {
+      protocol: 3,
       snapshot: initial.snapshot,
       accounting: initial.accounting,
       metadataOnly: initial.metadataOnly,
       final: initial.final,
       generationId: initial.generationId,
-      phase: 'parents',
+      phase: 'done',
       parents: [],
       pending: workSourcePins(data),
       heads: [
@@ -87,10 +84,6 @@ async function advanceReturnProgress(
           ...data.runs.map(r => r.head),
         ]),
       ],
-      head: 0,
-      view: 0,
-      states: [],
-      positions: [],
       rows: [],
     };
     if (initial.previous && initial.generation) {
@@ -100,8 +93,6 @@ async function advanceReturnProgress(
       c.rows = plan.entries.filter(row => row.collection !== 'lanes' && row.collection !== 'views');
       c.diffstats = {
         records: plan.entries.filter(row => row.collection === 'lanes' || row.collection === 'views'),
-        index: 0,
-        cache: [],
       };
       const priorHeads = new Set([
         ...(initial.previous.data.nativeHead ? [initial.previous.data.nativeHead] : []),
@@ -112,75 +103,48 @@ async function advanceReturnProgress(
         ...initial.previous.data.runs.map(r => r.head),
       ]);
       const priorPins = new Set(initial.previous.manifest.files.map(pin => pin.sha256));
-      // A newly selected historical State can add an ancestor that old pair
-      // indexes did not cover. Fill its parents rather than infer a negative.
-      const historicalSelection = c.heads.some(head => priorPins.has(head) && !priorHeads.has(head));
-      c.delta.stopParents = historicalSelection ? [] : [...priorHeads];
-      c.pending = c.pending.filter(head => historicalSelection || !priorPins.has(head));
-      c.parents = await cachedParents(ctx, initial.snapshot, owner, c.generationId, c.pending);
-      const known = new Set(c.parents.map(([head]) => head));
-      c.pending = [...new Set([...c.pending.filter(head => !known.has(head)), ...(c.delta.trees ?? [])])];
+      c.pending = c.pending.filter(head => !priorPins.has(head));
+      c.delta.stopParents = [...priorPins];
       c.heads = c.heads.filter(head => !priorHeads.has(head));
-      // Summary-only changes (acceptance and supersession) retain
-      // the immutable file provenance already selected under this generation.
-      for (const index of c.delta.summaries) {
-        const view = data.views[index]!;
-        const [old] = await ctx.runQuery(internal.projectWorkIndexStore.lookups, {
-          projectId: input.projectId,
-          owner,
-          generationId: c.generationId,
-          keys: [{ collection: 'viewDetails', key: view.id }],
-        });
-        if (!old) {
-          c.delta.views.push(index);
-          continue;
-        }
-        let prior = JSON.parse(old.value);
-        if (prior.payloadKey) {
-          const chunks: string[] = [];
-          let cursor: string | null = null;
-          do {
-            const page: { values: string[]; cursor: string | null } = await ctx.runQuery(
-              internal.projectWorkIndexStore.payload,
-              {
-                projectId: input.projectId,
-                owner,
-                generationId: c.generationId,
-                collection: 'viewDetails',
-                parent: prior.payloadKey,
-                cursor,
-              },
-            );
-            chunks.push(...page.values);
-            cursor = page.cursor;
-          } while (cursor !== null);
-          invariant(chunks.length === prior.payloadParts, 'WORK_STALE', 'View provenance summary changed.');
-          prior = JSON.parse(chunks.join(''));
-        }
-        const rows = viewIndexEntries(data, undefined, {
-          index,
-          positions: new Map(),
-          cachedProvenance: {
-            fileCount: prior.fileCount ?? null,
-            provenanceAvailable: prior.provenanceAvailable === true,
-          },
-        });
-        c.rows.push(...rows);
-      }
+      c.delta.views = [...new Set([...c.delta.views, ...c.delta.summaries])];
+    } else {
+      const projection = materializeWork(
+        data,
+        initial.snapshot.manifest,
+        [],
+        initial.snapshot.backup.transport,
+        new Map(),
+        true,
+      );
+      c.metadata = projection.metadata;
+      c.rows = projection.entries.filter(row => row.collection !== 'lanes' && row.collection !== 'views');
+      c.diffstats = {
+        records: projection.entries.filter(row => row.collection === 'lanes' || row.collection === 'views'),
+      };
+      c.delta = {
+        entries: [],
+        removed: [],
+        views: data.views.map((_, i) => i),
+        summaries: [],
+        positions: {},
+        stopParents: [],
+        trees: selectedTreeHeads(data),
+        readBytes: 0,
+        payloadReplacements: 0,
+      };
+      c.full = true;
     }
-  }
-  if (initial?.ownerDerived && !resuming) {
-    c.supplied = ownerCoverage(c, initial.ownerDerived);
     await installOwnerDerived(ctx, c, initial.ownerDerived);
-    console.log('source-return owner-derived', {
-      parents: c.supplied?.parents.length ?? 0,
-      stats: c.supplied?.stats.length ?? 0,
-      views: c.supplied?.views.length ?? 0,
-      trees: c.supplied?.trees.length ?? 0,
-      fastPath: c.phase === 'done',
-      metadataOnly: c.metadataOnly === true,
-    });
+    console.log('source-return owner-derived', { fastPath: true, metadataOnly: true });
+    if (c.full) {
+      const counts: Record<string, number> = {};
+      for (const row of c.rows) counts[row.collection] = (counts[row.collection] ?? 0) + 1;
+      c.metadata!.counts = counts;
+      delete c.delta;
+    }
+    await prepareOwnerIndexRows(ctx, c);
   }
+
   invariant(
     c.final.owner === owner &&
       c.final.projectId === input.projectId &&
@@ -208,7 +172,7 @@ async function advanceReturnProgress(
     const actionStarted = Date.now();
     // Reuse unchanged State bytes within this action, with current authority and
     // storage checks on every use and a fixed byte bound across all history.
-    const reader = exchangeObjectReader(ctx, true, RETURN_BUDGET.sourceBytes);
+
     let committedAt = actionStarted,
       items = 0;
     let batchStates = 0,
@@ -224,7 +188,7 @@ async function advanceReturnProgress(
       const result = await advance(
         ctx,
         c,
-        reader,
+        undefined,
         c.delta
           ? undefined
           : {
@@ -238,81 +202,7 @@ async function advanceReturnProgress(
       batchSourceBytes += result.sourceBytes;
       batchFailures += result.derivedReadFailures;
       derivedRows += result.entries.length;
-      if (c.phase !== phase || !c.phaseStarted) c.phaseStarted = Date.now();
-      if (c.delta) {
-        const rows = await ctx.runQuery(internal.projectWorkIndexStore.lookups, {
-          projectId: input.projectId,
-          owner,
-          generationId: c.generationId,
-          keys: result.entries.map(({ collection, key }) => ({ collection, key })),
-        });
-        for (const [index, row] of result.entries.entries()) {
-          const existing = c.delta.entries.findIndex(
-            e => e.collection === row.collection && e.key === row.key,
-          );
-          const old = rows[index] ?? c.delta.entries[existing];
-          if (rows[index] && existing < 0) {
-            c.delta.readBytes += Buffer.byteLength(JSON.stringify(rows[index])) + 2048;
-            if (!row.collection.endsWith(':payload')) {
-              const payloadKey = JSON.parse(rows[index]!.value).payloadKey;
-              if (payloadKey && JSON.parse(row.value).payloadKey !== payloadKey)
-                c.delta.payloadReplacements++;
-            }
-          }
-          if (old) {
-            if (row.collection !== 'viewFiles') row.position = old.position;
-          } else {
-            const position = c.delta.positions[row.collection] ?? 0;
-            c.delta.positions[row.collection] = position + 1;
-            if (
-              row.collection !== 'viewFiles' &&
-              !row.collection.endsWith(':payload') &&
-              !row.collection.startsWith('sourceTree')
-            )
-              row.position = position;
-            if (
-              derived.includes(row.collection) ||
-              row.collection === 'diffstats' ||
-              (c.delta.partial && row.collection === 'sourcePins') ||
-              row.collection.startsWith('sourceStateParent') ||
-              row.collection.startsWith('sourceAncestry')
-            )
-              c.metadata!.counts[row.collection] = (c.metadata!.counts[row.collection] ?? 0) + 1;
-          }
-          if (existing >= 0) c.delta.entries[existing] = row;
-          else c.delta.entries.push(row);
-        }
-        result.entries = [];
-        if (!deltaFits(c.delta, Buffer.byteLength(JSON.stringify(c.final)))) {
-          if (c.delta.partial) {
-            // This cursor contains touched records only. Keep the verified
-            // checkpoint and let the existing index reader rebuild from its
-            // complete record root rather than publish a partial projection.
-            return await ctx.runMutation(internal.projectWork.returnSource, c.final);
-          }
-          // Large deltas use the existing full private partition, never a capacity denial.
-          delete c.delta;
-          delete c.diffstats;
-          c.phase = 'parents';
-          c.parents = [];
-          c.pending = workSourcePins(c.snapshot.data);
-          c.head = 0;
-          c.view = 0;
-          c.rows = [];
-          c.positions = [];
-          delete c.metadata;
-          c.heads = [
-            ...new Set([
-              ...c.snapshot.data.lanes.map(l => l.head),
-              ...c.snapshot.data.channelMoves.map(m => m.head),
-              ...(c.snapshot.data.hostedChannelMoves ?? []).map(m => m.head),
-              ...c.snapshot.data.views.flatMap(v => (v.head ? [v.head] : [])),
-              ...c.snapshot.data.runs.map(r => r.head),
-            ]),
-          ];
-          result.last = false;
-        }
-      }
+
       const progressed = result.states > 0 || result.entries.length > 0 || c.phase !== phase;
       if (result.entries.length) {
         pending.push(...result.entries);
@@ -331,50 +221,19 @@ async function advanceReturnProgress(
       if (room && !result.last && items < 64 && Date.now() - committedAt < RETURN_BUDGET.commitMs) continue;
       items = 0;
       committedAt = Date.now();
-      const done =
-        c.phase === 'done'
-          ? 1
-          : c.phase === 'views'
-            ? c.view
-            : c.phase === 'ancestry'
-              ? c.head
-              : c.phase === 'diffstats'
-                ? (c.diffstats?.index ?? 0)
-                : c.parents.length;
-      const total =
-        c.phase === 'done'
-          ? 1
-          : c.phase === 'views'
-            ? (c.delta?.views.length ?? c.snapshot.data.views.length)
-            : c.phase === 'ancestry'
-              ? c.heads.length
-              : c.phase === 'diffstats'
-                ? (c.diffstats?.records.length ?? 0)
-                : done + c.pending.length;
+      const done = 1,
+        total = 1;
       const elapsedMs = Date.now() - Date.parse(stage.returnAt ?? new Date(started).toISOString());
       c.accounting = accounting(step + 1);
       const progress = JSON.stringify({
         ...c.accounting,
         phase: c.phase,
-        ...(c.ancestryProgress
-          ? {
-              item: c.ancestryProgress.head,
-              itemDone: c.ancestryProgress.seen.length,
-              itemPending: c.ancestryProgress.pending.length,
-            }
-          : {}),
         ...(c.rows.length ? { rowsPending: c.rows.length } : {}),
-        ...(c.diffstats?.pending?.files
-          ? { itemDone: c.diffstats.pending.offset, itemTotal: c.diffstats.pending.files.length }
-          : {}),
         step: step + 1,
         done,
         total,
         elapsedMs,
-        etaSeconds:
-          done > 0
-            ? Math.ceil(((Date.now() - c.phaseStarted!) / 1000 / done) * Math.max(0, total - done))
-            : null,
+        etaSeconds: 0,
       });
       // Immutable Work/manifest metadata is stored once, outside the advancing
       // cursor. Legacy cursors with an embedded snapshot upgrade on their next
@@ -384,10 +243,9 @@ async function advanceReturnProgress(
         c.metadataOnly
           ? storeReturnMetadata(ctx, input.projectId, owner, stage._id, value)
           : storeReturnJson(ctx, value);
-      if (c.metadataOnly && c.supplied) c.snapshot.coverage = c.supplied;
       const snapshot = c.snapshotRef ?? (await store(c.snapshot));
       c.snapshotRef = snapshot;
-      const position = { ...c, snapshot: undefined, ...(c.metadataOnly ? { supplied: undefined } : {}) };
+      const position = { ...c, snapshot: undefined };
       const cursor = await store(position);
       const committed = await ctx.runMutation(internal.projectReturnIndexStage.batch, {
         projectId: input.projectId,
@@ -503,6 +361,9 @@ export async function returnProgress(...args: Parameters<typeof advanceReturnPro
         operationId: input.operationId,
       });
       if (original) return original;
+      const selected = await ctx.runQuery(internal.projectWork.get, { projectId: input.projectId, owner });
+      if (selected.work?.backupId !== input.expectedBackupId || selected.work.revision !== input.revision)
+        throw error;
       if (
         current.returnStep !== stage.returnStep ||
         current.returnCursor !== stage.returnCursor ||

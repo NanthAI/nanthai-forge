@@ -240,7 +240,11 @@ export class ConvexExchange implements ExchangeTransport {
       }),
     );
   }
-  async publishMetadata(pin: ContentPin, build: () => PublicationMetadata): Promise<string | null> {
+  async publishMetadata(
+    pin: ContentPin,
+    build: () => PublicationMetadata,
+    ownerDerived?: ContentPin,
+  ): Promise<string | null> {
     if (this.proposalId || this.deferHistory) return null;
     const capability = await retryExchange('publication capabilities', this.operationId, async () => {
       try {
@@ -290,12 +294,27 @@ export class ConvexExchange implements ExchangeTransport {
         this.client.mutation(mutation('projectPublicationStore:append'), args),
       );
     }
-    return this.publish(pin, true);
+    return this.publish(pin, true, ownerDerived);
   }
-  async publish(pin: ContentPin, metadataOnly = false): Promise<string> {
+  async publishedOwnerDerived(backupId: string): Promise<ContentPin | null> {
+    return retryExchange('published owner display pin', this.operationId, () =>
+      this.client.query(query('projectPublicationStore:publishedDisplay'), {
+        projectId: this.projectId,
+        backupId,
+      }),
+    );
+  }
+  async ownerDisplayBaseline(): Promise<boolean> {
+    return retryExchange('owner display baseline', this.operationId, () =>
+      this.client.query(query('projectPublicationStore:displayBaseline'), { projectId: this.projectId }),
+    );
+  }
+  async publish(pin: ContentPin, metadataOnly = false, ownerDerived?: ContentPin): Promise<string> {
     try {
       return await retryExchange('checkpoint publication', this.operationId, () =>
         this.client.action(action('projectExchangeActions:publish'), {
+          displayProtocol: 3,
+          ...(ownerDerived ? { ownerDerived } : {}),
           projectId: this.projectId,
           operationId: this.operationId,
           previous: this.previous,

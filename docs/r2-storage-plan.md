@@ -19,7 +19,7 @@ Principle: R2 holds every blob. No database function receives or returns file by
 - **Browser.** The bucket gets a CORS rule for the web origin. The code view and diff fetch blobs directly, verify sha256 with `crypto.subtle` and compute hunks client-side.
 - **Access control.** Private projects: the bucket is private, and the only way to obtain bytes is a URL signed after a current access check. Revocation applies immediately to new URLs; issued URLs live at most 5 minutes (GET) or 15 minutes (PUT). Public projects may be signed without sign-in, limited to 100 keys per call plus a per-project anonymous budget. The signing secret is a bucket-scoped token held only as a server environment variable.
 - **Retention.** Objects are never overwritten. Project purge lists and deletes a prefix (deletes are free). Prepared-but-uncommitted uploads are swept after 24 hours. Optional later: a weekly copy to a second bucket and a bucket lock.
-- **Moving byte processing.** Diffstats, views and tree derivation move to the CLI (it already holds the bytes and sends derived data); publication validation becomes database lookups over a bounded manifest the CLI supplies; source-return cursors become database rows; the web code view runs in the browser; GitHub-import artifacts are built by a runner or the CLI. The trust shift: derived display data is client-supplied, so a malicious pusher can mislabel only their own project's display data. Authority (who may land, main heads) stays server-side. The R3a rollout preserves the existing publication path for older CLIs and projects without R2 opt-in.
+- **Moving byte processing.** Diffstats, views and tree derivation move to the CLI (it already holds the bytes and sends derived data); publication validation becomes database lookups over a bounded manifest the CLI supplies; source-return cursors become database rows; the web code view runs in the browser; GitHub-import artifacts are built by a runner or the CLI. The trust shift: derived display data is client-supplied, so a malicious pusher can mislabel only their own project's display data. Authority (who may land, main heads) stays server-side. Current pushes require owner display protocol 3; R2 opt-in controls storage placement, independently of display derivation.
 - **Public reads at scale (later).** A small Worker with an R2 binding and edge cache on a project subdomain, so anonymous reads need no database call. Presigned URLs do not work on custom domains, so this is a separate path.
 
 ## Slices
@@ -29,7 +29,7 @@ Principle: R2 holds every blob. No database function receives or returns file by
 | R0 | A single blob-store seam in the backend and CLI (no behaviour change), `location` and key fields on object rows, and a presigner using `crypto.subtle` with the AWS reference test vector | Landed |
 | R1 | Signed PUT write path behind a flag and per-project opt-in; commit step with HEAD checks; CLI direct upload with PUT concurrency of 8 or more | Landed |
 | R2 | Signed GET read path; readers dispatch on each row's location; browser sha256 helper; mixed-location tests, revoked members, expired URLs | In review (tested against a local fake; real-bucket smoke pending) |
-| R3 | Metadata-only publication (split R3a publish, R3b source return and cursors). Heaviest slice and on the landing hot path | R3a implemented and tested locally; R3b source return and cursors remain |
+| R3 | Owner display data, metadata publication and durable source return | Implemented; protocol 3 removes push-time display derivation, local qualification only |
 | R4 | Browser bytes: code view, review and archive download through signed URLs; CORS | Not started |
 | R5 | Imports, zones, agents and proposals build artifacts into R2 | Not started |
 | R6 | Backfill: export, upload each file after checking its digest, flip rows in pages; keep old storage 14 days as fallback | Needs owner run approval |
@@ -69,58 +69,53 @@ Server-side readers that still need bytes inside Convex fetch a signed GET insid
 | `downloadBatch`, and `downloadPart` of a raw R2 object | Same fetch, for callers that do not sign. |
 | Large files (recipes) | The CLI still reads them through `downloadPart`, so leaf bytes cross Convex until R3 or R4 moves recipe reading to the client. |
 
-## R3a metadata-only publication
+## R3 owner-derived publication and source return (done)
 
-A current CLI asks `projectPublicationStore:capabilities` before selecting
-`metadata-publication-v1`. The server advertises it only for owner-opted-in
-`r2Writes` projects. The CLI sends its parsed manifest, committed object pins,
-State-to-parent/blob edges and schema-2 owner-derived display rows in bounded
-DB pages. Each page fits a 128 KiB encoded argument budget. The session retains
-its operation, payload digest, page count and append cursor; same-operation
-retries reconcile the same pages and the original publication receipt.
+Current nforge pushes declare owner display protocol 3. The CLI computes every
+new State's parents and own-parent ancestry boundaries, comparison totals, View
+provenance and file lists, selected Code trees, and coordination change paths.
+Selection uses the exact hosted baseline when retained locally; missing baseline
+Work or cache entries cause local computation. Display items are never dropped
+to fit a total sidecar budget. Large sidecars use immutable 128 KiB pages with
+individual size/SHA-256 pins and a whole-document digest; small roots retain the
+ordinary object transport. Metadata publication already sends these same facts
+in bounded database pages with the exact Work JSON and State closure edges.
 
-Publication checks committed object rows in groups of 100 (including mixed
-Convex/R2 rows), validates the manifest and derived closure references, then
-uses the existing owner authority and previous-checkpoint CAS. It reads no
-stored object bytes. Missing committed pins return `PUBLISH_PIN_MISSING`;
-derived references outside the manifest return `DERIVED_ROW_UNPINNED`.
-Derived display data can mislabel only the publishing owner's project and
-never grants Work or Channel authority. Readers still verify source bytes.
+The server checks shape, safe counts, pinned references, payload hashes and
+complete coverage before staging rows. It trusts owner-supplied display facts;
+these facts never grant Work or Channel authority. Revision, main-history,
+owner authorization, journal validation and final compare-and-set remain on the
+server. Missing or invalid current-protocol data fails explicitly rather than
+starting server derivation. Old writers and old publications used as a new
+push receive `CLI_UPGRADE_REQUIRED`, naming nforge and an upgrade command.
+Existing hosted reads and completed-operation receipt replay remain available.
+See the [upgrade note](operations/source-exchange.md#cli-upgrade).
 
-Older CLIs and servers, projects without opt-in, deferred-history seeds and
-pushes without a valid optional owner-derived sidecar keep the existing
-byte-reading publication path. Turn the new path off with the existing
-owner-only `projectObjectCommit:setR2Writes` `{ projectId, enabled: false }`;
-this also stops new R2 writes. Already stored objects remain readable. No
-forced CLI upgrade or server fallback removal is part of R3a.
+Source return drains validated rows in bounded commits without parent, ancestry,
+diffstat or View computation. Small deltas install directly. Large deltas copy
+retained database index rows and apply owner replacements into a private
+partition before the existing atomic switch. A cold continuation reads its
+snapshot/cursor from database pages, not object storage. Immutable output is stored
+once with the snapshot; the cursor carries only its offset. The automatic
+`projectPublicationStore:displayBaseline` negotiation requests complete local
+facts when no current index exists; those facts form a new private partition
+under the same source/revision CAS. Complete current publications also build
+cold read indexes from their owner facts. There is no full-source
+derivation fallback for current returns. Legacy read-index construction remains
+available for existing hosted data; it is not a push compatibility path.
 
-## R3b source return
+The former routine coordination path opened up to eight State objects merely
+to calculate advisory changed paths. Those reads are removed: the owner supplies
+paths and their total. Record-based returns still authenticate roots, catalogs,
+delta descriptors and touched Work record bodies, and read owner display pages.
+Those remaining metadata reads validate source/Work identity and current journal
+history; they do not read file blobs or State bytes for display derivation.
+Metadata-publication returns read zero stored object bytes.
 
-`projectBackups.metadataPublication` selects the validated immutable session.
-Current CLIs include exact pinned Work JSON in those pages, alongside the
-manifest, closure edges and derived display rows. Source return reads the pages
-through `projectPublicationStore.read`, checks their digest/root/session binding,
-and replays the authoritative hosted journal before the usual revision/main/CAS
-checks. Complete metadata returns read zero stored bytes. Their snapshot and
-computational cursor use bounded DB pages; each committed step atomically selects
-its new cursor. Successful publication releases cursor/snapshot pages through the
-same cleanup boundary as legacy cursor blobs. Project deletion includes these
-pages in its existing bounded purge.
-
-The optional 4 MiB sidecar now retains fitting items when another item is too
-large. Missing exact baseline Work causes full owner facts to be supplied for
-server selection. The server validates and uses coverage per item and phase;
-missing Views or comparisons do not discard valid parents, trees or diffstats.
-Large-delta rebuilds retain this coverage. Complete deltas keep the existing
-fast installation path. This applies to every project, independently of R2 opt-in.
-
-Ancestry walks checkpoint within a head, and file comparisons checkpoint their
-offset between batches. Progress includes visited/pending ancestors, compared
-files and pending output rows. Old CLIs, old publications and incomplete derived
-items retain server computation. Already published R3a sessions that predate the
-Work field still require the original Work-byte compatibility path; no metadata
-can reconstruct those omitted bodies. No forced upgrade or fallback removal is
-part of R3b.
+No hosted backfill or migration command is needed. Upgrade the CLI before the
+next new push; retained legacy operations that lack owner display facts require
+a newly prepared push. The lead still qualifies actual network latency after
+landing; local fake-storage timings are not hosted measurements.
 
 ## Spike findings
 
@@ -168,8 +163,8 @@ What remains after R2 is realtime: database I/O and calls from open tabs and bou
 
 ## Risks and open questions
 
-1. Trust shift to client-supplied derived data (recommended: accept; authority stays server-side).
-2. Forced CLI upgrade after R3 (recommended: yes while pre-1.0).
+1. Approved: trust client-supplied derived display data; authority stays server-side.
+2. Approved while pre-1.0: require current owner display protocol before new pushes.
 3. Revocation window of up to 5 minutes for issued GET URLs (the usual norm).
 4. Anonymous signing for public projects costs one database call per batch; the Worker path needs a custom domain.
 5. A second backup bucket and bucket lock delay real deletion by the lock period, which affects privacy wording.
@@ -205,10 +200,10 @@ JS
 1. Use the real dogfood owner with its normal pending landings. Compare the
    observed total against push #10's 5,731 seconds, recording the source-return
    action time separately from publication/upload. In dev logs, retain
-   `source-return owner-derived` coverage counts and `fastPath`, every
-   `source-return step`, and `source-return complete` accounting. A partial
-   sidecar should still have covered phases/items supplied; a fallback must
-   identify the missing coverage rather than discard all rows. Do not infer
+   `source-return owner-derived` `fastPath` and `metadataOnly`, every
+   `source-return step`, and `source-return complete` accounting. Require zero
+   derivation calls and no State/blob reads for display. Incomplete owner data
+   must fail explicitly; the CLI computes missing items before uploading. Do not infer
    the cause of a previous push without its retained sidecar/baseline evidence.
 2. Use the existing opted-in R2 throwaway. Seed a checkpoint with this CLI first
    if its current source predates the publication Work field, then return a

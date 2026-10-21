@@ -124,7 +124,11 @@ for (const interrupted of [false, true])
       const paused = [...s.tables.projectWorkGenerations.values()].find(
         g => g.returnOperationId === args.operationId,
       );
-      assert.equal(paused.status, 'building', 'interruption occurred before the phase output completed');
+      assert.equal(
+        paused.status,
+        'ready',
+        'owner display output completes in one delta commit; the final CAS still awaits retry',
+      );
       assert.ok(paused.returnMetadataCursor);
       cursors.forgetReturnCursors();
     }
@@ -155,8 +159,8 @@ for (const interrupted of [false, true])
     console.log('R3B_STORAGE', JSON.stringify({ interrupted, reads, writes, accounting: result.accounting }));
   });
 
-for (const missing of ['baseline Work', 'View', 'comparison'])
-  test(`partial owner coverage derives only missing ${missing}`, async t => {
+for (const missing of ['View', 'comparison'])
+  test(`incomplete owner ${missing} is rejected without server derivation`, async t => {
     const s = fixture(),
       base = await checkpoint(t, s);
     const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, base.input);
@@ -166,83 +170,30 @@ for (const missing of ['baseline Work', 'View', 'comparison'])
     next.input.previous = backupId;
     const candidate = await modules.projectExchangeActions.publish._handler(s.ctx, next.input);
     const { ownerDerivedBytes } = await import('../dist/owner-derived-local.js');
-    const bytes = ownerDerivedBytes(base.store, base.store.load(), { states: new Set(), data: undefined });
-    assert.ok(bytes, 'missing exact baseline Work supplies full facts instead of omitting the sidecar');
-    const derived = JSON.parse(bytes);
-    const missingView = missing === 'View' ? derived.views.pop()[0] : undefined;
-    if (missing === 'comparison') derived.stats.pop();
-    const pin = await upload(s, Buffer.from(JSON.stringify(derived)));
+    const derived = JSON.parse(ownerDerivedBytes(base.store, base.store.load()));
+    if (missing === 'View') derived.views.pop();
+    else derived.stats.pop();
+    const ownerDerived = await upload(s, Buffer.from(JSON.stringify(derived)));
     let compared = 0;
     const action = s.ctx.runAction;
     s.ctx.runAction = (ref, args) => {
       if (getFunctionName(ref) === 'projectDiffstats:compare') compared++;
       return action(ref, args);
     };
-    const args = {
-      projectId: 'project',
-      backupId: candidate,
-      expectedBackupId: backupId,
-      revision: 0,
-      operationId: randomUUID(),
-      ownerDerived: pin,
-      continuation: true,
-    };
-    let result;
-    do {
-      result = await modules.projectSourceReturn.returnSource._handler(s.ctx, args);
-    } while (result.pending);
-    assert.equal(compared, missing === 'comparison' ? 1 : 0, 'only the missing comparison is computed');
-    const rows = [...s.tables.projectWorkRecords.values()];
-    for (const view of base.store.load().views) {
-      const row = rows.find(r => r.collection === 'viewDetails' && r.key === view.id);
-      assert.equal(
-        JSON.parse(row.value).provenanceAvailable,
-        true,
-        view.id === missingView ? 'missing View derived on server' : 'covered View retained',
-      );
-    }
+    await assert.rejects(
+      modules.projectSourceReturn.returnSource._handler(s.ctx, {
+        projectId: 'project',
+        backupId: candidate,
+        expectedBackupId: backupId,
+        revision: 0,
+        operationId: randomUUID(),
+        ownerDerived,
+        continuation: true,
+      }),
+      e => e.data?.code === 'INVALID_OWNER_DATA',
+    );
+    assert.equal(compared, 0);
   });
-
-test('ancestry checkpoints inside one deep head and CLI renders its inner progress', async () => {
-  const { advance, RETURN_BUDGET } = await import(moduleUrl('../convex/projectSourceReturnStep.ts'));
-  const { formatSourceReturnProgress } = await import('../dist/source-return-progress.js');
-  const parents = Array.from({ length: 3001 }, (_, i) => [String(i), i ? [String(i - 1)] : []]);
-  const c = {
-    snapshot: { data: {}, manifest: { files: [] }, backup: {} },
-    final: {},
-    phase: 'ancestry',
-    heads: ['3000'],
-    head: 0,
-    parents,
-    rows: [],
-    delta: {},
-    positions: [],
-    states: [],
-    pending: [],
-  };
-  const first = await advance({}, c);
-  assert.equal(c.head, 0);
-  assert.equal(c.ancestryProgress.seen.length, RETURN_BUDGET.ancestryItems);
-  assert.equal(first.last, false);
-  const resumed = structuredClone(c);
-  for (let i = 0; i < 10 && resumed.head === 0; i++) await advance({}, resumed);
-  assert.equal(resumed.head, 1);
-  assert.equal(resumed.ancestryProgress, undefined);
-  assert.match(
-    formatSourceReturnProgress({
-      phase: 'ancestry',
-      done: 0,
-      total: 1,
-      step: 1,
-      elapsedMs: 30000,
-      etaSeconds: null,
-      resumed: false,
-      itemDone: 1000,
-      itemPending: 1,
-    }),
-    /current item 1000 visited, 1 pending/,
-  );
-});
 
 test('simultaneous public returns replay the winner when preparation races publication', async t => {
   const s = fixture(),

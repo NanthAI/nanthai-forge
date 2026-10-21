@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { currentOwnerDisplay } from './project-exchange-fixture.mjs';
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -224,6 +225,7 @@ test('source return retains every original planning version/comment, appends loc
         channels: [],
       },
       status: 'stored',
+      ...(await currentOwnerDisplay(s, s.local.store, data, s.projectId)),
       storageId: id,
     });
     s.files.set(id, { blob: new Blob([bytes], { type: 'application/gzip' }) });
@@ -271,7 +273,8 @@ test('source return retains every original planning version/comment, appends loc
   }
   const receipt = await returns.returnSource._handler(s.ctx, input),
     again = await returns.returnSource._handler(s.ctx, input);
-  assert.deepEqual(again, receipt);
+  const { accounting: _accounting, ...originalReceipt } = receipt;
+  assert.deepEqual(again, originalReceipt);
   const hosted = (await s.read()).data;
   assert.equal(hosted.planningItems.length, 3);
   assert.equal(hosted.planningComments.length, 2);

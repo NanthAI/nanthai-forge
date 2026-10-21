@@ -258,8 +258,21 @@ export const returnSource = internalMutation({
       );
       let generationId;
       if (input.projection) {
-        const generation = await selectedGeneration(ctx, project);
-        if (generation?._id === input.projection.generationId) {
+        let generation = await selectedGeneration(ctx, project);
+        const detached = !generation && !input.projection.generationId && input.projection.partitionId;
+        if (detached) {
+          generation = await ctx.db.get(detached);
+          invariant(
+            generation?.projectId === project._id &&
+              generation.status === 'ready' &&
+              generation.backupId === input.backupId &&
+              generation.revision === input.localRevision + 1 &&
+              generation.returnOperationId === input.operationId,
+            'WORK_STALE',
+            'Owner display staging changed before the source return.',
+          );
+        }
+        if (generation && (generation._id === input.projection.generationId || detached === generation._id)) {
           if (input.projection.deltaPartitionId) {
             const stage = await ctx.db.get(input.projection.deltaPartitionId);
             invariant(

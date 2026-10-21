@@ -1,4 +1,6 @@
+import { workArchiveMetadata } from '../dist/work-archive-metadata.js';
 // SPDX-License-Identifier: Apache-2.0
+import { currentOwnerDisplay } from './project-exchange-fixture.mjs';
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -366,6 +368,7 @@ test('hosted Intent authority reconciles original operations, retains concurrent
         digest: digest(bytes),
         size: bytes.length,
         preview: await previewWorkArchive(new File([bytes], 'return.tar.gz')),
+        ...(await currentOwnerDisplay(s, recovered.store, recovered.store.load(), s.projectId)),
       });
       s.files.set(storageId, { blob: new Blob([bytes], { type: 'application/gzip' }) });
       return { id, exported: value };
@@ -1068,6 +1071,12 @@ test('native hosted source, Intent, local return, Channel and journal recovery r
     digest: digest(candidateBytes),
     size: candidateBytes.length,
     preview: await previewWorkArchive(new File([candidateBytes], 'return.tar.gz')),
+    ...(await currentOwnerDisplay(
+      s,
+      recovered.store,
+      JSON.parse(Buffer.from((await workArchiveMetadata(new Blob([candidateBytes]))).work)),
+      s.projectId,
+    )),
   });
   s.files.set(backupId, { blob: new Blob([candidateBytes]) });
   const returning = {

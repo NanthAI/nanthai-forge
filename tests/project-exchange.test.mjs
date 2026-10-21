@@ -78,13 +78,15 @@ function transport(s, previous = null) {
       const id = await s.ctx.storage.store(new Blob([bytes], { type: row.contentType }));
       await objects.complete._handler(s.ctx, { id: row.id, storageId: id });
     },
-    publish: p =>
+    publish: (p, _metadataOnly, ownerDerived) =>
       actions.publish._handler(s.ctx, {
         projectId: 'project',
         operationId: randomUUID(),
         previous,
         digest: p.sha256,
         size: p.size,
+        displayProtocol: 3,
+        ownerDerived,
       }),
     manifest: backupId => actions.manifest._handler(s.ctx, { backupId }),
     download: async p => {

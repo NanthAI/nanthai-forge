@@ -20,6 +20,7 @@ import { report } from './errors';
 import { exchangeObjectReader, bytesFromRow, type ExchangeObjectReader } from './projectExchangeReader';
 import { resolveExchangeRoot, isExchangeRoot } from '../src/native-exchange-tree';
 import { meteredStorage, storageMeter } from './storageMeter';
+import { CLI_UPGRADE_MESSAGE } from './projectOwnerDerived';
 import { metadataPublication } from './projectPublicationValidation';
 import { runPublication } from './projectPublicationRun';
 import { recordPublication, recordExchange, verifyRecordSeed } from './projectWorkRecordExchange';
@@ -191,17 +192,25 @@ export const published = action({
   },
 });
 export const publish = action({
-  args: { ...publicationFields, metadataOnly: v.optional(v.literal(1)) },
+  args: {
+    ...publicationFields,
+    metadataOnly: v.optional(v.literal(1)),
+    displayProtocol: v.optional(v.number()),
+    ownerDerived: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+  },
   returns: v.id('projectBackups'),
   handler: async (ctx, input): Promise<Id<'projectBackups'>> => {
     try {
       const { owner, request, original } = await publicationReceipt(ctx, input);
       if (original) return original;
+      invariant(input.displayProtocol === 3, 'CLI_UPGRADE_REQUIRED', CLI_UPGRADE_MESSAGE);
       return await runPublication(
         ctx,
         { projectId: input.projectId, operationId: input.operationId, owner, request },
         async () => {
-          const { metadataOnly, ...legacyInput } = input;
+          const { metadataOnly, displayProtocol: _displayProtocol, ...rawInput } = input;
+          void _displayProtocol;
+          const legacyInput = { ...rawInput, displayProtocol: 3 as const };
           if (metadataOnly) {
             console.log('work-record publication skip', {
               reason: 'metadata-publication',

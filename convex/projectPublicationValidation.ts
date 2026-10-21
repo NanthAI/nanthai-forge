@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { parseWorkBytes } from '../src/work-metadata';
 import { nativeManifestSchema } from '../src/work-archive-metadata';
+import { requireOwnerDerived } from './projectOwnerDerived';
 import { ownerDerivedSchema } from '../src/owner-derived';
 import { ForgeError, invariant } from '../src/errors';
 import { digest } from '../src/hash';
@@ -230,7 +231,9 @@ export async function metadataPublication(
     'WORK_OPERATION_CHANGED',
     'Publication metadata digest changed.',
   );
-  const data = validatePublicationMetadata(parseJson(text), { sha256: input.digest, size: input.size });
+  const value = parseJson(text);
+  requireOwnerDerived(value.ownerDerived);
+  const data = validatePublicationMetadata(value, { sha256: input.digest, size: input.size });
   // Snapshot identity and publication operation identity are independent in the
   // existing exchange protocol. The session/request/root pins bind this retry.
   for (let offset = 0; offset < data.pins.length; offset += 100)

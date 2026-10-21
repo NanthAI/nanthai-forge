@@ -2,59 +2,59 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { getFunctionName } from 'convex/server';
 import { setup, returns } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { materializeWork } from '../dist/work-hosted-index.js';
-import { digest } from '../dist/hash.js';
+import { preparedCheckpoint, modules } from './project-exchange-fixture.mjs';
 import { dispatchHostedWork } from '../dist/hosted-work-client.js';
 const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const indexStore = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
-const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
 const entry = row => ({
   collection: row.collection,
   key: row.key,
   parent: row.parent,
-  position: row.position,
-  value: row.value,
+  position: row.collection === 'notes' ? 0 : row.position,
+  value: row.collection.endsWith(':payload') ? row.value : JSON.parse(row.value),
   ...(row.status === undefined ? {} : { status: row.status }),
 });
 const ordered = rows =>
   rows
+    .filter(row => !['sourceAncestryClosure', 'sourceAncestryChunk'].includes(row.collection))
     .map(entry)
     .sort((a, b) =>
       JSON.stringify([a.collection, a.key]).localeCompare(JSON.stringify([b.collection, b.key])),
     );
+function wireObjects(s) {
+  s.ctx.storage.generateUploadUrl = async () => 'https://fixture.invalid/upload';
+  for (const method of ['runQuery', 'runMutation', 'runAction']) {
+    const run = s.ctx[method];
+    s.ctx[method] = (ref, args) => {
+      const [name, action] = getFunctionName(ref).split(':');
+      return modules[name]?.[action]?._handler(s.ctx, args) ?? run(ref, args);
+    };
+  }
+}
 async function candidate(s, mutate = () => {}) {
   const snapshot = await s.read(),
     data = structuredClone(snapshot.data);
   mutate(data);
   data.revision++;
   s.local.store.save(data);
-  const exported = (await s.local.dispatch({ action: 'export-work', archive: true }, data.revision)).result;
-  const bytes = readFileSync(exported.archive.path),
-    id = randomUUID(),
-    backup = s.tables.projectBackups.get(s.backupId);
-  s.tables.projectBackups.set(id, {
-    ...backup,
-    _id: id,
-    storageId: id,
-    digest: digest(bytes),
-    size: bytes.length,
-    preview: await previewWorkArchive(new File([bytes], 'candidate.tar.gz')),
-  });
-  s.files.set(id, { blob: new Blob([bytes], { type: 'application/gzip' }) });
+  const next = await preparedCheckpoint(s, s.local.store);
+  next.input.previous = snapshot.backupId;
+  const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, next.input);
   return {
     projectId: s.projectId,
-    backupId: id,
+    backupId,
     expectedBackupId: snapshot.backupId,
     revision: snapshot.data.revision,
     operationId: randomUUID(),
+    continuation: true,
   };
 }
 async function nativeSetup(t) {
-  return setup(t, true, (_root, local) => {
+  const s = await setup(t, true, (_root, local) => {
     const data = local.store.load();
     for (let i = 0; i < 250; i++)
       data.intents.push({
@@ -69,6 +69,8 @@ async function nativeSetup(t) {
     data.revision++;
     local.store.save(data);
   });
+  wireObjects(s);
+  return s;
 }
 test('source return retains public generation, reuses rows and invalidates held CLI cursors by source revision', async t => {
   const s = await nativeSetup(t),
@@ -123,7 +125,9 @@ test('source return retains public generation, reuses rows and invalidates held 
     ordered([...s.tables.projectWorkRecords.values()].filter(row => row.generationId === generationId)),
     ordered(expected.entries),
   );
-  assert.deepEqual(JSON.parse(generation.metadata), expected.metadata);
+  const metadata = JSON.parse(generation.metadata);
+  for (const name of ['sourceAncestryClosure', 'sourceAncestryChunk']) delete metadata.counts[name];
+  assert.deepEqual(metadata, expected.metadata);
   assert.equal(
     JSON.parse(
       [...s.tables.projectWorkRecords.values()].find(
@@ -159,7 +163,7 @@ test('source return retains public generation, reuses rows and invalidates held 
   });
   assert.deepEqual(
     fresh.page.map(row => row.value.text),
-    ['First Intent later', 'Local append', 'Second Intent first'],
+    ['Second Intent first', 'First Intent later', 'Local append'],
   );
   await indexStore.retire._handler(s.ctx, { generationId });
   assert.ok(s.tables.projectWorkGenerations.has(generationId), 'active physical partition cannot retire');
@@ -188,10 +192,9 @@ test('source return retains public generation, reuses rows and invalidates held 
   const rebuilt = await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
   assert.equal(rebuilt, generationId);
   const partition = s.tables.projectWorkGenerations.get(rebuilt).recordsGenerationId;
-  assert.notEqual(partition, generationId);
-  assert.ok([...s.tables.projectWorkRecords.values()].some(row => row.generationId === partition));
+  assert.equal(partition, undefined, 'this append fits the current bounded delta transaction');
 });
-test('large deltas stage a partition under the stable generation; unavailable indexes can rebuild', async t => {
+test('metadata deltas retain the generation without consulting the legacy snapshot reader', async t => {
   for (const unavailable of [false, true]) {
     const s = await nativeSetup(t);
     await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
@@ -211,7 +214,7 @@ test('large deltas stage a partition under the stable generation; unavailable in
     const result = await returns.returnSource._handler(s.ctx, request);
     assert.equal(s.tables.hostedProjects.get(s.projectId).work.backupId, request.backupId);
     assert.equal(result.revision, request.revision + 2);
-    assert.equal(Boolean(s.tables.hostedProjects.get(s.projectId).work.generationId), !unavailable);
+    assert.equal(Boolean(s.tables.hostedProjects.get(s.projectId).work.generationId), true);
     s.ctx.runQuery = query;
     assert.ok(await indexActions.ensure._handler(s.ctx, { projectId: s.projectId }));
   }
@@ -219,12 +222,14 @@ test('large deltas stage a partition under the stable generation; unavailable in
 test('a concurrent hosted edit during index paging preserves current source, generation and original event', async t => {
   const s = await nativeSetup(t),
     generationId = await indexActions.ensure._handler(s.ctx, { projectId: s.projectId }),
-    request = await candidate(s);
+    request = await candidate(s, data => {
+      data.intents[0].notes.push({ kind: 'comment', text: 'Local append', at: 'local' });
+    });
   const query = s.ctx.runQuery;
   let raced = false;
   s.ctx.runQuery = async (ref, input) => {
     const result = await query(ref, input);
-    if (getFunctionName(ref) === 'projectWorkIndexStore:snapshotEntries' && !raced) {
+    if (getFunctionName(ref) === 'projectWorkIndexStore:lookups' && !raced) {
       raced = true;
       const data = await s.read();
       await s.send({
@@ -240,6 +245,7 @@ test('a concurrent hosted edit during index paging preserves current source, gen
     returns.returnSource._handler(s.ctx, request),
     error => error.data?.code === 'WORK_STALE',
   );
+  assert.equal(raced, true, 'the hosted edit occurred while selecting replacement rows');
   const project = s.tables.hostedProjects.get(s.projectId);
   assert.equal(project.work.backupId, s.backupId);
   assert.equal(project.work.generationId, generationId);
@@ -265,6 +271,7 @@ test('source return removes obsolete payload rows while retaining exact unknown 
     data.revision++;
     local.store.save(data);
   });
+  wireObjects(s);
   const generationId = await indexActions.ensure._handler(s.ctx, { projectId: s.projectId });
   const oldPayload = [...s.tables.projectWorkRecords.values()]
     .filter(row => row.collection === 'intents:payload')
@@ -293,7 +300,7 @@ test('index optimization never bypasses final current-owner authorization', asyn
     query = s.ctx.runQuery;
   s.ctx.runQuery = async (ref, input) => {
     const result = await query(ref, input);
-    if (getFunctionName(ref) === 'projectWorkIndexStore:snapshotEntries')
+    if (getFunctionName(ref) === 'projectWorkIndexStore:lookups')
       s.tables.hostedProjects.get(s.projectId).owner = 'replacement-owner';
     return result;
   };

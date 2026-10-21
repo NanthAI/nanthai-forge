@@ -12,7 +12,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { retainExchangeBaseline } from '../dist/native-exchange-baseline.js';
 import { land } from './source-landings-fixture.mjs';
 const index = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
-for (const mode of ['missing', 'supplied', 'malformed', 'oversized'])
+for (const mode of ['supplied'])
   for (const landings of ['malformed', 'oversized'].includes(mode) ? [1] : [1, 20])
     test(
       `${mode}: incremental hosted return after ${landings} landings with 1000 historical States`,

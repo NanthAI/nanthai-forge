@@ -14,7 +14,7 @@ import { invariant } from '../src/errors';
 const base = {
   projectId: v.id('hostedProjects'),
   owner: v.string(),
-  generationId: v.id('projectWorkGenerations'),
+  generationId: v.optional(v.id('projectWorkGenerations')),
   revision: v.number(),
 };
 export const resume = internalQuery({

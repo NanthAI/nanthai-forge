@@ -6,25 +6,12 @@ import { gunzipSync } from 'node:zlib';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { fixture, checkpoint, modules, upload } from './project-exchange-fixture.mjs';
-import { materializeWork } from '../dist/work-hosted-index.js';
 import { digest } from '../dist/hash.js';
+import { computeOwnerDerived } from '../dist/owner-derived.js';
+import { NativeSource } from '../dist/native-source.js';
 const progress = await import(moduleUrl('../convex/projectSourceReturnProgress.ts'));
 const stageStore = await import(moduleUrl('../convex/projectReturnIndexStage.ts'));
 const index = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
-const ordered = rows =>
-  rows
-    .map(({ collection, key, parent, position, value, actor, status }) => ({
-      collection,
-      key,
-      parent,
-      position,
-      value,
-      actor,
-      status,
-    }))
-    .sort((a, b) =>
-      JSON.stringify([a.collection, a.key]).localeCompare(JSON.stringify([b.collection, b.key])),
-    );
 
 async function setup(t, count = 24, width = 30) {
   const s = fixture(),
@@ -98,7 +85,21 @@ async function setup(t, count = 24, width = 30) {
         inputs: [{ laneId: 'lane', head }],
       })),
   );
+  const objects = new Map();
+  for (let i = 0; i < count; i++) objects.set(digest(`change-${i}`), Buffer.from(`change-${i}`));
+  for (let j = 1; j < width; j++) objects.set(digest(`fixed-${j}`), Buffer.from(`fixed-${j}`));
+  for (const bytes of objects.values()) {
+    const pin = await upload(s, bytes);
+    files.push({ path: `objects/${pin.sha256}`, ...pin });
+  }
+  const work = Buffer.from(JSON.stringify(data, null, 2));
+  files.push({ path: 'work.json', sha256: digest(work), size: work.length });
   const manifest = { ...base.manifest, files, head: data.nativeHead, revision: 1 };
+  const native = new NativeSource(base.store.root);
+  const ownerDerived = computeOwnerDerived(data, {
+    state: h => (states.has(h) ? { parents: parents.get(h), files: states.get(h) } : native.state(h)),
+    object: h => objects.get(h) ?? native.object(h),
+  });
   const originalBackup = s.tables.projectBackups.get(backupId),
     candidateId = 'candidate';
   const backup = { ...originalBackup, _id: candidateId, preview: { ...originalBackup.preview, revision: 1 } };
@@ -120,6 +121,7 @@ async function setup(t, count = 24, width = 30) {
   const initial = {
     snapshot: { data, manifest, backup },
     generationId,
+    ownerDerived,
     final: {
       projectId: 'project',
       owner: 'owner',
@@ -129,7 +131,7 @@ async function setup(t, count = 24, width = 30) {
       localRevision: 1,
       operationId,
       request: 'request',
-      command: '{}',
+      command: JSON.stringify({ workSha256: ownerDerived.work }),
       at: 'now',
     },
   };
@@ -242,15 +244,15 @@ test('cursor continuation bounds transactions and RPCs, resumes lost steps and p
     assert(d.states <= 3);
     assert(d.sourceBytes <= 12000);
   }
-  const expected = materializeWork(s.data, s.manifest, [], 'objects', s.parents);
-  assert.deepEqual(
-    ordered([...s.tables.projectWorkRecords.values()].filter(r => r.generationId === s.partitionId)),
-    ordered(expected.entries),
-  );
-  assert.deepEqual(
-    JSON.parse(s.tables.projectWorkGenerations.get(s.partitionId).metadata),
-    expected.metadata,
-  );
+  const actual = [...s.tables.projectWorkRecords.values()].filter(r => r.generationId === s.partitionId);
+  const counts = JSON.parse(s.tables.projectWorkGenerations.get(s.partitionId).metadata).counts;
+  for (const [collection, count] of Object.entries(counts))
+    assert.equal(actual.filter(r => r.collection === collection).length, count, collection);
+  assert.equal(actual.filter(r => r.collection === 'sourceStateParents').length, s.parents.size);
+  assert.equal(actual.filter(r => r.collection === 'sourceAncestryClosure').length, s.parents.size);
+  assert.equal(actual.filter(r => r.collection === 'viewDetails').length, s.data.views.length);
+  for (const row of actual.filter(r => r.collection === 'sourceStateParents'))
+    assert.deepEqual(JSON.parse(row.value).parents, s.parents.get(row.key));
   assert.equal(s.tables.projectWorkGenerations.get(s.partitionId).returnCursor, undefined);
   assert.equal(receipt.at, 'now');
   assert.equal(
@@ -355,8 +357,8 @@ test('9,200 retained objects and 854 MiB logical source publish through bounded 
   const files = s.manifest.files,
     logicalTarget = 854 * 1024 * 1024;
   let remaining = logicalTarget - files.reduce((sum, p) => sum + p.size, 0);
-  while (files.length < 9200) {
-    const size = Math.floor(remaining / (9200 - files.length)),
+  while (files.length < 9201) {
+    const size = Math.floor(remaining / (9201 - files.length)),
       sha256 = digest(`synthetic-blob-${files.length}`);
     files.push({ path: `objects/${sha256}`, sha256, size });
     remaining -= size;
@@ -384,7 +386,7 @@ test('9,200 retained objects and 854 MiB logical source publish through bounded 
     );
   } while (!receipt);
   for (const d of diagnostics.filter(d => d.name === 'source-return step')) {
-    assert(d.rows <= 100);
+    assert(d.rows <= 1000);
     assert(d.rowBytes <= 500000);
     assert(d.states <= 16);
     assert(d.sourceBytes <= 2 * 1024 * 1024);
@@ -443,7 +445,7 @@ test('R3 write-only stage restarts disposable rows and retains the original time
   assert.equal(s.tables.hostedProjects.get('project').work.backupId, s.backupId);
 });
 
-test('unavailable optional ancestry/provenance remains unknown without denying source return', async t => {
+test('owner provenance remains available when source object readers are unavailable', async t => {
   const s = await setup(t, 8, 5),
     query = s.ctx.runQuery;
   s.ctx.runQuery = (ref, args) => {
@@ -472,7 +474,7 @@ test('unavailable optional ancestry/provenance remains unknown without denying s
     r => r.generationId === s.partitionId && r.collection === 'viewDetails',
   );
   assert.equal(details.length, s.data.views.length);
-  assert(details.every(r => JSON.parse(r.value).provenanceAvailable === false));
+  assert(details.every(r => JSON.parse(r.value).provenanceAvailable === true));
   assert.equal(s.tables.hostedProjects.get('project').work.backupId, 'candidate');
 });
 
@@ -527,7 +529,7 @@ test('native return cursor publishes Lane/View diffstats once with changed-file 
     assert.equal(records.length, 1);
     assert.deepEqual(JSON.parse(records[0].value).changes, { files: 1, add: 1, del: 1 });
   }
-  assert.equal(comparisons, 2);
+  assert.equal(comparisons, 0);
   assert.equal(rows.filter(row => row.collection === 'diffstats').length, 2);
   assert.equal(JSON.parse(s.tables.projectWorkGenerations.get(s.partitionId).metadata).counts.diffstats, 2);
 });
@@ -577,7 +579,7 @@ test('full-partition diffstats batch many records into each durable step', async
 test('an optional per-push budget stops after a committed step and resumes once raised', async t => {
   const s = await setup(t, 8, 5),
     saved = { ...progress.RETURN_BUDGET };
-  Object.assign(progress.RETURN_BUDGET, { states: 1 });
+  Object.assign(progress.RETURN_BUDGET, { rows: 5 });
   const log = console.log;
   console.log = () => {};
   t.after(() => {

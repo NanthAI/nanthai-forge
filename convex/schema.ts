@@ -292,7 +292,9 @@ const projectFields = {
   ),
 };
 const projectBackupFields = {
+  displayProtocol: v.optional(v.literal(3)),
   metadataPublication: v.optional(v.id('projectPublications')),
+  ownerDerived: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   validatedWorkRecords: v.optional(v.literal(1)),
   validatedClosure: v.optional(v.literal(1)),
   historyBackfilling: v.optional(v.boolean()),
