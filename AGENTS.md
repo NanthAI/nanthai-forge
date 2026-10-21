@@ -26,6 +26,19 @@ nforge agent OWNER finish '{"laneId":"…","message":"…","accept":true}'
 
 `finish` checkpoints, merges the latest `main`, runs the `verify` check and accepts on pass. Details: [agent workflow](docs/agents/workflow.md). Lifecycle receipts include advisory local peers; incomplete coverage never establishes independence. `start.scope.paths` retains planned claims; other lifecycle scopes declare relevance for that call. Use `peers {"laneId":"…","detail":true}` or `forge_peers` for details. Clean checkpoints succeed with an unchanged head. When Forge gets in your way, add an entry to the friction log in the [roadmap](docs/roadmap.md) — that log decides what we fix next.
 
+## Agent source commands
+
+`nforge agent OWNER diff '{"laneId":"…"}'` summarizes base-to-live Lane changes.
+Use `{"from":"STATE","to":"STATE"}` for a pinned comparison; `paths:["src/file.ts"]`
+filters exact relative files and includes contextual hunks. Output uses review's
+byte budget and pagination; see `diff --help`.
+
+`nforge agent OWNER show '{"state":"STATE","path":"src/file.ts"}'` writes exact
+file bytes to stdout, without JSON or an added newline. `laneId` instead of `state`
+selects the Lane's saved head. Binary/invalid UTF-8 and files over 1 MiB require
+`force:true`. MCP `forge_review` exposes `diff` and `show`; `show` returns source
+pins and `content` with `encoding:"utf8"` or `"base64"`.
+
 ## Hard rules
 
 **Privacy and safety**

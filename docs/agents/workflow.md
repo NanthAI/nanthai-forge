@@ -74,6 +74,26 @@ Checkpoint, compose, run and accept also exist as separate actions. Checkpoint t
 
 Validation errors identify invalid field paths; use full source digests rather than abbreviated heads. Review only the needed detail. Lane parameters are `{"kind":"lane","id":"LANE_ID","expectedHead":"HEAD","paths":["src/file.ts"]}`. Candidate parameters also include `expectedBase` and `expectedStatus`. Omit paths for changed-path summaries. Review bodies default to `maxBytes:12000` (1024–48000); `context` accepts 0–10 lines and `limit` accepts 1–100 files. Continue with returned `nextOffset` and `reviewTree`; a changed live selection is detectable with `expectedReviewTree`. Git live review and staged checkpoint selection have separate pins. Legacy full review remains available.
 
+`nforge agent ROOT diff '{"laneId":"LANE_ID"}'` reuses compact review to compare
+Lane base to live source. For immutable snapshots, use
+`diff '{"from":"BASE_STATE","to":"HEAD_STATE"}'` with full source digests.
+Omit `paths` for a changed-path summary, or set `paths:["src/file.ts"]` to filter
+exact relative paths and include contextual hunks. Budgets, `offset`, `limit`,
+`context`, `nextOffset` and `expectedReviewTree` work as in `review`.
+Lane diffs return `base` and `head`; send `expectedHead` to detect a moved saved
+head, and `expectedReviewTree` to detect changes during live pagination.
+State comparisons return their exact `base` and `head` without reading live files.
+
+`nforge agent ROOT show '{"state":"STATE","path":"src/file.ts"}'` writes the
+file's exact bytes to stdout, without JSON wrapping or a trailing newline.
+Use `laneId` instead of `state` to resolve the Lane's saved head; unsaved edits
+are excluded. `state` must be a full digest. Symlinks return the retained link
+bytes, never their target. Missing files fail explicitly. Binary/invalid UTF-8
+files and files over 1 MiB fail unless `force:true` is supplied. Nothing is clipped.
+MCP `forge_review` supports both actions; `show` returns `{revision,result}` with
+`state`, optional `laneId`, `path`, `blob`, `mode`, `size`, `encoding` and `content`.
+Text uses `encoding:"utf8"`; binary bytes use `encoding:"base64"` for lossless transport.
+
 Lifecycle. When the project policy has `lifecycle.completeOnAccept:true`, accepting a Candidate (through `finish` or `accept`) marks its input Lanes `completed`, and their Intent when all its Lanes are completed, unless the request has `keepOpen:true`; the receipt lists them under `completed`. A Lane is `merged` (shown as `merged:true` and `mergedInto` in `status`/`records` Lane items) when it has its own work and its head is an ancestor-or-equal of an accepted Channel head. Reading never changes records. `complete-merged` (`{"channel":"main"}`) explicitly completes every open merged Lane and the Intents whose Lanes are all completed, returns what it changed and does nothing on repeat. `complete` and `reopen` take `{"laneId"}` or `{"intentId"}` and need no revision. Completion keeps all source and evidence and does not stop further edits. `clean` (dry run unless `{"apply":true}`) reclaims disk from finished check workspaces and completed Lanes' build dirs or fully captured directories; `reopen` restores a removed Lane (see [operations](../operations.md#local-cleanup)). With `lifecycle.cleanRegenerableCopies:true`, completion and abandonment automatically remove eligible reconstructable native Lane folders and report removals, skipped copies and restore instructions. Terminal native check workspace cleanup retains its existing behavior; when the cleanup policy is enabled it records a separate automatic-action outcome after evidence is durable, without changing the run receipt. Policy-off cleanup preserves the Work format. `DISK_LOW` refusals retain materialized workspace and runtime files even during later automatic sweeps.
 
 `records` returns the same page as `status` sections (`items`, `total`, `more`, `nextOffset`, plus the older `records`). Filters: `state` or `status` (for example `{"collection":"lanes","state":"active"}`) and `merged:false|true` for Lanes; filtered offsets index the filtered list. `observe`, `log` and `cancel` take the nested check run operation ID, not the finish ID. Resume a finish by replaying its original request plus `resolved` pins. A failed `run`, `observe` or `finish` receipt carries `failureSummary`, and `log` accepts `tail:BYTES` (up to 65536) to read the end of a stream. `run` accepts `{"laneId"}` instead of `viewId` (the Lane's latest clean Candidate) and defaults the check as `finish` does, so repeating a flaky check is one short command.

@@ -34,7 +34,7 @@ Omitted operationId and pins are filled from current state and returned under
 "resolved". After an unknown reply, retry with your request plus "resolved".
 
 Actions: tests, peers, peer-ack, link, take, start, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
-         log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, brief, guidance,
+         log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
          making-of, report.
 start intentId adds a sibling Lane; finish with:[laneId] lands siblings together.
 after:{intentId} or after:{viewId} waits for that work to land; land-ready resumes waits.
@@ -90,6 +90,8 @@ const examples: Record<string, unknown> = {
   records: { collection: 'lanes', state: 'active', merged: false, offset: 0, limit: 50 },
   'making-of': { intentId: 'INTENT_ID' },
   report: { laneId: 'LANE_ID', harness: 'claude-code', model: 'MODEL', tokens: { input: 1200, output: 340 } },
+  diff: { laneId: 'LANE_ID', paths: ['src/file.ts'] },
+  show: { state: 'STATE', path: 'src/file.ts' },
   review: { kind: 'lane', id: 'LANE_ID', expectedHead: 'HEAD', paths: ['src/file.ts'] },
 };
 const strict: Record<string, unknown> = {
@@ -110,6 +112,12 @@ function actionHelp(action: string): string {
   if (strict[action]) result += `Fully pinned: '${JSON.stringify(strict[action])}'\n`;
   if (action === 'review')
     result += `Candidate: ${JSON.stringify({ kind: 'view', id: 'CANDIDATE_ID', expectedHead: 'HEAD', expectedBase: 'BASE', expectedStatus: 'clean', paths: ['src/file.ts'] })}\nUse full 40- or 64-character source digests; abbreviated heads are invalid. Omit paths for changed-path summaries. Body budget: maxBytes 1024..48000 (default 12000), context 0..10 (default 3), limit 1..100 (default 20), offset 0 or higher. Continue with nextOffset and expectedReviewTree:reviewTree; keep the same source pins.\n`;
+  if (action === 'diff')
+    result +=
+      'Select laneId for base-to-live changes, or from/to full State digests for an immutable comparison. Omit paths for a summary; paths selects exact relative files and contextual hunks. Same budgets and pagination as review: maxBytes 1024..48000 (default 12000), context 0..10, limit 1..100, offset; continue with returned head/base and expectedReviewTree. Lane comparisons accept expectedHead.\n';
+  if (action === 'show')
+    result +=
+      'Select exactly one state (full digest) or laneId (saved head), plus a relative file path. Writes exact bytes to stdout without JSON or an added newline. Binary/invalid UTF-8 or files over 1 MiB require force:true. MCP returns source pins and content with encoding utf8 or base64.\n';
   if (action === 'link')
     result +=
       'Select exactly one laneId, viewId or save (full source digest). path is an optional relative source file; line requires path. Links target the hosted app; an unpublished head may be unavailable until source is pushed.\n';
@@ -215,5 +223,12 @@ export async function agentCli(args: string[]): Promise<unknown> {
     if (laneId) selected.laneId = laneId;
   }
   const response = await agent.dispatch({ ...selected, action });
+  if (action === 'show') {
+    const file = response.result as ReturnType<
+      typeof import('./agent-source-read.js').readAgentShow
+    >['result'];
+    process.stdout.write(Buffer.from(file.content, file.encoding));
+    return undefined;
+  }
   return action === 'brief' ? response.result : response;
 }

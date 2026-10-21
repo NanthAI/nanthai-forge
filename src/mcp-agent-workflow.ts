@@ -139,9 +139,9 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
     },
     {
       name: 'forge_review',
-      actions: ['review', 'view', 'provenance', 'views'],
+      actions: ['review', 'diff', 'show', 'view', 'provenance', 'views'],
       description:
-        'Read an exact Lane or Candidate changed-path summary or selected contextual hunks. Use candidate and candidates; view and views are deprecated aliases. JSON fields (viewId, views) are unchanged. Truncation and unknown coverage stay explicit.',
+        'diff reads a live Lane or from/to pinned States using the review budgets and paths filter; show reads a pinned State file (laneId selects its saved head), returning content with utf8 or base64 encoding; force:true permits binary or over-1-MiB files. Read an exact Lane or Candidate changed-path summary or selected contextual hunks. Use candidate and candidates; view and views are deprecated aliases. JSON fields (viewId, views) are unchanged. Truncation and unknown coverage stay explicit.',
     },
   ];
   for (const group of groups) {
@@ -157,7 +157,9 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
         inputSchema: { command: schema },
         annotations: {
           readOnlyHint: group.actions.every(action =>
-            ['tests', 'link', 'review', 'records', 'view', 'provenance', 'views'].includes(action),
+            ['tests', 'link', 'review', 'diff', 'show', 'records', 'view', 'provenance', 'views'].includes(
+              action,
+            ),
           ),
           destructiveHint: group.actions.includes('clean'),
           idempotentHint: group.actions.every(action =>
@@ -170,6 +172,8 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
               'making-of',
               'report',
               'review',
+              'diff',
+              'show',
               'view',
               'provenance',
               'views',

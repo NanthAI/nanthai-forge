@@ -138,6 +138,27 @@ test('agent MCP profile awaits graph readiness, preserves selectors and legacy t
   });
   assert.ok(!started.isError);
   const lane = started.body.result;
+  const reviewTool = tools.find(tool => tool.name === 'forge_review');
+  assert.equal(reviewTool.annotations.readOnlyHint, true);
+  assert.equal(reviewTool.annotations.idempotentHint, true);
+  const diff = await call('forge_review', { command: { action: 'diff', laneId: lane.laneId } });
+  assert.ok(!diff.isError);
+  assert.equal(diff.body.result.head, lane.head);
+  const stateDiff = await call('forge_review', {
+    command: { action: 'diff', from: lane.head, to: lane.head },
+  });
+  assert.ok(!stateDiff.isError);
+  assert.equal(stateDiff.body.result.total, 0);
+  const shown = await call('forge_review', { command: { action: 'show', state: lane.head, path: 'a.ts' } });
+  assert.ok(!shown.isError);
+  assert.equal(shown.body.result.content, 'export const answer = 1;\n');
+  assert.equal(shown.body.result.encoding, 'utf8');
+  assert.equal(shown.body.result.state, lane.head);
+  const missingFile = await call('forge_review', {
+    command: { action: 'show', laneId: lane.laneId, path: 'missing' },
+  });
+  assert.equal(missingFile.isError, true);
+  assert.equal(missingFile.body.error.code, 'NOT_FOUND');
   const selectedTests = await call('forge_check', { command: { action: 'tests', laneId: lane.laneId } });
   assert.ok(!selectedTests.isError);
   assert.equal(selectedTests.body.result.head, lane.head);

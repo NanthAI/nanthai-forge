@@ -9,6 +9,7 @@ import { peersInputSchema, peersScopeSchema } from './agent-peers.js';
 import { afterSchema } from './work-types.js';
 import { dependencySchema, invariantPinSchema, defineCheckCommandSchema } from './work-types.js';
 import { agentReviewSchema } from './agent-review.js';
+import { agentDiffSchema, agentShowSchema } from './agent-source-read.js';
 import { cleanSchema } from './agent-clean.js';
 import { reportedTokensSchema } from './making-of.js';
 const id = z.string().uuid(),
@@ -233,6 +234,8 @@ export const agentActionSchema = z.discriminatedUnion('action', [
     merged: z.boolean().optional(),
   }),
   agentReviewSchema.extend({ action: z.literal('review') }),
+  agentDiffSchema.safeExtend({ action: z.literal('diff') }),
+  agentShowSchema.safeExtend({ action: z.literal('show') }),
   cleanSchema,
 ]);
 export type AgentAction = z.infer<typeof agentActionSchema>;

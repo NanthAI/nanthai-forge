@@ -35,6 +35,15 @@ export const agentReviewSchema = z
     maxBytes: z.number().int().min(1024).max(48000).default(12000),
   })
   .strict();
+export const agentStateDiffSchema = agentReviewSchema
+  .pick({ paths: true, offset: true, limit: true, context: true, maxBytes: true, expectedReviewTree: true })
+  .extend({
+    from: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/),
+    to: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/),
+  });
+export function readAgentStateDiff(store: WorkStore, input: z.input<typeof agentStateDiffSchema>) {
+  return readReview(store, agentStateDiffSchema.parse(input));
+}
 export type AgentReviewInput = z.input<typeof agentReviewSchema>;
 type File = { hash: string; hashKind: 'sha256' | 'git-object'; mode: string };
 type Change = {
@@ -49,24 +58,34 @@ function status(before: File | null, after: File | null): Change['status'] {
 
 /** Compact review is an observation, never evidence of acceptance or coverage. */
 export function readAgentReview(store: WorkStore, input: AgentReviewInput) {
-  const command = agentReviewSchema.parse(input);
+  return readReview(store, agentReviewSchema.parse(input));
+}
+function readReview(
+  store: WorkStore,
+  command: z.output<typeof agentReviewSchema> | z.output<typeof agentStateDiffSchema>,
+) {
+  const selection = 'kind' in command ? command : undefined,
+    states = 'from' in command ? command : undefined;
   return store.locked(() => {
     const data = store.load(),
-      lane = command.kind === 'lane' ? data.lanes.find(item => item.id === command.id) : undefined;
-    const view = command.kind === 'view' ? data.views.find(item => item.id === command.id) : undefined;
-    invariant(lane || view, 'NOT_FOUND', 'Select an existing Lane or Candidate.');
-    const base = (lane ?? view)!.base,
-      head = (lane ?? view)!.head;
-    invariant(head === command.expectedHead, 'VIEW_STALE', 'Select the original retained source head.');
+      lane = selection?.kind === 'lane' ? data.lanes.find(item => item.id === selection.id) : undefined;
+    const view = selection?.kind === 'view' ? data.views.find(item => item.id === selection.id) : undefined;
+    invariant(states || lane || view, 'NOT_FOUND', 'Select an existing Lane or Candidate.');
+    const base = states?.from ?? (lane ?? view)!.base,
+      head = states?.to ?? (lane ?? view)!.head;
+    invariant(
+      !selection || head === selection.expectedHead,
+      'VIEW_STALE',
+      'Select the original retained source head.',
+    );
     if (view)
       invariant(
-        base === command.expectedBase && view.status === command.expectedStatus,
+        base === selection?.expectedBase && view.status === selection?.expectedStatus,
         'VIEW_STALE',
         'Select the exact Candidate base and status.',
       );
     const pins = {
-      kind: command.kind,
-      id: command.id,
+      ...(selection ? { kind: selection.kind, id: selection.id } : { kind: 'states' }),
       base,
       head,
       ...(view ? { status: view.status, inputs: view.inputs, dependencies: view.dependencies ?? [] } : {}),
@@ -140,6 +159,13 @@ export function readAgentReview(store: WorkStore, input: AgentReviewInput) {
         return { before, after };
       };
     } else {
+      if (states)
+        for (const state of [base, head])
+          invariant(
+            workGit(store.root, ['cat-file', '-t', state]).trim() === 'commit',
+            'BAD_ARGUMENT',
+            'Select exact source commits for from and to.',
+          );
       if (path) {
         invariant(
           existsSync(path) &&

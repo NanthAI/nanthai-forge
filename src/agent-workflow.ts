@@ -48,6 +48,7 @@ import { agentSync, type SyncCommand } from './agent-sync.js';
 import { allRecords } from './agent-lifecycle.js';
 import { resolveAgentDefaults } from './agent-defaults.js';
 import { laneReceipt, viewReceipt, runReceipt, acceptanceReceipt } from './agent-receipts.js';
+import { readAgentDiff, readAgentShow } from './agent-source-read.js';
 import { readAgentReview } from './agent-review.js';
 import { readMakingOf, reportUsage } from './making-of-read.js';
 import type { CheckRun, WorkView, WorkData } from './work-types.js';
@@ -114,13 +115,15 @@ export class AgentWorkflow {
     if (command.action === 'tests') return agentLaneTests(store, command.laneId);
     // A cleaned Lane is restored before an action needs its source.
     const needed =
-      command.action === 'review'
-        ? command.kind === 'lane'
-          ? command.id
-          : undefined
-        : ['reopen', 'checkpoint', 'sync', 'undo-sync', 'finish'].includes(command.action)
-          ? (command as { laneId?: string }).laneId
-          : undefined;
+      command.action === 'diff'
+        ? command.laneId
+        : command.action === 'review'
+          ? command.kind === 'lane'
+            ? command.id
+            : undefined
+          : ['reopen', 'checkpoint', 'sync', 'undo-sync', 'finish'].includes(command.action)
+            ? (command as { laneId?: string }).laneId
+            : undefined;
     let warnings: string[] = [];
     const closedFinishReplay =
       command.action === 'finish' &&
@@ -281,6 +284,16 @@ export class AgentWorkflow {
     if (command.action === 'finish') return this.finish(command as FinishAction);
     if (command.action === 'land-ready')
       return landReady(store, pending => this.dispatch(pending), this.work);
+    if (command.action === 'diff') {
+      const { action: _action, ...selection } = command;
+      void _action;
+      return readAgentDiff(store, selection);
+    }
+    if (command.action === 'show') {
+      const { action: _action, ...selection } = command;
+      void _action;
+      return readAgentShow(store, selection);
+    }
     if (command.action === 'review') {
       const { action: _action, ...review } = command;
       void _action;
