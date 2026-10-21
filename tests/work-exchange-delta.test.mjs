@@ -13,6 +13,7 @@ import {
   validateWorkDelta,
   validateChangedRecords,
   applyWorkDelta,
+  channelMetadataChanges,
 } from '../dist/work-exchange-delta.js';
 import { workSchema } from '../dist/work-types.js';
 import { digest } from '../dist/hash.js';
@@ -215,6 +216,39 @@ test('changed Views resolve their Lane inputs within the same Intent', async () 
   const p = pair(before, after);
   await assert.rejects(
     () => validateChangedRecords(p.a.root, p.b.root, p.delta.changes, p.read, new Set([head])),
+    e => e.code === 'INVALID_WORK_BACKUP',
+  );
+});
+
+test('only post-accept check links inherit validated receipt dependencies; altered acceptance pins do not', async () => {
+  const before = seed();
+  before.channelMoves.push({
+    id: randomUUID(),
+    channel: 'main',
+    viewId: randomUUID(),
+    head,
+    previous: null,
+    at: 'now',
+    status: 'accepted',
+    provenance: 'user-declared-local',
+  });
+  const after = structuredClone(before);
+  after.revision++;
+  after.channelMoves[0].postAcceptRunId = randomUUID();
+  let p = pair(before, after);
+  assert.deepEqual(
+    [...(await channelMetadataChanges(p.a.root, p.b.root, p.delta.changes, p.read))],
+    [recordIdentity('channelMoves', before.channelMoves[0].id)],
+  );
+  for (const field of ['head', 'viewId', 'at']) {
+    const forged = structuredClone(after);
+    forged.channelMoves[0][field] =
+      field === 'head' ? 'b'.repeat(64) : field === 'viewId' ? randomUUID() : 'changed';
+    p = pair(before, forged);
+    assert.equal((await channelMetadataChanges(p.a.root, p.b.root, p.delta.changes, p.read)).size, 0, field);
+  }
+  await assert.rejects(
+    channelMetadataChanges(p.a.root, p.b.root, p.delta.changes, async () => Buffer.from('corrupt')),
     e => e.code === 'INVALID_WORK_BACKUP',
   );
 });

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { parseJsonStream } from './json-stream.js';
+import { validateRecordPacks, type RecordPack } from './work-record-packs.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { sourceManifestSchema } from './work-archive-metadata.js';
@@ -15,8 +16,7 @@ import type { WorkData } from './work-types.js';
 
 /** Four independent immutable reads in flight; preserve record order and drain
  * failures before returning. Each read is <=100 records / a 2 MiB target. */
-export function batchedRecordReader(records: WorkRecordRoot, read: (pins: BytePin[]) => Promise<Buffer[]>) {
-  const pins = records.fields.flatMap(field => ('records' in field ? field.records : []));
+function batchedPinReader(pins: BytePin[], read: (pins: BytePin[]) => Promise<Buffer[]>) {
   const pending: { start: number; end: number; result: Promise<PromiseSettledResult<Buffer[]>> }[] = [];
   let queued = 0,
     position = 0,
@@ -74,6 +74,53 @@ export function batchedRecordReader(records: WorkRecordRoot, read: (pins: BytePi
     },
   };
 }
+/** Packs amortize per-object storage/authority calls without trusting any
+ * record body. Callers still check each body and the whole canonical digest. */
+export function batchedRecordReader(
+  records: WorkRecordRoot,
+  read: (pins: BytePin[]) => Promise<Buffer[]>,
+  packs?: RecordPack[],
+) {
+  if (!packs)
+    return batchedPinReader(
+      records.fields.flatMap(f => ('records' in f ? f.records : [])),
+      read,
+    );
+  const pins = validateRecordPacks(records, packs),
+    reader = batchedPinReader(packs, read);
+  let index = 0,
+    position = 0,
+    offset = 0,
+    bytes: Buffer | undefined;
+  return {
+    async read(pin: BytePin) {
+      const pack = packs[index]!;
+      invariant(
+        pack && pins[position]?.sha256 === pin.sha256 && pins[position]?.size === pin.size,
+        'INVALID_WORK_BACKUP',
+        'Packed record traversal order changed.',
+      );
+      if (!bytes) {
+        bytes = await reader.read(pack);
+        invariant(
+          bytes.length === pack.size && digest(bytes) === pack.sha256,
+          'INVALID_WORK_BACKUP',
+          'Packed record bytes differ from their pin.',
+        );
+      }
+      const result = bytes.subarray(offset, offset + pin.size);
+      offset += pin.size + 2;
+      position++;
+      if (position === pack.first + pack.count) {
+        index++;
+        bytes = undefined;
+        offset = 0;
+      }
+      return result;
+    },
+    drain: reader.drain,
+  };
+}
 /** Complete validation still reads every byte. Only parsed Work and a bounded
  * read window are retained, never a second whole byte/string representation. */
 export async function resolveExchangeWork(bytes: Buffer, read: (pins: BytePin[]) => Promise<Buffer[]>) {
@@ -117,7 +164,7 @@ export async function resolveExchangeWork(bytes: Buffer, read: (pins: BytePin[])
     'INVALID_WORK_BACKUP',
     'Record root differs from logical Work.',
   );
-  const reader = batchedRecordReader(records, read);
+  const reader = batchedRecordReader(records, read, root.recordPacks);
   try {
     return { manifest, data: (await parseJsonStream(workRecordChunks(records, reader.read))) as WorkData };
   } finally {

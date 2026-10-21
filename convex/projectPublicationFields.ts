@@ -20,6 +20,16 @@ export const publicationDocument = v.object({
   ...publicationFields,
 });
 export const publicationTables = {
+  projectPublicationAttempts: defineTable({
+    projectId: v.id('hostedProjects'),
+    owner: v.string(),
+    operationId: v.string(),
+    request: v.string(),
+    attemptId: v.string(),
+    expiresAt: v.number(),
+  })
+    .index('by_project_and_operation', ['projectId', 'operationId'])
+    .index('by_project', ['projectId']),
   projectPublications: defineTable(publicationFields)
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_project', ['projectId']),

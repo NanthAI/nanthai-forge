@@ -1,6 +1,6 @@
 # Pinned npm dependency license inventory
 
-Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 388 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
+Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 389 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
 
 The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Apache-2.0 license](https://github.com/get-convex/convex-backend/blob/precompiled-2026-09-28-5c7cb5b/LICENSE.md), not the npm client license. Its bundled native dependencies are outside this npm inventory; [native license coverage](native-dependency-licenses.md) records the inspected pins and remaining gaps. Forge's own boundaries are in [the licensing map](../LICENSE.md).
 
@@ -373,6 +373,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/type-is/node_modules/content-type | 2.1.0 | MIT | runtime |
 | node_modules/typescript | 5.9.3 | Apache-2.0 | runtime |
 | node_modules/typescript-eslint | 8.59.0 | MIT | development |
+| node_modules/undici | 7.30.1 | MIT | runtime |
 | node_modules/undici-types | 6.21.0 | MIT | development |
 | node_modules/unified | 11.0.5 | MIT | runtime |
 | node_modules/unist-util-is | 6.0.1 | MIT | runtime |

@@ -14,6 +14,7 @@ import { workBytes, applyHostedEvent, parseWorkBytes } from '../dist/work-metada
 import { recordBytes, buildWorkRecords } from '../dist/work-exchange-records.js';
 import { buildExchangeRoot } from '../dist/native-exchange-tree.js';
 import { convertWorkTo18 } from '../dist/work-intent-converter.js';
+import { legacyPolicy } from '../dist/autonomy-policy.js';
 import { unifyIntent } from '../dist/work-intent-local.js';
 import { digest } from '../dist/hash.js';
 const index = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
@@ -96,7 +97,7 @@ test('complete record seed preserves absent defaults and rejects changed Work at
   );
 });
 
-async function setup(t, records = true, history = 3, active = false, unified = false) {
+async function setup(t, records = true, history = 3, active = false, unified = false, bindings = false) {
   const s = fixture(),
     first = await checkpoint(t, s);
   land(first.store, history, 2);
@@ -122,6 +123,94 @@ async function setup(t, records = true, history = 3, active = false, unified = f
     data.intentAliases.push({ aliasId: randomUUID(), intentId: data.intents[0].id });
     // Catalog metadata itself can exceed the old delta budget. This is not a delta-size limit.
     data.legacyIntentMerge.fields.synthetic = 'x'.repeat(4 * 1024 * 1024 + 1);
+    first.store.save(data);
+  }
+  if (bindings) {
+    const data = first.store.load();
+    const view = data.views[0],
+      runId = randomUUID(),
+      checkId = randomUUID();
+    const check = {
+      id: checkId,
+      name: 'Synthetic historical check',
+      executable: 'node',
+      args: [],
+      environmentLabel: 'synthetic',
+      definition: 'a'.repeat(64),
+      at: 'now',
+    };
+    data.checks.push(check);
+    data.runs.push({
+      id: runId,
+      viewId: view.id,
+      head: view.head,
+      base: view.base,
+      inputs: view.inputs,
+      dependencies: [],
+      check,
+      environment: {
+        platform: 'synthetic',
+        arch: 'synthetic',
+        os: 'synthetic',
+        node: 'synthetic',
+        env: {},
+        fingerprint: 'b'.repeat(64),
+      },
+      status: 'passed',
+      startedAt: 'now',
+      endedAt: 'later',
+      runner: { pid: 1, host: 'synthetic' },
+      details: 'x'.repeat(3 * 1024 * 1024),
+    });
+    for (const move of data.channelMoves)
+      move.fastPath = {
+        policy: legacyPolicy(),
+        kind: 'disjoint-fast-path',
+        checkedViewId: view.id,
+        checkedHead: view.head,
+        runId,
+        checkDefinition: check.definition,
+        environmentFingerprint: 'b'.repeat(64),
+        composedMain: move.head,
+        previousMain: move.previous,
+        lanePaths: [],
+        mainPaths: [],
+        cleanComposition: true,
+        descendant: true,
+        postAccept: { checkId, mode: 'full', required: true },
+      };
+    data.githubSync = {
+      repository: 'synthetic/project',
+      branch: 'main',
+      adoptedCommit: '',
+      pushed: 0,
+      commits: [
+        {
+          operationId: randomUUID(),
+          state: data.nativeHead,
+          acceptanceId: randomUUID(),
+          viewId: randomUUID(),
+          commit: 'a'.repeat(40),
+          parent: '',
+          tree: 'b'.repeat(40),
+          message: 'Synthetic mirror',
+          author: { name: 'Synthetic', email: 'synthetic@example.invalid' },
+          committer: { name: 'Synthetic', email: 'synthetic@example.invalid' },
+          seconds: 0,
+        },
+      ],
+    };
+    data.githubAutoPush = {
+      id: 'github-auto-push',
+      repository: 'synthetic/project',
+      acceptanceId: randomUUID(),
+      state: data.nativeHead,
+      operationId: randomUUID(),
+      status: 'queued',
+      attempts: 0,
+      at: 'now',
+      undo: 'Synthetic undo',
+    };
     first.store.save(data);
   }
   const baseline = first.store.load();
@@ -408,4 +497,67 @@ test('dogfood-like unified Work seeds validated large catalogs and returns throu
   assert.equal(hosted.data.schema, 18);
   assert.deepEqual(hosted.data.intentAliases, f.baseline.intentAliases);
   assert.ok(hosted.data.intents.some(i => i.base === undefined));
+});
+
+test('format-18 seed followed by routine record and mirror metadata changes publishes delta and returns through records', async t => {
+  const logs = [];
+  t.mock.method(console, 'log', (...args) => logs.push(args));
+  const f = await setup(t, true, 5, true, true, true);
+  assert.ok(
+    logs.some(([name, details]) => name === 'work-record exchange prepared' && details.mode === 'seed'),
+  );
+  const data = f.first.store.load();
+  data.revision++;
+  data.intents.at(-1).notes.push({ kind: 'comment', text: 'Routine synthetic change', at: 'later' });
+  for (const move of data.channelMoves) move.postAcceptRunId = data.runs[0].id;
+  data.githubSync.pushed = 1;
+  data.githubSync.pushedAt = '2026-10-21T09:00:00Z';
+  data.githubAutoPush.status = 'pushed';
+  data.githubAutoPush.attempts++;
+  f.first.store.save(data);
+  const next = await preparedCheckpoint(f.s, f.first.store, 0, f.baselineKey, {
+    records: true,
+    baseline: f.baseline,
+    journalRevision: f.baseline.revision,
+  });
+  next.input.previous = f.backupId;
+  const uploadedBytes = [...next.tree.objects]
+    .filter(([sha]) => !f.seed.tree.objects.has(sha))
+    .reduce((sum, [, bytes]) => sum + bytes.length, 0);
+  assert.ok(uploadedBytes < 512 * 1024, `routine metadata upload: ${uploadedBytes}`);
+  const backupId = await modules.projectExchangeActions.publish._handler(f.s.ctx, next.input);
+  assert.ok(
+    logs.some(([name, details]) => name === 'work-record exchange prepared' && details.mode === 'delta'),
+  );
+  assert.ok(
+    !logs.some(
+      ([name, details]) =>
+        name === 'work-record publication skip' && details.reason === 'delta-layout-unsupported',
+    ),
+  );
+  let unrelatedReads = 0;
+  const runPin = digest(recordBytes(f.baseline.runs[0]));
+  const runObject = [...f.s.tables.projectObjects.values()].find(row => row.digest === runPin);
+  const get = f.s.ctx.storage.get;
+  f.s.ctx.storage.get = id => {
+    if (id === runObject.storageId) unrelatedReads++;
+    return get(id);
+  };
+  const receipt = await complete(f.s, {
+    projectId: 'project',
+    backupId,
+    expectedBackupId: f.backupId,
+    revision: f.baseline.revision,
+    operationId: randomUUID(),
+    continuation: true,
+  });
+  assert.ok(logs.some(([name]) => name === 'work-record return prepared'));
+  assert.equal(unrelatedReads, 0, 'post-accept links do not reload unchanged historical check logs');
+  f.s.ctx.storage.get = get;
+  const loaded = await modules.projectWorkActions.load(f.s.ctx, 'project', 'owner');
+  assert.equal(loaded.data.runs[0].details, f.baseline.runs[0].details);
+  assert.equal(loaded.data.githubSync.pushed, 1);
+  assert.equal(loaded.data.githubAutoPush.status, 'pushed');
+  assert.equal(loaded.data.intents.at(-1).notes.at(-1).text, 'Routine synthetic change');
+  assert.equal(loaded.data.revision, receipt.revision);
 });

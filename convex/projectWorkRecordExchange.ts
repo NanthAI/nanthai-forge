@@ -16,6 +16,7 @@ import {
 import {
   validateWorkDelta,
   validateChangedRecords,
+  channelMetadataChanges,
   supportsWorkDelta,
   WORK_DELTA_BYTES,
 } from '../src/work-exchange-delta';
@@ -24,14 +25,34 @@ import { workDeltaContext } from '../src/work-exchange-context';
 import { sourceManifestSchema, archiveChannels } from '../src/work-archive-metadata';
 import { invariant } from '../src/errors';
 import { digest } from '../src/hash';
+import type { RecordPack } from '../src/work-record-packs';
 import type { WorkData } from '../src/work-types';
 export async function recordExchange(
   backup: Pick<Doc<'projectBackups'>, 'projectId' | 'digest' | 'size' | 'objectManifest'>,
   owner: string,
   reader: ExchangeObjectReader,
 ) {
-  const read = async (pin: { sha256: string; size: number }) =>
-    (await reader.read(backup.projectId, owner, [pin]))[0]!;
+  // Reuse authenticated record bodies across the validation phases of this one
+  // action. This cache never serves a source-read endpoint or another action;
+  // publication/source-return commits recheck current authority and exact pins.
+  // The underlying reader still checks authority on every actual storage read.
+  const bodies = new Map<string, Promise<Buffer>>();
+  let retained = 0;
+  const read = (pin: { sha256: string; size: number }) => {
+    const key = JSON.stringify([pin.sha256, pin.size]);
+    const existing = bodies.get(key);
+    if (existing) return existing;
+    const result = reader.read(backup.projectId, owner, [pin]).then(bytes => bytes[0]!);
+    if (retained + pin.size <= 8 * 1024 * 1024) {
+      retained += pin.size;
+      bodies.set(key, result);
+      result.catch(() => {
+        bodies.delete(key);
+        retained -= pin.size;
+      });
+    }
+    return result;
+  };
   const bytes = await read({
     sha256: backup.objectManifest?.digest ?? backup.digest,
     size: backup.objectManifest?.size ?? backup.size,
@@ -104,8 +125,9 @@ export async function verifyRecordDigest(
   reader: ExchangeObjectReader,
   backup: Pick<Doc<'projectBackups'>, 'projectId'>,
   owner: string,
+  packs?: RecordPack[],
 ) {
-  const batch = batchedRecordReader(records, pins => reader.read(backup.projectId, owner, pins));
+  const batch = batchedRecordReader(records, pins => reader.read(backup.projectId, owner, pins), packs);
   try {
     await hashWorkRecords(records, batch.read);
   } finally {
@@ -148,7 +170,13 @@ export async function recordPublication(
     root: previous.root.records.sha256,
   });
   if (!supportsWorkDelta(previous.records, candidate.records)) return skip('delta-layout-unsupported');
-  if (!(await workDeltaContext(previous.records, candidate.records, delta, candidate.read)))
+  const metadataOnly = await channelMetadataChanges(
+    previous.records,
+    candidate.records,
+    delta.changes,
+    candidate.read,
+  );
+  if (!(await workDeltaContext(previous.records, candidate.records, delta, candidate.read, [], metadataOnly)))
     return skip('context-over-budget');
   const files = new Map(
     previous.manifest.files.filter(p => p.path !== 'work.json').map(p => [p.sha256, p.size]),
@@ -162,10 +190,18 @@ export async function recordPublication(
     delta.changes,
     candidate.read,
     pins,
+    metadataOnly,
   );
-  if (delta.changes.some(change => change.collection === 'channelMoves' && change.previous !== null))
+  if (
+    delta.changes.some(
+      change =>
+        change.collection === 'channelMoves' &&
+        change.previous !== null &&
+        !metadataOnly.has(JSON.stringify([change.collection, change.key])),
+    )
+  )
     return skip('channel-history-replaced');
-  await verifyRecordDigest(candidate.records, reader, input, owner);
+  await verifyRecordDigest(candidate.records, reader, input, owner, candidate.root.recordPacks);
   const channels = new Map(
     prior.preview.channels.map((channel: { name: string; head: string }) => [channel.name, channel]),
   );

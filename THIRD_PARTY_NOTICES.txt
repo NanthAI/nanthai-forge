@@ -1,7 +1,7 @@
 NanthAi:Forge third-party npm notices
 
 Exact upstream license/notice files for installed locked production dependencies.
-Lockfile SHA-256: cf3c25d1e89a5dac01e1e1a3b2ec0fa861772e565cdd5083912d09a5f5618779
+Lockfile SHA-256: 7db0075f64d9b40640399a06d4e8e7d1970b0618f49bb749dd0b0bed427d989c
 Dependencies retain their own licenses; this document does not relicense them.
 The separately launched native Convex backend is not included in this package.
 NanthAi brand rights are described separately in web/src/assets/NOTICE.md.
@@ -5822,6 +5822,32 @@ If the Work includes a "NOTICE" text file as part of its distribution, then any 
 9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
 
 END OF TERMS AND CONDITIONS
+
+===== End original file =====
+
+===== undici@7.30.1: node_modules/undici/LICENSE =====
+Original bytes: 1090; SHA-256: a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27
+MIT License
+
+Copyright (c) Matteo Collina and Undici contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ===== End original file =====
 

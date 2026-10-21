@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { Agent } from 'undici';
 import { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import { exchangeFetch, exchangeRequest } from '../dist/exchange-request.js';
@@ -367,4 +368,81 @@ test('R2 GET tracking names the pending call and clears both successful and fail
       ['R2 object download', false],
     ]);
   }
+});
+
+test('long actions keep the full ten-minute header and total budget; quick calls keep short deadlines', async t => {
+  const realTimeout = globalThis.setTimeout,
+    timers = [];
+  t.mock.method(globalThis, 'setTimeout', (fn, ms, ...args) => {
+    timers.push(ms);
+    return realTimeout(fn, ms, ...args);
+  });
+  t.mock.method(globalThis, 'fetch', async () => new Response('{}'));
+  const fetch = exchangeConvexFetch();
+  for (const path of [
+    'projectExchangeActions:publish',
+    'projectSourceReturn:returnSource',
+    'projectWorkActions:exportJournal',
+    'projectWorkIndexActions:ensure',
+    'projectExchangeActions:manifest',
+    'projectExchangeActions:completeHistory',
+    'projectObjectRecipes:complete',
+    'projectWorkActions:initialize',
+    'projectExchangeMigration:migrate',
+  ]) {
+    timers.length = 0;
+    await fetch('https://fixture.invalid/api/action', { body: JSON.stringify({ path, args: [{}] }) });
+    assert.deepEqual(timers.slice(0, 2), [600000, 600000], path);
+  }
+  for (const [api, path] of [
+    ['query', 'projectWorkJournal:page'],
+    ['mutation', 'projectObjects:prepareBatch'],
+    ['action', 'projectExchangeActions:checkpoint'],
+    ['action', 'projectExchangeActions:downloadPart'],
+  ]) {
+    timers.length = 0;
+    await fetch(`https://fixture.invalid/api/${api}`, { body: JSON.stringify({ path, args: [{}] }) });
+    assert.deepEqual(timers.slice(0, 2), [30000, 120000], path);
+  }
+});
+
+test('a publish response arriving after the former header deadline is consumed once', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let release,
+    calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    return new Promise(resolve => {
+      release = resolve;
+    });
+  });
+  const pending = exchangeConvexFetch()('https://fixture.invalid/api/action', {
+    body: JSON.stringify({ path: 'projectExchangeActions:publish', args: [{ operationId: 'original' }] }),
+  });
+  t.mock.timers.tick(180001);
+  release(new Response('receipt'));
+  assert.equal(await (await pending).text(), 'receipt');
+  assert.equal(calls, 1);
+});
+
+test('long actions override the native HTTP header deadline at dispatch; quick calls use the default transport', async t => {
+  const dispatched = [];
+  t.mock.method(Agent.prototype, 'dispatch', options => {
+    dispatched.push(options);
+    return true;
+  });
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    init.dispatcher?.dispatch({ origin: 'https://fixture.invalid', path: '/', method: 'POST' }, {});
+    return new Response('{}');
+  });
+  const fetch = exchangeConvexFetch();
+  await fetch('https://fixture.invalid/api/action', {
+    body: JSON.stringify({ path: 'projectExchangeActions:publish', args: [{}] }),
+  });
+  assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0].headersTimeout, 600000);
+  await fetch('https://fixture.invalid/api/query', {
+    body: JSON.stringify({ path: 'projectWorkJournal:page', args: [{}] }),
+  });
+  assert.equal(dispatched.length, 1);
 });

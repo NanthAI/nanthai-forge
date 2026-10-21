@@ -21,6 +21,7 @@ const accountResources = await import(moduleUrl('../convex/accountResources.ts')
 const accountPlan = await import(moduleUrl('../convex/accountPlan.ts'));
 const accountExecute = await import(moduleUrl('../convex/accountExecute.ts'));
 const teamLifecycle = await import(moduleUrl('../convex/teamLifecycle.ts'));
+const projectPublicationAttempt = await import(moduleUrl('../convex/projectPublicationAttempt.ts'));
 const projectPublicationStore = await import(moduleUrl('../convex/projectPublicationStore.ts'));
 const projectLifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const projectActorNames = await import(moduleUrl('../convex/projectActorNames.ts'));
@@ -79,6 +80,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     projectWorkRecords: new Map(),
     projectObjects: new Map(),
     projectPublications: new Map(),
+    projectPublicationAttempts: new Map(),
     projectPublicationPages: new Map(),
     projectReturnPages: new Map(),
     projectGithubImports: new Map(),
@@ -400,6 +402,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
   };
   const modules = {
     projectPublicationStore,
+    projectPublicationAttempt,
     inventoryAccess,
     projectWorkIndexStore,
     projectReturnIndexStage,

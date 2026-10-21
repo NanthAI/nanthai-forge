@@ -45,6 +45,8 @@ Open work and friction, one line per problem. S is a small focused change, M spa
 
 ## Agent tools, fixtures and documentation
 
+- S: Lane affected-tests selection falls back to the full suite for dependency manifests and generated third-party notices; expose a pinned implementation scope plus separate package/notice checks for agents whose brief forbids full-suite execution.
+
 - M: Installed CLI/plugin packages can lag accepted main; route plugin execution through the nforge wrapper and expose installed source/version pins in lifecycle receipts.
 - M: External build-slot admission lacks FIFO tickets, holder/elapsed progress, install admission and separation of remote orchestration from local CPU work. Document argv arrays or full Node/npm invocation for zsh.
 - S: Abbreviate transpiled data-URL stack frames in fixture diagnostics while retaining error name, message and source location.

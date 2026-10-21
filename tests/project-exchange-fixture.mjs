@@ -19,6 +19,7 @@ const names = [
   'projectMain',
   'projectObjectValidation',
   'projectExchange',
+  'projectPublicationAttempt',
   'projectPublicationStore',
   'projectExchangeActions',
   'projectBackups',

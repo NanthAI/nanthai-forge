@@ -98,11 +98,39 @@ comparison. These thresholds schedule work; they do not limit accepted Work or
 require a CLI upgrade. Old retained operations use the same checkpoint, hosted
 revision, operation UUID and timestamp when preparation resumes.
 
+Publication validation is coordinated by project and original operation UUID in
+a transactional attempt record. An overlapping retry waits for the same receipt
+instead of starting another seed. Changed request pins still fail; failures
+release their attempt, and a crashed worker's attempt expires at the ten-minute
+action budget. Waiting callers yield a retryable `WORK_BUSY` before exhausting
+their action, retaining the original request. Final publication still checks
+current authority and the previous-checkpoint compare-and-set.
+
 Formats 16/18 use schema-owned unified collections, including alias keys and
 unpinned planned Intents, in record catalogs and deltas. Catalog size is independent
 of the delta/context optimization budget; complete seed validation can establish
 validated records for catalogs above 4 MiB. Unknown extension arrays, duplicate
 keys and unsupported layouts still use complete compatibility validation.
+Changes to schema-owned scalar metadata, including Git mirror and auto-push
+receipts, use record delta after normal versioned schema validation. Unknown
+changed scalar extensions and reordered collection histories keep the fallback.
+A change only to a local Channel receipt's `postAcceptRunId` is authenticated
+against both original record bodies before treating its source and acceptance
+fields as unchanged. Such check-link enrichment updates the receipt row without
+pulling the original receipt's entire historical check-log graph into the touched
+context. Other receipt changes keep the complete publication path. Source-return
+history, protected acceptance pins and final hosted Channel authority still use
+the existing validation; no context budget is increased.
+
+Current CLI checkpoints add optional `recordPacks` to exchange schema 2. These
+immutable, content-addressed spans contain consecutive canonical record bytes;
+they target 128 KiB, anchor on stable record identities and retain local byte
+locations for upload. Seed decoding and complete digest verification read packs
+instead of opening each small record object. Every individual record hash and the
+whole Work digest are still checked. A routine upload reuses unchanged packs;
+publication still reads the complete logical Work for hashing. Checkpoints with
+packs require the current reader; existing checkpoints without packs keep their
+original read path.
 
 Publication logs identify every delta skip gate, unavailable seed catalogs and
 metadata-only publications; successful validation identifies seed or delta mode.
@@ -191,9 +219,14 @@ requests keep their revision checks. Inconsistent hosted snapshot reads report
 
 Exchange HTTP requests bound response headers, body inactivity and total request time.
 Object transfers and Convex queries/mutations allow 30 seconds without headers or
-body bytes, with a two-minute total per attempt. Convex actions allow three minutes
-for headers (Work reconstruction can run before responding), 30 seconds of body
-inactivity and ten minutes total per attempt. Reads and replay-safe actions retry
+body bytes, with a two-minute total per attempt. Long Convex actions (publication,
+source return, journal export, logical-manifest reconstruction, index preparation,
+history completion, initialization, object-recipe completion and archive migration) allow the full ten minutes both before
+headers and in total, with 30 seconds of body inactivity after headers. Quick
+checkpoint and download actions keep the short transfer deadlines. Long actions
+also override Node's underlying HTTP header deadline to ten minutes; extending
+only the application timer would still stop them at the transport's five-minute
+default. Reads and replay-safe actions retry
 three times after 100, 200 and 400 ms; each retry keeps the exact payload and operation
 ID. Exhausted network failures report `EXCHANGE_REQUEST_TIMEOUT` or
 `EXCHANGE_REQUEST_FAILED` with the call name, never a signed URL. Structured Convex

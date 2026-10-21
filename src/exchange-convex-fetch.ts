@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { exchangeFetch, type ExchangeRequestOptions } from './exchange-request.js';
 import { ForgeError } from './errors.js';
+import { Agent, type Dispatcher } from 'undici';
+
+// Node fetch otherwise inherits Undici's five-minute header deadline. Override
+// the dispatched request as well as our AbortController deadline.
+class LongActionAgent extends Agent {
+  override dispatch(options: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) {
+    return super.dispatch({ ...options, headersTimeout: 600_000 }, handler);
+  }
+}
+const actionDispatcher = new LongActionAgent();
 
 // Reads, content-addressed commits, and pinned publication pages are replay-safe.
 const replaySafe = new Set([
@@ -27,6 +37,17 @@ const replaySafe = new Set([
   'projectWorkJournal:page',
   'projectWorkIndexActions:ensure',
 ]);
+const longActions = new Set([
+  'projectExchangeActions:publish',
+  'projectExchangeActions:manifest',
+  'projectExchangeActions:completeHistory',
+  'projectObjectRecipes:complete',
+  'projectWorkActions:initialize',
+  'projectExchangeMigration:migrate',
+  'projectSourceReturn:returnSource',
+  'projectWorkActions:exportJournal',
+  'projectWorkIndexActions:ensure',
+]);
 const receiptCalls = new Set([
   'projectExchangeActions:publish',
   'projectExchangeMigration:migrate',
@@ -45,12 +66,16 @@ export function exchangeConvexFetch(
       safe =
         replaySafe.has(name) ||
         (receiptCalls.has(name) && typeof payload.args?.[0]?.operationId === 'string'),
-      action = String(url).endsWith('/api/action');
+      longAction = String(url).endsWith('/api/action') && longActions.has(name);
     onCall?.(name, true);
     try {
-      const response = await exchangeFetch(name, url, init, {
+      const request: RequestInit & { dispatcher?: Dispatcher } = {
+        ...init,
+        ...(longAction ? { dispatcher: actionDispatcher } : {}),
+      };
+      const response = await exchangeFetch(name, url, request, {
         // Actions may rebuild retained Work before sending any response bytes.
-        ...(action ? { headerTimeoutMs: 180_000, totalTimeoutMs: 600_000 } : {}),
+        ...(longAction ? { headerTimeoutMs: 600_000, totalTimeoutMs: 600_000 } : {}),
         ...options,
         retries: safe ? (options.retries ?? 3) : 0,
       });

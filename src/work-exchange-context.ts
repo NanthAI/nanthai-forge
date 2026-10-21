@@ -8,11 +8,15 @@ export async function workDeltaContext(
   delta: WorkDelta,
   read: (pin: { sha256: string; size: number }) => Promise<Buffer>,
   extra: string[] = [],
+  metadataOnly = new Set<string>(),
 ) {
   const old = recordMap(before),
     next = recordMap(after),
     all = [...old.values(), ...next.values()];
-  const impacted = new Set([...delta.changes.map(c => recordIdentity(c.collection, c.key)), ...extra]);
+  const impacted = new Set([
+    ...delta.changes.map(c => recordIdentity(c.collection, c.key)).filter(id => !metadataOnly.has(id)),
+    ...extra,
+  ]);
   let changed = true;
   while (changed) {
     changed = false;
@@ -27,7 +31,7 @@ export async function workDeltaContext(
       }
     }
   }
-  const selected = new Set(impacted);
+  const selected = new Set([...impacted, ...metadataOnly]);
   for (const root of [before, after])
     for (const field of root.fields)
       if ('records' in field) {
@@ -59,6 +63,7 @@ export async function workDeltaContext(
       selected.add(recordIdentity(collection, record.key));
   const pending = [...selected];
   for (let cursor = 0; cursor < pending.length; cursor++) {
+    if (metadataOnly.has(pending[cursor]!)) continue;
     for (const map of [old, next])
       for (const ref of map.get(pending[cursor]!)?.record.refs ?? []) {
         const id = recordIdentity(ref.collection, ref.key);

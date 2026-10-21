@@ -6,6 +6,7 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { sourceManifestSchema } from './work-archive-metadata.js';
 import { buildWorkRecords, hashWorkRecords, workRecordRootSchema } from './work-exchange-records.js';
+import { buildRecordPacks, recordPackSchema } from './work-record-packs.js';
 import { buildWorkDelta } from './work-exchange-delta.js';
 import type { WorkData } from './work-types.js';
 const pinSchema = z
@@ -35,7 +36,13 @@ const legacyExchangeRootSchema = z
 export const exchangeRootSchema = z.union([
   legacyExchangeRootSchema,
   legacyExchangeRootSchema
-    .extend({ schema: z.literal(2), work: pinSchema, records: recipeSchema, delta: pinSchema.optional() })
+    .extend({
+      schema: z.literal(2),
+      work: pinSchema,
+      records: recipeSchema,
+      delta: pinSchema.optional(),
+      recordPacks: z.array(recordPackSchema).optional(),
+    })
     .strict(),
 ]);
 export type ExchangeRoot = z.infer<typeof exchangeRootSchema>;
@@ -189,6 +196,11 @@ export function buildExchangeRoot(
           locations[record.sha256] = { size: record.size, path: 'work.json', offset };
           offset += record.size;
         }
+    const recordPacks = buildRecordPacks(records.root, work, locations, (content, offset) => {
+      const p = pin(content);
+      objects.set(p.sha256, content);
+      locations[p.sha256] = { size: p.size, path: 'work.json', offset };
+    });
     const baseline = options.baseline ? buildWorkRecords(options.baseline) : undefined;
     const delta = baseline
       ? buildWorkDelta(baseline.root, records.root, baseline.pin.sha256, options.journalRevision)
@@ -199,6 +211,7 @@ export function buildExchangeRoot(
       manifest: manifestTree,
       work: pin(work),
       records: buildByteTree(records.bytes, objects, locations),
+      recordPacks,
       ...(delta ? { delta: put(Buffer.from(JSON.stringify(delta))) } : {}),
     };
   } else {

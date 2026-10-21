@@ -63,28 +63,39 @@ test('12k record checkpoint reconstruction batches reads without changing portab
   assert.equal(recordBatches, 120);
   assert.ok(calls < data.intents.length, `total read batches ${calls}`);
   assert.ok(largest <= 2 * 1024 * 1024);
-  let active = 0,
-    peakActive = 0,
-    streamedBatches = 0;
-  const streamed = await resolveExchangeWork(encoded.bytes, async pins => {
-    peakActive = Math.max(peakActive, ++active);
-    if (pins.some(p => recordHashes.has(p.sha256))) streamedBatches++;
-    await new Promise(resolve => setImmediate(resolve));
-    active--;
-    return pins.map(p => encoded.objects.get(p.sha256));
-  });
-  assert.deepEqual(Buffer.from(JSON.stringify(streamed.data, null, 2)), work);
-  assert.equal(streamedBatches, 120);
-  assert.ok(peakActive > 1 && peakActive <= 4, `independent read concurrency ${peakActive}`);
-  await assert.rejects(
-    resolveExchangeWork(encoded.bytes, async pins =>
-      pins.map(pin => {
-        const bytes = encoded.objects.get(pin.sha256);
-        return recordHashes.has(pin.sha256) ? Buffer.alloc(bytes.length, 32) : bytes;
-      }),
-    ),
-    e => e.code === 'INVALID_WORK_BACKUP',
-  );
+  const legacyRoot = { ...encoded.root };
+  delete legacyRoot.recordPacks;
+  const packHashes = new Set(encoded.root.recordPacks.map(pack => pack.sha256));
+  for (const [mode, bytes, hashes, expected] of [
+    ['record-only', Buffer.from(JSON.stringify(legacyRoot)), recordHashes, 120],
+    ['packed', encoded.bytes, packHashes, Math.ceil(encoded.root.recordPacks.length / 100)],
+  ]) {
+    let active = 0,
+      peakActive = 0,
+      streamedBatches = 0;
+    const streamed = await resolveExchangeWork(bytes, async pins => {
+      peakActive = Math.max(peakActive, ++active);
+      if (pins.some(p => hashes.has(p.sha256))) streamedBatches++;
+      assert.ok(pins.length <= 100);
+      assert.ok(pins.reduce((size, p) => size + p.size, 0) <= 2 * 1024 * 1024);
+      await new Promise(resolve => setImmediate(resolve));
+      active--;
+      return pins.map(p => encoded.objects.get(p.sha256));
+    });
+    assert.deepEqual(Buffer.from(JSON.stringify(streamed.data, null, 2)), work, mode);
+    assert.equal(streamedBatches, expected, mode);
+    assert.ok(peakActive > 1 && peakActive <= 4, `${mode}: independent read concurrency ${peakActive}`);
+    await assert.rejects(
+      resolveExchangeWork(bytes, async pins =>
+        pins.map(pin => {
+          const content = encoded.objects.get(pin.sha256);
+          return hashes.has(pin.sha256) ? Buffer.alloc(content.length, 32) : content;
+        }),
+      ),
+      e => e.code === 'INVALID_WORK_BACKUP',
+    );
+    t.diagnostic(JSON.stringify({ mode, streamedBatches, peakActive }));
+  }
   t.diagnostic(JSON.stringify({ records: 12000, workBytes: work.length, calls, recordBatches, largest }));
 });
 

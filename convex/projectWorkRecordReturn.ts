@@ -10,6 +10,7 @@ import { recordBytes, recordIdentity, recordMap } from '../src/work-exchange-rec
 import {
   validateWorkDelta,
   validateChangedRecords,
+  channelMetadataChanges,
   supportsWorkDelta,
   WORK_DELTA_BYTES,
 } from '../src/work-exchange-delta';
@@ -126,7 +127,20 @@ export async function recordReturn(
         if (field.name === 'hostedChannelMoves' && 'records' in field)
           for (const record of field.records) extra.push(recordIdentity(field.name, record.key));
   }
-  const context = await workDeltaContext(previous.records, candidate.records, delta, candidate.read, extra);
+  const metadataOnly = await channelMetadataChanges(
+    previous.records,
+    candidate.records,
+    delta.changes,
+    candidate.read,
+  );
+  const context = await workDeltaContext(
+    previous.records,
+    candidate.records,
+    delta,
+    candidate.read,
+    extra,
+    metadataOnly,
+  );
   if (!context) return skip('context-over-budget');
   const pins = new Set(
     candidate.manifest.files.filter(pin => pin.path === `objects/${pin.sha256}`).map(pin => pin.sha256),
@@ -137,6 +151,7 @@ export async function recordReturn(
     delta.changes,
     candidate.read,
     pins,
+    metadataOnly,
   );
   // Authenticate the complete hosted history by ordered hashes without loading it.
   const oldEvents = previous.records.fields.find(f => f.name === 'hostedEvents'),

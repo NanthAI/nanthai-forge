@@ -21,6 +21,7 @@ import { exchangeObjectReader, bytesFromRow, type ExchangeObjectReader } from '.
 import { resolveExchangeRoot, isExchangeRoot } from '../src/native-exchange-tree';
 import { meteredStorage, storageMeter } from './storageMeter';
 import { metadataPublication } from './projectPublicationValidation';
+import { runPublication } from './projectPublicationRun';
 import { recordPublication, recordExchange, verifyRecordSeed } from './projectWorkRecordExchange';
 
 async function caller(ctx: ActionCtx) {
@@ -196,168 +197,181 @@ export const publish = action({
     try {
       const { owner, request, original } = await publicationReceipt(ctx, input);
       if (original) return original;
-      const { metadataOnly, ...legacyInput } = input;
-      if (metadataOnly) {
-        console.log('work-record publication skip', {
-          reason: 'metadata-publication',
-          projectId: input.projectId,
-        });
-        const started = Date.now(),
-          metadataCtx = meteredStorage(ctx);
-        const metadata = await metadataPublication(metadataCtx, input, owner, request);
-        const { deferHistory: _deferHistory, ...publication } = legacyInput;
-        void _deferHistory;
-        const id = await metadataCtx.runMutation(internal.projectExchange.publish, {
-          ...publication,
-          owner,
-          request,
-          ...metadata,
-          validatedClosure: 1,
-        });
-        const meter = storageMeter(metadataCtx);
-        console.info('metadata-publication complete', {
-          projectId: input.projectId,
-          operationId: input.operationId,
-          elapsedMs: Date.now() - started,
-          storageReads: meter.reads,
-          storageBytes: meter.bytes,
-        });
-        return id;
-      }
-      const reader = exchangeObjectReader(ctx, true);
-      const records = await recordPublication(ctx, input, owner, reader);
-      if (records) {
-        await validateExchangePins(ctx, input.projectId, owner, records.contentPins);
-        const { deferHistory: _deferHistory, ...publication } = legacyInput;
-        void _deferHistory;
-        return await ctx.runMutation(internal.projectExchange.publish, {
-          ...publication,
-          owner,
-          request,
-          preview: records.preview,
-          validatedClosure: 1,
-          validatedWorkRecords: 1,
-        });
-      }
-      const bytes = await objectBytes(
+      return await runPublication(
         ctx,
-        input.projectId,
-        owner,
-        { sha256: input.digest, size: input.size },
-        // A fresh publication verifies its receipt root from storage even if an
-        // earlier attempt or metadata reader warmed the process memo. Descendants
-        // still reuse immutable bytes after current metadata/authority checks.
-        exchangeObjectReader(ctx),
-      );
-      const incremental = isExchangeRoot(JSON.parse(bytes.toString('utf8'))),
-        resolved = await resolveExchangeWork(bytes, pins => reader.read(input.projectId, owner, pins));
-      const manifest = sourceManifestSchema.parse(JSON.parse(resolved.manifest.toString('utf8')));
-      invariant(
-        new Set(manifest.files.map(file => file.path)).size === manifest.files.length,
-        'INVALID_WORK_BACKUP',
-        'Manifest repeats a logical path.',
-      );
-      const workFile = manifest.files.find(file => file.path === 'work.json');
-      invariant(workFile, 'INVALID_WORK_BACKUP', 'Manifest omits Work.');
-      const data = validateParsedWork(resolved.data);
-      const recordSeed = await recordExchange(input, owner, reader);
-      if (recordSeed) {
-        await verifyRecordSeed(recordSeed, resolved.data);
-        console.log('work-record exchange prepared', { mode: 'seed' });
-      } else
-        console.log('work-record publication skip', {
-          reason: 'seed-catalog-unavailable',
-          projectId: input.projectId,
-        });
-      invariant(
-        data.revision === manifest.revision &&
-          (manifest.kind === 'forge-native-work-backup'
-            ? data.nativeHead === manifest.head &&
-              manifest.files.some(
-                file => file.path === `objects/${manifest.head}` && file.sha256 === manifest.head,
-              )
-            : manifest.head.length === (manifest.format === 'sha1' ? 40 : 64) &&
-              manifest.refs.every(pin => pin.head.length === manifest.head.length) &&
-              manifest.files.some(file => file.path === 'source.bundle')),
-        'INVALID_WORK_BACKUP',
-        'Work/source pins differ from the exchange manifest.',
-      );
-      let contentPins = manifest.files.filter(file => !incremental || file.path !== 'work.json');
-      if (input.deferHistory) {
-        const project = await ctx.runQuery(internal.projectWork.owner, { projectId: input.projectId, owner });
-        invariant(
-          input.previous === null && project.hostingRequest && manifest.kind === 'forge-native-work-backup',
-          'BAD_ARGUMENT',
-          'Current-first exchange seeds a native hosted project.',
-        );
-        const required = new Set<string>();
-        const heads = hostSourceHeads(data);
-        const statePins = heads.map(head => {
-          const pin = manifest.files.find(file => file.path === `objects/${head}` && file.sha256 === head);
-          invariant(pin, 'INVALID_WORK_BACKUP', 'Current source State is absent from the manifest.');
-          required.add(head);
-          return pin;
-        });
-        const states = await reader.read(input.projectId, owner, statePins);
-        for (const bytes of states) {
-          const state = parseNativeState(bytes);
-          for (const file of state.files) required.add(file.blob);
-          if (state.git) required.add(state.git.bundle);
-        }
-        for (const id of required)
+        { projectId: input.projectId, operationId: input.operationId, owner, request },
+        async () => {
+          const { metadataOnly, ...legacyInput } = input;
+          if (metadataOnly) {
+            console.log('work-record publication skip', {
+              reason: 'metadata-publication',
+              projectId: input.projectId,
+            });
+            const started = Date.now(),
+              metadataCtx = meteredStorage(ctx);
+            const metadata = await metadataPublication(metadataCtx, input, owner, request);
+            const { deferHistory: _deferHistory, ...publication } = legacyInput;
+            void _deferHistory;
+            const id = await metadataCtx.runMutation(internal.projectExchange.publish, {
+              ...publication,
+              owner,
+              request,
+              ...metadata,
+              validatedClosure: 1,
+            });
+            const meter = storageMeter(metadataCtx);
+            console.info('metadata-publication complete', {
+              projectId: input.projectId,
+              operationId: input.operationId,
+              elapsedMs: Date.now() - started,
+              storageReads: meter.reads,
+              storageBytes: meter.bytes,
+            });
+            return id;
+          }
+          const reader = exchangeObjectReader(ctx, true);
+          const records = await recordPublication(ctx, input, owner, reader);
+          if (records) {
+            await validateExchangePins(ctx, input.projectId, owner, records.contentPins);
+            const { deferHistory: _deferHistory, ...publication } = legacyInput;
+            void _deferHistory;
+            return await ctx.runMutation(internal.projectExchange.publish, {
+              ...publication,
+              owner,
+              request,
+              preview: records.preview,
+              validatedClosure: 1,
+              validatedWorkRecords: 1,
+            });
+          }
+          const bytes = await objectBytes(
+            ctx,
+            input.projectId,
+            owner,
+            { sha256: input.digest, size: input.size },
+            // A fresh publication verifies its receipt root from storage even if an
+            // earlier attempt or metadata reader warmed the process memo. Descendants
+            // still reuse immutable bytes after current metadata/authority checks.
+            exchangeObjectReader(ctx),
+          );
+          const incremental = isExchangeRoot(JSON.parse(bytes.toString('utf8'))),
+            resolved = await resolveExchangeWork(bytes, pins => reader.read(input.projectId, owner, pins));
+          const manifest = sourceManifestSchema.parse(JSON.parse(resolved.manifest.toString('utf8')));
           invariant(
-            contentPins.some(pin => pin.path === `objects/${id}` && pin.sha256 === id),
+            new Set(manifest.files.map(file => file.path)).size === manifest.files.length,
             'INVALID_WORK_BACKUP',
-            'Current source content is absent from the manifest.',
+            'Manifest repeats a logical path.',
           );
-        contentPins = contentPins.filter(pin => required.has(pin.sha256) || pin.path === 'work.json');
-      }
-      // Object bindings are immutable for the lifetime of an active project.
-      // Only explicit project deletion purges them, and the final publication
-      // rechecks that the project is active. A complete prior closure therefore
-      // proves unchanged pins without resolving every retained object again.
-      if (input.previous && !input.deferHistory) {
-        const { backup: previous } = await ctx.runQuery(internal.projectBackups.get, {
-          id: input.previous,
-          owner,
-        });
-        invariant(
-          previous.projectId === input.projectId,
-          'PROJECT_CHANGED',
-          'Select this project’s prior checkpoint.',
-        );
-        if (previous.validatedClosure === 1 && !previous.historyBackfilling) {
-          const prior = await exchangeMetadata(ctx, previous, owner, reader);
-          const old = sourceManifestSchema.parse(JSON.parse(prior.manifest.toString('utf8')));
-          const retained = new Map(
-            old.files.filter(pin => pin.path !== 'work.json').map(pin => [pin.sha256, pin.size]),
+          const workFile = manifest.files.find(file => file.path === 'work.json');
+          invariant(workFile, 'INVALID_WORK_BACKUP', 'Manifest omits Work.');
+          const data = validateParsedWork(resolved.data);
+          const recordSeed = await recordExchange(input, owner, reader);
+          if (recordSeed) {
+            await verifyRecordSeed(recordSeed, resolved.data);
+            console.log('work-record exchange prepared', { mode: 'seed' });
+          } else
+            console.log('work-record publication skip', {
+              reason: 'seed-catalog-unavailable',
+              projectId: input.projectId,
+            });
+          invariant(
+            data.revision === manifest.revision &&
+              (manifest.kind === 'forge-native-work-backup'
+                ? data.nativeHead === manifest.head &&
+                  manifest.files.some(
+                    file => file.path === `objects/${manifest.head}` && file.sha256 === manifest.head,
+                  )
+                : manifest.head.length === (manifest.format === 'sha1' ? 40 : 64) &&
+                  manifest.refs.every(pin => pin.head.length === manifest.head.length) &&
+                  manifest.files.some(file => file.path === 'source.bundle')),
+            'INVALID_WORK_BACKUP',
+            'Work/source pins differ from the exchange manifest.',
           );
-          contentPins = contentPins.filter(pin => retained.get(pin.sha256) !== pin.size);
-        }
-      }
-      await validateExchangePins(ctx, input.projectId, owner, contentPins);
-      const preview = {
-        manifestDigest: digest(resolved.manifest),
-        head: manifest.head,
-        format: manifest.kind === 'forge-native-work-backup' ? ('native' as const) : manifest.format,
-        revision: data.revision,
-        intents: data.intents.length,
-        lanes: data.lanes.length,
-        views: data.views.length,
-        runs: data.runs.length,
-        files: manifest.files.length,
-        unavailable: manifest.unavailable.length,
-        channels: archiveChannels(manifest, data),
-      };
-      const { deferHistory, ...publication } = legacyInput;
-      return await ctx.runMutation(internal.projectExchange.publish, {
-        ...publication,
-        owner,
-        preview,
-        request,
-        ...(deferHistory ? { historyBackfilling: true } : { validatedClosure: 1 as const }),
-        ...(recordSeed ? { validatedWorkRecords: 1 as const } : {}),
-      });
+          let contentPins = manifest.files.filter(file => !incremental || file.path !== 'work.json');
+          if (input.deferHistory) {
+            const project = await ctx.runQuery(internal.projectWork.owner, {
+              projectId: input.projectId,
+              owner,
+            });
+            invariant(
+              input.previous === null &&
+                project.hostingRequest &&
+                manifest.kind === 'forge-native-work-backup',
+              'BAD_ARGUMENT',
+              'Current-first exchange seeds a native hosted project.',
+            );
+            const required = new Set<string>();
+            const heads = hostSourceHeads(data);
+            const statePins = heads.map(head => {
+              const pin = manifest.files.find(
+                file => file.path === `objects/${head}` && file.sha256 === head,
+              );
+              invariant(pin, 'INVALID_WORK_BACKUP', 'Current source State is absent from the manifest.');
+              required.add(head);
+              return pin;
+            });
+            const states = await reader.read(input.projectId, owner, statePins);
+            for (const bytes of states) {
+              const state = parseNativeState(bytes);
+              for (const file of state.files) required.add(file.blob);
+              if (state.git) required.add(state.git.bundle);
+            }
+            for (const id of required)
+              invariant(
+                contentPins.some(pin => pin.path === `objects/${id}` && pin.sha256 === id),
+                'INVALID_WORK_BACKUP',
+                'Current source content is absent from the manifest.',
+              );
+            contentPins = contentPins.filter(pin => required.has(pin.sha256) || pin.path === 'work.json');
+          }
+          // Object bindings are immutable for the lifetime of an active project.
+          // Only explicit project deletion purges them, and the final publication
+          // rechecks that the project is active. A complete prior closure therefore
+          // proves unchanged pins without resolving every retained object again.
+          if (input.previous && !input.deferHistory) {
+            const { backup: previous } = await ctx.runQuery(internal.projectBackups.get, {
+              id: input.previous,
+              owner,
+            });
+            invariant(
+              previous.projectId === input.projectId,
+              'PROJECT_CHANGED',
+              'Select this project’s prior checkpoint.',
+            );
+            if (previous.validatedClosure === 1 && !previous.historyBackfilling) {
+              const prior = await exchangeMetadata(ctx, previous, owner, reader);
+              const old = sourceManifestSchema.parse(JSON.parse(prior.manifest.toString('utf8')));
+              const retained = new Map(
+                old.files.filter(pin => pin.path !== 'work.json').map(pin => [pin.sha256, pin.size]),
+              );
+              contentPins = contentPins.filter(pin => retained.get(pin.sha256) !== pin.size);
+            }
+          }
+          await validateExchangePins(ctx, input.projectId, owner, contentPins);
+          const preview = {
+            manifestDigest: digest(resolved.manifest),
+            head: manifest.head,
+            format: manifest.kind === 'forge-native-work-backup' ? ('native' as const) : manifest.format,
+            revision: data.revision,
+            intents: data.intents.length,
+            lanes: data.lanes.length,
+            views: data.views.length,
+            runs: data.runs.length,
+            files: manifest.files.length,
+            unavailable: manifest.unavailable.length,
+            channels: archiveChannels(manifest, data),
+          };
+          const { deferHistory, ...publication } = legacyInput;
+          return await ctx.runMutation(internal.projectExchange.publish, {
+            ...publication,
+            owner,
+            preview,
+            request,
+            ...(deferHistory ? { historyBackfilling: true } : { validatedClosure: 1 as const }),
+            ...(recordSeed ? { validatedWorkRecords: 1 as const } : {}),
+          });
+        },
+      );
     } catch (error) {
       return report(error);
     }

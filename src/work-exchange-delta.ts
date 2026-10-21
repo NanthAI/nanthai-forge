@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { mapExchange } from './exchange-parallel.js';
 import { invariant } from './errors.js';
 import {
   recordIdentity,
@@ -55,9 +56,12 @@ export function supportsWorkDelta(before: WorkRecordRoot, after: WorkRecordRoot)
         prior.records.some((record, i) => field.records[i]?.key !== record.key)
       )
         return false;
+      // Schema-owned scalar metadata (for example mirror receipts) is validated
+      // by partialWork along with changed records. Opaque extensions still require
+      // the complete path, and collection/scalar representation changes cannot delta.
     } else if (
-      !['schema', 'revision', 'nativeHead'].includes(field.name) &&
-      JSON.stringify(field) !== JSON.stringify(prior)
+      (prior && 'records' in prior) ||
+      (!Object.hasOwn(shape, field.name) && JSON.stringify(field) !== JSON.stringify(prior))
     )
       return false;
   }
@@ -162,12 +166,43 @@ export function partialWork(
     ((data as unknown as Record<string, unknown[]>)[collection] ??= []).push(value);
   return data;
 }
+/** A post-accept check link enriches an existing local receipt without changing
+ * its acceptance. Authenticate both bodies before excluding its unchanged source
+ * and check-history dependencies from the display/return context. */
+export async function channelMetadataChanges(
+  before: WorkRecordRoot,
+  after: WorkRecordRoot,
+  changes: WorkDelta['changes'],
+  read: (pin: { sha256: string; size: number }) => Promise<Buffer>,
+) {
+  const old = recordMap(before),
+    next = recordMap(after),
+    metadataOnly = new Set<string>();
+  await mapExchange(
+    changes.filter(c => c.collection === 'channelMoves' && c.previous && c.next),
+    8,
+    async change => {
+      const id = recordIdentity(change.collection, change.key);
+      const [prior, current] = await Promise.all([
+        readRecord(old.get(id)!.record, read, change.collection),
+        readRecord(next.get(id)!.record, read, change.collection),
+      ]);
+      const { postAcceptRunId: _oldRun, ...a } = prior;
+      const { postAcceptRunId: _newRun, ...b } = current;
+      void _oldRun;
+      void _newRun;
+      if (JSON.stringify(a) === JSON.stringify(b)) metadataOnly.add(id);
+    },
+  );
+  return metadataOnly;
+}
 export async function validateChangedRecords(
   before: WorkRecordRoot,
   after: WorkRecordRoot,
   changes: WorkDelta['changes'],
   read: (pin: { sha256: string; size: number }) => Promise<Buffer>,
   sourcePins: Set<string>,
+  metadataOnly = new Set<string>(),
 ) {
   const old = recordMap(before),
     next = recordMap(after);
@@ -212,7 +247,9 @@ export async function validateChangedRecords(
     'INVALID_WORK_BACKUP',
     'Changed Work records require their versioned format.',
   );
-  const sourceRecords = [...current],
+  const sourceRecords = current.filter(
+      item => !metadataOnly.has(recordIdentity(item.collection, recordKey(item.value, item.collection)!)),
+    ),
     selected = new Set(
       current.map(item => recordIdentity(item.collection, recordKey(item.value, item.collection)!)),
     );
@@ -256,7 +293,7 @@ export async function validateChangedRecords(
       'A changed check run differs from its pinned Candidate.',
     );
   for (const move of candidate.channelMoves)
-    if (move.status === 'accepted')
+    if (move.status === 'accepted' && !metadataOnly.has(recordIdentity('channelMoves', move.id)))
       invariant(
         views.get(move.viewId)?.status === 'clean' && views.get(move.viewId)?.head === move.head,
         'INVALID_WORK_BACKUP',
