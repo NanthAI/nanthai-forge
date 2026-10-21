@@ -33,7 +33,10 @@ test('100 MB / 22,845-record compatibility candidate loads, stores and cold-vali
   assert.equal(result.objects, 22845);
   assert.equal(result.records, 22845);
   assert.equal(result.validationChunks, 376);
-  assert.equal(result.invocations, 48);
+  assert.equal(
+    result.invocations,
+    2 + Math.ceil(result.validationChunks / 8) + Math.ceil(result.projectionPages / 32),
+  );
   assert.ok(peakHeap < 320 * 1024 * 1024, `peak heap ${peakHeap}`);
   assert.ok(result.maxRSS < 512 * 1024 * 1024, `peak RSS ${result.maxRSS}`);
   t.diagnostic(JSON.stringify({ ...result, peakHeap }));

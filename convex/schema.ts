@@ -360,6 +360,14 @@ export const projectProposalDocument = v.object({
   ...projectProposalFields,
 });
 export default defineSchema({
+  projectReturnSupersessions: defineTable({
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    pushOperationId: v.string(),
+    expectedBackupId: v.id('projectBackups'),
+    revision: v.number(),
+    replacementId: v.string(),
+  }).index('by_project_and_operation', ['projectId', 'operationId']),
   forgeAccounts: defineTable({ owner: v.string(), handle: v.string() })
     .index('by_owner', ['owner'])
     .index('by_handle', ['handle']),

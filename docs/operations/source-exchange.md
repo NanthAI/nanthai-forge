@@ -407,3 +407,41 @@ separate: `nforge exchange NEW_OWNER restore --command-file restore.json` takes
 continues to materialize the uploaded native head; it does not claim to track
 hosted-selected main. Git interoperability remains a derived projection of native
 source, not an additional main authority.
+
+### Superseding an uncommitted retained push
+
+`nforge exchange ROOT push --supersede-retained` explicitly retires a stuck
+native bound push and starts a fresh capture. Use it when an immutable retained root
+cannot take the record-delta path. Ordinary `push` continues the original
+operation unless an explicit supersession is already pending.
+
+The CLI saves the original request and a replacement UUID before contacting the
+server. In one transaction the server checks current owner authority, verifies
+that the selected hosted Work backup and revision still match the original
+return base, and verifies that the original return has no committed receipt.
+It records a tombstone for that return UUID. The final source-return transaction
+checks this tombstone, so an in-flight old action cannot commit after supersession.
+A committed return reports `SOURCE_RETURN_COMMITTED`; moved hosted Work reports
+`WORK_STALE`. Either rejection leaves the original push available for receipt
+reconciliation. No checkpoint, source object, Work or staging data is deleted;
+the uploaded checkpoint stays available under normal retention.
+
+A crash before the server transaction, a lost server reply, or a crash before the
+local replacement is installed resumes the same saved supersession on the next
+ordinary `push`. Repeating the flag while the replacement is pending resumes that
+replacement. Local transport state retains the retired request and replacement
+UUID in `supersededPushes`; do not delete or rewrite pending transport files.
+The replacement captures current local Work, reconciles selected hosted Work,
+and builds its delta against that selected Work checkpoint, independently of the
+latest uploaded checkpoint used as the publication predecessor. Optional missing
+baseline hints are recovered by normal reconciliation. Delta eligibility and all
+existing authority, retained-history, closure and final CAS validation still apply.
+
+Large compatibility returns split retained Intent payloads into immutable private
+record pages while decoding an older prepared snapshot. Exact Work hashing reads
+those pages in original property and record order. Retained-history validation
+hydrates only the matching original records; schema validation and index payload
+projection consume bounded page groups in separate resumable steps. The final
+staging cursor retains compact relationship context and output references rather
+than complete Intent notes and lifecycle history. Owner-supplied display facts
+remain required; the server does not derive source or provenance.

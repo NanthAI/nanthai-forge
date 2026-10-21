@@ -1,3 +1,4 @@
+import { requireActiveReturn } from './projectReturnSupersede';
 import { indexActivity } from '../src/work-hosted-index';
 import { blobStore } from './blobStore';
 import type { MutationCtx } from './_generated/server';
@@ -236,6 +237,7 @@ export const returnSource = internalMutation({
         );
         return original;
       }
+      await requireActiveReturn(ctx, input.projectId, input.operationId);
       invariant(
         project.work?.backupId === input.expectedBackupId && project.work.revision === input.expectedRevision,
         'WORK_STALE',

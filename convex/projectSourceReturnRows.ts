@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import type { IntentRecords } from './projectSourceReturnRecords';
 import type { Id } from './_generated/dataModel';
 import type { ActionCtx } from './_generated/server';
 import type { Cursor } from './projectSourceReturnStep';
@@ -36,6 +37,7 @@ export async function prepareFullReturnRows(
   ctx: ActionCtx,
   c: Cursor,
   partitionId: Id<'projectWorkGenerations'>,
+  records?: IntentRecords,
 ) {
   const rows = workIndexRows(
       c.snapshot.data,
@@ -44,6 +46,7 @@ export async function prepareFullReturnRows(
       c.snapshot.backup.transport,
       new Map(),
       true,
+      !!records,
     ),
     summaries: IndexEntry[] = [],
     counts: Record<string, number> = {};
@@ -62,6 +65,18 @@ export async function prepareFullReturnRows(
     metadata = next.value;
   }
   await storeOutputRows(ctx, c, output(), partitionId);
-  c.metadata = { ...metadata!, counts };
+  if (records) {
+    (c.outputRefs ??= []).push(...(records.output ?? []));
+    for (const [collection, count] of Object.entries(records.counts ?? {})) counts[collection] = count;
+  }
+  c.metadata = {
+    ...metadata!,
+    counts,
+    ...(records
+      ? {
+          defaultIntentId: records.defaultIntentId,
+        }
+      : {}),
+  };
   c.diffstats = { records: summaries };
 }

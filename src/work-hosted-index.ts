@@ -205,6 +205,7 @@ export function* workIndexRows(
     files?: ReadonlyMap<string, readonly ProvenanceFile[]>;
   } = new Map(),
   deferDerived = false,
+  omitIntentRows = false,
 ) {
   const counts: Record<string, number> = {};
   const channels = archiveChannels(manifest, data),
@@ -232,7 +233,7 @@ export function* workIndexRows(
       );
   }
   counts.intents = data.intents.length;
-  for (const [position, intent] of data.intents.entries()) {
+  for (const [position, intent] of (omitIntentRows ? [] : data.intents).entries()) {
     const header = intentHeader(intent),
       attributes = { ...intent, notes: [], ...(intent.lifecycle ? { lifecycle: [] } : {}) };
     const hasExtraAttributes = Object.keys(attributes).some(key => !Object.hasOwn(header, key));
@@ -265,7 +266,7 @@ export function* workIndexRows(
   yield* add('intentAliases', unified.intentAliases ?? [], value => value.aliasId);
   yield* add(
     'intentAuthorities',
-    data.intents.flatMap(intent => {
+    (omitIntentRows ? [] : data.intents).flatMap(intent => {
       const accounts = intent as typeof intent & { creatorAccountId?: string; assigneeAccountIds?: string[] };
       return [
         ...new Set([
@@ -369,14 +370,18 @@ export function* workIndexRows(
   );
   yield* add(
     'githubRepositories',
-    [...new Set(data.intents.flatMap(intent => (intent.external ? [intent.external.repository] : [])))].map(
-      repository => ({ id: repository, repository }),
-    ),
+    [
+      ...new Set(
+        (omitIntentRows ? [] : data.intents).flatMap(intent =>
+          intent.external ? [intent.external.repository] : [],
+        ),
+      ),
+    ].map(repository => ({ id: repository, repository })),
     v => v.id,
   );
   // Imported and later hosted history remain addressable; the original event table is authoritative.
   yield* add('events', data.hostedEvents, v => v.id);
-  const notes = data.intents.flatMap(intent =>
+  const notes = (omitIntentRows ? [] : data.intents).flatMap(intent =>
     intent.notes.map((note, index) => ({ ...note, intentId: intent.id, index })),
   );
   yield* add(
@@ -385,7 +390,7 @@ export function* workIndexRows(
     v => `${v.intentId}:${v.index}`,
     v => v.intentId,
   );
-  const lifecycle = data.intents.flatMap(intent =>
+  const lifecycle = (omitIntentRows ? [] : data.intents).flatMap(intent =>
     (intent.lifecycle ?? []).map((entry, index) => ({ ...entry, intentId: intent.id, index })),
   );
   yield* add(

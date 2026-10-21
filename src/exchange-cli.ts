@@ -88,6 +88,7 @@ Migration preserves exact logical source/Work/artifact bytes and historical arch
 Push reuses verified project content and large-file chunks by digest, preserving original request IDs for retries.
 First seeds send complete new bytes; changed regions reuse prior chunks without changing logical source hashes.
 Upload counts and bytes describe physical POST bodies; logical reused objects remain separate.
+Bound push --supersede-retained explicitly retires an uncommitted retained return with hosted backup/revision CAS, then starts a fresh push.
 The optional returnSource uses the existing hosted source-return reconciliation and authority.
 Restore creates an independent owner; cacheRoot reuses verified local source and journalPath overlays its journal.
 History/source are preserved. No automatic deletion, archive generation, execution or Channel acceptance occurs.
@@ -98,7 +99,12 @@ export async function exchangeCli(args: string[]) {
     return;
   }
   const [root, action, option, file] = args;
-  if (root && action === 'push' && args.length === 2) return boundExchange(root, 'push');
+  if (
+    root &&
+    action === 'push' &&
+    (args.length === 2 || (args.length === 3 && option === '--supersede-retained'))
+  )
+    return boundExchange(root, 'push', undefined, option === '--supersede-retained');
   if (
     root &&
     action === 'pull' &&
@@ -205,6 +211,7 @@ async function executeExchangeCommand(root: string, action: string, input: unkno
           transport,
           request.returnSource
             ? {
+                workBaselineKey: transport.checkpointKey(request.returnSource.expectedBackupId)!,
                 ownerDerivedBaselineKey: transport.checkpointKey(request.returnSource.expectedBackupId)!,
                 journalRevision: request.returnSource.revision,
               }

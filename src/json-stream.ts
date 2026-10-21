@@ -5,11 +5,21 @@ type Frame = {
   value: unknown[] | Record<string, unknown>;
   state: 'key-or-end' | 'key' | 'colon' | 'value-or-end' | 'value' | 'comma-or-end';
   key?: string;
+  path: (string | number)[] | undefined;
+  descend: boolean;
 };
 /** Decode JSON without retaining the complete UTF-8 buffer, UTF-16 text and
  * parsed graph together. Tokens can span arbitrary byte/escape boundaries.
  * JSON.parse remains the authority for scalar syntax and string escapes. */
-export async function parseJsonStream(chunks: AsyncIterable<Uint8Array>): Promise<unknown> {
+export async function parseJsonStream(
+  chunks: AsyncIterable<Uint8Array>,
+  transform?: {
+    select: (path: (string | number)[]) => boolean;
+    /** Omit descendant paths when only the complete container is consumed. */
+    descend?: (path: (string | number)[]) => boolean;
+    value: (value: unknown, path: (string | number)[]) => Promise<unknown>;
+  },
+): Promise<unknown> {
   const decoder = new StringDecoder('utf8'),
     stack: Frame[] = [];
   let result: unknown,
@@ -48,14 +58,44 @@ export async function parseJsonStream(chunks: AsyncIterable<Uint8Array>): Promis
       if (typeof parsed !== 'string') invalid();
       frame.key = parsed;
       frame.state = 'colon';
-    } else value(parsed);
+    } else {
+      const path = transform ? nextPath() : undefined;
+      value(parsed);
+      if (path && transform?.select(path)) return replace(path, parsed);
+    }
+  }
+  function nextPath() {
+    const parent = stack.at(-1);
+    return parent
+      ? parent.descend
+        ? [...parent.path!, Array.isArray(parent.value) ? parent.value.length : parent.key!]
+        : undefined
+      : [];
+  }
+  async function replace(path: (string | number)[], child: unknown) {
+    const mapped = await transform!.value(child, path),
+      parent = stack.at(-1);
+    if (!parent) result = mapped;
+    else
+      Object.defineProperty(parent.value, path.at(-1)!, {
+        value: mapped,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
   }
   function punctuation(char: string) {
     const frame = stack.at(-1);
     if (char === '{' || char === '[') {
-      const child = char === '[' ? [] : {};
+      const path = transform ? nextPath() : undefined,
+        child = char === '[' ? [] : {};
       value(child);
-      stack.push({ value: child, state: char === '[' ? 'value-or-end' : 'key-or-end' });
+      stack.push({
+        path,
+        descend: !!path && (transform?.descend?.(path) ?? true),
+        value: child,
+        state: char === '[' ? 'value-or-end' : 'key-or-end',
+      });
     } else if (char === '}' || char === ']') {
       if (
         !frame ||
@@ -64,6 +104,7 @@ export async function parseJsonStream(chunks: AsyncIterable<Uint8Array>): Promis
       )
         invalid();
       stack.pop();
+      if (frame.path && transform?.select(frame.path)) return replace(frame.path, frame.value);
     } else if (char === ':') {
       if (!frame || frame.state !== 'colon') invalid();
       frame.state = 'value';
@@ -72,7 +113,7 @@ export async function parseJsonStream(chunks: AsyncIterable<Uint8Array>): Promis
       frame.state = Array.isArray(frame.value) ? 'value' : 'key';
     }
   }
-  function consume(text: string) {
+  async function consume(text: string) {
     let start = 0;
     for (let i = 0; i < text.length; i++) {
       const char = text[i]!;
@@ -81,7 +122,8 @@ export async function parseJsonStream(chunks: AsyncIterable<Uint8Array>): Promis
         else if (char === '\\') escaped = true;
         else if (char === '"') {
           token += text.slice(start, i + 1);
-          scalar(token);
+          const pending = scalar(token);
+          if (pending) await pending;
           token = '';
           string = false;
           start = i + 1;
@@ -92,10 +134,14 @@ export async function parseJsonStream(chunks: AsyncIterable<Uint8Array>): Promis
         char === ' ' || char === '\n' || char === '\r' || char === '\t' || '{}[]:,'.includes(char);
       if (delimiter) {
         if (token || start < i) {
-          scalar(token + text.slice(start, i));
+          const pending = scalar(token + text.slice(start, i));
+          if (pending) await pending;
           token = '';
         }
-        if ('{}[]:,'.includes(char)) punctuation(char);
+        if ('{}[]:,'.includes(char)) {
+          const pending = punctuation(char);
+          if (pending) await pending;
+        }
         start = i + 1;
       } else if (char === '"') {
         if (token || start < i) invalid();
@@ -106,10 +152,10 @@ export async function parseJsonStream(chunks: AsyncIterable<Uint8Array>): Promis
     token += text.slice(start);
   }
   for await (const chunk of chunks)
-    consume(decoder.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)));
-  consume(decoder.end());
+    await consume(decoder.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)));
+  await consume(decoder.end());
   if (string) invalid();
-  if (token) scalar(token);
+  if (token) await scalar(token);
   if (stack.length || !complete) invalid();
   return result;
 }

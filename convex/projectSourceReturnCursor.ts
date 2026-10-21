@@ -68,7 +68,12 @@ export async function deleteReturnJson(ctx: ActionCtx, id: Id<'_storage'>) {
   await blobStore(ctx).delete(id);
 }
 /** Reads gzip bodies and legacy plain JSON cursors/snapshots. */
-export async function readReturnJson<T>(ctx: ActionCtx, id: Id<'_storage'>, message: string): Promise<T> {
+export async function readReturnJson<T>(
+  ctx: ActionCtx,
+  id: Id<'_storage'>,
+  message: string,
+  transform?: Parameters<typeof parseJsonStream>[1],
+): Promise<T> {
   let body = await recall(ctx, id);
   if (!body) {
     const blob = await blobStore(ctx).get(id);
@@ -84,5 +89,6 @@ export async function readReturnJson<T>(ctx: ActionCtx, id: Id<'_storage'>, mess
   const stream = Readable.from(chunks());
   return (await parseJsonStream(
     body[0] === 0x1f && body[1] === 0x8b ? stream.pipe(createGunzip()) : stream,
+    transform,
   )) as T;
 }

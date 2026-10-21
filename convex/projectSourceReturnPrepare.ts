@@ -6,6 +6,13 @@ import { internal } from './_generated/api';
 import { load, source } from './projectWorkLoad';
 import type { ExchangeObjectReader } from './projectExchangeReader';
 import { readReturnMetadata, storeReturnMetadata } from './projectSourceReturnMetadata';
+import {
+  readCandidateRecords,
+  hydrateIntents,
+  projectIntentRecords,
+  type IntentRecords,
+} from './projectSourceReturnRecords';
+import type { MetadataRef } from './projectSourceReturnMetadata';
 import { readReturnJson, storeReturnJson } from './projectSourceReturnCursor';
 import { storageMeter } from './storageMeter';
 import type { ReturnAccounting } from './projectSourceReturnStep';
@@ -35,6 +42,8 @@ type Position = {
   chunks: Id<'_storage'>[];
   offset: number;
   candidate?: Id<'_storage'>;
+  candidateRef?: MetadataRef;
+  records?: IntentRecords;
   accounting?: ReturnAccounting;
 };
 async function workSize(reader: ExchangeObjectReader, backup: Doc<'projectBackups'>, owner: string) {
@@ -177,6 +186,11 @@ export async function prepareLargeReturn(
       cursor: JSON.stringify({
         ...ref,
         blobs: [...position.chunks, ...(position.candidate ? [position.candidate] : [])],
+        cleanup: [
+          ...(position.candidateRef ? [position.candidateRef.key] : []),
+          ...(position.records?.refs.map(r => r.ref.key) ?? []),
+          ...(position.records?.output?.map(r => r.key) ?? []),
+        ],
       }),
       progress: JSON.stringify({
         phase: 'preparing',
@@ -201,11 +215,19 @@ export async function prepareLargeReturn(
     return save();
   }
   invariant(position.candidate, 'WORK_STALE', 'Resume the original candidate preparation.');
-  const candidate = await readReturnJson<Candidate>(
-    ctx,
-    position.candidate,
-    'The original prepared candidate is unavailable.',
-  );
+  let candidate: Candidate;
+  if (position.candidateRef && position.records) {
+    candidate = await readReturnMetadata(ctx, input.projectId, owner, position.candidateRef);
+  } else {
+    const decoded = await readCandidateRecords(ctx, input.projectId, owner, stage._id, position.candidate);
+    candidate = decoded.candidate;
+    position.records = decoded.records;
+    position.candidateRef = await storeReturnMetadata(ctx, input.projectId, owner, stage._id, candidate);
+    // Commit the bounded record layout before post-prepare work. A crash no
+    // longer decodes the legacy full snapshot again, and the next action starts
+    // with only the compact context and immutable record pages.
+    return save();
+  }
   const started = Date.now(),
     end = Math.min(position.chunks.length, position.offset + PREPARE_BUDGET.chunks);
   while (position.offset < end) {
@@ -214,17 +236,53 @@ export async function prepareLargeReturn(
       position.chunks[position.offset]!,
       'The original retained-history chunk is unavailable.',
     );
-    validateSourceReturnChunk(chunk, candidate.data, candidate.manifest);
+    const intents =
+      chunk.collection === 'intents'
+        ? await hydrateIntents(
+            ctx,
+            input.projectId,
+            owner,
+            position.records!,
+            new Set(chunk.data.intents.map(i => i.id)),
+          )
+        : candidate.data.intents;
+    validateSourceReturnChunk(chunk, { ...candidate.data, intents }, candidate.manifest);
     position.offset++;
     if (Date.now() - started >= PREPARE_BUDGET.actionMs) break;
   }
   if (position.offset < position.chunks.length) return save();
+  if ((position.records!.projected ?? 0) < position.records!.refs.length) {
+    const records = position.records!;
+    await projectIntentRecords(ctx, input.projectId, owner, records, candidate.data, async rows => {
+      let batch: import('../src/work-hosted-index').IndexEntry[] = [],
+        bytes = 0;
+      const flush = async () => {
+        if (!batch.length) return;
+        (records.output ??= []).push(
+          await storeReturnMetadata(ctx, input.projectId, owner, stage!._id, batch),
+        );
+        batch = [];
+        bytes = 0;
+      };
+      for (const row of rows) {
+        const size = Buffer.byteLength(JSON.stringify(row));
+        if (batch.length && (batch.length >= 100 || bytes + size > 256 * 1024)) await flush();
+        batch.push(row);
+        bytes += size;
+        const counts = (records.counts ??= {});
+        counts[row.collection] = (counts[row.collection] ?? 0) + 1;
+      }
+      await flush();
+    });
+    return save();
+  }
   console.log('source-return prepare validation done', { reason: 'durable-chunks', chunks: position.offset });
   return {
     pending: false as const,
     current: position.current,
     before: position.before,
     candidate,
+    records: position.records,
     accounting: position.accounting,
   };
 }

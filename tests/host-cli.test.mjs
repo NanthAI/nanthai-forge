@@ -7,11 +7,11 @@ import { join, resolve } from 'node:path';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { convexToJson, jsonToConvex } from 'convex/values';
+import { ConvexError, convexToJson, jsonToConvex } from 'convex/values';
 import { validate } from 'convex-helpers/validators';
 import { writeAuth } from '../dist/auth-store.js';
 import { tmpdir } from 'node:os';
-import { getFunctionName } from 'convex/server';
+import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { fixture, modules, upload } from './project-exchange-fixture.mjs';
 import { WorkStore } from '../dist/work-store.js';
@@ -385,7 +385,9 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
     writeDuring = null,
     staleAfterReturn = false,
     rejectIndex = false,
-    blockedJournal = null;
+    blockedJournal = null,
+    stopUncommittedReturn = false,
+    loseSupersedeReply = false;
   const f = setup(t),
     routes = [],
     coordination = await import(moduleUrl('../convex/projectCoordination.ts'));
@@ -433,6 +435,9 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
         writeDuring.write();
         writeDuring = null;
       }
+      if (body.path === 'projectSourceReturn:returnSource' && stopUncommittedReturn && !args.statusOnly) {
+        throw new ConvexError({ code: 'SYNTHETIC_STOP', message: 'Stop with an uncommitted return' });
+      }
       if (body.path === 'projectSourceReturn:returnSource' && rejectReturn && !args.statusOnly) {
         rejectReturn--;
         response.writeHead(560, { 'Content-Type': 'application/json' });
@@ -462,6 +467,11 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
         name === 'projectCoordination'
           ? await coordination[method]._handler(f.s.ctx, args)
           : await f.s.ctx.runQuery(ref, args);
+      if (body.path === 'projectReturnSupersede:supersede' && loseSupersedeReply) {
+        loseSupersedeReply = false;
+        response.destroy();
+        return;
+      }
       if (body.path === 'projectSourceReturn:returnSource' && staleAfterReturn && !args.statusOnly) {
         staleAfterReturn = false;
         response.writeHead(560, { 'Content-Type': 'application/json' });
@@ -761,10 +771,106 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
   const retainedAfterReturn = readHostState(f.store).push;
   assert(retainedAfterReturn);
   const publishedCount = f.s.tables.projectBackups.size;
+  await assert.rejects(
+    cli('exchange', f.root, 'push', '--supersede-retained'),
+    error => JSON.parse(error.stderr.trim().split('\n').at(-1)).error.code === 'SOURCE_RETURN_COMMITTED',
+  );
+  assert.equal(readHostState(f.store).push.operationId, retainedAfterReturn.operationId);
+  assert.equal(readHostState(f.store).supersede, undefined);
   const resumedRefresh = JSON.parse((await cli('exchange', f.root, 'push')).stdout);
   assert.equal(resumedRefresh.operationId, retainedAfterReturn.operationId);
   assert.equal(f.s.tables.projectBackups.size, publishedCount);
   assert.equal(readHostState(f.store).push, undefined);
+
+  // A retained compatibility operation can be explicitly retired without
+  // deleting its checkpoint. A lost tombstone reply reuses the same request.
+  const selectedWork = f.s.tables.hostedProjects.get(hosted.projectId).work;
+  const reconciledForSeed = await modules.projectWorkActions.load(f.s.ctx, hosted.projectId, 'owner');
+  f.store.save(reconciledForSeed.data);
+  const retainedSeedId = randomUUID();
+  const { prepareNativeExchange: prepareRetainedSeed } = await import('../dist/native-exchange.js');
+  await prepareRetainedSeed(f.store, f.store.revision(), retainedSeedId, true, undefined, undefined, {
+    recordMetadata: true,
+  });
+  updateHostState(f.store, state => {
+    state.push = {
+      operationId: retainedSeedId,
+      projectId: hosted.projectId,
+      deployment,
+      previous: f.s.tables.hostedProjects.get(hosted.projectId).currentBackup,
+      revision: f.store.revision(),
+      returnSource: {
+        expectedBackupId: selectedWork.backupId,
+        revision: selectedWork.revision,
+        operationId: pushAttemptId(retainedSeedId, 0, 'return'),
+      },
+    };
+  });
+  stopUncommittedReturn = true;
+  await assert.rejects(
+    cli('exchange', f.root, 'push'),
+    error => JSON.parse(error.stderr.trim().split('\n').at(-1)).error.code === 'SYNTHETIC_STOP',
+  );
+  const stuck = readHostState(f.store).push;
+  const oldBackup = f.s.tables.hostedProjects.get(hosted.projectId).currentBackup;
+  const retainedRoot = JSON.parse(
+    readFileSync(join(f.store.directory, `exchange-${stuck.operationId}`, 'exchange.json')),
+  );
+  assert.equal(retainedRoot.delta, undefined, 'retained immutable root can only use compatibility fallback');
+  const baseBackup = stuck.returnSource.expectedBackupId;
+  stopUncommittedReturn = false;
+  loseSupersedeReply = true;
+  const deltaRevisions = [],
+    originalLog = console.log;
+  t.mock.method(console, 'log', (...args) => {
+    if (args[0] === 'work-record return prepared') deltaRevisions.push(args[1].revision);
+    originalLog(...args);
+  });
+  const supersededRecovery = JSON.parse(
+    (await cli('exchange', f.root, 'push', '--supersede-retained')).stdout,
+  );
+  assert.notEqual(supersededRecovery.operationId, stuck.operationId);
+  assert(
+    deltaRevisions.includes(stuck.returnSource.revision),
+    'replacement return executed the server record-delta path',
+  );
+  assert.equal(readHostState(f.store).supersededPushes.at(-1).original.operationId, stuck.operationId);
+  assert.equal(f.s.tables.projectReturnSupersessions.size, 1);
+  assert(f.s.tables.projectBackups.has(oldBackup), 'uploaded checkpoint remains retained');
+  assert.equal(f.s.tables.projectBackups.get(supersededRecovery.backupId).previous, oldBackup);
+  const freshRoot = JSON.parse(
+    readFileSync(join(f.store.directory, `exchange-${supersededRecovery.operationId}`, 'exchange.json')),
+  );
+  const baseRoot = JSON.parse(
+    readFileSync(
+      join(
+        f.store.directory,
+        `exchange-${f.s.tables.projectBackups.get(baseBackup).operationId}`,
+        'exchange.json',
+      ),
+    ),
+  );
+  assert(freshRoot.delta, 'fresh push has a record delta');
+  const { preparedMetadata } = await import('../dist/native-exchange-prepared.js');
+  const directory = join(f.store.directory, `exchange-${supersededRecovery.operationId}`);
+  const deltaBytes = preparedMetadata(directory, readFileSync(join(directory, 'manifest.json'))).read(
+    freshRoot.delta.sha256,
+  );
+  assert.equal(
+    JSON.parse(deltaBytes).base.root,
+    baseRoot.records.sha256,
+    'delta uses selected Work rather than orphan checkpoint',
+  );
+  await assert.rejects(
+    f.s.ctx.runMutation(makeFunctionReference('projectReturnSupersede:supersede'), {
+      projectId: hosted.projectId,
+      operationId: readHostState(f.store).supersededPushes.at(-1).original.returnSource.operationId,
+      pushOperationId: stuck.operationId,
+      expectedBackupId: baseBackup,
+      revision: stuck.returnSource.revision,
+      replacementId: randomUUID(),
+    }),
+  );
 
   // Real independent CLI processes share transport admission; ordinary owner
   // metadata writes continue while the first process awaits its journal.

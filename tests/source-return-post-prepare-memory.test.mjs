@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { moduleUrl } from './convex-module.mjs';
 const exec = promisify(execFile);
 moduleUrl('../convex/projectSourceReturn.ts');
-test('post-prepare fallback and original-operation recovery fit 512 MiB with 100 MB Work and 1.46 GB logical source', async t => {
+test('post-prepare fallback and original-operation recovery fit 256 MiB with 100 MB Work and 1.46 GB logical source', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-post-prepare-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const worker = new URL('./source-return-post-prepare-worker.mjs', import.meta.url).pathname;
@@ -31,5 +31,5 @@ test('post-prepare fallback and original-operation recovery fit 512 MiB with 100
   assert.equal(result.views, 1079);
   assert.equal(result.lanes, 347);
   assert.ok(peakHeap < 320 * 1024 * 1024, `peak heap ${peakHeap}`);
-  assert.ok(result.maxRSS < 512 * 1024 * 1024, `peak RSS ${result.maxRSS}`);
+  assert.ok(result.maxRSS < 256 * 1024 * 1024, `peak RSS ${result.maxRSS}`);
 });

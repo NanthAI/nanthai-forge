@@ -283,6 +283,7 @@ export async function pushNativeExchange(
     progress?: ReturnType<typeof hostProgress>;
     stage?: 'current' | 'history';
     ownerDerivedBaselineKey?: string | null;
+    workBaselineKey?: string;
     journalRevision?: number;
     /** Pin the current local Work revision (at least `revision`) under the short owner lock. */
     pinCurrent?: boolean;
@@ -296,7 +297,7 @@ export async function pushNativeExchange(
       revision,
       operationId,
       transport.metadataTrees,
-      transport.checkpointKey?.(),
+      options.workBaselineKey ?? transport.checkpointKey?.(),
       options.ownerDerivedBaselineKey,
       {
         ...(options.pinCurrent ? { pinCurrent: true } : {}),

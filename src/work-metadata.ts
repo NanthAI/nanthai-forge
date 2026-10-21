@@ -160,7 +160,11 @@ export function parseWorkBytes(bytes: Uint8Array): WorkData {
   // Preserve uninterpreted fields in an imported journal; validation is not permission to discard them.
   return { ...parseWork(raw), ...raw };
 }
-export function applyHostedEvent(data: WorkData, event: HostedEvent, options: { noteIndex?: number } = {}) {
+export function applyHostedEvent(
+  data: WorkData,
+  event: HostedEvent,
+  options: { noteIndex?: number; sourceReturnDigest?: string } = {},
+) {
   event = hostedEventSchema.parse(event);
   // Legacy journal digests retain their original replay format; schema 16 never downgrades.
   if (event.automatic && data.schema < 16) data.schema = 11;
@@ -185,7 +189,7 @@ export function applyHostedEvent(data: WorkData, event: HostedEvent, options: { 
         ? planningIntentId
         : undefined;
   if (event.command.action === 'source-return') {
-    const actual = workDigest(data);
+    const actual = options.sourceReturnDigest ?? workDigest(data);
     invariant(
       event.archiveSha256 === event.command.archiveSha256 &&
         actual === event.command.workSha256 &&

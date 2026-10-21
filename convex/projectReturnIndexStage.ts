@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { requireActiveReturn } from './projectReturnSupersede';
 import { indexActivity } from '../src/work-hosted-index';
 import { blobStore } from './blobStore';
 import { v } from 'convex/values';
@@ -28,6 +29,7 @@ export const resume = internalQuery({
   returns: v.union(generationDocument, v.null()),
   handler: async (ctx, input) => {
     await activeOwnedProject(ctx, input.projectId, input.owner);
+    await requireActiveReturn(ctx, input.projectId, input.operationId);
     const original = await ctx.db
       .query('projectWorkGenerations')
       .withIndex('by_project_and_return_operation', q =>

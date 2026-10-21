@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import type { IntentRecords } from './projectSourceReturnRecords';
 import { prepareDelta } from './projectSourceReturnDelta';
 export { RETURN_BUDGET } from './projectSourceReturnStep';
 import { installOwnerDerived } from './projectOwnerDerived';
@@ -41,10 +42,12 @@ async function advanceReturnProgress(
     partial?: boolean;
     metadataOnly?: boolean;
     accounting?: ReturnAccounting;
+    records?: IntentRecords;
   },
 ): Promise<(Doc<'projectWorkEvents'> & { accounting?: ReturnAccounting }) | null> {
   const started = Date.now();
   let c: Cursor;
+  let preparedRecords = false;
   function read<T>(ref: ReturnRef, message: string): Promise<T> {
     return typeof ref === 'string'
       ? readReturnJson<T>(ctx, ref, message)
@@ -108,7 +111,7 @@ async function advanceReturnProgress(
       c.heads = c.heads.filter(head => !priorHeads.has(head));
       c.delta.views = [...new Set([...c.delta.views, ...c.delta.summaries])];
     } else {
-      await prepareFullReturnRows(ctx, c, stage._id);
+      await prepareFullReturnRows(ctx, c, stage._id, initial.records);
       c.delta = {
         entries: [],
         removed: [],
@@ -132,6 +135,7 @@ async function advanceReturnProgress(
     }
     await prepareOwnerIndexRows(ctx, c);
     if (c.full && c.outputRefs) {
+      preparedRecords = !!initial.records;
       await storeOutputRows(ctx, c, c.snapshot.output ?? [], stage._id);
       c.outputCleanup = c.outputRefs.map(ref => ref.key);
       delete c.snapshot.output;
@@ -169,6 +173,33 @@ async function advanceReturnProgress(
     invocations: prior.invocations + 1,
   });
   let step = stage.returnStep ?? 0;
+  if (preparedRecords) {
+    // Publish only a computational cursor here. The next invocation drains
+    // output without holding preparation context or owner display documents.
+    const snapshot = await storeReturnMetadata(ctx, input.projectId, owner, stage._id, c.snapshot);
+    if (c.outputCleanup) snapshot.cleanup = c.outputCleanup;
+    c.snapshotRef = snapshot;
+    delete c.outputCleanup;
+    c.accounting = accounting(step + 1);
+    const cursor = await storeReturnMetadata(ctx, input.projectId, owner, stage._id, {
+      ...c,
+      snapshot: undefined,
+    });
+    await ctx.runMutation(internal.projectReturnIndexStage.batch, {
+      projectId: input.projectId,
+      owner,
+      generationId: c.generationId,
+      revision: input.revision,
+      partitionId: stage._id,
+      batch: stage.nextBatch,
+      entries: [],
+      last: false,
+      step,
+      metadataCursor: JSON.stringify(cursor),
+      metadataSnapshot: JSON.stringify(snapshot),
+    });
+    return null;
+  }
   if (stage.status !== 'ready') {
     checkReturnBudget(accounting(step));
     let batch = stage.nextBatch;

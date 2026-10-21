@@ -86,6 +86,8 @@ const schema = z.object({
   pulls: z.record(z.string(), z.uuid()).optional(),
   push: push.optional(),
   pendingPushes: z.array(push).optional(),
+  supersede: z.object({ original: push, replacementId: z.uuid() }).optional(),
+  supersededPushes: z.array(z.object({ original: push, replacementId: z.uuid() })).optional(),
   presence: z
     .record(
       z.string(),

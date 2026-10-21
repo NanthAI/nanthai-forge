@@ -253,7 +253,7 @@ export const returnSource = action({
       const command = sourceReturnSchema.parse({
           action: 'source-return',
           archiveSha256: candidate.backup.digest,
-          workSha256: workDigest(candidate.data),
+          workSha256: prepared?.records?.digest ?? workDigest(candidate.data),
           previousArchiveSha256: current.backup.digest,
           previousRevision: current.data.revision,
         }),
@@ -269,17 +269,23 @@ export const returnSource = action({
         },
       );
       const at = staged?.returnAt ?? new Date().toISOString();
-      applyHostedEvent(candidate.data, {
-        projectKey: current.project.key,
-        archiveSha256: candidate.backup.digest,
-        id: input.operationId,
-        actor: owner,
-        at,
-        request,
-        previousRevision: candidate.data.revision,
-        command,
-      });
-      validateWorkSize(candidate.data);
+      applyHostedEvent(
+        candidate.data,
+        {
+          projectKey: current.project.key,
+          archiveSha256: candidate.backup.digest,
+          id: input.operationId,
+          actor: owner,
+          at,
+          request,
+          previousRevision: candidate.data.revision,
+          command,
+        },
+        prepared?.records ? { sourceReturnDigest: prepared.records.digest } : {},
+      );
+      // Original Intent records were schema-validated page by page before
+      // projection. Revalidate the remaining context and newly appended event.
+      validateWorkSize(prepared?.records ? { ...candidate.data, intents: [] } : candidate.data);
       if (candidate.manifest.kind === 'forge-native-work-backup') {
         const generation: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
           internal.projectWorkIndexStore.current,
@@ -330,6 +336,7 @@ export const returnSource = action({
           return pending(
             await returnProgress(ctx, stage, input, owner, {
               accounting: prepared?.accounting,
+              records: prepared?.records,
               snapshot: {
                 data: candidate.data,
                 manifest: candidate.manifest,

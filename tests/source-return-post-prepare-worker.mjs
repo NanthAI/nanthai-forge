@@ -200,6 +200,10 @@ if (mode === 'fixture') {
     runMutation: async (ref, args) => {
       sample();
       switch (getFunctionName(ref)) {
+        case 'projectReturnIndexStage:prepare':
+          assert.equal(args.expectedCursor, stage.returnPrepareCursor);
+          stage.returnPrepareCursor = args.cursor;
+          return true;
         case 'projectReturnIndexStage:begin':
           if (fail) {
             fail = false;
@@ -254,8 +258,17 @@ if (mode === 'fixture') {
   };
   const start = performance.now();
   if (fail) {
-    await assert.rejects(returnSource._handler(ctx, input), /synthetic failure after prepared/);
-    invocations++;
+    while (fail && invocations < 100) {
+      invocations++;
+      try {
+        await returnSource._handler(ctx, input);
+      } catch (error) {
+        assert.match(error.message, /synthetic failure after prepared/);
+      }
+      forgetReturnCursors();
+      global.gc();
+    }
+    assert.equal(fail, false, 'bounded preparation reached the injected post-prepare failure');
     forgetReturnCursors();
     global.gc();
   }

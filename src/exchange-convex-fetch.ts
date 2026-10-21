@@ -52,6 +52,7 @@ const receiptCalls = new Set([
   'projectExchangeActions:publish',
   'projectExchangeMigration:migrate',
   'projectSourceReturn:returnSource',
+  'projectReturnSupersede:supersede',
 ]);
 
 /** The HTTP client uses this for every exchange query, mutation and action,

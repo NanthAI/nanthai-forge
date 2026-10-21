@@ -114,10 +114,11 @@ if (mode === 'fixture') {
     chunks: config.chunks,
     offset: 0,
   };
-  const pages = new Map([['position:0', JSON.stringify(position)]]);
+  writeFileSync(join(directory, 'page-position-0'), JSON.stringify(position));
   let sampledHeap = 0,
     invocations = 0,
-    longestInvocationMs = 0;
+    longestInvocationMs = 0,
+    projectionPages = 0;
   const sample = () => {
     sampledHeap = Math.max(sampledHeap, process.memoryUsage().heapUsed);
   };
@@ -142,7 +143,7 @@ if (mode === 'fixture') {
         case 'projectBackups:get':
           return { backup, project };
         case 'projectReturnMetadataStore:read':
-          return pages.get(`${args.key}:${args.position}`);
+          return readFile(join(directory, `page-${args.key}-${args.position}`), 'utf8');
         default:
           assert.fail(getFunctionName(ref));
       }
@@ -151,7 +152,7 @@ if (mode === 'fixture') {
       sample();
       switch (getFunctionName(ref)) {
         case 'projectReturnMetadataStore:put':
-          pages.set(`${args.key}:${args.position}`, args.body);
+          await writeFile(join(directory, `page-${args.key}-${args.position}`), args.body);
           return null;
         case 'projectReturnIndexStage:prepare':
           stage.returnPrepareCursor = args.cursor;
@@ -242,10 +243,32 @@ if (mode === 'fixture') {
     });
     const ref = JSON.parse(stage.returnPrepareCursor);
     const saved = JSON.parse(
-      Array.from({ length: ref.parts }, (_, i) => pages.get(`${ref.key}:${i}`)).join(''),
+      (
+        await Promise.all(
+          Array.from({ length: ref.parts }, (_, i) =>
+            readFile(join(directory, `page-${ref.key}-${i}`), 'utf8'),
+          ),
+        )
+      ).join(''),
     );
     assert.equal(saved.phase, 'validate');
-    assert.equal(saved.offset, 8, 'cold validation advanced exactly one bounded chunk budget');
+    assert.equal(saved.offset, 0, 'record layout commits before validation resumes');
+    assert.equal(saved.records.refs.flatMap(ref => ref.ids).length, 22845);
+    projectionPages = saved.records.refs.length;
+    forgetReturnCursors();
+    global.gc();
+    assert.deepEqual(await invoke(), { pending: true });
+    const nextRef = JSON.parse(stage.returnPrepareCursor);
+    const next = JSON.parse(
+      (
+        await Promise.all(
+          Array.from({ length: nextRef.parts }, (_, i) =>
+            readFile(join(directory, `page-${nextRef.key}-${i}`), 'utf8'),
+          ),
+        )
+      ).join(''),
+    );
+    assert.equal(next.offset, 8, 'cold validation advanced exactly one bounded chunk budget');
     forgetReturnCursors();
     global.gc();
     // Complete every remaining chunk with the production invocation budget.
@@ -256,13 +279,15 @@ if (mode === 'fixture') {
       global.gc();
       prepared = await invoke();
     } while (prepared.pending);
-    assert.equal(prepared.candidate.data.intents.length, 22845);
+    assert.equal(prepared.records.refs.flatMap(ref => ref.ids).length, 22845);
+    assert.equal(prepared.records.projected, projectionPages);
+    assert.equal(prepared.candidate.data.intents.length, 1, 'only distinct source bases remain in context');
     assert.equal(prepared.candidate.manifest.files.length, 22846);
-    assert.equal(invocations, 1 + Math.ceil(config.chunks.length / 8));
+    assert.equal(invocations, 2 + Math.ceil(config.chunks.length / 8) + Math.ceil(projectionPages / 32));
     sample();
   }
   global.gc();
   console.log(
-    `MEMORY_RESULT ${JSON.stringify({ mode, ...{ workBytes: config.workBytes, objects: config.objects, records: config.records }, sampledHeap, invocations, longestInvocationMs, validationChunks: config.chunks.length, maxRSS: process.resourceUsage().maxRSS * 1024, elapsedMs: performance.now() - started })}`,
+    `MEMORY_RESULT ${JSON.stringify({ mode, ...{ workBytes: config.workBytes, objects: config.objects, records: config.records }, sampledHeap, invocations, longestInvocationMs, validationChunks: config.chunks.length, projectionPages, maxRSS: process.resourceUsage().maxRSS * 1024, elapsedMs: performance.now() - started })}`,
   );
 }

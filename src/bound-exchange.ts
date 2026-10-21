@@ -1,3 +1,4 @@
+import { supersedeRetainedPush } from './bound-exchange-supersede.js';
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 // SPDX-License-Identifier: Apache-2.0
 import { withQueueSlot } from './landing-queue.js';
@@ -21,21 +22,18 @@ import { reconcileExchange } from './exchange-reconcile.js';
 import { ForgeError, invariant } from './errors.js';
 type PendingPush = NonNullable<HostState['push']>;
 const REBASE_ATTEMPTS = 3;
-/** Name-based UUID for one rebase attempt: the same parent and attempt always map to the same IDs. */
-export function pushAttemptId(
-  parent: string,
-  attempt: number,
-  phase: 'push' | 'reconcile' | 'return' | 'capture',
-) {
-  const hex = digest(`forge-push-attempt:${parent}:${attempt}:${phase}`),
-    variant = (8 | (parseInt(hex[16]!, 16) & 3)).toString(16);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-}
+import { pushAttemptId } from './bound-push-id.js';
+export { pushAttemptId } from './bound-push-id.js';
 const hostedState = async (client: ConvexExchange, projectId: string) =>
   (await retryExchange('hosted Work state read', randomUUID(), () =>
     client.client.query(makeFunctionReference<'query'>('projectWork:state'), { projectId }),
   )) as { currentBackup: string | null; work?: { backupId: string; revision: number } };
-export async function boundExchange(root: string, action: 'push' | 'pull', target?: string) {
+export async function boundExchange(
+  root: string,
+  action: 'push' | 'pull',
+  target?: string,
+  supersedeRetained = false,
+) {
   return withWorkLockOptions({ operation: `exchange ${action}` }, () =>
     withWorkProgress({ phase: `exchange ${action}` }, async () => {
       let phase = `preparing exchange ${action}`,
@@ -59,7 +57,10 @@ export async function boundExchange(root: string, action: 'push' | 'pull', targe
         // second process must not rebase/remove the request another is using.
         const queued = await withQueueSlot(
           join(store.directory, 'bound-push-queue'),
-          () => boundExchangeAction(root, action, target, report),
+          async () => {
+            await supersedeRetainedPush(store, supersedeRetained, report);
+            return boundExchangeAction(root, action, target, report);
+          },
           { anchor: store.directory, phase: 'exchange push' },
         );
         invariant('value' in queued, 'WORK_BUSY', 'A bound push is still running. Retry to resume it.');
@@ -360,7 +361,7 @@ async function pushAttempt(
         request.revision,
         request.operationId,
         transport.metadataTrees,
-        transport.checkpointKey(),
+        transport.checkpointKey(request.returnSource?.expectedBackupId),
         request.returnSource ? transport.checkpointKey(request.returnSource.expectedBackupId) : undefined,
         {
           pinCurrent: true,
@@ -385,6 +386,7 @@ async function pushAttempt(
         ...(captured && candidate ? { captured: { directory: captured.directory, data: candidate } } : {}),
         ...(request.returnSource
           ? {
+              workBaselineKey: transport.checkpointKey(request.returnSource.expectedBackupId)!,
               ownerDerivedBaselineKey: transport.checkpointKey(request.returnSource.expectedBackupId)!,
               journalRevision: request.returnSource.revision,
             }
