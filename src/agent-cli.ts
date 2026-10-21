@@ -3,6 +3,7 @@ import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js'
 import { readFileSync, realpathSync } from 'node:fs';
 import { sep } from 'node:path';
 import { AgentWorkflow } from './agent-workflow.js';
+import { overlapLines, type PredictiveOverlap } from './agent-predictive-overlap.js';
 import { invariant } from './errors.js';
 
 export const AGENT_HELP = `Forge agent workflow
@@ -23,7 +24,7 @@ New supervised projects stop at awaiting-review; a person accepts their checked 
 policy reads settings; set-policy selects a preset or edits fields (custom).
 laneUpdates:ask stops at sync-required when main moved; native undo-sync restores
 a recorded pre-sync checkpoint and refuses newer edits unless force:true.
-start/checkpoint/sync/finish include a local peers digest; scope:{paths:["src/file.ts"]}
+start/checkpoint/sync/finish and Lane status include a local peers digest; scope:{paths:["src/file.ts"]}
 declares paths; start retains planned claims until the Lane closes.
 take {laneId,takeover:true} hands another actor’s Lane to you with its context. peers {laneId,detail:true} reads full details.
 Clean checkpoints succeed with the unchanged head.
@@ -139,7 +140,7 @@ function actionHelp(action: string): string {
       'Read the scoped landing test selection for the Lane saved head versus current main. Returns scope, reason, tests, command and source pins; command is null when no test files are selected. Run it in the Lane after building. Checkpoint edits and ask again after sync or main changes. Read-only; no check is started.\n';
   if (action === 'status')
     result +=
-      'laneId returns one compact Lane: state, saved head/base, save count, paged Candidates, last check and saved changed-path count. detail:true also includes the existing owner overview. Omit laneId for that overview; intentId filters it. Candidate pages use offset/limit. Unsaved changes are available through review.\n';
+      'laneId returns one compact Lane: state, saved head/base, save count, paged Candidates, last check, saved changed-path count and local peers advice. High region overlap also prints compact stderr lines; peers detail:true includes low/disjoint regions. detail:true also includes the existing owner overview. Omit laneId for that overview; intentId filters it. Candidate pages use offset/limit. Unsaved changes are available through review.\n';
   if (action === 'checkpoint' || action === 'sync')
     result +=
       'Top-level summary leads with the outcome. Existing result fields remain; detail:true expands peer details (also available with peers {laneId,detail:true}).\n';
@@ -227,6 +228,12 @@ export async function agentCli(args: string[]): Promise<unknown> {
     if (laneId) selected.laneId = laneId;
   }
   const response = await agent.dispatch({ ...selected, action });
+  const result = response.result as {
+    peers?: { predictive?: PredictiveOverlap[] };
+    predictive?: PredictiveOverlap[];
+  };
+  const predictions = action === 'peers' ? result.predictive : result.peers?.predictive;
+  for (const line of overlapLines(predictions ?? [])) process.stderr.write(`${line}\n`);
   if (action === 'show') {
     const file = response.result as ReturnType<
       typeof import('./agent-source-read.js').readAgentShow

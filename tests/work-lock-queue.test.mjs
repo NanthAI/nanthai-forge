@@ -619,8 +619,11 @@ test('four parallel CLI finishes queue behind an owner writer, report check/land
     assert.doesNotMatch(reply.stderr, /unknown holder|pid undefined/);
     assert.match(reply.stderr, /holder agent|parallel agent|pid \d+/);
     const replay = (await agent.dispatch({ ...commands[i], ...result.resolved })).result;
-    const { resolved, ...canonical } = result;
-    assert.deepEqual(replay, canonical);
+    // Advisory peers refresh on every dispatch; other finishes may have landed
+    // between the original reply and replay. Only the saved receipt is stable.
+    const { resolved, peers: _originalPeers, ...canonical } = result;
+    const { peers: _replayedPeers, ...replayedReceipt } = replay;
+    assert.deepEqual(replayedReceipt, canonical);
   }
   assert.ok(replies.some(reply => /queued for check:.*queue position=[2-9]/.test(reply.stderr)));
   const moves = store.load().channelMoves;

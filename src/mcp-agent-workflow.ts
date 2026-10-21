@@ -18,7 +18,7 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
     'forge_peers',
     {
       description:
-        'Read local path overlaps and landed-since-base dry sync. Advisory, no locks or hosted calls. detail:true includes entries omitted by the 1.5 KB lifecycle digest. scope.paths declares relevance for this read only.',
+        'Read local path overlaps, predictive region/export overlaps against peer checkpoints and landed-since-base dry sync. Predictive advice includes ranges, peer Intent and suggested landing order; never blocks. Advisory, no locks or hosted calls. detail:true includes low/disjoint regions and entries omitted by the 1.5 KB lifecycle digest. scope.paths declares relevance for this read only.',
       inputSchema: peersInputSchema.shape,
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },

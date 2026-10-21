@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { PeersCache } from './agent-peers-cache.js';
 import { PeersSource } from './agent-peers-source.js';
+import { regionSummary } from './agent-region-summary.js';
 import { pageHashes, pageSize } from './work-records.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
@@ -37,5 +38,9 @@ export function indexPeerSource(store: WorkStore, laneId: string) {
   const source = new PeersSource(store, () => {}, lane.base);
   source.state(lane.base);
   source.state(lane.head);
+  regionSummary(source, new PeersCache(store.root), lane.base, lane.head, () => [
+    source.state(lane.base).files,
+    source.state(lane.head).files,
+  ]);
   source.live(lane);
 }

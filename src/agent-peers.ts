@@ -15,6 +15,8 @@ import { PeersCache } from './agent-peers-cache.js';
 import { pageHashes, pageSize } from './work-records.js';
 import { NativeAncestry } from './native-ancestry.js';
 import { PeersSource } from './agent-peers-source.js';
+import { regionSummary } from './agent-region-summary.js';
+import { predictiveOverlaps, type PredictiveOverlap } from './agent-predictive-overlap.js';
 import {
   moveDelta,
   scopedCode,
@@ -22,7 +24,7 @@ import {
   type ContractDependent,
   type LandedContracts,
 } from './agent-peers-contracts.js';
-import { contractDelta, dependentOn, type ContractChange } from './contract-deps.js';
+import { dependentOn, type ContractChange } from './contract-deps.js';
 import { changedPaths } from './agent-sync.js';
 import { pathsOverlap } from './coordination-paths.js';
 import { overlappingPaths } from './native-source.js';
@@ -63,6 +65,8 @@ export type PeersDigest = {
   notices?: { text: string }[];
   conflicts?: ConflictNotice[];
   overlaps?: Overlap[];
+  /** My live regions versus every in-flight peer's latest checkpoint. */
+  predictive?: PredictiveOverlap[];
   ownership?: ReturnType<typeof laneOwnership>;
   stalled?: { lane: string; actor: string; quietMs: number; offer: 'take' }[];
   landed?: Landed[];
@@ -260,7 +264,29 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     let composed = 0;
     peers.sort((a, b) => compare(a.id, b.id));
     // Contracts I changed that other open Lanes use: told again when I land.
-    const own = contractDelta(source, base, live);
+    const ownSummary = regionSummary(source, cache, lane.base, liveHead, () => [base, live]);
+    const own = ownSummary.contracts;
+    for (const peer of peers) {
+      tick();
+      try {
+        if (main && ancestry.contains(main, peer.head)) continue;
+        const theirs = regionSummary(source, cache, peer.base, peer.head, () => [
+          source.state(peer.base).files,
+          source.state(peer.head).files,
+        ]);
+        const predictions = predictiveOverlaps(source, cache, lane, ownSummary, peer, theirs);
+        if (!predictions.length) continue;
+        const intent = store.select('intents', peer.intentId)?.outcome;
+        for (const item of predictions) {
+          if (intent) item.intent = clip(intent);
+          if (item.risk === 'unknown') result.coverage = 'local-incomplete';
+        }
+        (result.predictive ??= []).push(...predictions);
+      } catch (error) {
+        if (error instanceof ForgeError && error.code === 'PEERS_BUDGET') throw error;
+        result.coverage = 'local-incomplete';
+      }
+    }
     if (command.detail && own.length) result.changes = own;
     if (own.length)
       for (const peer of peers.slice(0, 20)) {
@@ -387,6 +413,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
   if (
     result.coverage === 'local' &&
     !result.overlaps!.length &&
+    !result.predictive?.length &&
     !result.landed!.length &&
     !result.contracts?.length &&
     !result.dependents?.length &&

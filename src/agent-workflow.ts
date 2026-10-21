@@ -173,16 +173,18 @@ export class AgentWorkflow {
           /* Observation reports unavailable source below. */
         }
     }
-    const peers = ['start', 'checkpoint', 'sync', 'finish'].includes(command.action)
-      ? agentPeers(store, {
-          laneId:
-            command.action === 'start'
-              ? (response.result as { laneId: string }).laneId
-              : (command as { laneId: string }).laneId,
-          scope: (command as { scope?: { paths: string[] } }).scope,
-          detail: true,
-        })
-      : undefined;
+    const peers =
+      ['start', 'checkpoint', 'sync', 'finish'].includes(command.action) ||
+      (command.action === 'status' && command.laneId)
+        ? agentPeers(store, {
+            laneId:
+              command.action === 'start'
+                ? (response.result as { laneId: string }).laneId
+                : (command as { laneId: string }).laneId,
+            scope: (command as { scope?: { paths: string[] } }).scope,
+            detail: true,
+          })
+        : undefined;
     if (command.action === 'start') {
       const result = response.result as { laneId: string; warnings?: string[] };
       try {
@@ -195,7 +197,7 @@ export class AgentWorkflow {
     if (peers) {
       try {
         const journal = new CoordinationJournal(store);
-        journal.record(peers.conflicts ?? []);
+        if (command.action !== 'status') journal.record(peers.conflicts ?? []);
         const laneId =
           command.action === 'start'
             ? (response.result as { laneId: string }).laneId

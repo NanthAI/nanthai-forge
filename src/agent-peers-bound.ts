@@ -6,11 +6,31 @@ const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 /** Byte cap applies to JSON UTF-8, including escaping. `more` counts omitted entries. */
 export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
   if (detail) return value;
+  delete value.changes;
+  if (value.predictive) {
+    value.predictive = value.predictive.filter(item => item.risk === 'high');
+    if (!value.predictive.length) delete value.predictive;
+  }
   if (value.ownership) {
     value.ownership.actor = value.ownership.actor.slice(0, 200);
     if (value.ownership.sessionId) value.ownership.sessionId = value.ownership.sessionId.slice(0, 200);
   }
   let more = 0;
+  if (value.predictive) {
+    more += Math.max(0, value.predictive.length - 3);
+    value.predictive.splice(3);
+    for (const item of value.predictive) {
+      const extra =
+        Math.max(0, (item.mine?.length ?? 0) - 2) +
+        Math.max(0, (item.peer?.length ?? 0) - 2) +
+        Math.max(0, (item.symbols?.length ?? 0) - 2);
+      if (item.mine) item.mine = item.mine.slice(0, 2);
+      if (item.peer) item.peer = item.peer.slice(0, 2);
+      if (item.alignedPeer) item.alignedPeer = item.alignedPeer.slice(0, 2);
+      if (item.symbols) item.symbols = item.symbols.slice(0, 2);
+      if (extra) item.more = extra;
+    }
+  }
   if (value.notices) value.notices = value.notices.slice(-3).map(item => ({ text: item.text.slice(0, 200) }));
   if (value.conflicts?.length) {
     more += Math.max(0, value.conflicts.length - 3);
@@ -85,7 +105,9 @@ export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
             ? value.conflicts
             : value.dependents?.length
               ? value.dependents
-              : value.contracts;
+              : value.contracts?.length
+                ? value.contracts
+                : value.predictive;
     if (!items?.length) {
       if (value.notices?.length) {
         value.notices.pop();
@@ -107,6 +129,7 @@ export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
     if (!value.stalled?.length) delete value.stalled;
     if (!value.dependents?.length) delete value.dependents;
     if (!value.contracts?.length) delete value.contracts;
+    if (!value.predictive?.length) delete value.predictive;
   }
   return value;
 }
