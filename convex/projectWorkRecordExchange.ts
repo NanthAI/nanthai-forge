@@ -19,6 +19,7 @@ import {
   supportsWorkDelta,
   WORK_DELTA_BYTES,
 } from '../src/work-exchange-delta';
+import { batchedRecordReader } from '../src/native-exchange-stream';
 import { workDeltaContext } from '../src/work-exchange-context';
 import { sourceManifestSchema, archiveChannels } from '../src/work-archive-metadata';
 import { invariant } from '../src/errors';
@@ -38,7 +39,7 @@ export async function recordExchange(
   const value: unknown = JSON.parse(bytes.toString('utf8'));
   if (!isExchangeRoot(value)) return;
   const root = exchangeRootSchema.parse(value);
-  if (root.schema !== 2 || root.records.size > WORK_DELTA_BYTES) return;
+  if (root.schema !== 2) return;
   const recordBytes = await readByteTree(root.records, pins => reader.read(backup.projectId, owner, pins));
   const records = workRecordRootSchema.parse(JSON.parse(recordBytes.toString('utf8')));
   recordMap(records);
@@ -79,13 +80,16 @@ export async function recordExchange(
 }
 export async function verifyRecordSeed(
   exchange: NonNullable<Awaited<ReturnType<typeof recordExchange>>>,
-  validatedWork: Uint8Array,
+  validatedWork: Uint8Array | WorkData,
 ) {
   // The caller has validated these complete bytes. Rebuild from their original
   // field order: parseWorkBytes adds defaults and orders known fields by schema,
   // which can change a catalog even when the Work values and revision match.
-  const data = JSON.parse(Buffer.from(validatedWork).toString('utf8')) as WorkData;
-  const expected = buildWorkRecords(data);
+  const data =
+    validatedWork instanceof Uint8Array
+      ? (JSON.parse(Buffer.from(validatedWork).toString('utf8')) as WorkData)
+      : validatedWork;
+  const expected = buildWorkRecords(data, { retainObjects: false });
   invariant(
     expected &&
       expected.pin.sha256 === exchange.root.records.sha256 &&
@@ -101,33 +105,12 @@ export async function verifyRecordDigest(
   backup: Pick<Doc<'projectBackups'>, 'projectId'>,
   owner: string,
 ) {
-  const pins = [...recordMap(records).values()].map(({ record }) => record);
-  let position = 0;
-  const cache = new Map<string, Buffer>();
-  await hashWorkRecords(records, async pin => {
-    const current = position++;
-    if (!cache.has(pin.sha256)) {
-      cache.clear();
-      const batch = [];
-      let bytes = 0,
-        offset = current;
-      while (
-        offset < pins.length &&
-        batch.length < 100 &&
-        (!batch.length || bytes + pins[offset]!.size <= 2 * 1024 * 1024)
-      ) {
-        const next = pins[offset++]!;
-        batch.push(next);
-        bytes += next.size;
-      }
-      const values = await reader.read(backup.projectId, owner, batch);
-      batch.forEach((item, i) => cache.set(item.sha256, values[i]!));
-    }
-    const value = cache.get(pin.sha256);
-    // Repeated content is legal; an earlier consumed record can be read again.
-    cache.delete(pin.sha256);
-    return value ?? (await reader.read(backup.projectId, owner, [pin]))[0]!;
-  });
+  const batch = batchedRecordReader(records, pins => reader.read(backup.projectId, owner, pins));
+  try {
+    await hashWorkRecords(records, batch.read);
+  } finally {
+    await batch.drain();
+  }
 }
 export async function recordPublication(
   ctx: ActionCtx,
@@ -141,26 +124,32 @@ export async function recordPublication(
   owner: string,
   reader: ExchangeObjectReader,
 ) {
-  if (!input.previous || input.deferHistory) return;
+  const skip = (reason: string) => {
+    console.log('work-record publication skip', { reason, projectId: input.projectId });
+    return undefined;
+  };
+  if (!input.previous) return skip('previous-missing');
+  if (input.deferHistory) return skip('history-deferred');
   const { backup: prior } = await ctx.runQuery(internal.projectBackups.get, { id: input.previous, owner });
-  if (
-    prior.projectId !== input.projectId ||
-    prior.validatedWorkRecords !== 1 ||
-    prior.validatedClosure !== 1 ||
-    prior.historyBackfilling
-  )
-    return;
+  if (prior.projectId !== input.projectId) return skip('previous-project-differs');
+  if (prior.validatedWorkRecords !== 1) return skip('previous-records-unvalidated');
+  if (prior.validatedClosure !== 1) return skip('previous-closure-unvalidated');
+  if (prior.historyBackfilling) return skip('previous-history-backfilling');
   const candidate = await recordExchange(input, owner, reader),
     previous = await recordExchange(prior, owner, reader);
-  if (!candidate?.root.delta || !previous || candidate.root.delta.size > WORK_DELTA_BYTES) return;
+  if (!candidate) return skip('candidate-catalog-unavailable');
+  if (!previous) return skip('previous-catalog-unavailable');
+  if (!candidate.root.delta) return skip('delta-missing');
+  if (candidate.root.delta.size > WORK_DELTA_BYTES) return skip('delta-over-budget');
   const raw = JSON.parse((await candidate.read(candidate.root.delta)).toString('utf8'));
   // A checkpoint from another baseline uses the complete supported path.
-  if (raw?.base?.root !== previous.root.records.sha256) return;
+  if (raw?.base?.root !== previous.root.records.sha256) return skip('delta-base-root-differs');
   const delta = validateWorkDelta(previous.records, candidate.records, raw, {
     root: previous.root.records.sha256,
   });
-  if (!supportsWorkDelta(previous.records, candidate.records)) return;
-  if (!(await workDeltaContext(previous.records, candidate.records, delta, candidate.read))) return;
+  if (!supportsWorkDelta(previous.records, candidate.records)) return skip('delta-layout-unsupported');
+  if (!(await workDeltaContext(previous.records, candidate.records, delta, candidate.read)))
+    return skip('context-over-budget');
   const files = new Map(
     previous.manifest.files.filter(p => p.path !== 'work.json').map(p => [p.sha256, p.size]),
   );
@@ -174,7 +163,8 @@ export async function recordPublication(
     candidate.read,
     pins,
   );
-  if (delta.changes.some(change => change.collection === 'channelMoves' && change.previous !== null)) return;
+  if (delta.changes.some(change => change.collection === 'channelMoves' && change.previous !== null))
+    return skip('channel-history-replaced');
   await verifyRecordDigest(candidate.records, reader, input, owner);
   const channels = new Map(
     prior.preview.channels.map((channel: { name: string; head: string }) => [channel.name, channel]),

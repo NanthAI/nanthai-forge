@@ -11,7 +11,8 @@ import { sourceManifestSchema, archiveChannels } from '../src/work-archive-metad
 import { parseNativeState } from '../src/native-source';
 import { hostSourceHeads } from '../src/host-source';
 import { validateExchangePins, validateHostedClosure } from './projectExchangeValidation';
-import { parseWorkBytes } from '../src/work-metadata';
+import { validateParsedWork } from '../src/work-metadata';
+import { resolveExchangeWork } from '../src/native-exchange-stream';
 import { projectArchivePart } from './projectArchivePart';
 import { objectRange, rawContent } from './projectObjectContent';
 import { isStored, isR2Object } from './projectObjectFields';
@@ -197,6 +198,10 @@ export const publish = action({
       if (original) return original;
       const { metadataOnly, ...legacyInput } = input;
       if (metadataOnly) {
+        console.log('work-record publication skip', {
+          reason: 'metadata-publication',
+          projectId: input.projectId,
+        });
         const started = Date.now(),
           metadataCtx = meteredStorage(ctx);
         const metadata = await metadataPublication(metadataCtx, input, owner, request);
@@ -245,9 +250,7 @@ export const publish = action({
         exchangeObjectReader(ctx),
       );
       const incremental = isExchangeRoot(JSON.parse(bytes.toString('utf8'))),
-        resolved = await resolveExchangeRoot(bytes, pins => reader.read(input.projectId, owner, pins), {
-          batchSize: 100,
-        });
+        resolved = await resolveExchangeWork(bytes, pins => reader.read(input.projectId, owner, pins));
       const manifest = sourceManifestSchema.parse(JSON.parse(resolved.manifest.toString('utf8')));
       invariant(
         new Set(manifest.files.map(file => file.path)).size === manifest.files.length,
@@ -256,9 +259,16 @@ export const publish = action({
       );
       const workFile = manifest.files.find(file => file.path === 'work.json');
       invariant(workFile, 'INVALID_WORK_BACKUP', 'Manifest omits Work.');
-      const data = parseWorkBytes(resolved.work);
+      const data = validateParsedWork(resolved.data);
       const recordSeed = await recordExchange(input, owner, reader);
-      if (recordSeed) await verifyRecordSeed(recordSeed, resolved.work);
+      if (recordSeed) {
+        await verifyRecordSeed(recordSeed, resolved.data);
+        console.log('work-record exchange prepared', { mode: 'seed' });
+      } else
+        console.log('work-record publication skip', {
+          reason: 'seed-catalog-unavailable',
+          projectId: input.projectId,
+        });
       invariant(
         data.revision === manifest.revision &&
           (manifest.kind === 'forge-native-work-backup'

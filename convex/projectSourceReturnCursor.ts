@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
-import { gzipSync, gunzipSync } from 'node:zlib';
+import { createGzip, createGunzip } from 'node:zlib';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { parseJsonStream } from '../src/json-stream';
 import { blobStore } from './blobStore';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -51,8 +54,11 @@ export function forgetReturnCursors() {
 }
 
 export async function storeReturnJson(ctx: ActionCtx, value: unknown): Promise<Id<'_storage'>> {
-  const encoder = new TextEncoder();
-  const body = gzipSync(Buffer.concat(Array.from(jsonChunks(value), chunk => encoder.encode(chunk))));
+  const compressed: Buffer[] = [];
+  await pipeline(Readable.from(jsonChunks(value)), createGzip(), async source => {
+    for await (const chunk of source) compressed.push(chunk as Buffer);
+  });
+  const body = Buffer.concat(compressed);
   const id = await blobStore(ctx).store(new Blob([body], { type: 'application/gzip' }));
   remember(id, body);
   return id;
@@ -70,6 +76,13 @@ export async function readReturnJson<T>(ctx: ActionCtx, id: Id<'_storage'>, mess
     body = Buffer.from(await blob.arrayBuffer());
     remember(id, body);
   }
-  const text = body[0] === 0x1f && body[1] === 0x8b ? gunzipSync(body) : body;
-  return JSON.parse(text.toString('utf8')) as T;
+  // A Blob/Buffer slice is only a view; do not give zlib one complete inflated
+  // snapshot or JSON.parse one complete UTF-16 copy.
+  async function* chunks() {
+    for (let offset = 0; offset < body!.length; offset += 65536) yield body!.subarray(offset, offset + 65536);
+  }
+  const stream = Readable.from(chunks());
+  return (await parseJsonStream(
+    body[0] === 0x1f && body[1] === 0x8b ? stream.pipe(createGunzip()) : stream,
+  )) as T;
 }

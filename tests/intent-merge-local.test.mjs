@@ -16,8 +16,9 @@ import { prepareNativeExchange } from '../dist/native-exchange.js';
 import { hostedPushWork, intentState } from '../dist/work-intent-local.js';
 import { planningCommandSchema } from '../dist/work-planning-types.js';
 import { unifiedWorkSchema } from '../dist/work-unified-types.js';
+import { digest } from '../dist/hash.js';
 import { recordReferences, buildWorkRecords } from '../dist/work-exchange-records.js';
-import { buildExchangeRoot, readByteTree } from '../dist/native-exchange-tree.js';
+import { buildExchangeRoot, resolveExchangeRoot } from '../dist/native-exchange-tree.js';
 import { parseWorkBytes } from '../dist/work-metadata.js';
 
 const at = '2026-01-01T00:00:00Z',
@@ -412,15 +413,32 @@ test('planned Intents round-trip record-enabled push preparation after migration
       error.message.includes('["base"]') &&
       !error.message.includes('PRIVATE_SENTINEL'),
   );
-  assert.equal(
-    buildWorkRecords(data),
-    undefined,
-    'unified collections retain the complete compatibility path',
+  data.initiatives[0].opaque = { laneId: randomUUID() };
+  assert.deepEqual(
+    recordReferences('initiatives', data.initiatives[0], 18),
+    [],
+    'initiative extensions remain opaque',
   );
+  assert.ok(buildWorkRecords(data), 'unified collections have stable record catalogs');
   const bytes = Buffer.from(JSON.stringify(data, null, 2));
-  const encoded = buildExchangeRoot(Buffer.from('{}'), bytes, { records: true });
-  assert.equal(encoded.root.schema, 1);
-  const restored = await readByteTree(encoded.root.work, async pins =>
+  const encoded = buildExchangeRoot(
+    Buffer.from(
+      JSON.stringify({
+        schema: 1,
+        kind: 'forge-native-work-backup',
+        id: randomUUID(),
+        head: data.nativeHead,
+        revision: data.revision,
+        files: [{ path: 'work.json', sha256: digest(bytes), size: bytes.length }],
+        unavailable: [],
+        coverage: 'Synthetic',
+      }),
+    ),
+    bytes,
+    { records: true },
+  );
+  assert.equal(encoded.root.schema, 2);
+  const { work: restored } = await resolveExchangeRoot(encoded.bytes, async pins =>
     pins.map(pin => encoded.objects.get(pin.sha256)),
   );
   assert.deepEqual(restored, bytes);

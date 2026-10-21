@@ -500,9 +500,9 @@ for presentation only.
 Native exchange sends `hostedPushWork` without down-projecting unified fields or
 unpinned Intents. Record reference validation uses the declared Work format, so
 formats 16 and 18 accept an Intent without a base before its first Lane. Unknown
-extension fields remain opaque to reference discovery. Unified collections still
-select the complete metadata compatibility path rather than record deltas; the
-hosted reader validates the complete bytes with the shared format-aware parser.
+extension fields remain opaque to reference discovery. Unified collections use format-aware record catalogs and deltas, including stable
+alias keys. Unsupported layouts keep the complete compatibility path; streamed
+complete reads validate schema-owned array segments without a full schema clone.
 No Work migration or synthetic source base is needed for existing planned Intents.
 
 Hosted journal reads and local recovery replay original events through the Intent

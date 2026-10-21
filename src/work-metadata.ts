@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { sourceReturnChunks } from './work-source-return-chunks.js';
 import { isUnifiedWork, parseWork } from './work-unified-types.js';
 import { unifyIntent, resolveIntentId, noteConversation } from './work-intent-local.js';
 import { hostedIntentMigrationSchema } from './work-hosted-intents.js';
@@ -234,7 +235,16 @@ export function applyHostedEvent(data: WorkData, event: HostedEvent, options: { 
   data.revision++;
 }
 export function validateWorkSize(data: WorkData) {
-  parseWork(data);
+  // The version refinements are per record plus scalar metadata. Validate a
+  // skeleton and each bounded array segment, retaining no full schema clone.
+  for (const chunk of sourceReturnChunks(data)) parseWork(chunk.data);
+}
+export function validateParsedWork(raw: WorkData): WorkData {
+  validateWorkSize(raw);
+  const skeleton = Object.fromEntries(
+    Object.entries(raw).map(([key, value]) => [key, Array.isArray(value) ? [] : value]),
+  );
+  return { ...parseWork(skeleton), ...raw };
 }
 export const hostedJournalSchema = z.object({
   schema: z.literal(1),

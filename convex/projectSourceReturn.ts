@@ -165,7 +165,9 @@ export const returnSource = action({
         ctx,
         input,
         owner,
-        reader,
+        // Large compatibility reads consume each byte once per action. Avoid
+        // retaining a second raw-history window beside the parsed candidate.
+        exchangeObjectReader(ctx, false, 0),
         candidateInfo.backup,
         previousInfo.backup,
         priorStage,

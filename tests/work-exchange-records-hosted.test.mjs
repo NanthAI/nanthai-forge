@@ -13,6 +13,8 @@ import { retainExchangeBaseline } from '../dist/native-exchange-baseline.js';
 import { workBytes, applyHostedEvent, parseWorkBytes } from '../dist/work-metadata.js';
 import { recordBytes, buildWorkRecords } from '../dist/work-exchange-records.js';
 import { buildExchangeRoot } from '../dist/native-exchange-tree.js';
+import { convertWorkTo18 } from '../dist/work-intent-converter.js';
+import { unifyIntent } from '../dist/work-intent-local.js';
 import { digest } from '../dist/hash.js';
 const index = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const { verifyRecordSeed } = await import(moduleUrl('../convex/projectWorkRecordExchange.ts'));
@@ -94,13 +96,32 @@ test('complete record seed preserves absent defaults and rejects changed Work at
   );
 });
 
-async function setup(t, records = true, history = 3, active = false) {
+async function setup(t, records = true, history = 3, active = false, unified = false) {
   const s = fixture(),
     first = await checkpoint(t, s);
   land(first.store, history, 2);
   if (active) {
     const data = first.store.load();
     data.intents[0].status = 'active';
+    first.store.save(data);
+  }
+  if (unified) {
+    const raw = first.store.load();
+    raw.schema = 15;
+    const data = convertWorkTo18(raw);
+    data.intents.push(
+      unifyIntent({
+        id: randomUUID(),
+        outcome: 'Planned without a Lane',
+        constraints: '',
+        status: 'active',
+        createdAt: 'now',
+        notes: [],
+      }),
+    );
+    data.intentAliases.push({ aliasId: randomUUID(), intentId: data.intents[0].id });
+    // Catalog metadata itself can exceed the old delta budget. This is not a delta-size limit.
+    data.legacyIntentMerge.fields.synthetic = 'x'.repeat(4 * 1024 * 1024 + 1);
     first.store.save(data);
   }
   const baseline = first.store.load();
@@ -363,4 +384,28 @@ test('lost stage-begin replies retain the source-return timestamp and original o
   const receipt = await complete(f.s, c.input);
   assert.equal(receipt.at, at);
   assert.deepEqual(await complete(f.s, c.input), receipt);
+});
+
+test('dogfood-like unified Work seeds validated large catalogs and returns through record delta', async t => {
+  const f = await setup(t, true, 5, true, true);
+  assert.equal(f.seed.tree.root.schema, 2);
+  assert.ok(f.seed.tree.root.records.size > 4 * 1024 * 1024);
+  assert.equal(f.s.tables.projectBackups.get(f.backupId).validatedWorkRecords, 1);
+  const c = await candidate(f);
+  assert.equal(f.s.tables.projectBackups.get(c.input.backupId).validatedWorkRecords, 1);
+  const logs = [];
+  t.mock.method(console, 'log', (...args) => logs.push(args));
+  await complete(f.s, c.input);
+  assert.ok(
+    logs.some(([name]) => name === 'work-record return prepared'),
+    JSON.stringify(logs),
+  );
+  assert.ok(
+    !logs.some(([name]) => name === 'source-return prepare load done'),
+    'record delta never loads complete Work',
+  );
+  const hosted = await modules.projectWorkActions.load(f.s.ctx, 'project', 'owner');
+  assert.equal(hosted.data.schema, 18);
+  assert.deepEqual(hosted.data.intentAliases, f.baseline.intentAliases);
+  assert.ok(hosted.data.intents.some(i => i.base === undefined));
 });

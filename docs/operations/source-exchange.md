@@ -76,7 +76,13 @@ compatibility endpoint remain available. When either byte-reading native object 
 Work exceeds 16 MiB and a current index is available, compatibility preparation
 saves a cursor between reading current Work, reading candidate Work, and checking
 retained-history chunks. It does not load both complete Work copies in one
-action. Each validation invocation checks up to eight chunks (a 256 KiB target,
+action. Complete object metadata is decoded as a stream, and Work schema validation
+checks a scalar skeleton and bounded array segments. Snapshot compression and cold
+snapshot decoding also stream; they retain one parsed candidate without complete
+uncompressed byte and text copies. Large compatibility preparation bypasses the
+raw byte memos while consuming history, keeping their duplicate byte windows out
+of the candidate action. Record reads keep four bounded batches ahead
+to overlap storage latency while preserving canonical order and digest checks. Each validation invocation checks up to eight chunks (a 256 KiB target,
 with indivisible records preserved) against the pinned candidate, then saves its
 position. Large compatibility returns build a complete private index partition
 through the existing durable phases. Small returns keep their incremental index
@@ -84,6 +90,14 @@ comparison. These thresholds schedule work; they do not limit accepted Work or
 require a CLI upgrade. Old retained operations use the same checkpoint, hosted
 revision, operation UUID and timestamp when preparation resumes.
 
+Formats 16/18 use schema-owned unified collections, including alias keys and
+unpinned planned Intents, in record catalogs and deltas. Catalog size is independent
+of the delta/context optimization budget; complete seed validation can establish
+validated records for catalogs above 4 MiB. Unknown extension arrays, duplicate
+keys and unsupported layouts still use complete compatibility validation.
+
+Publication logs identify every delta skip gate, unavailable seed catalogs and
+metadata-only publications; successful validation identifies seed or delta mode.
 Prepare logs include each record-delta skip reason and separate current-load,
 candidate-load and retained-validation completion messages. Record checkpoint
 reconstruction batches up to 100 records with a 2 MiB target on hosted readers

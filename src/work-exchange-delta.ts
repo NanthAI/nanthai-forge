@@ -12,6 +12,7 @@ import {
   type WorkRecordRoot,
   type RecordPin,
 } from './work-exchange-records.js';
+import { isUnifiedWork, unifiedWorkSchema, safeParseWork } from './work-unified-types.js';
 import { workSchema, type WorkData } from './work-types.js';
 import { workSourcePins } from './work-archive-metadata.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
@@ -39,12 +40,13 @@ export type WorkDelta = z.infer<typeof workDeltaSchema>;
 /** An optimization budget; exceeding it selects the complete compatibility path. */
 export const WORK_DELTA_BYTES = 4 * 1024 * 1024;
 export function supportsWorkDelta(before: WorkRecordRoot, after: WorkRecordRoot) {
+  const shape = isUnifiedWork(recordMetadata(after)) ? unifiedWorkSchema.shape : workSchema.shape;
   const old = new Map(before.fields.map(field => [field.name, field]));
   for (const field of after.fields) {
     const prior = old.get(field.name);
     old.delete(field.name);
     if ('records' in field) {
-      if (!Object.hasOwn(workSchema.shape, field.name) || (prior && !('records' in prior))) return false;
+      if (!Object.hasOwn(shape, field.name) || (prior && !('records' in prior))) return false;
       // Existing positional indexes support append/replacement directly. A
       // reordered or inserted history uses complete reconstruction instead.
       if (
@@ -144,7 +146,16 @@ export function partialWork(
   root: WorkRecordRoot,
   records: { collection: string; value: Record<string, unknown> }[],
 ) {
-  const parsed = workSchema.safeParse({ intents: [], lanes: [], views: [], ...recordMetadata(root) });
+  const parsed = safeParseWork(
+    {
+      ...Object.fromEntries(root.fields.filter(f => 'records' in f).map(f => [f.name, []])),
+      intents: [],
+      lanes: [],
+      views: [],
+      ...recordMetadata(root),
+    },
+    true,
+  );
   invariant(parsed.success, 'INVALID_WORK_BACKUP', 'Work record metadata has an invalid shape.');
   const data = parsed.data;
   for (const { collection, value } of records)
@@ -173,7 +184,7 @@ export async function validateChangedRecords(
       });
     if (!record) continue;
     const value = await readRecord(record, read, change.collection),
-      refs = recordReferences(change.collection, value);
+      refs = recordReferences(change.collection, value, recordMetadata(after).schema as number);
     invariant(
       JSON.stringify(refs) === JSON.stringify(record.refs),
       'INVALID_WORK_BACKUP',
@@ -197,7 +208,7 @@ export async function validateChangedRecords(
   const candidate = partialWork(after, current),
     prior = partialWork(before, previous);
   invariant(
-    workSchema.safeParse(candidate).success,
+    safeParseWork(candidate, true).success,
     'INVALID_WORK_BACKUP',
     'Changed Work records require their versioned format.',
   );

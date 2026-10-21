@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
+import { jsonChunks } from './json-chunks.js';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { workSchema, type WorkData } from './work-types.js';
-import { isUnifiedWork, unifiedIntentSchema, intentMembershipSchema } from './work-unified-types.js';
+import {
+  isUnifiedWork,
+  unifiedIntentSchema,
+  intentMembershipSchema,
+  unifiedWorkSchema,
+  initiativeSchema,
+} from './work-unified-types.js';
 
 // Reference discovery interprets schema-owned fields only, even though portable
 // unified Intents preserve uninterpreted extensions verbatim.
@@ -42,11 +49,13 @@ export type RecordPin = z.infer<typeof recordPinSchema>;
 export type RecordRef = z.infer<typeof reference>;
 export const recordIdentity = (collection: string, key: string) => JSON.stringify([collection, key]);
 export const recordKey = (record: Record<string, unknown>, collection?: string) =>
-  typeof record.id !== 'string'
-    ? undefined
-    : collection === 'planningItems' && typeof record.version === 'number'
-      ? JSON.stringify([record.id, record.version])
-      : record.id;
+  collection === 'intentAliases' && typeof record.aliasId === 'string'
+    ? record.aliasId
+    : typeof record.id !== 'string'
+      ? undefined
+      : collection === 'planningItems' && typeof record.version === 'number'
+        ? JSON.stringify([record.id, record.version])
+        : record.id;
 export const recordBytes = (value: unknown) =>
   Buffer.from(
     JSON.stringify(value, null, 2)
@@ -73,11 +82,14 @@ const targets: Record<string, string> = {
 };
 /** Only schema-owned fields supply references; uninterpreted extension fields remain opaque. */
 export function recordReferences(collection: string, value: unknown, format = 15): RecordRef[] {
-  if (!Object.hasOwn(workSchema.shape, collection)) return [];
+  const shape = isUnifiedWork({ schema: format }) ? unifiedWorkSchema.shape : workSchema.shape;
+  if (!Object.hasOwn(shape, collection)) return [];
   const schema =
     collection === 'intents' && isUnifiedWork({ schema: format })
       ? unifiedReferenceIntents
-      : workSchema.shape[collection as keyof typeof workSchema.shape];
+      : collection === 'initiatives' && isUnifiedWork({ schema: format })
+        ? z.array(initiativeSchema.strip())
+        : shape[collection as keyof typeof shape];
   const result = schema.safeParse([value]);
   const key =
     value && typeof value === 'object' ? recordKey(value as Record<string, unknown>, collection) : undefined;
@@ -128,7 +140,7 @@ export function recordMetadata(root: WorkRecordRoot) {
       .map(field => [field.name, 'value' in field ? field.value : undefined]),
   );
 }
-export function buildWorkRecords(data: WorkData) {
+export function buildWorkRecords(data: WorkData, options: { retainObjects?: boolean } = {}) {
   const objects = new Map<string, Buffer>();
   const fields: WorkRecordRoot['fields'] = [];
   for (const [name, value] of Object.entries(data)) {
@@ -137,7 +149,7 @@ export function buildWorkRecords(data: WorkData) {
       fields.push({ name, value });
       continue;
     }
-    if (!Object.hasOwn(workSchema.shape, name)) return;
+    if (!Object.hasOwn(isUnifiedWork(data) ? unifiedWorkSchema.shape : workSchema.shape, name)) return;
     const records: RecordPin[] = [],
       keys = new Set<string>();
     for (const item of value) {
@@ -147,7 +159,7 @@ export function buildWorkRecords(data: WorkData) {
       keys.add(key);
       const bytes = recordBytes(item),
         sha256 = digest(bytes);
-      objects.set(sha256, bytes);
+      if (options.retainObjects !== false) objects.set(sha256, bytes);
       records.push({
         key,
         sha256,
@@ -158,11 +170,16 @@ export function buildWorkRecords(data: WorkData) {
     }
     fields.push({ name, records });
   }
-  const bytes = Buffer.from(JSON.stringify(data, null, 2));
+  const hash = createHash('sha256');
+  let size = 0;
+  for (const chunk of jsonChunks(data, 2)) {
+    hash.update(chunk);
+    size += Buffer.byteLength(chunk);
+  }
   const root: WorkRecordRoot = {
     kind: 'forge-work-records',
     schema: 2,
-    work: { sha256: digest(bytes), size: bytes.length },
+    work: { sha256: hash.digest('hex'), size },
     revision: data.revision,
     fields,
   };
@@ -189,10 +206,9 @@ export async function readRecord(
   return value;
 }
 /** Hash exact portable bytes incrementally; never construct a second whole Work JSON. */
-export async function hashWorkRecords(
+export async function* workRecordChunks(
   root: WorkRecordRoot,
   read: (pin: { sha256: string; size: number }) => Promise<Buffer>,
-  collect?: Buffer[] | ((bytes: Buffer) => void),
 ) {
   recordMap(root);
   const hash = createHash('sha256');
@@ -200,14 +216,13 @@ export async function hashWorkRecords(
   const append = (bytes: string | Buffer) => {
     hash.update(bytes);
     size += Buffer.byteLength(bytes);
-    if (typeof collect === 'function') collect(Buffer.from(bytes));
-    else collect?.push(Buffer.from(bytes));
+    return Buffer.from(bytes);
   };
-  append('{');
+  yield append('{');
   for (const [index, field] of root.fields.entries()) {
-    append(`${index ? ',' : ''}\n  ${JSON.stringify(field.name)}: `);
+    yield append(`${index ? ',' : ''}\n  ${JSON.stringify(field.name)}: `);
     if ('records' in field) {
-      append('[');
+      yield append('[');
       for (const [i, record] of field.records.entries()) {
         const bytes = await read(record);
         invariant(
@@ -215,13 +230,13 @@ export async function hashWorkRecords(
           'INVALID_WORK_BACKUP',
           'Work record bytes differ.',
         );
-        append(i ? ',\n' : '\n');
-        append(bytes);
+        yield append(i ? ',\n' : '\n');
+        yield append(bytes);
       }
-      append(field.records.length ? '\n  ]' : ']');
-    } else append(JSON.stringify(field.value, null, 2).replaceAll('\n', '\n  '));
+      yield append(field.records.length ? '\n  ]' : ']');
+    } else yield append(JSON.stringify(field.value, null, 2).replaceAll('\n', '\n  '));
   }
-  append(root.fields.length ? '\n}' : '}');
+  yield append(root.fields.length ? '\n}' : '}');
   const actual = { sha256: hash.digest('hex'), size };
   invariant(
     actual.sha256 === root.work.sha256 && actual.size === root.work.size,
@@ -229,4 +244,16 @@ export async function hashWorkRecords(
     'Record root differs from the whole Work digest.',
   );
   return actual;
+}
+
+export async function hashWorkRecords(
+  root: WorkRecordRoot,
+  read: (pin: { sha256: string; size: number }) => Promise<Buffer>,
+  collect?: Buffer[] | ((bytes: Buffer) => void),
+) {
+  for await (const chunk of workRecordChunks(root, read)) {
+    if (typeof collect === 'function') collect(chunk);
+    else collect?.push(chunk);
+  }
+  return root.work;
 }

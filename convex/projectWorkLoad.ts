@@ -6,20 +6,30 @@ import type { Doc, Id } from './_generated/dataModel';
 import { invariant, ForgeError } from '../src/errors';
 import { migrateHostedIntents } from '../src/work-hosted-intents';
 import { digest } from '../src/hash';
-import { hostedCommandSchema, type HostedEvent } from '../src/work-types';
-import { applyHostedEvent, parseWorkBytes, validateWorkSize } from '../src/work-metadata';
+import { hostedCommandSchema, type HostedEvent, type WorkData } from '../src/work-types';
+import { applyHostedEvent, parseWorkBytes, validateWorkSize, validateParsedWork } from '../src/work-metadata';
+import { resolveExchangeWork } from '../src/native-exchange-stream';
 import { sourceManifestSchema } from '../src/work-archive-metadata';
-import type { ExchangeObjectReader } from './projectExchangeReader';
+import { exchangeObjectReader, type ExchangeObjectReader } from './projectExchangeReader';
 import { exchangeMetadata } from './projectExchangeActions';
 import { projectArchiveMetadata } from './projectArchiveMetadata';
 import { publicationSnapshot } from './projectSourceReturnMetadata';
+type SourceSnapshot = {
+  backup: Doc<'projectBackups'>;
+  project: Doc<'hostedProjects'>;
+  manifest: ReturnType<typeof sourceManifestSchema.parse>;
+  data: WorkData;
+  originalWorkDigest: string;
+  publication: Awaited<ReturnType<typeof publicationSnapshot>>;
+};
 export async function source(
   ctx: ActionCtx,
   backupId: Id<'projectBackups'>,
   owner: string,
   reader?: ExchangeObjectReader,
   metadata = false,
-) {
+): Promise<SourceSnapshot> {
+  const objectReader = reader ?? exchangeObjectReader(ctx, true);
   const original: { backup: Doc<'projectBackups'>; project: Doc<'hostedProjects'> } = await ctx.runQuery(
     internal.projectBackups.get,
     { id: backupId, owner },
@@ -33,28 +43,44 @@ export async function source(
   // Only source return opts into owner publication metadata. Existing source
   // reads retain their current byte reader and access behavior.
   const publication = metadata ? await publicationSnapshot(ctx, original.backup, owner) : undefined;
-  const bytes =
-      publication?.work !== undefined
-        ? { manifest: Buffer.from(JSON.stringify(publication.manifest)), work: Buffer.from(publication.work) }
-        : original.backup.transport === 'objects'
-          ? await exchangeMetadata(ctx, original.backup, owner, reader)
-          : await projectArchiveMetadata(
-              ctx,
-              original.backup.storageId!,
-              original.backup.size,
-              original.backup.digest,
-              () => ctx.runQuery(internal.projectBackups.get, { id: backupId, owner }),
-            ),
-    manifest = sourceManifestSchema.parse(JSON.parse(Buffer.from(bytes.manifest).toString('utf8')));
-  const file = manifest.files.find(item => item.path === 'work.json');
+  const streamed =
+    original.backup.transport === 'objects' && !publication
+      ? await resolveExchangeWork(
+          (
+            await objectReader.read(original.backup.projectId, owner, [
+              {
+                sha256: original.backup.objectManifest?.digest ?? original.backup.digest,
+                size: original.backup.objectManifest?.size ?? original.backup.size,
+              },
+            ])
+          )[0]!,
+          pins => objectReader.read(original.backup.projectId, owner, pins),
+        )
+      : undefined;
+  const bytes = streamed
+    ? undefined
+    : publication?.work !== undefined
+      ? { manifest: Buffer.from(JSON.stringify(publication.manifest)), work: Buffer.from(publication.work) }
+      : original.backup.transport === 'objects'
+        ? await exchangeMetadata(ctx, original.backup, owner, objectReader)
+        : await projectArchiveMetadata(
+            ctx,
+            original.backup.storageId!,
+            original.backup.size,
+            original.backup.digest,
+            () => ctx.runQuery(internal.projectBackups.get, { id: backupId, owner }),
+          );
+  const manifestBytes = streamed?.manifest ?? bytes!.manifest,
+    manifest = sourceManifestSchema.parse(JSON.parse(Buffer.from(manifestBytes).toString('utf8'))),
+    file = manifest.files.find(item => item.path === 'work.json');
   invariant(
-    digest(bytes.manifest) === original.backup.preview.manifestDigest &&
-      digest(bytes.work) === file?.sha256 &&
-      bytes.work.byteLength === file.size,
+    digest(manifestBytes) === original.backup.preview.manifestDigest &&
+      file &&
+      (streamed || (digest(bytes!.work) === file.sha256 && bytes!.work.byteLength === file.size)),
     'INVALID_WORK_BACKUP',
     'Work or manifest bytes differ from the stored archive pins.',
   );
-  const data = parseWorkBytes(bytes.work);
+  const data = streamed ? validateParsedWork(streamed.data) : parseWorkBytes(bytes!.work);
   invariant(
     data.revision === manifest.revision &&
       (manifest.kind === 'forge-native-work-backup'
@@ -87,7 +113,7 @@ export async function load(
   owner: string,
   reader?: ExchangeObjectReader,
   options: { requireCurrent?: boolean; metadata?: boolean } = {},
-) {
+): Promise<SourceSnapshot & { events: HostedEvent[] }> {
   const project: Doc<'hostedProjects'> = await ctx.runQuery(internal.projectWork.get, { projectId, owner });
   invariant(project.work, 'PROJECT_WORK_MISSING', 'Start hosted Work from a stored source backup.');
   const unchanged = async () => {
