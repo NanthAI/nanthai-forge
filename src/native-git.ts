@@ -20,6 +20,7 @@ import { workSchema, type GitProjection } from './work-types.js';
 import { workGit } from './work-git.js';
 import { asyncGitTreeWriter } from './native-git-tree.js';
 import { nativeGitRunner } from './native-git-runner.js';
+import { nativeCommitBytes, reuseNativeGit } from './native-git-reuse.js';
 export { treeForGit } from './native-git-tree.js';
 import { fullGitBundle } from './work-git-bundle.js';
 import { withGithubTransport } from './work-github.js';
@@ -198,7 +199,7 @@ export async function importNativeGit(input: string, commit: string, target: str
     rmSync(scratch, { recursive: true, force: true });
   }
 }
-export async function exportNativeGit(input: string, head: string, target: string) {
+export async function exportNativeGit(input: string, head: string, target: string, reuse?: string) {
   invariant(/^[0-9a-f]{64}$/.test(head), 'BAD_ARGUMENT', 'Select an exact retained native State.');
   const store = new WorkStore(input);
   invariant(store.native, 'BAD_ARGUMENT', 'Select a native Forge owner or Lane.');
@@ -220,47 +221,71 @@ export async function exportNativeGit(input: string, head: string, target: strin
       output = join(scratch, 'output');
     mkdirSync(output, { mode: 0o700 });
     const repo = join(output, 'repository.git');
-    await git(scratch, [
-      'init',
-      '--bare',
-      '--template=',
-      `--object-format=${format}`,
-      '--initial-branch=forge',
-      repo,
-    ]);
+    const init = () =>
+      git(scratch, [
+        'init',
+        '--bare',
+        '--template=',
+        `--object-format=${format}`,
+        '--initial-branch=forge',
+        repo,
+      ]);
+    await init();
     const original = new Map<string, string>();
-    for (const bundle of new Set(
-      states.flatMap(id => (source.state(id).git ? [source.state(id).git!.bundle] : [])),
-    )) {
-      const path = join(scratch, bundle + '.bundle');
-      writeFileSync(path, source.object(bundle), { flag: 'wx', mode: 0o600 });
-      await git(repo, ['--no-lazy-fetch', 'bundle', 'verify', path]);
-      for (const record of (await git(repo, ['--no-lazy-fetch', 'bundle', 'unbundle', path]))
-        .trim()
-        .split('\n')) {
-        const [oid, ref] = record.split(' ');
-        invariant(
-          oid && gitId.test(oid) && ref && ref.startsWith('refs/'),
-          'INVALID_NATIVE_GIT',
-          'Original bundle refs are invalid.',
-        );
-        const prior = original.get(ref);
-        invariant(
-          !prior || prior === oid,
-          'NATIVE_GIT_REF_CONFLICT',
-          'Imported bundles retain different original refs; no destination is published.',
-        );
-        original.set(ref, oid);
+    async function loadOriginal() {
+      original.clear();
+      for (const bundle of new Set(
+        states.flatMap(id => (source.state(id).git ? [source.state(id).git!.bundle] : [])),
+      )) {
+        const path = join(scratch, bundle + '.bundle');
+        writeFileSync(path, source.object(bundle), { mode: 0o600 });
+        await git(repo, ['--no-lazy-fetch', 'bundle', 'verify', path]);
+        for (const record of (await git(repo, ['--no-lazy-fetch', 'bundle', 'unbundle', path]))
+          .trim()
+          .split('\n')) {
+          const [oid, ref] = record.split(' ');
+          invariant(
+            oid && gitId.test(oid) && ref && ref.startsWith('refs/'),
+            'INVALID_NATIVE_GIT',
+            'Original bundle refs are invalid.',
+          );
+          const prior = original.get(ref);
+          invariant(
+            !prior || prior === oid,
+            'NATIVE_GIT_REF_CONFLICT',
+            'Imported bundles retain different original refs; no destination is published.',
+          );
+          original.set(ref, oid);
+        }
+      }
+      for (const [ref, oid] of original) await git(repo, ['update-ref', ref, oid]);
+    }
+    await loadOriginal();
+    let reused = { mappings: new Map<string, string>(), blobs: new Map<string, string>() };
+    if (reuse) {
+      try {
+        reused = await reuseNativeGit(reuse, source, states, format, repo, scratch, git);
+      } catch {
+        process.stderr.write('export-native-git: reuse source is unusable; falling back to full export.\n');
+        rmSync(repo, { recursive: true, force: true });
+        await init();
+        await loadOriginal();
       }
     }
-    for (const [ref, oid] of original) await git(repo, ['update-ref', ref, oid]);
     const mappings = new Map<string, string>(),
-      writeTree = asyncGitTreeWriter(repo, source, git);
+      writeTree = asyncGitTreeWriter(repo, source, git, reused.blobs);
     async function project(id: string): Promise<string> {
       const existing = mappings.get(id);
       if (existing) return existing;
-      const state = source.state(id),
-        tree = await writeTree(state.files);
+      const state = source.state(id);
+      if (reused.mappings.has(id)) {
+        await Promise.resolve();
+        for (const parent of state.parents) await project(parent);
+        const commit = reused.mappings.get(id)!;
+        mappings.set(id, commit);
+        return commit;
+      }
+      const tree = await writeTree(state.files);
       let commit: string;
       const parents: string[] = [];
       for (const parent of state.parents) parents.push(await project(parent));
@@ -272,10 +297,13 @@ export async function exportNativeGit(input: string, head: string, target: strin
         );
         commit = state.git.commit;
       } else {
-        const seconds = Math.floor(Date.parse(state.at) / 1000);
-        invariant(Number.isSafeInteger(seconds), 'INVALID_NATIVE_GIT', 'Native source time is invalid.');
-        const raw = `tree ${tree}\n${parents.map(parent => `parent ${parent}\n`).join('')}author NanthAi Forge <forge@localhost> ${seconds} +0000\ncommitter NanthAi Forge <forge@localhost> ${seconds} +0000\n\n${state.message}\n\nForge-State: ${id}\n`;
-        commit = (await git(repo, ['hash-object', '-t', 'commit', '-w', '--stdin'], Buffer.from(raw))).trim();
+        commit = (
+          await git(
+            repo,
+            ['hash-object', '-t', 'commit', '-w', '--stdin'],
+            nativeCommitBytes(id, state, tree, parents),
+          )
+        ).trim();
       }
       mappings.set(id, commit);
       return commit;

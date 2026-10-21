@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { createHash } from 'node:crypto';
 import { NativeSource, type NativeFile } from './native-source.js';
 import { workGit } from './work-git.js';
 
@@ -50,9 +51,9 @@ export function asyncGitTreeWriter(
   root: string,
   source: NativeSource,
   git: (root: string, args: string[], input?: string | Buffer) => Promise<string>,
+  blobs = new Map<string, string>(),
 ) {
   // Only IDs live across States. Validate bytes before their first write in this repository.
-  const blobs = new Map<string, string>();
   return async (files: NativeFile[]): Promise<string> => {
     for (const file of files)
       if (!blobs.has(file.blob))
@@ -63,6 +64,45 @@ export function asyncGitTreeWriter(
     const trees = new Map<string, string>();
     for (const [path, node] of treeNodes(files, blobs))
       trees.set(path, (await git(root, ['mktree', '-z'], treeInput(path, node, trees))).trim());
+    return trees.get('')!;
+  };
+}
+
+/** Compute Git tree identities for validation without writing Git objects. */
+export function gitTreeHasher(
+  source: NativeSource,
+  format: 'sha1' | 'sha256',
+  blobs = new Map<string, string>(),
+  objects = new Set<string>(),
+) {
+  const hash = (kind: string, bytes: Buffer) =>
+    createHash(format).update(`${kind} ${bytes.length}\0`).update(bytes).digest('hex');
+  return (files: NativeFile[]) => {
+    for (const file of files)
+      if (!blobs.has(file.blob)) blobs.set(file.blob, hash('blob', source.object(file.blob)));
+    const trees = new Map<string, string>();
+    for (const [path, node] of treeNodes(files, blobs)) {
+      const records = treeInput(path, node, trees)
+        .toString('utf8')
+        .split('\0')
+        .filter(Boolean)
+        .map(record => {
+          const split = record.indexOf('\t'),
+            [mode, kind, oid] = record.slice(0, split).split(' '),
+            name = record.slice(split + 1);
+          return {
+            key: Buffer.from(name + (kind === 'tree' ? '/' : '')),
+            bytes: Buffer.concat([
+              Buffer.from(`${mode === '040000' ? '40000' : mode} ${name}\0`),
+              Buffer.from(oid!, 'hex'),
+            ]),
+          };
+        })
+        .sort((a, b) => Buffer.compare(a.key, b.key));
+      const tree = hash('tree', Buffer.concat(records.map(record => record.bytes)));
+      trees.set(path, tree);
+      objects.add(tree);
+    }
     return trees.get('')!;
   };
 }

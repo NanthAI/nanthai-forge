@@ -60,7 +60,7 @@ Usage:
   nforge policy <root>
   nforge set-policy <root> JSON
   nforge import-native-git <git-root> <exact-commit> <new-directory>
-  nforge export-native-git <native-root> <exact-state> <new-directory>
+  nforge export-native-git <native-root> <exact-state> <new-directory> [--reuse <previous-export-dir>]
   nforge restore-native <backup-directory-or-archive> <new-directory> [--journal HOSTED_WORK.json]
   nforge init-native <directory>
   nforge work <git-worktree-root> [command-json expected-revision]
@@ -169,13 +169,17 @@ async function main(args: string[]): Promise<unknown> {
   }
   if (args[0] === 'import-native-git' || args[0] === 'export-native-git') {
     invariant(
-      args.length === 4 && args[1] && args[2] && args[3],
+      (args.length === 4 ||
+        (args[0] === 'export-native-git' && args.length === 6 && args[4] === '--reuse' && args[5])) &&
+        args[1] &&
+        args[2] &&
+        args[3],
       'BAD_ARGUMENT',
-      'Use import-native-git <git-root> <exact-commit> <new-directory> or export-native-git <native-root> <exact-state> <new-directory>.',
+      'Use import-native-git <git-root> <exact-commit> <new-directory> or export-native-git <native-root> <exact-state> <new-directory> [--reuse <previous-export-dir>].',
     );
     return args[0] === 'import-native-git'
       ? importNativeGit(args[1], args[2], args[3])
-      : exportNativeGit(args[1], args[2], args[3]);
+      : exportNativeGit(args[1], args[2], args[3], args[5]);
   }
   if (args[0] === 'restore-native') {
     invariant(
