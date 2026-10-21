@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { Workspace } from './workspace.js';
 import { ForgeError } from './errors.js';
 import { WorkService } from './work.js';
+import { readPendingStatus } from './pending-status-read.js';
 import { registerAgentWorkflow } from './mcp-agent-workflow.js';
 import type { RepositoryQuery } from './query.js';
 import { McpSourceRouting, RoutedSourceError } from './mcp-source.js';
@@ -210,11 +211,12 @@ export async function startMcp(root: string, workEnabled = false, agentMode = fa
       'forge_work_status',
       {
         description:
-          'Read local Intents, Lanes, exact Candidates and publication observations. Optional compact:true defers full review bodies with explicit markers; read-work-detail returns original pinned detail. Reconciles interrupted local journals.',
-        inputSchema: { compact: z.boolean().optional() },
+          'Read local Intents, Lanes, exact Candidates and publication observations. pending:true reads the pinned local pending-work/recovery summary without recovery, remote calls or archive export. Optional compact:true defers full review bodies with explicit markers; read-work-detail returns original pinned detail. Reconciles interrupted local journals.',
+        inputSchema: { compact: z.boolean().optional(), pending: z.boolean().optional() },
         annotations: { ...read, readOnlyHint: false },
       },
-      ({ compact }) => result(() => work.status({ compact: compact ?? false })),
+      ({ compact, pending }) =>
+        result(() => (pending ? readPendingStatus(work.store) : work.status({ compact: compact ?? false }))),
     );
     server.registerTool(
       'forge_work_command',

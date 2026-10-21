@@ -10,6 +10,7 @@ import { AgentWorkflow, agentActionSchema } from './agent-workflow.js';
 import { briefInputSchema } from './agent-brief-types.js';
 import { agentBrief } from './agent-brief.js';
 import { ForgeError } from './errors.js';
+import { readPendingStatus } from './pending-status-read.js';
 
 export function registerAgentWorkflow(server: McpServer, root: string) {
   const agent = new AgentWorkflow(root, true);
@@ -124,9 +125,9 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
     },
     {
       name: 'forge_work_overview',
-      actions: ['peers', 'status', 'records', 'policy', 'link', 'making-of', 'report'],
+      actions: ['pending-status', 'peers', 'status', 'records', 'policy', 'link', 'making-of', 'report'],
       description:
-        'Read Forge URLs with link (laneId, viewId or save; optional path/line), policy, concise Work pins and counts, or page one retained collection directly with records without reconstructing all Work history. making-of reads one Intent’s derived record: Lanes, saves, check runs with queued/running time, landings, sessions, wall clock and active time. report records cumulative self-reported harness, model and token totals for a Lane session (advisory). All source and history remain retained.',
+        'pending-status reads one pinned local pending-work/recovery summary without remote calls, process recovery or archive export. Read Forge URLs with link (laneId, viewId or save; optional path/line), policy, concise Work pins and counts, or page one retained collection directly with records without reconstructing all Work history. making-of reads one Intent’s derived record: Lanes, saves, check runs with queued/running time, landings, sessions, wall clock and active time. report records cumulative self-reported harness, model and token totals for a Lane session (advisory). All source and history remain retained.',
     },
     {
       name: 'forge_review',
@@ -139,8 +140,12 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
     const options = agentActionSchema.options
       .filter(option => group.actions.includes(option.shape.action.value))
       .map(option => candidateActionSchema(option, option.shape.action.value));
+    const extended =
+      group.name === 'forge_work_overview'
+        ? [...options, z.object({ action: z.literal('pending-status') })]
+        : options;
     const schema =
-      options.length === 1 ? options[0]! : z.union([options[0]!, options[1]!, ...options.slice(2)]);
+      extended.length === 1 ? extended[0]! : z.union([extended[0]!, extended[1]!, ...extended.slice(2)]);
     server.registerTool(
       group.name,
       {
@@ -148,13 +153,23 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
         inputSchema: { command: schema },
         annotations: {
           readOnlyHint: group.actions.every(action =>
-            ['tests', 'link', 'review', 'diff', 'show', 'records', 'view', 'provenance', 'views'].includes(
-              action,
-            ),
+            [
+              'pending-status',
+              'tests',
+              'link',
+              'review',
+              'diff',
+              'show',
+              'records',
+              'view',
+              'provenance',
+              'views',
+            ].includes(action),
           ),
           destructiveHint: group.actions.includes('clean'),
           idempotentHint: group.actions.every(action =>
             [
+              'pending-status',
               'tests',
               'link',
               'status',
@@ -178,7 +193,16 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
       async ({ command }) => {
         try {
           return {
-            content: [{ type: 'text' as const, text: JSON.stringify(await agent.dispatch(command)) }],
+            content: [
+              {
+                type: 'text' as const,
+                text: JSON.stringify(
+                  command.action === 'pending-status'
+                    ? readPendingStatus(agent.work.store)
+                    : await agent.dispatch(command),
+                ),
+              },
+            ],
           };
         } catch (error) {
           return {

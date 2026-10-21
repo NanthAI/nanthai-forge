@@ -33,6 +33,9 @@ import { docsCli } from './docs-cli.js';
 import { describeFailure, recordFailure } from './system-errors.js';
 import { agentCli } from './agent-cli.js';
 import { readFileSync } from 'node:fs';
+import { nativeOwner } from './native-source.js';
+import { readPendingStatus } from './pending-status-read.js';
+import { formatPendingStatus } from './pending-status-format.js';
 
 const HELP = `Forge is a source host and workspace for humans and AI agents working on the same code.
 
@@ -74,7 +77,8 @@ Usage:
   nforge local-checks ROOT DEPLOYMENT PROJECT_ID [--name NAME]
   nforge doctor <git-worktree-root>
   nforge index <git-worktree-root>
-  nforge status <git-worktree-root>
+  nforge status ROOT [--pending] [--json]
+  nforge status <git-worktree-root>   # existing graph JSON; --pending selects owner summary
   nforge context <git-worktree-root> [search] [--limit N]
   nforge inspect <git-worktree-root> <name-or-id> [--limit N]
   nforge refs <git-worktree-root> <name-or-id> [--limit N]
@@ -261,6 +265,17 @@ async function main(args: string[]): Promise<unknown> {
       'Use mcp <root> [--work | --agent].',
     );
     await startMcp(args[1], args[2] === '--work' || args[2] === '--agent', args[2] === '--agent');
+    return undefined;
+  }
+  if (args[0] === 'status' && args[1] && (args.includes('--pending') || !!nativeOwner(resolve(args[1])))) {
+    invariant(
+      args.slice(2).every(arg => ['--pending', '--json'].includes(arg)),
+      'BAD_ARGUMENT',
+      'Use status ROOT [--pending] [--json].',
+    );
+    const status = readPendingStatus(new WorkStore(args[1]));
+    if (args.includes('--json')) return status;
+    process.stdout.write(formatPendingStatus(status) + '\n');
     return undefined;
   }
   const flag = args.indexOf('--limit');

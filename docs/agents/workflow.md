@@ -423,3 +423,34 @@ For an offline Git import through first supervised acceptance, run `nforge docs 
 `FORGE_AGENT_NAME`, then `FORGE_ACTOR`); use distinct names for concurrent agents.
 
 See [gh-compatible commands](../gh-cli.md) for local `pr`, `repo view`, version and authentication probes over the same workflow.
+
+### Pending owner work
+
+`nforge status OWNER` shows a compact local summary for a native owner without a
+source index. `nforge status ROOT --pending` selects the same summary for a Git
+owner; plain Git `status` retains the source-graph JSON interface. Add `--json`
+to the pending summary for all recorded Lane and check entries. Existing
+`agent status` and `host --status` interfaces remain available unchanged.
+`forge_work_status {pending:true}` exposes the same read model in MCP `--work`;
+`forge_work_overview {command:{action:"pending-status"}}` exposes it in `--agent`.
+
+The snapshot pins one Work revision and reads local transport observations under
+the owner lock. It does not run checks, recover processes, export an archive,
+contact a provider or publish anything. Ready, waiting and checking are recorded
+states, not an acceptance eligibility decision or a claim that a process is alive.
+The summary shows at most three example Lanes; JSON includes every open Lane.
+
+Hosted source coverage is separate from metadata publication and GitHub's last
+successfully pushed mapping. A pending/failed push does not establish a newer
+successful capture. Unknown capture time, history coverage, evidence coverage,
+oldest unsent mutation time, owner heartbeat and installed source are explicit.
+Recovery capture integration consumes the synchronous local
+`RecoveryCaptureReader` / `RecoveryCaptureObservation` contract in
+`src/pending-status-read.ts` and `src/pending-status.ts`. Until the recovery
+inventory supplies that reader, the CLI and MCP report hosted capture pins and
+coverage as unknown. Later log metadata or run completion can disprove evidence
+coverage; unchanged source and an earlier log timestamp cannot establish it.
+Deployment pins, when recorded, are labelled as the last observation, not a live
+provider check. Capture age uses capture time rather than publication completion.
+This read model is intended to feed the hosted **Now** screen's pending work and
+recovery summary; this command does not add a hosted UI.
