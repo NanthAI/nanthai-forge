@@ -16,18 +16,23 @@ export async function hostedRecordValue(
   let pending = memo.get(identity);
   if (!pending) {
     pending = (async () => {
-      const parts: { key: string; value: string }[] = [];
-      let cursor: string | null = null;
+      // Bounded position-ordered batches, not paginate(): callers are paginated queries,
+      // and Convex allows only one paginated query per query function.
+      const parts: { key: string; value: string; position: number }[] = [];
       for (;;) {
-        const page = await ctx.db
+        const last = parts.at(-1)?.position;
+        const batch = await ctx.db
           .query('projectWorkRecords')
-          .withIndex('by_generation_and_collection_and_parent_and_position', q =>
-            q.eq('generationId', partition).eq('collection', row.collection).eq('parent', row.parent),
-          )
-          .paginate({ cursor, numItems: 100 });
-        parts.push(...page.page);
-        if (page.isDone) break;
-        cursor = page.continueCursor;
+          .withIndex('by_generation_and_collection_and_parent_and_position', q => {
+            const parent = q
+              .eq('generationId', partition)
+              .eq('collection', row.collection)
+              .eq('parent', row.parent);
+            return last === undefined ? parent : parent.gt('position', last);
+          })
+          .take(100);
+        parts.push(...batch);
+        if (batch.length < 100) break;
       }
       const portable = hostedText(parts.map(part => part.value).join(''));
       let offset = 0;

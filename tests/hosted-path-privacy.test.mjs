@@ -285,3 +285,49 @@ test('legacy indexed payload redaction spans parts without rewriting records or 
   assert.equal(portable.links.hosted, 'https://forge.example/p');
   assert.deepEqual(f.tables.projectWorkRecords, before);
 });
+
+test('payloads stored in many parts assemble without a nested paginated query', async () => {
+  const { hostedRecordValue } = await import(moduleUrl('../convex/hostedRecordValue.ts'));
+  const f = state([]);
+  const parts = Array.from({ length: 250 }, (_, position) => `${position},`);
+  // Insert out of order: assembly must follow position, not insertion.
+  [...parts.keys()].reverse().forEach(position =>
+    f.tables.projectWorkRecords.set(
+      `part-${position}`,
+      row(`part-${position}`, {
+        generationId: 'g',
+        collection: 'lanes:payload',
+        parent: 'many',
+        key: `key-${position}`,
+        position,
+        value: parts[position],
+      }),
+    ),
+  );
+  // Callers are paginated queries; Convex rejects a second paginate() in the same query.
+  const query = f.ctx.db.query.bind(f.ctx.db);
+  f.ctx.db.query = table => {
+    const built = query(table);
+    const withIndex = built.withIndex.bind(built);
+    built.withIndex = (...args) => {
+      const indexed = withIndex(...args);
+      indexed.paginate = () => {
+        throw new Error('This query function ran multiple paginated queries.');
+      };
+      return indexed;
+    };
+    return built;
+  };
+  const memo = new Map();
+  const values = await Promise.all(
+    parts.map((_, position) =>
+      hostedRecordValue(
+        f.ctx,
+        'g',
+        { collection: 'lanes:payload', parent: 'many', key: `key-${position}`, value: '' },
+        memo,
+      ),
+    ),
+  );
+  assert.equal(values.join(''), parts.join(''));
+});
