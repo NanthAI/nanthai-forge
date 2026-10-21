@@ -8,6 +8,7 @@ import { activeOwnedProject } from './projectAuthority';
 import { createProject } from './projectCreation';
 import { githubHostedProject } from '../src/hosted-github-bootstrap';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
+import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 
 const key = { actor: v.string(), operationId: v.string(), request: v.string() };
@@ -71,7 +72,7 @@ export const begin = internalMutation({
     repository: v.string(),
     commit: v.string(),
     at: v.string(),
-    cursor: v.id('_storage'),
+    cursor: v.string(),
     visibility: v.union(v.literal('public'), v.literal('private')),
   },
   returns: v.id('projectGithubImports'),
@@ -120,7 +121,7 @@ const identity = { id: v.id('projectGithubImports'), actor: v.string(), step: v.
 export const advance = internalMutation({
   args: {
     ...identity,
-    cursor: v.id('_storage'),
+    cursor: v.string(),
     completed: v.number(),
     total: v.number(),
     bytes: v.number(),
@@ -214,7 +215,7 @@ export const publish = internalMutation({
         .withIndex('by_project_and_digest', q => q.eq('projectId', row.projectId).eq('digest', object.sha256))
         .unique();
       invariant(
-        bound && !bound.removed && bound.size === object.size && (bound.storageId || bound.recipe),
+        bound && !bound.removed && bound.size === object.size && isStored(bound),
         'INVALID_WORK_BACKUP',
         'Import metadata is not retained.',
       );

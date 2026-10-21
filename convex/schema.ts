@@ -13,6 +13,7 @@ import { coordinationTables } from './coordinationFields';
 import { githubImportTables } from './projectGithubImportFields';
 import { publicationTables } from './projectPublicationFields';
 import { objectTables } from './projectObjectFields';
+import { artifactBlobTables } from './artifactBlobFields';
 import { derivedFields } from './derivedArtifactFields';
 import { defineSchema, defineTable } from 'convex/server';
 import { accountFields, accountItemFields } from './accountTypes';
@@ -25,6 +26,7 @@ export const syncResult = v.object({
   head: v.optional(v.string()),
 });
 export const jobFields = {
+  r2Writes: v.optional(v.boolean()),
   scope: v.string(),
   repository: v.string(),
   ref: v.string(),
@@ -91,7 +93,7 @@ export const agentFields = {
   operationId: v.string(),
   request: v.string(),
   importId: v.id('imports'),
-  artifactKey: v.id('_storage'),
+  artifactKey: v.string(),
   sourceId: v.string(),
   gitHead: v.string(),
   files: v.array(v.string()),
@@ -112,7 +114,7 @@ export const zoneFields = {
   name: v.string(),
   operationId: v.string(),
   request: v.string(),
-  artifactKey: v.id('_storage'),
+  artifactKey: v.string(),
   sourceId: v.string(),
   gitHead: v.string(),
   files: v.array(v.string()),
@@ -397,6 +399,7 @@ export default defineSchema({
   ...coordinationTables,
   ...indexTables,
   ...objectTables,
+  ...artifactBlobTables,
   ...githubImportTables,
   derivedArtifacts: defineTable(derivedFields)
     .index('by_original_and_kind_and_pin', ['original', 'kind', 'pin'])
@@ -578,7 +581,7 @@ export default defineSchema({
     .index('by_owner_and_visibility', ['owner', 'visibility'])
     .index('by_visibility', ['visibility'])
     .index('by_artifactKey', ['artifactKey']),
-  importArtifacts: defineTable({ importId: v.id('imports'), artifactKey: v.id('_storage') })
+  importArtifacts: defineTable({ importId: v.id('imports'), artifactKey: v.string() })
     .index('by_importId_and_artifactKey', ['importId', 'artifactKey'])
     .index('by_artifactKey', ['artifactKey']),
   importReaders: defineTable({ importId: v.id('imports'), reader: v.string() })

@@ -71,6 +71,6 @@ export const stored = internalQuery({
       'INVALID_WORK_BACKUP',
       'Content differs from its original binding.',
     );
-    return !!(row?.storageId || row?.recipe);
+    return !!row && isStored(row);
   },
 });

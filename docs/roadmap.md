@@ -94,7 +94,7 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 
 - Central agent lifecycle edits produce a broad local scoped selection: predictive-overlap work selected 210 files, and a two-worker run was interrupted after 49.5 minutes with unrelated synthetic Git setup timeouts. Local task validation needs a focused selection distinct from the combined remote landing selection; it must retain coverage and report any unrun files rather than silently treating the broad selection as passed.
 
-- Modal cost-model edits to `scripts/modal-check/cost.py` select the full test suite as an unclassified path. Finite agents forbidden from running full verification cannot run the returned selection; the selector needs an explicit mapping to the Modal bridge and cost-model tests.
+- Modal cost-model edits to `scripts/modal-check/cost.py` and analysis-worker edits to `netlify/functions/analyze-background.mts` select the full test suite as unclassified paths. Finite agents forbidden from running full verification cannot run the returned selection; the selector needs explicit mappings to the Modal bridge, cost-model and analysis-worker artifact tests.
 
 - `agent tests` compares a saved Lane against the latest main. Concurrent accepted additions can appear as deletions in an unsynced Lane and force a full-suite fallback for unrelated work. Expose a pinned comparison for task-scoped validation without requiring a sync; the existing comparison remains useful for landing validation.
 

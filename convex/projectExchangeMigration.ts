@@ -72,8 +72,14 @@ export const migrate = action({
         sha256: input.manifestDigest,
         size: input.manifestSize,
       });
-      const original = await projectArchiveMetadata(ctx, backup.storageId!, backup.size, backup.digest, () =>
-        ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: user.subject }),
+      const original = await projectArchiveMetadata(
+        ctx,
+        backup.storageId!,
+        backup.size,
+        backup.digest,
+        () => ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: user.subject }),
+        true,
+        project.r2Writes ?? false,
       );
       invariant(
         digest(original.manifest) === input.manifestDigest && bytes.equals(Buffer.from(original.manifest)),

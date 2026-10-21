@@ -1,6 +1,6 @@
 # R2 storage plan
 
-Plan to move every file blob from the application database's file storage to Cloudflare R2, so that file bytes never pass through database functions. Status: design and spike done; slices R0 and R1 are landed and slice R2 (dual read) is in review; with R2 the opt-in works end to end. R3 owner-derived publication and the R6 lead-run backfill command are implemented; deployment qualification and the actual backfill remain. Date: 2026-10-19. Related: [roadmap](roadmap.md), [egress](operations/egress.md), [compute and egress](operations/compute-egress.md), [source exchange](operations/source-exchange.md).
+Plan to move every file blob from the application database's file storage to Cloudflare R2, so that file bytes never pass through database functions. Status: R0–R3 and R6 are landed; R4 browser bytes, R5 artifacts and R7 purge/sweep are implemented and awaiting landing. R4 has local fake-browser qualification; live CORS qualification, deployment qualification and the actual R6 backfill remain lead-run work. Related: [roadmap](roadmap.md), [egress](operations/egress.md), [compute and egress](operations/compute-egress.md), [source exchange](operations/source-exchange.md).
 
 ## Why
 
@@ -28,12 +28,12 @@ Principle: R2 holds every blob. No database function receives or returns file by
 | --- | --- | --- |
 | R0 | A single blob-store seam in the backend and CLI (no behaviour change), `location` and key fields on object rows, and a presigner using `crypto.subtle` with the AWS reference test vector | Landed |
 | R1 | Signed PUT write path behind a flag and per-project opt-in; commit step with HEAD checks; CLI direct upload with PUT concurrency of 8 or more | Landed |
-| R2 | Signed GET read path; readers dispatch on each row's location; browser sha256 helper; mixed-location tests, revoked members, expired URLs | In review (tested against a local fake; real-bucket smoke pending) |
-| R3 | Owner display data, metadata publication and durable source return | Implemented; protocol 3 removes push-time display derivation, local qualification only |
-| R4 | Browser bytes: code view, review and archive download through signed URLs; CORS | Not started |
-| R5 | Imports, zones, agents and proposals build artifacts into R2 | Not started |
-| R6 | Backfill: export, upload each file after checking its digest, flip rows in pages; keep old storage 14 days as fallback | Lead-run command implemented; deployment qualification and actual run remain |
-| R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Not started |
+| R2 | Signed GET read path; readers dispatch on each row's location; browser sha256 helper; mixed-location tests, revoked members, expired URLs | Landed; local fake qualification, real-bucket smoke pending |
+| R3 | Owner display data, metadata publication and durable source return | Landed; protocol 3 removes push-time display derivation, local qualification only |
+| R4 | Browser bytes: code view, review and archive download through signed URLs; CORS | Done; awaiting landing, local fake-browser qualification, live CORS qualification remains lead-only |
+| R5 | Imports, zones, agents and proposals build artifacts into R2 | Done; awaiting landing, server/runner paths implemented; legacy browser archive uploader belongs to R4 |
+| R6 | Backfill: export, upload each file after checking its digest, flip rows in pages; keep old storage 14 days as fallback | Landed; lead-run command implemented, deployment qualification and actual run remain |
+| R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Done; awaiting landing |
 | R8 | Optional public Worker with edge cache on a custom subdomain | Later |
 
 Order: R0, R1, R2, then R3a and R4 in parallel, R3b, R6, R5, R7. R0 to R2 alone remove egress for pulls and new pushes. During dual read every reader dispatches on the row's location, so old and new paths coexist. Rollback: unset the flag and new writes return to the old storage; rows already in R2 stay readable; nothing in old storage is deleted until 14 days after a full digest verification.
@@ -116,6 +116,45 @@ No hosted backfill or migration command is needed. Upgrade the CLI before the
 next new push; retained legacy operations that lack owner display facts require
 a newly prepared push. The lead still qualifies actual network latency after
 landing; local fake-storage timings are not hosted measurements.
+
+## R5 server and runner artifacts
+
+Hosted GitHub-import source objects, recipe parts and bootstrap metadata use the
+same project opt-in as exchange. Their immutable progress cursors use the artifact
+blob seam once the project is opted in. Legacy exchange metadata materialization and compressed archive metadata
+sidecars also respect that opt-in. A committed R2 root is valid for proposal completion;
+check outputs, logs and native agent artifacts already travel as exchange objects.
+
+Indexed imports predate `hostedProjects` and have their own owner-only
+`importStorage:setR2Writes` mutation (`{ id, enabled }`). With this opt-in and
+`FORGE_BLOBS=r2`, the indexer stores its gzip artifact in R2. Public analysis runners
+build the bytes locally, then send only digest/size to `/worker/uploadTarget`, PUT
+directly, and publish after the backend verifies HEAD. The in-action indexer and
+hosted GitHub-import worker still process source bytes inside Convex; moving their
+execution to a runner/CLI remains future work.
+
+`BlobStore` retains opaque legacy storage IDs and adds `r2blob:` references to
+`artifactBlobs` metadata rows. Reservations bind a resource/generation namespace,
+SHA-256, size, content type and immutable R2 key before upload. Create-only signed
+PUTs carry checksums; HEAD verifies each new artifact before commit. Repeating an
+unknown upload or commit reuses that reservation. Reads resolve each row's location
+and verify full downloaded bytes. References grant no authority: owning actions
+retain current access checks. Existing resource cleanup tombstones the binding and
+schedules a signed DELETE; it does not start a new retention timer.
+
+Zones and source-agent grants retain exact indexed-artifact references, including
+old Convex rows. Zone binary exports and large hosted-query derivatives use the
+indexed import's current opt-in, even when their original artifact is old. Small
+inline derived JSON remains database metadata. Turning off writes keeps committed
+R2 artifacts readable with the existing R2 configuration.
+
+Compatibility boundaries: empty-project bootstrap and the first hosted-import
+cursor precede any project opt-in, so they retain their existing placement. New
+backup/proposal archives are already retired; resumptions of old archive uploads
+retain their original Convex upload protocol. The legacy browser archive uploader
+uses `projectObjects:prepare`, which still returns a Convex URL; its direct-R2
+upload/commit change must be coordinated with the R4 web byte work. R2-capable
+clients use `prepareBatch`. No backfill or live migration runs as part of R5.
 
 ## Spike findings
 

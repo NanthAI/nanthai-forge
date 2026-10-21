@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { blobStore } from './blobStore';
+import { isStored } from './projectObjectFields';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, mutation, internalMutation, internalQuery } from './cliServer';
 import { projectProposalDocument, projectBackupPreview } from './schema';
@@ -265,7 +266,7 @@ export const completeObjects = internalMutation({
         )
         .unique();
       invariant(
-        root && !root.removed && (root.storageId || root.recipe) && root.size === proposal.size,
+        root && !root.removed && isStored(root) && root.size === proposal.size,
         'INVALID_WORK_BACKUP',
         'Proposal root is unavailable.',
       );

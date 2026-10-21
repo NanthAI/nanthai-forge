@@ -2,8 +2,9 @@
 'use node';
 import { randomUUID } from 'node:crypto';
 import { blobStore } from './blobStore';
+import { r2Enabled } from './r2';
 import type { ActionCtx } from './_generated/server';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
@@ -13,7 +14,7 @@ export const hexDigest = (value: string) =>
 async function reconciled(ctx: ActionCtx, row: Derived): Promise<Derived | null> {
   let cursor: string | null = null;
   while (true) {
-    const page: { storageId: Id<'_storage'> | null; isDone: boolean; cursor: string } = await ctx.runQuery(
+    const page: { storageId: string | null; isDone: boolean; cursor: string } = await ctx.runQuery(
       internal.derivedArtifacts.uploadPage,
       { id: row._id, cursor },
     );
@@ -27,11 +28,12 @@ async function reconciled(ctx: ActionCtx, row: Derived): Promise<Derived | null>
 // remain current owning-action checks, never stored cache eligibility or authority.
 export async function derivedArtifact(
   ctx: ActionCtx,
-  original: Id<'_storage'>,
+  original: string,
   kind: string,
   pin: string,
   build: () => Promise<Blob | string>,
   checkAccess: () => Promise<unknown>,
+  r2 = false,
 ): Promise<Derived | null> {
   const file = await blobStore(ctx).getMetadata(original);
   invariant(file, 'INVALID_ARTIFACT', 'Stored source is unavailable.');
@@ -80,9 +82,12 @@ export async function derivedArtifact(
     if (!row || row.digest !== input.digest) throw error;
   }
   if (!row || row.inline !== undefined || row.storageId) return row;
-  let storageId: Id<'_storage'>;
+  let storageId: string;
   try {
-    storageId = await blobStore(ctx).store(new Blob([bytes], { type: row.uploadType! }));
+    storageId = await blobStore(ctx).store(
+      new Blob([bytes], { type: row.uploadType! }),
+      r2Enabled() && r2 ? { r2Namespace: `v1/d/${row._id}` } : undefined,
+    );
   } catch (error) {
     const stored = await reconciled(ctx, row);
     if (stored) return stored;

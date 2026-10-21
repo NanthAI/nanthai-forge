@@ -1,3 +1,4 @@
+import { artifactMetadata } from './artifactStorage';
 import { removeDerived } from './derivedArtifacts';
 import { blobStore } from './blobStore';
 // SPDX-License-Identifier: Apache-2.0
@@ -211,13 +212,13 @@ export const purge = internalMutation({
   },
 });
 export const fileInfo = internalQuery({
-  args: { id: v.id('_storage') },
+  args: { id: v.string() },
   returns: v.union(
     v.null(),
     v.object({ size: v.number(), sha256: v.string(), contentType: v.optional(v.string()) }),
   ),
   handler: async (ctx, { id }) => {
-    const file = await ctx.db.system.get(id);
+    const file = await artifactMetadata(ctx, id);
     return file
       ? {
           size: file.size,

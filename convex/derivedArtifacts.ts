@@ -3,11 +3,11 @@ import { v } from 'convex/values';
 import { blobStore } from './blobStore';
 import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './_generated/server';
 import { internal } from './_generated/api';
-import type { Id } from './_generated/dataModel';
+import { artifactMetadata } from './artifactStorage';
 import { storageDigest, scanComplete } from './storageDigest';
 import { derivedFields } from './derivedArtifactFields';
-const key = { original: v.id('_storage'), kind: v.string(), pin: v.string() };
-const find = (ctx: Pick<QueryCtx, 'db'>, args: { original: Id<'_storage'>; kind: string; pin: string }) =>
+const key = { original: v.string(), kind: v.string(), pin: v.string() };
+const find = (ctx: Pick<QueryCtx, 'db'>, args: { original: string; kind: string; pin: string }) =>
   ctx.db
     .query('derivedArtifacts')
     .withIndex('by_original_and_kind_and_pin', q =>
@@ -29,7 +29,7 @@ export const reserve = internalMutation({
   returns: v.any(),
   handler: async (ctx, input) => {
     const { replace, ...args } = input,
-      original = await ctx.db.system.get(args.original);
+      original = await artifactMetadata(ctx, args.original);
     if (
       !original ||
       original.size !== args.originalSize ||
@@ -40,7 +40,7 @@ export const reserve = internalMutation({
     if (old) {
       if (old.removed) return null;
       if (old._id !== replace) return old;
-      const current = old.storageId ? await ctx.db.system.get(old.storageId) : null;
+      const current = old.storageId ? await artifactMetadata(ctx, old.storageId) : null;
       const sameBytes =
         old.originalDigest === args.originalDigest &&
         old.originalSize === args.originalSize &&
@@ -70,11 +70,11 @@ export const reserve = internalMutation({
   },
 });
 export const attach = internalMutation({
-  args: { id: v.id('derivedArtifacts'), storageId: v.id('_storage') },
+  args: { id: v.id('derivedArtifacts'), storageId: v.string() },
   returns: v.any(),
   handler: async (ctx, { id, storageId }) => {
     const row = await ctx.db.get(id),
-      file = await ctx.db.system.get(storageId);
+      file = await artifactMetadata(ctx, storageId);
     if (
       !row ||
       !file ||
@@ -83,7 +83,7 @@ export const attach = internalMutation({
       storageDigest(file.sha256) !== row.digest
     )
       return null;
-    if (row.removed || !(await ctx.db.system.get(row.original))) {
+    if (row.removed || !(await artifactMetadata(ctx, row.original))) {
       await blobStore(ctx).delete(storageId);
       return null;
     }
@@ -100,7 +100,7 @@ export const uploadPage = internalQuery({
   returns: v.any(),
   handler: async (ctx, { id, cursor }) => {
     const row = await ctx.db.get(id);
-    if (!row || row.removed || !(await ctx.db.system.get(row.original)))
+    if (!row || row.removed || !(await artifactMetadata(ctx, row.original)))
       return { storageId: null, isDone: true, cursor: '' };
     const page = await ctx.db.system.query('_storage').order('desc').paginate({ cursor, numItems: 100 });
     const found = page.page.find(
@@ -117,11 +117,11 @@ export const uploadPage = internalQuery({
   },
 });
 export const discard = internalMutation({
-  args: { id: v.id('derivedArtifacts'), storageId: v.id('_storage') },
+  args: { id: v.id('derivedArtifacts'), storageId: v.string() },
   returns: v.null(),
   handler: async (ctx, { id, storageId }) => {
     const row = await ctx.db.get(id),
-      file = await ctx.db.system.get(storageId);
+      file = await artifactMetadata(ctx, storageId);
     if (
       row?.storageId !== storageId &&
       row &&
@@ -134,7 +134,7 @@ export const discard = internalMutation({
     return null;
   },
 });
-export async function removeDerived(ctx: MutationCtx, original: Id<'_storage'>): Promise<void> {
+export async function removeDerived(ctx: MutationCtx, original: string): Promise<void> {
   const rows = await ctx.db
     .query('derivedArtifacts')
     .withIndex('by_original_and_removed', q => q.eq('original', original).eq('removed', false))
@@ -153,10 +153,10 @@ export async function removeDerived(ctx: MutationCtx, original: Id<'_storage'>):
   if (rows.length === 50) await ctx.scheduler.runAfter(0, internal.derivedArtifacts.purge, { original });
 }
 export const purge = internalMutation({
-  args: { original: v.id('_storage') },
+  args: { original: v.string() },
   returns: v.null(),
   handler: async (ctx, { original }) => {
-    if (!(await ctx.db.system.get(original))) await removeDerived(ctx, original);
+    if (!(await artifactMetadata(ctx, original))) await removeDerived(ctx, original);
     return null;
   },
 });

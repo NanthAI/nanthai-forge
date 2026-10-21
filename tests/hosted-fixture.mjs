@@ -5,6 +5,9 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
+const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
+const importStorage = await import(moduleUrl('../convex/importStorage.ts'));
+const projectExchangeCache = await import(moduleUrl('../convex/projectExchangeCache.ts'));
 const derivedArtifacts = await import(moduleUrl('../convex/derivedArtifacts.ts'));
 const imports = await import(moduleUrl('../convex/imports.ts'));
 const lifecycle = await import(moduleUrl('../convex/lifecycle.ts'));
@@ -93,6 +96,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     projectCoordinationReceipts: new Map(),
     projectCoordinationClaims: new Map(),
     derivedArtifacts: new Map(),
+    artifactBlobs: new Map(),
     accountOperations: new Map(),
     accountItems: new Map(),
     hostedProjects: new Map(),
@@ -417,6 +421,9 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     projectWorkIndex,
     projectWorkIndexActions,
     derivedArtifacts,
+    artifactStorage,
+    importStorage,
+    projectExchangeCache,
     imports,
     lifecycle,
     sync,
@@ -478,7 +485,12 @@ export function providers(revoked = () => false, privateRepository = true, head 
   });
   globalThis.fetch = async (input, init) => {
     const url = new URL(input);
-    if (url.protocol === 'blob:' || url.protocol === 'data:') return previousFetch(input, init);
+    if (
+      url.protocol === 'blob:' ||
+      url.protocol === 'data:' ||
+      url.hostname.endsWith('.r2.cloudflarestorage.com')
+    )
+      return previousFetch(input, init);
     if (url.hostname === 'api.clerk.com') {
       const user = decodeURIComponent(url.pathname.split('/')[3]);
       return url.pathname.endsWith('/oauth_github')

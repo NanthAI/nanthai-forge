@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ActionCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import { artifactBlobId } from './artifactBlobFields';
 import { makeFunctionReference } from 'convex/server';
 import { blobStore } from './blobStore';
 /** Current archive access is checked by the caller before and after reading. */
-export async function archiveBlobUrl(ctx: ActionCtx, storageId: Id<'_storage'>) {
+export async function archiveBlobUrl(ctx: ActionCtx, storageId: string) {
+  if (artifactBlobId(storageId)) return blobStore(ctx).getUrl(storageId);
   const user = await ctx.auth.getUserIdentity();
   if (user) {
     const url: string | null = await ctx.runQuery(

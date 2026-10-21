@@ -71,6 +71,7 @@ export async function source(
             original.backup.digest,
             () => ctx.runQuery(internal.projectBackups.get, { id: backupId, owner }),
             cacheMetadata,
+            original.project.r2Writes ?? false,
           );
   const manifestBytes = streamed?.manifest ?? bytes!.manifest,
     manifest = sourceManifestSchema.parse(JSON.parse(Buffer.from(manifestBytes).toString('utf8'))),

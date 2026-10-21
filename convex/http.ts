@@ -6,7 +6,7 @@ import { workerAuthorized } from '../src/worker-auth';
 import { githubWebhookAuthorized } from '../src/github-webhook';
 
 const http = httpRouter();
-for (const operation of ['prepare', 'update'] as const)
+for (const operation of ['prepare', 'update', 'uploadTarget'] as const)
   http.route({
     path: `/worker/${operation}`,
     method: 'POST',

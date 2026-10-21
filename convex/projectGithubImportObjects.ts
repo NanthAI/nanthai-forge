@@ -4,6 +4,8 @@ import { blobStore } from './blobStore';
 import { internalMutation, internalQuery } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
 import { storageDigest } from './projectStorage';
+import { r2Enabled } from './r2';
+import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 const pin = { projectId: v.id('hostedProjects'), actor: v.string(), digest: v.string(), size: v.number() };
 /** Internal only: the importer has verified these bytes against the Git object.
@@ -23,7 +25,7 @@ export const reuse = internalMutation({
         'INVALID_WORK_BACKUP',
         'Object binding changed.',
       );
-      if (bound.storageId || bound.recipe) return true;
+      if (isStored(bound)) return true;
     }
     const shared = await ctx.db
       .query('projectObjects')
@@ -64,7 +66,7 @@ export const bind = internalMutation({
       .query('projectObjects')
       .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', input.digest))
       .unique();
-    if (own?.storageId || own?.recipe) {
+    if (own && isStored(own)) {
       if (own.storageId !== input.storageId) await blobStore(ctx).delete(input.storageId);
       return null;
     }
@@ -97,7 +99,7 @@ export const stored = internalQuery({
       .query('projectObjects')
       .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', input.digest))
       .unique();
-    return !!(row && !row.removed && row.size === input.size && (row.storageId || row.recipe));
+    return !!(row && !row.removed && row.size === input.size && isStored(row));
   },
 });
 
@@ -125,5 +127,14 @@ export const reserve = internalMutation({
       removed: false,
     });
     return nonce;
+  },
+});
+
+export const placement = internalQuery({
+  args: { projectId: v.id('hostedProjects'), actor: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { projectId, actor }) => {
+    const project = await activeOwnedProject(ctx, projectId, actor);
+    return !!(r2Enabled() && project.r2Writes);
   },
 });

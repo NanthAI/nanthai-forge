@@ -1,6 +1,7 @@
 import { historicalArchiveActions } from './historical-archive-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { setup as r2Setup } from './r2-harness.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1005,5 +1006,71 @@ test('new contributor proposals transfer objects, preserve old archives, pull di
       preview: c.input.preview,
     }),
     error => error.data?.code === 'ARCHIVE_TRANSPORT_RETIRED',
+  );
+});
+
+test('contributor proposals publish and read committed R2 roots while retaining old archive rows', async t => {
+  const { fake } = await r2Setup(t);
+  const s = await setup(t),
+    c = await candidate(t, s);
+  s.tables.hostedProjects.get('project').r2Writes = true;
+  const { workArchiveMetadata } = await import('../dist/work-archive-metadata.js');
+  const { storeProjectArtifact } = await import(moduleUrl('../convex/projectArtifactActions.ts'));
+  s.ctx.storage.store = () => assert.fail('R2 proposal must not store Convex bytes');
+  s.ctx.storage.generateUploadUrl = () => assert.fail('R2 proposal must not create Convex upload URLs');
+  const store = bytes => storeProjectArtifact(s.ctx, 'project', 'contributor', Buffer.from(bytes));
+  const metadata = await workArchiveMetadata(new File([c.bytes], 'proposal.tar.gz'), {
+    select: () => true,
+    read: async (_name, bytes) => store(bytes),
+  });
+  await store(metadata.work);
+  await store(metadata.manifest);
+  const pin = { digest: digest(metadata.manifest), size: metadata.manifest.length };
+  const row = await modules.projectProposalObjects.publish._handler(s.ctx, { ...c.input, ...pin });
+  assert.equal(row.status, 'stored');
+  assert.equal(row.transport, 'objects');
+  assert.equal(row.storageId, undefined);
+  assert.ok(fake.objects.size > 0);
+  const checkpoint = await modules.projectProposalObjects.checkpoint._handler(s.ctx, { proposalId: row._id });
+  assert.equal(checkpoint.digest, pin.digest);
+  const count = fake.objects.size;
+  assert.equal(
+    (await modules.projectProposalObjects.publish._handler(s.ctx, { ...c.input, ...pin }))._id,
+    row._id,
+  );
+  assert.equal(fake.objects.size, count);
+  assert.ok(s.tables.projectBackups.get('backup').storageId, 'the legacy base archive remains readable');
+});
+
+test('opted-in legacy archive metadata sidecars use R2 and preserve exact Work bytes', async t => {
+  const { fake } = await r2Setup(t);
+  const s = await setup(t);
+  s.tables.hostedProjects.get('project').r2Writes = true;
+  s.files.set('old-sidecar-original', {
+    blob: new Blob([s.bytes], { type: 'application/gzip' }),
+    metadata: { size: s.bytes.length, sha256: digest(s.bytes), contentType: 'application/gzip' },
+  });
+  s.ctx.storage.store = () => assert.fail('opted-in metadata sidecars must not write Convex bytes');
+  const { projectArchiveMetadata } = await import(moduleUrl('../convex/projectArchiveMetadata.ts'));
+  const load = () =>
+    projectArchiveMetadata(
+      s.ctx,
+      'old-sidecar-original',
+      s.bytes.length,
+      digest(s.bytes),
+      async () => {},
+      true,
+      true,
+    );
+  const first = await load(),
+    objects = fake.objects.size;
+  const second = await load();
+  assert.deepEqual(Buffer.from(second.work), Buffer.from(first.work));
+  assert.deepEqual(Buffer.from(second.manifest), Buffer.from(first.manifest));
+  assert.equal(fake.objects.size, objects);
+  assert.ok(
+    [...s.tables.derivedArtifacts.values()].some(
+      row => row.original === 'old-sidecar-original' && row.storageId?.startsWith('r2blob:'),
+    ),
   );
 });

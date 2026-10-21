@@ -3,7 +3,6 @@
 import type { ActionCtx } from './_generated/server';
 import { blobStore } from './blobStore';
 import { archiveBlobUrl } from './archiveBlobUrl';
-import type { Id } from './_generated/dataModel';
 import { exchangeRequest } from '../src/exchange-request';
 import { invariant } from '../src/errors';
 import { noteStorageRead } from './storageMeter';
@@ -12,7 +11,7 @@ import { noteStorageRead } from './storageMeter';
 // reading and after returning at the caller. Never materialize the entire Blob.
 export async function projectArchivePart(
   ctx: ActionCtx,
-  storageId: Id<'_storage'>,
+  storageId: string,
   size: number,
   digest: string,
   offset: number,

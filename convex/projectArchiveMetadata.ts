@@ -3,7 +3,6 @@
 import type { ActionCtx } from './_generated/server';
 import { blobStore } from './blobStore';
 import { archiveBlobUrl } from './archiveBlobUrl';
-import type { Id } from './_generated/dataModel';
 import { derivedArtifact, derivedBytes } from './derivedArtifactActions';
 import { invariant } from '../src/errors';
 import { workArchiveMetadata } from '../src/work-archive-metadata';
@@ -14,7 +13,7 @@ import { noteStorageRead } from './storageMeter';
 // The storage URL stays inside this action; final owner/grant checks remain at callers.
 async function readOriginalMetadata(
   ctx: ActionCtx,
-  storageId: Id<'_storage'>,
+  storageId: string,
   size: number,
   digest: string,
   checkAccess: () => Promise<unknown>,
@@ -53,11 +52,12 @@ async function readOriginalMetadata(
 // original full archive remains authoritative for recovery and every other member.
 export async function projectArchiveMetadata(
   ctx: ActionCtx,
-  storageId: Id<'_storage'>,
+  storageId: string,
   size: number,
   digest: string,
   checkAccess: () => Promise<unknown>,
   cache = true,
+  r2 = false,
 ) {
   if (!cache) return readOriginalMetadata(ctx, storageId, size, digest, checkAccess);
   const file = await blobStore(ctx).getMetadata(storageId);
@@ -80,6 +80,7 @@ export async function projectArchiveMetadata(
       return encodeWorkMetadataSidecar(original);
     },
     checkAccess,
+    r2,
   );
   await checkAccess();
   if (original) return original;

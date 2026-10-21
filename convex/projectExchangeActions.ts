@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { v } from 'convex/values';
-import { blobStore } from './blobStore';
+import { storeProjectArtifact } from './projectArtifactActions';
 import { action, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Id, Doc } from './_generated/dataModel';
@@ -113,27 +113,7 @@ async function cacheLogicalMetadata(
   actor: string,
   bytes: Buffer,
 ) {
-  const prepared = await ctx.runMutation(internal.projectExchangeCache.prepare, {
-    projectId,
-    actor,
-    digest: digest(bytes),
-    size: bytes.length,
-  });
-  if (prepared.stored) return;
-  let cursor: string | null = null;
-  while (!prepared.created) {
-    const receipt: { stored: boolean; done: boolean; cursor: string } = await ctx.runMutation(
-      internal.projectExchangeCache.reconcile,
-      { id: prepared.id, actor, cursor },
-    );
-    if (receipt.stored) return;
-    if (receipt.done) break;
-    cursor = receipt.cursor;
-  }
-  const storageId = await blobStore(ctx).store(
-    new Blob([new Uint8Array(bytes)], { type: prepared.contentType }),
-  );
-  await ctx.runMutation(internal.projectExchangeCache.complete, { id: prepared.id, actor, storageId });
+  await storeProjectArtifact(ctx, projectId, actor, bytes);
 }
 const publicationFields = {
   projectId: v.id('hostedProjects'),

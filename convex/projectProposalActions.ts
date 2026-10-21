@@ -26,8 +26,18 @@ async function checkedComplete(
   if (proposal.status === 'stored')
     return await ctx.runMutation(internal.projectProposals.complete, { id, actor, storageId });
   await ctx.runQuery(internal.projectProposals.validateUpload, { id, actor, storageId });
-  const bytes = await projectArchiveMetadata(ctx, storageId, proposal.size, proposal.digest, () =>
-      ctx.runQuery(internal.projectProposals.get, { id, actor }),
+  const r2: boolean = await ctx.runQuery(internal.projectExchangeCache.placement, {
+    projectId: proposal.projectId,
+    actor,
+  });
+  const bytes = await projectArchiveMetadata(
+      ctx,
+      storageId,
+      proposal.size,
+      proposal.digest,
+      () => ctx.runQuery(internal.projectProposals.get, { id, actor }),
+      true,
+      r2,
     ),
     manifest = sourceManifestSchema.parse(JSON.parse(Buffer.from(bytes.manifest).toString('utf8'))),
     data = parseWorkBytes(bytes.work);

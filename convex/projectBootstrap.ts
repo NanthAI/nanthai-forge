@@ -29,7 +29,7 @@ export const create = action({
             type: `application/x-forge-object-${nonce}`,
           }),
         );
-        objects.push({ storageId, nonce });
+        objects.push({ storageId: storageId as Id<'_storage'>, nonce });
       }
       // All project/source/Work pointers publish in one transaction. Unknown
       // outcomes retain these bytes; a retry reconciles the original operation.

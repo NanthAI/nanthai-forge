@@ -2,9 +2,11 @@
 // Only verified legacy-reader materialization calls these internal functions.
 // It shares object bindings and explicit project cleanup with ordinary uploads.
 import { v } from 'convex/values';
-import { internalMutation } from './_generated/server';
+import { internalMutation, internalQuery } from './_generated/server';
 import { accessibleProject } from './projectAuthority';
 import { storageDigest, scanComplete, removeExclusive } from './projectStorage';
+import { isStored } from './projectObjectFields';
+import { r2Enabled, r2Config, r2Key } from './r2';
 import { invariant } from '../src/errors';
 export const prepare = internalMutation({
   args: { projectId: v.id('hostedProjects'), actor: v.string(), digest: v.string(), size: v.number() },
@@ -13,9 +15,12 @@ export const prepare = internalMutation({
     stored: v.boolean(),
     created: v.boolean(),
     contentType: v.string(),
+    r2Key: v.optional(v.string()),
   }),
   handler: async (ctx, input) => {
-    await accessibleProject(ctx, input.projectId, input.actor);
+    const project = await accessibleProject(ctx, input.projectId, input.actor);
+    const r2 = r2Enabled() && project.r2Writes;
+    if (r2) r2Config();
     invariant(
       /^[0-9a-f]{64}$/.test(input.digest) && Number.isSafeInteger(input.size) && input.size >= 0,
       'INVALID_WORK_BACKUP',
@@ -38,14 +43,23 @@ export const prepare = internalMutation({
         size: input.size,
         nonce: crypto.randomUUID(),
         removed: false,
+        ...(r2 ? { location: 'r2' as const, r2Key: r2Key(input.projectId, input.digest) } : {}),
       });
       row = (await ctx.db.get(id))!;
+    }
+    if (!isStored(row) && r2 && row.location !== 'r2') {
+      await ctx.db.patch(row._id, { location: 'r2', r2Key: r2Key(input.projectId, input.digest) });
+      row = (await ctx.db.get(row._id))!;
+    } else if (!isStored(row) && !r2 && row.location === 'r2') {
+      await ctx.db.patch(row._id, { location: 'convex', r2Key: undefined });
+      row = (await ctx.db.get(row._id))!;
     }
     return {
       id: row._id,
       created,
-      stored: !!(row.storageId || row.recipe),
+      stored: isStored(row),
       contentType: `application/x-forge-object-${row.nonce}`,
+      ...(row.location === 'r2' ? { r2Key: row.r2Key } : {}),
     };
   },
 });
@@ -56,7 +70,8 @@ export const reconcile = internalMutation({
     const row = await ctx.db.get(id);
     invariant(row && !row.removed, 'PROJECT_UNAVAILABLE', 'Original metadata binding is unavailable.');
     await accessibleProject(ctx, row.projectId, actor);
-    if (row.storageId || row.recipe) return { stored: true, done: true, cursor: '' };
+    if (isStored(row)) return { stored: true, done: true, cursor: '' };
+    if (row.location === 'r2') return { stored: false, done: true, cursor: '' };
     const page = await ctx.db.system.query('_storage').order('desc').paginate({ cursor, numItems: 100 });
     const file = page.page.find(
       item =>
@@ -99,5 +114,31 @@ export const complete = internalMutation({
     }
     await ctx.db.patch(id, { storageId });
     return null;
+  },
+});
+
+/** Internal actions call this only after a successful signed HEAD verification. */
+export const completeR2 = internalMutation({
+  args: { id: v.id('projectObjects'), actor: v.string(), key: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { id, actor, key }) => {
+    const row = await ctx.db.get(id);
+    invariant(
+      row && !row.removed && row.location === 'r2' && row.r2Key === key,
+      'INVALID_WORK_BACKUP',
+      'Original artifact object binding changed.',
+    );
+    await accessibleProject(ctx, row.projectId, actor);
+    if (!row.r2Committed) await ctx.db.patch(id, { r2Committed: true });
+    return null;
+  },
+});
+
+export const placement = internalQuery({
+  args: { projectId: v.id('hostedProjects'), actor: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { projectId, actor }) => {
+    const project = await accessibleProject(ctx, projectId, actor);
+    return project.r2Writes ?? false;
   },
 });

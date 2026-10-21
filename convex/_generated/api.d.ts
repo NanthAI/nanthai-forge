@@ -1,3 +1,7 @@
+import type * as artifactBlobFields from "../artifactBlobFields.js";
+import type * as artifactStorage from "../artifactStorage.js";
+import type * as importStorage from "../importStorage.js";
+import type * as projectArtifactActions from "../projectArtifactActions.js";
 import type * as projectReturnCommit from "../projectReturnCommit.js";
 import type * as projectPublicationAttempt from "../projectPublicationAttempt.js";
 import type * as projectReturnMetadataStore from "../projectReturnMetadataStore.js";
@@ -145,6 +149,10 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  artifactBlobFields: typeof artifactBlobFields;
+  artifactStorage: typeof artifactStorage;
+  importStorage: typeof importStorage;
+  projectArtifactActions: typeof projectArtifactActions;
   projectReturnCommit: typeof projectReturnCommit;
   importStatus: typeof importStatus;
   projectGithubImportObjects: typeof projectGithubImportObjects;

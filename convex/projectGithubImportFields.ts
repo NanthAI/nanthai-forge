@@ -11,7 +11,7 @@ export const githubImportFields = {
   commit: v.string(),
   at: v.string(),
   step: v.number(),
-  cursor: v.id('_storage'),
+  cursor: v.string(),
   phase: v.union(v.literal('discovering'), v.literal('importing'), v.literal('ready'), v.literal('error')),
   totalKnown: v.boolean(),
   completed: v.number(),

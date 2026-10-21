@@ -2,6 +2,7 @@
 'use node';
 import { v } from 'convex/values';
 import { blobStore } from './blobStore';
+import { storeProjectArtifact } from './projectArtifactActions';
 import { internalAction, type ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
@@ -39,11 +40,7 @@ async function put(
     });
     return;
   }
-  const nonce: string = await ctx.runMutation(internal.projectGithubImportObjects.reserve, pin);
-  const storageId = await blobStore(ctx).store(
-    new Blob([new Uint8Array(bytes)], { type: `application/x-forge-object-${nonce}` }),
-  );
-  await ctx.runMutation(internal.projectGithubImportObjects.bind, { ...pin, storageId, nonce });
+  await storeProjectArtifact(ctx, job.projectId, job.owner, bytes);
 }
 export const run = internalAction({
   args: { id: v.id('projectGithubImports'), actor: v.string() },
@@ -97,8 +94,13 @@ export const run = internalAction({
         });
         return null;
       }
+      const placement = await ctx.runQuery(internal.projectGithubImportObjects.placement, {
+        projectId: job.projectId,
+        actor: job.owner,
+      });
       const storageId = await blobStore(ctx).store(
         new Blob([JSON.stringify(cursor)], { type: 'application/json' }),
+        placement ? { r2Namespace: `v1/p/${job.projectId}/import/${job._id}/${job.step + 1}` } : undefined,
       );
       await ctx.runMutation(internal.projectGithubImportStore.advance, {
         ...input,

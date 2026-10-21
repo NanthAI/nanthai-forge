@@ -61,7 +61,7 @@ export async function storeReturnJson(ctx: ActionCtx, value: unknown): Promise<I
   const body = Buffer.concat(compressed);
   const id = await blobStore(ctx).store(new Blob([body], { type: 'application/gzip' }));
   remember(id, body);
-  return id;
+  return id as Id<'_storage'>;
 }
 export async function deleteReturnJson(ctx: ActionCtx, id: Id<'_storage'>) {
   forget(id);

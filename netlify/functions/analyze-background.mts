@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Config } from '@netlify/functions';
+import { digest } from '../../src/hash.js';
+import { putR2 } from '../../src/exchange-blobs.js';
 import { workerAuthorized } from '../../src/worker-auth.js';
 import { authorizeGithub } from '../../src/github-access.js';
 import { captureGithub, githubAnalysisVersion } from '../../src/github.js';
@@ -43,7 +45,10 @@ export default async (request: Request): Promise<Response> => {
   };
   let artifactKey: string | undefined;
   try {
-    const input = await post<{ repository: string; ref: string; uploadUrl: string } | null>('prepare', job);
+    const input = await post<{ repository: string; ref: string; uploadUrl?: string; r2?: boolean } | null>(
+      'prepare',
+      job,
+    );
     // A delivery must claim its generation once; platform redeliveries do not restart analysis.
     if (!input) return new Response(null, { status: 204 });
     const access = await authorizeGithub(input.repository, undefined, {
@@ -63,21 +68,36 @@ export default async (request: Request): Promise<Response> => {
         invariant(current, 'WORKER_SUPERSEDED', 'A newer import replaced this worker.');
       },
     );
-    const response = await fetch(input.uploadUrl, {
-      method: 'POST',
-      redirect: 'error',
-      signal: AbortSignal.timeout(120_000),
-      headers: { 'Content-Type': 'application/gzip' },
-      body: await encodeHostedArtifact(artifact),
-    });
-    invariant(response.ok, 'WORKER_UNAVAILABLE', 'The source artifact could not be stored.');
-    const stored = (await response.json()) as { storageId: string };
-    invariant(
-      typeof stored.storageId === 'string',
-      'INVALID_ARTIFACT',
-      'Storage returned an invalid artifact identity.',
-    );
-    artifactKey = stored.storageId;
+    const body = await encodeHostedArtifact(artifact);
+    if (input.r2) {
+      const bytes = Buffer.from(await body.arrayBuffer());
+      const upload = await post<{
+        ref: string;
+        target: { kind: 'r2'; url: string; headers: Record<string, string> };
+      }>('uploadTarget', {
+        ...job,
+        digest: digest(bytes),
+        size: bytes.length,
+      });
+      await putR2(upload.target, bytes);
+      artifactKey = upload.ref;
+    } else {
+      const response = await fetch(input.uploadUrl!, {
+        method: 'POST',
+        redirect: 'error',
+        signal: AbortSignal.timeout(120_000),
+        headers: { 'Content-Type': 'application/gzip' },
+        body,
+      });
+      invariant(response.ok, 'WORKER_UNAVAILABLE', 'The source artifact could not be stored.');
+      const stored = (await response.json()) as { storageId: string };
+      invariant(
+        typeof stored.storageId === 'string',
+        'INVALID_ARTIFACT',
+        'Storage returned an invalid artifact identity.',
+      );
+      artifactKey = stored.storageId;
+    }
     await post<boolean>('update', {
       ...job,
       phase: 'ready',

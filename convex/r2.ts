@@ -103,3 +103,13 @@ export async function headObject(config: R2Config, key: string): Promise<HeadRes
   }
 }
 export const checksumOf = base64;
+
+/** Used only by explicit resource cleanup, after its durable artifact tombstone. */
+export const presignDelete = (config: R2Config, key: string) =>
+  presign({
+    method: 'DELETE',
+    ...target(config, key),
+    accessKeyId: config.accessKeyId,
+    secretAccessKey: config.secretAccessKey,
+    expires: headExpiry,
+  });

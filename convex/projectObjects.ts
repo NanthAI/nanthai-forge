@@ -113,7 +113,7 @@ async function prepareObject(
 export const prepare = mutation({
   args: { projectId: v.id('hostedProjects'), ...pin.fields },
   returns: preparedObject,
-  // Single-object prepare never uses R2 (only prepareBatch does), so its result has no target.
+  // The legacy browser uploader uses this API; R2 clients use prepareBatch.
   handler: (ctx, args) =>
     prepareObject(ctx, args) as Promise<{
       id: Id<'projectObjects'>;

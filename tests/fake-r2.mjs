@@ -14,6 +14,10 @@ export const fakeR2Config = {
   secretAccessKey: 'fake/secret+key',
 };
 const b64 = bytes => createHash('sha256').update(bytes).digest('base64');
+// Keep local bucket traffic on the real HTTP transport even when a preceding
+// provider fixture has wrapped global fetch. Non-bucket requests still use the
+// caller's current mock.
+const networkFetch = globalThis.fetch;
 const mustSign = ['content-length', 'if-none-match', 'x-amz-checksum-sha256'];
 
 export async function startFakeR2(config = fakeR2Config) {
@@ -45,7 +49,7 @@ export async function startFakeR2(config = fakeR2Config) {
       globalThis.fetch = (input, init) => {
         const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
         if (url.host !== host) return native(input, init);
-        return native(`http://127.0.0.1:${server.address().port}${url.pathname}${url.search}`, init);
+        return networkFetch(`http://127.0.0.1:${server.address().port}${url.pathname}${url.search}`, init);
       };
       return () => {
         globalThis.fetch = native;
@@ -114,6 +118,10 @@ export async function startFakeR2(config = fakeR2Config) {
         const object = objects.get(id);
         if (!object) return send(404);
         return send(200, { 'content-length': String(object.length), 'x-amz-checksum-sha256': b64(object) });
+      }
+      if (req.method === 'DELETE') {
+        objects.delete(id);
+        return send(204);
       }
       if (req.method === 'GET') {
         if (fake.getDelay) await new Promise(resolve => setTimeout(resolve, fake.getDelay));

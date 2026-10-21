@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { setup as r2Setup } from './r2-harness.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
 import { fixture, git } from './helpers.mjs';
@@ -364,4 +365,38 @@ test('source Zone navigation and copied links retain the scope while ordinary ro
     if (previousLocation === undefined) delete globalThis.location;
     else globalThis.location = previousLocation;
   }
+});
+
+test('opted-in Zones export to R2 from old or R2 indexed originals without Convex writes', async t => {
+  const { fake } = await r2Setup(t);
+  const { s, artifact, request } = await setup(t);
+  const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
+  const job = s.tables.imports.get('own');
+  job.r2Writes = true;
+  const first = await actions.create._handler(s.ctx, request);
+  const r2Original = await blobStore(s.ctx).store(await encodeHostedArtifact(artifact), {
+    r2Namespace: 'v1/i/own/g/2',
+  });
+  await imports.update._handler(s.ctx, { id: 'own', generation: 1, phase: 'ready', artifactKey: r2Original });
+  const second = await actions.create._handler(s.ctx, {
+    ...request,
+    name: 'R2 original',
+    operationId: randomUUID(),
+  });
+  s.ctx.storage.store = () => assert.fail('Zone exports must not write Convex bytes');
+  s.ctx.storage.generateUploadUrl = () => assert.fail('Zone exports must not create Convex upload URLs');
+  for (const id of [first, second]) {
+    const part = await actions.downloadPart._handler(s.ctx, { id, offset: 0 });
+    const scoped = await decodeHostedArtifact(new Blob([part.data], { type: part.contentType }));
+    assert.deepEqual(Object.keys(scoped.content).sort(), [...request.files].sort());
+    const before = fake.objects.size;
+    await actions.downloadPart._handler(s.ctx, { id, offset: 0, digest: part.digest });
+    assert.equal(fake.objects.size, before);
+  }
+  assert.equal(
+    [...s.tables.derivedArtifacts.values()].filter(
+      row => row.kind === 'zone-export-v1' && row.storageId?.startsWith('r2blob:'),
+    ).length,
+    2,
+  );
 });

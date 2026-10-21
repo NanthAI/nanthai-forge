@@ -78,7 +78,7 @@ test('worker headers reject missing/wrong credentials before parsing or running 
   process.env.FORGE_WORKER_KEY = 'right';
   try {
     const routes = http.getRoutes().filter(([path]) => path.startsWith('/worker/'));
-    assert.equal(routes.length, 2);
+    assert.equal(routes.length, 3);
     for (const [path, , action] of routes) {
       const ctx = { runAction: () => assert.fail('Unauthorized calls must not touch jobs or storage.') };
       const response = await action._handler(

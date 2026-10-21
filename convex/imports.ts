@@ -189,7 +189,7 @@ export const publicPage = internalQuery({
 
 // Late worker callbacks must not delete a blob retained by another analysis.
 export const artifactInUse = internalQuery({
-  args: { artifactKey: v.id('_storage') },
+  args: { artifactKey: v.string() },
   returns: v.boolean(),
   handler: async (ctx, { artifactKey }) => {
     const current = await ctx.db

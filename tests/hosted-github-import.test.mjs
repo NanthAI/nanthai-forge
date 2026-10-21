@@ -5,6 +5,7 @@ import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 import { githubHostedProject } from '../dist/hosted-github-bootstrap.js';
+import { setup as r2Setup } from './r2-harness.mjs';
 import { digest } from '../dist/hash.js';
 const modules = {};
 for (const name of [
@@ -43,6 +44,7 @@ function fixture(t, { privateRepository = false, tooLarge = false } = {}) {
   let denied = false,
     blobs = 0;
   globalThis.fetch = async (url, options) => {
+    if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return previous(url, options);
     const p = new URL(url).pathname;
     if (p.includes('/oauth_access_tokens/oauth_github')) return Response.json([{ token: 'ghu_synthetic' }]);
     if (p.startsWith('/applications/')) return new Response('{}');
@@ -280,4 +282,41 @@ test('existing explicit project deletion removes import progress and preserves a
   assert.equal(s.files.has(a.cursor), false);
   assert.equal(s.files.has(shared), true);
   assert.equal(s.tables.hostedProjects.get(b.projectId).currentBackup !== null, true);
+});
+
+test('opted-in hosted import writes source, metadata and cursor to R2 and retries a lost object commit', async t => {
+  const { fake } = await r2Setup(t);
+  const s = fixture(t),
+    id = await s.start();
+  const job = s.tables.projectGithubImports.get(id);
+  s.tables.hostedProjects.get(job.projectId).r2Writes = true;
+  s.ctx.storage.store = () => assert.fail('opted-in import must not store Convex bytes');
+  s.ctx.storage.generateUploadUrl = () => assert.fail('opted-in import must not generate Convex upload URLs');
+  await s.advance(id);
+  assert.match(s.tables.projectGithubImports.get(id).cursor, /^r2blob:/);
+  const run = s.ctx.runMutation;
+  let lost = false;
+  s.ctx.runMutation = async (ref, args) => {
+    const value = await run(ref, args);
+    if (!lost && getFunctionName(ref) === 'projectExchangeCache:completeR2') {
+      lost = true;
+      throw Error('lost committed R2 object reply');
+    }
+    return value;
+  };
+  await s.advance(id);
+  assert.equal(s.tables.projectGithubImports.get(id).phase, 'error');
+  const objects = fake.objects.size;
+  await s.start(job.operationId);
+  await s.advance(id);
+  await s.advance(id);
+  assert.equal(s.tables.projectGithubImports.get(id).phase, 'ready');
+  assert.ok(fake.objects.size >= objects);
+  const bindings = [...s.tables.projectObjects.values()];
+  assert.ok(
+    bindings.length > 0 && bindings.every(row => row.location === 'r2' && row.r2Committed && !row.storageId),
+  );
+  const source = bindings.find(row => row.digest === digest(s.bytes));
+  assert.deepEqual(fake.objects.get(fake.key(source.r2Key)), s.bytes);
+  assert.equal(bindings.filter(row => row.digest === digest(s.bytes)).length, 1);
 });
