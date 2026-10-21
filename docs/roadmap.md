@@ -1,8 +1,8 @@
 # Roadmap
 
-What we are doing, in what order, and why. Four phases. Phases 1 and 2 are done, Phase 3 is closing, Phase 4 is a candidate list. Open work items live in the [backlog](backlog.md); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
+What we are doing, in what order, and why. Six phases. Phases 1–3 are done. Phase 4 is in progress. Phase 5 is private alpha; Phase 6 is public beta. Open work items live in the [backlog](backlog.md); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
 
-Last updated: 2026-10-19.
+Last updated: 2026-10-21.
 
 ## Direction
 
@@ -38,103 +38,55 @@ Delivered:
 
 Closed on 2026-10-16.
 
-## Phase 3: speed, trust and hosted groundwork (closing)
+## Phase 3: speed, trust and hosted groundwork (done)
 
-Goal: make landing fast, make checks trustworthy and cheap, decide scope with data, and lay the groundwork for hosted-first projects. Run as seven stages. Status as of 2026-10-19.
+Goal: make landing fast, make checks trustworthy and cheap, and lay the groundwork for hosted projects.
 
-### Stage 0: throughput
+Delivered:
 
-Why: with about ten agents on one Mac, CPU-bound checks were the bottleneck (about one landing per hour).
+- Scope-aware checks, concurrent checkpoints, landing batches and remote runners. Landing measured 2–3× faster than the GitHub merge queue on the same runners. A full check takes about 5–6 minutes on Blacksmith. About 134 landings completed.
+- Clean-environment checks, authorization fixes and runner qualification. The restore drill passed.
+- Performance instrumentation, client error capture and cheaper idle tabs and source returns.
+- Intent vocabulary, UI coherence, quickstart, glossary and agent docs.
+- Hosted main, browser project creation and resumable lossless GitHub import.
 
-Done:
+Closed on 2026-10-20. Current measurements and capabilities are in [status](status.md). Remaining work follows below and in the [backlog](backlog.md).
 
-- Scope-aware checks and a trimmed suite. A docs-only change lands in about 18 s end to end (target 60 s, met).
-- Disjoint-change fast path as a finish policy with fix-forward on failure.
-- Lock contention with typed, retried errors; automatic cleanup of regenerable copies.
-- Incremental hosted push, a hosted staleness strip, owner-derived rows, and a Work-delta push format.
-- Smart re-check when only overlapping files changed.
-- Landing batches, flaky-test quarantine, resilience, queue controls, a Modal runner and a manual fallback runner. Burst landing throughput on remote runners: a batch window and stacked concurrent batches.
-- Concurrent checkpoints (ten at once went from 29 s to 9.6 s).
-- One measured cohort at about 7.5 landings per hour (single sample).
+## Phase 4: we're happy using it (in progress)
 
-Open:
+Goal: the Forge team uses Forge end to end on its own project and is happy with it.
 
-- Full `verify` still takes 11 to 12 minutes (target under 6).
-- A single checkpoint takes 2.9 to 4.6 s (target 1 s).
-- No post-delta live number for a one-landing hosted push (target 10 s; last measured 178 s before the delta format).
-- The owner root as a current working copy of `main` landed but is off by default.
-- Measured throughput numbers belong in [status](status.md); Stage 0 is not formally closed.
+Started on 2026-10-21. Work in order:
 
-### Stage 1: instrument
+1. **R3 metadata-only publication and return — done**, except the big-backlog measurement. Routine push fell from 95 minutes to about 3 minutes; push #21 took 186 seconds. See the [R2 storage plan](r2-storage-plan.md#r3-owner-derived-publication-and-source-return-done).
+2. **Carried-over fixes — done**: P03, P04, P12, P15 and P27; hosted-unsynced state; incremental deploy export; the Modal estimate.
+3. **Hosted Lanes**: start, save, compose, land, revert and abandon from the site with all Macs offline. Use a server-side landing queue with compare-and-swap main.
+4. **The lead's routine in the product**: batch landing and the routine deploy and push workflow.
+5. **Off-machine recovery**: recover the project without the owner's Mac.
+6. **Predictive overlap warnings**: show likely overlap while agents work.
+7. **Last: the agent-coordination benchmark**. Run forge-bench R3 with Forge coordination on, Forge coordination off and GitHub PRs. Use a real-history track on NanthAI Edge OSS and a synthetic track. Run a no-model preflight of every arm before the benchmark.
 
-Done: client error capture (bounded rate, 30 day retention); a per-Intent making-of record (local owners only); measured cost drivers; a performance harness and cheap web wins (eager JavaScript from 1.20 to 1.07 MB, font payload from 165 to 33 KB).
+## Phase 5: private alpha (planned)
 
-Open: making-of data has no hosted query or browser view; the harness's live timings have not been run against a deployed site, so the page-load budgets (Now and Work in 1.5 s, first Lane diff in 1 s, one-file push in 3 s) are unverified; a measured dollar table for [status](status.md).
+Goal: a few invited developers can use Forge on their own projects.
 
-### Stage 2: trust
+- Trial with outside users.
+- A polished first project through GitHub import.
+- A self-hosted check worker (`nforge worker`) using the project's own compute, with contributor first-click approval.
+- Per-project usage counters.
+- Newcomer docs.
 
-Done: clean-environment checks (hygiene, not isolation); the authorization review and its fixes; the audit triage; a GitHub Actions runner (including third-party runners) with live smoke checks passing.
+## Phase 6: public beta (planned)
 
-Open:
+Goal: open Forge to public use with a free core and sustainable hosting.
 
-- Runner choice per project. All four must exist at launch and the hosted site never pays for other people's checks: (1) own machine, exists; (2) GitHub Actions through the GitHub App, mostly landed; (3) Modal with the project's own key, open (today's Modal backend is tied to the owner's account); (4) a self-hosted worker (`nforge worker`), open. Defaults: a CLI-created project uses the own machine; a browser project with GitHub uses Actions; otherwise "no runner yet, pick one". Contributor code runs only on the project's remote runner after a first-time maintainer click.
-- A scheduled backup job with an off-site copy and a monthly restore drill (verifier and procedure exist; the drill is approved but unrun). See also [hosted durability](operations/hosted-durability.md).
-- Public imports as personal mirrors with a verified claim (decided, not built).
-
-### Stage 3: decide with data
-
-Done: a decision to use Git as an interchange format (not the daily format); the duplicate local UI path removed; a proxy trial of an outside developer's first hour, which fixed first-run docs.
-
-Open: the Forge arm of the benchmark against GitHub. Single landings measured four times out of four: Forge about 1.9 to 2.0 times faster. Burst landings, other runner configurations and the many-agent coordination series are not yet clean runs (void runs are archived with reasons). Real outside developers have not tried it. Hosted Git serving and Lane refs are Phase 4.
-
-### Stage 4: vocabulary
-
-Done: Issue and Intent merged into one concept (Proposed, Planned, In motion, Done; optional kind; Initiatives kept as grouping; hosted migration run on the development deployment).
-
-Open: qualify Candidate terminology throughout the UI, CLI (with aliases and a deprecation notice), MCP, docs and tests, as one cohort. The name Channel stays and gets a glossary entry.
-
-### Stage 5: hosted canonical
-
-Order: hosted main and checkout, browser "New project", lossless GitHub import, hosted Lanes with save and compose from the site, a remote check worker with live output, accept, revert and abandon on hosted, qualification with every Mac offline, hosted GitHub sync.
-
-Done: the hosted main contract with a wants-only checkout; browser project bootstrap; resumable lossless GitHub import (400 MiB fixtures). Bulk-byte storage is planned in [R2 storage plan](r2-storage-plan.md); the seam slice (R0) is in review.
-
-Open and moved to Phase 4: hosted Lane, save and compose; hosted accept, revert and abandon; the server-side landing queue with compare-and-swap main; qualification with all Macs offline; full hosted GitHub sync; the remaining remote-check pieces.
-
-### Stage 6: product
-
-Done: UI coherence slices 1, 2 and 7a (shared icons and rows, Who's working fixes); `nforge docs`, a quickstart and a glossary; the `gh` command shim.
-
-Open: UI coherence slices 3a, 3b (one detail layout, merged timeline), 4 (Planning list), 5 (planned Intent page), 6 (Initiative page), 7b (Code as a file tree); the vocabulary words check; `llms.txt` agent docs; performance follow-ups, which need live timings first.
-
-### Cost and idle behaviour (cross-cutting)
-
-Lessons from the first month of hosted use are in the [R2 storage plan](r2-storage-plan.md#why). Fixes landed: an idle browser tab stops subscribing after 30 s hidden or 5 minutes without input; the session token lives 10 minutes; key-set lookups are cached; hosted source return re-reads far less storage. The effect of the source-return fix is unmeasured until one measured push is made.
-
-### Definition of done for Phase 3
-
-1. Throughput: a documented cohort of ten concurrent agents lands at least 6 changes per hour; docs-only under 60 s, scoped code under 5 minutes; numbers in [status](status.md); Stage 0 formally closed.
-2. Measured performance: the harness run against the deployed site; Now and Work, first Lane diff and one-file push recorded against budgets; misses listed.
-3. Cost and safety: one measured hosted push shows the egress fix works; monthly running cost under the owner's limit; weekly backup running with one passed restore drill; an idle tab verified to cost nothing.
-4. Runners: own machine, GitHub Actions and Modal (project's own key) selectable per project with cost per check recorded; the self-hosted worker and the contributor first-click rule specified and handed to Phase 4.
-5. Vocabulary and UI: Issue to Intent complete; Candidate terminology consistent everywhere with CLI aliases; coherence slices 3a to 7b landed with reviewed screenshots.
-6. Benchmarks published: single-landing and burst numbers on the same compute, and the first coordination pilot result, with void runs listed; the bar from the fair-test plan stated as met or not. The longer coordination series may continue into Phase 4.
-7. Hosted groundwork: hosted main, bootstrap and lossless import landed and qualified; remaining Stage 5 slices written up with sizes as the Phase 4 queue.
-8. Public readiness: a fresh public repository from one clean commit, the old one archived privately, automatic mirroring enabled, current docs and agent docs.
-9. Housekeeping: docs batches merged; every friction item fixed, filed in the [backlog](backlog.md) or dropped; scratch folders, old Lanes and benchmark resources cleaned with owner approval; closing report written.
-
-## Phase 4: hosted-first and sustainable (candidates)
-
-Goal: a project can live entirely on hosted Forge at near-zero cost, and the product can pay for itself without taxing the free core. Order is not fixed; candidates, roughly in this order:
-
-1. **Hosted Lanes** (moved from Phase 3): create, save and compose Candidates from the site; accept, revert and abandon on hosted; the server-side landing queue with compare-and-swap main (cut over after one green week); qualification with all Macs offline; full two-way hosted GitHub sync.
-2. **R2 storage, later slices**: metadata-only publication, browser bytes, imports, zones and agents, backfill, purge and backups. See [R2 storage plan](r2-storage-plan.md).
-3. **Runners**: the self-hosted worker, a runner picker, live logs from remote runners into hosted Checks. Hand-off: `nforge worker` connects a project-owned machine to the existing exact-Candidate/check protocol, with retained operation and execution identities, cancellation, recoverable live logs and cost receipts. It uses the project's own compute and credentials; hosted Forge does not fund other projects' runs. Specify contributor first-click approval in Phase 4: the first remote execution of a contributor's code requires a maintainer click, with identity and scope retained; retries reconcile that exact approval/run rather than prompting again. Contributor code uses only the project's remote runner. This is future work, not an enforcement rule implemented by the current local-owner runner setting.
-4. **Public Worker and custom domain**: serve public project bytes with edge caching on a project subdomain, so anonymous reads do not call the database.
-5. **Monetisation, free core**: hosted projects, presence, pushes, code view and public and private projects within fair use stay free. Candidates for paid extras: hosted runners and check minutes, storage above fair use, org features (teams, SSO, audit export, retention policies), a priority landing queue, a public-project CDN, support. Needs per-project usage counters first so fair use can be measured. Any new limit, retention rule or price needs an explicit owner decision.
-6. **Cross-repo coordination**: agents coordinated across several repositories, with shared usage pools.
-7. **Product depth**: making-of record in the browser, timeline and flow views, Intent discussions with per-item public or private visibility, Markdown and images on Intents, a real dependency graph in Code, open-source mode (configurable proposal limits, anonymous visibility, optional CLA), an extension model of events, actions and policies, Lane-scoped undo.
-8. **Git serving**: serve Git from hosted Forge and expose Lane refs.
+- **Public Worker and custom domain**: serve public project bytes through the edge cache.
+- **Open-source mode**: configurable proposal limits, anonymous visibility and an optional CLA.
+- **Monetisation with a free core**: use the Phase 5 usage counters to inform decisions. Any limit or price needs an owner decision.
+- **Cross-repo coordination** with shared usage pools.
+- **Git serving** from hosted Forge, with Lane refs.
+- **Product depth**: making-of, timeline and flow views, discussions, Markdown and images, a dependency graph, an extension model and Lane-scoped undo.
+- **Later R2 slices**: browser bytes, imports, zones, agents and proposals, backfill, purge and backups. See the [R2 storage plan](r2-storage-plan.md). Retention or deletion changes still need an owner decision.
 
 ## Workflow friction
 
