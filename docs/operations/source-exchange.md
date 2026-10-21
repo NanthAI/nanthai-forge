@@ -68,8 +68,11 @@ not omit comparisons, ancestry, Views or Code trees to fit a 4 MiB sidecar.
 The server validates owner facts and stores them; owner-supplied display data
 never changes who may land or bypasses revision, main-history or final CAS
 checks. Coordination changed-path lists also come from the CLI, avoiding State
-reads solely for advisory display. Large index deltas copy existing database
-rows into a private partition and switch only after all replacements are ready.
+reads solely for advisory display. Index deltas above 1,000 rows copy existing database
+rows into a private partition and apply removals/replacements in transactions of
+at most 1,000 rows. The final source/Work CAS switches partitions only after every
+batch is durable. Lost batch or final replies resume the original operation;
+ready delta cursors from earlier deployments use the same staged commit.
 When a hosted index is missing, the CLI automatically supplies complete local
 facts and source return publishes a new private index under the original CAS.
 Large immutable output is retained once; durable cursors carry its offset.
@@ -329,7 +332,7 @@ No Work format bump, hosted row migration or backfill is required. The sidecar i
 a disposable index supplied under the owner's existing source trust. Contributor
 proposals retain their existing hosted derivation path.
 
-Native object returns copy retained database index rows for State parents, immutable diffstat pairs and unchanged Candidate provenance. Complete and streamed native projections produce identical parent-cache rows and counts, including chunked parents for large fan-in. Only new source heads receive compact, chunked ancestry closures; older pair indexes remain readable, and missing pair membership can be resolved lazily from cached parents. Acceptance and supersession refresh the affected Candidate summaries without rereading unchanged file provenance. Bounded row deltas publish atomically into the selected partition. Larger deltas use the complete staged-partition path. Optional cache fields and record collections require no migration; an older generation reuses its complete ancestry boundaries and caches new States during its next return.
+Native object returns copy retained database index rows for State parents, immutable diffstat pairs and unchanged Candidate provenance. Complete and streamed native projections produce identical parent-cache rows and counts, including chunked parents for large fan-in. Only new source heads receive compact, chunked ancestry closures; older pair indexes remain readable, and missing pair membership can be resolved lazily from cached parents. Acceptance and supersession refresh the affected Candidate summaries without rereading unchanged file provenance. Row deltas of at most 1,000 rows publish atomically into the selected partition. Larger deltas use a private staged partition and a short final CAS; existing readers see the complete old or new partition. Optional cache fields and record collections require no migration; an older generation reuses its complete ancestry boundaries and caches new States during its next return.
 
 The CLI writes phase, items done/total, durable step, elapsed time and ETA to stderr, including the saved step when resuming. JSON stdout retains the original final receipt. The server advances many items between durable checkpoints and continues bounded batches within each action; restart always uses the original operation and stored cursor.
 
@@ -434,7 +437,10 @@ UUID in `supersededPushes`; do not delete or rewrite pending transport files.
 The replacement captures current local Work, reconciles selected hosted Work,
 and builds its delta against that selected Work checkpoint, independently of the
 latest uploaded checkpoint used as the publication predecessor. Optional missing
-baseline hints are recovered by normal reconciliation. Delta eligibility and all
+baseline hints are recovered by normal reconciliation. Publication authenticates
+the delta against that selected, fully validated Work catalog when the latest
+upload is a superseded candidate; its predecessor CAS still pins the latest
+upload. Delta eligibility and all
 existing authority, retained-history, closure and final CAS validation still apply.
 
 Large compatibility returns split retained Intent payloads into immutable private

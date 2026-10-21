@@ -820,9 +820,11 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
   const baseBackup = stuck.returnSource.expectedBackupId;
   stopUncommittedReturn = false;
   loseSupersedeReply = true;
-  const deltaRevisions = [],
+  const publicationModes = [],
+    deltaRevisions = [],
     originalLog = console.log;
   t.mock.method(console, 'log', (...args) => {
+    if (args[0] === 'work-record exchange prepared') publicationModes.push(args[1].mode);
     if (args[0] === 'work-record return prepared') deltaRevisions.push(args[1].revision);
     originalLog(...args);
   });
@@ -830,6 +832,7 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
     (await cli('exchange', f.root, 'push', '--supersede-retained')).stdout,
   );
   assert.notEqual(supersededRecovery.operationId, stuck.operationId);
+  assert.deepEqual(publicationModes, ['delta'], 'replacement publishes a record delta against selected Work');
   assert(
     deltaRevisions.includes(stuck.returnSource.revision),
     'replacement return executed the server record-delta path',

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { digest } from '../src/hash';
 import type { IntentRecords } from './projectSourceReturnRecords';
 import { prepareDelta } from './projectSourceReturnDelta';
 export { RETURN_BUDGET } from './projectSourceReturnStep';
@@ -349,14 +350,50 @@ async function advanceReturnProgress(
         return null;
     }
   }
+  // Legacy ready delta cursors also enter this path: their original projection
+  // is immutable and the private commit resumes without a new push/return ID.
+  const stagedDelta =
+    c.delta && (c.delta.entries.length + c.delta.removed.length > 1000 || stage.returnCommitPlan);
+  if (stagedDelta && c.delta) {
+    invariant(c.generationId, 'WORK_STALE', 'The return baseline is unavailable.');
+    const pins = c.delta.removed,
+      entries = c.delta.entries;
+    const plan = digest(JSON.stringify([c.final, c.metadata, pins, entries]));
+    let committed = stage;
+    while (!committed.returnCommitDone) {
+      const offset = committed.returnCommitOffset ?? 0;
+      const removed = pins.slice(offset, offset + 1000);
+      const rows = entries.slice(
+        Math.max(0, offset - pins.length),
+        Math.max(0, offset - pins.length) + 1000 - removed.length,
+      );
+      committed = await ctx.runMutation(internal.projectReturnCommit.batch, {
+        projectId: input.projectId,
+        owner,
+        generationId: c.generationId,
+        partitionId: stage._id,
+        expectedBackupId: input.expectedBackupId,
+        revision: input.revision,
+        operationId: input.operationId,
+        plan,
+        copy: !committed.returnCommitCopied,
+        cursor: committed.returnCommitCursor ?? null,
+        offset,
+        total: pins.length + entries.length,
+        removed,
+        entries: rows,
+      });
+      if (Date.now() - started >= RETURN_BUDGET.actionMs) return null;
+    }
+  }
   const receipt = await ctx.runMutation(internal.projectWork.returnSource, {
     ...c.final,
     projection: {
       generationId: c.generationId,
-      ...(c.delta ? { deltaPartitionId: stage._id } : { partitionId: stage._id }),
+      ...(c.delta && !stagedDelta ? { deltaPartitionId: stage._id } : { partitionId: stage._id }),
       metadata: JSON.stringify(c.metadata),
-      entries: c.delta?.entries ?? [],
-      removed: c.delta?.removed ?? [],
+      entries: c.delta && !stagedDelta ? c.delta.entries : [],
+      removed: c.delta && !stagedDelta ? c.delta.removed : [],
     },
   });
   const total = accounting(step);

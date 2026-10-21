@@ -1,6 +1,6 @@
+import { detachReturnMetadata } from './projectReturnMetadataStore';
 import { requireActiveReturn } from './projectReturnSupersede';
 import { indexActivity } from '../src/work-hosted-index';
-import { blobStore } from './blobStore';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { commandProjection } from './projectWorkProjection';
@@ -258,6 +258,11 @@ export const returnSource = internalMutation({
         'INVALID_WORK_JOURNAL',
         'Select this project’s stored local checkpoint with the current hosted history.',
       );
+      invariant(
+        !input.projection || input.projection.entries.length + input.projection.removed.length <= 1000,
+        'BAD_ARGUMENT',
+        'Stage large return projections before the final flip.',
+      );
       let generationId;
       if (input.projection) {
         let generation = await selectedGeneration(ctx, project);
@@ -285,28 +290,7 @@ export const returnSource = internalMutation({
               'WORK_STALE',
               'Return delta staging changed.',
             );
-            if (stage.returnCursor) await blobStore(ctx).delete(stage.returnCursor);
-            if (stage.returnSnapshot) await blobStore(ctx).delete(stage.returnSnapshot);
-            for (const ref of [
-              stage.returnMetadataCursor,
-              stage.returnMetadataSnapshot,
-              stage.returnPrepareCursor,
-            ])
-              if (ref) {
-                for (const id of JSON.parse(ref).blobs ?? []) await blobStore(ctx).delete(id);
-                for (const key of [JSON.parse(ref).key, ...(JSON.parse(ref).cleanup ?? [])])
-                  await ctx.scheduler.runAfter(0, internal.projectReturnMetadataStore.retire, {
-                    partitionId: stage._id,
-                    key,
-                  });
-              }
-            await ctx.db.patch(stage._id, {
-              returnCursor: undefined,
-              returnSnapshot: undefined,
-              returnMetadataCursor: undefined,
-              returnMetadataSnapshot: undefined,
-              returnPrepareCursor: undefined,
-            });
+            await detachReturnMetadata(ctx, stage);
           }
           const oldPartition = recordPartition(generation);
           const partition = input.projection.partitionId ?? oldPartition;
@@ -320,30 +304,12 @@ export const returnSource = internalMutation({
               'WORK_STALE',
               'Return index staging changed.',
             );
-            if (staged.returnCursor || staged.returnMetadataCursor) {
-              if (staged.returnCursor) await blobStore(ctx).delete(staged.returnCursor);
-              for (const ref of [
-                staged.returnMetadataCursor,
-                staged.returnMetadataSnapshot,
-                staged.returnPrepareCursor,
-              ])
-                if (ref) {
-                  for (const id of JSON.parse(ref).blobs ?? []) await blobStore(ctx).delete(id);
-                  for (const key of [JSON.parse(ref).key, ...(JSON.parse(ref).cleanup ?? [])])
-                    await ctx.scheduler.runAfter(0, internal.projectReturnMetadataStore.retire, {
-                      partitionId: staged._id,
-                      key,
-                    });
-                }
-              if (staged.returnSnapshot) await blobStore(ctx).delete(staged.returnSnapshot);
-              await ctx.db.patch(staged._id, {
-                returnCursor: undefined,
-                returnSnapshot: undefined,
-                returnMetadataCursor: undefined,
-                returnMetadataSnapshot: undefined,
-                returnPrepareCursor: undefined,
-              });
-            }
+            invariant(
+              !staged.returnCommitPlan || staged.returnCommitDone,
+              'WORK_STALE',
+              'Complete the private return commit before publication.',
+            );
+            await detachReturnMetadata(ctx, staged);
           }
           for (const pin of input.projection.removed) {
             const old = await record(ctx, partition, pin.collection, pin.key);

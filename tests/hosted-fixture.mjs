@@ -26,6 +26,7 @@ const projectPublicationStore = await import(moduleUrl('../convex/projectPublica
 const projectLifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const projectActorNames = await import(moduleUrl('../convex/projectActorNames.ts'));
 const projectReturnMetadataStore = await import(moduleUrl('../convex/projectReturnMetadataStore.ts'));
+const projectReturnCommit = await import(moduleUrl('../convex/projectReturnCommit.ts'));
 const projectReturnIndexStage = await import(moduleUrl('../convex/projectReturnIndexStage.ts'));
 const projectWorkIndexStore = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
 const projectWorkIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
@@ -407,6 +408,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     inventoryAccess,
     projectWorkIndexStore,
     projectReturnIndexStage,
+    projectReturnCommit,
     projectReturnMetadataStore,
     projectWorkAncestry,
     projectActorNames,

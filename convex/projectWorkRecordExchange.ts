@@ -152,20 +152,43 @@ export async function recordPublication(
   };
   if (!input.previous) return skip('previous-missing');
   if (input.deferHistory) return skip('history-deferred');
-  const { backup: prior } = await ctx.runQuery(internal.projectBackups.get, { id: input.previous, owner });
+  let { backup: prior } = await ctx.runQuery(internal.projectBackups.get, { id: input.previous, owner });
   if (prior.projectId !== input.projectId) return skip('previous-project-differs');
-  if (prior.validatedWorkRecords !== 1) return skip('previous-records-unvalidated');
-  if (prior.validatedClosure !== 1) return skip('previous-closure-unvalidated');
-  if (prior.historyBackfilling) return skip('previous-history-backfilling');
-  const candidate = await recordExchange(input, owner, reader),
-    previous = await recordExchange(prior, owner, reader);
+  const candidate = await recordExchange(input, owner, reader);
   if (!candidate) return skip('candidate-catalog-unavailable');
-  if (!previous) return skip('previous-catalog-unavailable');
   if (!candidate.root.delta) return skip('delta-missing');
   if (candidate.root.delta.size > WORK_DELTA_BYTES) return skip('delta-over-budget');
   const raw = JSON.parse((await candidate.read(candidate.root.delta)).toString('utf8'));
-  // A checkpoint from another baseline uses the complete supported path.
-  if (raw?.base?.root !== previous.root.records.sha256) return skip('delta-base-root-differs');
+  const usable = (backup: Doc<'projectBackups'>) =>
+    backup.projectId === input.projectId &&
+    backup.validatedWorkRecords === 1 &&
+    backup.validatedClosure === 1 &&
+    !backup.historyBackfilling;
+  let previous = usable(prior) ? await recordExchange(prior, owner, reader) : undefined;
+  const missingReason =
+    prior.validatedWorkRecords !== 1
+      ? 'previous-records-unvalidated'
+      : prior.validatedClosure !== 1
+        ? 'previous-closure-unvalidated'
+        : prior.historyBackfilling
+          ? 'previous-history-backfilling'
+          : !previous
+            ? 'previous-catalog-unavailable'
+            : 'delta-base-root-differs';
+  if (!previous || raw?.base?.root !== previous.root.records.sha256) {
+    // Publication CAS follows currentBackup, including a superseded upload.
+    // The owner prepares its delta against selected hosted Work instead. These
+    // pins intentionally differ until source return commits the replacement.
+    const project = await ctx.runQuery(internal.projectWork.get, { projectId: input.projectId, owner });
+    const baseId = project.work?.backupId;
+    if (!baseId || baseId === input.previous) return skip(missingReason);
+    const { backup: selected } = await ctx.runQuery(internal.projectBackups.get, { id: baseId, owner });
+    if (!usable(selected)) return skip('selected-base-unvalidated');
+    const base = await recordExchange(selected, owner, reader);
+    if (!base || raw?.base?.root !== base.root.records.sha256) return skip('delta-base-root-differs');
+    prior = selected;
+    previous = base;
+  }
   const delta = validateWorkDelta(previous.records, candidate.records, raw, {
     root: previous.root.records.sha256,
   });

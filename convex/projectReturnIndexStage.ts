@@ -139,6 +139,7 @@ export const batch = internalMutation({
       if (input.batch < partition.nextBatch) return true;
       invariant(partition.status === 'building', 'WORK_STALE', 'Return index staging is already complete.');
       invariant(input.batch === partition.nextBatch, 'WORK_STALE', 'Resume the original return index batch.');
+      invariant(input.entries.length <= 1000, 'BAD_ARGUMENT', 'Stage return rows in bounded batches.');
       for (const entry of input.entries)
         await ctx.db.insert('projectWorkRecords', {
           ...entry,

@@ -618,3 +618,37 @@ for (const [from, to] of [
     });
     assert.ok(logs.some(([name]) => name === 'work-record return prepared'));
   });
+
+test('replacement publication authenticates selected Work independently of an unreturned predecessor', async t => {
+  const f = await setup(t, true, 1),
+    { s } = f;
+  const orphan = await candidate(f);
+  // The upload changed currentBackup, but its return never selected hosted Work.
+  assert.equal(s.tables.hostedProjects.get('project').work.backupId, f.backupId);
+  const next = await preparedCheckpoint(s, f.first.store, 0, f.baselineKey, {
+    records: true,
+    baseline: f.baseline,
+    journalRevision: f.baseline.revision,
+  });
+  next.input.previous = orphan.input.backupId;
+  const { recordPublication } = await import(moduleUrl('../convex/projectWorkRecordExchange.ts'));
+  const { exchangeObjectReader } = await import(moduleUrl('../convex/projectExchangeReader.ts'));
+  const logs = [];
+  t.mock.method(console, 'log', (...args) => logs.push(args));
+  const selected = s.tables.projectBackups.get(f.backupId);
+  delete selected.validatedClosure;
+  assert.equal(
+    await recordPublication(s.ctx, next.input, 'owner', exchangeObjectReader(s.ctx, true)),
+    undefined,
+  );
+  assert.equal(logs.at(-1)[1].reason, 'selected-base-unvalidated');
+  selected.validatedClosure = 1;
+  // Even a legacy/unvalidated predecessor cannot hide a usable selected base.
+  delete s.tables.projectBackups.get(orphan.input.backupId).validatedWorkRecords;
+  const id = await modules.projectExchangeActions.publish._handler(s.ctx, next.input);
+  assert.equal(s.tables.projectBackups.get(id).previous, orphan.input.backupId);
+  assert.equal(s.tables.projectBackups.get(id).validatedWorkRecords, 1);
+  assert.equal(logs.at(-1)[0], 'work-record exchange prepared');
+  assert.equal(logs.at(-1)[1].mode, 'delta');
+  assert.equal(s.tables.hostedProjects.get('project').work.backupId, f.backupId);
+});

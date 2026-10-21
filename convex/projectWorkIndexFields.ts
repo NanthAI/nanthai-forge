@@ -20,6 +20,13 @@ export const returnProjection = v.object({
   removed: v.array(v.object({ collection: v.string(), key: v.string() })),
 });
 export const generationFields = {
+  returnCleanupRefs: v.optional(v.string()),
+  returnCleanupOffset: v.optional(v.number()),
+  returnCommitPlan: v.optional(v.string()),
+  returnCommitCursor: v.optional(v.string()),
+  returnCommitCopied: v.optional(v.boolean()),
+  returnCommitOffset: v.optional(v.number()),
+  returnCommitDone: v.optional(v.boolean()),
   workSchema: v.optional(v.number()),
   intentMigrationOperationId: v.optional(v.string()),
   retainedForIntentMigration: v.optional(v.string()),

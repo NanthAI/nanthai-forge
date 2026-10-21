@@ -1,3 +1,4 @@
+import type * as projectReturnCommit from "../projectReturnCommit.js";
 import type * as projectPublicationAttempt from "../projectPublicationAttempt.js";
 import type * as projectReturnMetadataStore from "../projectReturnMetadataStore.js";
 import type * as projectPublicationStore from "../projectPublicationStore.js";
@@ -144,6 +145,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  projectReturnCommit: typeof projectReturnCommit;
   importStatus: typeof importStatus;
   projectGithubImportObjects: typeof projectGithubImportObjects;
   projectGithubImportWorker: typeof projectGithubImportWorker;
