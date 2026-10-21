@@ -9,16 +9,19 @@ import { compareSnapshots, failure, readSnapshot } from './lib/hosted-durability
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const help = `Usage:
+  node scripts/hosted-durability.mjs backup --deployment NAME --state-dir PRIVATE_DIR [--prefix PREFIX/] [--operation-id UUID]
+  node scripts/hosted-durability.mjs backup-status --state-dir PRIVATE_DIR
   node scripts/hosted-durability.mjs export --deployment NAME --path BACKUP.zip [--dry-run]
   node scripts/hosted-durability.mjs verify --left-export BACKUP.zip --right-export RESTORED.zip
   node scripts/hosted-durability.mjs verify --left-export BACKUP.zip --right-deployment NAME
   node scripts/hosted-durability.mjs verify --left-deployment NAME --right-deployment NAME
 
-Export deployment fallback: HOSTED_DURABILITY_DEPLOYMENT, then CONVEX_DEPLOYMENT.
+Export/backup deployment fallback: HOSTED_DURABILITY_DEPLOYMENT, then CONVEX_DEPLOYMENT.
 Credentials stay in the process environment or existing Convex CLI login; no key flags.
 Verify downloads read-only snapshots for deployment inputs, then removes its temporary copies.
-Exit: 0 = exported/equal, 1 = command/input error, 2 = comparison differs.
-Requires installed pinned Convex CLI and Python 3 (ZIP reader). No import/deploy subcommand.`;
+Backup uses R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY; prefix/state-dir have HOSTED_DURABILITY_R2_PREFIX/HOSTED_DURABILITY_STATE_DIR fallbacks.
+Exit: 0 = complete/current/equal, 1 = command/input error, 2 = comparison differs or backup week missed.
+Backup requires npm run build:core. Requires installed pinned Convex CLI and Python 3 (ZIP reader). No import/deploy subcommand.`;
 
 export function parseCommand(args, env = process.env) {
   const { values, positionals } = parseArgs({
@@ -29,6 +32,9 @@ export function parseCommand(args, env = process.env) {
       'dry-run': { type: 'boolean' },
       deployment: { type: 'string' },
       path: { type: 'string' },
+      'state-dir': { type: 'string' },
+      prefix: { type: 'string' },
+      'operation-id': { type: 'string' },
       'left-export': { type: 'string' },
       'right-export': { type: 'string' },
       'left-deployment': { type: 'string' },
@@ -36,9 +42,41 @@ export function parseCommand(args, env = process.env) {
     },
   });
   if (values.help) return { command: 'help' };
-  if (positionals.length !== 1 || !['export', 'verify'].includes(positionals[0]))
+  if (positionals.length !== 1 || !['export', 'verify', 'backup', 'backup-status'].includes(positionals[0]))
     throw failure('ARGUMENT_INVALID');
   const command = positionals[0];
+  if (command === 'backup' || command === 'backup-status') {
+    if (
+      values.path ||
+      values['dry-run'] ||
+      Object.keys(values).some(k => k.startsWith('left-') || k.startsWith('right-'))
+    )
+      throw failure('ARGUMENT_INVALID');
+    const stateDirectory = values['state-dir'] ?? env.HOSTED_DURABILITY_STATE_DIR;
+    if (!stateDirectory) throw failure('ARGUMENT_INVALID');
+    if (command === 'backup-status') {
+      if (values.deployment || values.prefix || values['operation-id']) throw failure('ARGUMENT_INVALID');
+      return { command, stateDirectory: resolve(stateDirectory) };
+    }
+    const deployment = values.deployment ?? env.HOSTED_DURABILITY_DEPLOYMENT ?? env.CONVEX_DEPLOYMENT;
+    deploymentOptions(deployment ?? '', {});
+    const bucket = env.R2_BUCKET;
+    const prefix = values.prefix ?? env.HOSTED_DURABILITY_R2_PREFIX;
+    if (!bucket || !prefix || !/^[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*\/$/.test(prefix))
+      throw failure('ARGUMENT_INVALID');
+    const operationId = values['operation-id'];
+    if (operationId && !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(operationId))
+      throw failure('ARGUMENT_INVALID');
+    return {
+      command,
+      deployment: deployment.replace(/^(?:dev|prod|preview):/, ''),
+      bucket,
+      prefix,
+      stateDirectory: resolve(stateDirectory),
+      ...(operationId ? { operationId } : {}),
+    };
+  }
+  if (values['state-dir'] || values.prefix || values['operation-id']) throw failure('ARGUMENT_INVALID');
   if (command === 'export') {
     if (Object.keys(values).some(k => k.startsWith('left-') || k.startsWith('right-')))
       throw failure('ARGUMENT_INVALID');
@@ -116,6 +154,12 @@ async function convexExport(deployment, path) {
 
 export async function execute(command, exportSnapshot = convexExport) {
   if (command.command === 'help') return { help };
+  if (command.command === 'backup' || command.command === 'backup-status') {
+    const { backup, readBackupStatus } = await import('./lib/hosted-backup.mjs');
+    return command.command === 'backup'
+      ? backup(command, exportSnapshot)
+      : readBackupStatus(command.stateDirectory);
+  }
   if (command.command === 'export') {
     if (command.dryRun)
       return { operation: 'export', dryRun: true, includeFileStorage: true, contactedDeployment: false };
@@ -150,11 +194,19 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   process.umask(0o077);
   try {
     const result = await execute(parseCommand(process.argv.slice(2)));
-    console.log(result.help ?? JSON.stringify(result, null, 2));
+    console.log(result.help ?? JSON.stringify(result, null, result.operation?.startsWith('backup') ? 0 : 2));
+    if (result.operation === 'backup-status' && result.missedWeek) process.exitCode = 2;
     if (result.equal === false) process.exitCode = 2;
   } catch (error) {
     const known = new Set([
       'ARGUMENT_INVALID',
+      'R2_NOT_CONFIGURED',
+      'BACKUP_BUSY',
+      'BACKUP_PENDING',
+      'BACKUP_TARGET_MISMATCH',
+      'BACKUP_STATE_INVALID',
+      'BACKUP_R2_FAILED',
+      'BACKUP_CHECKSUM_MISMATCH',
       'DEPLOYMENT_CREDENTIAL_MISMATCH',
       'CONVEX_EXPORT_FAILED',
       'EXPORT_MISSING',

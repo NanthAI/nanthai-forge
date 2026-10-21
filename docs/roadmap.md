@@ -90,6 +90,8 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 
 ## Workflow friction
 
+- A launchd `.plist` template selects the full test suite as an unclassified path. Finite agents forbidden from full verification must use affected backup/signer tests instead; the selector needs explicit template ownership.
+
 - Modal cost-model edits to `scripts/modal-check/cost.py` select the full test suite as an unclassified path. Finite agents forbidden from running full verification cannot run the returned selection; the selector needs an explicit mapping to the Modal bridge and cost-model tests.
 
 - `agent tests` compares a saved Lane against the latest main. Concurrent accepted additions can appear as deletions in an unsynced Lane and force a full-suite fallback for unrelated work. Expose a pinned comparison for task-scoped validation without requiring a sync; the existing comparison remains useful for landing validation.

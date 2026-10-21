@@ -6,10 +6,10 @@ separate from a Forge project archive and from the canonical local owner's backu
 A hosted copy can lag local accepted `main`; this procedure preserves the hosted
 snapshot, not unpublished local work. Keep the local owner and its portable backup.
 
-The tooling is fixture-tested. A real backup/restore drill has not been performed.
-The owner must approve a fresh scratch deployment before the lead runs the drill.
-No deployment, backup schedule, retention or automatic deletion is configured by
-these scripts.
+The tooling is fixture-tested. The owner-approved offsite policy is a weekly
+file-inclusive export to R2, keeping the newest four completed copies. Installation
+and the first real run are operator actions; no schedule is installed by this repo.
+The backup command never deploys, imports or contacts any account until invoked.
 
 ## Snapshot and backup
 
@@ -145,29 +145,115 @@ checkpoint through the existing recovery path, restore into a new local director
 and check its source/Work integrity. Record only observed results and elapsed
 restore/verify times. Keep the source and local owner unchanged throughout.
 
-## Cadence and cost proposal (owner decision)
+## Weekly R2 backup
 
-Proposed starting point: one daily file-inclusive backup, seven daily copies,
-one separately downloaded weekly copy retained for four weeks, and a monthly
-restore drill into fresh scratch. This targets up to 24 hours of hosted data loss;
-restore time remains unmeasured. These are proposals, not configured defaults or
-authorized deletion rules. The owner selects cadence, destinations and retention.
+The weekly job runs on the operator's Mac using this exporter, without Convex's
+Professional scheduled-backup feature. Use an existing private operator-managed
+environment file or process environment with `R2_ACCOUNT_ID`, `R2_BUCKET`,
+`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and the existing Convex credential/login.
+These are the same R2 names used by [blob storage](../r2-storage-plan.md); credentials
+stay out of flags, the plist, manifests and logs. Do not place the environment file
+inside source. The selected bucket must already exist. No new secret store is used.
 
-Convex's managed daily/weekly backups require Professional. Managed daily backups
-are kept seven days and weekly backups fourteen days; local/offsite copies are a
-separate owner choice. See [backup behavior](https://docs.convex.dev/database/backup-restore).
+Build core once (`npm ci --ignore-scripts && npm run build:core`). Choose a dedicated
+bucket prefix such as `hosted-backups/production/`, separate from blob objects, and
+a private local state directory outside source. `HOSTED_DURABILITY_R2_PREFIX` and
+`HOSTED_DURABILITY_STATE_DIR` can supply these two nonsecret settings. Deployment
+selection has the same environment fallback as export.
 
-For an illustrative Professional US-region deployment with **1 GB table data,
-4 GB stored files and a 5 GB ZIP**, thirty daily generations plus downloads mean
-about 30 GB database I/O, 120 GB file reads, 150 GB ZIP generation and 150 GB ZIP
-download bandwidth per month. At seven retained snapshots, backup storage is
-about 35 GB. Using published marginal rates ($0.20/GB database I/O, $0.12/GB file
-bandwidth, $0.03/GB-month file storage), that is approximately **$57.45/month**
-before included allowances, plan/seat fees, weekly copies, restore traffic and
-scratch storage. This is a planning estimate, not measured usage or a quote;
-compression and actual billed usage change it. Local weekly retention adds no
-Convex storage if copies are kept outside Convex; external storage has its own cost.
-A restore additionally writes table data and transfers stored files. Published
-non-US usage rates are 1.3× (illustrative subtotal **$74.69/month**).
-Verify current [Convex usage pricing](https://docs.convex.dev/production/state/limits)
-and the deployment's usage dashboard before the owner selects a plan or cadence.
+```sh
+# First real run, performed by the lead after setting the existing environment.
+# Keep this operation id when retrying an unknown outcome.
+node --env-file="$EXISTING_ENV_FILE" scripts/hosted-durability.mjs backup \
+  --deployment "$DEPLOYMENT" --prefix "$BACKUP_PREFIX" \
+  --state-dir "$BACKUP_STATE_DIR" --operation-id "$BACKUP_OPERATION_ID"
+
+# Offline check; no credentials or account calls. Exit 2 means no successful run
+# or the last success is more than seven days old; exit 0 means current.
+node scripts/hosted-durability.mjs backup-status --state-dir "$BACKUP_STATE_DIR"
+```
+
+The job exports with file storage, validates the ZIP with the existing table,
+Work and storage verifier, hashes the ZIP, then sends 16 MiB multipart uploads with
+per-part MD5 checksums. It downloads the completed remote ZIP as a stream and
+checks its complete size/SHA-256 before publishing a create-only manifest. The
+manifest records observation time, deployment, ZIP size/SHA-256, stored-file
+summary, package version and lockfile/backup-source hashes. These hashes identify
+the backup tooling; preserve matching deployed code/configuration separately as
+in the snapshot procedure above. Verification reads R2 bytes back; it does not
+re-export the live deployment.
+
+Only after both remote objects verify does retention list the selected prefix.
+It deletes ZIP/manifest pairs beyond four completed backup names, preserving the
+just-written copy even if the machine clock moved backwards. Other prefixes,
+unrecognized names and incomplete uploads are untouched. Deleting those older
+copies is the approved retention behavior and is irreversible; there is no undo
+for pruned copies. Uninstall the job below to stop future automatic runs/deletion.
+This does not delete Convex-generated snapshots or configure provider retention.
+
+`last-run.json` and the pending ZIP are private local retry state. Keep that
+directory between runs. A failed export/upload/checksum check never starts
+retention. An interrupted multipart upload resumes its same key/upload ID and
+replaces parts deterministically; a lost completion or manifest response is
+reconciled by reading the existing bytes. Retry without a new operation id while
+pending; an explicit id must match the pending operation. Completed explicit ids
+return their saved receipt. A lost multipart-initiation response is reconciled by listing multipart uploads
+for the exact operation key before creating another upload. The job never prunes
+incomplete uploads. Forge's process queue prevents concurrent local writes; `BACKUP_BUSY` leaves
+the pending operation intact for retry. Changing deployment/bucket/prefix requires its own state directory,
+so a retry cannot switch destinations silently.
+
+Success prints one JSON line including `pruned` and `missedWeek`. Failure prints
+one redacted error line and exits 1; provider text and signed URLs are withheld.
+The offline status reads the last success and pending state. Check it from the
+operator's existing machine monitoring: a switched-off Mac cannot report its own
+missed week. The next successful run also reports whether the prior success was
+overdue. A fresh installation reports `missedWeek:true` until its first success.
+
+### Install or uninstall on macOS (lead only)
+
+The [launchd template](../../scripts/launchd/com.nanthai.forge-hosted-backup.plist)
+runs Mondays at 03:00 local time. launchd coalesces calendar events missed during
+sleep when the Mac wakes; a logged-out user agent waits for that user's login.
+Render its nonsecret paths/settings using the environment below. Use an accepted,
+stable source directory with dependencies/core built, an absolute Node path,
+Python 3 on the template PATH, and the existing private environment-file path.
+The file's contents are never copied into the plist. This is a template, not an
+installed schedule.
+
+```sh
+# Set SOURCE, NODE, EXISTING_ENV_FILE, DEPLOYMENT, BACKUP_PREFIX and BACKUP_STATE_DIR
+# to your existing paths/settings; export them for this renderer.
+mkdir -p "$BACKUP_STATE_DIR" "$HOME/Library/LaunchAgents"
+python3 - <<'PYTHON'
+import os, pathlib, plistlib
+source = pathlib.Path(os.environ["SOURCE"])
+text = (source / "scripts/launchd/com.nanthai.forge-hosted-backup.plist").read_text()
+settings = dict(SOURCE=str(source), NODE=os.environ["NODE"],
+    NODE_BIN=str(pathlib.Path(os.environ["NODE"]).parent),
+    EXISTING_ENV_FILE=os.environ["EXISTING_ENV_FILE"],
+    DEPLOYMENT=os.environ["DEPLOYMENT"], PREFIX=os.environ["BACKUP_PREFIX"],
+    STATE_DIR=os.environ["BACKUP_STATE_DIR"])
+from xml.sax.saxutils import escape
+for key, value in settings.items():
+    text = text.replace("__" + key + "__", escape(value))
+plistlib.loads(text.encode())
+target = pathlib.Path.home() / "Library/LaunchAgents/com.nanthai.forge-hosted-backup.plist"
+target.write_text(text)
+target.chmod(0o600)
+PYTHON
+chmod 700 "$BACKUP_STATE_DIR"
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.nanthai.forge-hosted-backup.plist"
+launchctl print "gui/$(id -u)/com.nanthai.forge-hosted-backup"
+
+# Uninstall: stops the schedule, retains backups and local retry/status records.
+launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.nanthai.forge-hosted-backup.plist"
+rm "$HOME/Library/LaunchAgents/com.nanthai.forge-hosted-backup.plist"
+```
+
+Logs are `launchd.log` and `launchd-error.log` in the chosen private state directory.
+To restore, download a retained ZIP and its manifest using the existing R2 operator
+tooling, verify the ZIP size/SHA-256 against the manifest, then follow
+[Restore into a fresh deployment](#restore-into-a-fresh-deployment) and
+[Verify the restored data](#verify-the-restored-data). A checksum match is transport
+integrity; the existing restore drill remains the recovery qualification procedure.
