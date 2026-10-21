@@ -429,16 +429,21 @@ disposable pins, an older backup, or an index/source-return race restart the
 original manifest reader with the same backup, base and head. No source revision
 or visibility is substituted, and no new index format or backfill is required.
 
-## Unified Work format (schema 18)
+## Unified Work formats (schemas 18/20)
 
-`src/work-unified-types.ts` defines unified Work formats 16 and 18: a unified
+`src/work-unified-types.ts` defines unified Work formats 16, 18 and 20: a unified
 Intent plus separate Initiative grouping records. `convertWork15To16` in
 `src/work-intent-converter.ts` is a pure converter for schema-15 portable Work,
 with schema-16 pass-through for deterministic retries. Local stores read and write
-formats 15/16/17/18. Format 18 combines unified Intents with format-17 landing
-batches; explicit migration accepts 15, 16 and 17. Historical format-16 receipts
-remain exact. Hosted pushes down-project to legacy Intents, retaining format 17
-when batch records are present.
+formats 15/16/17/18/19/20. Format 18 combines unified Intents with format-17 landing
+batches; explicit migration accepts 15, 16, 17 and 19. Formats 19/20 explicitly
+carry the capability for batches above four entries (up to eight). Selecting a
+larger batch promotes 17→19 or 18→20; later writes preserve the capability.
+Migration maps 19→20 with unchanged batch records. Older format-aware readers
+report `WORK_UPGRADE_REQUIRED` and “upgrade nforge” before reading records or
+preparing writes. Current readers retain the earlier formats, including batches
+already written before this capability was versioned. Historical migration
+receipts remain exact. Hosted pushes retain the current representation and format.
 
 Unlinked issues retain their UUIDs. A single issue-to-execution link folds only
 when that pair is unique in both directions across retained planning history;
@@ -474,7 +479,7 @@ writer migrates implicitly. Take a verified backup first. Under the owner lock i
 converts the current Work, writes the converted pages as content-addressed
 records, reads them back and validates them, writes `intent-merge-receipt.json`,
 then switches `work.json` with one atomic rename. A failure before the rename
-leaves the original format-15/16/17 pointer and records untouched. The migration ID derives from
+leaves the original format-15/16/17/19 pointer and records untouched. The migration ID derives from
 the original Work hash, so a retry reproduces identical pages and receipt; once switched,
 a retry returns the stored `intentMigration` receipt without writing. The large
 `legacyIntentMerge` copy is stored as a one-record paged collection, so ordinary
@@ -499,7 +504,7 @@ for presentation only.
 
 Native exchange sends `hostedPushWork` without down-projecting unified fields or
 unpinned Intents. Record reference validation uses the declared Work format, so
-formats 16 and 18 accept an Intent without a base before its first Lane. Unknown
+formats 16, 18 and 20 accept an Intent without a base before its first Lane. Unknown
 extension fields remain opaque to reference discovery. Unified collections use format-aware record catalogs and deltas, including stable
 alias keys. Unsupported layouts keep the complete compatibility path; streamed
 complete reads validate schema-owned array segments without a full schema clone.

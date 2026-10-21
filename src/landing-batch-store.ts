@@ -22,7 +22,11 @@ export function batchEdit<T>(work: WorkService, id: string, edit: (data: WorkDat
     work.store.locked(() => {
       const data = work.store.load();
       const result = edit(data);
-      data.schema = ([16, 18].includes(Number(data.schema)) ? 18 : 17) as WorkData['schema'];
+      const expanded =
+        Number(data.schema) >= 19 || data.landingBatches?.some(batch => batch.entryIds.length > 4);
+      data.schema = (
+        [16, 18, 20].includes(Number(data.schema)) ? (expanded ? 20 : 18) : expanded ? 19 : 17
+      ) as WorkData['schema'];
       data.revision++;
       work.store.save(data);
       return result;

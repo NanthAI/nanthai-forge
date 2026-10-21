@@ -13,7 +13,7 @@ export const hostedIntentMigrationSchema = z.object({
 export type HostedIntentMigration = z.infer<typeof hostedIntentMigrationSchema>;
 /** Replay the original journal up to the cutover, then change representation once. */
 export function migrateHostedIntents(data: WorkData, migration?: HostedIntentMigration): WorkData {
-  if (!migration || data.revision < migration.revision || [16, 18].includes(data.schema)) return data;
+  if (!migration || data.revision < migration.revision || [16, 18, 20].includes(data.schema)) return data;
   invariant(
     data.revision === migration.revision,
     'INVALID_WORK_JOURNAL',
@@ -23,7 +23,7 @@ export function migrateHostedIntents(data: WorkData, migration?: HostedIntentMig
 }
 /** Convert validated hosted observations, including planning edits on an existing Intent UUID. */
 export function convertHostedIntents(data: WorkData): WorkData {
-  if ([16, 18].includes(data.schema)) return data;
+  if ([16, 18, 20].includes(data.schema)) return data;
   const edits = new Set(
     data.planningItems
       .filter(

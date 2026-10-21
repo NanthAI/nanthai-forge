@@ -63,7 +63,7 @@ export async function indexedCommand(
     });
     return result[0] ?? null;
   });
-  if ([16, 18].includes(metadata.schema)) {
+  if ([16, 18, 20].includes(metadata.schema)) {
     const lookup = (keys: { collection: string; key: string }[]): Promise<(IndexEntry | null)[]> =>
       ctx.runQuery(internal.projectWorkIndexStore.lookups, {
         projectId: input.projectId,

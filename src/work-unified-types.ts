@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Format 18 composes historical unified format 16 with format-17 landing batches.
+// Formats 18/20 compose unified format 16 with four/eight-entry landing batches.
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import { intentSchema, workSchema, type WorkData } from './work-types.js';
 import { planningItemSchema } from './work-planning-types.js';
 
-export const unifiedWorkFormat = 18;
+export const unifiedWorkFormat = 20;
 const id = z.string().uuid();
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const intentMembershipSchema = z
@@ -52,15 +52,15 @@ export const intentAliasSchema = z.object({ aliasId: id, intentId: id });
 const counts = z.record(z.string(), z.number().int().nonnegative());
 export const intentMergeReceiptSchema = z.object({
   converter: z.literal('intent-merge-v1'),
-  fromSchema: z.union([z.literal(15), z.literal(17)]),
-  toSchema: z.union([z.literal(16), z.literal(18)]),
+  fromSchema: z.union([z.literal(15), z.literal(17), z.literal(19)]),
+  toSchema: z.union([z.literal(16), z.literal(18), z.literal(20)]),
   counts: z.object({ before: counts, after: counts, foldedPairs: z.number().int().nonnegative() }),
   hashes: z.object({ input: hash, output: hash, intents: hash, planningItems: hash, planningComments: hash }),
 });
 export const unifiedWorkSchema = z
   .object({
     ...workSchema.shape,
-    schema: z.union([z.literal(16), z.literal(18)]),
+    schema: z.union([z.literal(16), z.literal(18), z.literal(20)]),
     intents: z.array(unifiedIntentSchema),
     initiatives: z.array(initiativeSchema),
     intentAliases: z.array(intentAliasSchema),
@@ -82,7 +82,9 @@ const partialUnifiedWorkSchema = unifiedWorkSchema.extend({
   legacyIntentMerge: unifiedWorkSchema.shape.legacyIntentMerge.optional(),
 });
 export const isUnifiedWork = (value: unknown) =>
-  !!value && typeof value === 'object' && [16, 18].includes((value as { schema?: unknown }).schema as number);
+  !!value &&
+  typeof value === 'object' &&
+  [16, 18, 20].includes((value as { schema?: unknown }).schema as number);
 /**
  * Validate stored Work with the schema its format names. Schema-16 Intents may lack `base`
  * until their first Lane captures it; execution readers reach Intents through Lanes and Views.

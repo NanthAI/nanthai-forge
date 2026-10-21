@@ -27,7 +27,7 @@ const count = (data: {
 /** Pure, retry-stable conversion. No clock, random IDs, IO, or production reader wiring. */
 export function convertWork15To16(
   input: WorkData | UnifiedWorkData,
-  target: 16 | 18 = 16,
+  target: 16 | 18 | 20 = 16,
   options: { sameIdentityEdits?: ReadonlySet<string> } = {},
 ): UnifiedWorkData {
   if (input.schema === 16) {
@@ -35,9 +35,9 @@ export function convertWork15To16(
     return structuredClone(input);
   }
   invariant(
-    input.schema === 15 || (target === 18 && input.schema === 17),
+    input.schema === 15 || (target !== 16 && input.schema === 17) || (target === 20 && input.schema === 19),
     'WORK_UPGRADE_REQUIRED',
-    'Intent conversion requires Work schema 15 or 16, or format 17 when targeting 18.',
+    'Intent conversion requires Work 15/16, Work 17 targeting 18/20, or Work 19 targeting 20.',
   );
   workSchema.parse(input); // Validate without replacing original objects or extension fields.
   const source = structuredClone(input);
@@ -184,7 +184,7 @@ export function convertWork15To16(
     ...output,
     intentMergeReceipt: {
       converter: 'intent-merge-v1',
-      fromSchema: source.schema as 15 | 17,
+      fromSchema: source.schema as 15 | 17 | 19,
       toSchema: target,
       counts: {
         before: { ...count(source), ...(sameIdentityEdits ? { sameIdentityEdits } : {}) },
@@ -208,19 +208,19 @@ export function convertWork15To16(
   return result;
 }
 
-/** Compose the historical unified format with batch-capable Work without dropping records. */
+/** Compose unified Intents with batch-capable Work, retaining the eight-entry capability. */
 export function convertWorkTo18(
   input: WorkData | UnifiedWorkData,
   options: { sameIdentityEdits?: ReadonlySet<string> } = {},
 ): UnifiedWorkData {
-  if (input.schema === 16 || input.schema === 18) {
+  if (input.schema === 16 || input.schema === 18 || input.schema === 20) {
     unifiedWorkSchema.parse(input);
-    return { ...structuredClone(input), schema: 18 } as UnifiedWorkData;
+    return { ...structuredClone(input), schema: input.schema === 20 ? 20 : 18 } as UnifiedWorkData;
   }
   invariant(
-    input.schema === 15 || input.schema === 17,
+    input.schema === 15 || input.schema === 17 || input.schema === 19,
     'WORK_UPGRADE_REQUIRED',
-    'Intent conversion requires Work format 15, 16, 17 or 18.',
+    'Intent conversion requires Work format 15, 16, 17, 18, 19 or 20.',
   );
-  return convertWork15To16(input, 18, options);
+  return convertWork15To16(input, input.schema === 19 ? 20 : 18, options);
 }

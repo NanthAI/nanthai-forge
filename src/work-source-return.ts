@@ -40,9 +40,9 @@ export function validateSourceReturn(
   manifest: z.infer<typeof sourceManifestSchema>,
 ) {
   invariant(
-    ![16, 18].includes(current.schema) || [16, 18].includes(candidate.schema),
+    ![16, 18, 20].includes(current.schema) || [16, 18, 20].includes(candidate.schema),
     'WORK_UPGRADE_REQUIRED',
-    'Unified hosted Intents require a unified format-16 or format-18 checkpoint; upgrade nforge. Existing Work is preserved.',
+    'Unified hosted Intents require a unified format-16, format-18 or format-20 checkpoint; upgrade nforge. Existing Work is preserved.',
   );
   invariant(
     JSON.stringify(candidate.hostedChannelMoves ?? []) === JSON.stringify(current.hostedChannelMoves ?? []),
@@ -72,7 +72,7 @@ export function validateSourceReturn(
     const next = intents.get(intent.id)!;
     invariant(
       next.base === intent.base &&
-        ([16, 18].includes(current.schema) || next.outcome === intent.outcome) &&
+        ([16, 18, 20].includes(current.schema) || next.outcome === intent.outcome) &&
         next.constraints === intent.constraints &&
         next.createdAt === intent.createdAt &&
         next.baseChannel?.name === intent.baseChannel?.name &&

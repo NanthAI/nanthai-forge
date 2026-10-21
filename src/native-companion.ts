@@ -91,9 +91,9 @@ export function mergeCompanion(
   common = migrateHostedIntents(common, intentMigration);
   // Authenticate original journal bytes before normalizing merge representations.
   // A pre-cutover source return pins legacy Work, even when the local owner is unified.
-  if ([common, local, hosted].some(data => [16, 18].includes(data.schema))) {
+  if ([common, local, hosted].some(data => [16, 18, 20].includes(data.schema))) {
     const unified = (data: WorkData): WorkData =>
-      [16, 18].includes(data.schema) ? data : convertHostedIntents(data);
+      [16, 18, 20].includes(data.schema) ? data : convertHostedIntents(data);
     common = unified(common);
     local = unified(local);
     hosted = unified(hosted);
@@ -131,7 +131,7 @@ export function mergeCompanion(
       conflict('intents', 'identity', original, undefined, remote, remote.id);
       continue;
     }
-    if ([16, 18].includes(merged.schema)) {
+    if ([16, 18, 20].includes(merged.schema)) {
       const before = original as Record<string, unknown>,
         currentFields = current as Record<string, unknown>,
         remoteFields = remote as Record<string, unknown>;
@@ -159,7 +159,7 @@ export function mergeCompanion(
     }
     for (const field of ['outcome', 'constraints', 'base', 'createdAt', 'baseChannel', 'hostedBase'] as const)
       if (
-        (field !== 'outcome' || ![16, 18].includes(merged.schema)) &&
+        (field !== 'outcome' || ![16, 18, 20].includes(merged.schema)) &&
         (!equal(original[field], current[field]) || !equal(original[field], remote[field]))
       )
         conflict('intents', field, original[field], current[field], remote[field], remote.id);
@@ -189,7 +189,7 @@ export function mergeCompanion(
       conflict('intents', 'notes', original.notes, current.notes, remote.notes, remote.id);
     else {
       current.notes = [...structuredClone(remote.notes), ...current.notes.slice(original.notes.length)];
-      if ([16, 18].includes(merged.schema)) {
+      if ([16, 18, 20].includes(merged.schema)) {
         const before = original as unknown as UnifiedIntent,
           localIntent = current as unknown as UnifiedIntent,
           remoteIntent = remote as unknown as UnifiedIntent;
@@ -262,7 +262,7 @@ export function mergeCompanion(
     hosted.planningComments,
     record => record.id,
   );
-  if ([16, 18].includes(merged.schema)) {
+  if ([16, 18, 20].includes(merged.schema)) {
     const before = common as Record<string, unknown>,
       current = merged as Record<string, unknown>,
       remote = hosted as Record<string, unknown>;

@@ -87,7 +87,7 @@ export async function executeCommand(
   await commandAliasRows(rows, (collection, key) =>
     record(ctx, recordPartition(generation), collection, key),
   );
-  if ([16, 18].includes(JSON.parse(generation.metadata).schema)) {
+  if ([16, 18, 20].includes(JSON.parse(generation.metadata).schema)) {
     const lookup = (keys: { collection: string; key: string }[]) =>
       Promise.all(keys.map(key => record(ctx, recordPartition(generation), key.collection, key.key)));
     await commandPayloadRows(rows, lookup);

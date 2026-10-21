@@ -360,7 +360,7 @@ test('a legacy index build cannot publish or continue staging after same-revisio
   assert.equal(JSON.parse(s.tables.projectWorkHeads.values().next().value.metadata).schema, 16);
 });
 
-for (const schema of [16, 18])
+for (const schema of [16, 18, 20])
   test(`migration generation publication accepts unified format ${schema} during rollout`, async () => {
     const s = setup();
     s.input.metadata = JSON.stringify({ schema });
@@ -370,52 +370,56 @@ for (const schema of [16, 18])
     assert.equal(JSON.parse(s.tables.projectWorkHeads.values().next().value.metadata).schema, schema);
   });
 
-test('hosted conversion preserves format17 landing entries and batches in format18', () => {
-  const id = randomUUID(),
-    hash = 'a'.repeat(64);
-  const data = workSchema.parse({
-    schema: 17,
-    revision: 4,
-    intents: [],
-    lanes: [],
-    views: [],
-    landingEntries: [
-      {
-        id,
-        request: hash,
-        channel: 'main',
-        viewId: randomUUID(),
-        head: hash,
-        checkId: randomUUID(),
-        definition: hash,
-        environment: hash,
-        arrivedAt: 'synthetic',
-        submitter: 'synthetic',
-        keepOpen: false,
-        status: 'queued',
-      },
-    ],
-    landingBatches: [
-      {
-        id: randomUUID(),
-        channel: 'main',
-        base: hash,
-        previous: null,
-        arrivedAt: 'synthetic',
-        entryIds: [id],
-        mode: 'parallel',
-        status: 'composing',
-        prefixes: [],
-        conflicts: [],
-      },
-    ],
+for (const [format, size, target] of [
+  [17, 4, 18],
+  [19, 8, 20],
+])
+  test(`hosted conversion preserves format${format} ${size}-entry batches in format${target}`, () => {
+    const id = randomUUID(),
+      hash = 'a'.repeat(64);
+    const data = workSchema.parse({
+      schema: format,
+      revision: 4,
+      intents: [],
+      lanes: [],
+      views: [],
+      landingEntries: [
+        {
+          id,
+          request: hash,
+          channel: 'main',
+          viewId: randomUUID(),
+          head: hash,
+          checkId: randomUUID(),
+          definition: hash,
+          environment: hash,
+          arrivedAt: 'synthetic',
+          submitter: 'synthetic',
+          keepOpen: false,
+          status: 'queued',
+        },
+      ],
+      landingBatches: [
+        {
+          id: randomUUID(),
+          channel: 'main',
+          base: hash,
+          previous: null,
+          arrivedAt: 'synthetic',
+          entryIds: [id, ...Array.from({ length: size - 1 }, () => randomUUID())],
+          mode: 'parallel',
+          status: 'composing',
+          prefixes: [],
+          conflicts: [],
+        },
+      ],
+    });
+    const migrated = migrateHostedIntents(data, { operationId: randomUUID(), revision: 4 });
+    assert.equal(migrated.schema, target);
+    assert.deepEqual(migrated.landingEntries, data.landingEntries);
+    assert.deepEqual(migrated.landingBatches, data.landingBatches);
+    for (const schema of [16, 18, 20]) {
+      const unified = { ...migrated, schema };
+      assert.equal(migrateHostedIntents(unified, { operationId: randomUUID(), revision: 4 }), unified);
+    }
   });
-  const migrated = migrateHostedIntents(data, { operationId: randomUUID(), revision: 4 });
-  assert.equal(migrated.schema, 18);
-  assert.deepEqual(migrated.landingEntries, data.landingEntries);
-  assert.deepEqual(migrated.landingBatches, data.landingBatches);
-  for (const schema of [16, 18]) {
-    const unified = { ...migrated, schema };
-    assert.equal(migrateHostedIntents(unified, { operationId: randomUUID(), revision: 4 }), unified);
-  }
-});

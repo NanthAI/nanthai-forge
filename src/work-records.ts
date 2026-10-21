@@ -231,7 +231,7 @@ export function readRecordPage(
 const legacyKey = 'legacyIntentMerge';
 function encodeStored(value: Record<string, unknown>) {
   const legacy = value[legacyKey];
-  return (value.schema === 16 || value.schema === 18) &&
+  return [16, 18, 20].includes(value.schema as number) &&
     legacy &&
     typeof legacy === 'object' &&
     !Array.isArray(legacy)
@@ -240,7 +240,7 @@ function encodeStored(value: Record<string, unknown>) {
 }
 function decodeStored(value: Record<string, unknown>) {
   const legacy = value[legacyKey];
-  if ((value.schema === 16 || value.schema === 18) && Array.isArray(legacy) && legacy.length === 1)
+  if ([16, 18, 20].includes(value.schema as number) && Array.isArray(legacy) && legacy.length === 1)
     value[legacyKey] = legacy[0];
   return value;
 }
@@ -377,7 +377,7 @@ export function stageRecords(directory: string, value: Record<string, unknown>):
         io,
         field,
         true,
-        !([16, 18].includes(value.schema as number) && key === legacyKey),
+        !([16, 18, 20].includes(value.schema as number) && key === legacyKey),
       );
   }
   return manifest;

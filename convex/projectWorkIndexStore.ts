@@ -21,7 +21,7 @@ export async function selectedGeneration(ctx: QueryCtx | MutationCtx, project: D
     generation.status === 'ready' &&
     generation.projectId === project._id &&
     generation.backupId === project.work?.backupId &&
-    (!project.work?.intentMigration || [16, 18].includes(JSON.parse(generation.metadata).schema))
+    (!project.work?.intentMigration || [16, 18, 20].includes(JSON.parse(generation.metadata).schema))
     ? generation
     : null;
 }
@@ -98,7 +98,7 @@ export const begin = internalMutation({
     if (
       project.work?.backupId !== input.backupId ||
       project.work.revision !== input.revision ||
-      (project.work.intentMigration && ![16, 18].includes(JSON.parse(input.metadata).schema))
+      (project.work.intentMigration && ![16, 18, 20].includes(JSON.parse(input.metadata).schema))
     )
       return null;
     const current = await selectedGeneration(ctx, project);
@@ -148,7 +148,7 @@ export const batch = internalMutation({
     if (
       project.work?.backupId !== generation.backupId ||
       project.work.revision !== generation.revision ||
-      (project.work.intentMigration && ![16, 18].includes(JSON.parse(generation.metadata).schema))
+      (project.work.intentMigration && ![16, 18, 20].includes(JSON.parse(generation.metadata).schema))
     ) {
       await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {
         generationId: generation._id,
@@ -193,7 +193,7 @@ export const publish = internalMutation({
       project.work?.backupId !== generation.backupId ||
       project.work.revision !== generation.revision ||
       (project.work.intentMigration &&
-        ![16, 18].includes(JSON.parse(input.metadata ?? generation.metadata).schema))
+        ![16, 18, 20].includes(JSON.parse(input.metadata ?? generation.metadata).schema))
     ) {
       await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {
         generationId: generation._id,

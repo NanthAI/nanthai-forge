@@ -243,9 +243,9 @@ export const returnSource = internalMutation({
       );
       invariant(
         !project.work?.intentMigration ||
-          (input.projection && [16, 18].includes(JSON.parse(input.projection.metadata).schema)),
+          (input.projection && [16, 18, 20].includes(JSON.parse(input.projection.metadata).schema)),
         'WORK_UPGRADE_REQUIRED',
-        'Hosted Intents migrated while this checkpoint was preparing; return a unified format-16 or format-18 checkpoint. Existing Work is preserved.',
+        'Hosted Intents migrated while this checkpoint was preparing; return a unified format-16, format-18 or format-20 checkpoint. Existing Work is preserved.',
       );
       const backup = await ctx.db.get(input.backupId);
       invariant(

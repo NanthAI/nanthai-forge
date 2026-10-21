@@ -291,7 +291,7 @@ test('Work17 requires its version and survives portable serialization; reserved 
       .map(entry => JSON.parse(entry.value)),
     data.landingEntries,
   );
-  assert.throws(() => assertWorkFormat({ schema: 19 }), { code: 'WORK_UPGRADE_REQUIRED' });
+  assert.throws(() => assertWorkFormat({ schema: 21 }), { code: 'WORK_UPGRADE_REQUIRED' });
   assertWorkFormat({ schema: 16 });
   assertWorkFormat({ schema: 18 });
   assertWorkFormat({ schema: 17 });
@@ -694,3 +694,43 @@ test('format17 batches migrate to unified format18 and keep working without down
   assert.equal(f.content('before-migration.txt'), 'before-migration.txt\n');
   assert.equal(f.content('after-migration.txt'), 'after-migration.txt\n');
 });
+
+for (const unifiedFirst of [false, true])
+  test(`eight-entry remote batch promotes ${unifiedFirst ? 'unified format18 to 20' : 'legacy format17 to 19'} and survives migration/restart`, async t => {
+    const f = await fixture(t);
+    for (let i = 0; i < 8; i++) await f.candidate(`eight-${i}.txt`);
+    if (unifiedFirst) migrateIntentWork(f.store);
+    assert.equal(f.store.load().schema, unifiedFirst ? 18 : 17);
+    const batch = await batchEdit(f.work, 'select-eight', data => selectBatch(f.work, data, 'main'));
+    assert.equal(batch.entryIds.length, 8);
+    const selected = f.store.load();
+    assert.equal(selected.schema, unifiedFirst ? 20 : 19);
+    assert.equal(hostedPushWork(selected).schema, selected.schema);
+    const receipt = migrateIntentWork(f.store);
+    if (!unifiedFirst) {
+      assert.equal(receipt.receipt.fromSchema, 19);
+      assert.equal(receipt.receipt.toSchema, 20);
+    }
+    const migrated = f.store.load();
+    assert.equal(migrated.schema, 20);
+    assert.deepEqual(migrated.landingBatches, selected.landingBatches);
+    assert.deepEqual(migrated.landingEntries, selected.landingEntries);
+    assert.equal(unifiedWorkSchema.safeParse(hostedPushWork(migrated)).success, true);
+    assert.equal(migrateIntentWork(f.store).migrated, false);
+    assert.deepEqual(f.store.load(), migrated);
+    await drainLandingBatches(new AgentWorkflow(f.root).work, 'main');
+    const data = f.store.load();
+    assert.equal(data.schema, 20);
+    assert.equal(data.landingBatches.length, 1);
+    assert.equal(data.landingBatches[0].entryIds.length, 8);
+    assert.equal(data.landingBatches[0].status, 'completed');
+    assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
+    assert.ok(data.landingEntries.every(entry => entry.status === 'accepted'));
+    assert.equal(data.channelMoves.length, 1);
+    for (let i = 0; i < 8; i++) assert.equal(f.content(`eight-${i}.txt`), `eight-${i}.txt\n`);
+    // Candidate preparation pins Work's revision; finish the concurrent audit first.
+    await drainPostAccept(f.store);
+    await f.candidate('later-small.txt');
+    await drainLandingBatches(f.work, 'main');
+    assert.equal(f.store.load().schema, 20);
+  });

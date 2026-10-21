@@ -967,6 +967,7 @@ export const workSchema = z
       z.literal(14),
       z.literal(15),
       z.literal(17),
+      z.literal(19),
     ]),
     landingEntries: z.array(landingEntrySchema).optional(),
     landingBatches: z.array(landingBatchSchema).optional(),

@@ -178,7 +178,7 @@ export function commandProjection(
         index: oldIntent.lifecycleCount ?? 0,
       });
     }
-    if ([16, 18].includes(data.schema)) update('intents', intent.id, '', attributes(intent), header);
+    if ([16, 18, 20].includes(data.schema)) update('intents', intent.id, '', attributes(intent), header);
     else {
       // Legacy mutable status/counts leave original large payload chunks unchanged.
       const old = unique.find(row => row.collection === 'intents' && row.key === intent.id)!;
@@ -207,7 +207,7 @@ export function commandProjection(
     }
   }
   if (
-    [16, 18].includes(data.schema) &&
+    [16, 18, 20].includes(data.schema) &&
     (command.action === 'put-planning-item' || command.action === 'comment-planning-item')
   ) {
     for (const intent of data.intents)
@@ -237,7 +237,7 @@ export function commandProjection(
     for (const item of (data as WorkData & { initiatives: { id: string }[] }).initiatives)
       if (beforeInitiatives.get(item.id) !== JSON.stringify(item)) update('initiatives', item.id, '', item);
   }
-  if (command.action === 'intent' && [16, 18].includes(data.schema))
+  if (command.action === 'intent' && [16, 18, 20].includes(data.schema))
     update('intentAuthorities', `${event.id}:${owner}`, event.id, { intentId: event.id, accountId: owner });
   update('events', event.id, '', event);
   return {

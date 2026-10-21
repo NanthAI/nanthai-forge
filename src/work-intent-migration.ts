@@ -39,7 +39,7 @@ function writeReceipt(directory: string, value: unknown) {
 }
 
 /**
- * Explicit, owner-locked migration of local Work to schema 18. Converted pages are staged as
+ * Explicit, owner-locked migration of local Work to schema 18/20. Converted pages are staged as
  * content-addressed records and read back before one atomic commit-pointer rename; a failure
  * before the rename leaves the original pointer and every record untouched. The migration ID
  * derives from the original Work bytes, so a retry reproduces the same pages and receipt, and a
@@ -49,7 +49,7 @@ export function migrateIntentWork(store: WorkStore, options: { beforeSwitch?: ()
   return store.locked(
     () => {
       const current = store.load();
-      if (Number(current.schema) === 18) {
+      if ([18, 20].includes(Number(current.schema))) {
         const data = current as unknown as Migrated;
         return {
           migrated: false,
@@ -87,7 +87,7 @@ export function migrateIntentWork(store: WorkStore, options: { beforeSwitch?: ()
         intentMergeHash(staged) === intentMergeHash(jsonValue(next)) &&
           unifiedWorkSchema.safeParse(staged).success,
         'INTENT_MIGRATION_INVALID',
-        'Staged format-18 Work differs from its conversion. Original Work remains selected.',
+        'Staged unified Work differs from its conversion. Original Work remains selected.',
       );
       const receipt = receiptOf(next);
       writeReceipt(store.directory, receipt);

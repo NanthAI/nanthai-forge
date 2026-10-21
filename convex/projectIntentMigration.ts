@@ -82,7 +82,7 @@ export const publish = internalMutation({
     if (project.work.backupId !== generation.backupId || project.work.revision !== generation.revision)
       return false;
     invariant(
-      generation.nextBatch === input.batches && [16, 18].includes(JSON.parse(input.metadata).schema),
+      generation.nextBatch === input.batches && [16, 18, 20].includes(JSON.parse(input.metadata).schema),
       'INVALID_WORK_JOURNAL',
       'Complete all unified Intent projection batches before publication.',
     );

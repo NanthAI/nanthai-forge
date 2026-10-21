@@ -14,6 +14,8 @@ import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { convertWork15To16, convertWorkTo18 } from '../dist/work-intent-converter.js';
 import { WorkStore } from '../dist/work-store.js';
+import { latestWorkFormat } from '../dist/work-format.js';
+import { parseWork } from '../dist/work-unified-types.js';
 import { callTool, mcpTestEnvironment } from './mcp-runtime.mjs';
 
 // Exercise the real CLI/MCP and low-level writer entry points as a format-aware
@@ -29,8 +31,24 @@ async function fixture(t, format = 15, readerFormat = 14) {
   const lane = (await agent.dispatch({ action: 'start', outcome: 'Format compatibility' })).result;
   store.locked(() => {
     const data = store.load();
-    if (format === 16 || format === 18) {
-      data.schema = 15;
+    if ([17, 18, 19, 20].includes(format)) {
+      data.landingBatches = [
+        {
+          id: randomUUID(),
+          channel: 'main',
+          base: data.nativeHead,
+          previous: null,
+          arrivedAt: 'synthetic',
+          entryIds: Array.from({ length: format >= 19 ? 8 : 4 }, () => randomUUID()),
+          mode: 'parallel',
+          status: 'composing',
+          prefixes: [],
+          conflicts: [],
+        },
+      ];
+    }
+    if ([16, 18, 20].includes(format)) {
+      data.schema = format === 20 ? 19 : format === 18 ? 17 : 15;
       Object.assign(data, format === 16 ? convertWork15To16(data) : convertWorkTo18(data));
     } else data.schema = format;
     data.autonomyPolicy = policyPreset('trusted');
@@ -46,8 +64,8 @@ async function fixture(t, format = 15, readerFormat = 14) {
     const result = await next(url, context);
     if (url === ${JSON.stringify(pathToFileURL(resolve('dist/work-format.js')).href)}) {
       const source = result.source.toString();
-      if (!source.includes('latestWorkFormat = 18')) throw new Error('Update compatibility probe');
-      return { ...result, source: source.replace('latestWorkFormat = 18', 'latestWorkFormat = ${readerFormat}') };
+      if (!source.includes('latestWorkFormat = ${latestWorkFormat}')) throw new Error('Update compatibility probe');
+      return { ...result, source: source.replace('latestWorkFormat = ${latestWorkFormat}', 'latestWorkFormat = ${readerFormat}') };
     }
     return result;
   }`,
@@ -152,6 +170,8 @@ for (const [format, reader] of [
   [16, 15],
   [17, 15],
   [18, 17],
+  [19, 18],
+  [20, 18],
 ])
   test(`format-${reader} compatibility probe rejects format${format} before writer preparation and preserves retained bytes`, async t => {
     const f = await fixture(t, format, reader),
@@ -172,6 +192,21 @@ for (const [format, reader] of [
       );
       assert.notEqual(result.status, 0);
       assert.match(result.stderr + result.stdout, /WORK_UPGRADE_REQUIRED/);
+      assert.match(result.stderr + result.stdout, /upgrade nforge/);
       assert.deepEqual(f.retained(), before);
     }
+  });
+
+for (const format of [17, 18, 19, 20])
+  test(`current reader retains ${format >= 19 ? 'eight' : 'four'}-entry format${format} batches in full, selected and portable reads`, async t => {
+    const f = await fixture(t, format);
+    const data = f.store.load();
+    const batch = data.landingBatches[0];
+    assert.equal(data.schema, format);
+    assert.equal(batch.entryIds.length, format >= 19 ? 8 : 4);
+    assert.deepEqual(f.store.select('landingBatches', batch.id), batch);
+    assert.deepEqual(parseWork(JSON.parse(f.store.snapshotBytes())).landingBatches, [batch]);
+    f.store.locked(() => f.store.commitRecords(f.store.records()));
+    assert.equal(f.store.load().schema, format);
+    assert.deepEqual(f.store.load().landingBatches, [batch]);
   });

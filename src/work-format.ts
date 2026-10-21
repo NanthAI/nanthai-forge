@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
-export const latestWorkFormat = 18;
+export const latestWorkFormat = 20;
 /** Reject before any selected-record reads or writer preparation. */
 export function assertWorkFormat(value: unknown) {
   if (!value || typeof value !== 'object' || !('schema' in value)) return;

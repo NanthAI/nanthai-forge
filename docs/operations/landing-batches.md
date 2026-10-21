@@ -1,7 +1,7 @@
 # Local landing batches
 
 Native `finish` operations with an explicitly configured check runner queue code
-candidates in Work format 17. `land-ready` resumes incomplete batches as well as
+candidates in Work format 17 (18 with unified Intents). `land-ready` resumes incomplete batches as well as
 dependency waits. Legacy projects without a runner policy retain their existing
 finish protocol. Git, protected paths, supervised review, invariant-pinned
 acceptance and docs-only candidates retain the ordinary finish path. Applicable
@@ -61,5 +61,17 @@ acceptance response. Modal budget enforcement is separate from batching.
 Format 17 adds `landingEntries` and `landingBatches`; it does not activate the
 historical unified Intent format 16. Format 18 composes unified Intents and
 batching; explicit Intent migration converts formats 15, 16 and 17 to 18. Batch
-writes preserve format 18. Writers must support the owner’s current format. Original source, checks, conflicts and acceptance history remain
+writes preserve the unified representation.
+
+Selecting a batch with more than four entries promotes Work to format 19 (legacy
+Intents) or 20 (unified Intents) before publishing it. Four-entry batches retain
+formats 17/18; later smaller batches never downgrade a promoted owner. Current
+readers retain both the old four-entry and new eight-entry shapes, including
+previously written formats 17/18. Explicit Intent migration maps format 19 to 20
+without changing batch pins, and a migration retry preserves format 20. Portable
+snapshots, record pages and hosted projections retain the format and entries.
+Readers capped at format 18 reject 19/20 with `WORK_UPGRADE_REQUIRED` and
+“upgrade nforge” before reading records or preparing writes. Upgrade all writers
+sharing the owner before creating a larger batch. Writers must support the owner’s
+current format. Original source, checks, conflicts and acceptance history remain
 retained. Undo accepted work through a checked compensating change.
