@@ -1116,6 +1116,7 @@ test('Modal receipt retains per-execution quantities and their measurement basis
   ];
   await launchModalRun(work.store, run, async (file, emit) => {
     const plan = read(file);
+    assert.equal(plan.costSafetyMargin, 1.15);
     emit({ kind: 'execution', executionId: costUsage[0].executionId, image: 'im-fixture' });
     emit(result(plan, { estimatedCostUsd: 60 * 0.00003942 + 120 * 0.00000667, costUsage }));
   });

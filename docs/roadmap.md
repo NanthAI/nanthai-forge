@@ -138,6 +138,8 @@ Goal: a project can live entirely on hosted Forge at near-zero cost, and the pro
 
 ## Workflow friction
 
+- Modal cost-model edits to `scripts/modal-check/cost.py` select the full test suite as an unclassified path. Finite agents forbidden from running full verification cannot run the returned selection; the selector needs an explicit mapping to the Modal bridge and cost-model tests.
+
 - `agent tests` compares a saved Lane against the latest main. Concurrent accepted additions can appear as deletions in an unsynced Lane and force a full-suite fallback for unrelated work. Expose a pinned comparison for task-scoped validation without requiring a sync; the existing comparison remains useful for landing validation.
 
 ## Related documents

@@ -67,14 +67,17 @@ class Sandbox:
         if cls.failures: raise cls.failures.pop(0)
         if cls.fail: raise cls.fail
         sandbox = cls()
+        sandbox.object_id = 'sb-fixture-' + str(cls.created)
         sandbox.new = True
         sandbox.exit_code = cls.exit_codes.pop(0) if cls.exit_codes else cls.exit_code
         return sandbox
     @classmethod
     def from_id(cls, identity):
         cls.observed += 1
-        assert identity == 'sb-fixture'
-        return cls()
+        assert identity.startswith('sb-fixture-')
+        sandbox = cls()
+        sandbox.object_id = identity
+        return sandbox
     def wait(self, **_):
         if getattr(self, 'new', False):
             assert App.active, 'App closed before test process completed'

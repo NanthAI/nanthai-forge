@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { modalUsageCost } from './modal-cost.js';
 import { modalCredentialsRefSchema } from './check-runner-settings.js';
 import { checkCostSchema } from './check-cost.js';
 import type { CheckRun } from './work-types.js';
@@ -11,6 +12,7 @@ export const modalCostUsageSchema = z.array(
     cpuCoreSeconds: z.number().nonnegative().finite(),
     memoryGiBSeconds: z.number().nonnegative().finite(),
     basis: z.enum(['worker-runtime', 'controller-time']),
+    safetyMargin: z.number().min(1).finite().optional(),
   }),
 );
 
@@ -95,7 +97,7 @@ export function modalMonthCost(runs: Iterable<Pick<CheckRun, 'startedAt' | 'back
       // Controller adoption and retries can report the same retained attempt.
       if (executions.has(usage.executionId)) continue;
       executions.add(usage.executionId);
-      estimatedCostUsd += usage.cpuCoreSeconds * 0.00003942 + usage.memoryGiBSeconds * 0.00000667;
+      estimatedCostUsd += modalUsageCost(usage);
     }
   }
   return {
@@ -104,6 +106,6 @@ export function modalMonthCost(runs: Iterable<Pick<CheckRun, 'startedAt' | 'back
     recordedRuns,
     legacyRuns,
     basis:
-      'Gross Sandbox compute estimate before credits and billing adjustments; CPU $0.00003942/core-second, memory $0.00000667/GiB-second at max(request, usage). Worker runtime when recorded; legacy controller-time estimates otherwise. Excludes startup/teardown, image builds and egress. Billed spend is unknown; Modal billing is authoritative.',
+      'Sandbox compute estimate (conservative) before credits and billing adjustments; CPU $0.00003942/core-second, memory $0.00000667/GiB-second at max(request, usage). Worker runtime when recorded; legacy controller-time estimates otherwise. Includes each retained safety margin; legacy estimates are uncalibrated. Excludes startup/teardown, image builds and egress. Billed spend is unknown; Modal billing is authoritative.',
   };
 }

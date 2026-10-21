@@ -274,7 +274,7 @@ def main():
                                  {'infrastructure': 'sandbox-stopped'} if 'stopped' in item and 'exitCode' not in item else {}))
                          for position, item in enumerate(journal['executions'])],
              details='; '.join('Shard ' + str(item['index']) + ': ' + (exit_summary(item['exitCode']) if 'exitCode' in item else 'stopped after collection stall') for item in journal['executions']),
-             **compute_estimate(journal['executions']))
+             **compute_estimate(journal['executions'], plan.get('costSafetyMargin', 1)))
     except Exception as error:
         category = classify(error)
         rejected = isinstance(error, (modal.exception.AuthError, modal.exception.ResourceExhaustedError)) and category in ['auth', 'billing']
@@ -290,7 +290,7 @@ def main():
         # Remote failure is not a successful command. Only confirmed infrastructure failures fall back.
         emit('error', category=category, safeFallback=safe and category in ['auth', 'network', 'billing'],
              details='Modal ' + category + ' failure during ' + ('sandbox creation' if journal.get('creating') else 'preparation or collection') + '; executions: ' + ', '.join(item['id'] for item in journal['executions']),
-             **compute_estimate(journal['executions']))
+             **compute_estimate(journal['executions'], plan.get('costSafetyMargin', 1)))
 
     finally:
         journal['complete'] = True

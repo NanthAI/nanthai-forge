@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { modalUsageCost } from './modal-cost.js';
 import type { CheckRun } from './work-types.js';
 
 const quantity = z.number().nonnegative().finite().nullable();
@@ -22,7 +23,7 @@ export const checkCostSchema = z.object({
 export type CheckCost = z.infer<typeof checkCostSchema>;
 type Item = z.infer<typeof itemSchema>;
 const modalCostBasis =
-  'Gross Modal Sandbox estimate: CPU $0.00003942/core-second + memory $0.00000667/GiB-second at max(request, usage); worker-runtime when recorded, legacy controller-time otherwise. Excludes startup/teardown, builds, egress, credits and billing adjustments. Modal billing is authoritative.';
+  'Modal Sandbox estimate (conservative): CPU $0.00003942/core-second + memory $0.00000667/GiB-second at max(request, usage); worker-runtime when recorded, legacy controller-time otherwise. Excludes startup/teardown, builds, egress, credits and billing adjustments. Includes each retained safety margin; legacy estimates are uncalibrated. Modal billing is authoritative.';
 
 export function unknownCost(runner: CheckCost['runner']): CheckCost {
   return {
@@ -65,7 +66,7 @@ export function modalRunCost(backend: NonNullable<CheckRun['backend']>): CheckCo
           id: item.executionId,
           seconds: item.seconds,
           billedMinutes: item.seconds / 60,
-          estimatedCostUsd: item.cpuCoreSeconds * 0.00003942 + item.memoryGiBSeconds * 0.00000667,
+          estimatedCostUsd: modalUsageCost(item),
         })),
         `${modalCostBasis} Measurement bases: ${[...new Set(usage.map(item => item.basis))].join(', ') || 'no executions'}.`,
       ),

@@ -192,8 +192,8 @@ snapshot used by hosted Needs you; a local fix alone does not publish hosted Wor
 Older candidate sources without named reports retain their failures; quarantine
 never guesses which tests failed from interleaved console output.
 
-`agent status` includes `modalCost`: the current UTC month's gross Sandbox
-compute estimate and run count, including charges retained before a local fallback.
+`agent status` includes `modalCost`: the current UTC month's Sandbox
+compute **estimate (conservative)** and run count, including charges retained before a local fallback.
 `legacyRuns` counts runs without quantity records. It is **not billed spend**:
 workspace credits, discounts, taxes, subscription charges and unrelated usage are
 unknown locally. Historical allocation estimates stay identifiable; Forge does
@@ -207,7 +207,32 @@ attempts and retries; controller adoption never adds a second copy of its quanti
 Worker elapsed time excludes controller queues, reconnection and log draining.
 Older journals use controller elapsed time, bounded by the Sandbox's 900-second
 lifetime, and label that basis explicitly. Worker timing excludes container
-startup/teardown; it remains an estimate, not provider metering.
+startup/teardown. New plans pin `MODAL_COST_SAFETY_MARGIN` (1.15) from
+`src/modal-cost.ts`; each usage record retains that multiplier. The formula is
+`1.15 × Σ(seconds × (requested cores × CPU rate + requested GiB × memory rate))`,
+using fractional worker seconds and counting each distinct execution once,
+including cancelled and failed attempts. Resources are reserved, not sampled
+process CPU/RSS: using less than the request does not reduce Sandbox billing.
+Controller-time fallbacks retain their explicit basis and 900-second bound.
+The margin supplies headroom for unmetered startup/teardown; it does not establish
+an upper bound on an invoice or cover unknown image-build/egress charges. Older
+plans and receipts without a retained margin keep their original estimate.
+
+After `npm run build:core`, a read-only back-test is available locally:
+
+```sh
+node scripts/modal-cost-backtest.mjs OWNER YYYY-MM-DD
+```
+
+It reads pinned Work run records and retained execution journals, without loading
+the SDK or contacting any service. The date is inclusive, in UTC. It reports old
+estimates, missing journals/worker measurements and controller intervals exceeding
+the Sandbox lifetime. A complete recomputed total is `null` if any priced run
+lacks the necessary worker measurements; partial known costs are reported
+separately. Controller timestamps and TAP file durations cannot recover billed
+runtime. The 15% margin targets modest overestimation on measured compute; its
+accuracy against actual spend remains uncalibrated until matching usage and
+billing evidence exist.
 
 The published [Sandbox prices](https://modal.com/pricing) are
 $0.00003942/physical-core-second and $0.00000667/GiB-second, with minimum requests

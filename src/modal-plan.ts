@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { digest } from './hash.js';
+import { MODAL_COST_SAFETY_MARGIN } from './modal-cost.js';
 import { NativeSource } from './native-source.js';
 import { writeCheckScope } from './work-check-scope.js';
 import { balanceShards } from './check-backend.js';
@@ -10,7 +11,7 @@ import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
 export const modalRuntime =
-  'node:24.19.0-trixie-slim;git;time;python3;modal-sdk:1.6.2;cpu:2;memory:4096;static-memory:8192;static-oom-retry:16384;static-workers:2;static-heap:3072;flake-retry:1;resume:1;cost:worker-runtime-1;timeout:900';
+  'node:24.19.0-trixie-slim;git;time;python3;modal-sdk:1.6.2;cpu:2;memory:4096;static-memory:8192;static-oom-retry:16384;static-workers:2;static-heap:3072;flake-retry:1;resume:1;cost:worker-runtime-margin-1;timeout:900';
 export const modalBridge = fileURLToPath(new URL('../scripts/modal-check/runner.py', import.meta.url));
 export async function modalPlan(
   store: WorkStore,
@@ -71,6 +72,7 @@ export async function modalPlan(
     selection,
     lockfile,
     runtime,
+    costSafetyMargin: MODAL_COST_SAFETY_MARGIN,
     groups: standard
       ? shards
         ? Array.from({ length: Math.min(shards, selection.tests.length) }, (_, index) =>
@@ -112,6 +114,7 @@ export function validateModalPlan(plan: ModalPlan, run: CheckRun) {
     selection,
     lockfile,
     runtime,
+    costSafetyMargin: MODAL_COST_SAFETY_MARGIN,
     groups,
     standard,
     artifacts,
@@ -133,6 +136,7 @@ export function validateModalPlan(plan: ModalPlan, run: CheckRun) {
         selection,
         lockfile,
         runtime,
+        costSafetyMargin: MODAL_COST_SAFETY_MARGIN,
         groups,
         standard,
         artifacts,
