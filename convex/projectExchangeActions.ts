@@ -411,8 +411,10 @@ export const manifest = action({
           size: bytes.length,
           sourceDigest: backup.digest,
         };
-      const logical = await resolveExchangeRoot(bytes, pins =>
-        objectByteBatch(ctx, backup.projectId, actor, pins),
+      const logical = await resolveExchangeRoot(
+        bytes,
+        pins => objectByteBatch(ctx, backup.projectId, actor, pins),
+        { batchSize: 100 },
       );
       await cacheLogicalMetadata(ctx, backup.projectId, actor, logical.work);
       await cacheLogicalMetadata(ctx, backup.projectId, actor, logical.manifest);

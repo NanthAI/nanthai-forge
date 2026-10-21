@@ -72,7 +72,23 @@ journal adapter.
 The first v2 checkpoint, old or mismatched baselines, unsupported metadata and
 large preparation contexts retain full validation. No hosted row rewrite or
 backfill is needed. Schema-1 checkpoints, recovery and the logical-manifest
-compatibility endpoint remain available. Record preparation and full digest
+compatibility endpoint remain available. When either byte-reading native object checkpoint's
+Work exceeds 16 MiB and a current index is available, compatibility preparation
+saves a cursor between reading current Work, reading candidate Work, and checking
+retained-history chunks. It does not load both complete Work copies in one
+action. Each validation invocation checks up to eight chunks (a 256 KiB target,
+with indivisible records preserved) against the pinned candidate, then saves its
+position. Large compatibility returns build a complete private index partition
+through the existing durable phases. Small returns keep their incremental index
+comparison. These thresholds schedule work; they do not limit accepted Work or
+require a CLI upgrade. Old retained operations use the same checkpoint, hosted
+revision, operation UUID and timestamp when preparation resumes.
+
+Prepare logs include each record-delta skip reason and separate current-load,
+candidate-load and retained-validation completion messages. Record checkpoint
+reconstruction batches up to 100 records with a 2 MiB target on hosted readers
+(a larger indivisible record is read alone), preserving exact portable bytes and
+fresh authority checks. Record preparation and full digest
 hashing still read retained metadata; transferred bytes alone do not measure
 their CPU or storage-read cost.
 

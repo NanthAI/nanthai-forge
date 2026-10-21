@@ -19,6 +19,7 @@ import { returnChanges } from './coordinationReturnChanges';
 import { recordReturn } from './projectWorkRecordReturn';
 import { meteredStorage } from './storageMeter';
 import type { ReturnAccounting } from './projectSourceReturnStep';
+import { prepareLargeReturn } from './projectSourceReturnPrepare';
 
 const accounting = v.object({
   storageReads: v.number(),
@@ -108,7 +109,11 @@ export const returnSource = action({
         return {
           pending: true as const,
           ...(stage?.returnProgress ? { progress: stage.returnProgress } : {}),
-          resumed: !!(priorStage?.returnCursor || priorStage?.returnMetadataCursor),
+          resumed: !!(
+            priorStage?.returnCursor ||
+            priorStage?.returnMetadataCursor ||
+            priorStage?.returnPrepareCursor
+          ),
         };
       };
       const priorStage: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
@@ -134,30 +139,58 @@ export const returnSource = action({
               elapsedMs: 0,
               etaSeconds: null,
             }),
-          resumed: !!(priorStage?.returnCursor || priorStage?.returnMetadataCursor),
+          resumed: !!(
+            priorStage?.returnCursor ||
+            priorStage?.returnMetadataCursor ||
+            priorStage?.returnPrepareCursor
+          ),
         };
       if (priorStage?.returnCursor || priorStage?.returnMetadataCursor)
         return pending(await returnProgress(ctx, priorStage, input, owner));
       console.log('source-return prepare', { revision: input.revision });
       const reader = exchangeObjectReader(ctx, true);
-      const records = await recordReturn(
+      const records = priorStage?.returnPrepareCursor
+        ? undefined
+        : await recordReturn(
+            ctx,
+            input,
+            owner,
+            reader,
+            candidateInfo.backup,
+            previousInfo.backup,
+            priorStage?.returnAt,
+          );
+      if (records) return pending(records.receipt);
+      const prepared = await prepareLargeReturn(
         ctx,
         input,
         owner,
         reader,
         candidateInfo.backup,
         previousInfo.backup,
-        priorStage?.returnAt,
+        priorStage,
       );
-      if (records) return pending(records.receipt);
-      const current = await load(ctx, input.projectId, owner, reader, { metadata: true });
+      if (prepared?.pending) return pending(null);
+      const current =
+        prepared?.current ?? (await load(ctx, input.projectId, owner, reader, { metadata: true }));
+      if (!prepared)
+        console.log('source-return prepare load done', {
+          reason: 'complete-compatibility',
+          revision: input.revision,
+        });
       invariant(
         current.backup._id === input.expectedBackupId && current.data.revision === input.revision,
         'WORK_STALE',
         'Hosted source or Work changed. The uploaded checkpoint and current work remain available.',
       );
-      const candidate = await source(ctx, input.backupId, owner, reader, true);
-      validateSourceReturn(current.data, candidate.data, candidate.manifest);
+      const candidate = prepared?.candidate ?? (await source(ctx, input.backupId, owner, reader, true));
+      if (!prepared) {
+        console.log('source-return prepare source done', {
+          reason: 'complete-compatibility',
+          revision: input.revision,
+        });
+        validateSourceReturn(current.data, candidate.data, candidate.manifest);
+      }
       console.log('source-return prepared', {
         objects: candidate.manifest.files.length,
         logicalBytes: candidate.manifest.files.reduce((sum, p) => sum + p.size, 0),
@@ -241,13 +274,14 @@ export const returnSource = action({
             reader,
             input.projectId,
             owner,
-            current.data,
+            prepared?.before ?? current.data,
             candidate.data,
             candidate.manifest,
             candidate.publication ? { trees: candidate.publication.ownerDerived.trees } : undefined,
           );
           return pending(
             await returnProgress(ctx, stage, input, owner, {
+              accounting: prepared?.accounting,
               snapshot: {
                 data: candidate.data,
                 manifest: candidate.manifest,
@@ -257,8 +291,12 @@ export const returnSource = action({
               generationId: generation._id,
               ownerDerived,
               metadataOnly: candidate.publication?.work !== undefined,
-              generation,
-              previous: { data: current.data, manifest: current.manifest, backup: current.backup },
+              ...(!prepared
+                ? {
+                    generation,
+                    previous: { data: current.data, manifest: current.manifest, backup: current.backup },
+                  }
+                : {}),
               final: {
                 projectId: input.projectId,
                 owner,
@@ -292,7 +330,7 @@ export const returnSource = action({
         reader,
         input.projectId,
         owner,
-        current.data,
+        prepared?.before ?? current.data,
         candidate.data,
         candidate.manifest,
         candidate.publication ? { trees: candidate.publication.ownerDerived.trees } : undefined,

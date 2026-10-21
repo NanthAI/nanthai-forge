@@ -178,6 +178,40 @@ export const batch = internalMutation({
     }
   },
 });
+/** Preparation has its own CAS cursor and never makes a partition publishable. */
+export const prepare = internalMutation({
+  args: {
+    ...base,
+    partitionId: v.id('projectWorkGenerations'),
+    operationId: v.string(),
+    expectedBackupId: v.id('projectBackups'),
+    expectedCursor: v.optional(v.string()),
+    cursor: v.string(),
+    progress: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, input) => {
+    const project = await workProject(ctx, await activeOwnedProject(ctx, input.projectId, input.owner));
+    const partition = await ctx.db.get(input.partitionId);
+    invariant(
+      project.work?.backupId === input.expectedBackupId &&
+        project.work.revision === input.revision &&
+        project.work.generationId === input.generationId &&
+        partition?.projectId === input.projectId &&
+        partition.returnOperationId === input.operationId,
+      'WORK_STALE',
+      'Hosted Work changed during return preparation.',
+    );
+    if (partition.returnPrepareCursor !== input.expectedCursor) return false;
+    await ctx.db.patch(partition._id, { returnPrepareCursor: input.cursor, returnProgress: input.progress });
+    if (input.expectedCursor)
+      await ctx.scheduler.runAfter(0, internal.projectReturnMetadataStore.retire, {
+        partitionId: partition._id,
+        key: JSON.parse(input.expectedCursor).key,
+      });
+    return true;
+  },
+});
 // A stable public generation can have an obsolete physical partition at its own
 // ID. Remove only disposable rows, leaving the selected public identity intact.
 export const retirePartition = internalMutation({

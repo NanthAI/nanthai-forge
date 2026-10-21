@@ -26,7 +26,7 @@ export async function returnChanges(
   reader: ExchangeObjectReader,
   projectId: Id<'hostedProjects'>,
   owner: string,
-  before: WorkData,
+  before: { lanes: { id: string; head: string }[] },
   after: WorkData,
   manifest: Manifest,
   metadata?: { trees: import('../src/owner-derived').OwnerDerived['trees'] },

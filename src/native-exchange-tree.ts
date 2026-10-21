@@ -320,6 +320,9 @@ export async function resolveExchangeRoot(
     );
     const records = workRecordRootSchema.parse(JSON.parse(bytes.toString('utf8'))),
       work = Buffer.allocUnsafe(root.work.size);
+    const pins = records.fields.flatMap(field => ('records' in field ? field.records : []));
+    const cache = new Map<string, Buffer>();
+    let position = 0;
     let offset = 0;
     invariant(
       records.work.sha256 === root.work.sha256 && records.work.size === root.work.size,
@@ -328,7 +331,23 @@ export async function resolveExchangeRoot(
     );
     await hashWorkRecords(
       records,
-      async pin => (await boundedRead([pin]))[0]!,
+      async pin => {
+        const current = position++;
+        if (!cache.has(pin.sha256)) {
+          cache.clear();
+          const batch: BytePin[] = [];
+          let bytes = 0;
+          for (let i = current; i < pins.length && batch.length < (options.batchSize ?? 8); i++) {
+            const next = pins[i]!;
+            if (batch.length && bytes + next.size > 2 * 1024 * 1024) break;
+            batch.push(next);
+            bytes += next.size;
+          }
+          const values = await boundedRead(batch);
+          batch.forEach((item, i) => cache.set(item.sha256, values[i]!));
+        }
+        return cache.get(pin.sha256)!;
+      },
       chunk => {
         invariant(
           offset + chunk.length <= work.length,

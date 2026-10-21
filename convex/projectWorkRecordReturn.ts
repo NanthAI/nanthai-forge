@@ -53,7 +53,12 @@ export async function recordReturn(
   prior: Doc<'projectBackups'>,
   priorAt?: string,
 ) {
-  if (backup.validatedWorkRecords !== 1 || prior.validatedWorkRecords !== 1) return;
+  const skip = (reason: string) => {
+    console.log('source-return record skip', { reason, revision: input.revision });
+    return undefined;
+  };
+  if (backup.validatedWorkRecords !== 1) return skip('candidate-records-unvalidated');
+  if (prior.validatedWorkRecords !== 1) return skip('previous-records-unvalidated');
   const project = await ctx.runQuery(internal.projectWork.get, { projectId: input.projectId, owner });
   invariant(
     project.work?.backupId === input.expectedBackupId && project.work.revision === input.revision,
@@ -62,17 +67,21 @@ export async function recordReturn(
   );
   const candidate = await recordExchange(backup, owner, reader),
     previous = await recordExchange(prior, owner, reader);
-  if (!candidate?.root.delta || !previous || candidate.root.delta.size > WORK_DELTA_BYTES) return;
-  if (!preservesParsedWorkBytes(previous.records) || !preservesParsedWorkBytes(candidate.records)) return;
+  if (!candidate) return skip('candidate-catalog-unavailable');
+  if (!previous) return skip('previous-catalog-unavailable');
+  if (!candidate.root.delta) return skip('delta-missing');
+  if (candidate.root.delta.size > WORK_DELTA_BYTES) return skip('delta-over-budget');
+  if (!preservesParsedWorkBytes(previous.records)) return skip('previous-parsed-bytes-differ');
+  if (!preservesParsedWorkBytes(candidate.records)) return skip('candidate-parsed-bytes-differ');
   const raw = JSON.parse((await candidate.read(candidate.root.delta)).toString('utf8'));
-  if (raw?.base?.root !== previous.root.records.sha256) return;
+  if (raw?.base?.root !== previous.root.records.sha256) return skip('delta-base-root-differs');
   // Old retries without an explicit journal pin retain the full compatibility path.
-  if (raw?.base?.journalRevision !== input.revision) return;
+  if (raw?.base?.journalRevision !== input.revision) return skip('delta-journal-revision-differs');
   const delta = validateWorkDelta(previous.records, candidate.records, raw, {
     root: previous.root.records.sha256,
     revision: input.revision,
   });
-  if (!supportsWorkDelta(previous.records, candidate.records)) return;
+  if (!supportsWorkDelta(previous.records, candidate.records)) return skip('delta-layout-unsupported');
   const events: HostedEvent[] = [];
   let cursor: string | null = null;
   do {
@@ -106,7 +115,7 @@ export async function recordReturn(
         event.command.action === 'put-planning-item' || event.command.action === 'comment-planning-item',
     )
   )
-    return;
+    return skip('planning-journal-events');
   const extra: string[] = [];
   for (const event of events) {
     const command = event.command;
@@ -118,7 +127,7 @@ export async function recordReturn(
           for (const record of field.records) extra.push(recordIdentity(field.name, record.key));
   }
   const context = await workDeltaContext(previous.records, candidate.records, delta, candidate.read, extra);
-  if (!context) return;
+  if (!context) return skip('context-over-budget');
   const pins = new Set(
     candidate.manifest.files.filter(pin => pin.path === `objects/${pin.sha256}`).map(pin => pin.sha256),
   );

@@ -43,6 +43,7 @@ export async function returnProgress(
     generation?: Doc<'projectWorkGenerations'>;
     partial?: boolean;
     metadataOnly?: boolean;
+    accounting?: ReturnAccounting;
   },
 ): Promise<(Doc<'projectWorkEvents'> & { accounting?: ReturnAccounting }) | null> {
   const started = Date.now();
@@ -69,6 +70,7 @@ export async function returnProgress(
     const { data } = initial.snapshot;
     c = {
       snapshot: initial.snapshot,
+      accounting: initial.accounting,
       metadataOnly: initial.metadataOnly,
       final: initial.final,
       generationId: initial.generationId,

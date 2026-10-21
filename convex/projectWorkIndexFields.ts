@@ -24,6 +24,7 @@ export const generationFields = {
   intentMigrationOperationId: v.optional(v.string()),
   retainedForIntentMigration: v.optional(v.string()),
   returnProgress: v.optional(v.string()),
+  returnPrepareCursor: v.optional(v.string()),
   returnMetadataCursor: v.optional(v.string()),
   returnMetadataSnapshot: v.optional(v.string()),
   returnCursor: v.optional(v.id('_storage')),

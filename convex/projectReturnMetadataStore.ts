@@ -69,7 +69,11 @@ export const retire = internalMutation({
   handler: async (ctx, input) => {
     const partition = await ctx.db.get(input.partitionId);
     if (!partition) return null;
-    for (const ref of [partition.returnMetadataCursor, partition.returnMetadataSnapshot])
+    for (const ref of [
+      partition.returnMetadataCursor,
+      partition.returnMetadataSnapshot,
+      partition.returnPrepareCursor,
+    ])
       if (ref && JSON.parse(ref).key === input.key) return null;
     const rows = await ctx.db
       .query('projectReturnPages')
