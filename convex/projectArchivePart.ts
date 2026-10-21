@@ -2,6 +2,7 @@
 'use node';
 import type { ActionCtx } from './_generated/server';
 import { blobStore } from './blobStore';
+import { archiveBlobUrl } from './archiveBlobUrl';
 import type { Id } from './_generated/dataModel';
 import { exchangeRequest } from '../src/exchange-request';
 import { invariant } from '../src/errors';
@@ -37,7 +38,7 @@ export async function projectArchivePart(
   }
   // Ranged on purpose: a Node action's storage.get buffers the whole Blob and
   // would transfer all of it again for every part.
-  const url = await blobStore(ctx).getUrl(storageId);
+  const url = await archiveBlobUrl(ctx, storageId);
   invariant(url, errorCode, 'Stored archive is unavailable.');
   await checkAccess();
   const end = Math.min(size, offset + 2 * 1024 * 1024),

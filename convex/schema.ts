@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { backfillFields } from './r2BackfillFields';
 import { ownerAcceptanceTables } from './ownerAcceptanceFields';
 import { sourceAuthority } from './projectSourceAuthorityFields';
 import { actorTables } from './projectActorFields';
@@ -271,6 +272,7 @@ const projectFields = {
   exchangeCleanupDone: v.optional(v.boolean()),
   /** Owner opt-in for new objects in R2 (also needs FORGE_BLOBS=r2). Default off. */
   r2Writes: v.optional(v.boolean()),
+  r2BackfillRevision: v.optional(v.number()),
   owner: v.string(),
   key: v.string(),
   name: v.string(),
@@ -294,6 +296,7 @@ const projectFields = {
   ),
 };
 const projectBackupFields = {
+  ...backfillFields,
   displayProtocol: v.optional(v.literal(3)),
   metadataPublication: v.optional(v.id('projectPublications')),
   ownerDerived: v.optional(v.object({ sha256: v.string(), size: v.number() })),
@@ -306,6 +309,7 @@ const projectBackupFields = {
       digest: v.string(),
       size: v.number(),
       storageId: v.id('_storage'),
+      ...backfillFields,
       operationId: v.string(),
       at: v.number(),
     }),
@@ -338,6 +342,7 @@ export const projectContributorFields = {
   agentGuidanceMaintainer: v.optional(v.boolean()),
 };
 export const projectProposalFields = {
+  ...backfillFields,
   transport: v.optional(v.literal('objects')),
   projectId: v.id('hostedProjects'),
   actor: v.string(),
@@ -468,6 +473,7 @@ export default defineSchema({
     .index('by_owner_and_slug', ['owner', 'slug']),
   ...publicationTables,
   projectBackups: defineTable(projectBackupFields)
+    .index('by_archive_storage', ['archiveReceipt.storageId'])
     .index('by_project', ['projectId'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_storage', ['storageId']),

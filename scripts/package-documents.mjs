@@ -27,6 +27,7 @@ export const packageDocuments = [
   'docs/operations/github-actions-checks.md',
   'docs/operations/runner-fallback.md',
   'docs/operations/source-exchange.md',
+  'docs/operations/r2-backfill.md',
   'docs/r2-storage-plan.md',
   'docs/readable-urls.md',
   'docs/roadmap.md',

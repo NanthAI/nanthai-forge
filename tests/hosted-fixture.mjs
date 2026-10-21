@@ -1,3 +1,4 @@
+const projectR2Backfill = await import(moduleUrl('../convex/projectR2Backfill.ts'));
 const inventoryAccess = await import(moduleUrl('../convex/inventoryAccess.ts'));
 import { createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -403,6 +404,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     },
   };
   const modules = {
+    projectR2Backfill,
     projectPublicationStore,
     projectPublicationAttempt,
     inventoryAccess,

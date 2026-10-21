@@ -2,6 +2,7 @@
 'use node';
 import type { ActionCtx } from './_generated/server';
 import { blobStore } from './blobStore';
+import { archiveBlobUrl } from './archiveBlobUrl';
 import type { Id } from './_generated/dataModel';
 import { derivedArtifact, derivedBytes } from './derivedArtifactActions';
 import { invariant } from '../src/errors';
@@ -29,7 +30,7 @@ async function readOriginalMetadata(
     'INVALID_WORK_BACKUP',
     'Stored source and Work bytes differ from their original archive pins.',
   );
-  const url = await blobStore(ctx).getUrl(storageId);
+  const url = await archiveBlobUrl(ctx, storageId);
   invariant(url, 'INVALID_WORK_BACKUP', 'Stored source and Work are unavailable.');
   await checkAccess();
   // Streamed on purpose: a Node action's storage.get buffers the whole archive.

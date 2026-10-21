@@ -1,6 +1,6 @@
 # R2 storage plan
 
-Plan to move every file blob from the application database's file storage to Cloudflare R2, so that file bytes never pass through database functions. Status: design and spike done; slices R0 and R1 are landed and slice R2 (dual read) is in review; with R2 the opt-in works end to end, and the rest is unbuilt. Date: 2026-10-19. Related: [roadmap](roadmap.md), [egress](operations/egress.md), [compute and egress](operations/compute-egress.md), [source exchange](operations/source-exchange.md).
+Plan to move every file blob from the application database's file storage to Cloudflare R2, so that file bytes never pass through database functions. Status: design and spike done; slices R0 and R1 are landed and slice R2 (dual read) is in review; with R2 the opt-in works end to end. R3 owner-derived publication and the R6 lead-run backfill command are implemented; deployment qualification and the actual backfill remain. Date: 2026-10-19. Related: [roadmap](roadmap.md), [egress](operations/egress.md), [compute and egress](operations/compute-egress.md), [source exchange](operations/source-exchange.md).
 
 ## Why
 
@@ -32,7 +32,7 @@ Principle: R2 holds every blob. No database function receives or returns file by
 | R3 | Owner display data, metadata publication and durable source return | Implemented; protocol 3 removes push-time display derivation, local qualification only |
 | R4 | Browser bytes: code view, review and archive download through signed URLs; CORS | Not started |
 | R5 | Imports, zones, agents and proposals build artifacts into R2 | Not started |
-| R6 | Backfill: export, upload each file after checking its digest, flip rows in pages; keep old storage 14 days as fallback | Needs owner run approval |
+| R6 | Backfill: export, upload each file after checking its digest, flip rows in pages; keep old storage 14 days as fallback | Lead-run command implemented; deployment qualification and actual run remain |
 | R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Not started |
 | R8 | Optional public Worker with edge cache on a custom subdomain | Later |
 
@@ -216,3 +216,13 @@ JS
    counters during a long step, with no gap over roughly 60 seconds.
 
 These commands are lead-only live qualification, not local fixture results.
+
+## R6 lead-run backfill
+
+`nforge maintenance r2-backfill` streams project files through verified private
+CLI spool files, resumes by page, and flips rows only after R2 HEAD verification
+and a location/storage-id CAS. Convex copies remain intact. `--dry-run` reads
+metadata only; `--verify` checks every backfilled object and downloads a digest
+sample, then reports a date 14 days after the full pass. See the
+[operator runbook](operations/r2-backfill.md) for opt-in, commands, recovery, cost
+and verification details. No real deployment run is implied by local tests.

@@ -24,6 +24,7 @@ import { doctor, mcpConfig } from './setup.js';
 import { pluginConfig } from './plugin-config.js';
 import { localChecksCli } from './local-checks-cli.js';
 import { ForgeError, invariant } from './errors.js';
+import { maintenanceCli } from './maintenance-cli.js';
 import { hostedWorkCli } from './hosted-work-cli.js';
 import { coordinationCli } from './coordination-cli.js';
 import { startCoordinationMcp } from './coordination-mcp.js';
@@ -55,6 +56,7 @@ Usage:
   nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination]
   nforge logout [DEPLOYMENT_URL]
   nforge auth status [DEPLOYMENT_URL]
+  nforge maintenance r2-backfill <root> [--dry-run|--verify] [--resume] [--state FILE]
   nforge hosted-work <deployment-url> <project-id> JSON
   nforge coordination <deployment-url> <project-id> JSON
   nforge mcp-coordination <deployment-url> <project-id>
@@ -141,6 +143,7 @@ async function main(args: string[]): Promise<unknown> {
     );
     return agentCli([args[1], args[0], ...(args[2] ? [args[2]] : [])]);
   }
+  if (args[0] === 'maintenance') return maintenanceCli(args.slice(1));
   if (args[0] === 'hosted-work') return hostedWorkCli(args.slice(1));
   if (args[0] === 'coordination') return coordinationCli(args.slice(1));
   if (args[0] === 'mcp-coordination') {
