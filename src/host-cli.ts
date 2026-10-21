@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retainRecoveryCapture } from './recovery-capture.js';
+import { join } from 'node:path';
 import { hostProgress, type ProgressSink } from './host-progress.js';
 import { basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -224,9 +226,16 @@ export async function hostProject(
       await client.action(makeFunctionReference<'action'>('projectExchangeActions:completeHistory'), {
         backupId: pushed.backupId,
       });
+      const recovery = retainRecoveryCapture(
+        store,
+        join(store.directory, `exchange-${pending.pushId}`),
+        history.manifest,
+        { kind: 'exchange', backupId: history.backupId, completeHistory: 'complete' },
+      );
       updateHostState(store, state => {
         if (state.hosting?.operationId === pending.operationId) delete state.hosting;
       });
+      Object.assign(pushed, { recovery });
     }
     progress.phase('complete');
     return {

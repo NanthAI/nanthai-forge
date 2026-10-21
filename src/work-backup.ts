@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retainRecoveryCapture } from './recovery-capture.js';
 import { migrateHostedIntents } from './work-hosted-intents.js';
 import {
   chmodSync,
@@ -112,7 +113,7 @@ export async function exportWork(store: WorkStore, revision: number, archive = f
       refs = refsAt(store),
       head = headAt(store.root);
     const bytes = store.snapshotBytes();
-    return { data, refs, head, bytes };
+    return { data, refs, head, bytes, capturedAt: new Date().toISOString() };
   });
   const id = randomUUID(),
     path = mkdtempSync(join(store.directory, 'backup-'));
@@ -165,6 +166,11 @@ export async function exportWork(store: WorkStore, revision: number, archive = f
         'Source or Work changed during export. Retry its current snapshot; nothing was overwritten.',
       );
     });
+    writeFileSync(
+      join(path, 'recovery-timing.json'),
+      JSON.stringify({ capturedAt: snapshot.capturedAt, evidenceCapturedAt: new Date().toISOString() }),
+      { flag: 'wx', mode: 0o600 },
+    );
     const manifest = {
       schema: 1 as const,
       kind: 'forge-source-and-work' as const,
@@ -189,6 +195,12 @@ export async function exportWork(store: WorkStore, revision: number, archive = f
     return {
       revision: snapshot.data.revision,
       result: {
+        recovery: retainRecoveryCapture(
+          store,
+          path,
+          { sha256: digest(json), size: Buffer.byteLength(json) },
+          { kind: 'export' },
+        ),
         id,
         path,
         sha256: digest(json),

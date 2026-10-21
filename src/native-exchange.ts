@@ -4,6 +4,7 @@ import {
   capturePendingExchange,
   pendingExchangeCaptureSchema,
 } from './pending-exchange.js';
+import { retainRecoveryCapture, recoveryTiming } from './recovery-capture.js';
 import { hostedPushWork } from './work-intent-local.js';
 import {
   copyFileSync,
@@ -123,12 +124,17 @@ export async function prepareNativeExchange(
   const baseline = exchangeBaseline(store, baselineKey);
   // Only the small commit pointer is read under the owner lock. Its records are
   // immutable and retained, so materializing them needs no lock.
+  const captured = options.captured ? recoveryTiming(options.captured.directory) : undefined;
   const localCapture = options.captured
     ? undefined
     : store.locked(
         () => {
           const pointer = store.pointer();
-          return { pointer, pending: capturePendingExchange(store.directory, pointer) };
+          return {
+            pointer,
+            capturedAt: new Date().toISOString(),
+            pending: capturePendingExchange(store.directory, pointer),
+          };
         },
         { operation: 'exchange snapshot' },
       );
@@ -285,6 +291,10 @@ export async function prepareNativeExchange(
           }),
         }
       : {}),
+    'recovery-timing.json': JSON.stringify({
+      capturedAt: captured ? captured.capturedAt : localCapture!.capturedAt,
+      evidenceCapturedAt: captured?.evidenceCapturedAt ?? new Date().toISOString(),
+    }),
     'current.json': JSON.stringify([...current]),
     'states.json': JSON.stringify([...states]),
     'work.json': snapshot.bytes,
@@ -419,9 +429,15 @@ export async function pushNativeExchange(
       }
     : undefined;
   const result = (backupId: string) => ({
+    recovery: retainRecoveryCapture(store, prepared.directory, manifestPin, {
+      kind: 'exchange',
+      backupId,
+      ...(options.stage ? { completeHistory: 'incomplete' as const } : {}),
+    }),
     backupId,
     ...(pendingCoverage ? { pendingCoverage } : {}),
     digest: manifestPin.sha256,
+    manifest: manifestPin,
     revision,
     transport: 'objects' as const,
     objects: pins.length,

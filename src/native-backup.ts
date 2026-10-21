@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retainRecoveryCapture } from './recovery-capture.js';
 import {
   chmodSync,
   lstatSync,
@@ -70,6 +71,7 @@ async function exportSnapshot(
       : current;
     return {
       data,
+      capturedAt: new Date().toISOString(),
       ids: nativeReachable(store, data),
       bytes: head ? Buffer.from(JSON.stringify(data, null, 2)) : store.snapshotBytes(),
     };
@@ -136,6 +138,11 @@ async function exportSnapshot(
       );
     }
   }
+  writeFileSync(
+    join(path, 'recovery-timing.json'),
+    JSON.stringify({ capturedAt: snapshot.capturedAt, evidenceCapturedAt: new Date().toISOString() }),
+    { flag: 'wx', mode: 0o600 },
+  );
   const aliases = deduplicateArtifacts ? deduplicateArtifactFiles(files) : undefined;
   const logicalBytes = files.reduce((total, file) => total + file.size, 0),
     physical = aliases ? files.filter(file => !aliases.some(alias => alias.path === file.path)) : files;
@@ -166,6 +173,16 @@ async function exportSnapshot(
   return {
     revision: store.load().revision,
     result: {
+      ...(!head
+        ? {
+            recovery: retainRecoveryCapture(
+              store,
+              path,
+              { sha256: digest(json), size: Buffer.byteLength(json) },
+              { kind: 'export' },
+            ),
+          }
+        : {}),
       path,
       json,
       sha256: digest(json),

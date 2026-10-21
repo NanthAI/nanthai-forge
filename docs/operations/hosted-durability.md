@@ -11,6 +11,13 @@ file-inclusive export to R2, keeping the newest four completed copies. Installat
 and the first real run are operator actions; no schedule is installed by this repo.
 The backup command never deploys, imports or contacts any account until invoked.
 
+A development-deployment data restore drill passed on 2026-10-20: export 146 s
+(787 MB, 27,143 stored files), import about 2 h 17 min, and comparison 243 s with
+equal tables, files and Work. Code, authentication and environment were not
+redeployed; off-machine owner recovery remains unqualified. Convex scheduled
+backups require Pro; the weekly R2 job below runs independently on the operator's
+Mac. No deployment or schedule is configured by these scripts.
+
 ## Snapshot and backup
 
 Use the accepted Forge source and lockfile, Node 22.12+ or 24, installed dependencies

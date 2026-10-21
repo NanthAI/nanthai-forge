@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readRecoveryInventory } from './recovery-inventory.js';
 import { consumeOwnerRequests, startOwnerAcceptanceListener } from './owner-acceptance-consumer.js';
 import { flushAgentSync } from './agent-hosted-sync.js';
 import { spawn } from 'node:child_process';
@@ -52,6 +53,7 @@ export async function hostCli(args: string[]) {
     invariant(flags.length === 1, 'BAD_ARGUMENT', HOST_HELP);
     const state = readHostState(new WorkStore(root));
     return {
+      recovery: await readRecoveryInventory(root),
       bound: Boolean(state.binding),
       canonicalOwner: state.binding?.acceptanceOwner === true,
       ownerRole:

@@ -479,3 +479,39 @@ preserve unspecified fields; changing an acceptance preset preserves this projec
 preference. This persistence layer starts no driver, timers or background pushes,
 even when the preference is enabled. Binding `autoSync` and GitHub mirror
 `autoPush` retain their existing meanings. Manual exchange remains available.
+
+## Recovery inventory
+
+`nforge host ROOT --status` includes the read-only `recovery` inventory. The exported
+`readRecoveryInventory(root, now?)` function returns the same typed data for other
+status consumers. It performs no network calls, export, check recovery or Work
+mutation. It reports completed exchange/export capture times, root source and
+accepted main heads, exact Work revision/hash, manifest pin, complete-history state
+and each check evidence path's included/unavailable status. Source/Work capture
+time is separate from evidence sampling and successful completion time.
+
+A successful local export is listed separately and **does not prove an off-machine
+copy**. Only completed exchanges with complete retained history establish the
+inventory's off-machine baseline. First-host current-source publication stays
+incomplete until history upload and `completeHistory` validation succeed. Missing
+logs/artifacts remain unavailable even when source and Work publication succeeds.
+Nothing here blocks export, manual push, checking or acceptance.
+
+Pending saves compare canonical record fingerprints against that baseline,
+including unlanded Lane checkpoints, check completions and changed Work records.
+These are saved records, not a count of every intermediate editing operation.
+Evidence fingerprints detect later running-log bytes even without a Work revision
+change. Oldest pending age uses recorded save times; un-timestamped replacements,
+unknown capture times or pending evidence with no save timestamp produce `null`,
+not zero. `oldestKnownPendingAgeMs` preserves the oldest known save age separately.
+Unsaved filesystem edits and running processes remain outside this inventory.
+
+The durable inventory and capture timing are local sidecars under `.forge/work`,
+not canonical Work or additions to the archive/exchange wire format. They survive
+process restarts without triggering another save. Existing captures without timing
+report unknown time; restored owners without those sidecars have unknown prior
+coverage. Preserve an export's returned recovery receipt alongside an off-machine
+archive when recording its identity. Receipts describe observed successful capture,
+not current remote storage health or a promised backup cadence. A reporting write
+failure returns `RECOVERY_INVENTORY_UNAVAILABLE` without changing publication
+success; missing/corrupt inventory never establishes coverage.
