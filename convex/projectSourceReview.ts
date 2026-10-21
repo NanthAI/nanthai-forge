@@ -2,7 +2,7 @@
 'use node';
 import { v } from 'convex/values';
 import { action, type ActionCtx } from './cliServer';
-import { internal } from './_generated/api';
+import { internal, api } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { exchangeRootSchema, isExchangeRoot, readByteTree } from '../src/native-exchange-tree';
@@ -160,9 +160,13 @@ export const read = action({
   returns: v.string(),
   handler: async (ctx, input): Promise<string> => {
     try {
-      const user = await ctx.auth.getUserIdentity();
-      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to review project source.');
-      return JSON.stringify(await readSourceReview(ctx, input, user.subject));
+      // Browser callers receive only a checkpoint plan. They verify/download objects directly,
+      // including Convex rows; server-only anchor validation still uses readSourceReview above.
+      return await ctx.runMutation(api.projectObjectDownloads.source, {
+        projectId: input.projectId,
+        backupId: input.backupId,
+        digests: [input.base, input.head],
+      });
     } catch (error) {
       return report(error);
     }

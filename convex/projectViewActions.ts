@@ -8,7 +8,7 @@ import { action } from './cliServer';
 import { api, internal } from './_generated/api';
 import { checkLogPage } from '../src/check-log-page';
 import { source } from './projectWorkLoad';
-import { objectRange, rawMetadata, rawContent } from './projectObjectContent';
+import { rawMetadata } from './projectObjectContent';
 import { isR2Object } from './projectObjectFields';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { readFileProvenance } from '../src/view-provenance';
@@ -156,17 +156,20 @@ export const log = action({
         'INVALID_WORK_BACKUP',
         'Log bytes differ from their retained pin.',
       );
+      if (isR2Object(object) || !object.storageId) {
+        // The browser verifies complete leaf/file bytes and applies the same redaction before paging.
+        return JSON.stringify({
+          direct: { sha256: pin.sha256, size: pin.size },
+          offset: input.offset,
+          backupId: generation.backupId,
+          generationId: generation._id,
+        });
+      }
       // Redact the complete text before paging: a local path may cross a page boundary.
-      let original: Buffer;
-      if (isR2Object(object)) {
-        await rawMetadata(ctx, object, pin);
-        original = await rawContent(ctx, object, pin);
-      } else if (object.storageId) {
-        await rawMetadata(ctx, object, pin);
-        const blob = await blobStore(ctx).get(object.storageId);
-        invariant(blob && blob.size === pin.size, 'INVALID_WORK_BACKUP', 'Retained log is unavailable.');
-        original = Buffer.from(await blob.arrayBuffer());
-      } else original = Buffer.from(await objectRange(ctx, object, user.subject, 0, pin.size));
+      await rawMetadata(ctx, object, pin);
+      const blob = await blobStore(ctx).get(object.storageId);
+      invariant(blob && blob.size === pin.size, 'INVALID_WORK_BACKUP', 'Retained log is unavailable.');
+      const original = Buffer.from(await blob.arrayBuffer());
       await ctx.runQuery(internal.projectObjects.resolve, args);
       const current = await ctx.runQuery(internal.projectWorkIndexStore.current, {
         projectId: input.projectId,

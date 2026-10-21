@@ -17,7 +17,7 @@ const client = {
     return answer ? answer(args) : empty(args);
   },
   action: async (reference, args) => tree().actions?.[name(reference)]?.(args) ?? null,
-  mutation: async () => null,
+  mutation: async (reference, args) => tree().mutations?.[name(reference)]?.(args) ?? null,
 };
 export const ConvexProvider = ({ children }) => createElement(Fragment, null, children);
 export const useConvex = () => client;

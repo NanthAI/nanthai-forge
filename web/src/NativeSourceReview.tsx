@@ -1,10 +1,9 @@
+import { useSourceReview } from './use-source-review';
 import { useReadRetry } from './ui/read-retry';
 import { ErrorToast } from './ui/Toast';
 import { SyntaxLine } from './SourceTokens';
 // SPDX-License-Identifier: Apache-2.0
-import { memo, Profiler, useCallback, useEffect, useRef, useState } from 'react';
-import { useAction } from 'convex/react';
-import { api } from '../../convex/_generated/api';
+import { memo, Profiler, useCallback, useEffect, useState } from 'react';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { ReviewPath, reviewTextPage } from '../../src/native-source-review';
 import type { contextualHunks } from '../../src/review-hunks';
@@ -192,12 +191,8 @@ export default function NativeSourceReview({
 }) {
   const readAttempt = useReadRetry();
   const backupId = workspace.backupId;
-  const cached = useRef<{ scope: string; files: Map<string, File | Unavailable> }>({
-    scope: '',
-    files: new Map(),
-  });
   const [anchor, setAnchor] = useState<SourceAnchor | null>(null);
-  const read = useAction(api.projectSourceReview.read),
+  const read = useSourceReview(),
     [index, setIndex] = useState<Index | Unavailable | null>(null),
     [file, setFile] = useState(''),
     [detail, setDetail] = useState<File | Unavailable | null>(null);
@@ -230,21 +225,12 @@ export default function NativeSourceReview({
     let current = true;
     setDetail(null);
     setError('');
-    const scope = JSON.stringify([projectId, backupId, base, head, retry]);
-    if (cached.current.scope !== scope) cached.current = { scope, files: new Map() };
-    const files = cached.current.files;
-    const key = JSON.stringify([file, beforeOffset, afterOffset]);
-    const hit = files.get(key);
-    if (hit) {
-      setDetail(hit);
-      return;
-    }
+    // Each selection rechecks current authority; verified immutable bytes use the shared short cache.
     if (file)
       read({ projectId, backupId, base, head, file, beforeOffset, afterOffset })
         .then(value => {
           if (current) {
             const parsed = JSON.parse(value) as File | Unavailable;
-            if (parsed.available) files.set(key, parsed);
             setDetail(parsed);
           }
         })

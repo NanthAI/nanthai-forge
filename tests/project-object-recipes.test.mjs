@@ -10,6 +10,7 @@ import { readHosted } from './hosted-read.mjs';
 const recipes = await import(moduleUrl('../convex/projectObjectRecipes.ts'));
 const recipeStore = await import(moduleUrl('../convex/projectObjectRecipeStore.ts'));
 const { purgeExchangeObjects } = await import(moduleUrl('../convex/projectObjectLifecycle.ts'));
+const { objectRange } = await import(moduleUrl('../convex/projectObjectContent.ts'));
 const { exchangeObjectReader } = await import(moduleUrl('../convex/projectExchangeReader.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 function setup() {
@@ -46,7 +47,7 @@ async function prepare(s, bytes, projectId = 'project') {
 const row = (s, sha, projectId = 'project') =>
   [...s.tables.projectObjects.values()].find(item => item.digest === sha && item.projectId === projectId);
 
-test('recipe binds original logical bytes; old small/ranged readers and retry retain exact content without full duplicate storage', async () => {
+test('recipe binds original logical bytes; direct-download redirects, internal ranges and retry retain exact content without full duplicate storage', async () => {
   const s = setup(),
     bytes = randomBytes(5 * 1024 * 1024 + 3),
     built = await prepare(s, bytes);
@@ -76,8 +77,9 @@ test('recipe binds original logical bytes; old small/ranged readers and retry re
       digest: digest(bytes),
       offset,
     });
+    assert.deepEqual(result, { direct: true, digest: digest(bytes), size: bytes.length });
     assert.deepEqual(
-      Buffer.from(result.data),
+      Buffer.from(await objectRange(s.ctx, bound, 'owner', offset)),
       bytes.subarray(offset, Math.min(bytes.length, offset + 2 * 1024 * 1024)),
     );
   }
@@ -94,7 +96,7 @@ test('recipe binds original logical bytes; old small/ranged readers and retry re
     projectId: 'project',
     digests: [digest(small)],
   });
-  assert.deepEqual(Buffer.from(result[0].data), small);
+  assert.deepEqual(result, [{ direct: true, digest: digest(small), size: small.length }]);
   const response = await recipes.representation._handler(s.ctx, {
     projectId: 'project',
     digest: digest(bytes),
@@ -248,14 +250,7 @@ test('recipe ranges recheck current chunk bytes and access after transfer, inclu
     if (id === bound.storageId) s.tables.projectContributors.delete('grant');
     return value;
   };
-  await assert.rejects(
-    modules.projectExchangeActions.downloadPart._handler(s.ctx, {
-      projectId: 'project',
-      digest: pin.sha256,
-      offset: 0,
-    }),
-    code('PROJECT_UNAVAILABLE'),
-  );
+  await assert.rejects(objectRange(s.ctx, row(s, pin.sha256), 'reader', 0), code('PROJECT_UNAVAILABLE'));
 });
 
 test('a recipe-bound logical manifest publishes and opens Work without mislabeling recipe storage as original bytes', async t => {

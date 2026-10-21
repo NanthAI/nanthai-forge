@@ -4,7 +4,13 @@ import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { fixture, checkpoint, modules } from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-const { read } = await import(moduleUrl('../convex/projectSourceReview.ts'));
+const { readSourceReview } = await import(moduleUrl('../convex/projectSourceReview.ts'));
+// Server-only source/anchor validation retains its exact-source contract. The public browser
+// endpoint now returns metadata only; direct browser reads are covered by browser-r2-bytes.test.mjs.
+const read = {
+  _handler: async (ctx, input) =>
+    JSON.stringify(await readSourceReview(ctx, input, (await ctx.auth.getUserIdentity())?.subject ?? '')),
+};
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 async function setup(t) {
   const s = fixture(),

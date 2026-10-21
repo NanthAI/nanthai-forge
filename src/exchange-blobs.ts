@@ -4,6 +4,8 @@ import { makeFunctionReference } from 'convex/server';
 import type { ContentPin } from './native-exchange.js';
 import { exchangeFetch } from './exchange-request.js';
 import { ForgeError, invariant } from './errors.js';
+import { ObjectDownloadReader } from './blob-download.js';
+import type { DownloadRow } from './blob-download-format.js';
 import { readSigned, SignedDownloadCache, type SignedObject } from './exchange-r2-read.js';
 
 /** The one place the CLI moves exchange object bytes. Callers verify sizes and
@@ -80,6 +82,20 @@ export class ConvexExchangeBlobs implements ExchangeBlobs {
     private readonly onBytes?: (pin: ContentPin, done: number) => void,
     private readonly onCall?: (name: string, pending: boolean) => void,
   ) {}
+  private directReader(projectId: string) {
+    return new ObjectDownloadReader({
+      describe: digests =>
+        this.client.mutation(makeFunctionReference<'mutation'>('projectObjectDownloads:describe'), {
+          projectId,
+          digests,
+        }) as Promise<DownloadRow[]>,
+      sign: digests =>
+        this.client.mutation(makeFunctionReference<'mutation'>('projectObjectDownloads:signDownloads'), {
+          projectId,
+          digests,
+        }) as Promise<SignedObject[]>,
+    });
+  }
   put = putTarget;
   getSigned(projectId: string, pins: ContentPin[]): Promise<Map<string, Buffer>> {
     return readSigned(
@@ -95,17 +111,42 @@ export class ConvexExchangeBlobs implements ExchangeBlobs {
       this.onCall,
     );
   }
-  getGroup(projectId: string, pins: ContentPin[]): Promise<BlobRow[]> {
-    return this.client.action(action('projectExchangeActions:downloadBatch'), {
-      projectId,
-      digests: pins.map(pin => pin.sha256),
-    });
+  async getGroup(projectId: string, pins: ContentPin[]): Promise<BlobRow[]> {
+    const rows: (BlobRow | { direct: true; digest: string; size: number })[] = await this.client.action(
+      action('projectExchangeActions:downloadBatch'),
+      {
+        projectId,
+        digests: pins.map(pin => pin.sha256),
+      },
+    );
+    const reader = this.directReader(projectId);
+    return Promise.all(
+      rows.map(async (row, index) =>
+        'direct' in row
+          ? {
+              digest: row.digest,
+              size: row.size,
+              data: new Uint8Array((await reader.read([pins[index]!]))[0]!).buffer,
+            }
+          : row,
+      ),
+    );
   }
-  getPart(projectId: string, pin: ContentPin, offset: number): Promise<BlobRow> {
-    return this.client.action(action('projectExchangeActions:downloadPart'), {
-      projectId,
-      digest: pin.sha256,
+  async getPart(projectId: string, pin: ContentPin, offset: number): Promise<BlobRow> {
+    const row: BlobRow | { direct: true; digest: string; size: number } = await this.client.action(
+      action('projectExchangeActions:downloadPart'),
+      {
+        projectId,
+        digest: pin.sha256,
+        offset,
+      },
+    );
+    if (!('direct' in row)) return row;
+    const bytes = await this.directReader(projectId).range(
+      pin,
       offset,
-    });
+      Math.min(2 * 1024 * 1024, pin.size - offset),
+    );
+    return { digest: row.digest, size: row.size, data: new Uint8Array(bytes).buffer };
   }
 }

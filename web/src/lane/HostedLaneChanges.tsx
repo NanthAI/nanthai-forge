@@ -1,10 +1,10 @@
+import { useSourceReview } from '../use-source-review';
 import { usePageCritical } from '../ui/page-critical';
 import { useReadRetry } from '../ui/read-retry';
 // SPDX-License-Identifier: Apache-2.0
-import { useAction, useQuery } from 'convex/react';
+import { useQuery } from 'convex/react';
 import { workIndex, type WorkIndexWorkspace } from '../hosted-work-index';
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { ReviewPath } from '../../../src/native-source-review';
 import { hostedError } from '../snapshot';
@@ -40,7 +40,7 @@ export function HostedLaneChanges({
   laneId?: string;
 }) {
   const readAttempt = useReadRetry();
-  const read = useAction(api.projectSourceReview.read);
+  const read = useSourceReview();
   const [index, setIndex] = useState<Index | null>(null),
     [error, setError] = useState('');
   const indexedPins =

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { state, providers } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { fakeR2Config } from './fake-r2.mjs';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 const modules = {};
 for (const name of [
@@ -20,6 +21,7 @@ for (const name of [
   'projectCoordinationReads',
   'projectExchangeActions',
   'projectObjects',
+  'projectObjectDownloads',
   'projectPeopleActions',
   'projectProposalActions',
   'projectProposalObjects',
@@ -125,6 +127,9 @@ const reads = [
   ['projectExchangeActions', 'downloadPart', { digest, offset: 0 }],
   ['projectExchangeActions', 'checkpoint', { backupId: 'backup' }, false],
   ['projectSourceReview', 'read', { backupId: 'backup', base: digest, head: digest }],
+  ['projectObjectDownloads', 'source', { backupId: 'backup', digests: [digest] }],
+  ['projectObjectDownloads', 'describe', { digests: [digest] }],
+  ['projectObjectDownloads', 'signDownloads', { digests: [digest] }],
   [
     'projectViewActions',
     'log',
@@ -209,6 +214,18 @@ test('the owner of one project cannot read another project through its child ids
       { projectId: 'project', backupId: 'backup', base: digest, head: digest },
       { backupId: 'other-backup' },
     ],
+    [
+      'projectObjectDownloads',
+      'source',
+      { projectId: 'project', backupId: 'backup', digests: [digest] },
+      { backupId: 'other-backup' },
+    ],
+    ...['source', 'describe', 'signDownloads'].map(name => [
+      'projectObjectDownloads',
+      name,
+      { projectId: 'project', ...(name === 'source' ? { backupId: 'backup' } : {}), digests: [digest] },
+      { projectId: 'other', ...(name === 'source' ? { backupId: 'other-backup' } : {}) },
+    ]),
     ['projectExchangeActions', 'checkpoint', { backupId: 'backup' }, { backupId: 'other-backup' }],
     ['projectBackupActions', 'downloadPart', { id: 'backup', offset: 0, digest }, { id: 'other-backup' }],
     [
@@ -239,4 +256,138 @@ test('the owner of one project cannot read another project through its child ids
   for (const [module, name, args, other] of rows)
     await assert.rejects(call(s, module, name, { ...args, ...other }), denied, `${module}.${name}`);
   assert.deepEqual(s.tables, before);
+});
+
+test('browser review and object metadata return real plans and URLs only while access is current', async t => {
+  const s = setup();
+  const env = {
+    R2_ACCOUNT_ID: fakeR2Config.accountId,
+    R2_BUCKET: fakeR2Config.bucket,
+    R2_ACCESS_KEY_ID: fakeR2Config.accessKeyId,
+    R2_SECRET_ACCESS_KEY: fakeR2Config.secretAccessKey,
+  };
+  const saved = Object.fromEntries(Object.keys(env).map(name => [name, process.env[name]]));
+  Object.assign(process.env, env);
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  s.tables.projectObjects.set('object', {
+    _id: 'object',
+    projectId: 'project',
+    digest,
+    size: 1,
+    removed: false,
+    location: 'r2',
+    r2Key: `v1/p/project/o/${digest}`,
+    r2Committed: true,
+  });
+  const input = { projectId: 'project', backupId: 'backup', base: digest, head: digest };
+  for (const caller of ['owner', 'reader', 'former']) {
+    s.caller(caller);
+    const plan = JSON.parse(await call(s, 'projectSourceReview', 'read', input));
+    assert.equal(plan.backupId, 'backup');
+    assert.deepEqual(plan.root, { sha256: digest, size: 1 });
+    assert.deepEqual(
+      JSON.parse(
+        await call(s, 'projectObjectDownloads', 'source', {
+          projectId: 'project',
+          backupId: 'backup',
+          digests: [digest],
+        }),
+      ),
+      plan,
+    );
+    assert.deepEqual(
+      await call(s, 'projectObjectDownloads', 'describe', {
+        projectId: 'project',
+        digests: [digest],
+      }),
+      [{ digest, size: 1, location: 'r2' }],
+    );
+    const signed = await call(s, 'projectObjectDownloads', 'signDownloads', {
+      projectId: 'project',
+      digests: [digest],
+    });
+    assert.equal(signed.length, 1);
+    assert.equal(signed[0].digest, digest);
+    assert.equal(new URL(signed[0].url).pathname, `/${fakeR2Config.bucket}/v1/p/project/o/${digest}`);
+    for (const name of ['downloadBatch', 'downloadPart']) {
+      const result = await call(s, 'projectExchangeActions', name, {
+        projectId: 'project',
+        ...(name === 'downloadBatch' ? { digests: [digest] } : { digest, offset: 0 }),
+      });
+      assert.deepEqual(name === 'downloadBatch' ? result : [result], [{ direct: true, digest, size: 1 }]);
+    }
+  }
+  s.tables.projectReaders.delete('grant');
+  s.tables.projectContributors.delete('member');
+  for (const caller of ['reader', 'former', 'stranger', undefined]) {
+    s.caller(caller);
+    for (const [module, name, args, scoped] of reads.filter(([module]) =>
+      ['projectSourceReview', 'projectObjectDownloads', 'projectExchangeActions'].includes(module),
+    ))
+      await assert.rejects(
+        call(s, module, name, withProject(args, scoped)),
+        denied,
+        `${caller} ${module}.${name}`,
+      );
+  }
+  // Existing public reads remain available without signing in.
+  s.tables.hostedProjects.get('project').visibility = 'public';
+  s.caller(undefined);
+  assert.equal(JSON.parse(await call(s, 'projectSourceReview', 'read', input)).backupId, 'backup');
+  assert.equal(
+    (
+      await call(s, 'projectObjectDownloads', 'describe', {
+        projectId: 'project',
+        digests: [digest],
+      })
+    ).length,
+    1,
+  );
+  assert.equal(
+    (
+      await call(s, 'projectObjectDownloads', 'signDownloads', {
+        projectId: 'project',
+        digests: [digest],
+      })
+    ).length,
+    1,
+  );
+  s.caller('owner');
+  s.tables.hostedProjects.get('other').owner = 'owner';
+  // Even access to both projects does not permit mixing their checkpoint ids.
+  await assert.rejects(
+    call(s, 'projectSourceReview', 'read', {
+      ...input,
+      backupId: 'other-backup',
+    }),
+    denied,
+  );
+  // An accessible project cannot use another project's checkpoint or object identity.
+  await assert.rejects(
+    call(s, 'projectObjectDownloads', 'source', {
+      projectId: 'project',
+      backupId: 'other-backup',
+      digests: [digest],
+    }),
+    denied,
+  );
+  s.tables.projectObjects.get('object').projectId = 'other';
+  assert.deepEqual(
+    await call(s, 'projectObjectDownloads', 'signDownloads', {
+      projectId: 'project',
+      digests: [digest],
+    }),
+    [],
+  );
+  await assert.rejects(
+    call(s, 'projectObjectDownloads', 'describe', {
+      projectId: 'project',
+      digests: [digest],
+    }),
+    error => error.data?.code === 'INVALID_WORK_BACKUP',
+  );
 });

@@ -66,11 +66,13 @@ test('Code lists indexed paths without full-source reads and reads only the defa
     const reads = await page.evaluate(() => globalThis.__codeReads);
     assert.equal(reads.length, 1);
     assert.equal(reads[0].file, 'README.md');
+    assert.equal(await page.evaluate(() => globalThis.__manifestReads), 0);
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/fixture.html?legacy=1`);
     await page.getByText('export const value = 1;', { exact: false }).first().waitFor();
     const legacyReads = await page.evaluate(() => globalThis.__codeReads);
-    assert.equal(legacyReads.length, 2);
-    assert.equal(legacyReads[1].file, 'README.md');
+    assert.equal(legacyReads.length, 1);
+    assert.equal(legacyReads[0].file, 'README.md');
+    assert.equal(await page.evaluate(() => globalThis.__manifestReads), 0);
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/lane.html`);
     await page
       .getByText('This source object is not retained in the selected checkpoint.', { exact: true })

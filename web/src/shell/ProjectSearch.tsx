@@ -1,8 +1,8 @@
+import { readBrowserSource } from '../browser-source';
 import { useReadRetry } from '../ui/read-retry';
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useMemo, useState } from 'react';
 import { useConvex, useQuery as useHostedQuery } from 'convex/react';
-import { api as hostedApi } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { CockpitWork } from '../cockpit/model';
 import { useWorkRecords, workIndex, type WorkIndexWorkspace } from '../hosted-work-index';
@@ -88,13 +88,12 @@ function HostedSearch({
     setFiles([]);
     setError('');
     setLoading(true);
-    void client
-      .action(hostedApi.projectSourceReview.read, {
-        projectId,
-        backupId: workspace.backupId,
-        base: sourceHead,
-        head: sourceHead,
-      })
+    void readBrowserSource(client, {
+      projectId,
+      backupId: workspace.backupId,
+      base: sourceHead,
+      head: sourceHead,
+    })
       .then(raw => {
         if (!active) return;
         const result = JSON.parse(raw) as { available: boolean; paths?: { path: string }[] };

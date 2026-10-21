@@ -14,7 +14,6 @@ import { validateExchangePins, validateHostedClosure } from './projectExchangeVa
 import { validateParsedWork } from '../src/work-metadata';
 import { resolveExchangeWork } from '../src/native-exchange-stream';
 import { projectArchivePart } from './projectArchivePart';
-import { objectRange, rawContent } from './projectObjectContent';
 import { isStored, isR2Object } from './projectObjectFields';
 import { report } from './errors';
 import { exchangeObjectReader, bytesFromRow, type ExchangeObjectReader } from './projectExchangeReader';
@@ -40,13 +39,20 @@ export async function objectBytes(
   const [bytes] = await reader.read(projectId, actor, [pin]);
   return bytes!;
 }
+const downloadReply = v.union(
+  v.object({ data: v.bytes(), digest: v.string(), size: v.number() }),
+  v.object({ direct: v.literal(true), digest: v.string(), size: v.number() }),
+);
+type DownloadReply = { digest: string; size: number } & ({ data: ArrayBuffer } | { direct: true });
+const directReply = (row: Doc<'projectObjects'>): DownloadReply => ({
+  direct: true,
+  digest: row.digest,
+  size: row.size,
+});
 export const downloadBatch = action({
   args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()) },
-  returns: v.array(v.object({ data: v.bytes(), digest: v.string(), size: v.number() })),
-  handler: async (
-    ctx,
-    { projectId, digests },
-  ): Promise<{ data: ArrayBuffer; digest: string; size: number }[]> => {
+  returns: v.array(downloadReply),
+  handler: async (ctx, { projectId, digests }): Promise<DownloadReply[]> => {
     try {
       const actor = await caller(ctx);
       invariant(
@@ -65,12 +71,15 @@ export const downloadBatch = action({
         'Use ranged downloads for content larger than the small-content batch.',
       );
       const result = await Promise.all(
-        rows.map(async row => ({
-          data: new Uint8Array(await bytesFromRow(ctx, row, { sha256: row.digest, size: row.size }, actor))
-            .buffer,
-          digest: row.digest,
-          size: row.size,
-        })),
+        rows.map(async row => {
+          if (isR2Object(row) || !row.storageId) return directReply(row);
+          return {
+            data: new Uint8Array(await bytesFromRow(ctx, row, { sha256: row.digest, size: row.size }, actor))
+              .buffer,
+            digest: row.digest,
+            size: row.size,
+          };
+        }),
       );
       await ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, digests });
       return result;
@@ -443,15 +452,10 @@ export const manifest = action({
     }
   },
 });
-const sliceOf = (bytes: Buffer, offset: number) =>
-  new Uint8Array(bytes.subarray(offset, offset + 2 * 1024 * 1024)).buffer;
 export const downloadPart = action({
   args: { projectId: v.id('hostedProjects'), digest: v.string(), offset: v.number() },
-  returns: v.object({ data: v.bytes(), digest: v.string(), size: v.number() }),
-  handler: async (
-    ctx,
-    { projectId, digest, offset },
-  ): Promise<{ data: ArrayBuffer; digest: string; size: number }> => {
+  returns: downloadReply,
+  handler: async (ctx, { projectId, digest, offset }): Promise<DownloadReply> => {
     try {
       const actor = await caller(ctx),
         rows: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, {
@@ -468,17 +472,14 @@ export const downloadPart = action({
         'BAD_ARGUMENT',
         'Use an offset inside the selected content.',
       );
+      // Recipes can contain mixed Convex/R2 leaves: resolve them in the client, too.
+      if (isR2Object(row) || !row.storageId) return directReply(row);
       const data =
         row.size === 0
           ? new ArrayBuffer(0)
-          : isR2Object(row)
-            ? // Fallback for callers that did not sign. Raw R2 objects are small: read whole, slice.
-              sliceOf(await rawContent(ctx, row, { sha256: digest, size: row.size }), offset)
-            : !row.storageId
-              ? await objectRange(ctx, row, actor, offset)
-              : await projectArchivePart(ctx, row.storageId, row.size, digest, offset, () =>
-                  ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, digests: [digest] }),
-                );
+          : await projectArchivePart(ctx, row.storageId, row.size, digest, offset, () =>
+              ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, digests: [digest] }),
+            );
       await ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, digests: [digest] });
       return { data, digest, size: row.size };
     } catch (error) {

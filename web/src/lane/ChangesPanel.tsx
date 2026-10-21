@@ -1,7 +1,7 @@
 import { ErrorToast } from '../ui/Toast';
 import { useDestination, useSection } from '../WorkspaceUI';
 // SPDX-License-Identifier: Apache-2.0
-import { Profiler, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Profiler, useEffect, useState, type ReactNode } from 'react';
 import { ChangeMapToggle, type MapSource } from './ChangeMapToggle';
 import { PathLabel } from './PathLabel';
 import { Glyph } from '../ui/Glyph';
@@ -42,7 +42,6 @@ export function ChangesPanel({
   loadNeighbour?: typeof load;
   comment?: (file: string, side: 'before' | 'after', line: number, blob: string) => void;
 }) {
-  const cache = useRef<{ load: typeof load; files: Map<string, Comparison> }>({ load, files: new Map() });
   const [selected, setSelected] = useDestination('diffFile');
   const [neighbour, setNeighbour] = useState<ChangedPath>();
   const [allFiles, showAllFiles] = useState(false);
@@ -66,19 +65,11 @@ export function ChangesPanel({
   useEffect(() => {
     if (!currentPath) return;
     const controller = new AbortController();
-    if (cache.current.load !== load) cache.current = { load, files: new Map() };
-    const files = cache.current.files;
-    const hit = files.get(currentPath);
-    if (hit) {
-      setDiff({ path: currentPath, comparison: hit });
-      onSettled?.();
-      return;
-    }
+    // Re-enter the reader on selection/retry so cached content never replaces an access check.
     setDiff({ path: currentPath });
     (current?.status === 'unchanged' && loadNeighbour ? loadNeighbour : load)(currentPath, controller.signal)
       .then(comparison => {
         if (!controller.signal.aborted) {
-          files.set(currentPath, comparison);
           setDiff({ path: currentPath, comparison });
           onSettled?.();
         }

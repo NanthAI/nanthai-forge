@@ -1,3 +1,4 @@
+import { useSourceReview } from './use-source-review';
 import { usePageCritical } from './ui/page-critical';
 import { SourcePicker } from './shell/SourcePicker';
 import { currentSource, sourceOptions } from './shell/source-options';
@@ -11,10 +12,9 @@ import { publishedMoves, type MoveRecord } from './cockpit/now-model';
 import { useDestination } from './WorkspaceUI';
 // SPDX-License-Identifier: Apache-2.0
 import './code.css';
-import { useAction, useConvex, useQuery } from 'convex/react';
+import { useConvex, useQuery } from 'convex/react';
 import { workIndex } from './hosted-work-index';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { ReviewPath, reviewTextPage } from '../../src/native-source-review';
 import type { Lane } from '../../src/work-types';
@@ -69,7 +69,7 @@ export default function HostedCode({
   const runs = useWorkRecords<HostedRunSummary>(projectId, workspace, 'runs');
   const hostedMoves = useWorkRecords<MoveRecord & { head: string }>(projectId, workspace, 'hostedChannels');
   const localMoves = useWorkRecords<MoveRecord & { head: string }>(projectId, workspace, 'channelMoves');
-  const read = useAction(api.projectSourceReview.read);
+  const read = useSourceReview();
   const client = useConvex();
   const [index, setIndex] = useState<Index | null>(null);
   const [content, setContent] = useState<File | null>(null);

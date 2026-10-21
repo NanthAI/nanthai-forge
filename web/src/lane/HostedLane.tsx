@@ -1,3 +1,4 @@
+import { useSourceReview } from '../use-source-review';
 import { useGenerationFreshness } from '../ui/generation-freshness';
 import { usePageCritical } from '../ui/page-critical';
 import { age, checkStatus } from '../ui/status';
@@ -15,7 +16,7 @@ import { routeUrlState } from '../shell/location';
 import { useOwnerLifecycle, type LifecycleParts } from './OwnerLifecycle';
 import { hostedViewHref } from '../views/links';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { useAction, useConvex, useMutation, useQuery } from 'convex/react';
+import { useConvex, useMutation, useQuery } from 'convex/react';
 import { BriefSourceContext, hostedBriefs, laneBrief } from '../cockpit/brief';
 import { CopyPrompt } from '../cockpit/CopyPrompt';
 import { api } from '../../../convex/_generated/api';
@@ -348,7 +349,7 @@ export function HostedLane({
   back?: ReactNode;
 }) {
   const now = useNow();
-  const readSource = useAction(api.projectSourceReview.read);
+  const readSource = useSourceReview();
   const readSaveFiles = useCallback<SaveFiles>(
     async save => {
       const result = JSON.parse(

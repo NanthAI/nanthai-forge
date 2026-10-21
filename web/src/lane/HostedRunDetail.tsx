@@ -1,7 +1,7 @@
+import { readBrowserLog } from '../browser-log';
 // SPDX-License-Identifier: Apache-2.0
 import { useCallback } from 'react';
-import { useAction } from 'convex/react';
-import { api } from '../../../convex/_generated/api';
+import { useConvex } from 'convex/react';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { WorkIndexWorkspace } from '../hosted-work-index';
 import { useWorkRecord } from '../hosted-work-index';
@@ -23,11 +23,11 @@ export function HostedRunDetail({
   const linkedRun = linked?.viewId === run.viewId && linked?.head === run.head ? linked : null;
   const selected = linkedRun ?? run;
   const detail = useWorkRecord<CheckRun>(projectId, workspace, 'runs', selected.id);
-  const log = useAction(api.projectViewActions.log);
+  const client = useConvex();
   const read = useCallback(
     async (stream: 'stdout' | 'stderr', offset: number) =>
       JSON.parse(
-        await log({
+        await readBrowserLog(client, {
           projectId,
           generationId: workspace.generationId as Id<'projectWorkGenerations'>,
           runId: selected.id,
@@ -35,7 +35,7 @@ export function HostedRunDetail({
           offset,
         }),
       ) as LogPage,
-    [log, projectId, workspace.generationId, selected.id],
+    [client, projectId, workspace.generationId, selected.id],
   );
   return (
     <RunDetail

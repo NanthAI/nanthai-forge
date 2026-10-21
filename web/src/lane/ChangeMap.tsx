@@ -1,9 +1,9 @@
+import { readBrowserSource } from '../browser-source';
 import { useReadRetry } from '../ui/read-retry';
 import { ErrorToast } from '../ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState, useRef } from 'react';
 import { useConvex } from 'convex/react';
-import { api as hosted } from '../../../convex/_generated/api';
 import type { ChangeMapData } from '../../../src/change-map';
 import { hostedError } from '../snapshot';
 import { createPortal } from 'react-dom';
@@ -29,7 +29,7 @@ export default function ChangeMap(props: Props) {
       read={async (base, head, _id, map) => {
         let raw: string;
         try {
-          raw = await client.action(hosted.projectSourceReview.read, {
+          raw = await readBrowserSource(client, {
             projectId: props.source.projectId!,
             backupId: props.source.backupId!,
             base,
@@ -205,7 +205,7 @@ function MapDiff({ source, node }: { source: MapSource; node: ChangeMapData['nod
       node={node}
       load={async () => {
         const value = JSON.parse(
-          await client.action(hosted.projectSourceReview.read, {
+          await readBrowserSource(client, {
             projectId: source.projectId!,
             backupId: source.backupId!,
             base: source.base,

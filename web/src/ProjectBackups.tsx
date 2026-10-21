@@ -1,3 +1,4 @@
+import { downloadObjectArchive } from './object-archive';
 import { countLabel } from './ui/count';
 import { ErrorToast } from './ui/Toast';
 import { projectIdentity, routeSearch, routeUrlState } from './shell/location';
@@ -93,7 +94,12 @@ function History({
                 <div className="import-actions">
                   {backup.status === 'stored' ? (
                     backup.transport === 'objects' ? (
-                      <ExchangeHandoff projectId={projectId} backupId={backup.id} transport="objects" />
+                      <>
+                        <ExchangeHandoff projectId={projectId} backupId={backup.id} transport="objects" />
+                        <button disabled={busy} onClick={() => operate(backup, 'download')}>
+                          Download source and Work
+                        </button>
+                      </>
                     ) : (
                       <button disabled={busy} onClick={() => operate(backup, 'download')}>
                         Download source and Work
@@ -307,16 +313,19 @@ export default function ProjectBackups({ explore }: { explore?: () => void }) {
         );
         return;
       }
-      const { blob, filename } = await snapshotDownload(async offset => ({
-        ...(await client.action(api.projectBackupActions.downloadPart, {
-          id: backup.id,
-          offset,
-          digest: backup.digest,
-        })),
-        contentType: 'application/gzip',
-        repository: backup.name,
-        head: backup.preview.head,
-      }));
+      const { blob, filename } =
+        backup.transport === 'objects'
+          ? await downloadObjectArchive(client, backup.projectId, backup.id)
+          : await snapshotDownload(async offset => ({
+              ...(await client.action(api.projectBackupActions.downloadPart, {
+                id: backup.id,
+                offset,
+                digest: backup.digest,
+              })),
+              contentType: 'application/gzip',
+              repository: backup.name,
+              head: backup.preview.head,
+            }));
       const url = URL.createObjectURL(blob),
         link = document.createElement('a');
       link.href = url;
@@ -325,7 +334,11 @@ export default function ProjectBackups({ explore }: { explore?: () => void }) {
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      setMessage(`Downloaded ${filename}; SHA-256 matches the original stored archive.`);
+      setMessage(
+        backup.transport === 'objects'
+          ? `Downloaded ${filename}; all member bytes match their SHA-256 pins. This is a new archive container.`
+          : `Downloaded ${filename}; SHA-256 matches the original stored archive.`,
+      );
     } catch (e) {
       setError(hostedError(e));
     } finally {

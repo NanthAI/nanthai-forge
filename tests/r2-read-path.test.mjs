@@ -247,14 +247,14 @@ test('a corrupt object is rejected with BLOB_DIGEST_MISMATCH and never written t
     code('BLOB_DIGEST_MISMATCH'),
   );
   assert.throws(() => readFileSync(join(dir, 'x')), /ENOENT/);
-  // The server-side reader (publication and views) verifies too.
-  await assert.rejects(
-    actions.downloadBatch._handler(s.ctx, {
-      projectId: 'project',
-      digests: [pinOf('pristine bytes').digest],
-    }),
-    code('BLOB_DIGEST_MISMATCH'),
-  );
+  // Public download actions return metadata only, even for a corrupt R2 object.
+  const before = fake.requests.length;
+  const redirected = await actions.downloadBatch._handler(s.ctx, {
+    projectId: 'project',
+    digests: [pinOf('pristine bytes').digest],
+  });
+  assert.deepEqual(redirected, [{ direct: true, ...pinOf('pristine bytes') }]);
+  assert.equal(fake.requests.length, before);
   fake.corrupt.clear();
   assert.equal((await reader.downloadBatch(pins(['pristine bytes'])))[0].toString(), 'pristine bytes');
 });
@@ -270,7 +270,7 @@ test('the fake serves Range reads with 206 and rejects an unsatisfiable range', 
   assert.equal((await fetch(url, { headers: { Range: 'bytes=40-' } })).status, 416);
 });
 
-test('committed r2 rows stay readable with FORGE_BLOBS unset, server side and from the CLI', async t => {
+test('committed r2 rows stay readable with FORGE_BLOBS unset, directly from the CLI', async t => {
   const { s } = await setup(t),
     writer = client(s);
   await writer.uploadBatch(content(['stays readable']));
@@ -283,18 +283,18 @@ test('committed r2 rows stay readable with FORGE_BLOBS unset, server side and fr
     digests: [pinOf('stays readable').digest],
   });
   assert.equal(rowsNow[0].location, 'r2');
-  // The Convex-side reader (publication, views) still serves it through a signed GET.
+  // Public endpoints redirect to direct reads instead of proxying file bytes.
   const served = await actions.downloadBatch._handler(s.ctx, {
     projectId: 'project',
     digests: [pinOf('stays readable').digest],
   });
-  assert.equal(Buffer.from(served[0].data).toString(), 'stays readable');
+  assert.deepEqual(served, [{ direct: true, ...pinOf('stays readable') }]);
   const part = await actions.downloadPart._handler(s.ctx, {
     projectId: 'project',
     digest: pinOf('stays readable').digest,
     offset: 0,
   });
-  assert.equal(Buffer.from(part.data).toString(), 'stays readable');
+  assert.deepEqual(part, { direct: true, ...pinOf('stays readable') });
 });
 
 test('pending r2 rows are not readable until committed', async t => {

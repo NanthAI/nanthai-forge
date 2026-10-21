@@ -120,7 +120,8 @@ test('Code labels and activity follow file selection; work-map counts use singul
     }
     // A saved Lane head in the URL keeps the same frame; only the Source picker changes.
     await page.setViewportSize({ width: 1500, height: 1000 });
-    await page.goto(`${base}?head=${'b'.repeat(64)}&sourceLane=exports&file=src/export.ts#L1`);
+    const heads = await page.evaluate(() => window.__sourceHeads);
+    await page.goto(`${base}?head=${heads.exports}&sourceLane=exports&file=src/export.ts#L1`);
     const picker = page.getByRole('button', { name: 'Source: Export filenames' });
     await picker.waitFor();
     assert.equal(await page.locator('.hosted-code .sidebar').count(), 1);
@@ -143,10 +144,10 @@ test('Code labels and activity follow file selection; work-map counts use singul
     await menu.getByPlaceholder('Paste a hash').fill('zz');
     await menu.getByPlaceholder('Paste a hash').press('Enter');
     await page.getByText('No save matches that hash.').waitFor();
-    await menu.getByPlaceholder('Paste a hash').fill('cccccccc');
+    await menu.getByPlaceholder('Paste a hash').fill(heads.docs.slice(0, 8));
     await menu.getByPlaceholder('Paste a hash').press('Enter');
     await page.getByRole('button', { name: 'Source: Explain exports' }).waitFor();
-    assert.equal(new URL(page.url()).searchParams.get('head'), 'c'.repeat(64));
+    assert.equal(new URL(page.url()).searchParams.get('head'), heads.docs);
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

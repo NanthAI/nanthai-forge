@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Synthetic data through the real hosted project tree; no network or credentials.
+import { browserSource } from './hosted-tree/browser-source.mjs';
 import { createRoot } from 'react-dom/client';
 const PROJECT='project-under-test';
 (globalThis as any).__qaErrors=[];
@@ -66,8 +67,27 @@ Object.assign(tree.pages, {
   'projectCoordination:sessions':()=>sessions,
   'projectCoordination:recent':()=>[oldMessage],
 });
-const paths=['README.md','src/index.ts','src/navigation.ts','web/src/App.tsx'].map(path=>({path,status:'unchanged',after:{blob:'b'.repeat(64),mode:33188}}));
-tree.actions['projectSourceReview:read']=(args:{file?:string})=>JSON.stringify(args.file?{available:true,file:paths.find(path=>path.path===args.file),after:{kind:'text',text:'export const project = "Forge";\n',line:1,offset:0,nextOffset:null}}:{available:true,paths});
+const sourceFiles = Object.fromEntries(['README.md','src/index.ts','src/navigation.ts','web/src/App.tsx']
+  .map(path => [path, 'export const project = "Forge";\n']));
+const sourceHeads = new Set<string>([workspace.sourceHead]);
+const collectHeads = (value: any, key = '') => {
+  if (typeof value === 'string' && /^(head|base|parent|sourceHead|nativeHead)$/.test(key) && /^[a-f0-9]{64}$/.test(value)) sourceHeads.add(value);
+  else if (Array.isArray(value)) value.forEach(item => collectHeads(item));
+  else if (value && typeof value === 'object') Object.entries(value).forEach(([key, value]) => collectHeads(value, key));
+};
+collectHeads(workspace); collectHeads(project); collectHeads(checkpoints);
+for (const rows of Object.values(collections)) for (const row of rows) collectHeads(JSON.parse(row.value));
+const source = await browserSource(Object.fromEntries([...sourceHeads].map(head => [head, sourceFiles])));
+const remapHeads = (value: any): any => typeof value === 'string' ? source.heads[value] ?? value
+  : Array.isArray(value) ? value.map(remapHeads)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, value]) => [key, remapHeads(value)])) : value;
+Object.assign(workspace, remapHeads(workspace)); Object.assign(project, remapHeads(project));
+for (const checkpoint of checkpoints) Object.assign(checkpoint, remapHeads(checkpoint));
+for (const rows of Object.values(collections)) for (const row of rows) {
+  const value = JSON.stringify(remapHeads(JSON.parse(row.value)));
+  Object.assign(row, remapHeads({ ...row, value: null }), { value });
+}
+tree.mutations = source.mutations;
 tree.actions['projectPeopleActions:labels']=()=>[];
 (globalThis as any).__forgeTree=tree;
 const params=new URLSearchParams(location.search);

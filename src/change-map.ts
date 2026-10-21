@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { codeImports } from './code-imports.js';
 import type { ReviewPath } from './native-source-review.js';
-import { contextualHunks } from './review-hunks.js';
+import { computeHunks } from './review-hunks-core.js';
 
 export type ChangeMapNode = {
   id: string;
@@ -23,7 +23,7 @@ export async function readChangeMap(
   base: string,
   head: string,
   paths: ReviewPath[],
-  read: (ids: string[]) => Promise<Buffer[]>,
+  read: (ids: string[]) => Promise<Uint8Array[]>,
 ): Promise<ChangeMapData> {
   const touched = new Set(paths.filter(p => p.status !== 'unchanged').map(p => p.path));
   if (!touched.size) return { base, head, nodes: [], edges: [] };
@@ -50,13 +50,17 @@ export async function readChangeMap(
       if (/\.[cm]?[jt]sx?$/.test(file.path))
         for (const content of new Set([a, b]))
           if (content)
-            for (const edge of codeImports(file.path, content.toString('utf8'), names))
+            for (const edge of codeImports(
+              file.path,
+              new TextDecoder('utf-8', { ignoreBOM: true }).decode(content),
+              names,
+            ))
               if (touched.has(edge.from) || touched.has(edge.to)) edges.set(JSON.stringify(edge), edge);
       let add = 0,
         del = 0,
         approximate = false;
       if (touched.has(file.path)) {
-        const comparison = contextualHunks(a ?? Buffer.alloc(0), b ?? Buffer.alloc(0), 0);
+        const comparison = computeHunks(a ?? new Uint8Array(), b ?? new Uint8Array(), 0);
         approximate = comparison.truncated;
         for (const hunk of comparison.hunks)
           for (const line of hunk.lines) {

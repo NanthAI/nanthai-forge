@@ -16,7 +16,7 @@ Principle: R2 holds every blob. No database function receives or returns file by
 - **Integrity, three layers.** (1) The signed PUT is create-only (`If-None-Match: *`) and carries a sha256 checksum that R2 enforces. (2) A commit step checks each new object with a HEAD request. (3) Every reader verifies the sha256 of what it downloads, as Git does, so a corrupt upload can only damage a project the uploader could already write to.
 - **Upload.** The client asks which objects are missing, asks for signed PUT URLs for up to 100 at a time, uploads directly, then commits the batch. About 3 database calls per 100 objects instead of 2 to 3 per object.
 - **Download.** One call returns signed GET URLs for up to 100 keys after a membership check. Ranged reads use HTTP `Range` on the same URL.
-- **Browser.** The bucket gets a CORS rule for the web origin. The code view and diff fetch blobs directly, verify sha256 with `crypto.subtle` and compute hunks client-side.
+- **Browser.** The bucket gets a CORS rule for the web origin. The code view, diff and object archive download fetch blobs directly, verify sha256 with `crypto.subtle` and compute hunks client-side.
 - **Access control.** Private projects: the bucket is private, and the only way to obtain bytes is a URL signed after a current access check. Revocation applies immediately to new URLs; issued URLs live at most 5 minutes (GET) or 15 minutes (PUT). Public projects may be signed without sign-in, limited to 100 keys per call plus a per-project anonymous budget. The signing secret is a bucket-scoped token held only as a server environment variable.
 - **Retention.** Objects are never overwritten. Project purge lists and deletes a prefix (deletes are free). Prepared-but-uncommitted uploads are swept after 24 hours. Optional later: a weekly copy to a second bucket and a bucket lock.
 - **Moving byte processing.** Diffstats, views and tree derivation move to the CLI (it already holds the bytes and sends derived data); publication validation becomes database lookups over a bounded manifest the CLI supplies; source-return cursors become database rows; the web code view runs in the browser; GitHub-import artifacts are built by a runner or the CLI. The trust shift: derived display data is client-supplied, so a malicious pusher can mislabel only their own project's display data. Authority (who may land, main heads) stays server-side. Current pushes require owner display protocol 3; R2 opt-in controls storage placement, independently of display derivation.
@@ -57,7 +57,10 @@ Reads of committed R2 rows work end to end, so a push to an opted-in project now
 - Committed rows stay readable when `FORGE_BLOBS` is unset (the rollback rule), as long as the R2 settings are configured. A digest that needs signing with missing settings fails with `R2_NOT_CONFIGURED`; Convex-only projects never need the settings.
 - Public projects sign without sign-in, at most 100 digests per call. TODO(owner): there is no anonymous budget counter yet. Adding one is a user-facing limit and needs owner approval.
 - CLI and agent readers (`src/exchange-r2-read.ts`, used by pull, checkout, landing and agent reads through the exchange client) retain signed URLs only in process memory, per client, project and digest. They reuse a URL until 60 seconds before its signed expiry, then ask `signDownloads` only for uncached digests (at most 100 per call). URLs are never written to disk or logs. Verified local byte-cache hits skip signing and GETs while retaining current project-binding checks, including when writing those bytes to a file. Other reads use 8 parallel GETs, retry 5xx, 429 and network errors with backoff, discard a cached URL on 403, sign again once and then fail with `EXCHANGE_DOWNLOAD_DENIED` if the replacement is refused. Every download verifies size and sha256 before the bytes are used or written; a mismatch is `BLOB_DIGEST_MISMATCH`. Digests that are not R2 rows fall through to the old download actions and are not cached as signed URLs, so Convex-only fetches still ask `signDownloads`.
-- Browser: `web/src/verified-blob.ts` (`verifiedBytes`) checks sha256 with `crypto.subtle`. The code view and diff do not use R2 yet (R4).
+- Browser: Code (including exact State/raw), Lane/Candidate review, change maps and search use `web/src/browser-source.ts`. `projectObjectDownloads:source` returns exact checkpoint and disposable source pins, never file bytes; an absent pin index falls back to reading the same immutable manifest in the browser. `describe` returns project-authorized location metadata (R2, Convex URL or recipe), in pages of 100. `src/blob-download.ts` batches R2 signing at 100 and GETs at eight, calls `verifiedBytes` before exposing bytes, and refreshes once on 403 or a CORS-masked network failure. Convex rows remain readable directly through their storage URLs. Private access is rechecked before and after reads, even on byte-cache hits. Public anonymous reads use the same source/describe/sign access boundary. No anonymous budget number has been added; its owner-approval TODO remains.
+- Browser bytes are cached in memory per client/project, by sha256, for 60 seconds with a 16 MiB cache budget. This is an internal cache budget, not a content limit: larger files remain readable. Review panels re-enter the reader on each file selection rather than retaining independent permanent content caches. Expiration is lazy, no timer or polling runs, and signed URLs are fetched only on demand and never persisted. Recipe pages and full leaves are digest-verified; leaves use Range GETs, complete reconstructions also verify the whole-file hash. Selected ranges verify complete touched leaves before slicing.
+- `projectExchangeActions:downloadBatch` and `downloadPart` return `{direct:true,digest,size}` for R2 or recipe rows, with no byte read. Updated CLI readers follow that hint through the same direct object reader, including mixed recipes. The public `projectSourceReview:read` compatibility endpoint now returns a checkpoint plan only; server-only anchor validation retains `readSourceReview`. Retained R2/recipe check logs return a pin and are verified, redacted and paged in the browser. Convex-only logs retain the old server path.
+- Stored-checkpoint history offers an object-backed source-and-Work archive download through `web/src/object-archive.ts`. It reconstructs exact manifest/member bytes (including record-based Work) and makes a new gzip container in the browser. The resulting container digest is distinct from the original source receipt. Matching source/journal handoff controls retain their existing pull request and journal identities. Legacy archive/proposal downloads remain in Convex storage and retain their existing download and whole-archive checksum paths.
 
 Server-side readers that still need bytes inside Convex fetch a signed GET inside the action and verify it (`BLOB_DIGEST_MISMATCH`, or `R2_OBJECT_UNAVAILABLE` when the object cannot be read):
 
@@ -66,8 +69,49 @@ Server-side readers that still need bytes inside Convex fetch a signed GET insid
 | `projectObjects:resolve` (every Convex-side reader) | Serves committed R2 rows; a pending R2 row is `INVALID_WORK_BACKUP`. |
 | Checkpoint publication, migration, hosted main, closure validation, recipe binding | Treat a committed R2 row as stored, with no byte read. |
 | Publication parsing (root manifest, `work.json`, States), derived views, diffstats, recipe ranges | Fetch via signed GET inside the action. R3 removes these byte reads. |
-| `downloadBatch`, and `downloadPart` of a raw R2 object | Same fetch, for callers that do not sign. |
-| Large files (recipes) | The CLI still reads them through `downloadPart`, so leaf bytes cross Convex until R3 or R4 moves recipe reading to the client. |
+| Public `downloadBatch` / `downloadPart` | Metadata-only direct-read hints for R2/recipe rows; Convex-stored raw rows retain byte responses. |
+| Large files (recipes) | Browser and CLI resolve recipes client-side, fetching verified R2 leaves directly with Range GETs. |
+
+## Browser CORS handoff (lead only; not applied by local tests)
+
+The exact Cloudflare API rule array is:
+
+```json
+[
+  {
+    "allowed": {
+      "origins": ["https://nanthai-forge-dev.netlify.app", "http://localhost:5173"],
+      "methods": ["GET", "HEAD", "PUT"],
+      "headers": ["Range", "Content-Type", "If-None-Match", "x-amz-checksum-sha256"]
+    },
+    "exposeHeaders": ["Content-Range", "Content-Length", "ETag", "x-amz-checksum-sha256"],
+    "maxAgeSeconds": 3600
+  }
+]
+```
+
+The dev site origin comes from the `nanthai-forge-dev` site in
+[development](development.md); localhost is Vite's default port, 5173. Use that
+exact localhost origin for qualification. Range is used for leaves; create-only
+browser PUTs send If-None-Match and x-amz-checksum-sha256. Content-Length is set
+by the browser rather than JavaScript. Content-Range must be exposed so the reader
+can validate a 206 response. No wildcard origin or public bucket is required.
+
+With the lead's existing cf CLI profile and bucket selection, apply the rule array:
+
+```sh
+cf r2 buckets cors update "$R2_BUCKET" --rules '[{"allowed":{"origins":["https://nanthai-forge-dev.netlify.app","http://localhost:5173"],"methods":["GET","HEAD","PUT"],"headers":["Range","Content-Type","If-None-Match","x-amz-checksum-sha256"]},"exposeHeaders":["Content-Range","Content-Length","ETag","x-amz-checksum-sha256"],"maxAgeSeconds":3600}]'
+cf r2 buckets cors get "$R2_BUCKET"
+```
+
+These are lead-only account commands. This Lane does not run them. The update
+replaces the bucket's rule list; the lead should retain its current list to undo
+that change. Rule shape and flags follow the cf CLI schema and
+[Cloudflare CORS documentation](https://developers.cloudflare.com/r2/buckets/cors/).
+Expired URLs can omit CORS headers, so the browser also refreshes once after a
+network error; a second failure remains an error. Real-bucket propagation and
+GET/HEAD/PUT from the dev origin still need qualification after applying CORS.
+Local fake-origin tests do not establish that the real bucket is configured.
 
 ## R3 owner-derived publication and source return (done)
 
