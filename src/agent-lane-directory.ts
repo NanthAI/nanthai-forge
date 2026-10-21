@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lstatSync } from 'node:fs';
 import { NativeSource } from './native-source.js';
-import type { WorkStore } from './work-store.js';
+import { WorkStore } from './work-store.js';
 
 const present = (path: string) => {
   try {
@@ -21,8 +21,10 @@ export function ensureLaneDirectory(
   if (!store.native) return false;
   const path = store.path(laneId);
   if (present(path)) return false;
-  return store.locked(() => {
-    const lane = store.select('lanes', laneId, 'id', true);
+  return store.laneLocked(laneId, () => {
+    // Restoration changes the live workspace, so use the current head even
+    // when the caller is observing an older immutable Work revision.
+    const lane = new WorkStore(store.root).select('lanes', laneId, 'id', true);
     if (!lane || lane.state === 'creating' || present(path)) return false;
     const warnings = new NativeSource(store.root).materialize(lane.head, path);
     onWarnings?.(warnings);

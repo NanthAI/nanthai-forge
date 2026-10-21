@@ -66,10 +66,10 @@ function readReview(
 ) {
   const selection = 'kind' in command ? command : undefined,
     states = 'from' in command ? command : undefined;
-  return store.locked(() => {
-    const data = store.load(),
-      lane = selection?.kind === 'lane' ? data.lanes.find(item => item.id === selection.id) : undefined;
-    const view = selection?.kind === 'view' ? data.views.find(item => item.id === selection.id) : undefined;
+  return store.observing(() => {
+    const revision = store.revision(),
+      lane = selection?.kind === 'lane' ? store.select('lanes', selection.id) : undefined;
+    const view = selection?.kind === 'view' ? store.select('views', selection.id) : undefined;
     invariant(states || lane || view, 'NOT_FOUND', 'Select an existing Lane or Candidate.');
     const base = states?.from ?? (lane ?? view)!.base,
       head = states?.to ?? (lane ?? view)!.head;
@@ -92,7 +92,7 @@ function readReview(
     };
     if (view?.status === 'conflict')
       return {
-        revision: data.revision,
+        revision,
         result: {
           ...pins,
           total: 0,
@@ -323,7 +323,7 @@ function readReview(
     const output: object[] = [];
     let truncated = false;
     const envelope = (rows: object[], cut: boolean) => ({
-      revision: data.revision,
+      revision,
       result: {
         ...pins,
         reviewTree,

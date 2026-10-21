@@ -11,6 +11,9 @@ const quote = (value: string) =>
 
 /** Preview the scoped selector on saved bytes, without running repository code or taking a lock. */
 export async function agentLaneTests(store: WorkStore, laneId: string) {
+  return store.observing(() => readLaneTests(store, laneId));
+}
+async function readLaneTests(store: WorkStore, laneId: string) {
   const tx = store.readRecords(),
     data = tx ? tx.data() : store.load(),
     lane = tx ? tx.fields('lanes', laneId)?.record : data.lanes.find(item => item.id === laneId);

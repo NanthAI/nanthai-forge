@@ -329,13 +329,8 @@ export class WorkRecordTransaction {
     const position = this.positions(collection, id)[0];
     return position === undefined ? undefined : this.hash(collection, position);
   }
-  /** Publish sync source fields while preserving concurrent metadata writers. */
-  publishLane(
-    candidate: WorkRecordTransaction,
-    laneId: string,
-    expectedVersion: string,
-    restore?: () => void,
-  ) {
+  /** Stage Lane source fields while preserving concurrent metadata writers. */
+  stageLane(candidate: WorkRecordTransaction, laneId: string, expectedVersion: string) {
     const before = this.validate('lanes', readRecordValue(this.directory, expectedVersion, true)),
       current = this.find('lanes', laneId)?.record,
       lane = candidate.find('lanes', laneId)!.record;
@@ -355,9 +350,14 @@ export class WorkRecordTransaction {
       'LANE_STALE',
       'Lane source changed; original source remains available.',
     );
-    for (const operation of lane.checkpoints
-      .map(item => item.operation?.id)
-      .filter((id): id is string => !!id)) {
+    const operations = [
+      ...lane.checkpoints.map(item => item.operation?.id),
+      lane.pending?.operation?.id,
+      lane.pendingSync?.operation?.id,
+      lane.pendingMerge?.operation.id,
+      lane.pendingUndo?.operation.id,
+    ].filter((id): id is string => !!id);
+    for (const operation of new Set(operations)) {
       const owners = this.positions('lanes', operation, 'agentOperation');
       invariant(
         !this.positions('intents', operation, 'agentOperation').length &&
@@ -366,15 +366,16 @@ export class WorkRecordTransaction {
         'This operation belongs to another retained action.',
       );
     }
-    restore?.();
+    this.setSchema(candidate.manifest.fields.schema as WorkData['schema']);
     this.replace('lanes', this.positions('lanes', laneId)[0]!, {
       ...current,
       head: lane.head,
       pendingMerge: lane.pendingMerge,
+      pending: lane.pending,
+      pendingSync: lane.pendingSync,
+      pendingUndo: lane.pendingUndo,
       checkpoints: lane.checkpoints,
     });
-    this.setSchema(candidate.manifest.fields.schema as WorkData['schema']);
-    return this.commit();
   }
   setSchema(schema: WorkData['schema']) {
     this.manifest.fields.schema = Math.max(this.manifest.fields.schema as number, schema);

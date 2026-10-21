@@ -11,6 +11,11 @@ import type { WorkStore } from './work-store.js';
 export async function agentBrief(store: WorkStore, input: unknown, liveMcp = false): Promise<Briefing> {
   const parsed = briefInputSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Choose a briefing situation and linked records.');
+  return store.observing(() => readBrief(store, parsed.data, liveMcp));
+}
+async function readBrief(store: WorkStore, input: unknown, liveMcp: boolean): Promise<Briefing> {
+  const parsed = briefInputSchema.safeParse(input);
+  invariant(parsed.success, 'BAD_ARGUMENT', 'Choose a briefing situation and linked records.');
   const deployment = process.env.FORGE_DEPLOYMENT,
     projectId = process.env.FORGE_PROJECT_ID;
   if (!deployment && !projectId) return localBrief(store, input, liveMcp);

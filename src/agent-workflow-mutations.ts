@@ -1,3 +1,5 @@
+import { workLockWaitMs } from './work-lock.js';
+import { preparedRecordCommit } from './work-prepared-commit.js';
 // SPDX-License-Identifier: Apache-2.0
 import { applyPlanningMetadata } from './work-planning-state.js';
 import { finishChild } from './agent-finish-journal.js';
@@ -58,200 +60,196 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
   return store.laneLocked(
     command.operationId,
     () => {
-      const reserved = store.locked(
-        () => {
-          if (!store.native) executionGuard(store.root);
-          let tx = store.records();
-          const data = tx.data(),
-            hash = request(command),
-            originalLane = tx.find('lanes', command.operationId, 'agentOperation')?.record,
-            originalPosition = tx.positions('intents', command.operationId, 'agentOperation')[0];
-          const original =
-            originalPosition === undefined
-              ? originalLane
-                ? tx.fields('intents', originalLane.intentId)?.record
-                : undefined
-              : tx.fieldsAt('intents', originalPosition).record;
-          let intent = original,
-            lane: Lane;
-          if (original) {
-            invariant(
-              (originalLane?.agentStart ?? original.agentStart)?.request === hash,
-              'WORK_OPERATION_CHANGED',
-              'This start operation has different inputs. Its original Intent and Lane are retained.',
-            );
-            const retained = originalLane ?? tx.fields('lanes', original.agentStart!.laneId)?.record;
-            invariant(
-              !retained || retained.intentId === original.id,
-              'INVALID_WORK_STORE',
-              'Original start Lane differs.',
-            );
-            invariant(retained, 'INVALID_WORK_STORE', 'Original start Lane is unavailable.');
-            lane = retained;
-          } else {
-            invariant(
-              !sameOperation(tx, command.operationId),
-              'WORK_OPERATION_CHANGED',
-              'This operation belongs to another retained action.',
-            );
-            data.channelMoves =
-              command.channel === null ? [] : tx.all('channelMoves', command.channel ?? 'main', 'channel');
-            const channels = store.native ? nativeChannels(data) : channelStatus(store, data);
-            const channel =
-              command.channel === null
-                ? undefined
-                : channels.find(item => item.name === (command.channel ?? 'main'));
-            invariant(
-              command.channel === null ||
-                (!channel && command.channel === undefined) ||
-                (channel?.head && channel.moveId && !channel.diagnostic),
-              'CHANNEL_CHANGED',
-              'Selected Channel has no intact acceptance receipt. Reconcile that Channel, or explicitly select channel:null to start from the workspace source.',
-            );
-            const base =
-              channel?.head && channel.moveId && !channel.diagnostic
-                ? channel.head
-                : store.native
-                  ? data.nativeHead!
-                  : headAt(store.root);
+      const reserved = preparedRecordCommit(store, 'start reservation', tx => {
+        if (!store.native) executionGuard(store.root);
+        const data = tx.data(),
+          hash = request(command),
+          originalLane = tx.find('lanes', command.operationId, 'agentOperation')?.record,
+          originalPosition = tx.positions('intents', command.operationId, 'agentOperation')[0];
+        const original =
+          originalPosition === undefined
+            ? originalLane
+              ? tx.fields('intents', originalLane.intentId)?.record
+              : undefined
+            : tx.fieldsAt('intents', originalPosition).record;
+        let intent = original,
+          lane: Lane;
+        if (original) {
+          invariant(
+            (originalLane?.agentStart ?? original.agentStart)?.request === hash,
+            'WORK_OPERATION_CHANGED',
+            'This start operation has different inputs. Its original Intent and Lane are retained.',
+          );
+          const retained = originalLane ?? tx.fields('lanes', original.agentStart!.laneId)?.record;
+          invariant(
+            !retained || retained.intentId === original.id,
+            'INVALID_WORK_STORE',
+            'Original start Lane differs.',
+          );
+          invariant(retained, 'INVALID_WORK_STORE', 'Original start Lane is unavailable.');
+          lane = retained;
+        } else {
+          invariant(
+            !sameOperation(tx, command.operationId),
+            'WORK_OPERATION_CHANGED',
+            'This operation belongs to another retained action.',
+          );
+          data.channelMoves =
+            command.channel === null ? [] : tx.all('channelMoves', command.channel ?? 'main', 'channel');
+          const channels = store.native ? nativeChannels(data) : channelStatus(store, data);
+          const channel =
+            command.channel === null
+              ? undefined
+              : channels.find(item => item.name === (command.channel ?? 'main'));
+          invariant(
+            command.channel === null ||
+              (!channel && command.channel === undefined) ||
+              (channel?.head && channel.moveId && !channel.diagnostic),
+            'CHANNEL_CHANGED',
+            'Selected Channel has no intact acceptance receipt. Reconcile that Channel, or explicitly select channel:null to start from the workspace source.',
+          );
+          const base =
+            channel?.head && channel.moveId && !channel.diagnostic
+              ? channel.head
+              : store.native
+                ? data.nativeHead!
+                : headAt(store.root);
 
-            const at = new Date().toISOString(),
-              laneId = randomUUID();
-            const alias = command.intentId
-              ? (tx.find('intentAliases' as never, command.intentId, 'aliasId')?.record as unknown as
-                  { intentId: string } | undefined)
-              : undefined;
-            const selectedId = alias?.intentId ?? command.intentId;
-            let existing = selectedId ? tx.fields('intents', selectedId)?.record : undefined;
-            const planning =
-              !existing && selectedId ? tx.find('planningItems', selectedId, 'id', true)?.record : undefined;
-            if (planning?.kind === 'issue') {
-              existing = applyIntentMetadata(
-                data,
-                { action: 'intent', outcome: planning.title, constraints: planning.body, base },
-                { id: planning.id, at },
-              );
-              tx.append('intents', existing);
-              data.planningItems.push(planning);
-              if (planning.initiativeId) {
-                const group = tx.find('planningItems', planning.initiativeId, 'id', true)?.record;
-                if (group) data.planningItems.push(group);
-              }
-              const version = applyPlanningMetadata(
-                data,
-                {
-                  action: 'put-planning-item',
-                  operationId: finishChild(command.operationId, 'planning-start'),
-                  itemId: planning.id,
-                  expectedVersion: planning.version,
-                  kind: planning.kind,
-                  title: planning.title,
-                  body: planning.body,
-                  status: 'open',
-                  intentIds: [existing.id],
-                  ...(planning.initiativeId ? { initiativeId: planning.initiativeId } : {}),
-                },
-                at,
-              );
-              tx.append('planningItems', version as typeof planning);
-            }
-            invariant(!command.intentId || existing, 'NOT_FOUND', 'Intent not found.');
-            invariant(
-              !existing || ['active', 'ready', 'proposed'].includes(existing.status),
-              'INTENT_CLOSED',
-              'Add a Lane to an open Intent.',
+          const at = new Date().toISOString(),
+            laneId = randomUUID();
+          const alias = command.intentId
+            ? (tx.find('intentAliases' as never, command.intentId, 'aliasId')?.record as unknown as
+                { intentId: string } | undefined)
+            : undefined;
+          const selectedId = alias?.intentId ?? command.intentId;
+          let existing = selectedId ? tx.fields('intents', selectedId)?.record : undefined;
+          const planning =
+            !existing && selectedId ? tx.find('planningItems', selectedId, 'id', true)?.record : undefined;
+          if (planning?.kind === 'issue') {
+            existing = applyIntentMetadata(
+              data,
+              { action: 'intent', outcome: planning.title, constraints: planning.body, base },
+              { id: planning.id, at },
             );
-            if (command.after) validateAfter(store, command.after, existing?.id);
-            intent =
-              existing ??
-              applyIntentMetadata(
-                data,
-                {
-                  action: 'intent',
-                  outcome: command.outcome,
-                  constraints: command.constraints,
-                  base,
-                  ...(channel?.head && channel.moveId && !channel.diagnostic
-                    ? {
-                        baseChannel: { name: channel.name, head: channel.head, acceptanceId: channel.moveId },
-                      }
-                    : {}),
-                },
-                { id: randomUUID(), at },
-              );
-            if (!existing) intent.agentStart = { id: command.operationId, request: hash, laneId };
-            lane = {
-              id: laneId,
-              ...(existing ? { agentStart: { id: command.operationId, request: hash } } : {}),
-              ...(command.after ? { after: command.after } : {}),
-              startedBy: localActor('agent', command.actor, command.tool),
-              startedAt: at,
-              ...(command.scope ? { scope: command.scope } : {}),
-              setup: localAgentSetup(store.root, liveMcp) as { machine: string; mcpConfigured: boolean },
-              intentId: intent.id,
-              name: command.name ?? derivedLaneName(command.outcome),
-              assignment: command.assignment,
-              target: command.target,
-              base,
-              head: base,
-              state: 'creating',
-              checkpoints: [],
-            };
-            tx.setSchema(existing || command.after ? 12 : 7);
-            if (!existing) tx.append('intents', intent);
-            // A planned schema-16 Intent's first Lane captures its exact source pin.
-            else if (!existing.base) tx.patchFields('intents', existing.id, { base });
-            if ((existing as { status?: string } | undefined)?.status === 'proposed') {
-              tx.appendField('intents', existing!.id, 'lifecycle', {
-                from: 'proposed',
-                to: 'active',
-                at,
-                actor: localActor('agent', command.actor, command.tool),
-              });
-              tx.patchFields('intents', existing!.id, { status: 'active' });
+            tx.append('intents', existing);
+            data.planningItems.push(planning);
+            if (planning.initiativeId) {
+              const group = tx.find('planningItems', planning.initiativeId, 'id', true)?.record;
+              if (group) data.planningItems.push(group);
             }
-            tx.append('lanes', lane);
-            store.commitRecords(tx);
-            tx = store.records();
+            const version = applyPlanningMetadata(
+              data,
+              {
+                action: 'put-planning-item',
+                operationId: finishChild(command.operationId, 'planning-start'),
+                itemId: planning.id,
+                expectedVersion: planning.version,
+                kind: planning.kind,
+                title: planning.title,
+                body: planning.body,
+                status: 'open',
+                intentIds: [existing.id],
+                ...(planning.initiativeId ? { initiativeId: planning.initiativeId } : {}),
+              },
+              at,
+            );
+            tx.append('planningItems', version as typeof planning);
           }
+          invariant(!command.intentId || existing, 'NOT_FOUND', 'Intent not found.');
+          invariant(
+            !existing || ['active', 'ready', 'proposed'].includes(existing.status),
+            'INTENT_CLOSED',
+            'Add a Lane to an open Intent.',
+          );
+          if (command.after) validateAfter(store, command.after, existing?.id);
+          intent =
+            existing ??
+            applyIntentMetadata(
+              data,
+              {
+                action: 'intent',
+                outcome: command.outcome,
+                constraints: command.constraints,
+                base,
+                ...(channel?.head && channel.moveId && !channel.diagnostic
+                  ? {
+                      baseChannel: { name: channel.name, head: channel.head, acceptanceId: channel.moveId },
+                    }
+                  : {}),
+              },
+              { id: randomUUID(), at },
+            );
+          if (!existing) intent.agentStart = { id: command.operationId, request: hash, laneId };
+          lane = {
+            id: laneId,
+            ...(existing ? { agentStart: { id: command.operationId, request: hash } } : {}),
+            ...(command.after ? { after: command.after } : {}),
+            startedBy: localActor('agent', command.actor, command.tool),
+            startedAt: at,
+            ...(command.scope ? { scope: command.scope } : {}),
+            setup: localAgentSetup(store.root, liveMcp) as { machine: string; mcpConfigured: boolean },
+            intentId: intent.id,
+            name: command.name ?? derivedLaneName(command.outcome),
+            assignment: command.assignment,
+            target: command.target,
+            base,
+            head: base,
+            state: 'creating',
+            checkpoints: [],
+          };
+          tx.setSchema(existing || command.after ? 12 : 7);
+          if (!existing) tx.append('intents', intent);
+          // A planned schema-16 Intent's first Lane captures its exact source pin.
+          else if (!existing.base) tx.patchFields('intents', existing.id, { base });
+          if ((existing as { status?: string } | undefined)?.status === 'proposed') {
+            tx.appendField('intents', existing!.id, 'lifecycle', {
+              from: 'proposed',
+              to: 'active',
+              at,
+              actor: localActor('agent', command.actor, command.tool),
+            });
+            tx.patchFields('intents', existing!.id, { status: 'active' });
+          }
+          tx.append('lanes', lane);
+        }
+        return () => {
+          if (!original) store.commitRecords(tx);
           return { lane, intent: intent! };
-        },
-        { operation: 'start reservation' },
-      );
+        };
+      });
       const { lane, intent } = reserved;
       const warnings = lane.state === 'creating' ? diskGuard(store.root) : [];
       return store.laneLocked(
         lane.id,
         () => {
-          if (lane.state === 'creating' && store.native) materialize(store, lane);
-          return store.locked(
-            () => {
-              const tx = store.records();
-              if (lane.state === 'creating') {
-                if (!store.native) materialize(store, lane);
-                lane.state = 'active';
-                tx.patchFields('lanes', lane.id, { state: 'active' });
+          if (lane.state === 'creating') materialize(store, lane);
+          return preparedRecordCommit(store, 'start activation', tx => {
+            const creating = lane.state === 'creating';
+            if (creating) tx.patchFields('lanes', lane.id, { state: 'active' });
+            const siblings = tx
+              .all('lanes', intent.id, 'intentId')
+              .filter(item => item.id !== lane.id)
+              .map(item => laneReceipt(item, store.path(item.id)));
+            return () => {
+              if (creating) {
                 store.commitRecords(tx);
+                lane.state = 'active';
               }
               return {
                 revision: tx.revision,
                 result: {
                   operationId: command.operationId,
-                  outcome: intent!.outcome,
-                  siblingLanes: tx
-                    .all('lanes', intent!.id, 'intentId')
-                    .filter(item => item.id !== lane.id)
-                    .map(item => laneReceipt(item, store.path(item.id))),
+                  outcome: intent.outcome,
+                  siblingLanes: siblings,
                   ...(warnings.length ? { warnings } : {}),
                   ...laneReceipt(lane, store.path(lane.id)),
                   head: lane.base,
                   currentHead: lane.head,
-                  baseChannel: intent!.baseChannel ?? null,
+                  baseChannel: intent.baseChannel ?? null,
                 },
               };
-            },
-            { operation: 'start activation' },
-          );
+            };
+          });
         },
         { operation: 'start materialization' },
       );
@@ -299,6 +297,15 @@ export function agentCheckpoint(
     () => {
       let preparation = prepareCheckpoint(store, command, options.preserveMerge);
       let refresh = false;
+      let retryEnd: number | undefined;
+      const retry = (code: string) => {
+        retryEnd ??= Date.now() + (workLockWaitMs() || 1000);
+        if (Date.now() >= retryEnd)
+          throw new ForgeError(
+            code,
+            `Checkpoint publication changed throughout lock patience. Retry original operation ${command.operationId}; existing work is preserved.`,
+          );
+      };
       for (;;) {
         if (refresh) {
           preparation = prepareCheckpoint(store, command, options.preserveMerge);
@@ -308,13 +315,19 @@ export function agentCheckpoint(
         try {
           const select = (prepared?: WorkRecordTransaction) => {
             let tx = prepared ?? store.records();
+            let version = tx.version('lanes', command.laneId);
             const hash = request(requestIdentity),
               selected = store.native ? tx.fields('lanes', command.laneId) : tx.find('lanes', command.laneId),
               lane = selected?.record;
             const save = (advance = true) => {
               tx.replace('lanes', selected!.position, lane!);
-              store.commitRecords(tx, tx.revision + (advance ? 1 : 0));
-              tx = store.records();
+              preparedRecordCommit(store, 'Git checkpoint publication', latest => {
+                latest.stageLane(tx, command.laneId, version!);
+                if (after && lane!.after === after) latest.patchFields('lanes', command.laneId, { after });
+                return () => store.commitRecords(latest, latest.revision + (advance ? 1 : 0));
+              });
+              tx = store.readRecords()!;
+              version = tx.version('lanes', command.laneId);
             };
             invariant(lane, 'NOT_FOUND', 'Lane not found.');
             const after = (requestIdentity as { after?: Lane['after'] }).after;
@@ -494,7 +507,10 @@ export function agentCheckpoint(
           };
           const selected = store.native
             ? nativeCheckpointSelection(store, select)
-            : store.locked(() => select(), { operation: 'checkpoint publication' });
+            : select(
+                store.readRecords() ??
+                  store.locked(() => store.records(), { operation: 'checkpoint migration' }),
+              );
           if (!selected) {
             refresh = true;
             continue;
@@ -504,9 +520,12 @@ export function agentCheckpoint(
           if (
             error === checkpointMetadataChanged ||
             (store.native && error instanceof ForgeError && error.code === 'SOURCE_CHANGED')
-          )
+          ) {
+            retry(error === checkpointMetadataChanged ? 'WORK_STALE' : 'SOURCE_CHANGED');
             continue;
+          }
           if (error !== checkpointPreparationChanged) throw error;
+          retry('SOURCE_CHANGED');
           refresh = true;
         }
       }

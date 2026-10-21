@@ -36,6 +36,10 @@ export const agentShowSchema = z
   .refine(input => !!input.state !== !!input.laneId, 'Select exactly one state or laneId.');
 
 export function readAgentDiff(store: WorkStore, input: z.input<typeof agentDiffSchema>) {
+  const command = agentDiffSchema.parse(input);
+  return store.observing(() => readDiff(store, command));
+}
+function readDiff(store: WorkStore, input: z.input<typeof agentDiffSchema>) {
   const { laneId, from, to, expectedHead, ...options } = agentDiffSchema.parse(input);
   if (!laneId) return readAgentStateDiff(store, { from: from!, to: to!, ...options });
   const lane = store.select('lanes', laneId);
@@ -87,7 +91,7 @@ function gitFile(store: WorkStore, head: string, path: string, force: boolean) {
 /** Read only retained source: never the Lane working copy or a symlink target. */
 export function readAgentShow(store: WorkStore, input: z.input<typeof agentShowSchema>) {
   const command = agentShowSchema.parse(input);
-  return store.locked(() => {
+  return store.observing(() => {
     const lane = command.laneId ? store.select('lanes', command.laneId) : undefined;
     invariant(!command.laneId || lane, 'NOT_FOUND', 'Lane not found.');
     const head = command.state ?? lane!.head;

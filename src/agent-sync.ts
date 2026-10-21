@@ -1,3 +1,10 @@
+import {
+  checkpointPreparationChanged,
+  prepareNativeObjects,
+  preparedCheckpointCurrent,
+} from './native-checkpoint-publication.js';
+import { workLockWaitMs } from './work-lock.js';
+import { preparedRecordCommit } from './work-prepared-commit.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,7 +23,7 @@ import { DOCS_RULE, resolveDocsComposition } from './native-docs-resolve.js';
 import { nativeChannels } from './native-work.js';
 import { readSource } from './files.js';
 import { digest } from './hash.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 import type { Lane } from './work-types.js';
@@ -119,21 +126,35 @@ export function agentSync(
   return store.laneLocked(
     command.laneId,
     () => {
-      const tx = store.locked(() => store.records(), { operation: 'sync snapshot' }),
+      const tx = store.readRecords() ?? store.locked(() => store.records(), { operation: 'sync migration' }),
         version = tx.version('lanes', command.laneId),
         hash = digest(JSON.stringify(options.identity ?? command)),
         lane = tx.fields('lanes', command.laneId)?.record;
       invariant(lane, 'NOT_FOUND', 'Lane not found.');
-      const publish = (restore?: () => void) =>
-        store.locked(
-          () => {
-            const latest = store.records();
-            const revision = latest.publishLane(tx, lane.id, version!, restore);
+      const publish = (objects = new Map<string, Buffer>()) => {
+        const end = Date.now() + (workLockWaitMs() || 1000);
+        for (;;) {
+          const prepared = prepareNativeObjects(source, objects);
+          try {
+            const revision = preparedRecordCommit(store, 'sync publication', latest => {
+              latest.stageLane(tx, lane.id, version!);
+              return () => {
+                preparedCheckpointCurrent(source, prepared);
+                return store.commitRecords(latest);
+              };
+            });
             clearSyncSelection(store.path(lane.id), command.operationId);
             return revision;
-          },
-          { operation: 'sync publication' },
-        );
+          } catch (error) {
+            if (error !== checkpointPreparationChanged) throw error;
+            if (Date.now() >= end)
+              throw new ForgeError(
+                'SOURCE_CHANGED',
+                'Prepared sync source changed before publication. Retry the original sync operation; its target and workspace are retained.',
+              );
+          }
+        }
+      };
       const source = new NativeSource(store.root),
         path = store.path(lane.id);
       const receipt = (fields: Record<string, unknown>) => ({
@@ -302,10 +323,7 @@ export function agentSync(
         });
         tx.patchFields('lanes', lane.id, { head: merged.head });
         return {
-          revision: publish(() => {
-            for (const bytes of objects.values()) source.put(bytes);
-            source.put(stateBytes);
-          }),
+          revision: publish(new Map([...objects, [merged.head, stateBytes]])),
           result: receipt({
             status: 'merged',
             ...('resolutions' in merged ? { resolutions: merged.resolutions } : {}),

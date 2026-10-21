@@ -1,6 +1,5 @@
 import { agentLaneStatus } from './agent-lane-status.js';
-import { runnerMonthCosts } from './check-cost.js';
-import { modalMonthCost } from './check-backend.js';
+import { agentCostSummary } from './agent-cost-summary.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readPolicy } from './work-autonomy.js';
 import type { WorkStore } from './work-store.js';
@@ -8,7 +7,6 @@ import type { WorkRecordTransaction, WorkCollection, WorkRecord } from './work-r
 import type { AgentAction } from './agent-workflow-schema.js';
 import type { CheckRun } from './work-types.js';
 import { checkEnvironment } from './work-run.js';
-import { recoverRecordRuns } from './work-record-runs.js';
 import { nativeChannels } from './native-work.js';
 import { channelStatus } from './work-channel.js';
 import { evidenceApplicability, runApplicability } from './work-evidence.js';
@@ -33,7 +31,7 @@ export function agentRecordStatus(
   command: Extract<AgentAction, { action: 'status' }>,
   original: WorkRecordTransaction,
 ) {
-  const tx = recoverRecordRuns(store, original),
+  const tx = original,
     data = tx.data(),
     environment = checkEnvironment();
   const lane = command.laneId ? agentLaneStatus(store, command, tx) : undefined;
@@ -85,8 +83,7 @@ export function agentRecordStatus(
     revision: tx.revision,
     result: {
       ...(lane ? { lane } : {}),
-      modalCost: modalMonthCost(positions('runs').map(position => tx.at('runs', position))),
-      checkCosts: runnerMonthCosts(positions('runs').map(position => tx.at('runs', position))),
+      ...agentCostSummary(store.root, tx),
       autonomyPolicy: readPolicy(store),
       checkRunner: { runner: 'local', ...readPolicy(store).checks },
       engine: store.native ? 'forge-native' : 'git',

@@ -14,12 +14,14 @@ import { localActor } from './work-actor.js';
 import { allRecords } from './agent-lifecycle.js';
 import { laneSummary, viewSummary } from './work-hosted-summary.js';
 import { intentHeader } from './work-hosted-index.js';
-import { NativeSource } from './native-source.js';
 import { withQueueSlot } from './landing-queue.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 import type { AgentAction } from './agent-workflow-schema.js';
-import { ForgeError } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
+import { activitySnapshot } from './agent-activity-snapshot.js';
+import { readWorkFile } from './work-records.js';
+import { workLockWaitMs } from './work-lock.js';
 
 function sessionId(binding: string, lane: string, actor: string) {
   const bytes = createHash('sha256')
@@ -46,7 +48,7 @@ const actions = new Set([
   'reopen',
   'complete-merged',
 ]);
-/** Queue under the owner lock before starting any network work. Never changes local command success. */
+/** Prepare source outside the owner lock; validate and queue before network work. */
 export function queueAgentSync(
   store: WorkStore,
   command: AgentAction | { action: 'activity'; laneId: string; actor?: string },
@@ -82,160 +84,164 @@ export function queueAgentSync(
         if (lane.intentId === command.intentId) ids.add(lane.id);
     if (command.action === 'complete-merged') for (const id of receipt?.lanes ?? []) ids.add(id);
     if (!ids.size) return undefined;
-    updateHostState(store, state => {
-      const binding = state.binding;
-
-      const queue =
-        binding && binding.autoSync !== false
-          ? (state.agentSync ??= { sequence: 0, pending: [] })
-          : undefined;
-      const revision = store.revision();
-      for (const id of ids) {
-        const lane = store.select('lanes', id);
-        if (!lane) continue;
-        const intent = store.select('intents', lane.intentId)!;
-        const name =
-          ('actor' in command ? command.actor : undefined) ??
-          process.env.FORGE_AGENT_NAME ??
-          process.env.FORGE_ACTOR ??
-          lane.owner?.actor ??
-          lane.startedBy?.name ??
-          localActor('agent').name;
-
-        const completed =
-          ['completed', 'abandoned'].includes(lane.state) ||
-          intent.status === 'abandoned' ||
-          !!acceptance?.acceptanceId;
-        const activityKind =
-          signal ??
-          (waiting
-            ? 'check queued'
-            : ['queued', 'preparing', 'running'].includes(receipt.status ?? '')
-              ? receipt.status === 'queued'
-                ? 'check queued'
-                : 'check running'
-              : command.action === 'take'
-                ? 'taken over'
-                : command.action === 'checkpoint'
-                  ? 'saved'
-                  : command.action === 'sync'
-                    ? 'updated from main'
-                    : command.action === 'start'
-                      ? 'started'
-                      : command.action === 'finish'
-                        ? acceptance?.acceptanceId
-                          ? 'accepted'
-                          : 'checked'
-                        : command.action === 'accept'
-                          ? 'accepted'
-                          : command.action === 'complete' || command.action === 'complete-merged'
-                            ? 'completed'
-                            : command.action === 'reopen'
-                              ? 'reopened'
-                              : 'checked');
-        const status = completed
-          ? 'completed'
-          : signal?.startsWith('check ') || waiting
-            ? 'working'
-            : (command.action === 'finish' && receipt.status !== 'accepted') ||
-                (!signal && ['ready', 'paused'].includes(lane.state)) ||
-                ['awaiting-review', 'waiting to land', 'waiting-for-dependency', 'conflict'].includes(
-                  receipt?.status ?? '',
-                )
-              ? 'waiting'
-              : 'working';
-        let paths: string[] = [];
-        if (!signal && store.native && lane.head !== lane.base) {
-          const source = new NativeSource(store.root),
-            before = Object.fromEntries(source.state(lane.base).files.map(file => [file.path, file])),
-            after = Object.fromEntries(source.state(lane.head).files.map(file => [file.path, file]));
-          paths = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
-            path => JSON.stringify(before[path]) !== JSON.stringify(after[path]),
+    const end = Date.now() + (workLockWaitMs() || 1000);
+    const pathsByHead = new Map<string, string[]>();
+    for (;;) {
+      const prepared = activitySnapshot(store, ids, signal, pathsByHead, viewId, acceptance?.acceptanceId);
+      try {
+        updateHostState(store, state => {
+          const pointer = readWorkFile(store.directory);
+          invariant(
+            prepared.pointer ? !!pointer && prepared.pointer.equals(pointer) : pointer === null,
+            'WORK_STALE',
+            'Work changed while preparing activity.',
           );
-        }
-        const entries: { collection: string; key: string; parent: string; value: unknown }[] = [
-          { collection: 'lanes', key: lane.id, parent: lane.intentId, value: laneSummary(lane) },
-          { collection: 'intents', key: intent.id, parent: '', value: intentHeader(intent) },
-        ];
-        if (view)
-          entries.push({
-            collection: 'views',
-            key: view.id,
-            parent: view.intentId,
-            value: viewSummary(view),
-          });
-        if (acceptance?.acceptanceId && (!store.native || binding?.acceptanceOwner === true)) {
-          const move = store.select('channelMoves', acceptance.acceptanceId);
-          if (move?.status === 'accepted') {
-            entries.push({ collection: 'channelMoves', key: move.id, parent: move.channel, value: move });
-            entries.push({
-              collection: 'channels',
-              key: move.channel,
-              parent: '',
-              value: { name: move.channel, head: move.head, moveId: move.id },
+          const binding = state.binding;
+
+          const queue =
+            binding && binding.autoSync !== false
+              ? (state.agentSync ??= { sequence: 0, pending: [] })
+              : undefined;
+          const revision = prepared.revision;
+          for (const { lane, intent, paths } of prepared.rows) {
+            const name =
+              ('actor' in command ? command.actor : undefined) ??
+              process.env.FORGE_AGENT_NAME ??
+              process.env.FORGE_ACTOR ??
+              lane.owner?.actor ??
+              lane.startedBy?.name ??
+              localActor('agent').name;
+
+            const completed =
+              ['completed', 'abandoned'].includes(lane.state) ||
+              intent.status === 'abandoned' ||
+              !!acceptance?.acceptanceId;
+            const activityKind =
+              signal ??
+              (waiting
+                ? 'check queued'
+                : ['queued', 'preparing', 'running'].includes(receipt.status ?? '')
+                  ? receipt.status === 'queued'
+                    ? 'check queued'
+                    : 'check running'
+                  : command.action === 'take'
+                    ? 'taken over'
+                    : command.action === 'checkpoint'
+                      ? 'saved'
+                      : command.action === 'sync'
+                        ? 'updated from main'
+                        : command.action === 'start'
+                          ? 'started'
+                          : command.action === 'finish'
+                            ? acceptance?.acceptanceId
+                              ? 'accepted'
+                              : 'checked'
+                            : command.action === 'accept'
+                              ? 'accepted'
+                              : command.action === 'complete' || command.action === 'complete-merged'
+                                ? 'completed'
+                                : command.action === 'reopen'
+                                  ? 'reopened'
+                                  : 'checked');
+            const status = completed
+              ? 'completed'
+              : signal?.startsWith('check ') || waiting
+                ? 'working'
+                : (command.action === 'finish' && receipt.status !== 'accepted') ||
+                    (!signal && ['ready', 'paused'].includes(lane.state)) ||
+                    ['awaiting-review', 'waiting to land', 'waiting-for-dependency', 'conflict'].includes(
+                      receipt?.status ?? '',
+                    )
+                  ? 'waiting'
+                  : 'working';
+            const entries: { collection: string; key: string; parent: string; value: unknown }[] = [
+              { collection: 'lanes', key: lane.id, parent: lane.intentId, value: laneSummary(lane) },
+              { collection: 'intents', key: intent.id, parent: '', value: intentHeader(intent) },
+            ];
+            if (prepared.view)
+              entries.push({
+                collection: 'views',
+                key: prepared.view.id,
+                parent: prepared.view.intentId,
+                value: viewSummary(prepared.view),
+              });
+            if (acceptance?.acceptanceId && (!store.native || binding?.acceptanceOwner === true)) {
+              const move = prepared.move;
+              if (move?.status === 'accepted') {
+                entries.push({ collection: 'channelMoves', key: move.id, parent: move.channel, value: move });
+                entries.push({
+                  collection: 'channels',
+                  key: move.channel,
+                  parent: '',
+                  value: { name: move.channel, head: move.head, moveId: move.id },
+                });
+              }
+            }
+            const fingerprint = JSON.stringify([command.action, revision, name, status, entries]);
+            const session = sessionId(binding?.operationId ?? store.root, lane.id, name);
+            const now = Date.now();
+            const previous = state.presence?.[session];
+            if (
+              signal &&
+              previous &&
+              now - previous.lastActivity < PRESENCE.touchMs &&
+              previous.activityKind === activityKind
+            )
+              continue;
+            if (!signal && previous?.fingerprint === fingerprint) continue;
+            if (queue) (queue.observations ??= {})[session] = fingerprint;
+            const summary = signal ? (previous?.summary ?? intent.outcome) : intent.outcome.slice(0, 2000);
+            (state.presence ??= {})[session] = {
+              sessionId: session,
+              name,
+              environment: 'Local Lane',
+              status,
+              summary,
+              lastSeen: now,
+              lastActivity: now,
+              activityKind,
+              context: { laneId: lane.id, intentId: lane.intentId, head: lane.head },
+              fingerprint,
+            };
+            if (!completed) startPresenceWorker(store);
+            if (!binding || !queue) continue;
+            const sequence = ++queue.sequence;
+            queue.pending.push({
+              operationId: randomUUID(),
+              projectId: binding.projectId,
+              deployment: binding.deployment,
+              activity: hostedPaths({
+                kind: 'activity',
+                activityAt: now,
+                activityKind,
+                sessionId: session,
+                sequence,
+                name: name.slice(0, 120),
+                environment: 'Local Lane',
+                status,
+                summary,
+                context: {
+                  laneId: lane.id,
+                  intentId: lane.intentId,
+                  head: lane.head,
+                  paths: paths.slice(0, 100),
+                },
+              }),
+              metadata: hostedText(
+                JSON.stringify({
+                  ownerId: binding.operationId,
+                  revision,
+                  entries: signal ? [] : entries,
+                }),
+              ),
             });
           }
-        }
-        const fingerprint = JSON.stringify([command.action, revision, name, status, entries]);
-        const session = sessionId(binding?.operationId ?? store.root, lane.id, name);
-        const now = Date.now();
-        const previous = state.presence?.[session];
-        if (
-          signal &&
-          previous &&
-          now - previous.lastActivity < PRESENCE.touchMs &&
-          previous.activityKind === activityKind
-        )
-          continue;
-        if (!signal && previous?.fingerprint === fingerprint) continue;
-        if (queue) (queue.observations ??= {})[session] = fingerprint;
-        const summary = signal ? (previous?.summary ?? intent.outcome) : intent.outcome.slice(0, 2000);
-        (state.presence ??= {})[session] = {
-          sessionId: session,
-          name,
-          environment: 'Local Lane',
-          status,
-          summary,
-          lastSeen: now,
-          lastActivity: now,
-          activityKind,
-          context: { laneId: lane.id, intentId: lane.intentId, head: lane.head },
-          fingerprint,
-        };
-        if (!completed) startPresenceWorker(store);
-        if (!binding || !queue) continue;
-        const sequence = ++queue.sequence;
-        queue.pending.push({
-          operationId: randomUUID(),
-          projectId: binding.projectId,
-          deployment: binding.deployment,
-          activity: hostedPaths({
-            kind: 'activity',
-            activityAt: now,
-            activityKind,
-            sessionId: session,
-            sequence,
-            name: name.slice(0, 120),
-            environment: 'Local Lane',
-            status,
-            summary,
-            context: {
-              laneId: lane.id,
-              intentId: lane.intentId,
-              head: lane.head,
-              paths: paths.slice(0, 100),
-            },
-          }),
-          metadata: hostedText(
-            JSON.stringify({
-              ownerId: binding.operationId,
-              revision,
-              entries: signal ? [] : entries,
-            }),
-          ),
         });
+        break;
+      } catch (error) {
+        if (!(error instanceof ForgeError && error.code === 'WORK_STALE') || Date.now() >= end) throw error;
       }
-    });
+    }
     if (!readHostState(store).binding || readHostState(store).binding?.autoSync === false) return undefined;
     const child = spawn(
       process.execPath,

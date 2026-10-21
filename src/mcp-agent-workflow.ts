@@ -2,7 +2,6 @@ import { candidateActionSchema } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
 import { agentPeers, peersInputSchema } from './agent-peers.js';
 import { controlQueue } from './queue-control.js';
-import { queueAgentSync } from './agent-hosted-sync.js';
 import { registerHostedWorkTools } from './mcp-hosted-work.js';
 import { registerExchangeTools } from './mcp-exchange.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -66,14 +65,6 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
     },
     async input => {
       try {
-        if ('laneId' in input && typeof input.laneId === 'string')
-          queueAgentSync(
-            agent.work.store,
-            { action: 'activity', laneId: input.laneId },
-            {},
-            false,
-            'MCP call',
-          );
         return {
           content: [
             { type: 'text' as const, text: JSON.stringify(await agentBrief(agent.work.store, input, true)) },

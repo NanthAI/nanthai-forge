@@ -136,6 +136,10 @@ Goal: a project can live entirely on hosted Forge at near-zero cost, and the pro
 7. **Product depth**: making-of record in the browser, timeline and flow views, Intent discussions with per-item public or private visibility, Markdown and images on Intents, a real dependency graph in Code, open-source mode (configurable proposal limits, anonymous visibility, optional CLA), an extension model of events, actions and policies, Lane-scoped undo.
 8. **Git serving**: serve Git from hosted Forge and expose Lane refs.
 
+## Workflow friction
+
+- `agent tests` compares a saved Lane against the latest main. Concurrent accepted additions can appear as deletions in an unsynced Lane and force a full-suite fallback for unrelated work. Expose a pinned comparison for task-scoped validation without requiring a sync; the existing comparison remains useful for landing validation.
+
 ## Related documents
 
 - [Backlog](backlog.md): open items and friction, grouped.

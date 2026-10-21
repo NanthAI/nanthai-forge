@@ -33,7 +33,7 @@ import { agentFinish } from './agent-finish.js';
 import { agentRecordStatus, recordApplicability } from './agent-record-status.js';
 import { waitForAgentRun } from './agent-run-observer.js';
 import { WorkService } from './work.js';
-import { checkEnvironment, recoverRuns } from './work-run.js';
+import { checkEnvironment } from './work-run.js';
 import { nativeChannels } from './native-work.js';
 import { channelStatus } from './work-channel.js';
 import { evidenceApplicability, runApplicability, recordEvidence } from './work-evidence.js';
@@ -54,6 +54,7 @@ import { readMakingOf, reportUsage } from './making-of-read.js';
 import type { CheckRun, WorkView, WorkData } from './work-types.js';
 export { agentActionSchema, type AgentAction } from './agent-workflow-schema.js';
 import type { AgentAction } from './agent-workflow-schema.js';
+const readOnlyActions = new Set(['status', 'tests', 'peers', 'review', 'diff', 'show', 'brief']);
 export class AgentWorkflow {
   readonly work: WorkService;
   constructor(
@@ -63,17 +64,14 @@ export class AgentWorkflow {
     this.work = new WorkService(root, localAgent());
   }
   async dispatch(input: unknown) {
-    input = candidateCommand(input);
-    const settings =
-      input && typeof input === 'object'
-        ? (input as {
-            action?: string;
-            waitMs?: number;
-            lockWaitMs?: number;
-            actor?: string;
-            operationId?: string;
-          })
-        : {};
+    const parsed = parseAgentAction(candidateCommand(input));
+    const settings = parsed as {
+      action?: string;
+      waitMs?: number;
+      lockWaitMs?: number;
+      actor?: string;
+      operationId?: string;
+    };
     const waitMs =
       settings.lockWaitMs ??
       (['start', 'checkpoint', 'sync'].includes(settings.action ?? '') ? settings.waitMs : undefined);
@@ -98,12 +96,14 @@ export class AgentWorkflow {
               `pid ${process.pid}`,
             ...(settings.action ? { phase: settings.action } : {}),
           },
-          () => this.dispatchAction(input),
+          () =>
+            readOnlyActions.has(settings.action ?? '')
+              ? this.work.store.observing(() => this.dispatchAction(parsed))
+              : this.dispatchAction(parsed),
         ),
     );
   }
-  private async dispatchAction(input: unknown) {
-    const parsed = parseAgentAction(input);
+  private async dispatchAction(parsed: AgentAction) {
     const { lockWaitMs: _lockWaitMs, ...identity } = parsed as typeof parsed & {
       lockWaitMs?: number;
     };
@@ -142,9 +142,10 @@ export class AgentWorkflow {
     );
     const ownershipStop =
       command.action === 'take' && (response.result as { status: string }).status === 'ownership';
-    const hostedSync = ownershipStop
-      ? undefined
-      : queueAgentSync(store, command, response.result, false, this.liveMcp ? 'MCP call' : undefined);
+    const hostedSync =
+      ownershipStop || readOnlyActions.has(command.action)
+        ? undefined
+        : queueAgentSync(store, command, response.result, false, this.liveMcp ? 'MCP call' : undefined);
     let links: unknown;
     if (['checkpoint', 'finish'].includes(command.action) && 'laneId' in command) {
       try {
@@ -310,98 +311,91 @@ export class AgentWorkflow {
       const result = await completeMerged(this.work, command.channel);
       return { revision: store.revision(), result };
     }
-    if (command.action === 'status')
-      return store.locked(() => {
-        const records = store.readRecords();
-        if (records) return agentRecordStatus(store, command, records);
-        const data = store.load();
-        if (recoverRuns(store, data)) {
-          data.revision++;
-          store.save(data);
-        }
-        const lane = command.laneId ? agentLaneStatus(store, command, undefined, data) : undefined;
-        if (lane && !command.detail) return { revision: data.revision, result: { lane } };
-        invariant(
-          !command.intentId || data.intents.some(intent => intent.id === command.intentId),
-          'NOT_FOUND',
-          'Intent not found.',
-        );
-        const selected = (id: string) => !command.intentId || command.intentId === id,
-          environment = checkEnvironment();
-        const page = <T>(items: T[]) => ({
-          total: items.length,
-          items: items
-            .slice()
-            .reverse()
-            .slice(command.offset, command.offset + command.limit),
-          more: command.offset + command.limit < items.length,
-          nextOffset: command.offset + command.limit < items.length ? command.offset + command.limit : null,
-        });
-        return {
-          revision: data.revision,
-          result: {
-            ...(lane ? { lane } : {}),
-            modalCost: modalMonthCost(data.runs),
-            checkCosts: runnerMonthCosts(data.runs),
-            autonomyPolicy: readPolicy(store),
-            checkRunner: { runner: 'local', ...readPolicy(store).checks },
-            automaticActions: page(data.automaticActions ?? []),
-            engine: store.native ? 'forge-native' : 'git',
-            channels: page(store.native ? nativeChannels(data) : channelStatus(store, data)),
-            intents: page(
-              data.intents
-                .filter(intent => selected(intent.id))
-                .map(intent => ({
-                  intentId: intent.id,
-                  outcome: intent.outcome,
-                  base: intent.base,
-                  status: intent.status,
-                  lanes: data.lanes
-                    .filter(lane => lane.intentId === intent.id)
-                    .map(lane => laneReceipt(lane, store.path(lane.id))),
-                })),
-            ),
-            lanes: lanePage(
-              store,
-              page(
-                data.lanes
-                  .filter(lane => selected(lane.intentId))
-                  .map(lane => laneReceipt(lane, store.path(lane.id))),
-              ),
-              data,
-            ),
-            views: page(data.views.filter(view => selected(view.intentId)).map(viewReceipt)),
-            checks: page(
-              data.checks.map(check => ({
-                checkId: check.id,
-                name: check.name,
-                definition: check.definition,
-              })),
-            ),
-            environmentFingerprint: environment.fingerprint,
-            runs: page(
-              data.runs
-                .filter(run => data.views.some(view => view.id === run.viewId && selected(view.intentId)))
-                .map(run => ({ ...runReceipt(run), ...runApplicability(data, run, environment) })),
-            ),
-            reviews: page(
-              data.reviews
-                .filter(review =>
-                  data.views.some(view => view.id === review.viewId && selected(view.intentId)),
-                )
-                .map(review => ({
-                  reviewId: review.id,
-                  viewId: review.viewId,
-                  head: review.head,
-                  reviewer: review.reviewer,
-                  decision: review.decision,
-                  provenance: review.provenance,
-                  applicability: evidenceApplicability(data, review.viewId),
-                })),
-            ),
-          },
-        };
+    if (command.action === 'status') {
+      const records = store.readRecords();
+      if (records) return agentRecordStatus(store, command, records);
+      const data = store.load();
+      const lane = command.laneId ? agentLaneStatus(store, command, undefined, data) : undefined;
+      if (lane && !command.detail) return { revision: data.revision, result: { lane } };
+      invariant(
+        !command.intentId || data.intents.some(intent => intent.id === command.intentId),
+        'NOT_FOUND',
+        'Intent not found.',
+      );
+      const selected = (id: string) => !command.intentId || command.intentId === id,
+        environment = checkEnvironment();
+      const page = <T>(items: T[]) => ({
+        total: items.length,
+        items: items
+          .slice()
+          .reverse()
+          .slice(command.offset, command.offset + command.limit),
+        more: command.offset + command.limit < items.length,
+        nextOffset: command.offset + command.limit < items.length ? command.offset + command.limit : null,
       });
+      return {
+        revision: data.revision,
+        result: {
+          ...(lane ? { lane } : {}),
+          modalCost: modalMonthCost(data.runs),
+          checkCosts: runnerMonthCosts(data.runs),
+          autonomyPolicy: readPolicy(store),
+          checkRunner: { runner: 'local', ...readPolicy(store).checks },
+          automaticActions: page(data.automaticActions ?? []),
+          engine: store.native ? 'forge-native' : 'git',
+          channels: page(store.native ? nativeChannels(data) : channelStatus(store, data)),
+          intents: page(
+            data.intents
+              .filter(intent => selected(intent.id))
+              .map(intent => ({
+                intentId: intent.id,
+                outcome: intent.outcome,
+                base: intent.base,
+                status: intent.status,
+                lanes: data.lanes
+                  .filter(lane => lane.intentId === intent.id)
+                  .map(lane => laneReceipt(lane, store.path(lane.id))),
+              })),
+          ),
+          lanes: lanePage(
+            store,
+            page(
+              data.lanes
+                .filter(lane => selected(lane.intentId))
+                .map(lane => laneReceipt(lane, store.path(lane.id))),
+            ),
+            data,
+          ),
+          views: page(data.views.filter(view => selected(view.intentId)).map(viewReceipt)),
+          checks: page(
+            data.checks.map(check => ({
+              checkId: check.id,
+              name: check.name,
+              definition: check.definition,
+            })),
+          ),
+          environmentFingerprint: environment.fingerprint,
+          runs: page(
+            data.runs
+              .filter(run => data.views.some(view => view.id === run.viewId && selected(view.intentId)))
+              .map(run => ({ ...runReceipt(run), ...runApplicability(data, run, environment) })),
+          ),
+          reviews: page(
+            data.reviews
+              .filter(review => data.views.some(view => view.id === review.viewId && selected(view.intentId)))
+              .map(review => ({
+                reviewId: review.id,
+                viewId: review.viewId,
+                head: review.head,
+                reviewer: review.reviewer,
+                decision: review.decision,
+                provenance: review.provenance,
+                applicability: evidenceApplicability(data, review.viewId),
+              })),
+          ),
+        },
+      };
+    }
     if (command.action === 'observe') {
       await this.wait(command.operationId, command.waitMs);
       const original = store.select('runs', command.operationId);

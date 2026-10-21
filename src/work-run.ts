@@ -1,17 +1,15 @@
-import { runCandidateFamily } from './work-run-cancellation.js';
+import { prepareRunRegistration } from './work-run-preparation.js';
 import { localActor } from './work-actor.js';
 import { launchGithubActionsRun } from './work-github-actions-run.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { pollCancellation } from './work-cancel-poll.js';
 import { shardLogName } from './modal-shard-logs.js';
 import { localCost, modalRunCost } from './check-cost.js';
-import { checkRoute } from './check-backend.js';
 import { launchModalRun } from './work-modal-run.js';
 // SPDX-License-Identifier: Apache-2.0
 import { withWorkLockOptions } from './work-lock.js';
 import { wakeGithubPush } from './github-auto-push.js';
 import { lightweightDocsRun } from './work-docs-admission.js';
-import { interactionEvidence } from './work-interaction.js';
 import { writeCheckScope } from './work-check-scope.js';
 import { failureSummary } from './agent-run-failure.js';
 import { receiptSchema, createRunReceipt } from './work-run-receipt.js';
@@ -49,7 +47,6 @@ import { executionGuard, workGit } from './work-git.js';
 import { checkRunSchema, type CheckRun, type EvidenceCommand, type WorkData } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 import { captureArtifacts } from './work-artifacts.js';
-import { observeCheckInputs } from './work-inputs.js';
 import { resourceCommand, readResources } from './work-resources.js';
 
 export const runInterruption = new AbortController();
@@ -58,11 +55,7 @@ const active = (run: CheckRun) =>
   run.status === 'queued' || run.status === 'preparing' || run.status === 'running';
 const directory = (store: WorkStore, id: string) => join(store.directory, `check-${id}`);
 export { checkEnvironment } from './check-environment.js';
-import {
-  checkEnvironment,
-  checkProcessEnvironment,
-  checkEnvironmentDescription,
-} from './check-environment.js';
+import { checkProcessEnvironment, checkEnvironmentDescription } from './check-environment.js';
 function safeDirectory(path: string): boolean {
   return (
     existsSync(path) &&
@@ -689,6 +682,8 @@ export function runWork(
       closeSync(fd);
     }
   }
+  const preparation =
+    command.action === 'run-check' ? prepareRunRegistration(store, command, sequence?.id) : undefined;
   let started: CheckRun | undefined;
   const result = store.locked(() => {
     if (!store.native) executionGuard(store.root);
@@ -751,65 +746,28 @@ export function runWork(
     }
     const selectedView = tx.find('views', command.viewId)?.record;
     if (selectedView) data.views.push(selectedView);
-    const view = evidenceView(data, command.viewId, command.expectedHead);
+    evidenceView(data, command.viewId, command.expectedHead);
     const check = tx.find('checks', command.checkId)?.record;
-    // A retained batch owns its runtime pins across driver process restarts.
-    const batch = (store.native ? (store.load().landingBatches ?? []) : []).find(batch =>
-      batch.prefixes.some(
-        prefix =>
-          prefix.runId === command.operationId &&
-          prefix.viewId === command.viewId &&
-          prefix.head === command.expectedHead,
-      ),
-    );
-    const environment = batch?.environment ?? checkEnvironment();
     invariant(
-      check?.definition === command.expectedDefinition &&
-        environment.fingerprint === command.expectedEnvironment,
+      check?.definition === command.expectedDefinition,
       'EVIDENCE_CHANGED',
       'Check definition or runtime settings changed. Inspect them before starting.',
     );
-    const warnings = diskGuard(store.root);
-    const inputObservations = observeCheckInputs(store, check, command.expectedHead, environment);
-    const policy = readPolicy(store).checks;
-    const route = checkRoute(policy?.runner ?? 'local', check, store.native);
-    started = {
-      backend: {
-        ...route,
-        ...(route.actual === 'modal' ? { credentialsRef: policy?.credentialsRef ?? null } : {}),
-      },
-      id: command.operationId,
-      viewId: view.id,
-      supersessionBaseline: runCandidateFamily(tx, view).at(-1)?.id ?? view.id,
-      head: command.expectedHead,
-      base: view.base,
-      ...(view.composedMain ? { comparisonBase: view.composedMain } : {}),
-      inputs: view.inputs,
-      ...(view.mainCheck ? { mainCheck: view.mainCheck } : {}),
-      ...(view.optimistic ? { optimistic: true } : {}),
-      ...(view.recovery ? { recovery: view.recovery } : {}),
-      dependencies: view.dependencies ?? [],
-      check,
-      environment,
-      status: 'queued',
-      queuedAt: new Date().toISOString(),
-      warnings,
-      startedAt: new Date().toISOString(),
-      runner: { ...processIdentity(), host: hostname() },
-      details:
-        checkEnvironmentDescription(check) +
-        ' Queued for machine-wide check capacity; preparing the exact committed candidate for the selected command. No evidence reuse.',
-      ...(inputObservations ? { inputObservations } : {}),
-      ...(sequence ? { playbookRunId: sequence.id } : {}),
-    };
-    if (command.interaction !== undefined) {
-      started.interaction = command.interaction
-        ? interactionEvidence(store, started, command.interaction)
-        : null;
-      tx.setSchema(15);
-    }
-    tx.append('runs', started);
-    data.revision = store.commitRecords(tx);
+    if (preparation && 'error' in preparation) throw preparation.error;
+    invariant(
+      preparation && preparation.tx.revision === data.revision,
+      'WORK_STALE',
+      'Run preparation changed. Retry the original operation.',
+    );
+    invariant(
+      preparation.run.environment.fingerprint === command.expectedEnvironment,
+      'EVIDENCE_CHANGED',
+      'Check definition or runtime settings changed. Inspect them before starting.',
+    );
+    // commitRecords checks the exact prepared pointer under this lock. Recovery
+    // and concurrent metadata can never publish a stale prepared run.
+    data.revision = store.commitRecords(preparation.tx);
+    started = preparation.run;
     return { revision: data.revision, result: started };
   });
   if (started) {

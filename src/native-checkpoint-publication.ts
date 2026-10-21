@@ -123,7 +123,10 @@ export type PreparedCheckpoint = ReturnType<typeof prepareCandidate>;
  * CAS detects collection, replacement, corruption and symlink changes to new
  * references without a second byte pass. Unchanged blobs are already retained
  * by the pinned parent. Unrelated insertions never invalidate this Lane. */
-export function preparedCheckpointCurrent(source: NativeSource, candidate: NonNullable<PreparedCheckpoint>) {
+export function preparedCheckpointCurrent(
+  source: NativeSource,
+  candidate: Pick<NonNullable<PreparedCheckpoint>, 'directory' | 'verified'>,
+) {
   try {
     if (!candidate.directory || directoryIdentity(source) !== candidate.directory)
       throw checkpointPreparationChanged;
@@ -173,4 +176,16 @@ export function nativeCheckpointSelection<T>(
       { operation: 'checkpoint publication' },
     );
   }
+}
+
+/** Retain prepared sync bytes outside the owner lock. Collection races retry
+ * this restoration, never the source merge or workspace application. */
+export function prepareNativeObjects(source: NativeSource, objects: Map<string, Buffer>) {
+  const directory = directoryIdentity(source),
+    verified = new Map<string, string>();
+  for (const [id, bytes] of objects) {
+    invariant(source.put(bytes) === id, 'INVALID_NATIVE_SOURCE', 'Prepared source identity differs.');
+    verified.set(id, objectStamp(join(source.directory, id)));
+  }
+  return { directory, verified };
 }

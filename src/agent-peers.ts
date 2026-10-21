@@ -83,6 +83,10 @@ const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /** Advisory observation only: no locks, network, Work writes or source publication.
  * Two seconds of cooperative read budget; incomplete observations never claim clear. */
 export function agentPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): PeersDigest {
+  const command = peersInputSchema.parse(input);
+  return store.observing(() => readPeers(store, command));
+}
+function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): PeersDigest {
   const command = peersInputSchema.parse(input),
     started = performance.now();
   const result: PeersDigest = { v: 1, coverage: 'local', overlaps: [], landed: [], conflicts: [] };

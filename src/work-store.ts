@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { indexPeerRecords } from './agent-peers-index.js';
 // SPDX-License-Identifier: Apache-2.0
 import { assertWorkFormat } from './work-format.js';
@@ -21,6 +22,16 @@ import { preserveFields } from './work-normalization.js';
 export { preserveFields } from './work-normalization.js';
 
 export class WorkStore {
+  private readonly observation = new AsyncLocalStorage<{ pointer: Buffer | null }>();
+  /** Atomic rename pins revision and immutable records together, without a writer lock. */
+  observing<T>(run: () => T): T {
+    if (this.observation.getStore()) return run();
+    return this.observation.run({ pointer: readWorkFile(this.directory) }, run);
+  }
+  private readPointer() {
+    const pinned = this.observation.getStore();
+    return pinned ? pinned.pointer : readWorkFile(this.directory);
+  }
   readonly root: string;
   readonly directory: string;
   readonly native: boolean;
@@ -46,7 +57,7 @@ export class WorkStore {
     return join(this.directory, `lane-${id}`);
   }
   revision(): number {
-    const bytes = readWorkFile(this.directory);
+    const bytes = this.readPointer();
     if (!bytes) return 0;
     try {
       const raw = JSON.parse(bytes.toString('utf8')),
@@ -67,18 +78,18 @@ export class WorkStore {
     }
   }
   load(): WorkData {
-    return this.pinnedData(readWorkFile(this.directory));
+    return this.pinnedData(this.readPointer());
   }
-  /** The small commit pointer. Read it under the owner lock to pin one revision;
+  /** The atomically replaced small commit pointer pins one revision;
    * the immutable records it names stay readable after the lock is released. */
   pointer(): Buffer | null {
-    return readWorkFile(this.directory);
+    return this.readPointer();
   }
   /** WorkData of a pinned pointer; equivalent to load() at the pinned revision. */
   pinnedData(bytes: Buffer | null): WorkData {
     if (!bytes) {
       invariant(
-        !existsSync(join(this.directory, 'work.json')),
+        this.observation.getStore()?.pointer === null || !existsSync(join(this.directory, 'work.json')),
         'INVALID_WORK_STORE',
         'Work metadata is unavailable. Existing work is preserved.',
       );
@@ -105,7 +116,7 @@ export class WorkStore {
   }
   /** Complete portable WorkData; the on-disk commit pointer is not an archive. */
   snapshotBytes(): Buffer {
-    return this.pinnedBytes(readWorkFile(this.directory));
+    return this.pinnedBytes(this.readPointer());
   }
   /** snapshotBytes() of a pinned pointer, read without holding the owner lock. */
   pinnedBytes(bytes: Buffer | null): Buffer {
@@ -127,7 +138,7 @@ export class WorkStore {
       'BAD_ARGUMENT',
       'Choose a nonnegative offset and positive page size.',
     );
-    const bytes = readWorkFile(this.directory),
+    const bytes = this.readPointer(),
       raw: unknown = bytes ? JSON.parse(bytes.toString('utf8')) : undefined;
     const manifest = recordManifest(raw);
     if (manifest)
@@ -149,7 +160,7 @@ export class WorkStore {
   }
   /** Read-only record access; legacy owners retain their full validation path. */
   readRecords(): WorkRecordTransaction | undefined {
-    const bytes = readWorkFile(this.directory),
+    const bytes = this.readPointer(),
       manifest = bytes ? recordManifest(JSON.parse(bytes.toString('utf8'))) : undefined;
     return manifest?.schema === 'forge-work-records-v2' &&
       Object.values(manifest.collections).every(index => index.lookup)
@@ -177,14 +188,14 @@ export class WorkStore {
   }
   /** Call under the existing owner lock; one validated migration prepares older owners. */
   records(): WorkRecordTransaction {
-    let bytes = readWorkFile(this.directory),
+    let bytes = this.readPointer(),
       manifest = bytes ? recordManifest(JSON.parse(bytes.toString('utf8'))) : undefined;
     if (
       manifest?.schema !== 'forge-work-records-v2' ||
       Object.values(manifest.collections).some(index => !index.lookup)
     ) {
       this.save(this.load());
-      bytes = readWorkFile(this.directory)!;
+      bytes = this.readPointer()!;
       manifest = recordManifest(JSON.parse(bytes.toString('utf8')))!;
     }
     return new WorkRecordTransaction(this.directory, manifest, bytes!);
@@ -207,7 +218,7 @@ export class WorkStore {
   }
   save(data: WorkData): void {
     assertWorkFormat(data);
-    const bytes = readWorkFile(this.directory);
+    const bytes = this.readPointer();
     let previousSchema: unknown;
     if (bytes) {
       try {
