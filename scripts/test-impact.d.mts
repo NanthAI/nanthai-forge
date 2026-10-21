@@ -9,3 +9,9 @@ export function standardSelection(input: {
 }): { scope: string; reason: string; tests: string[] };
 
 export function selectionSourcePath(path: string): boolean;
+
+export function selectTests(input: { files: Map<string, string>; paths: string[] }): {
+  scope: string;
+  reason: string;
+  tests: string[];
+};

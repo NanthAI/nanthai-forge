@@ -143,23 +143,39 @@ retained recipe refuses adoption.
 
 Standard test shards emit per-file, named test reports, including nested test
 names. A failed shard retries once; a named test that passes after failing has a
-`flake` verdict, never a clean verdict. Original exits, named results and attempt
-logs remain available. OOM (137) or a confirmed stopped sandbox without a named
-test failure, followed by a complete passing report for every selected file on
-the same pinned Candidate/plan, is a clean infrastructure recovery. Its attempts and
-infrastructure reason stay recorded, without flake or quarantine ledger input.
-A named failure before that recovery retains the flake behavior. A nonzero test
-process exit without attributed failures still blocks even if its retry passes;
-an incomplete passing retry report cannot exonerate an infrastructure failure. A flake blocks until the test is quarantined. Two flake
-verdicts within seven days quarantine that exact file/test identity and list it in
-Needs you. Quarantined tests continue running; only their completely attributed
-failures become non-blocking. Static checks, unrelated tests and incomplete or
-unattributed reports continue to block. Receipts retain actual process exit codes,
-including nonzero exits for non-blocking quarantined failures. A named failure
-outside the ledger has verdict `failed`; `quarantined` applies only when all
-attributed failures belong to the actual ledger. Blocking behavior is unchanged.
+`recovered` verdict, never a clean verdict. Original exits, named results and
+attempt logs remain available. A recovery on a change that touches the test or
+its statically identified code is labelled **Recovered, related change**, never
+`flake`. Missing source or inconclusive impact data stays recovered with unknown
+cause. A retry alone does not establish flakiness.
 
-Twenty consecutive clean test passes release quarantine; failures and flakes
+A `flake` verdict needs another completed run of the same named test and check
+runtime/definition: a failure or recovery on unchanged source bytes, or a recovery
+across unrelated changes. Changed paths and the conservative test-impact selector
+supply this evidence; missing edges do not prove independence. Receipts record the
+source relationship and supporting run ID. Legacy flake labels without this
+evidence do not count toward quarantine. Two supported flake verdicts within
+seven days quarantine that exact file/test identity and list it in Needs you.
+Recovered tests do not count toward quarantine and still block landing.
+Quarantined tests continue running; attributed failures become non-blocking only
+when the current source comparison is unchanged or unrelated to that test.
+Failures on related changes, unknown source relationships, static checks,
+unrelated tests and incomplete or unattributed reports continue to block.
+Receipts retain actual process exit codes, including nonzero exits for
+non-blocking quarantined failures. A named failure outside the effective ledger
+has verdict `failed`; `quarantined` applies only when all attributed failures can
+use the ledger for this source comparison.
+
+OOM (137) or a confirmed stopped sandbox without a named test failure, followed
+by a complete passing report for every selected file on the same pinned
+Candidate/plan, is a clean infrastructure recovery. Its attempts and
+infrastructure reason stay recorded, without recovery or quarantine ledger input.
+A named failure before that recovery follows the recovered-test behavior. A
+nonzero test process exit without attributed failures still blocks even if its
+retry passes; an incomplete passing retry report cannot exonerate an
+infrastructure failure.
+
+Twenty consecutive clean test passes release quarantine; failures, recoveries and flakes
 reset the streak. The ledger derives from retained run receipts and deduplicates
 run IDs. Explicit fixes are retry-safe owner-local records:
 

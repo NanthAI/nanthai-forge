@@ -355,7 +355,7 @@ export async function launchModalRun(
         : unavailable
           ? runnerRetryMessage(unavailable)
           : outcome
-            ? `Modal outcome bound to the exact source, definition, selection and runtime; compute cost is estimated. ${outcome.details ?? ''} ${assessment?.verdict === 'flake' ? 'Flake verdict (pass after failure); attempts and available named results retained.' : ''} ${assessment?.quarantine.length ? 'Quarantined tests still ran and reported; only their attributed failures are non-blocking.' : ''}`.trim()
+            ? `Modal outcome bound to the exact source, definition, selection and runtime; compute cost is estimated. ${outcome.details ?? ''} ${assessment?.verdict === 'flake' ? 'Known flake: recovery supported by retained source/history evidence; attempts and named results retained.' : ''} ${assessment?.verdict === 'recovered' ? `Recovered${assessment.testVerdicts.some(item => item.recovery === 'related-change') ? ', related change' : ''}; failure and passing retry retained. Flakiness is not established.` : ''} ${assessment?.quarantine.length ? 'Quarantined tests still ran and reported; only attributed failures with unchanged or unrelated source evidence are non-blocking.' : ''}`.trim()
             : `Modal infrastructure interrupted the check; no check failure was recorded. Retry resumes the same pinned Candidate/plan and retains completed shards. ${terminal?.kind === 'error' ? (terminal.details ?? `Modal ${terminal.category} failure.`) : ''}`.trim(),
     });
     if (

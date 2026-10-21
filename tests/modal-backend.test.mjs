@@ -11,6 +11,7 @@ import { initNative } from '../dist/native-work.js';
 import { checkEnvironment, recoverRuns, adoptModalRun } from '../dist/work-run.js';
 import { checkRoute, balanceShards, modalMonthCost } from '../dist/check-backend.js';
 import { policyPreset, editedPolicy, effectivePolicy } from '../dist/autonomy-policy.js';
+import { NativeSource } from '../dist/native-source.js';
 import { launchModalRun } from '../dist/work-modal-run.js';
 import { ForgeError } from '../dist/errors.js';
 import { CheckQueue } from '../dist/check-queue.js';
@@ -862,7 +863,7 @@ test('safe network loss records manual recovery with retained completed shards',
   assert.doesNotMatch(readFileSync(join(path, 'stdout.log'), 'utf8'), /local fallback/);
 });
 
-test('named flakes stay distinct from clean passes and only quarantined failures cease blocking', async t => {
+test('recoveries need independent history before flake quarantine can make failures nonblocking', async t => {
   const { work, run, path } = fixture(t, { 'tests/flake.test.mjs': '// synthetic fixture' });
   run.check.args = ['scripts/forge-check.mjs'];
   const identity = 'tests/flake.test.mjs :: intermittent';
@@ -905,9 +906,24 @@ test('named flakes stay distinct from clean passes and only quarantined failures
   };
   let receipt = await execute();
   assert.equal(receipt.status, 'failed');
-  assert.equal(receipt.backend.verdict, 'flake');
-  assert.deepEqual(receipt.backend.testVerdicts, [{ test: identity, verdict: 'flake' }]);
-  assert.match(receipt.failureSummary, /flake: tests\/flake.test.mjs :: intermittent/);
+  assert.equal(receipt.backend.verdict, 'recovered');
+  assert.deepEqual(receipt.backend.testVerdicts, [
+    { test: identity, verdict: 'recovered', recovery: 'unchanged-source' },
+  ]);
+  assert.match(receipt.details, /Recovered; failure and passing retry retained/);
+  assert.match(
+    receipt.failureSummary,
+    /attempt 1, exit 1:[\s\S]*failed: tests\/flake.test.mjs :: intermittent/,
+  );
+  assert.match(
+    receipt.failureSummary,
+    /attempt 2, exit 0:[\s\S]*passed: tests\/flake.test.mjs :: intermittent/,
+  );
+  const attempts = read(join(path, 'modal-shard-logs.json')).filter(item => item.index === 0);
+  assert.deepEqual(
+    attempts.map(item => item.tests['tests/flake.test.mjs'].results[0].passed),
+    [false, true],
+  );
   const historical = {
     ...run,
     id: randomUUID(),
@@ -918,6 +934,17 @@ test('named flakes stay distinct from clean passes and only quarantined failures
   work.store.locked(() => {
     const tx = work.store.records();
     tx.append('runs', historical);
+    work.store.commitRecords(tx);
+  });
+  receipt = await execute();
+  assert.equal(receipt.status, 'failed');
+  assert.equal(receipt.backend.verdict, 'flake');
+  assert.equal(receipt.backend.testVerdicts[0].evidenceRunId, historical.id);
+  assert.deepEqual(receipt.backend.quarantine, []);
+  // A second supported flake, separate from the first recovery, enters quarantine.
+  work.store.locked(() => {
+    const tx = work.store.records();
+    tx.append('runs', { ...historical, id: randomUUID(), backend: receipt.backend });
     work.store.commitRecords(tx);
   });
   receipt = await execute();
@@ -953,14 +980,14 @@ for (const scenario of [
     status: 'passed',
     verdict: 'clean',
   },
-  { name: 'named failure then pass', first: 1, named: true, last: 0, status: 'failed', verdict: 'flake' },
+  { name: 'named failure then pass', first: 1, named: true, last: 0, status: 'failed', verdict: 'recovered' },
   {
     name: 'OOM with named failure then pass',
     first: 137,
     named: true,
     last: 0,
     status: 'failed',
-    verdict: 'flake',
+    verdict: 'recovered',
   },
   { name: 'unattributed nonzero then pass', first: 1, last: 0, status: 'failed', verdict: 'clean' },
   {
@@ -1180,3 +1207,84 @@ test('superseded Modal Candidate reaches cancellation control and keeps executio
   assert.equal(receipt.cancellation.reason, 'superseded');
   assert.deepEqual(receipt.backend.executionIds, ['sb-superseded']);
 });
+
+for (const changed of ['src/synthetic.ts', 'tests/synthetic.test.mjs', 'missing-comparison']) {
+  test(`quarantine cannot bypass a regression with ${changed}`, async t => {
+    const file = 'tests/synthetic.test.mjs',
+      identity = `${file} :: synthetic result`;
+    const { work, run, path } = fixture(t, {
+      [file]: "import { value } from '../dist/synthetic.js';",
+      'src/synthetic.ts': 'export const value = 1;',
+    });
+    run.check.args = ['scripts/forge-check.mjs'];
+    const source = new NativeSource(work.store.root);
+    if (changed === 'missing-comparison') run.base = '0'.repeat(64);
+    else
+      run.head = source.writeState(
+        source.state(run.head).files.map(item =>
+          item.path === changed
+            ? {
+                ...item,
+                blob: source.put(
+                  Buffer.from(changed.startsWith('src/') ? 'export const value = 2;' : '// changed test'),
+                ),
+              }
+            : item,
+        ),
+        [run.head],
+        'Synthetic related change',
+        new Date().toISOString(),
+      );
+    work.store.locked(() => {
+      const tx = work.store.records();
+      for (let index = 0; index < 2; index++)
+        tx.append('runs', {
+          ...run,
+          id: randomUUID(),
+          status: 'failed',
+          endedAt: '2026-01-01',
+          backend: {
+            ...run.backend,
+            testVerdicts: [
+              {
+                test: identity,
+                verdict: 'flake',
+                recovery: 'unchanged-source',
+                evidenceRunId: 'historical-support',
+              },
+            ],
+          },
+        });
+      work.store.commitRecords(tx);
+    });
+    const report = passed => ({
+      [file]: { file, complete: true, results: [{ name: 'synthetic result', passed }] },
+    });
+    for (const passed of [true, false]) {
+      await launchModalRun(work.store, run, async (filename, emit) => {
+        const plan = read(filename);
+        const executions = [
+          { executionId: 'first', index: 0, attempt: 0, exitCode: 1, tests: report(false) },
+          { executionId: 'static', index: plan.groups.length, attempt: 0, exitCode: 0 },
+          { executionId: 'retry', index: 0, attempt: 1, exitCode: passed ? 0 : 1, tests: report(passed) },
+        ];
+        for (const execution of executions) emit({ kind: 'execution', ...execution, image: 'im-test' });
+        emit(result(plan, { exitCode: passed ? 0 : 1, executions }));
+      });
+      const receipt = read(join(path, 'result.json'));
+      assert.equal(receipt.status, 'failed');
+      assert.equal(receipt.backend.quarantine.length, 1);
+      assert.equal(receipt.backend.verdict, passed ? 'recovered' : 'failed');
+      if (passed) {
+        assert.equal(
+          receipt.backend.testVerdicts[0].recovery,
+          changed === 'missing-comparison' ? 'unknown' : 'related-change',
+        );
+        assert.match(
+          receipt.details,
+          changed === 'missing-comparison' ? /Recovered;/ : /Recovered, related change;/,
+        );
+      }
+    }
+  });
+}

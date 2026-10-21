@@ -7,9 +7,10 @@ import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 import type { ModalEvent } from './modal-client.js';
+import { testFlakeEvidence, type TestVerdict, type TestObservation } from './check-flake-evidence.js';
 
-type Verdict = NonNullable<NonNullable<CheckRun['backend']>['testVerdicts']>[number];
-type Observation = { id: string; at: string; tests: Verdict[] };
+type Verdict = TestVerdict;
+type Observation = TestObservation;
 const fixesSchema = z.array(z.object({ id: z.uuid(), at: z.string(), test: z.string() }));
 export function quarantineLedger(observations: readonly Observation[]) {
   const tests = new Map<string, { flakes: number[]; quarantined: boolean; consecutivePasses: number }>();
@@ -34,7 +35,11 @@ export function quarantineLedger(observations: readonly Observation[]) {
         }
       } else {
         state.consecutivePasses = 0;
-        if (result.verdict === 'flake') {
+        if (
+          result.verdict === 'flake' &&
+          result.evidenceRunId &&
+          ['unrelated-change', 'unchanged-source'].includes(result.recovery ?? '')
+        ) {
           state.flakes = state.flakes.filter(at => now - at <= 7 * 86400000);
           state.flakes.push(now);
           if (state.flakes.length >= 2) state.quarantined = true;
@@ -66,8 +71,17 @@ function observations(store: WorkStore): Observation[] {
     : store.load().runs;
   return [
     ...runs
-      .filter(run => run.backend?.testVerdicts && run.endedAt)
-      .map(run => ({ id: run.id, at: run.endedAt!, tests: run.backend!.testVerdicts! })),
+      .filter(run => run.backend?.testVerdicts && run.endedAt && ['passed', 'failed'].includes(run.status))
+      .map(run => ({
+        id: run.id,
+        at: run.endedAt!,
+        tests: run.backend!.testVerdicts!,
+        source: {
+          head: run.head,
+          definition: run.check.definition,
+          ...(run.backend?.runtime ? { runtime: run.backend.runtime } : {}),
+        },
+      })),
     ...fixes(store),
   ];
 }
@@ -149,15 +163,17 @@ export function modalTestVerdicts(result: Extract<ModalEvent, { kind: 'result' }
         const failedBefore = previous.some(
           item =>
             item.exitCode !== 0 &&
-            item.tests?.[file]?.results.some(old => old.name === test.name && !old.passed),
+            item.tests?.[file]?.complete &&
+            item.tests[file]!.file === file &&
+            item.tests[file]!.results.some(old => old.name === test.name && !old.passed),
         );
-        const verdict = !test.passed ? 'failed' : failedBefore ? 'flake' : 'passed';
+        const verdict = !test.passed ? 'failed' : failedBefore ? 'recovered' : 'passed';
         const old = verdicts.get(identity);
         // Infrastructure recovery does not advance quarantine clean-pass streaks.
         // Duplicate names are conservative: a failure wins over a pass.
         if (
           !(recoveredInfrastructure && execution.exitCode === 0 && test.passed) &&
-          (!old || verdict === 'failed' || (old.verdict === 'passed' && verdict === 'flake'))
+          (!old || verdict === 'failed' || (old.verdict === 'passed' && verdict === 'recovered'))
         )
           verdicts.set(identity, { test: identity, verdict });
         if (verdict !== 'passed') failures.push(identity);
@@ -169,7 +185,7 @@ export function modalTestVerdicts(result: Extract<ModalEvent, { kind: 'result' }
       execution.exitCode === 0 &&
       previous.some(item => !infrastructureOnly(item) && item.exitCode !== 0) &&
       ![...verdicts.values()].some(
-        item => item.verdict === 'flake' && files.some(file => item.test.startsWith(`${file} :: `)),
+        item => item.verdict === 'recovered' && files.some(file => item.test.startsWith(`${file} :: `)),
       )
     )
       unknownFailure = true;
@@ -188,26 +204,36 @@ export function modalQuarantine(
   groups: string[][],
   at: string,
 ) {
-  const { verdicts, failures, unknownFailure, recoveredFailure } = modalTestVerdicts(result, groups);
+  const observed = modalTestVerdicts(result, groups);
+  const { failures, unknownFailure, recoveredFailure } = observed;
   return store.locked(() => {
-    const quarantine = quarantineLedger([
-      ...observations(store).filter(item => item.id !== run.id),
-      { id: run.id, at, tests: verdicts },
-    ]);
+    const history = observations(store).filter(item => item.id !== run.id && item.at <= at);
+    const evidence = testFlakeEvidence(store, run, history);
+    const verdicts = observed.verdicts.map(item =>
+      item.verdict === 'recovered' ? evidence.recovery(item.test) : item,
+    );
+    const quarantine = quarantineLedger([...history, { id: run.id, at, tests: verdicts }]);
     const quarantined = new Set(quarantine.map(item => item.test));
-    const blocked = unknownFailure || failures.some(test => !quarantined.has(test));
+    const nonblocking = (test: string) =>
+      quarantined.has(test) &&
+      evidence.canQuarantine(test) &&
+      !verdicts.some(item => item.test === test && item.verdict === 'recovered');
+    const blocked = unknownFailure || failures.some(test => !nonblocking(test));
     return {
       testVerdicts: verdicts,
       quarantine,
       blocked,
       verdict:
-        recoveredFailure || verdicts.some(item => item.verdict === 'flake')
-          ? ('flake' as const)
-          : failures.some(test => !quarantined.has(test))
-            ? ('failed' as const)
-            : failures.length
-              ? ('quarantined' as const)
-              : ('clean' as const),
+        verdicts.some(item => item.verdict === 'recovered') ||
+        (recoveredFailure && !verdicts.some(item => item.verdict === 'flake'))
+          ? ('recovered' as const)
+          : verdicts.some(item => item.verdict === 'flake')
+            ? ('flake' as const)
+            : failures.some(test => !nonblocking(test))
+              ? ('failed' as const)
+              : failures.length
+                ? ('quarantined' as const)
+                : ('clean' as const),
     };
   });
 }

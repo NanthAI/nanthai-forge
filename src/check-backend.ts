@@ -18,9 +18,16 @@ export const checkBackendSchema = z.object({
   cost: checkCostSchema.optional(),
   credentialsRef: modalCredentialsRefSchema.nullable().optional(),
   retryable: z.boolean().optional(),
-  verdict: z.enum(['clean', 'flake', 'quarantined', 'failed']).optional(),
+  verdict: z.enum(['clean', 'recovered', 'flake', 'quarantined', 'failed']).optional(),
   testVerdicts: z
-    .array(z.object({ test: z.string(), verdict: z.enum(['passed', 'failed', 'flake', 'fixed']) }))
+    .array(
+      z.object({
+        test: z.string(),
+        verdict: z.enum(['passed', 'failed', 'recovered', 'flake', 'fixed']),
+        recovery: z.enum(['related-change', 'unrelated-change', 'unchanged-source', 'unknown']).optional(),
+        evidenceRunId: z.string().optional(),
+      }),
+    )
     .optional(),
   quarantine: z
     .array(z.object({ test: z.string(), consecutivePasses: z.number().int().nonnegative() }))

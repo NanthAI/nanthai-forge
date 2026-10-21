@@ -5,7 +5,7 @@ import { basename, join } from 'node:path';
 import { durableReplace } from './native-durability.js';
 import type { ModalEvent } from './modal-client.js';
 
-type Execution = { executionId: string; index: number; attempt: number; exitCode?: number };
+type Execution = NonNullable<Extract<ModalEvent, { kind: 'result' }>['executions']>[number];
 export function shardLogName(shard: number | 'static', attempt = 1) {
   return `${shard}${attempt > 1 ? `.attempt-${attempt}` : ''}.log`;
 }
@@ -58,6 +58,8 @@ export class ModalShardLogs {
       if (!execution || execution.index !== outcome.index || execution.attempt !== outcome.attempt)
         throw new Error('Modal result shard identity changed.');
       if (outcome.exitCode !== undefined) execution.exitCode = outcome.exitCode;
+      if (outcome.tests) execution.tests = outcome.tests;
+      if (outcome.infrastructure) execution.infrastructure = outcome.infrastructure;
     }
     durableReplace(this.indexPath, JSON.stringify(this.executions));
     const latest = new Map<number, Execution>();
@@ -65,8 +67,24 @@ export class ModalShardLogs {
       if ((latest.get(execution.index)?.attempt ?? -1) < execution.attempt)
         latest.set(execution.index, execution);
     }
+    const recovered = new Set(
+      [...latest.values()]
+        .filter(
+          execution =>
+            execution.exitCode === 0 &&
+            this.executions.some(
+              previous =>
+                previous.index === execution.index &&
+                previous.attempt < execution.attempt &&
+                Object.values(previous.tests ?? {}).some(report => report.results.some(test => !test.passed)),
+            ),
+        )
+        .map(execution => execution.index),
+    );
     const summaries: string[] = [];
-    for (const execution of latest.values()) {
+    for (const execution of this.executions.filter(
+      item => latest.get(item.index) === item || recovered.has(item.index),
+    )) {
       const filename = this.filename(execution);
       const lines = readFileSync(join(this.path, filename), 'utf8').split('\n');
       const failures: string[] = [];
@@ -80,10 +98,20 @@ export class ModalShardLogs {
         }
         failures.push(block.join('\n'));
       }
-      if (execution.exitCode === 0 || (!failures.length && execution.exitCode === undefined)) continue;
+      if (
+        (execution.exitCode === 0 && !recovered.has(execution.index)) ||
+        (!failures.length && execution.exitCode === undefined)
+      )
+        continue;
+      const namedResults = Object.values(execution.tests ?? {})
+        .flatMap(report =>
+          report.results.map(test => `${test.passed ? 'passed' : 'failed'}: ${report.file} :: ${test.name}`),
+        )
+        .join('\n');
       summaries.push(
         `Shard ${execution.index}${execution.index === this.staticIndex ? ' (static)' : ''}, attempt ${execution.attempt + 1}${execution.exitCode === undefined ? '' : `, exit ${execution.exitCode}`}: ${basename(this.path)}/${filename}\n${
           failures.join('\n') ||
+          namedResults ||
           lines
             .filter(line => line.trim())
             .slice(-12)

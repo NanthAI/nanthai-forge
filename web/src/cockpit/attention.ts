@@ -307,7 +307,7 @@ export function quarantineDecisions(runs: CockpitWork['runs']): DecisionItem[] {
     id: `check-quarantine:${item.test}`,
     kind: 'failed',
     title: `Quarantined test: ${item.test}`,
-    body: `Two flake verdicts occurred within seven days. This test still runs and reports; its attributed failures do not block landing. ${item.consecutivePasses}/20 consecutive passes toward automatic release. An explicit fix also releases quarantine.`,
+    body: `Two supported flake verdicts occurred within seven days. This test still runs and reports; failures on related changes or without source evidence still block landing. ${item.consecutivePasses}/20 consecutive passes toward automatic release. An explicit fix also releases quarantine.`,
     viewId: latest!.viewId,
     runId: latest!.id,
     at: latest!.endedAt,
