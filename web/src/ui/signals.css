@@ -266,7 +266,8 @@ input[aria-invalid=true], textarea[aria-invalid=true], select[aria-invalid=true]
 @media (prefers-reduced-motion: reduce) { .fx-toast { animation: none; } }
 @media (max-width: 720px) { .fx-toast-stack { bottom: calc(70px + env(safe-area-inset-bottom)); left: 12px; right: 12px; } .fx-toast-stack .fx-toast { width: 100%; max-width: 100%; } }
 
-.cl-alert:has(.cl-alertText), .cl-formFieldErrorText { display: none; }
+/* Clerk errors appear as Forge toasts (Toast.tsx SignInErrors). Plain class selectors only: Clerk warns on selectors that depend on its internal DOM. */
+.cl-alert, .cl-formFieldErrorText { display: none; }
 .fx-toast-stack { background: transparent; }
 .fx-toast { box-sizing: border-box; }
 .fx-toast-main { flex: 1; }
