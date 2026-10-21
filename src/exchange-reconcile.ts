@@ -21,7 +21,12 @@ export async function reconcileExchange(
     preserveLocalSource?: boolean;
   },
   // Not part of the retained request: a bound push merges into newer local Work.
-  options: { followLocal?: boolean; candidate?: WorkData; onCandidate?: (data: WorkData) => void } = {},
+  options: {
+    followLocal?: boolean;
+    candidate?: WorkData;
+    onCandidate?: (data: WorkData) => void;
+    onProgress?: (detail: string) => void;
+  } = {},
 ) {
   const store = new WorkStore(root),
     transport = new ConvexExchange(
@@ -33,6 +38,26 @@ export async function reconcileExchange(
     );
   const directory = join(store.directory, `exchange-receive-${request.operationId}`),
     receiptPath = join(directory, 'request.json');
+  let stage = 'manifest',
+    done = 0,
+    total: number | undefined;
+  const calls = new Map<string, number>();
+  const progress = () =>
+    options.onProgress?.(
+      `${stage}${total === undefined ? '' : ` ${done}/${total} bytes`}${calls.size ? `; waiting on ${[...calls.keys()].join(', ')}` : ''}`,
+    );
+  transport.onCall = (call, pending) => {
+    const count = (calls.get(call) ?? 0) + (pending ? 1 : -1);
+    if (count > 0) calls.set(call, count);
+    else calls.delete(call);
+    progress();
+  };
+  transport.onWorkProgress = (received, size) => {
+    stage = 'manifest / work.json download';
+    done = received;
+    total = size;
+    progress();
+  };
   let command;
   if (existsSync(receiptPath)) {
     const original = JSON.parse(readFileSync(receiptPath, 'utf8'));
@@ -43,6 +68,7 @@ export async function reconcileExchange(
     );
     command = original.command;
   } else {
+    progress();
     const original = await transport.manifest(request.backupId),
       bytes = Buffer.from(original.json);
     invariant(
@@ -53,8 +79,21 @@ export async function reconcileExchange(
     const manifest = nativeManifestSchema.parse(JSON.parse(original.json)),
       file = manifest.files.find(file => file.path === 'work.json');
     invariant(file, 'INVALID_WORK_BACKUP', 'Original Work is absent from the manifest.');
-    const work = await transport.download(file),
-      journal = await transport.journal(),
+    stage = 'work.json download';
+    done = 0;
+    total = file.size;
+    progress();
+    transport.onDownloadProgress = (pin, received) => {
+      if (pin.sha256 === file.sha256) {
+        done = received;
+        progress();
+      }
+    };
+    const work = await transport.download(file);
+    stage = 'journal export';
+    total = undefined;
+    progress();
+    const journal = await transport.journal(),
       parsed = JSON.parse(journal);
     invariant(
       parsed.source?.backupId === request.backupId &&
@@ -82,5 +121,8 @@ export async function reconcileExchange(
       'request.json': JSON.stringify({ request, command }),
     });
   }
+  stage = 'local merge';
+  total = undefined;
+  progress();
   return reconcileHostedWork(store, command, request.revision, options);
 }

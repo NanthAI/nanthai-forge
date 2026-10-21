@@ -61,7 +61,7 @@ test('concurrent chunk clients share bindings and reconcile a lost recipe reply 
       const storageId = await s.ctx.storage.store(
         new Blob([init.body], { type: init.headers['Content-Type'] }),
       );
-      return { ok: true, json: async () => ({ storageId }) };
+      return Response.json({ storageId });
     } finally {
       active--;
     }

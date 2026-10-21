@@ -8,6 +8,7 @@ import {
 import { ExchangeDownloadCache } from './exchange-download-cache.js';
 import { SignedDownloadCache } from './exchange-r2-read.js';
 import { hostedMainSchema, type MainExpectation } from './hosted-main.js';
+import { exchangeConvexFetch } from './exchange-convex-fetch.js';
 import { retryExchange } from './exchange-retry.js';
 import type { SourceReturnProgress } from './source-return-progress.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -42,6 +43,9 @@ export class ConvexExchange implements ExchangeTransport {
   private readonly downloadCache = new ExchangeDownloadCache();
   private readonly signedDownloads = new WeakMap<ConvexHttpClient, SignedDownloadCache>();
   readonly workRecords = true;
+  onCall?: (name: string, pending: boolean) => void;
+  onWorkProgress?: (done: number, total: number) => void;
+  onDownloadProgress?: (pin: ContentPin, done: number) => void;
   onReturnProgress?: (progress: SourceReturnProgress) => void;
   uploadBatchSize?: number;
   readonly client: ConvexHttpClient;
@@ -49,7 +53,12 @@ export class ConvexExchange implements ExchangeTransport {
   private get blobs() {
     let cache = this.signedDownloads.get(this.client);
     if (!cache) this.signedDownloads.set(this.client, (cache = new SignedDownloadCache()));
-    return new ConvexExchangeBlobs(this.client, cache);
+    return new ConvexExchangeBlobs(
+      this.client,
+      cache,
+      (pin, done) => this.onDownloadProgress?.(pin, done),
+      (name, pending) => this.onCall?.(name, pending),
+    );
   }
   /** Digests just found not to be R2 objects, so a large-object read need not ask again. */
   private readonly unsigned = new Set<string>();
@@ -72,6 +81,7 @@ export class ConvexExchange implements ExchangeTransport {
     this.client = new ConvexHttpClient(url, {
       skipConvexDeploymentUrlCheck: true,
       logger: false,
+      fetch: exchangeConvexFetch({}, (name, pending) => this.onCall?.(name, pending)),
     });
     this.client.setAuth(token);
   }
@@ -320,7 +330,9 @@ export class ConvexExchange implements ExchangeTransport {
       'Checkpoint root differs from its selected digest.',
     );
     if (!isExchangeRoot(JSON.parse(original.json))) return original;
-    const resolved = await resolveExchangeRoot(bytes, pins => this.downloadBatch(pins));
+    const resolved = await resolveExchangeRoot(bytes, pins => this.downloadBatch(pins), {
+      onWorkProgress: this.onWorkProgress,
+    });
     this.logicalMetadata.set(digest(resolved.work), { bytes: resolved.work, backupId });
     return {
       json: resolved.manifest.toString('utf8'),
@@ -443,6 +455,7 @@ export class ConvexExchange implements ExchangeTransport {
         { length: Math.max(1, Math.ceil(pin.size / chunkBytes)) },
         (_, index) => index * chunkBytes,
       );
+    let done = 0;
     const parts = await mapExchange(offsets, 4, async offset => {
       const part = await this.blobs.getPart(this.projectId, pin, offset);
       const bytes = Buffer.from(part.data),
@@ -452,6 +465,8 @@ export class ConvexExchange implements ExchangeTransport {
         'INVALID_WORK_BACKUP',
         'Exchange response differs from the selected content range.',
       );
+      done += bytes.length;
+      this.onDownloadProgress?.(pin, done);
       return bytes;
     });
     const bytes = Buffer.concat(parts);

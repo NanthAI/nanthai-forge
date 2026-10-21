@@ -2,6 +2,7 @@
 import type { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import type { ContentPin } from './native-exchange.js';
+import { exchangeFetch } from './exchange-request.js';
 import { ForgeError, invariant } from './errors.js';
 import { readSigned, SignedDownloadCache, type SignedObject } from './exchange-r2-read.js';
 
@@ -29,11 +30,16 @@ const action = (name: string) => makeFunctionReference<'action'>(name);
 
 /** Convex file storage upload: POST the bytes to the one-time upload URL. */
 export async function putConvexUpload(target: { uploadUrl: string; contentType: string }, bytes: Buffer) {
-  const response = await fetch(target.uploadUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': target.contentType },
-    body: new Uint8Array(bytes),
-  });
+  const response = await exchangeFetch(
+    'Convex object upload',
+    target.uploadUrl,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': target.contentType },
+      body: new Uint8Array(bytes),
+    },
+    { retries: 0 },
+  );
   invariant(
     response.ok,
     'EXCHANGE_UPLOAD_UNKNOWN',
@@ -42,10 +48,7 @@ export async function putConvexUpload(target: { uploadUrl: string; contentType: 
   return (await response.json()) as { storageId: string };
 }
 
-const retryDelay = (attempt: number) => 100 * 2 ** attempt * (0.5 + Math.random());
-/** Presigned R2 PUT. The signed headers go out exactly as given (content-length comes from the
- * body). Retries 5xx, 429 and network errors with backoff. 412 means the create-only PUT found the
- * object already there, which is success; the server's HEAD check then confirms it. */
+/** Create-only R2 PUTs can safely replay their exact signed destination and bytes. */
 export async function putR2(
   target: { url: string; headers: Record<string, string> },
   bytes: Buffer,
@@ -54,22 +57,17 @@ export async function putR2(
   const headers = Object.fromEntries(
     Object.entries(target.headers).filter(([name]) => name.toLowerCase() !== 'content-length'),
   );
-  for (let attempt = 0; ; attempt++) {
-    let status = 0;
-    try {
-      status = (await fetch(target.url, { method: 'PUT', headers, body: new Uint8Array(bytes) })).status;
-    } catch {
-      // Network failure: retry below.
-    }
-    if ((status >= 200 && status < 300) || status === 412) return {};
-    const retryable = status === 0 || status === 429 || status >= 500;
-    if (!retryable || attempt + 1 >= attempts)
-      throw new ForgeError(
-        'EXCHANGE_UPLOAD_UNKNOWN',
-        `Object upload ${status ? `returned HTTP ${status}` : 'did not complete'}. Retry this same exchange to reconcile its original objects.`,
-      );
-    await new Promise(resolve => setTimeout(resolve, retryDelay(attempt)));
-  }
+  const response = await exchangeFetch(
+    'R2 object upload',
+    target.url,
+    { method: 'PUT', headers, body: new Uint8Array(bytes) },
+    { retries: attempts - 1 },
+  );
+  if (response.ok || response.status === 412) return {};
+  throw new ForgeError(
+    'EXCHANGE_UPLOAD_UNKNOWN',
+    `R2 object upload returned HTTP ${response.status}. Retry this same exchange to reconcile its original objects.`,
+  );
 }
 export function putTarget(target: PutTarget, bytes: Buffer): Promise<{ storageId?: string }> {
   return 'kind' in target ? putR2(target, bytes) : putConvexUpload(target, bytes);
@@ -79,6 +77,8 @@ export class ConvexExchangeBlobs implements ExchangeBlobs {
   constructor(
     private readonly client: Pick<ConvexHttpClient, 'action' | 'mutation'>,
     private readonly signedDownloads = new SignedDownloadCache(),
+    private readonly onBytes?: (pin: ContentPin, done: number) => void,
+    private readonly onCall?: (name: string, pending: boolean) => void,
   ) {}
   put = putTarget;
   getSigned(projectId: string, pins: ContentPin[]): Promise<Map<string, Buffer>> {
@@ -91,6 +91,8 @@ export class ConvexExchangeBlobs implements ExchangeBlobs {
       projectId,
       pins,
       this.signedDownloads,
+      this.onBytes,
+      this.onCall,
     );
   }
   getGroup(projectId: string, pins: ContentPin[]): Promise<BlobRow[]> {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // R2 object access for Convex functions (V8 runtime): config from the Convex
 // environment, presigned PUT targets, and signed HEAD checks. Secrets never leave Convex.
+import { exchangeFetch } from '../src/exchange-request';
 import { ForgeError } from '../src/errors';
 import { presign } from './presign';
 
@@ -82,7 +83,12 @@ export async function headObject(config: R2Config, key: string): Promise<HeadRes
       secretAccessKey: config.secretAccessKey,
       expires: headExpiry,
     });
-    const response = await fetch(url, { method: 'HEAD' });
+    const response = await exchangeFetch(
+      'R2 object HEAD verification',
+      url,
+      { method: 'HEAD' },
+      { retries: 1 },
+    );
     if (response.status === 404) return { status: 'missing' };
     if (!response.ok) return { status: 'error', detail: `HTTP ${response.status}` };
     const length = response.headers.get('content-length');
@@ -91,8 +97,9 @@ export async function headObject(config: R2Config, key: string): Promise<HeadRes
       size: length === null ? -1 : Number(length),
       checksum: response.headers.get('x-amz-checksum-sha256'),
     };
-  } catch {
-    return { status: 'error', detail: 'network' };
+  } catch (error) {
+    if (error instanceof ForgeError) throw error;
+    return { status: 'error', detail: 'R2 object HEAD verification network failure' };
   }
 }
 export const checksumOf = base64;

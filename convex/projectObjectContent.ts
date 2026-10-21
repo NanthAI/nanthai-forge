@@ -4,6 +4,7 @@ import type { ActionCtx } from './_generated/server';
 import { blobStore } from './blobStore';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
+import { exchangeFetch } from '../src/exchange-request';
 import { invariant } from '../src/errors';
 import { digest } from '../src/hash';
 import { storageDigest } from './projectStorage';
@@ -27,23 +28,13 @@ export const rawKey = (row: Doc<'projectObjects'>) => row.storageId ?? row.r2Key
  * (publication, derived views); clients read R2 directly. Verifies size and sha256. */
 async function r2Content(row: Doc<'projectObjects'>, pin: ChunkPin) {
   const url = await presignGet(r2Config(), row.r2Key!);
-  let status = 0,
-    data: Buffer | null = null;
-  for (let attempt = 0; attempt < 2 && !data; attempt++) {
-    try {
-      const response = await fetch(url);
-      status = response.status;
-      if (response.ok) data = Buffer.from(await response.arrayBuffer());
-      else if (status < 500) break;
-    } catch {
-      status = 0;
-    }
-  }
+  const response = await exchangeFetch('server R2 object download', url, {}, { retries: 1 });
   invariant(
-    data,
+    response.ok,
     'R2_OBJECT_UNAVAILABLE',
-    `Stored content is unavailable in object storage${status ? ` (HTTP ${status})` : ''}.`,
+    `Stored content is unavailable in object storage (HTTP ${response.status}).`,
   );
+  const data = Buffer.from(await response.arrayBuffer());
   invariant(
     data.length === pin.size && digest(data) === pin.sha256,
     'BLOB_DIGEST_MISMATCH',

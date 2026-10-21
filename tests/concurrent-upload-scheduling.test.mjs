@@ -48,7 +48,7 @@ function environment(t) {
         lose = false;
         throw Error('lost original POST reply');
       }
-      return { ok: true, json: async () => ({ storageId }) };
+      return Response.json({ storageId });
     } finally {
       active--;
       if (init.body.byteLength > 8 * 1024 * 1024) largeActive--;
@@ -227,7 +227,10 @@ test('unknown POST outcome reconciles original nonce and retries without rereadi
   const e = environment(t),
     objects = data(12);
   e.lose();
-  await assert.rejects(uploadPhysicalObjects(e.client, 'project', objects), /lost original POST reply/);
+  await assert.rejects(
+    uploadPhysicalObjects(e.client, 'project', objects),
+    error => error.code === 'EXCHANGE_REQUEST_FAILED' && /Convex object upload/.test(error.message),
+  );
   assert.equal(e.stats().active, 0);
   const before = e.stats(),
     rows = [...e.s.tables.projectObjects.values()].map(x => ({

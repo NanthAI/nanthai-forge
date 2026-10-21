@@ -232,7 +232,10 @@ test('malformed range/length, unavailable, truncated and failed streams return n
     const original = structuredClone(s.tables.projectBackups.get('backup'));
     await assert.rejects(s.invoke(), e => {
       assert.doesNotMatch(JSON.stringify(e.data), /storage.invalid|private-capability/);
-      return ['INVALID_WORK_BACKUP', 'HOSTED_REQUEST_FAILED'].includes(e.data.code);
+      const networkFailure = option.throwFetch || option.errorAt !== undefined;
+      assert.equal(e.data.code, networkFailure ? 'EXCHANGE_REQUEST_FAILED' : 'INVALID_WORK_BACKUP');
+      if (networkFailure) assert.match(e.data.message, /Convex archive range download/);
+      return true;
     });
     if (s.calls.body) assert.equal(s.calls.body.locked, false, 'Failed response releases its reader');
     assert.deepEqual(s.tables.projectBackups.get('backup'), original);

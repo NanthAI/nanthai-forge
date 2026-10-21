@@ -555,7 +555,10 @@ test('batch transfer commits successful members and reconciles lost POST/finaliz
     pin: { sha256: digest(value), size: 3 },
     bytes: Buffer.from(value),
   }));
-  await assert.rejects(client.uploadBatch(content), /lost post reply/);
+  await assert.rejects(
+    client.uploadBatch(content),
+    error => error.code === 'EXCHANGE_REQUEST_FAILED' && /Convex object upload/.test(error.message),
+  );
   assert.equal(posts, 2);
   assert.equal([...s.tables.projectObjects.values()].filter(row => row.storageId).length, 1);
   assert.deepEqual(calls, ['prepareBatch', 'completeBatch']);

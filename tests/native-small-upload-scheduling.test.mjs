@@ -45,7 +45,7 @@ function provider(t) {
       const storageId = await s.ctx.storage.store(
         new Blob([init.body], { type: init.headers['Content-Type'] }),
       );
-      return { ok: true, json: async () => ({ storageId }) };
+      return Response.json({ storageId });
     } finally {
       active--;
     }

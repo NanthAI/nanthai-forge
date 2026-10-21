@@ -275,20 +275,21 @@ export async function* byteTreeChunks(
 export async function readByteTree(
   recipe: z.infer<typeof recipeSchema>,
   read: (pins: BytePin[]) => Promise<Buffer[]>,
-  options: { batchSize?: number } = {},
+  options: { batchSize?: number; onBytes?: ((done: number, total: number) => void) | undefined } = {},
 ) {
   const bytes = Buffer.allocUnsafe(recipe.size);
   let offset = 0;
   for await (const chunk of byteTreeChunks(recipe, read, options)) {
     chunk.copy(bytes, offset);
     offset += chunk.length;
+    options.onBytes?.(offset, recipe.size);
   }
   return bytes;
 }
 export async function resolveExchangeRoot(
   bytes: Buffer,
   read: (pins: BytePin[]) => Promise<Buffer[]>,
-  options: { batchSize?: number } = {},
+  options: { batchSize?: number; onWorkProgress?: ((done: number, total: number) => void) | undefined } = {},
 ) {
   const value: unknown = JSON.parse(bytes.toString('utf8'));
   if (!isExchangeRoot(value)) {
@@ -310,6 +311,7 @@ export async function resolveExchangeRoot(
         pins.reduce((sum, pin) => sum + pin.size, 0),
       );
   const root = exchangeRootSchema.parse(value);
+  options.onWorkProgress?.(0, root.work.size);
   const recordWork = async () => {
     invariant(root.schema === 2, 'INVALID_WORK_BACKUP', 'Select a record exchange.');
     const bytes = await readByteTree(root.records, boundedRead, options);
@@ -356,6 +358,7 @@ export async function resolveExchangeRoot(
         );
         chunk.copy(work, offset);
         offset += chunk.length;
+        options.onWorkProgress?.(offset, root.work.size);
       },
     );
     return work;
@@ -364,7 +367,10 @@ export async function resolveExchangeRoot(
   const resolved = await mapExchange(
       [
         () => readByteTree(root.manifest, boundedRead, options),
-        () => (root.schema === 2 ? recordWork() : readByteTree(root.work, boundedRead, options)),
+        () =>
+          root.schema === 2
+            ? recordWork()
+            : readByteTree(root.work, boundedRead, { ...options, onBytes: options.onWorkProgress }),
       ],
       2,
       run => run(),

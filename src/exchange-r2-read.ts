@@ -2,6 +2,7 @@
 import type { ContentPin } from './native-exchange.js';
 import { mapExchange } from './exchange-parallel.js';
 import { ForgeError, invariant } from './errors.js';
+import { exchangeFetch } from './exchange-request.js';
 import { digest } from './hash.js';
 
 /** A signed GET the server returned for one committed R2 object of the project. */
@@ -44,39 +45,34 @@ export class SignedDownloadCache {
 
 /** GETs run in parallel; small objects are latency-bound, so at least eight at once. */
 export const readConcurrency = 8;
-const retryDelay = (attempt: number) => 100 * 2 ** attempt * (0.5 + Math.random());
-
-/** One verified GET of a signed URL. Retries 5xx, 429 and network errors with backoff. Returns
- * `forbidden` on 403 (an expired or revoked signature) so the caller can sign again once. */
-export async function getSigned(url: string, pin: ContentPin, attempts = 4): Promise<Buffer | 'forbidden'> {
-  for (let attempt = 0; ; attempt++) {
-    let status = 0,
-      bytes: Buffer | undefined;
-    try {
-      const response = await fetch(url);
-      status = response.status;
-      if (response.ok) bytes = Buffer.from(await response.arrayBuffer());
-    } catch {
-      // Network failure: retry below.
-    }
-    if (bytes) {
-      invariant(
-        bytes.length === pin.size && digest(bytes) === pin.sha256,
-        'BLOB_DIGEST_MISMATCH',
-        'Downloaded content differs from its digest. Nothing was used or written.',
-      );
-      return bytes;
-    }
-    if (status === 403) return 'forbidden';
-    if (status === 404)
+/** A 403 refreshes the signed URL once; all other retries retain the original URL. */
+export async function getSigned(
+  url: string,
+  pin: ContentPin,
+  attempts = 4,
+  onBytes?: (done: number, total?: number) => void,
+  onCall?: (name: string, pending: boolean) => void,
+): Promise<Buffer | 'forbidden'> {
+  onCall?.('R2 object download', true);
+  try {
+    const response = await exchangeFetch('R2 object download', url, {}, { retries: attempts - 1, onBytes });
+    if (response.status === 403) return 'forbidden';
+    if (response.status === 404)
       throw new ForgeError('R2_OBJECT_MISSING', 'An object is missing from object storage.');
-    const retryable = status === 0 || status === 429 || status >= 500;
-    if (!retryable || attempt + 1 >= attempts)
+    if (!response.ok)
       throw new ForgeError(
         'R2_READ_FAILED',
-        `Object download ${status ? `returned HTTP ${status}` : 'did not complete'}. Retry the command.`,
+        `R2 object download returned HTTP ${response.status}. Retry the command.`,
       );
-    await new Promise(resolve => setTimeout(resolve, retryDelay(attempt)));
+    const bytes = Buffer.from(await response.arrayBuffer());
+    invariant(
+      bytes.length === pin.size && digest(bytes) === pin.sha256,
+      'BLOB_DIGEST_MISMATCH',
+      'Downloaded content differs from its digest. Nothing was used or written.',
+    );
+    return bytes;
+  } finally {
+    onCall?.('R2 object download', false);
   }
 }
 
@@ -88,6 +84,8 @@ export async function readSigned(
   projectId: string,
   pins: ContentPin[],
   cache = new SignedDownloadCache(),
+  onBytes?: (pin: ContentPin, done: number) => void,
+  onCall?: (name: string, pending: boolean) => void,
 ): Promise<Map<string, Buffer>> {
   const wanted = new Map(pins.map(pin => [pin.sha256, pin]));
   const signed = new Map<string, SignedObject>();
@@ -115,7 +113,7 @@ export async function readSigned(
     readConcurrency,
     async object => {
       const pin = wanted.get(object.digest)!;
-      let result = await getSigned(object.url, pin);
+      let result = await getSigned(object.url, pin, 4, done => onBytes?.(pin, done), onCall);
       if (result === 'forbidden') {
         cache.delete(projectId, object.digest);
         const [again] = await sign(projectId, [object.digest]);
@@ -124,7 +122,7 @@ export async function readSigned(
           'EXCHANGE_DOWNLOAD_DENIED',
           'Object storage no longer lets this account read the selected content.',
         );
-        result = await getSigned(again.url, pin);
+        result = await getSigned(again.url, pin, 4, done => onBytes?.(pin, done), onCall);
         invariant(
           result !== 'forbidden',
           'EXCHANGE_DOWNLOAD_DENIED',

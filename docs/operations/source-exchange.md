@@ -168,6 +168,28 @@ the original snapshot and request; retries never recapture them. Explicit revisi
 requests keep their revision checks. Inconsistent hosted snapshot reads report
 `WORK_CHANGED_DURING_PUSH`; exhausted hosted transaction conflicts report `HOSTED_CONFLICT`. Opaque platform failures become `HOSTED_ACTION_FAILED` with a safe request ID when available, rather than a bare `INTERNAL_ERROR`. Authentication, changed-operation payloads and stable validation failures remain typed and do not retry. A known stale bound push allows the next invocation to select fresh pins; an unknown outcome preserves the pending request. No retry silently changes a source revision or overwrites hosted edits.
 
+Exchange HTTP requests bound response headers, body inactivity and total request time.
+Object transfers and Convex queries/mutations allow 30 seconds without headers or
+body bytes, with a two-minute total per attempt. Convex actions allow three minutes
+for headers (Work reconstruction can run before responding), 30 seconds of body
+inactivity and ten minutes total per attempt. Reads and replay-safe actions retry
+three times after 100, 200 and 400 ms; each retry keeps the exact payload and operation
+ID. Exhausted network failures report `EXCHANGE_REQUEST_TIMEOUT` or
+`EXCHANGE_REQUEST_FAILED` with the call name, never a signed URL. Structured Convex
+function errors keep their original code. Upload POSTs to Convex storage are bounded
+but not blindly replayed: retrying the exchange reconciles their existing nonce-bound
+objects. Server-side R2 and archive range reads use the same 30-second/two-minute
+bounds with one retry; range-less archive responses still discard their prefix and
+cancel the unused suffix.
+
+The five-second reconcile heartbeat names manifest loading, work.json download
+(with logical bytes reconstructed out of total), journal export or local merge,
+and the active Convex function or R2 GET when waiting for its reply. R2 signed GETs are checked
+for every uncached object, even with new R2 writes disabled. Signing returns no URL
+for Convex-stored objects, which retain their existing download fallback. Previously
+committed R2 rows remain readable with `FORGE_BLOBS` unset; the write flag and project
+opt-in do not change their storage location.
+
 Journal export pages hosted events and streams checkpoint byte reconstruction. Schema-1
 Work reconstruction reads four byte chunks at a time; record checkpoints keep their
 bounded record windows. Export hashes parsed Work with a streaming JSON digest rather

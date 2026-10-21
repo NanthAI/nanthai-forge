@@ -38,13 +38,19 @@ const hostedState = async (client: ConvexExchange, projectId: string) =>
 export async function boundExchange(root: string, action: 'push' | 'pull', target?: string) {
   return withWorkLockOptions({ operation: `exchange ${action}` }, () =>
     withWorkProgress({ phase: `exchange ${action}` }, async () => {
-      let phase = `preparing exchange ${action}`;
-      const report = (next: string) => {
+      let phase = `preparing exchange ${action}`,
+        detail = 'in progress';
+      const report = (next: string, announce = true) => {
+        if (!announce) {
+          detail = next;
+          return;
+        }
         phase = next;
-        workProgress(phase, 'in progress');
+        detail = 'in progress';
+        workProgress(phase, detail);
       };
       report(phase);
-      const heartbeat = setInterval(() => report(phase), 5000);
+      const heartbeat = setInterval(() => workProgress(phase, detail), 5000);
       heartbeat.unref();
       try {
         if (action === 'pull') return await boundExchangeAction(root, action, target, report);
@@ -70,7 +76,7 @@ async function boundExchangeAction(
   root: string,
   action: 'push' | 'pull',
   target: string | undefined,
-  report: (phase: string) => void,
+  report: (phase: string, announce?: boolean) => void,
 ) {
   const store = new WorkStore(root),
     binding = requireHostedBinding(store);
@@ -231,7 +237,7 @@ async function pushAttempt(
   root: string,
   store: WorkStore,
   request: PendingPush,
-  report: (phase: string) => void,
+  report: (phase: string, announce?: boolean) => void,
 ) {
   const persist = (update: (pending: PendingPush) => void) =>
     updateHostState(store, state => {
@@ -320,6 +326,7 @@ async function pushAttempt(
         },
         {
           followLocal: true,
+          onProgress: detail => report(detail, false),
           ...(candidate
             ? {
                 candidate,

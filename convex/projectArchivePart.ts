@@ -3,6 +3,7 @@
 import type { ActionCtx } from './_generated/server';
 import { blobStore } from './blobStore';
 import type { Id } from './_generated/dataModel';
+import { exchangeRequest } from '../src/exchange-request';
 import { invariant } from '../src/errors';
 import { noteStorageRead } from './storageMeter';
 
@@ -41,63 +42,72 @@ export async function projectArchivePart(
   await checkAccess();
   const end = Math.min(size, offset + 2 * 1024 * 1024),
     length = end - offset;
-  const response = await fetch(url, { headers: { Range: `bytes=${offset}-${end - 1}` } });
-  contentType?.(response.headers.get('content-type')?.toLowerCase() ?? '');
-  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-  try {
-    invariant(
-      response.body && (response.status === 200 || response.status === 206),
-      errorCode,
-      'Stored archive transfer is unavailable.',
-    );
-    const partial = response.status === 206,
-      expected = partial ? length : size,
-      contentLength = response.headers.get('content-length');
-    invariant(
-      contentLength === null || (/^\d+$/.test(contentLength) && Number(contentLength) === expected),
-      errorCode,
-      'Stored archive transfer has a different length.',
-    );
-    if (partial) {
-      const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers.get('content-range') ?? '');
-      invariant(
-        range && Number(range[1]) === offset && Number(range[2]) === end - 1 && Number(range[3]) === size,
-        errorCode,
-        'Stored archive transfer has different source offsets.',
-      );
-    }
-    // Range-less storage responses are consumed incrementally, discarding their
-    // prefix. Retain only the requested bytes and cancel the unused suffix.
-    const data = new Uint8Array(length),
-      start = partial ? 0 : offset,
-      stop = start + length;
-    reader = response.body.getReader();
-    let position = 0,
-      copied = 0;
-    while (position < stop) {
-      const part = await reader.read();
-      invariant(!part.done, errorCode, 'Stored archive transfer ended before the requested bytes.');
-      const next = position + part.value.byteLength;
-      invariant(next <= expected, errorCode, 'Stored archive transfer exceeds its original size.');
-      const from = Math.max(position, start),
-        to = Math.min(next, stop);
-      if (to > from) {
-        data.set(part.value.subarray(from - position, to - position), copied);
-        copied += to - from;
+  return exchangeRequest(
+    'Convex archive range download',
+    url,
+    { headers: { Range: `bytes=${offset}-${end - 1}` } },
+    async (response, progressed) => {
+      contentType?.(response.headers.get('content-type')?.toLowerCase() ?? '');
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+      try {
+        invariant(
+          response.body && (response.status === 200 || response.status === 206),
+          errorCode,
+          'Stored archive transfer is unavailable.',
+        );
+        const partial = response.status === 206,
+          expected = partial ? length : size,
+          contentLength = response.headers.get('content-length');
+        invariant(
+          contentLength === null || (/^\d+$/.test(contentLength) && Number(contentLength) === expected),
+          errorCode,
+          'Stored archive transfer has a different length.',
+        );
+        if (partial) {
+          const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers.get('content-range') ?? '');
+          invariant(
+            range && Number(range[1]) === offset && Number(range[2]) === end - 1 && Number(range[3]) === size,
+            errorCode,
+            'Stored archive transfer has different source offsets.',
+          );
+        }
+        // Range-less storage responses are consumed incrementally, discarding their
+        // prefix. Retain only the requested bytes and cancel the unused suffix.
+        const data = new Uint8Array(length),
+          start = partial ? 0 : offset,
+          stop = start + length;
+        reader = response.body.getReader();
+        let position = 0,
+          copied = 0;
+        while (position < stop) {
+          const part = await reader.read();
+          invariant(!part.done, errorCode, 'Stored archive transfer ended before the requested bytes.');
+          if (part.value.byteLength) progressed();
+          const next = position + part.value.byteLength;
+          invariant(next <= expected, errorCode, 'Stored archive transfer exceeds its original size.');
+          const from = Math.max(position, start),
+            to = Math.min(next, stop);
+          if (to > from) {
+            data.set(part.value.subarray(from - position, to - position), copied);
+            copied += to - from;
+          }
+          position = next;
+        }
+        if (partial || end === size) {
+          const tail = await reader.read();
+          invariant(tail.done, errorCode, 'Stored archive transfer exceeds its original size.');
+        }
+        invariant(copied === length, errorCode, 'Stored archive transfer is incomplete.');
+        noteStorageRead(ctx, position);
+        return data.buffer;
+      } finally {
+        if (reader) {
+          await reader.cancel().catch(() => undefined);
+          reader.releaseLock();
+        } else if (response.body && !response.body.locked)
+          await response.body.cancel().catch(() => undefined);
       }
-      position = next;
-    }
-    if (partial || end === size) {
-      const tail = await reader.read();
-      invariant(tail.done, errorCode, 'Stored archive transfer exceeds its original size.');
-    }
-    invariant(copied === length, errorCode, 'Stored archive transfer is incomplete.');
-    noteStorageRead(ctx, position);
-    return data.buffer;
-  } finally {
-    if (reader) {
-      await reader.cancel().catch(() => undefined);
-      reader.releaseLock();
-    } else if (response.body && !response.body.locked) await response.body.cancel().catch(() => undefined);
-  }
+    },
+    { retries: 1 },
+  );
 }
