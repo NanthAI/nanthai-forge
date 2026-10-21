@@ -24,6 +24,7 @@ const replaySafe = new Set([
   'projectExchangeActions:downloadPart',
   'projectProposalObjects:checkpoint',
   'projectWorkActions:exportJournal',
+  'projectWorkJournal:page',
   'projectWorkIndexActions:ensure',
 ]);
 const receiptCalls = new Set([

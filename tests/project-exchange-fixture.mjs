@@ -24,6 +24,7 @@ const names = [
   'projectBackups',
   'projectWork',
   'projectWorkActions',
+  'projectWorkJournal',
   'projectSourceReturn',
   'projectDiffstats',
 ];

@@ -418,13 +418,13 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
         );
         return;
       }
-      if (body.path === 'projectWorkActions:exportJournal' && blockedJournal) {
+      if (body.path === 'projectWorkJournal:page' && blockedJournal) {
         const gate = blockedJournal;
         blockedJournal = null;
         gate.enter();
         await gate.wait;
       }
-      if (body.path === 'projectWorkActions:exportJournal' && delayJournal) {
+      if (body.path === 'projectWorkJournal:page' && delayJournal) {
         delayJournal = false;
         await new Promise(resolve => setTimeout(resolve, 10500));
       }
@@ -575,7 +575,7 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
     .split('\n')
     .filter(line => line.startsWith('receiving and reconciling hosted Work journal:'));
   assert(journalProgress.length >= 2, 'a slow journal read reports progress while awaiting its reply');
-  assert.match(journalProgress.at(-1), /journal export; waiting on projectWorkActions:exportJournal/);
+  assert.match(journalProgress.at(-1), /journal delta; waiting on projectWorkJournal:page/);
   // The heartbeat fires every 5 s; whole-second rounding can print 4 s on a busy runner.
   assert.match(journalProgress.at(-1), /elapsed=[1-9]\d*s/);
   assert.equal(first.revision, f.store.revision());
@@ -716,7 +716,7 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
     'the retry reused its retained snapshot and receipt',
   );
   assert(!(await indexed('intents')).some(intent => intent.id === duringPublish));
-  const duringJournal = localWrite('projectWorkActions:exportJournal');
+  const duringJournal = localWrite('projectWorkJournal:page');
   const following = JSON.parse((await cli('exchange', f.root, 'push')).stdout);
   assert.equal(writeDuring, null);
   assert.equal(following.revision, f.store.revision());

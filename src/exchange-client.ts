@@ -5,6 +5,7 @@ import {
   publicationHash,
   type PublicationMetadata,
 } from './publication-metadata.js';
+import { cachedExchangeMetadata, retainExchangeMetadata } from './exchange-receive-cache.js';
 import { ExchangeDownloadCache } from './exchange-download-cache.js';
 import { SignedDownloadCache } from './exchange-r2-read.js';
 import { hostedMainSchema, type MainExpectation } from './hosted-main.js';
@@ -40,6 +41,7 @@ const chunked = (pin: ContentPin) => {
 };
 export class ConvexExchange implements ExchangeTransport {
   readonly metadataTrees = true;
+  metadataCacheDirectory?: string;
   private readonly downloadCache = new ExchangeDownloadCache();
   private readonly signedDownloads = new WeakMap<ConvexHttpClient, SignedDownloadCache>();
   readonly workRecords = true;
@@ -329,10 +331,24 @@ export class ConvexExchange implements ExchangeTransport {
       'INVALID_WORK_BACKUP',
       'Checkpoint root differs from its selected digest.',
     );
+    const cached = this.metadataCacheDirectory
+      ? cachedExchangeMetadata(this.metadataCacheDirectory, bytes)
+      : undefined;
+    if (cached) {
+      this.logicalMetadata.set(digest(cached.work), { bytes: cached.work, backupId });
+      return {
+        json: cached.manifest.toString('utf8'),
+        digest: digest(cached.manifest),
+        size: cached.manifest.length,
+        sourceDigest: original.sourceDigest ?? original.digest,
+      };
+    }
     if (!isExchangeRoot(JSON.parse(original.json))) return original;
     const resolved = await resolveExchangeRoot(bytes, pins => this.downloadBatch(pins), {
       onWorkProgress: this.onWorkProgress,
     });
+    if (this.metadataCacheDirectory)
+      retainExchangeMetadata(this.metadataCacheDirectory, bytes, resolved.manifest, resolved.work);
     this.logicalMetadata.set(digest(resolved.work), { bytes: resolved.work, backupId });
     return {
       json: resolved.manifest.toString('utf8'),
@@ -515,6 +531,23 @@ export class ConvexExchange implements ExchangeTransport {
       manifestDigest: manifest.sha256,
       manifestSize: manifest.size,
     });
+  }
+  async journalPage(afterRevision?: number, snapshot?: string): Promise<unknown> {
+    try {
+      const json = await this.client.query(query('projectWorkJournal:page'), {
+        projectId: this.projectId,
+        ...(afterRevision === undefined ? {} : { afterRevision }),
+        ...(snapshot === undefined ? {} : { snapshot }),
+      });
+      return JSON.parse(json);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        /Could not find public function.*projectWorkJournal:page/.test(error.message)
+      )
+        throw new ForgeError('JOURNAL_PAGING_UNAVAILABLE', 'Hosted journal paging is not deployed.');
+      throw hostedActionError(error, 'journal page');
+    }
   }
   async journal(): Promise<string> {
     return retryExchange('Work journal read', this.operationId, () =>

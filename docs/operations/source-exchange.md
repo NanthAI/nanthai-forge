@@ -130,6 +130,27 @@ deployment, network push or canonical owner.
 
 ## Receive
 
+Native object reconciliation first reads `projectWorkJournal:page` metadata and
+proves an exact local base using the hosted manifest digest, its `work.json` hash,
+source head and initial revision. Retained outgoing exchanges and earlier receive
+or download caches supply those bytes. It replays the already received local event
+prefix, checks the preceding event's SHA-256 against the server, then downloads only
+new events in revision order. Every page rechecks current project access and the
+same checkpoint, revision and Intent migration pins. The query reads no source
+objects or complete Work; pages read at most 50 rows with a 256 KiB read/response
+budget (one existing larger event remains readable).
+
+An unprovable base or event boundary logs `journal delta fallback` with its reason.
+Full checkpoint recovery reuses hash-verified retained downloads, including receive
+directories written by older CLIs. Resolved metadata is retained before journal
+export, so an interrupted export does not redownload the same large Work. Current
+servers still return journal pages after base recovery. Older deployments use the
+existing full `exportJournal` action; older CLIs keep that action unchanged. Access
+failures and stale snapshot pins remain errors. Local companion validation, merge
+conflicts, operation retries and final revision/CAS checks are unchanged. This
+reduces network and hosted storage reads; local replay and merging still scale
+with retained Work. Live latency and billing require separate measurement.
+
 `reconcile` merges hosted Work into an existing owner that already has the common source. It takes `backupId` and `revision`, and leaves Lane files and unrelated records alone. `restore` builds a new owner from `backupId` (also accepted by the legacy `pull` request). Optional `cacheRoot` reuses source bytes from another owner, and `journalPath` supplies the hosted Work journal. Restore checks every hash, never runs repository commands, and never overwrites an existing directory.
 
 ## Migrate an older archive

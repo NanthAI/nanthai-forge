@@ -7,7 +7,9 @@ import { nativeManifestSchema } from './work-archive-metadata.js';
 import { reconcileHostedWork } from './native-companion.js';
 import { ConvexExchange } from './exchange-client.js';
 import { WorkStore } from './work-store.js';
-import { invariant } from './errors.js';
+import { exchangeJournalDelta } from './exchange-journal-delta.js';
+import { retainExchangeMetadata, retainedExchangeBase } from './exchange-receive-cache.js';
+import { ForgeError, invariant } from './errors.js';
 import type { WorkData } from './work-types.js';
 
 export async function reconcileExchange(
@@ -36,6 +38,7 @@ export async function reconcileExchange(
       request.operationId,
       null,
     );
+  transport.metadataCacheDirectory = store.directory;
   const directory = join(store.directory, `exchange-receive-${request.operationId}`),
     receiptPath = join(directory, 'request.json');
   let stage = 'manifest',
@@ -68,39 +71,73 @@ export async function reconcileExchange(
     );
     command = original.command;
   } else {
+    stage = 'journal delta';
     progress();
-    const original = await transport.manifest(request.backupId),
-      bytes = Buffer.from(original.json);
-    invariant(
-      digest(bytes) === original.digest && bytes.length === original.size,
-      'INVALID_WORK_BACKUP',
-      'Original exchange manifest changed.',
-    );
-    const manifest = nativeManifestSchema.parse(JSON.parse(original.json)),
-      file = manifest.files.find(file => file.path === 'work.json');
-    invariant(file, 'INVALID_WORK_BACKUP', 'Original Work is absent from the manifest.');
-    stage = 'work.json download';
-    done = 0;
-    total = file.size;
-    progress();
-    transport.onDownloadProgress = (pin, received) => {
-      if (pin.sha256 === file.sha256) {
-        done = received;
+    let received,
+      pagingAvailable = true;
+    try {
+      received = await exchangeJournalDelta(store, transport, request.backupId, options.onProgress);
+    } catch (error) {
+      if (
+        !(error instanceof ForgeError) ||
+        !['INVALID_WORK_JOURNAL', 'INVALID_WORK_BACKUP', 'JOURNAL_PAGING_UNAVAILABLE'].includes(error.code)
+      )
+        throw error;
+      const reason = `journal delta fallback: ${error.code}: ${error.message}`;
+      process.stderr.write(`${reason}\n`);
+      options.onProgress?.(reason);
+      pagingAvailable = error.code === 'INVALID_WORK_JOURNAL';
+    }
+    if (!received) {
+      stage = 'manifest';
+      progress();
+      const original = await transport.manifest(request.backupId),
+        bytes = Buffer.from(original.json);
+      invariant(
+        digest(bytes) === original.digest && bytes.length === original.size,
+        'INVALID_WORK_BACKUP',
+        'Original exchange manifest changed.',
+      );
+      const manifest = nativeManifestSchema.parse(JSON.parse(original.json)),
+        file = manifest.files.find(file => file.path === 'work.json');
+      invariant(file, 'INVALID_WORK_BACKUP', 'Original Work is absent from the manifest.');
+      stage = 'work.json download';
+      done = 0;
+      total = file.size;
+      progress();
+      transport.onDownloadProgress = (pin, received) => {
+        if (pin.sha256 === file.sha256) {
+          done = received;
+          progress();
+        }
+      };
+      const cached = retainedExchangeBase(store.directory, original.digest);
+      const work = cached?.work ?? (await transport.download(file));
+      // Also retain flat/legacy object checkpoints before a journal-export failure.
+      retainExchangeMetadata(store.directory, bytes, bytes, work);
+      if (pagingAvailable) {
+        // Recover the exact base, then read all events in bounded pages. A cold
+        // owner must not make the new server rebuild the entire hosted Work.
+        received = await exchangeJournalDelta(store, transport, request.backupId, options.onProgress, {
+          reuseReceived: false,
+        });
+      } else {
+        stage = 'journal export';
+        total = undefined;
         progress();
+        const journal = await transport.journal(),
+          parsed = JSON.parse(journal);
+        invariant(
+          parsed.source?.backupId === request.backupId &&
+            parsed.base.archiveSha256 === (original.sourceDigest ?? original.digest),
+          'WORK_STALE',
+          'Hosted source changed. Keep the original request and select its matching checkpoint.',
+        );
+        received = { original, work, journal, parsed };
       }
-    };
-    const work = await transport.download(file);
-    stage = 'journal export';
-    total = undefined;
-    progress();
-    const journal = await transport.journal(),
-      parsed = JSON.parse(journal);
-    invariant(
-      parsed.source?.backupId === request.backupId &&
-        parsed.base.archiveSha256 === (original.sourceDigest ?? original.digest),
-      'WORK_STALE',
-      'Hosted source changed. Keep the original request and select its matching checkpoint.',
-    );
+    }
+    const { original, work, journal, parsed } = received,
+      bytes = Buffer.from(original.json);
     const journalPath = join(directory, 'journal.json');
     command = {
       action: 'reconcile-hosted-work',

@@ -265,7 +265,7 @@ test('reconcile progress identifies manifest, work.json bytes, journal export an
   const { reconcileExchange } = await import('../dist/exchange-reconcile.js');
   const root = mkdtempSync(join(tmpdir(), 'forge-reconcile-progress-'));
   initNative(root);
-  const methods = ['manifest', 'download', 'journal'];
+  const methods = ['manifest', 'download', 'journal', 'journalPage'];
   const saved = methods.map(name => ConvexExchange.prototype[name]);
   const token = process.env.FORGE_AUTH_TOKEN;
   process.env.FORGE_AUTH_TOKEN = 'synthetic';
@@ -289,6 +289,9 @@ test('reconcile progress identifies manifest, work.json bytes, journal export an
     unavailable: [],
     coverage: 'Synthetic',
   });
+  ConvexExchange.prototype.journalPage = async () => {
+    throw new ForgeError('JOURNAL_PAGING_UNAVAILABLE', 'Synthetic old server');
+  };
   ConvexExchange.prototype.manifest = async function () {
     this.onCall?.('projectExchangeActions:checkpoint', true);
     this.onCall?.('projectExchangeActions:checkpoint', false);
