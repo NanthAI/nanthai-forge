@@ -6,7 +6,11 @@ import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { caller, load } from './projectWorkActions';
 import { workProjection } from './projectSourceProjection';
-import { migrateHostedIntents, validateUnifiedHostedWork } from '../src/work-hosted-intents';
+import {
+  convertHostedIntents,
+  migrateHostedIntents,
+  validateUnifiedHostedWork,
+} from '../src/work-hosted-intents';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
@@ -72,6 +76,40 @@ export const migrate = action({
           return generation._id;
         // A concurrent journal append wins. Reconstruct its full lineage at the new revision.
       }
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** Run the same conversion and validation without staging or selecting a generation. */
+export const preview = action({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    try {
+      const owner = await caller(ctx);
+      await ctx.runQuery(internal.projectWork.owner, { ...input, owner });
+      const snapshot = await load(ctx, input.projectId, owner, undefined, {
+        requireCurrent: true,
+        cacheMetadata: false,
+      });
+      const converted = convertHostedIntents(snapshot.data);
+      const unified = validateUnifiedHostedWork(converted);
+      const alreadyUnified = [16, 18].includes(snapshot.data.schema);
+      const current = {
+        intents: unified.intents.length,
+        initiatives: unified.initiatives.length,
+        aliases: unified.intentAliases.length,
+      };
+      return JSON.stringify({
+        dryRun: true,
+        revision: snapshot.data.revision,
+        alreadyUnified,
+        counts: alreadyUnified
+          ? { before: current, after: current, foldedPairs: 0 }
+          : unified.intentMergeReceipt.counts,
+      });
     } catch (error) {
       return report(error);
     }

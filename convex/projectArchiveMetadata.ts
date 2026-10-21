@@ -56,7 +56,9 @@ export async function projectArchiveMetadata(
   size: number,
   digest: string,
   checkAccess: () => Promise<unknown>,
+  cache = true,
 ) {
+  if (!cache) return readOriginalMetadata(ctx, storageId, size, digest, checkAccess);
   const file = await blobStore(ctx).getMetadata(storageId);
   const actual =
     file &&

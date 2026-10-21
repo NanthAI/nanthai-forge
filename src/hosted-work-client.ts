@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runHostedIntentMigration } from './hosted-intent-migration-client.js';
 import { assembleIndexValue } from './work-index-value.js';
 import { policyWriteSchema } from './autonomy-policy.js';
 import { ConvexError } from 'convex/values';
@@ -21,6 +22,13 @@ export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
     })
     .strict(),
   z.object({ action: z.literal('workspace') }).strict(),
+  z
+    .object({
+      action: z.literal('migrate-intents'),
+      operationId: z.uuid(),
+      dryRun: z.boolean().default(false),
+    })
+    .strict(),
   z
     .object({
       action: z.literal('records'),
@@ -138,15 +146,18 @@ export async function dispatchHostedWork(
   client: HostedWorkTransport,
   projectId: string,
   input: unknown,
+  progress?: (line: string) => void,
 ): Promise<unknown> {
   const parsed = hostedWorkRequestSchema.safeParse(input);
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    'Use workspace, records, detail, policy, set-policy or pinned accept.',
+    'Use workspace, records, detail, policy, set-policy, migrate-intents or pinned accept.',
   );
   try {
     const request = parsed.data;
+    if (request.action === 'migrate-intents')
+      return await runHostedIntentMigration(client, projectId, request, progress);
     if (request.action === 'accept') {
       const { action: _action, operationId, revision, ...pins } = request;
       void _action;
@@ -255,7 +266,7 @@ export async function dispatchHostedWork(
       throw new ForgeError(data.code, data.message);
     throw new ForgeError(
       'HOSTED_WORK_REQUEST_FAILED',
-      'The Work read did not return success. Check current authentication/access; no successful result is claimed.',
+      'The hosted Work request did not return success. Check current authentication/access; no successful result is claimed.',
     );
   }
 }

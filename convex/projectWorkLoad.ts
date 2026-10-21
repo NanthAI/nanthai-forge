@@ -28,6 +28,7 @@ export async function source(
   owner: string,
   reader?: ExchangeObjectReader,
   metadata = false,
+  cacheMetadata = true,
 ): Promise<SourceSnapshot> {
   const objectReader = reader ?? exchangeObjectReader(ctx, true);
   const original: { backup: Doc<'projectBackups'>; project: Doc<'hostedProjects'> } = await ctx.runQuery(
@@ -69,6 +70,7 @@ export async function source(
             original.backup.size,
             original.backup.digest,
             () => ctx.runQuery(internal.projectBackups.get, { id: backupId, owner }),
+            cacheMetadata,
           );
   const manifestBytes = streamed?.manifest ?? bytes!.manifest,
     manifest = sourceManifestSchema.parse(JSON.parse(Buffer.from(manifestBytes).toString('utf8'))),
@@ -112,7 +114,7 @@ export async function load(
   projectId: Id<'hostedProjects'>,
   owner: string,
   reader?: ExchangeObjectReader,
-  options: { requireCurrent?: boolean; metadata?: boolean } = {},
+  options: { requireCurrent?: boolean; metadata?: boolean; cacheMetadata?: boolean } = {},
 ): Promise<SourceSnapshot & { events: HostedEvent[] }> {
   const project: Doc<'hostedProjects'> = await ctx.runQuery(internal.projectWork.get, { projectId, owner });
   invariant(project.work, 'PROJECT_WORK_MISSING', 'Start hosted Work from a stored source backup.');
@@ -127,7 +129,14 @@ export async function load(
     );
   };
   try {
-    const snapshot = await source(ctx, project.work.backupId, owner, reader, options.metadata),
+    const snapshot = await source(
+        ctx,
+        project.work.backupId,
+        owner,
+        reader,
+        options.metadata,
+        options.cacheMetadata,
+      ),
       events: HostedEvent[] = [];
     let cursor: string | null = null;
     invariant(

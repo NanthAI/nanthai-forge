@@ -27,6 +27,42 @@ This complements project archives; the live restore drill remains unverified.
 
 Hosted projects store the same archives. Use "Store private backup" in the browser, or `nforge exchange` for incremental pushes. To work on hosted Intents locally, download the pinned archive and the current journal together, then run `nforge restore-native ARCHIVE NEW_DIR --journal HOSTED_WORK.json`. Return a new checkpoint with "Return checkpoint to hosted Forge". If another edit landed first, nothing is overwritten. Both versions stay, so download the current Work and reconcile first. A lost reply is resolved with "Reconcile original source return".
 
+### Hosted Intent migration
+
+Owners can preview and run the existing operation-pinned hosted migration through
+`hosted-work`. Use a CLI built with these commands and a backend providing
+`projectIntentMigrationActions:preview` and `projectIntentMigration:progress`.
+Authenticate with `nforge login DEPLOYMENT_URL` or the existing `FORGE_AUTH_TOKEN`
+environment override. For a locally bound owner:
+
+```sh
+nforge hosted-work ROOT '{"action":"migrate-intents","operationId":"ORIGINAL_UUID","dryRun":true}'
+nforge hosted-work ROOT '{"action":"migrate-intents","operationId":"ORIGINAL_UUID"}'
+```
+
+Replace `ORIGINAL_UUID` with one UUID and retain it for every retry. The same JSON
+also works with `nforge hosted-work DEPLOYMENT_URL PROJECT_ID JSON` or
+`--command-file FILE`. This migrates hosted Work only; local `migrate-intents`
+is a separate operation.
+
+Dry run replays the current checkpoint and journal, applies the same converter
+and validates the result without staging batches, publishing a generation or
+changing source. It reports the observed revision, `alreadyUnified`, and
+before/after counts with `foldedPairs`. On an already unified snapshot, counts
+show current Intents, Initiatives and aliases and zero new folds.
+
+During migration, stderr identifies the operation UUID, revision, generation
+and staged-batch count as they change; stdout holds the final JSON result.
+After interruption, timeout or an unknown reply, rerun the original request with
+the same UUID. The server resumes retained batches, reconstructs at a newer
+revision when a concurrent journal append wins, and publishes only after its
+existing source/revision checks. A completed migration returns its retained
+generation even after later source selections; a new operation does not migrate
+it again. A progress-read failure reports unavailable progress while the
+original action result remains authoritative. No automatic retry chooses a new
+operation or claims success. Previous generations, source backups and journal
+bytes remain retained by the existing migration.
+
 ### Hosting progress and recovery
 
 `nforge host ROOT --json --wait` emits progress and result JSON lines; ordinary progress uses stderr.

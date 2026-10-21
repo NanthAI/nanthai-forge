@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalMutation } from './_generated/server';
+import { internalMutation, query } from './cliServer';
+import { report } from './errors';
 import { activeOwnedProject } from './projectAuthority';
 import { workProject, setWorkHead } from './projectWorkHead';
 import { generationDocument } from './projectWorkIndexFields';
@@ -110,5 +111,46 @@ export const publish = internalMutation({
       },
     });
     return true;
+  },
+});
+
+/** Read only the original operation's latest staged revision, or the retained publication. */
+export const progress = query({
+  args: { projectId: v.id('hostedProjects'), operationId: v.string() },
+  returns: v.object({
+    operationId: v.string(),
+    state: v.union(v.literal('pending'), v.literal('building'), v.literal('completed')),
+    generationId: v.union(v.id('projectWorkGenerations'), v.null()),
+    revision: v.number(),
+    batches: v.number(),
+  }),
+  handler: async (ctx, input) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use your Forge project.');
+      const project = await workProject(ctx, await activeOwnedProject(ctx, input.projectId, user.subject));
+      invariant(project.work, 'PROJECT_WORK_MISSING', 'Initialize hosted Work before migrating Intents.');
+      const published = project.work.intentMigration;
+      const generation = published
+        ? await ctx.db.get(published.generationId)
+        : (
+            await ctx.db
+              .query('projectWorkGenerations')
+              .withIndex('by_project_and_intent_migration_and_revision', q =>
+                q.eq('projectId', input.projectId).eq('intentMigrationOperationId', input.operationId),
+              )
+              .order('desc')
+              .take(1)
+          )[0];
+      return {
+        operationId: published?.operationId ?? input.operationId,
+        state: published ? ('completed' as const) : generation ? ('building' as const) : ('pending' as const),
+        generationId: published?.generationId ?? generation?._id ?? null,
+        revision: published?.revision ?? generation?.revision ?? project.work.revision,
+        batches: generation?.nextBatch ?? 0,
+      };
+    } catch (error) {
+      return report(error);
+    }
   },
 });

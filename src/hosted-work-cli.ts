@@ -10,6 +10,8 @@ nforge hosted-work ROOT JSON
 nforge hosted-work DEPLOYMENT PROJECT_ID JSON
 nforge hosted-work DEPLOYMENT PROJECT_ID --command-file FILE
 Run nforge login or set FORGE_AUTH_TOKEN to an existing owner/contributor Convex JWT; never put it in arguments or source.
+Intent migration (owner only): {"action":"migrate-intents","operationId":"UUID","dryRun":true} reports conversion counts without writes.
+Omit dryRun to migrate; progress is on stderr, final JSON on stdout. Resume with the same operationId after interruption.
 Policy: {"action":"policy"}; set-policy: {"action":"set-policy","operationId":"UUID","preset":"trusted"} (current owner only).
 Workspace: {"action":"workspace"} returns source pins, current command revision, counts and capabilities.
 Records: {"action":"records","collection":"intents","cursor":null,"pageSize":50} returns one indexed summary page.
@@ -45,5 +47,12 @@ export async function hostedWorkCli(args: string[]) {
   } catch {
     invariant(false, 'BAD_ARGUMENT', 'Read a valid hosted Work request JSON object.');
   }
-  return dispatchHostedWork(coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN), projectId, input);
+  return dispatchHostedWork(
+    coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN),
+    projectId,
+    input,
+    line => {
+      process.stderr.write(`${line}\n`);
+    },
+  );
 }
