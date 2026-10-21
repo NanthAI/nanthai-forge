@@ -534,3 +534,41 @@ uploaded checkpoint's root head. Explicit independent-owner restore remains the
 full retained-closure recovery operation. Client cache and retry receipts are
 transport state; they do not grant hosted access or move a Channel. See
 [hosted main client checkout](operations/source-exchange.md#hosted-main-client-checkout).
+
+### Hosted source authority and operation contracts
+
+Projects have an explicit optional `sourceAuthority` record with mode
+`native-owner`, `server-shadow` or `server` and a nonnegative fencing epoch.
+New projects from native upload, browser bootstrap and GitHub import all record
+`native-owner` at epoch 0. Missing legacy fields mean that same authority;
+creation retries preserve an existing record. Hosting requests, presence and
+heartbeats never select authority. `projectSourceAuthority:current` checks
+current project access and reads that project row without scanning or migrating
+history. The shared transition helper checks expected mode/epoch and increases
+the epoch, including when preparing a return to native authority. H01 adds no
+cutover mutation and enables no server writer.
+
+`src/hosted-main.ts` retains the strict schema-1 contract and adds schema 2:
+project, snapshot ID, source revision, authority mode/epoch, State head and
+Channel receipt with previous State/receipt pins. Optional seed backup/generation
+pins are recovery information; they do not constrain the current State or select
+main. The source checkout reader accepts both schemas. Clients advertise their
+maximum schema to `projectMain:current`; omitted means schema 1. After current
+access checks, an unsupported server-source reader receives
+`CLI_UPGRADE_REQUIRED` before any legacy generation lookup. Server snapshot
+publication is a subsequent implementation slice; until it exists, a capable
+reader receives `SOURCE_UNAVAILABLE`, never a native head labeled server main.
+Existing native and shadow projects retain schema-1 main selection.
+
+`src/hosted-source-operation.ts` defines shared versioned operation, attempt,
+expected-pin and terminal-receipt envelopes. Payload hashing recursively sorts
+JSON object keys and retains array order, with original expected pins included
+in the hash. A first attempt pins its time, operation/project identity and child
+UUIDs before external work. Named child attempts can carry new observations
+without changing the original operation. The preparation helper requires a
+current authorization callback before reading a saved receipt, rejects changed
+payloads/identity/pins with `WORK_OPERATION_CHANGED`, and returns original
+first-attempt and terminal data on retry. Completion retains the first terminal
+outcome, including failure. Callers must persist fresh envelopes transactionally
+before external effects; H01 defines these contracts without adding operation
+storage or changing existing receipt formats.

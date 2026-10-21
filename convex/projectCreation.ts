@@ -16,6 +16,7 @@ export async function createProject(
   if (!project) {
     const id = await ctx.db.insert('hostedProjects', {
       ...input,
+      sourceAuthority: { mode: 'native-owner', epoch: 0 },
       autonomyPolicy: policyPreset('supervised'),
       visibility: input.visibility ?? 'private',
       currentBackup: null,

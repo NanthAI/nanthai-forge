@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ownerAcceptanceTables } from './ownerAcceptanceFields';
+import { sourceAuthority } from './projectSourceAuthorityFields';
 import { actorTables } from './projectActorFields';
 import { autonomyPolicy, autonomyTables, automaticAction } from './autonomyFields';
 import { briefTables } from './agentBriefFields';
@@ -261,6 +262,7 @@ export const hostedWorkEventDocument = v.object({
 });
 export const projectRemoval = v.union(v.literal('trash'), v.literal('deleting'), v.literal('deleted'));
 const projectFields = {
+  sourceAuthority: v.optional(sourceAuthority),
   visibility: v.optional(v.union(v.literal('private'), v.literal('public'))),
   hostingRequest: v.optional(v.string()),
   autonomyPolicy: v.optional(autonomyPolicy),

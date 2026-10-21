@@ -92,6 +92,7 @@ export class ConvexExchange implements ExchangeTransport {
       JSON.parse(
         await this.client.query(query('projectMain:current'), {
           projectId: this.projectId,
+          maxSchema: 2,
           ...(expected ? { expected } : {}),
         }),
       ),

@@ -6,20 +6,26 @@ import { isStored } from './projectObjectFields';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { invariant } from '../src/errors';
 import { hostedMainSchema } from '../src/hosted-main';
+import { requireSourceContract, sourceAuthority } from '../src/hosted-source-authority';
 import { report } from './errors';
 /** One transaction observes both the selected source generation and Channel receipt. */
 export const current = query({
   args: {
     projectId: v.id('hostedProjects'),
+    maxSchema: v.optional(v.union(v.literal(1), v.literal(2))),
     expected: v.optional(v.object({ head: v.string(), receiptId: v.string() })),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, expected }) => {
+  handler: async (ctx, { projectId, expected, maxSchema }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted main.');
-      const project = await accessibleProject(ctx, projectId, user.subject),
-        generation = await selectedGeneration(ctx, project);
+      const project = await accessibleProject(ctx, projectId, user.subject);
+      const authority = sourceAuthority(project);
+      requireSourceContract(authority, maxSchema);
+      // H01 defines the contract; authoritative server snapshot publication follows separately.
+      invariant(authority.mode !== 'server', 'SOURCE_UNAVAILABLE', 'Server main snapshot is not ready.');
+      const generation = await selectedGeneration(ctx, project);
       invariant(generation, 'PROJECT_WORK_MISSING', 'Hosted source index is not ready.');
       const backup = await ctx.db.get(generation.backupId);
       invariant(
