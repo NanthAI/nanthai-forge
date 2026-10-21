@@ -10,6 +10,8 @@ import { WorkStore } from './work-store.js';
 import { exchangeJournalDelta } from './exchange-journal-delta.js';
 import { retainExchangeMetadata, retainedExchangeBase } from './exchange-receive-cache.js';
 import { ForgeError, invariant } from './errors.js';
+import { exchangeBaseline, retainExchangeBaseline } from './native-exchange-baseline.js';
+import { parseWork } from './work-unified-types.js';
 import type { WorkData } from './work-types.js';
 
 export async function reconcileExchange(
@@ -161,5 +163,33 @@ export async function reconcileExchange(
   stage = 'local merge';
   total = undefined;
   progress();
-  return reconcileHostedWork(store, command, request.revision, options);
+  const reconciled = await reconcileHostedWork(store, command, request.revision, options);
+  // A publication receipt can survive a lost reply without its optional hint.
+  // Only after successful journal/merge validation recover the exact base,
+  // including on replay. This cache is never a reconciliation precondition.
+  const baselineKey = transport.checkpointKey(request.backupId);
+  if (reconciled.result.status === 'reconciled' && !exchangeBaseline(store, baselineKey)?.data) {
+    try {
+      const manifestBytes = readFileSync(join(directory, 'manifest.json')),
+        manifest = nativeManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8'))),
+        work = readFileSync(join(directory, 'work.json')),
+        pin = manifest.files.find(file => file.path === 'work.json');
+      invariant(
+        digest(manifestBytes) === command.manifestSha256 &&
+          pin &&
+          pin.size === work.length &&
+          pin.sha256 === digest(work),
+        'INVALID_WORK_BACKUP',
+        'Retained reconciliation baseline differs from its original pins.',
+      );
+      const data = JSON.parse(work.toString('utf8'));
+      parseWork(data);
+      // Unknown State kinds/physical objects are rediscovered normally. Never
+      // assume all logical object pins are States or physical upload receipts.
+      retainExchangeBaseline(store, baselineKey, manifest, data, [], []);
+    } catch {
+      // Missing/corrupt optional caches cannot undo successful reconciliation.
+    }
+  }
+  return reconciled;
 }

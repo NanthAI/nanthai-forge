@@ -3,7 +3,7 @@ import { readFileSync, existsSync, writeFileSync, renameSync, rmSync } from 'nod
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { nativeManifestSchema } from './work-archive-metadata.js';
-import { workSchema } from './work-types.js';
+import { parseWork } from './work-unified-types.js';
 import { digest } from './hash.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
@@ -33,8 +33,11 @@ export function exchangeBaseline(store: WorkStore, key?: string) {
         const pin = parsed.files.find(p => p.path === 'work.json');
         if (pin && /^[0-9a-f-]{36}$/i.test(parsed.id)) {
           const bytes = readFileSync(join(store.directory, `exchange-${parsed.id}`, 'work.json'));
-          if (bytes.length === pin.size && digest(bytes) === pin.sha256)
-            baselineData = workSchema.parse(JSON.parse(bytes.toString('utf8')));
+          if (bytes.length === pin.size && digest(bytes) === pin.sha256) {
+            const raw = JSON.parse(bytes.toString('utf8'));
+            parseWork(raw);
+            baselineData = raw;
+          }
         }
       } catch {
         /* missing exact baseline means optional derivation is omitted */

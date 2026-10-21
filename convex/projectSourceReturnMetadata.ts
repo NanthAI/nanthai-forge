@@ -5,9 +5,16 @@ import { internal } from './_generated/api';
 import type { ActionCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
-import { publicationHash, publicationPages, type PublicationMetadata } from '../src/publication-metadata';
+import { publicationHash } from '../src/publication-metadata';
+import { jsonChunks } from '../src/json-chunks';
+import { parseJsonStream } from '../src/json-stream';
 import { validatePublicationMetadata } from './projectPublicationValidation';
-export type MetadataRef = { partitionId: Id<'projectWorkGenerations'>; key: string; parts: number };
+export type MetadataRef = {
+  partitionId: Id<'projectWorkGenerations'>;
+  key: string;
+  parts: number;
+  cleanup?: string[];
+};
 export type ReturnRef = Id<'_storage'> | MetadataRef;
 /** Session/root pins and current owner authority remain required on every load. */
 export async function publicationSnapshot(
@@ -50,18 +57,19 @@ export async function storeReturnMetadata(
   partitionId: Id<'projectWorkGenerations'>,
   value: unknown,
 ): Promise<MetadataRef> {
-  const key = randomUUID(),
-    { pages } = publicationPages(value as PublicationMetadata);
-  for (const [position, body] of pages.entries())
+  const key = randomUUID();
+  let position = 0;
+  for (const body of jsonChunks(value)) {
     await ctx.runMutation(internal.projectReturnMetadataStore.put, {
       projectId,
       owner,
       partitionId,
       key,
-      position,
+      position: position++,
       body,
     });
-  return { partitionId, key, parts: pages.length };
+  }
+  return { partitionId, key, parts: position };
 }
 export async function readReturnMetadata<T>(
   ctx: ActionCtx,
@@ -69,16 +77,17 @@ export async function readReturnMetadata<T>(
   owner: string,
   ref: MetadataRef,
 ): Promise<T> {
-  const pages: string[] = [];
-  for (let position = 0; position < ref.parts; position++)
-    pages.push(
-      await ctx.runQuery(internal.projectReturnMetadataStore.read, {
+  async function* pages() {
+    for (let position = 0; position < ref.parts; position++) {
+      const body: string = await ctx.runQuery(internal.projectReturnMetadataStore.read, {
         projectId,
         owner,
         partitionId: ref.partitionId,
         key: ref.key,
         position,
-      }),
-    );
-  return JSON.parse(pages.join('')) as T;
+      });
+      yield Buffer.from(body);
+    }
+  }
+  return (await parseJsonStream(pages())) as T;
 }

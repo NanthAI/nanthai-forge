@@ -382,11 +382,37 @@ export async function pushNativeExchange(
     archiveCreated: false,
     ...(ownerDerived ? { ownerDerived } : {}),
   });
+  const retainBaseline = (backupId: string) => {
+    const baselineKey = transport.checkpointKey?.(backupId);
+    if (store.native && baselineKey && prepared.manifest.kind === 'forge-native-work-backup') {
+      try {
+        const bytes = readFileSync(join(prepared.directory, 'work.json')),
+          workPin = prepared.manifest.files.find(pin => pin.path === 'work.json');
+        invariant(
+          workPin && bytes.length === workPin.size && digest(bytes) === workPin.sha256,
+          'WORK_OPERATION_CHANGED',
+          'Preparation hint Work differs from its pinned bytes.',
+        );
+        retainExchangeBaseline(
+          store,
+          baselineKey,
+          prepared.manifest,
+          JSON.parse(bytes.toString('utf8')),
+          pins,
+          JSON.parse(readFileSync(join(prepared.directory, 'states.json'), 'utf8')),
+        );
+      } catch {
+        // Publication has succeeded. A disposable preparation hint is never an
+        // additional success condition, and a later push can prepare in full.
+      }
+    }
+  };
   const original = options.stage === 'history' ? null : await transport.published?.(manifestPin);
   if (original) {
     const pinned = transport.publishedOwnerDerived
       ? await transport.publishedOwnerDerived(original)
       : ownerDerived;
+    retainBaseline(original);
     return { ...result(original), ownerDerived: pinned ?? undefined };
   }
   const baseline = exchangeBaseline(store, transport.checkpointKey?.());
@@ -540,29 +566,7 @@ export async function pushNativeExchange(
         )
       : null;
   const backupId = metadataId ?? (await transport.publish(manifestPin, false, ownerDerived));
-  const baselineKey = transport.checkpointKey?.(backupId);
-  if (store.native && baselineKey && prepared.manifest.kind === 'forge-native-work-backup') {
-    try {
-      const bytes = readFileSync(join(prepared.directory, 'work.json')),
-        workPin = prepared.manifest.files.find(pin => pin.path === 'work.json');
-      invariant(
-        workPin && bytes.length === workPin.size && digest(bytes) === workPin.sha256,
-        'WORK_OPERATION_CHANGED',
-        'Preparation hint Work differs from its pinned bytes.',
-      );
-      retainExchangeBaseline(
-        store,
-        baselineKey,
-        prepared.manifest,
-        JSON.parse(bytes.toString('utf8')),
-        pins,
-        JSON.parse(readFileSync(join(prepared.directory, 'states.json'), 'utf8')),
-      );
-    } catch {
-      // Publication has succeeded. A disposable preparation hint is never an
-      // additional success condition, and a later push can prepare in full.
-    }
-  }
+  retainBaseline(backupId);
   return result(backupId);
 }
 export async function pullNativeExchange(

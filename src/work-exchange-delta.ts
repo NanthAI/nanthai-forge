@@ -65,7 +65,11 @@ export function supportsWorkDelta(before: WorkRecordRoot, after: WorkRecordRoot)
     )
       return false;
   }
-  return old.size === 0 && recordMetadata(before).schema === recordMetadata(after).schema;
+  const from = recordMetadata(before).schema,
+    to = recordMetadata(after).schema;
+  // These promotions only widen landing-batch capacity. Previously validated
+  // unchanged records retain identical interpretation and reference semantics.
+  return old.size === 0 && (from === to || (from === 17 && to === 19) || (from === 18 && to === 20));
 }
 export const workRecordChanges = (before: WorkRecordRoot, after: WorkRecordRoot) => {
   const old = recordMap(before),

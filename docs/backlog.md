@@ -27,7 +27,7 @@ Open work and friction, one line per problem. S is a small focused change, M spa
 
 ## Performance and qualification
 
-- S: Agent test selection classifies deleted modules as unknown and selects the full suite; preserve the base import graph for deleted paths so removal work can use conservative affected tests.
+- S: Agent test selection classifies deleted modules as unknown and selects the full suite; preserve the base import graph for deleted paths so removal work can use conservative affected tests. A Lane started before main deletes a module hits this even when none of its own edits delete files; expose its pinned base-to-head selection separately from the main comparison.
 
 - M: Measure owner-sized one-landing source return and diffstats after delta/batched derivation; preparation/full fallback still scales with retained Work and production savings remain unverified.
 - M: Check timing receipts lack install/build cache evidence and machine/child-worker pressure, making preparation and execution costs hard to distinguish.

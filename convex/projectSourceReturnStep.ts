@@ -5,6 +5,7 @@ import type { ActionCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { invariant } from '../src/errors';
+import { readReturnMetadata, type MetadataRef } from './projectSourceReturnMetadata';
 import { CLI_UPGRADE_MESSAGE } from './projectOwnerDerived';
 import { firstIndexBatch, type IndexEntry, type IndexMetadata } from '../src/work-hosted-index';
 import type { WorkData } from '../src/work-types';
@@ -34,6 +35,8 @@ export type Cursor = {
   full?: boolean;
   copy?: { cursor: string | null };
   offset?: number;
+  outputRefs?: MetadataRef[];
+  outputCleanup?: string[];
   metadata?: IndexMetadata;
   rows: IndexEntry[];
   delta?: Delta;
@@ -63,6 +66,10 @@ const unused: StepUse = { states: 0, sourceBytes: 0, rows: 0, rowBytes: 0 };
 /** Drain validated rows, copying retained index rows only for large deltas. */
 export async function advance(ctx: ActionCtx, c: Cursor, _reader?: unknown, used: StepUse = unused) {
   invariant(c.phase === 'done', 'CLI_UPGRADE_REQUIRED', CLI_UPGRADE_MESSAGE);
+  if (!c.rows.length && c.outputRefs?.length) {
+    c.rows = await readReturnMetadata<IndexEntry[]>(ctx, c.final.projectId, c.final.owner, c.outputRefs[0]!);
+    c.outputRefs.shift();
+  }
   const room = { rows: RETURN_BUDGET.rows - used.rows, bytes: RETURN_BUDGET.rowBytes - used.rowBytes };
   if (!c.rows.length && (c.offset ?? 0) < (c.snapshot.output?.length ?? 0)) {
     let entries =
@@ -104,6 +111,10 @@ export async function advance(ctx: ActionCtx, c: Cursor, _reader?: unknown, used
     sourceBytes: 0,
     states: 0,
     derivedReadFailures: 0,
-    last: !c.rows.length && !c.copy && (c.offset ?? 0) >= (c.snapshot.output?.length ?? 0),
+    last:
+      !c.rows.length &&
+      !c.outputRefs?.length &&
+      !c.copy &&
+      (c.offset ?? 0) >= (c.snapshot.output?.length ?? 0),
   };
 }

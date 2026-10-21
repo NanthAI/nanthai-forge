@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initNative } from '../dist/native-work.js';
@@ -77,4 +77,96 @@ test('production native v2 push pins concurrent Work for the next push and reuse
     downloadBatch: async pins => pins.map(pin => logical.get(pin.sha256) ?? objects.get(pin.sha256)),
   });
   assert.equal(new WorkStore(restored).load().intents[0].outcome, 'Arrived during upload');
+});
+
+test('publication receipt replay repairs a missing hint and the next format promotion sends a delta', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-record-replay-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
+  initNative(root);
+  const store = new WorkStore(root),
+    objects = new Map();
+  const key = id => `synthetic/${id ?? 'previous'}`;
+  const transport = {
+    metadataTrees: true,
+    workRecords: true,
+    checkpointKey: key,
+    missing: async pins => pins.filter(pin => !objects.has(pin.sha256)).map(pin => pin.sha256),
+    upload: async (pin, bytes) => objects.set(pin.sha256, Buffer.from(bytes)),
+    publish: async pin => pin.sha256,
+  };
+  const operationId = randomUUID(),
+    revision = store.revision();
+  const first = await pushNativeExchange(store, revision, operationId, transport);
+  const hint = join(store.directory, `exchange-baseline-${digest(key(first.backupId))}.json`);
+  rmSync(hint);
+  transport.published = async () => first.backupId;
+  const replay = await pushNativeExchange(store, revision, operationId, transport);
+  assert.equal(replay.digest, first.digest);
+  assert.equal(replay.uploadedBytes, 0);
+  assert.equal(JSON.parse(JSON.parse(readFileSync(hint)).payload).manifest.id, operationId);
+  const data = store.load();
+  data.schema = 19;
+  data.revision++;
+  store.save(data);
+  delete transport.published;
+  transport.checkpointKey = id => key(id ?? first.backupId);
+  const next = await pushNativeExchange(store, store.revision(), randomUUID(), transport);
+  const nextRoot = JSON.parse(objects.get(next.digest));
+  assert.ok(nextRoot.delta);
+  const delta = JSON.parse(objects.get(nextRoot.delta.sha256));
+  assert.equal(delta.base.root, JSON.parse(objects.get(first.digest)).records.sha256);
+});
+
+test('legacy unified baseline recovery preserves exact catalog property order and planned Intents', async t => {
+  const { retainExchangeBaseline, exchangeBaseline } = await import('../dist/native-exchange-baseline.js');
+  const { buildWorkRecords } = await import('../dist/work-exchange-records.js');
+  const { workSchema } = await import('../dist/work-types.js');
+  const { convertWorkTo18 } = await import('../dist/work-intent-converter.js');
+  const { unifyIntent } = await import('../dist/work-intent-local.js');
+  const directory = mkdtempSync(join(tmpdir(), 'forge-unified-hint-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const head = 'a'.repeat(64),
+    source = convertWorkTo18(
+      workSchema.parse({ schema: 17, revision: 7, nativeHead: head, intents: [], lanes: [], views: [] }),
+    );
+  source.intents.push(
+    unifyIntent({
+      id: randomUUID(),
+      outcome: 'Planned',
+      constraints: '',
+      status: 'proposed',
+      createdAt: 'now',
+      notes: [],
+    }),
+  );
+  const { schema, ...rest } = source,
+    data = { ...rest, schema, opaque: { unchanged: true } },
+    work = Buffer.from(JSON.stringify(data, null, 2)),
+    id = randomUUID();
+  const manifest = {
+    schema: 1,
+    kind: 'forge-native-work-backup',
+    id,
+    head,
+    revision: data.revision,
+    files: [{ path: 'work.json', sha256: digest(work), size: work.length }],
+    unavailable: [],
+    coverage: 'Synthetic',
+  };
+  const store = { native: true, directory },
+    key = 'synthetic/legacy';
+  mkdirSync(join(directory, `exchange-${id}`));
+  writeFileSync(join(directory, `exchange-${id}`, 'work.json'), work);
+  retainExchangeBaseline(store, key, manifest, data, [], []);
+  const path = join(directory, `exchange-baseline-${digest(key)}.json`),
+    envelope = JSON.parse(readFileSync(path)),
+    value = JSON.parse(envelope.payload);
+  delete value.data;
+  const payload = JSON.stringify(value);
+  writeFileSync(path, JSON.stringify({ payload, sha256: digest(payload) }));
+  const recovered = exchangeBaseline(store, key);
+  assert.equal(recovered.data.intents[0].base, undefined);
+  assert.equal(buildWorkRecords(recovered.data).pin.sha256, buildWorkRecords(data).pin.sha256);
+  assert.deepEqual(Object.keys(recovered.data), Object.keys(data));
 });

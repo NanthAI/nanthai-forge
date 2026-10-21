@@ -10,6 +10,7 @@ import {
 } from '../dist/work-exchange-records.js';
 import {
   buildWorkDelta,
+  supportsWorkDelta,
   validateWorkDelta,
   validateChangedRecords,
   applyWorkDelta,
@@ -250,5 +251,29 @@ test('only post-accept check links inherit validated receipt dependencies; alter
   await assert.rejects(
     channelMetadataChanges(p.a.root, p.b.root, p.delta.changes, async () => Buffer.from('corrupt')),
     e => e.code === 'INVALID_WORK_BACKUP',
+  );
+});
+
+test('capacity-only format promotions reuse unchanged validated records; unrelated format changes do not', async () => {
+  const { convertWorkTo18 } = await import('../dist/work-intent-converter.js');
+  for (const [from, to] of [
+    [17, 19],
+    [18, 20],
+  ]) {
+    const before = from === 18 ? convertWorkTo18(seed()) : { ...seed(), schema: from };
+    before.intents = [];
+    const after = { ...before, schema: to, revision: before.revision + 1 };
+    const p = pair(before, after);
+    assert.equal(supportsWorkDelta(p.a.root, p.b.root), true);
+    validateWorkDelta(p.a.root, p.b.root, p.delta, { root: p.a.pin.sha256 });
+    assert.equal(
+      (await validateChangedRecords(p.a.root, p.b.root, p.delta.changes, p.read, new Set([head]))).validated,
+      0,
+    );
+    assert.equal(supportsWorkDelta(p.b.root, p.a.root), false, 'a downgrade does not inherit interpretation');
+  }
+  assert.equal(
+    supportsWorkDelta(buildWorkRecords(seed()).root, buildWorkRecords({ ...seed(), schema: 19 }).root),
+    false,
   );
 });

@@ -196,7 +196,7 @@ export function indexedRecord(
   }
   return entries;
 }
-export function materializeWork(
+export function* workIndexRows(
   data: WorkData,
   manifest: z.infer<typeof sourceManifestSchema>,
   _events: HostedEvent[],
@@ -206,15 +206,14 @@ export function materializeWork(
   } = new Map(),
   deferDerived = false,
 ) {
-  const entries: IndexEntry[] = [],
-    counts: Record<string, number> = {};
+  const counts: Record<string, number> = {};
   const channels = archiveChannels(manifest, data),
     hosted = hostedChannels(data);
   const mainHead =
     hosted.find(c => c.channel === 'main')?.head ?? channels.find(c => c.name === 'main')?.head ?? null;
   const ancestry = hostedAncestry(data, sourceParents, { defer: deferDerived });
   const mainSummary = (head?: string) => ancestry.main(head, mainHead);
-  function add<T>(
+  function* add<T>(
     collection: string,
     values: T[],
     key: (value: T, index: number) => string,
@@ -222,35 +221,37 @@ export function materializeWork(
     summary?: (value: T) => unknown,
   ) {
     counts[collection] = values.length;
-    values.forEach((value, index) =>
-      entries.push(
-        ...indexedRecord(
-          collection,
-          key(value, index),
-          parent(value),
-          index,
-          value,
-          summary?.(value) ?? value,
-        ),
-      ),
-    );
+    for (const [index, value] of values.entries())
+      yield* indexedRecord(
+        collection,
+        key(value, index),
+        parent(value),
+        index,
+        value,
+        summary?.(value) ?? value,
+      );
   }
   counts.intents = data.intents.length;
-  data.intents.forEach((intent, position) => {
+  for (const [position, intent] of data.intents.entries()) {
     const header = intentHeader(intent),
       attributes = { ...intent, notes: [], ...(intent.lifecycle ? { lifecycle: [] } : {}) };
     const hasExtraAttributes = Object.keys(attributes).some(key => !Object.hasOwn(header, key));
-    entries.push(
-      ...indexedRecord('intents', intent.id, '', position, hasExtraAttributes ? attributes : header, header),
+    yield* indexedRecord(
+      'intents',
+      intent.id,
+      '',
+      position,
+      hasExtraAttributes ? attributes : header,
+      header,
     );
-  });
-  add(
+  }
+  yield* add(
     'landingEntries',
     data.landingEntries ?? [],
     value => value.id,
     value => value.channel,
   );
-  add(
+  yield* add(
     'landingBatches',
     data.landingBatches ?? [],
     value => value.id,
@@ -260,9 +261,9 @@ export function materializeWork(
     initiatives?: { id: string }[];
     intentAliases?: { aliasId: string; intentId: string }[];
   };
-  add('initiatives', unified.initiatives ?? [], value => value.id);
-  add('intentAliases', unified.intentAliases ?? [], value => value.aliasId);
-  add(
+  yield* add('initiatives', unified.initiatives ?? [], value => value.id);
+  yield* add('intentAliases', unified.intentAliases ?? [], value => value.aliasId);
+  yield* add(
     'intentAuthorities',
     data.intents.flatMap(intent => {
       const accounts = intent as typeof intent & { creatorAccountId?: string; assigneeAccountIds?: string[] };
@@ -276,9 +277,9 @@ export function materializeWork(
     value => `${value.intentId}:${value.accountId}`,
     value => value.intentId,
   );
-  add('automaticActions', data.automaticActions ?? [], value => value.id);
-  add('policyChanges', data.policyChanges ?? [], value => value.id);
-  add(
+  yield* add('automaticActions', data.automaticActions ?? [], value => value.id);
+  yield* add('policyChanges', data.policyChanges ?? [], value => value.id);
+  yield* add(
     'checkpoints',
     data.lanes.flatMap(lane =>
       lane.checkpoints.map((checkpoint, index) => ({ ...checkpoint, laneId: lane.id, index })),
@@ -286,7 +287,7 @@ export function materializeWork(
     value => `${value.laneId}:${value.index}`,
     value => value.laneId,
   );
-  add(
+  yield* add(
     'lanes',
     data.lanes,
     v => v.id,
@@ -294,7 +295,7 @@ export function materializeWork(
     v => laneSummary(v, ancestry.lane(v.head, mainHead)),
   );
   const viewModels = new Map(viewReadModels(data).map(view => [view.viewId, view]));
-  add(
+  yield* add(
     'views',
     data.views,
     v => v.id,
@@ -306,49 +307,49 @@ export function materializeWork(
       inputs: viewModels.get(v.id)!.inputs,
     }),
   );
-  add(
+  yield* add(
     'checks',
     data.checks,
     v => v.id,
     () => '',
     v => ({ id: v.id, name: v.name, definition: v.definition }),
   );
-  add(
+  yield* add(
     'runs',
     data.runs,
     v => v.id,
     v => v.viewId,
     v => runSummary(v, mainSummary(v.head)),
   );
-  add('planningItems', currentPlanning(data), v => v.id);
-  add(
+  yield* add('planningItems', currentPlanning(data), v => v.id);
+  yield* add(
     'planningVersions',
     data.planningItems,
     v => v.operationId,
     v => v.id,
   );
-  add(
+  yield* add(
     'planningComments',
     data.planningComments,
     v => v.id,
     v => v.itemId,
   );
-  add(
+  yield* add(
     'channelMoves',
     data.channelMoves,
     v => v.id,
     v => v.channel,
   );
-  add(
+  yield* add(
     'hostedChannelMoves',
     data.hostedChannelMoves ?? [],
     v => v.id,
     v => v.channel,
   );
-  add('hostedChannels', hosted, v => v.channel);
-  add('channels', channels, v => v.name);
-  add('githubAutoPush', data.githubAutoPush ? [data.githubAutoPush] : [], v => v.id);
-  add(
+  yield* add('hostedChannels', hosted, v => v.channel);
+  yield* add('channels', channels, v => v.name);
+  yield* add('githubAutoPush', data.githubAutoPush ? [data.githubAutoPush] : [], v => v.id);
+  yield* add(
     'githubSync',
     data.githubSync ? [{ id: 'github', ...data.githubSync }] : [],
     v => v.id,
@@ -366,7 +367,7 @@ export function materializeWork(
       };
     },
   );
-  add(
+  yield* add(
     'githubRepositories',
     [...new Set(data.intents.flatMap(intent => (intent.external ? [intent.external.repository] : [])))].map(
       repository => ({ id: repository, repository }),
@@ -374,11 +375,11 @@ export function materializeWork(
     v => v.id,
   );
   // Imported and later hosted history remain addressable; the original event table is authoritative.
-  add('events', data.hostedEvents, v => v.id);
+  yield* add('events', data.hostedEvents, v => v.id);
   const notes = data.intents.flatMap(intent =>
     intent.notes.map((note, index) => ({ ...note, intentId: intent.id, index })),
   );
-  add(
+  yield* add(
     'notes',
     notes,
     v => `${v.intentId}:${v.index}`,
@@ -387,7 +388,7 @@ export function materializeWork(
   const lifecycle = data.intents.flatMap(intent =>
     (intent.lifecycle ?? []).map((entry, index) => ({ ...entry, intentId: intent.id, index })),
   );
-  add(
+  yield* add(
     'lifecycle',
     lifecycle,
     v => `${v.intentId}:${v.index}`,
@@ -404,29 +405,29 @@ export function materializeWork(
             { key: `${pin.ref}:${pin.head}`, head: pin.head },
           ]),
         ];
-  add('sourcePins', [...new Map(pins.map(pin => [pin.key, pin])).values()], v => v.key);
-  add(
+  yield* add('sourcePins', [...new Map(pins.map(pin => [pin.key, pin])).values()], v => v.key);
+  yield* add(
     'sourceAncestry',
     ancestry.pairs,
     v => v.key,
     v => v.head,
   );
-  add('sourceAncestryHeads', ancestry.complete, v => v.head);
+  yield* add('sourceAncestryHeads', ancestry.complete, v => v.head);
   if (manifest.kind === 'forge-native-work-backup') {
     let chunks = 0;
     for (const [head, parents] of sourceParents) {
       const rows = stateParentEntries(head, parents);
-      entries.push(...rows);
+      yield* rows;
       chunks += rows.length - 1;
     }
     counts.sourceStateParents = sourceParents.size;
     counts.sourceStateParentChunks = chunks;
   }
   const derived = deferDerived ? [] : viewIndexEntries(data, sourceParents.files);
-  entries.push(...derived);
+  yield* derived;
   for (const name of ['viewDetails', 'viewFiles', 'laneViews', 'viewAcceptances'])
     counts[name] = derived.filter(entry => entry.collection === name).length;
-  add(
+  yield* add(
     'sourceBlobs',
     manifest.files
       .filter(file => /^objects\/[a-f0-9]{64}$/.test(file.path))
@@ -441,7 +442,7 @@ export function materializeWork(
     ]);
     for (const head of heads) {
       const files = head && sourceParents.files.get(head);
-      if (head && files) entries.push(...sourceTreeEntries(head, files));
+      if (head && files) yield* sourceTreeEntries(head, files);
     }
   }
   const metadata: IndexMetadata = {
@@ -457,7 +458,17 @@ export function materializeWork(
     initialRevision: manifest.revision,
     ...(sourceTransport ? { sourceTransport } : {}),
   };
-  return { entries, metadata };
+  return metadata;
+}
+export function materializeWork(...args: Parameters<typeof workIndexRows>) {
+  const entries: IndexEntry[] = [],
+    rows = workIndexRows(...args);
+  let next = rows.next();
+  while (!next.done) {
+    entries.push(next.value);
+    next = rows.next();
+  }
+  return { entries, metadata: next.value };
 }
 /** Batches bound RPC/document work, not retained history or a user's capability. */
 export function indexBatches(entries: IndexEntry[], limits = { rows: 100, bytes: 500000 }) {

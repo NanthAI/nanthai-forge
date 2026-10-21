@@ -17,7 +17,7 @@ import { invariant, ForgeError } from '../src/errors';
 import { ConvexError } from 'convex/values';
 import type { IndexEntry } from '../src/work-hosted-index';
 import { workSourcePins } from '../src/work-archive-metadata';
-import { materializeWork } from '../src/work-hosted-index';
+import { prepareFullReturnRows, storeOutputRows } from './projectSourceReturnRows';
 import { selectedTreeHeads } from '../src/owner-derived';
 type Snapshot = Cursor['snapshot'];
 type Final = Cursor['final'];
@@ -108,19 +108,7 @@ async function advanceReturnProgress(
       c.heads = c.heads.filter(head => !priorHeads.has(head));
       c.delta.views = [...new Set([...c.delta.views, ...c.delta.summaries])];
     } else {
-      const projection = materializeWork(
-        data,
-        initial.snapshot.manifest,
-        [],
-        initial.snapshot.backup.transport,
-        new Map(),
-        true,
-      );
-      c.metadata = projection.metadata;
-      c.rows = projection.entries.filter(row => row.collection !== 'lanes' && row.collection !== 'views');
-      c.diffstats = {
-        records: projection.entries.filter(row => row.collection === 'lanes' || row.collection === 'views'),
-      };
+      await prepareFullReturnRows(ctx, c, stage._id);
       c.delta = {
         entries: [],
         removed: [],
@@ -137,12 +125,27 @@ async function advanceReturnProgress(
     await installOwnerDerived(ctx, c, initial.ownerDerived);
     console.log('source-return owner-derived', { fastPath: true, metadataOnly: true });
     if (c.full) {
-      const counts: Record<string, number> = {};
+      const counts = c.metadata!.counts;
       for (const row of c.rows) counts[row.collection] = (counts[row.collection] ?? 0) + 1;
       c.metadata!.counts = counts;
       delete c.delta;
     }
     await prepareOwnerIndexRows(ctx, c);
+    if (c.full && c.outputRefs) {
+      await storeOutputRows(ctx, c, c.snapshot.output ?? [], stage._id);
+      c.outputCleanup = c.outputRefs.map(ref => ref.key);
+      delete c.snapshot.output;
+      // The exact Work remains in its authenticated checkpoint/preparation
+      // snapshot. A phase-done continuation only needs immutable output pages.
+      c.snapshot.data = {
+        ...data,
+        ...Object.fromEntries(
+          Object.entries(data)
+            .filter(([, value]) => Array.isArray(value))
+            .map(([key]) => [key, []]),
+        ),
+      };
+    }
   }
 
   invariant(
@@ -244,6 +247,10 @@ async function advanceReturnProgress(
           ? storeReturnMetadata(ctx, input.projectId, owner, stage._id, value)
           : storeReturnJson(ctx, value);
       const snapshot = c.snapshotRef ?? (await store(c.snapshot));
+      if (typeof snapshot !== 'string' && c.outputCleanup) {
+        snapshot.cleanup = c.outputCleanup;
+        delete c.outputCleanup;
+      }
       c.snapshotRef = snapshot;
       const position = { ...c, snapshot: undefined };
       const cursor = await store(position);

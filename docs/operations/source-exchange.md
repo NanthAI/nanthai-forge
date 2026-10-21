@@ -118,7 +118,11 @@ of the candidate action. Record reads keep four bounded batches ahead
 to overlap storage latency while preserving canonical order and digest checks. Each validation invocation checks up to eight chunks (a 256 KiB target,
 with indivisible records preserved) against the pinned candidate, then saves its
 position. Large compatibility returns build a complete private index partition
-from validated owner rows through durable commits. Small returns keep their incremental index comparison. Display rows always come from the owner; full metadata validation does not derive them. These thresholds schedule work; they do not limit accepted Work or
+from validated owner rows through durable commits. Full-index rows are generated
+and saved in bounded immutable batches rather than retained as a second complete
+Work. Post-prepare continuations drain those batches; their snapshot keeps only
+scalar Work metadata after row planning. Metadata page encoding and decoding
+stream without joining or stringifying the complete snapshot. Small returns keep their incremental index comparison. Display rows always come from the owner; full metadata validation does not derive them. These thresholds schedule work; they do not limit accepted Work or
 limit retained Work. Current pushes require the CLI upgrade above. Current-protocol retained operations use the same checkpoint, hosted
 revision, operation UUID and timestamp when preparation resumes.
 
@@ -130,7 +134,7 @@ action budget. Waiting callers yield a retryable `WORK_BUSY` before exhausting
 their action, retaining the original request. Final publication still checks
 current authority and the previous-checkpoint compare-and-set.
 
-Formats 16/18 use schema-owned unified collections, including alias keys and
+Formats 16/18/20 use schema-owned unified collections, including alias keys and
 unpinned planned Intents, in record catalogs and deltas. Catalog size is independent
 of the delta/context optimization budget; complete seed validation can establish
 validated records for catalogs above 4 MiB. Unknown extension arrays, duplicate
@@ -138,6 +142,14 @@ keys and unsupported layouts still use complete compatibility validation.
 Changes to schema-owned scalar metadata, including Git mirror and auto-push
 receipts, use record delta after normal versioned schema validation. Unknown
 changed scalar extensions and reordered collection histories keep the fallback.
+Capacity-only Work promotions 17→19 and 18→20 retain the validated record base;
+unchanged records keep their reference meaning, while changed records use their
+new format's validation. Other format transitions keep complete validation.
+Publication receipt replay restores its optional local preparation hint. When
+reconciliation finds an exact retained base without that hint, it recovers the
+original Work bytes and property order before preparing a new record delta.
+It never uses mutable owner Work or journal-reduced Work as the publication base.
+Missing/corrupt unprovable bases still use complete publication.
 A change only to a local Channel receipt's `postAcceptRunId` is authenticated
 against both original record bodies before treating its source and acceptance
 fields as unchanged. Such check-link enrichment updates the receipt row without

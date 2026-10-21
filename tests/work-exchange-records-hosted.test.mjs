@@ -569,3 +569,52 @@ test('format-18 seed followed by routine record and mirror metadata changes publ
   assert.equal(loaded.data.intents.at(-1).notes.at(-1).text, 'Routine synthetic change');
   assert.equal(loaded.data.revision, receipt.revision);
 });
+
+for (const [from, to] of [
+  [17, 19],
+  [18, 20],
+])
+  test(`format ${from} to ${to} publication and source return retain record delta mode`, async t => {
+    const s = fixture(),
+      first = await checkpoint(t, s);
+    const initial = { ...first.store.load(), schema: 17 };
+    const data = from === 18 ? convertWorkTo18(initial) : initial;
+    first.store.save(data);
+    const baseline = await preparedCheckpoint(s, first.store, 0, undefined, { records: true });
+    const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, baseline.input);
+    await modules.projectWorkActions.initialize._handler(s.ctx, {
+      projectId: 'project',
+      backupId,
+      operationId: randomUUID(),
+    });
+    await index.ensure._handler(s.ctx, { projectId: 'project' });
+    const before = JSON.parse(
+      readFileSync(join(first.store.directory, `exchange-${baseline.input.operationId}`, 'work.json')),
+    );
+    first.store.save({ ...before, schema: to, revision: before.revision + 1 });
+    const candidate = await preparedCheckpoint(s, first.store, 0, undefined, {
+      records: true,
+      baseline: before,
+      journalRevision: before.revision,
+    });
+    candidate.input.previous = backupId;
+    const logs = [];
+    t.mock.method(console, 'log', (...args) => logs.push(args));
+    assert.ok(candidate.tree.root.delta);
+    const nextId = await modules.projectExchangeActions.publish._handler(s.ctx, candidate.input);
+    assert.ok(
+      logs.some(([name, details]) => name === 'work-record exchange prepared' && details.mode === 'delta'),
+    );
+    assert.ok(
+      !logs.some(([name, details]) => name === 'work-record exchange prepared' && details.mode === 'seed'),
+    );
+    await complete(s, {
+      projectId: 'project',
+      backupId: nextId,
+      expectedBackupId: backupId,
+      revision: before.revision,
+      operationId: randomUUID(),
+      continuation: true,
+    });
+    assert.ok(logs.some(([name]) => name === 'work-record return prepared'));
+  });

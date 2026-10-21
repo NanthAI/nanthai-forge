@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
+import { exchangeBaseline } from '../dist/native-exchange-baseline.js';
 import { prepareNativeExchange } from '../dist/native-exchange.js';
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { reconcileExchange } from '../dist/exchange-reconcile.js';
@@ -223,8 +224,22 @@ test('large Work reconcile transfers only new journal events and preserves retry
   assert.equal(f.counts().storageReads, 0);
   assert.equal(f.counts().pages, 2);
   assert(f.counts().wireBytes < 64 * 1024);
+  const baselineKey = JSON.stringify(['https://fixture.invalid', 'project', 'backup']);
+  const recovered = exchangeBaseline(f.store, baselineKey);
+  assert.equal(
+    workDigest(recovered.data),
+    digest(f.work),
+    'hint retains exact original Work before journal replay',
+  );
+  const hint = join(f.store.directory, `exchange-baseline-${digest(baselineKey)}.json`);
+  rmSync(hint);
   const counts = f.counts();
   await reconcileExchange(f.root, originalRequest);
+  assert.equal(
+    workDigest(exchangeBaseline(f.store, baselineKey).data),
+    digest(f.work),
+    'retained reconcile replay repairs missing hints',
+  );
   assert.deepEqual(f.counts(), counts, 'retained request retry needs no hosted read');
   await assert.rejects(
     reconcileExchange(f.root, { ...originalRequest, revision: originalRequest.revision + 1 }),
