@@ -300,3 +300,74 @@ test('lifecycle activity retries metadata CAS without repeating source reads und
   assert.equal(reads, 2, 'same base/head reuses the prepared path difference');
   assert.equal(store.select('lanes', lane.laneId).concurrentExtension, 'retained');
 });
+
+for (const changed of ['unrelated metadata', 'Lane head', 'Intent base'])
+  test(`native composition revalidates ${changed} after preparing its pinned merge`, async t => {
+    const { agent, store, peer, lane } = await fixture(t);
+    writeFileSync(join(lane.path, 'a.txt'), 'composition source\n');
+    const saved = (
+      await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'Composition' })
+    ).result;
+    const command = {
+      action: 'compose',
+      operationId: randomUUID(),
+      intentId: lane.intentId,
+      inputs: [{ laneId: lane.laneId, head: saved.head }],
+      dependencies: [],
+    };
+    const compose = NativeSource.prototype.compose;
+    let merges = 0;
+    t.mock.method(NativeSource.prototype, 'compose', function (...args) {
+      const result = compose.apply(this, args);
+      if (args[2] === 'Native review composition') {
+        merges++;
+        peer.locked(() => {
+          const tx = peer.records();
+          if (changed === 'Lane head') tx.patchFields('lanes', lane.laneId, { head: lane.head });
+          else if (changed === 'Intent base') tx.patchFields('intents', lane.intentId, { base: saved.head });
+          else tx.patchFields('lanes', lane.laneId, { concurrentExtension: 'retained' });
+          peer.commitRecords(tx);
+        });
+      }
+      return result;
+    });
+    const publish = () => agent.work.dispatch(command, store.revision(), { reconcileComposition: true });
+    if (changed === 'unrelated metadata') {
+      const result = (await publish()).result;
+      assert.equal(result.head, saved.head);
+      assert.equal(store.select('lanes', lane.laneId).concurrentExtension, 'retained');
+      assert.equal(store.load().views.length, 1);
+      const replay = (await publish()).result;
+      assert.equal(replay.id, result.id);
+    } else {
+      await assert.rejects(publish(), {
+        code: changed === 'Lane head' ? 'LANE_STALE' : 'COMPOSITION_STALE',
+      });
+      assert.equal(store.load().views.length, 0, 'changed inputs never publish the prepared Candidate');
+      if (changed === 'Lane head') assert.equal(store.select('lanes', lane.laneId).head, lane.head);
+      else assert.equal(store.select('intents', lane.intentId).base, saved.head);
+    }
+    assert.equal(merges, 1, 'metadata admission never repeats the source merge');
+  });
+
+test('finish composition can observe current metadata while direct commands keep revision preconditions', async t => {
+  const { agent, store, peer, lane } = await fixture(t);
+  const revision = store.revision();
+  peer.locked(() => {
+    const tx = peer.records();
+    tx.patchFields('lanes', lane.laneId, { concurrentExtension: 'retained' });
+    peer.commitRecords(tx);
+  });
+  const command = {
+    action: 'compose',
+    operationId: randomUUID(),
+    intentId: lane.intentId,
+    inputs: [{ laneId: lane.laneId, head: lane.head }],
+    dependencies: [],
+  };
+  await assert.rejects(agent.work.dispatch(command, revision), { code: 'WORK_STALE' });
+  const result = await agent.work.dispatch(command, revision, { reconcileComposition: true });
+  assert.equal(result.result.head, lane.head);
+  assert.equal(store.select('lanes', lane.laneId).concurrentExtension, 'retained');
+  assert.equal(store.load().views.length, 1);
+});

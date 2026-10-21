@@ -9,6 +9,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { initNative } from '../dist/native-work.js';
 import { ForgeError } from '../dist/errors.js';
 import { NativeSource } from '../dist/native-source.js';
+import { WorkStore } from '../dist/work-store.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
@@ -463,6 +464,67 @@ test('batch lock contention returns waiting and replays the same entry without d
   const result = (await f.agent.dispatch(command)).result;
   assert.deepEqual(result.counts, { accepted: 1 });
   await f.agent.dispatch(command);
+  assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
+  assert.equal(f.store.load().channelMoves.length, 1);
+});
+
+for (const changed of ['unrelated metadata', 'Lane head', 'Intent base'])
+  test(`land revalidates ${changed} without repeating the prepared source merge`, async t => {
+    const f = await fixture(t),
+      a = await f.lane('a.txt'),
+      peer = new WorkStore(f.root),
+      compose = NativeSource.prototype.compose;
+    let merges = 0;
+    t.mock.method(NativeSource.prototype, 'compose', function (...args) {
+      const result = compose.apply(this, args);
+      if (args[2] === 'Native review composition') {
+        merges++;
+        peer.locked(() => {
+          const tx = peer.records();
+          if (changed === 'Lane head') tx.patchFields('lanes', a.laneId, { head: a.base });
+          else if (changed === 'Intent base') tx.patchFields('intents', a.intentId, { base: a.head });
+          else tx.patchFields('lanes', a.laneId, { concurrentExtension: 'retained' });
+          peer.commitRecords(tx);
+        });
+      }
+      return result;
+    });
+    const operationId = randomUUID(),
+      result = (await f.land([a], { operationId })).result;
+    if (changed === 'unrelated metadata') {
+      assert.deepEqual(result.counts, { accepted: 1 });
+      assert.equal(f.contents('a.txt'), 'a.txt\n');
+      assert.equal(f.store.select('lanes', a.laneId).concurrentExtension, 'retained');
+      const before = f.store.load();
+      assert.deepEqual((await f.land([a], { operationId })).result.entries, result.entries);
+      assert.equal(f.store.load().runs.length, before.runs.length);
+      assert.equal(f.store.load().channelMoves.length, 1);
+    } else {
+      assert.deepEqual(result.counts, { failed: 1 });
+      assert.equal(result.entries[0].code, changed === 'Lane head' ? 'LANE_STALE' : 'COMPOSITION_STALE');
+      assert.equal(f.store.load().views.length, 0);
+      assert.equal(f.store.load().runs.length, 0);
+      assert.equal(f.store.load().channelMoves.length, 0);
+    }
+    assert.equal(merges, 1, 'source-pinned publication does not re-merge for metadata contention');
+  });
+
+test('land reconciles transient source observation with the original phase operation', async t => {
+  const f = await fixture(t, { batching: false }),
+    a = await f.lane('a.txt'),
+    dispatch = f.agent.work.dispatch.bind(f.agent.work),
+    operations = [];
+  f.agent.work.dispatch = async (...args) => {
+    if (args[0].action === 'run-check') {
+      operations.push(args[0].operationId);
+      if (operations.length === 1) throw new ForgeError('SOURCE_CHANGED', 'Synthetic observation race');
+    }
+    return dispatch(...args);
+  };
+  const result = (await f.land([a])).result;
+  assert.deepEqual(result.counts, { accepted: 1 });
+  assert.equal(operations.length, 2);
+  assert.equal(operations[0], operations[1]);
   assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
   assert.equal(f.store.load().channelMoves.length, 1);
 });

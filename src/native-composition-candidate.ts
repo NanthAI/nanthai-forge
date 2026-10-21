@@ -7,8 +7,8 @@ import { invariant } from './errors.js';
 import { digest } from './hash.js';
 import type { WorkData, WorkView, LocalWorkCommand } from './work-types.js';
 import { executionBase } from './work-intent-local.js';
-/** Source traversal/merge is speculative. The caller checks the snapshot revision
- * under the owner lock before restoring new objects and publishing the View. */
+/** Source traversal/merge is speculative. Publication revalidates only the
+ * selected source pins under the owner lock; unrelated Work writes survive. */
 export function prepareNativeComposition(
   root: string,
   data: WorkData,
@@ -27,6 +27,7 @@ export function prepareNativeComposition(
     'Select each Lane once or a pinned dependency.',
   );
   const nativeDependencies = dependencies.map(pin => ({ head: nativeDependencyHead(data, pin) }));
+  const intentPins = JSON.stringify([intent.base, intent.dependencies]);
   for (const pin of command.inputs) {
     const item = data.lanes.find(lane => lane.id === pin.laneId);
     invariant(item, 'NOT_FOUND', 'Lane not found.');
@@ -75,6 +76,29 @@ export function prepareNativeComposition(
   return {
     view,
     dependencies,
+    assertCurrent: (current: WorkData) => {
+      const selected = current.intents.find(item => item.id === command.intentId);
+      invariant(
+        selected && JSON.stringify([selected.base, selected.dependencies]) === intentPins,
+        'COMPOSITION_STALE',
+        'Selected composition Intent source or dependencies changed; original work is retained.',
+      );
+      for (const pin of command.inputs) {
+        const lane = current.lanes.find(item => item.id === pin.laneId);
+        invariant(
+          lane?.intentId === intent.id && lane.head === pin.head,
+          'LANE_STALE',
+          'Selected native Lane changed or belongs to another Intent.',
+        );
+      }
+      dependencies.forEach((pin, index) =>
+        invariant(
+          nativeDependencyHead(current, pin) === nativeDependencies[index]!.head,
+          'COMPOSITION_STALE',
+          'Selected composition dependency changed; original work is retained.',
+        ),
+      );
+    },
     restore: () => {
       for (const bytes of objects.values()) source.put(bytes);
     },

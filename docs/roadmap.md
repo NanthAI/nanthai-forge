@@ -90,6 +90,10 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 
 ## Workflow friction
 
+- Repeating sync on a Lane with a pending merge returns `MERGE_PENDING` without listing its conflicting paths. Include the pending sync target and conflicting paths in that diagnostic so a merge agent can resume from the receipt.
+
+- Core finish/publication edits select 217 of 349 test files, including hosted and UI suites. Finite implementation agents need a phase-focused validation selection alongside the conservative landing selection; the broad local run competes with concurrent Lanes for check capacity and disk writes.
+
 - A launchd `.plist` template selects the full test suite as an unclassified path. Finite agents forbidden from full verification must use affected backup/signer tests instead; the selector needs explicit template ownership.
 
 - Central agent lifecycle edits produce a broad local scoped selection: predictive-overlap work selected 210 files, and a two-worker run was interrupted after 49.5 minutes with unrelated synthetic Git setup timeouts. Local task validation needs a focused selection distinct from the combined remote landing selection; it must retain coverage and report any unrun files rather than silently treating the broad selection as passed.

@@ -26,7 +26,8 @@ export async function retryWorkPhase<T>(
           `${error.message} Retry the original operation ${operationId} to reconcile its retained outcome.`,
           error.retryAt,
         );
-      const delay = Math.min(25 * 2 ** Math.min(attempt, 5), 500, end - Date.now());
+      const backoff = Math.min(25 * 2 ** Math.min(attempt, 5), 500);
+      const delay = Math.min(backoff * (0.5 + Math.random() * 0.5), end - Date.now());
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }

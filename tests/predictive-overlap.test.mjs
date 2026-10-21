@@ -249,7 +249,7 @@ test('checkpoint, sync, status and MCP report latest peer checkpoint; dirty peer
 });
 
 test('finish advises without blocking on adjacent checkpoint regions in a synthetic owner', async t => {
-  const { agent, start, save } = await fixture(t);
+  const { root, agent, start, save } = await fixture(t);
   const mine = await start('Mine'),
     peer = await start('Peer');
   writeFileSync(join(mine.path, 'src/a.txt'), change(10, 'mine'));
@@ -273,6 +273,26 @@ test('finish advises without blocking on adjacent checkpoint regions in a synthe
   ).result;
   assert.equal(result.peers.predictive[0].risk, 'high');
   assert.equal(result.status, 'passed');
+  // Exercise the CLI parser/output without starting its detached presence daemon.
+  const replay = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import {agentCli} from ${JSON.stringify(new URL('../dist/agent-cli.js', import.meta.url).href)};
+       console.log(JSON.stringify(await agentCli(process.argv.slice(1))));`,
+      root,
+      'finish',
+      JSON.stringify({ operationId: result.operationId }),
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(replay.status, 0, replay.stderr);
+  const retained = JSON.parse(replay.stdout).result;
+  assert.equal(retained.status, 'passed');
+  assert.equal(retained.view.viewId, result.view.viewId);
+  assert.equal(retained.peers.predictive[0].risk, 'high');
+  assert.match(replay.stderr, /^Overlap /m);
 });
 
 test('50 peer predictions stay within compact receipt and human output budgets; detail retains all', () => {

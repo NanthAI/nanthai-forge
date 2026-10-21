@@ -20,7 +20,12 @@ import { acceptedLifecycle } from './agent-autonomy-lifecycle.js';
 import { localActor, type WorkActor } from './work-actor.js';
 import { viewReceipt, runReceipt, acceptanceReceipt } from './agent-receipts.js';
 import { runReceiptWithFailure } from './agent-run-failure.js';
-import { FinishJournal, finishAttempt, type FinishAttempt } from './agent-finish-journal.js';
+import {
+  FinishJournal,
+  finishAttempt,
+  retainedFinishCommand,
+  type FinishAttempt,
+} from './agent-finish-journal.js';
 import { withLandingSlot, withQueueSlot } from './landing-queue.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { WorkService } from './work.js';
@@ -70,6 +75,14 @@ export async function agentFinish(work: WorkService, command: FinishAction, phas
       'WORK_BUSY',
       `Finish driver lock wait expired at queue position ${response.waiting.position}. Retry finish operation ${command.operationId} or increase lockWaitMs/FORGE_WORK_LOCK_WAIT_MS.`,
     );
+  } catch (error) {
+    if (error instanceof ForgeError && ['WORK_BUSY', 'WORK_STALE'].includes(error.code)) {
+      const recovery = retainedFinishCommand(work.store, command.operationId)
+        ? `Resume the retained finish with nforge agent ${JSON.stringify(work.store.root)} finish '${JSON.stringify({ operationId: command.operationId })}'.`
+        : `Retry the original finish request with operationId ${command.operationId}.`;
+      throw new ForgeError(error.code, `${error.message} ${recovery}`, error.retryAt);
+    }
+    throw error;
   } finally {
     process.off('SIGTERM', onSignal);
     process.off('SIGINT', onSignal);

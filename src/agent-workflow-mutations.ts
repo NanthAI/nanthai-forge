@@ -521,7 +521,7 @@ export function agentCheckpoint(
             error === checkpointMetadataChanged ||
             (store.native && error instanceof ForgeError && error.code === 'SOURCE_CHANGED')
           ) {
-            retry(error === checkpointMetadataChanged ? 'WORK_STALE' : 'SOURCE_CHANGED');
+            retry(error === checkpointMetadataChanged ? 'WORK_BUSY' : 'SOURCE_CHANGED');
             continue;
           }
           if (error !== checkpointPreparationChanged) throw error;

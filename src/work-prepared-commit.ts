@@ -11,11 +11,11 @@ export function preparedRecordCommit<T>(
   operation: string,
   prepare: (tx: WorkRecordTransaction) => () => T,
 ): T {
-  const end = Date.now() + (workLockWaitMs() || 1000);
+  let end: number | undefined;
   for (;;) {
-    let tx = store.readRecords();
-    if (!tx) tx = store.locked(() => store.records(), { operation: `${operation} migration` });
     try {
+      let tx = store.readRecords();
+      if (!tx) tx = store.locked(() => store.records(), { operation: `${operation} migration` });
       let publish: () => T;
       try {
         publish = prepare(tx);
@@ -37,12 +37,21 @@ export function preparedRecordCommit<T>(
         { operation },
       );
     } catch (error) {
-      if (!(error instanceof ForgeError && error.code === 'WORK_STALE')) throw error;
+      if (!(error instanceof ForgeError && ['WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)))
+        throw error;
+      end ??= Date.now() + (workLockWaitMs() || 1000);
       if (Date.now() >= end)
         throw new ForgeError(
-          'WORK_STALE',
+          'WORK_BUSY',
           `${operation} could not commit before lock patience expired. Retry the original operation to reconcile; existing work is preserved.`,
         );
+      // Independent drivers should not restage and rejoin FIFO admission in lockstep.
+      Atomics.wait(
+        new Int32Array(new SharedArrayBuffer(4)),
+        0,
+        0,
+        Math.min(1 + Math.random() * 24, end - Date.now()),
+      );
     }
   }
 }

@@ -27,10 +27,19 @@ export async function land(work: WorkService, command: LandCommand) {
     join(store.directory, 'land-queue', command.operationId),
     async () => {
       const journal = new LandJournal(store, command);
-      const phase = (input: unknown) =>
-        retryWorkPhase(command.operationId, () =>
-          work.dispatch(input, store.revision(), { keepOpen: command.keepOpen }),
+      const phase = (input: unknown) => {
+        const reconcileComposition = (input as { action?: string }).action === 'compose';
+        return retryWorkPhase(
+          command.operationId,
+          () =>
+            work.dispatch(
+              input,
+              reconcileComposition ? store.revision() : store.locked(() => store.revision()),
+              { keepOpen: command.keepOpen, reconcileComposition },
+            ),
+          ['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'],
         );
+      };
       const recordError = (entry: LandEntry, error: unknown) => {
         if (!(error instanceof ForgeError)) throw error;
         entry.result = {

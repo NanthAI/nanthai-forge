@@ -664,15 +664,20 @@ export class AgentWorkflow {
   }
   private async finishPhase(command: unknown, keepOpen?: boolean, attribution?: WorkActor) {
     const operationId = (command as { operationId?: string }).operationId ?? 'status update';
+    const reconcileComposition = (command as { action?: string }).action === 'compose';
     return retryWorkPhase(
       operationId,
       () =>
         this.work.dispatch(
           command,
-          this.work.store.locked(() => this.work.store.revision()),
+          reconcileComposition
+            ? this.work.store.revision()
+            : this.work.store.locked(() => this.work.store.revision()),
           {
             compact: true,
             keepOpen,
+            // Finish already pins source inputs; observe publication metadata once.
+            reconcileComposition,
             ...(attribution ? { attribution } : {}),
           },
         ),

@@ -231,17 +231,34 @@ export async function drainLandingBatches(work: WorkService, channel: string, wa
         started = new Set<string>(),
         running = new Map<string, Promise<boolean>>();
       const observe = () => {
-        for (const entry of work.store.load().landingEntries ?? [])
+        const data = work.store.load();
+        for (const entry of data.landingEntries ?? [])
           if (entry.channel === channel && ['queued', 'checking'].includes(entry.status)) seen.add(entry.id);
+        return data;
       };
       let halted = false,
         failure: { error: unknown } | undefined,
         launched = 0;
       observe();
       for (;;) {
-        observe();
+        const observed = observe();
+        const pending = observed.landingEntries?.find(
+          entry => entry.channel === channel && entry.status === 'queued',
+        );
+        const check = pending && observed.checks.find(check => check.id === pending.checkId);
+        const shape = check && landingShape(work, check);
+        const recoverable = observed.landingBatches?.some(
+          batch =>
+            batch.channel === channel &&
+            ['composing', 'checking'].includes(batch.status) &&
+            !started.has(batch.id),
+        );
+        // A saturated runner cannot admit another batch. Polling selectBatch
+        // anyway saves unchanged Work every turn, invalidating other Lanes'
+        // prepared commits for the entire duration of the running check.
+        const canSelect = !running.size || recoverable || (shape?.remote && running.size < shape.concurrency);
         let batch: LandingBatch | undefined;
-        if (!halted && launched < seen.size) {
+        if (!halted && launched < seen.size && canSelect) {
           if (!running.size) await batchWindow(work, channel);
           batch = await batchEdit(work, channel, data => selectBatch(work, data, channel, started));
         }

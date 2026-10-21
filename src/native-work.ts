@@ -245,6 +245,7 @@ export function nativeExecute(
     actor?: AcceptanceActor;
     attribution?: WorkActor;
     ownerRequest?: boolean;
+    reconcileComposition?: boolean;
   } = {},
 ) {
   const parsed = commandSchema.safeParse(input),
@@ -270,7 +271,11 @@ export function nativeExecute(
     const snapshot = store.load(),
       command = parsed.data;
     if (!command.operationId || !snapshot.views.some(view => view.operation?.id === command.operationId)) {
-      invariant(snapshot.revision === revision, 'WORK_STALE', 'Refresh Work before composing.');
+      invariant(
+        options.reconcileComposition || snapshot.revision === revision,
+        'WORK_STALE',
+        'Refresh Work before composing.',
+      );
       composition = prepareNativeComposition(store.root, snapshot, command);
     }
   }
@@ -331,11 +336,17 @@ export function nativeExecute(
             return { revision: data.revision, result: nativeViewReview(source, existing, options.compact) };
           }
         }
-        invariant(
-          Number.isSafeInteger(revision) && revision === data.revision,
-          'WORK_STALE',
-          'Work changed. Refresh before retrying; nothing was overwritten.',
-        );
+        // A prepared composition has exact source pins. Revalidate those against
+        // the latest locked Work instead of invalidating a potentially expensive
+        // merge for another Lane's checkpoint, check progress or batch admission.
+        // All other commands retain their explicit whole-Work revision guard.
+        if (composition && options.reconcileComposition) composition.assertCurrent(data);
+        else
+          invariant(
+            Number.isSafeInteger(revision) && revision === data.revision,
+            'WORK_STALE',
+            'Work changed. Refresh before retrying; nothing was overwritten.',
+          );
         const lane = (id: string) => {
           const item = data.lanes.find(l => l.id === id);
           invariant(item, 'NOT_FOUND', 'Lane not found.');

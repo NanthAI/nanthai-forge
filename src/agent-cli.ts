@@ -4,6 +4,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { sep } from 'node:path';
 import { AgentWorkflow } from './agent-workflow.js';
 import { overlapLines, type PredictiveOverlap } from './agent-predictive-overlap.js';
+import { retainedFinishCommand } from './agent-finish-journal.js';
 import { invariant } from './errors.js';
 
 export const AGENT_HELP = `Forge agent workflow
@@ -33,6 +34,9 @@ finish again. Inside a Lane directory laneId may be omitted.
 
 Omitted operationId and pins are filled from current state and returned under
 "resolved". After an unknown reply, retry with your request plus "resolved".
+Once finish has checkpointed, resume its retained request with:
+  nforge agent ROOT finish '{"operationId":"ORIGINAL_FINISH_UUID"}'
+Use the parent finish operationId, not an attempt's child operation ID.
 
 Actions: tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
@@ -223,11 +227,19 @@ export async function agentCli(args: string[]): Promise<unknown> {
     'Command action differs from the selected action.',
   );
   const agent = new AgentWorkflow(root);
-  if (['checkpoint', 'sync', 'finish'].includes(action) && selected.laneId === undefined) {
+  const retained =
+    action === 'finish' && typeof selected.operationId === 'string'
+      ? retainedFinishCommand(agent.work.store, selected.operationId)
+      : undefined;
+  if (
+    ['checkpoint', 'sync', 'finish'].includes(action) &&
+    selected.laneId === undefined &&
+    retained?.laneId === undefined
+  ) {
     const laneId = laneFromCwd(agent.work.store.directory);
     if (laneId) selected.laneId = laneId;
   }
-  const response = await agent.dispatch({ ...selected, action });
+  const response = await agent.dispatch({ ...retained, ...selected, action });
   const result = response.result as {
     peers?: { predictive?: PredictiveOverlap[] };
     predictive?: PredictiveOverlap[];

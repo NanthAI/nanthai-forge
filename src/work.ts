@@ -370,6 +370,7 @@ export class WorkService {
       keepOpen?: boolean | undefined;
       attribution?: WorkActor;
       ownerRequest?: boolean;
+      reconcileComposition?: boolean;
     } = {},
   ) {
     input = candidateCommand(input);
@@ -379,7 +380,12 @@ export class WorkService {
   private async dispatchAction(
     input: unknown,
     expectedRevision: number,
-    options: { compact?: boolean; keepOpen?: boolean | undefined; attribution?: WorkActor },
+    options: {
+      compact?: boolean;
+      keepOpen?: boolean | undefined;
+      attribution?: WorkActor;
+      reconcileComposition?: boolean;
+    },
   ) {
     if (input && typeof input === 'object' && 'action' in input) {
       if (input.action === 'policy')
