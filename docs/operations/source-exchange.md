@@ -841,8 +841,96 @@ The small signed result schedules `projectHostedComposeJobs:complete`; no client
 needs to remain connected and no recurring idle worker is created. Only the small
 result manifest crosses the finalizer action. Rebuild and pin the fixed image
 with the compose reducer and descriptor transport before enabling this route.
-Ingress provisioning, remote deployment, resolution/sync, hosted checks and landing
-remain separate work; these APIs alone do not enable a live end-to-end hosted loop.
+Ingress provisioning, remote deployment, resolution/sync, live check dispatch and
+landing remain separate work; these APIs alone do not enable a live end-to-end hosted loop.
+
+## Hosted check API
+
+The check APIs operate on canonical hosted Candidates without a local owner.
+They accept/return canonical JSON text for versioned request/result contracts.
+The provider contract currently has local fake coverage; these endpoints alone
+do not start live Modal compute. Existing native check requests are unchanged.
+
+- `projectHostedCheckDefinitions:configure({projectId,request})` takes an original
+  `operationId`, `authorityEpoch`, `expected` digest (null to create), and `change`.
+  For `kind:"definition"`, provide `checkId` and `command` using the local check
+  fields: name, executable, args, environmentLabel and optional environment-name,
+  credential-name, artifact-path, static/resource and declared-input settings.
+  For `kind:"import"`, provide the existing `check` with its UUID, definition and
+  timestamp. For `kind:"runner"`, provide `configuration` with `provider:"modal"`,
+  `app`, `function`, `runtime`, `environmentFingerprint` and credential-use
+  reference `{secretId,version,operation}`. No credential values are accepted.
+  Settings use existing project-owner authority. Each mutation retains its exact
+  original receipt; replay cannot rewind a later setting.
+- `projectHostedCheckDefinitions:current({projectId,checkId})` returns the selected
+  check, runner configuration and configuration digest. `list({projectId,cursor})`
+  pages definitions. Current readers can inspect them; contributors can enqueue
+  against the selected pins.
+- `projectHostedChecks:enqueue({projectId,request})` takes `operationId`,
+  `authorityEpoch`, `candidateId`, `expectedHead`, `checkId`, `expectedDefinition`,
+  `expectedConfiguration` and `expectedEnvironment`. The Candidate must be clean,
+  canonical and registered, and its exact State must match. Fresh requests require
+  current definition/configuration/environment pins. The result retains a run
+  UUID, stable dispatch key, frozen Candidate/definition/configuration and unknown
+  initial cost. Original retries return that run after later source/configuration
+  changes; they do not create another paid execution or switch its provider.
+- `projectHostedCheckRead:status({projectId,runId})` reads one compact record with
+  counts and exact pins, independently of shard/history size. `list` accepts a
+  Candidate UUID and cursor. `shards({projectId,runId,cursor})` pages current shard
+  metadata in automatic 100-row/128-KiB transport windows. Continue `continueCursor`
+  until `isDone`; these windows are not a total run/shard/output limit.
+- `projectHostedChecks:cancel({projectId,request})` takes its own original
+  `operationId`, `authorityEpoch` and `runId`. The requester or project owner can
+  cancel. Before dispatch this is terminal; after dispatch reservation it sets
+  `cancelRequested` and retains an honest running/unknown status until a provider
+  acknowledgement. Cancellation does not assert remote compute was terminated.
+
+The internal `projectHostedCheckApi:control` mutation takes project/run identity
+and a strict JSON `command`: `claim`, `prepare`, `reserve`, `empty` or `observe`.
+The adapter prepares and uploads a complete immutable plan/selection outside
+Convex, then supplies `head`, `definition`, `runtime`, `environmentFingerprint`,
+`lockfile`, selection/manifest `{sha256,size}` references and positive `shardCount`.
+The plan includes every selected job, including static checks. Indices cover
+`[0,shardCount)`. Plan preparation checks committed object bindings and frozen
+runtime/source pins. H11 must verify the actual source/lockfile/selection bytes
+and execute that exact manifest; client claims cannot call this internal boundary.
+
+`dispatchHostedCheck` runs a short controller tick through that mutation. A lease
+owner/token fences responses. Dispatch intent is durable before external I/O.
+Adapters must bind lookups to the complete original request and deduplicate
+submissions by `dispatchKey`, including lost responses. Unknown lookups stay
+unknown. One recovery requires two distinct fresh authoritative empty lookup
+receipts under the current lease and reuses the original execution key/plan.
+Eventually consistent absence is not authoritative. A rejected recovery retains
+unknown status, since the original submission could still be running. The
+controller does not choose a replacement provider or start an idle polling loop.
+
+Trusted collection ingress calls only the internal
+`projectHostedCheckApi:callback` with exact callback JSON and its signature. The
+backend pins `FORGE_HOSTED_CHECK_KEY_ID` at enqueue and resolves
+`FORGE_HOSTED_CHECK_KEY_<keyId>` itself. Signing uses the
+`forge-hosted-check-provider-v1` domain. Keep this signing authority in fixed
+collector/control code, isolated from project commands, source workers and account
+credentials; never pass a signing key in a dispatch payload or project environment.
+H11 owns real credential use, execution adoption/cancellation, ingress provisioning
+and pending-work wakes. Nothing here deploys or provisions those integrations.
+
+`hostedCheckCallbackSchema` binds project/run/operation, epoch/fence, provider and
+execution, source/definition/configuration/environment, runtime, plan digest,
+lockfile and selection. `kind:"shard"` carries index, ordered attempt, provider
+execution, status/exit code and optional output reference. Running-to-terminal
+transitions retain the same shard execution; replacement attempts retain older
+callback receipts. `kind:"complete"` carries terminal/unknown status, exit code,
+optional output reference and unknown or receipt-backed cost. Overall success
+with missing, running or unsuccessful selected shards stays unknown. Late events
+cannot rewrite a terminal outcome, and even duplicates recheck current authority.
+No stdout or artifact byte field is accepted; R2 chunk/manifest transfer is H12.
+
+H13/H14 can call `requireHostedCheckEvidence` inside their final transaction. It
+requires the exact passed run, complete successful shard counts and current
+definition/configuration/environment/epoch pins under current authority. Landing
+still checks its own policy and main head plus receipt. A check result does not
+move main or add a check requirement to person-selected acceptance.
 
 ### Hosted explicit sync and conflict resolution APIs
 

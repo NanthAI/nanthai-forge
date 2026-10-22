@@ -920,3 +920,61 @@ untracked obstructions, including changes during transfer, retain the old marker
 and files. Interrupted original-operation retries cannot replace a newer client
 marker, and completed retries never reinstall over later edits. Server source
 publication and optional local installation have separate outcomes.
+
+### Hosted check definitions and provider evidence
+
+`projectHostedCheckDefinitions` writes versioned check definitions and the selected
+remote runner configuration with original-operation reconciliation and expected
+definition/configuration pins. Definitions use the local command normalization
+and definition digest; import preserves the original check UUID, timestamp and
+command. Project check settings use owner authority; contributors can request
+checks under current project access. Configuration contains a Modal route, exact
+runtime/environment fingerprints and a credential-use reference, never account
+credential values or a local credential file. These APIs do not configure a live
+provider or change existing native-owner checks.
+
+`projectHostedChecks:enqueue` freezes one clean canonical Candidate, its registered
+State, input/dependency roots, base receipt, definition, runner configuration and
+environment under the original operation and authority epoch. Retries retain its
+run UUID and dispatch key. Later saves, main movement or definition/configuration
+changes cannot replace those pins. Fresh stale selections fail. A later passing
+run remains historical when its definition or runtime configuration changes;
+landing must use current exact evidence, not a display verdict.
+
+Internal plan preparation binds the exact source, definition, runtime, lockfile,
+selection reference and immutable shard-plan manifest before dispatch. The
+provider-neutral controller performs at most two lookups and one submission per
+tick, retaining dispatch intent first. Ambiguous outcomes remain unknown. Like
+source jobs, one recovery needs two distinct authoritative empty lookup receipts
+under the current control lease, the last immediately before reservation. It
+reuses the original key and plan; adapters must deduplicate it. A rejected recovery
+does not prove that the original ambiguous execution never started. Controller
+takeover fences old responses without replacing an accepted provider execution.
+
+Only an internal trusted collector callback can supply provider result evidence.
+Its domain-separated HMAC binds project/run/operation, epoch/fence, provider and
+execution, exact source/definition/configuration/environment, runtime, plan,
+lockfile and selection. The key comes from backend configuration and must stay
+outside project-code processes. Source-worker signatures and owner-uploaded
+display claims are not check evidence. Current project/actor authority and epoch
+are checked even for callback duplicates. Every shard execution/attempt retains
+its callback receipt; current shard metadata is paged separately from the compact
+run record. Terminal results cannot be rewritten.
+
+An overall provider success cannot pass a run until every selected shard has
+settled successfully with exit zero. Missing, running or failed shard evidence
+leaves that success unresolved under the same run. Failed, cancelled,
+interrupted, runner-unavailable and unknown outcomes remain distinct. Cancellation
+before dispatch is certain; after reservation it records a request until the
+provider acknowledges it. No cancellation request claims remote compute stopped.
+Cost starts unknown and only signed provider usage supplies observations. New
+stdout/artifact bytes never enter these Convex APIs; only object references do.
+
+`projectHostedCheckRead` reads one run in constant time and pages definitions,
+Candidate runs and shard metadata through indexes. The shared
+`requireHostedCheckEvidence` helper rechecks current definitions/configuration and
+exact passing provider evidence inside the caller's transaction. It does not move
+main, implement landing policy or require checks for person-selected acceptance.
+Live Modal dispatch, credential use, callback ingress and output transfer remain
+adapter work; the contract is exercised with local fake providers. See the
+[check API](operations/source-exchange.md#hosted-check-api).
