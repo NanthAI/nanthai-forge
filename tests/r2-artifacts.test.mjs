@@ -345,18 +345,45 @@ test('the Netlify runner builds bytes locally and publishes an R2 artifact throu
   assert.equal(fake.objects.size, 1);
 });
 
-test('archive reads resolve R2 artifact references alongside legacy backfill URLs', async t => {
+test('archive parts read migrated storage IDs and artifact references through their own resolvers', async t => {
   const { s, fake } = await setup(t);
   const { projectArchivePart } = await import(moduleUrl('../convex/projectArchivePart.ts'));
   const bytes = Buffer.from('R2 archive part');
   const ref = await blobStore(s.ctx).store(new Blob([bytes]), { r2Namespace: 'v1/p/project/artifacts' });
   assert.match(ref, /^r2blob:/);
-  s.ctx.storage.getUrl = () => assert.fail('R2 artifact references must not reach Convex storage');
-  let checks = 0;
-  const part = await projectArchivePart(s.ctx, ref, bytes.length, pinOf(bytes).digest, 0, async () => {
-    checks++;
+  const artifact = s.tables.artifactBlobs.get(ref.slice(7)),
+    storageId = await s.ctx.storage.store(new Blob([bytes]));
+  await s.ctx.db.insert('projectBackups', {
+    projectId: 'project',
+    ...pinOf(bytes),
+    storageId,
+    status: 'stored',
+    location: 'r2',
+    r2Key: artifact.r2Key,
+    r2Committed: true,
+    r2ConvexPurged: true,
   });
-  assert.deepEqual(Buffer.from(part), bytes);
-  assert.equal(checks, 1);
-  assert.ok(fake.requests.some(request => request.method === 'GET'));
+  await s.ctx.storage.delete(storageId);
+  s.ctx.storage.getMetadata = () => assert.fail('R2 archives must not read Convex metadata');
+  s.ctx.storage.getUrl = () => assert.fail('R2 archives must not read Convex URLs');
+  const query = s.ctx.runQuery,
+    resolutions = [];
+  s.ctx.runQuery = (fn, args) => {
+    if (getFunctionName(fn) === 'r2ArchiveSource:resolve') {
+      assert.equal(args.storageId, storageId, 'only the legacy ID reaches the storage-ID validator');
+      assert.equal(args.actor, 'owner', 'legacy resolution retains the current actor');
+      resolutions.push(args.storageId);
+    }
+    return query(fn, args);
+  };
+  let checks = 0;
+  for (const id of [storageId, ref]) {
+    const part = await projectArchivePart(s.ctx, id, bytes.length, pinOf(bytes).digest, 0, async () => {
+      checks++;
+    });
+    assert.deepEqual(Buffer.from(part), bytes);
+  }
+  assert.deepEqual(resolutions, [storageId]);
+  assert.equal(checks, 2);
+  assert.equal(fake.requests.filter(request => request.method === 'GET').length, 2);
 });

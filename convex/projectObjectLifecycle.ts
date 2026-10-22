@@ -9,6 +9,8 @@ export async function purgeExchangeObjects(ctx: MutationCtx, project: Doc<'hoste
     .query('projectObjects')
     .withIndex('by_project_and_removed', q => q.eq('projectId', project._id).eq('removed', false))
     .take(50);
+  if (rows.some(row => row.r2Key) && !project.r2StorageUsed)
+    await ctx.db.patch(project._id, { r2StorageUsed: true });
   for (const row of rows) {
     if (row.storageId) await removeExclusive(ctx, row.storageId, row._id);
     await ctx.db.patch(row._id, { removed: true, storageId: undefined, recipe: undefined });

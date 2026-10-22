@@ -5,6 +5,7 @@ export const backfillFields = {
   location: v.optional(v.union(v.literal('convex'), v.literal('r2'))),
   r2Key: v.optional(v.string()),
   r2Committed: v.optional(v.boolean()),
+  r2ConvexPurged: v.optional(v.boolean()),
   r2BackfilledAt: v.optional(v.number()),
   r2BackfillOperationId: v.optional(v.string()),
 };

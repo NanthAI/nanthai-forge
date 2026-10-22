@@ -9,6 +9,8 @@ export const objectFields = {
   nonce: v.string(),
   storageId: v.optional(v.id('_storage')),
   ...backfillFields,
+  r2SweepKey: v.optional(v.string()),
+  r2PreparedAt: v.optional(v.number()),
   recipe: v.optional(v.object({ digest: v.string(), size: v.number() })),
   removed: v.boolean(),
 };

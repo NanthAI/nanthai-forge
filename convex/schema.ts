@@ -275,6 +275,8 @@ const projectFields = {
   /** Owner opt-in for new objects in R2 (also needs FORGE_BLOBS=r2). Default off. */
   r2Writes: v.optional(v.boolean()),
   r2BackfillRevision: v.optional(v.number()),
+  r2StorageUsed: v.optional(v.boolean()),
+  r2PrefixPurged: v.optional(v.boolean()),
   owner: v.string(),
   key: v.string(),
   name: v.string(),
@@ -479,7 +481,8 @@ export default defineSchema({
     .index('by_archive_storage', ['archiveReceipt.storageId'])
     .index('by_project', ['projectId'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
-    .index('by_storage', ['storageId']),
+    .index('by_storage', ['storageId'])
+    .index('by_archive_storage', ['archiveReceipt.storageId']),
   projectInterests: defineTable(interestFields)
     .index('by_importId', ['importId'])
     .index('by_owner_and_importId', ['owner', 'importId'])

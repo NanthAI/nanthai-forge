@@ -2,7 +2,7 @@
 'use node';
 import type { ActionCtx } from './_generated/server';
 import { blobStore } from './blobStore';
-import { archiveBlobUrl } from './archiveBlobUrl';
+import { archiveSource } from './r2ArchiveSource';
 import { exchangeRequest } from '../src/exchange-request';
 import { invariant } from '../src/errors';
 import { noteStorageRead } from './storageMeter';
@@ -19,7 +19,8 @@ export async function projectArchivePart(
   errorCode: 'INVALID_WORK_BACKUP' | 'INVALID_ARTIFACT' = 'INVALID_WORK_BACKUP',
   contentType?: (value: string) => void,
 ): Promise<ArrayBuffer> {
-  const metadata = await blobStore(ctx).getMetadata(storageId);
+  const source = await archiveSource(ctx, storageId);
+  const metadata = source.metadata;
   const actualDigest =
     metadata &&
     (/^[0-9a-f]{64}$/.test(metadata.sha256)
@@ -37,7 +38,7 @@ export async function projectArchivePart(
   }
   // Ranged on purpose: a Node action's storage.get buffers the whole Blob and
   // would transfer all of it again for every part.
-  const url = await archiveBlobUrl(ctx, storageId);
+  const url = await source.getUrl();
   invariant(url, errorCode, 'Stored archive is unavailable.');
   await checkAccess();
   const end = Math.min(size, offset + 2 * 1024 * 1024),

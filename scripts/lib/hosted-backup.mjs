@@ -130,8 +130,12 @@ export async function backup(command, exportSnapshot, options = {}) {
     if (state.target && JSON.stringify(state.target) !== JSON.stringify(target))
       throw failure('BACKUP_TARGET_MISMATCH');
     state.target = target;
-    if (command.operationId && state.receipts[command.operationId])
-      return state.receipts[command.operationId];
+    if (command.operationId && state.receipts[command.operationId]) {
+      const receipt = state.receipts[command.operationId];
+      if ((receipt.includeFileStorage ?? true) !== !command.databaseOnly)
+        throw failure('BACKUP_TARGET_MISMATCH');
+      return receipt;
+    }
     if (state.pending && command.operationId && state.pending.id !== command.operationId)
       throw failure('BACKUP_PENDING');
     const client = options.client ?? r2Client();
@@ -144,14 +148,20 @@ export async function backup(command, exportSnapshot, options = {}) {
       await save(path, state);
     }
     const pending = state.pending;
+    const databaseOnly = !!command.databaseOnly;
+    if (pending.databaseOnly !== undefined && pending.databaseOnly !== databaseOnly)
+      throw failure('BACKUP_TARGET_MISMATCH');
+    if (pending.manifest && !!pending.manifest.databaseOnly !== databaseOnly)
+      throw failure('BACKUP_TARGET_MISMATCH');
+    pending.databaseOnly = databaseOnly;
     const snapshot = join(directory, pending.id + '.zip');
     try {
       if (!pending.manifest) {
         // Publish an export only after the exporter and ZIP/storage/Work verification succeed.
         const temp = snapshot + '.partial.zip';
         await rm(temp, { force: true });
-        await exportSnapshot(command.deployment, temp);
-        const summary = await (options.verifySnapshot ?? readSnapshot)(temp);
+        await exportSnapshot(command.deployment, temp, { databaseOnly });
+        const summary = await (options.verifySnapshot ?? readSnapshot)(temp, { databaseOnly });
         const digest = await fileDigest(temp);
         await rename(temp, snapshot);
         Object.assign(pending, digest);
@@ -167,6 +177,8 @@ export async function backup(command, exportSnapshot, options = {}) {
           deployment: command.deployment,
           ...digest,
           storedFiles: summary.files,
+          databaseOnly,
+          includeFileStorage: !databaseOnly,
           identity,
         };
         await save(path, state);
@@ -193,6 +205,7 @@ export async function backup(command, exportSnapshot, options = {}) {
         size: pending.size,
         sha256: pending.sha256,
         pruned,
+        includeFileStorage: !databaseOnly,
         missedWeek: previous.missedWeek,
       };
       state.lastSuccess = pending.manifest.time;

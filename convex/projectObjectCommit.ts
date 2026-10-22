@@ -29,6 +29,11 @@ export const pendingRows = internalQuery({
           'BAD_ARGUMENT',
           'This object is not in object storage.',
         );
+        invariant(
+          row.r2Committed || row.r2SweepKey !== row.r2Key,
+          'R2_OBJECT_MISSING',
+          'Prepare this abandoned upload again before committing.',
+        );
         if (!row.removed && !row.r2Committed)
           rows.push({ id, digest: row.digest, size: row.size, key: row.r2Key });
       }
@@ -39,12 +44,30 @@ export const pendingRows = internalQuery({
   },
 });
 export const markCommitted = internalMutation({
-  args: { ids: v.array(v.id('projectObjects')) },
+  args: { rows: v.array(pending) },
   returns: v.null(),
-  handler: async (ctx, { ids }) => {
-    for (const id of ids) {
+  handler: async (ctx, { rows }) => {
+    for (const expected of rows) {
+      const id = expected.id;
       const row = await ctx.db.get(id);
-      if (row && row.location === 'r2' && !row.removed && !row.r2Committed)
+      invariant(
+        !row ||
+          row.removed ||
+          row.r2Committed ||
+          (row.r2Key === expected.key && row.r2SweepKey !== expected.key),
+        'R2_OBJECT_MISSING',
+        'Prepare this upload again after storage maintenance.',
+      );
+      if (
+        row &&
+        row.r2Key === expected.key &&
+        row.r2SweepKey !== expected.key &&
+        row.digest === expected.digest &&
+        row.size === expected.size &&
+        row.location === 'r2' &&
+        !row.removed &&
+        !row.r2Committed
+      )
         await ctx.db.patch(id, { r2Committed: true });
     }
     return null;
@@ -83,9 +106,9 @@ export const commitBatch = action({
       const results = await Promise.all(
         rows.map(async row => ({ row, failure: mismatch(row, await headObject(config, row.key)) })),
       );
-      const verified = results.filter(r => !r.failure).map(r => r.row.id);
+      const verified = results.filter(r => !r.failure).map(r => r.row);
       if (verified.length)
-        await ctx.runMutation(internal.projectObjectCommit.markCommitted, { ids: verified });
+        await ctx.runMutation(internal.projectObjectCommit.markCommitted, { rows: verified });
       const failed = results.find(r => r.failure);
       invariant(!failed, failed?.failure?.[0] ?? '', failed?.failure?.[1] ?? '');
       return null;

@@ -28,6 +28,7 @@ const teamLifecycle = await import(moduleUrl('../convex/teamLifecycle.ts'));
 const projectPublicationAttempt = await import(moduleUrl('../convex/projectPublicationAttempt.ts'));
 const projectPublicationStore = await import(moduleUrl('../convex/projectPublicationStore.ts'));
 const projectLifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
+const r2ArchiveSource = await import(moduleUrl('../convex/r2ArchiveSource.ts'));
 const projectActorNames = await import(moduleUrl('../convex/projectActorNames.ts'));
 const projectReturnMetadataStore = await import(moduleUrl('../convex/projectReturnMetadataStore.ts'));
 const projectReturnCommit = await import(moduleUrl('../convex/projectReturnCommit.ts'));
@@ -409,6 +410,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
   };
   const modules = {
     projectR2Backfill,
+    r2ArchiveSource,
     projectPublicationStore,
     projectPublicationAttempt,
     inventoryAccess,

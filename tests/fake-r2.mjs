@@ -30,6 +30,8 @@ export async function startFakeR2(config = fakeR2Config) {
     requests: [],
     /** Respond 503 to the next n PUTs. */
     failPuts: 0,
+    failDeletes: 0,
+    beforeDelete: null,
     /** Added to the clock, in ms, to test expiry. */
     clockSkew: 0,
     putDelay: 0,
@@ -101,6 +103,37 @@ export async function startFakeR2(config = fakeR2Config) {
       const [, bucket, ...rest] = decodeURIComponent(url.pathname).split('/'),
         id = fake.key(rest.join('/'), bucket);
       if (bucket !== config.bucket) return send(404);
+      if (req.method === 'GET' && q.get('list-type') === '2') {
+        const prefix = q.get('prefix') ?? '',
+          after = q.get('continuation-token') ?? '';
+        const keys = [...objects.keys()]
+          .filter(key => key.startsWith(bucket + '/' + prefix))
+          .map(key => key.slice(bucket.length + 1))
+          .sort()
+          .filter(key => key > after);
+        const page = keys.slice(0, Number(q.get('max-keys')));
+        const truncated = keys.length > page.length;
+        fake.active--;
+        fake.requests.push({ method: 'LIST', path: req.url, status: 200 });
+        res.writeHead(200, { 'content-type': 'application/xml' });
+        return res.end(
+          '<ListBucketResult><IsTruncated>' +
+            truncated +
+            '</IsTruncated>' +
+            page.map(key => '<Contents><Key>' + encodeURIComponent(key) + '</Key></Contents>').join('') +
+            (truncated ? '<NextContinuationToken>' + page.at(-1) + '</NextContinuationToken>' : '') +
+            '</ListBucketResult>',
+        );
+      }
+      if (req.method === 'DELETE') {
+        if (fake.beforeDelete) await fake.beforeDelete(rest.join('/'));
+        if (fake.failDeletes > 0) {
+          fake.failDeletes--;
+          return send(503);
+        }
+        objects.delete(id);
+        return send(204);
+      }
       if (req.method === 'PUT') {
         if (!mustSign.every(name => signed.includes(name))) return send(403);
         if (fake.putDelay) await new Promise(resolve => setTimeout(resolve, fake.putDelay));

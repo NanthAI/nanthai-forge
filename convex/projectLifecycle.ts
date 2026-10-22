@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { makeFunctionReference } from 'convex/server';
 import { ensureProjectSlug, slugTaken } from './urlIdentity';
 import { blobStore } from './blobStore';
 import { invariant as check } from '../src/errors';
@@ -420,6 +421,21 @@ export const purge = internalMutation({
     if (!(await purgeExchangeObjects(ctx, project))) {
       await ctx.db.patch(projectId, { task: undefined });
       await schedule(ctx, (await ctx.db.get(projectId))!);
+      return null;
+    }
+    if (
+      (project.r2StorageUsed ||
+        project.r2BackfillRevision ||
+        project.r2Writes ||
+        process.env.FORGE_R2_MAINTENANCE === '1') &&
+      !project.r2PrefixPurged
+    ) {
+      const task = await ctx.scheduler.runAfter(
+        0,
+        makeFunctionReference<'action'>('projectR2Maintenance:purgeDeletedProjectPage'),
+        { projectId },
+      );
+      await ctx.db.patch(projectId, { task });
       return null;
     }
     // The owner/key tombstone prevents an old initial-upload retry from silently recreating this project.

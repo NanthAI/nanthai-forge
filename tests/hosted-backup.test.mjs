@@ -363,3 +363,31 @@ test('a re-export after a failed export gets the fresh observation key and a pen
     assert.equal(result.time, later.toISOString());
     assert.ok([...x.client.objects.keys()].every(key => key.includes('2026-10-28T03-00-00.000Z')));
   }));
+
+test('database-only weekly backup excludes files and pins storage mode in its manifest and receipt', () =>
+  setup(async x => {
+    x.command.databaseOnly = true;
+    const result = await backup(
+      x.command,
+      async (_, path, options) => {
+        assert.equal(options.databaseOnly, true);
+        await writeFile(path, 'database-only snapshot');
+      },
+      {
+        ...x.options,
+        verifySnapshot: async (_, options) => {
+          assert.equal(options.databaseOnly, true);
+          return { files: { count: 0 } };
+        },
+      },
+    );
+    assert.equal(result.includeFileStorage, false);
+    const key = [...x.client.objects.keys()].find(key => key.endsWith('/manifest.json'));
+    const manifest = JSON.parse(x.client.objects.get(key));
+    assert.equal(manifest.databaseOnly, true);
+    assert.equal(manifest.includeFileStorage, false);
+    assert.equal(manifest.storedFiles.count, 0);
+    await assert.rejects(backup({ ...x.command, databaseOnly: false }, x.exporter, x.options), {
+      code: 'BACKUP_TARGET_MISMATCH',
+    });
+  }));

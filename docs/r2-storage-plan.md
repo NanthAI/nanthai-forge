@@ -34,6 +34,8 @@ Principle: R2 holds every blob. No database function receives or returns file by
 | R5 | Imports, zones, agents and proposals build artifacts into R2 | Done; awaiting landing, server/runner paths implemented; legacy browser archive uploader belongs to R4 |
 | R6 | Backfill: export, upload each file after checking its digest, flip rows in pages; keep old storage 14 days as fallback | Landed; lead-run command implemented, deployment qualification and actual run remain |
 | R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Done; awaiting landing |
+| R5 | Imports, zones, agents and proposals build artifacts into R2 | Done; awaiting landing |
+| R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Done; awaiting landing, local purge/sweep and database-only backup fixtures; live operator run remains |
 | R8 | Optional public Worker with edge cache on a custom subdomain | Later |
 
 Order: R0, R1, R2, then R3a and R4 in parallel, R3b, R6, R5, R7. R0 to R2 alone remove egress for pulls and new pushes. During dual read every reader dispatches on the row's location, so old and new paths coexist. Rollback: unset the flag and new writes return to the old storage; rows already in R2 stay readable; nothing in old storage is deleted until 14 days after a full digest verification.
@@ -309,3 +311,62 @@ metadata only; `--verify` checks every backfilled object and downloads a digest
 sample, then reports a date 14 days after the full pass. See the
 [operator runbook](operations/r2-backfill.md) for opt-in, commands, recovery, cost
 and verification details. No real deployment run is implied by local tests.
+
+## R7 storage maintenance
+
+Maintenance is implemented and disabled for writes until the lead sets
+`FORGE_R2_MAINTENANCE=1` on the backend. There is no new cron. Purge and abandoned
+upload sweep are explicit deployment-admin commands; both default to dry-run.
+The command uses the pinned Convex CLI and existing operator authentication;
+provider output and credentials are withheld.
+
+```sh
+node scripts/r2-maintenance.mjs purge --deployment NAME --project PROJECT_ID --verification /private/r2-verify.json
+node scripts/r2-maintenance.mjs purge --deployment NAME --project PROJECT_ID --verification /private/r2-verify.json --apply
+node scripts/r2-maintenance.mjs sweep --deployment NAME --project PROJECT_ID
+node scripts/r2-maintenance.mjs sweep --deployment NAME --project PROJECT_ID --apply
+```
+
+The verification input is the completed R6 `--verify` state, with zero failures,
+all four kinds visited, `verificationRevision`, `verifiedAt` and
+`safeToPurgeAfter`. It binds the deployment and project. This is a lead-supplied
+local receipt, not a server-signed proof. Only deployment-admin internal functions
+accept it. R6 currently HEAD-checks all migrated rows and downloads SHA-256
+samples; it does not download every object during the final verification pass.
+The original migration checks every transferred file's digest. Purge never
+manufactures a verification receipt.
+
+Purge refuses until at least 14 days after the verified pass and its recorded
+safe date, or if the backfill revision changed. Only committed R2 rows migrated
+before that pass qualify. Each 100-row page re-HEADs every eligible object and
+requires its size and checksum to match before any deletion in that page. The
+mutation rechecks the pass, original row pins and other storage references.
+It uses at most 1,401 document reads (below 4,096). Storage IDs remain immutable
+archive lookup aliases with `r2ConvexPurged: true`; they no longer assert a live
+Convex file. Archive readers resolve them through the authorized R2 pointer,
+including when old Convex-derived caches are absent.
+
+Sweep removes only prepared, uncommitted R2 keys under `v1/p/PROJECT_ID/`, older
+than 24 hours since their latest preparation (legacy rows use creation time).
+It retains a pending deletion key, rechecks commit state, and rotates the upload
+key on a concurrent retry. A delayed or repeated DELETE cannot remove that
+retry's newly committed copy. Failed deletes retain their pending cleanup key.
+Both commands report page, scanned, eligible, deleted and skipped counts. Deleted
+counts represent acknowledged delete operations, including already-absent keys.
+A retry starts the indexed pages again and reconciles row markers/pending keys.
+Dry-runs do not claim uploads or delete storage. Failures do not advance the
+operator command past the failing page; earlier completed pages remain applied.
+
+Existing explicit permanent project deletion also removes the entire R2 project
+prefix in 100-key S3 pages once maintenance is enabled. When maintenance is off, Convex-only projects need
+no R2 configuration. Once enabled, prefix cleanup also covers projects without a
+prior R2 marker, including artifact-only or orphaned uploads. A failed prefix action
+reports its error and schedules the same page again after 60 seconds, retaining its
+cursor. The project stays deleting until prefix cleanup succeeds; replaying the
+original project deletion also remains available. Already-issued PUTs can complete late;
+the lead can run the internal `projectR2Maintenance:purgeDeletedProjectPage`
+action again for the retained deleted-project tombstone after the 15-minute PUT
+expiry. No new project or source-history expiry is introduced.
+
+The weekly backup supports database-only snapshots after deployment-wide source
+bytes are in R2; see [database-only backup and restore](operations/hosted-durability.md#database-only-backup-and-restore).

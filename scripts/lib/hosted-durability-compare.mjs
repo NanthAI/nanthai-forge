@@ -18,13 +18,14 @@ export const failure = code => Object.assign(new Error(code), { code });
 
 // Full records are hashed, including IDs and creation times (snapshot import preserves both).
 // Only selected Work metadata is retained in memory; private record values are never reported.
-export function snapshotAccumulator() {
+export function snapshotAccumulator({ databaseOnly = false } = {}) {
   const tables = new Map(),
     files = [],
     projects = [],
     generations = new Map(),
     partitions = new Map(),
     storageIds = new Set();
+  let convexSourceRemains = false;
   function add(event) {
     if (event.kind === 'file') {
       files.push(event);
@@ -39,6 +40,19 @@ export function snapshotAccumulator() {
     )
       throw failure('SNAPSHOT_INVALID');
     tables.get(event.table).push(hash(row));
+    if (databaseOnly) {
+      const r2 = source => source?.location === 'r2' && source.r2Committed && source.r2Key;
+      if (['projectObjects', 'projectBackups', 'projectProposals'].includes(event.table)) {
+        if (row.storageId && !r2(row) && !row.removed) convexSourceRemains = true;
+        if (row.archiveReceipt?.storageId && !r2(row.archiveReceipt)) convexSourceRemains = true;
+      }
+      if (
+        ['imports', 'importArtifacts', 'sourceZones', 'agentGrants'].includes(event.table) &&
+        row.artifactKey &&
+        !r2(row)
+      )
+        convexSourceRemains = true;
+    }
     if (event.table === '_storage') storageIds.add(row._id);
     if (event.table === 'hostedProjects') projects.push(row);
     if (event.table === 'projectWorkGenerations') generations.set(row._id, row);
@@ -61,7 +75,8 @@ export function snapshotAccumulator() {
     const fileIds = new Set(
       files.filter(file => file.path.startsWith('_storage/')).map(file => file.path.slice(9).split('.')[0]),
     );
-    if (!tables.has('_storage') || [...storageIds].some(id => !fileIds.has(id)))
+    if (databaseOnly && convexSourceRemains) throw failure('DATABASE_ONLY_STORAGE_REMAINS');
+    if (!databaseOnly && (!tables.has('_storage') || [...storageIds].some(id => !fileIds.has(id))))
       throw failure('STORAGE_INCOMPLETE');
     const work = projects
       .filter(p => p.work && !p.removal)
@@ -101,7 +116,7 @@ export function snapshotAccumulator() {
   return { add, finish };
 }
 
-export async function readSnapshot(path) {
+export async function readSnapshot(path, options = {}) {
   const child = spawn(
     'python3',
     [fileURLToPath(new URL('./hosted-durability-zip.py', import.meta.url)), path],
@@ -111,7 +126,7 @@ export async function readSnapshot(path) {
     child.once('error', () => resolve(false));
     child.once('close', code => resolve(code === 0));
   });
-  const accumulator = snapshotAccumulator();
+  const accumulator = snapshotAccumulator(options);
   try {
     for await (const line of createInterface({ input: child.stdout, crlfDelay: Infinity }))
       accumulator.add(JSON.parse(line));
@@ -121,7 +136,9 @@ export async function readSnapshot(path) {
     child.kill();
     await completion;
     throw failure(
-      error.code?.startsWith('WORK_') || error.code === 'STORAGE_INCOMPLETE'
+      error.code?.startsWith('WORK_') ||
+        error.code === 'STORAGE_INCOMPLETE' ||
+        error.code === 'DATABASE_ONLY_STORAGE_REMAINS'
         ? error.code
         : 'SNAPSHOT_READ_FAILED',
     );

@@ -264,3 +264,43 @@ tooling, verify the ZIP size/SHA-256 against the manifest, then follow
 [Restore into a fresh deployment](#restore-into-a-fresh-deployment) and
 [Verify the restored data](#verify-the-restored-data). A checksum match is transport
 integrity; the existing restore drill remains the recovery qualification procedure.
+
+## Database-only backup and restore
+
+After every project's durable bytes in the deployment have moved to R2, use
+`--database-only` for `export`, `backup`, and comparisons of database-only
+snapshots. Exports cover the whole deployment, so a migrated single project is
+not sufficient if other projects or legacy import/zone/agent archives still
+need Convex file storage. The ZIP validator refuses known source/archive rows
+that still point only at Convex storage. Prepared uploads and disposable derived
+caches are not durable source. Keep ordinary file-inclusive exports for mixed
+storage until all durable source paths have migrated.
+
+```sh
+node scripts/hosted-durability.mjs export --deployment SOURCE_NAME --path /private/backups/database.zip --database-only
+node scripts/hosted-durability.mjs backup --deployment SOURCE_NAME --prefix BACKUP_PREFIX/ --state-dir /private/backup-state --database-only
+node scripts/hosted-durability.mjs verify --left-export /private/backups/database.zip --right-deployment FRESH_TARGET_NAME --database-only
+```
+
+For the already approved weekly job, the lead may set
+`HOSTED_DURABILITY_DATABASE_ONLY=1` in its existing operator environment. The
+schedule and keep-four completed-backup retention do not change. No job is
+installed or enabled by this option. The default continues including Convex
+file storage. A backup's pending state, manifest and receipt pin its storage
+mode; retry the original operation with that same mode.
+
+Restore imports the original database ZIP into a fresh deployment using the
+fresh-target procedure above, then restores matching code, authentication,
+private environment and the existing R2 bucket configuration. The immutable R2
+objects already hold the source bytes: this restore does not re-upload or copy
+them through Convex. Retain their exact project prefixes and keys; database
+rows contain the R2 pointers and original IDs. Restore backend R2 credentials
+through the existing private operator process. Deleting a project's R2 prefix also removes its bytes from the recovery
+available through retained database-only snapshots. A database ZIP without the corresponding
+R2 objects is not a full recovery copy.
+
+Database-only verification compares all exported database rows and selected
+Work/main pins while accepting the deliberate absence of Convex files. It does
+not establish R2 health; the lead separately verifies the referenced immutable
+objects and exercises an authenticated source download from the restored project.
+No real database-only restore or bucket drill has been run by this implementation.

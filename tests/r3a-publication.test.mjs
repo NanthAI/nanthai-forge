@@ -273,19 +273,46 @@ test('R3a: existing explicit project deletion purges publication metadata in bou
       position: 1000 + i,
     });
   const { moduleUrl } = await import('./convex-module.mjs'),
-    lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
+    lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts')),
+    maintenance = await import(moduleUrl('../convex/projectR2Maintenance.ts')),
+    cleanup = { projectLifecycle: lifecycle, projectR2Maintenance: maintenance };
+  const previous = process.env.FORGE_R2_MAINTENANCE;
+  process.env.FORGE_R2_MAINTENANCE = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env.FORGE_R2_MAINTENANCE;
+    else process.env.FORGE_R2_MAINTENANCE = previous;
+  });
+  const invoke = (ref, args) => {
+    const [module, name] = getFunctionName(ref).split(':');
+    return cleanup[module][name]._handler(f.s.ctx, args);
+  };
+  for (const kind of ['runQuery', 'runMutation', 'runAction']) {
+    const run = f.s.ctx[kind];
+    f.s.ctx[kind] = (ref, args) =>
+      cleanup[getFunctionName(ref).split(':')[0]] ? invoke(ref, args) : run(ref, args);
+  }
+  let next = 0;
+  const drainOne = async () => {
+    const task = f.s.scheduled[next++];
+    assert.ok(task, 'deletion retains scheduled work until completion');
+    f.s.tasks.set(task.id, { state: { kind: 'inProgress' } });
+    await invoke(task.fn, task.args);
+    f.s.tasks.set(task.id, { state: { kind: 'success' } });
+  };
   await lifecycle.permanentlyDelete._handler(f.s.ctx, {
     projectId: 'project',
     operationId: randomUUID(),
     expectedRevision: f.s.tables.hostedProjects.get('project').revision,
   });
-  await lifecycle.purge._handler(f.s.ctx, { projectId: 'project' });
+  await drainOne();
   assert.ok(f.s.tables.projectPublicationPages.size > 0, 'first transaction stops at 50');
   assert.equal(f.s.tables.projectPublicationPages.size, 55 + 1 - 50);
   for (let i = 0; i < 50 && f.s.tables.hostedProjects.get('project').removal === 'deleting'; i++)
-    await lifecycle.purge._handler(f.s.ctx, { projectId: 'project' });
+    await drainOne();
   assert.equal(f.s.tables.projectPublicationPages.size, 0);
   assert.equal(f.s.tables.projectPublications.size, 0);
+  assert.equal(f.s.tables.hostedProjects.get('project').r2PrefixPurged, true);
+  assert.equal(f.fake.objects.size, 0);
   assert.equal(f.s.tables.hostedProjects.get('project').removal, 'deleted');
 });
 

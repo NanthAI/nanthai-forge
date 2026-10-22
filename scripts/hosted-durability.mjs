@@ -9,15 +9,16 @@ import { compareSnapshots, failure, readSnapshot } from './lib/hosted-durability
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const help = `Usage:
-  node scripts/hosted-durability.mjs backup --deployment NAME --state-dir PRIVATE_DIR [--prefix PREFIX/] [--operation-id UUID]
+  node scripts/hosted-durability.mjs backup --deployment NAME --state-dir PRIVATE_DIR [--prefix PREFIX/] [--operation-id UUID] [--database-only]
   node scripts/hosted-durability.mjs backup-status --state-dir PRIVATE_DIR
-  node scripts/hosted-durability.mjs export --deployment NAME --path BACKUP.zip [--dry-run]
+  node scripts/hosted-durability.mjs export --deployment NAME --path BACKUP.zip [--dry-run] [--database-only]
   node scripts/hosted-durability.mjs verify --left-export BACKUP.zip --right-export RESTORED.zip
   node scripts/hosted-durability.mjs verify --left-export BACKUP.zip --right-deployment NAME
   node scripts/hosted-durability.mjs verify --left-deployment NAME --right-deployment NAME
 
 Export/backup deployment fallback: HOSTED_DURABILITY_DEPLOYMENT, then CONVEX_DEPLOYMENT.
 Credentials stay in the process environment or existing Convex CLI login; no key flags.
+Use --database-only for verify when both snapshots exclude Convex files.
 Verify downloads read-only snapshots for deployment inputs, then removes its temporary copies.
 Backup uses R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY; prefix/state-dir have HOSTED_DURABILITY_R2_PREFIX/HOSTED_DURABILITY_STATE_DIR fallbacks.
 Exit: 0 = complete/current/equal, 1 = command/input error, 2 = comparison differs or backup week missed.
@@ -30,6 +31,7 @@ export function parseCommand(args, env = process.env) {
     options: {
       help: { type: 'boolean' },
       'dry-run': { type: 'boolean' },
+      'database-only': { type: 'boolean' },
       deployment: { type: 'string' },
       path: { type: 'string' },
       'state-dir': { type: 'string' },
@@ -55,7 +57,8 @@ export function parseCommand(args, env = process.env) {
     const stateDirectory = values['state-dir'] ?? env.HOSTED_DURABILITY_STATE_DIR;
     if (!stateDirectory) throw failure('ARGUMENT_INVALID');
     if (command === 'backup-status') {
-      if (values.deployment || values.prefix || values['operation-id']) throw failure('ARGUMENT_INVALID');
+      if (values.deployment || values.prefix || values['operation-id'] || values['database-only'])
+        throw failure('ARGUMENT_INVALID');
       return { command, stateDirectory: resolve(stateDirectory) };
     }
     const deployment = values.deployment ?? env.HOSTED_DURABILITY_DEPLOYMENT ?? env.CONVEX_DEPLOYMENT;
@@ -74,6 +77,7 @@ export function parseCommand(args, env = process.env) {
       prefix,
       stateDirectory: resolve(stateDirectory),
       ...(operationId ? { operationId } : {}),
+      databaseOnly: values['database-only'] ?? env.HOSTED_DURABILITY_DATABASE_ONLY === '1',
     };
   }
   if (values['state-dir'] || values.prefix || values['operation-id']) throw failure('ARGUMENT_INVALID');
@@ -82,7 +86,13 @@ export function parseCommand(args, env = process.env) {
       throw failure('ARGUMENT_INVALID');
     const deployment = values.deployment ?? env.HOSTED_DURABILITY_DEPLOYMENT ?? env.CONVEX_DEPLOYMENT;
     if (!deployment || !values.path?.endsWith('.zip')) throw failure('ARGUMENT_INVALID');
-    return { command, deployment, path: resolve(values.path), dryRun: values['dry-run'] ?? false };
+    return {
+      command,
+      deployment,
+      path: resolve(values.path),
+      dryRun: values['dry-run'] ?? false,
+      databaseOnly: values['database-only'] ?? false,
+    };
   }
   if (values.deployment || values.path || values['dry-run']) throw failure('ARGUMENT_INVALID');
   const side = name => {
@@ -91,7 +101,12 @@ export function parseCommand(args, env = process.env) {
     if ((!path && !deployment) || (path && deployment)) throw failure('ARGUMENT_INVALID');
     return path ? { path: resolve(path) } : { deployment };
   };
-  return { command, left: side('left'), right: side('right') };
+  return {
+    command,
+    left: side('left'),
+    right: side('right'),
+    databaseOnly: values['database-only'] ?? false,
+  };
 }
 
 export function deploymentOptions(deployment, env = process.env) {
@@ -125,7 +140,7 @@ export function deploymentOptions(deployment, env = process.env) {
 
 // Capture neither stdout nor stderr: provider failures may contain credentials.
 // Invoke the lockfile-pinned CLI directly, never npx's implicit package download.
-async function convexExport(deployment, path) {
+async function convexExport(deployment, path, { databaseOnly = false } = {}) {
   const selection = deploymentOptions(deployment);
   const child = spawn(
     process.execPath,
@@ -133,7 +148,7 @@ async function convexExport(deployment, path) {
       join(root, 'node_modules/convex/bin/main.js'),
       'export',
       ...selection.args,
-      '--include-file-storage',
+      ...(databaseOnly ? [] : ['--include-file-storage']),
       '--path',
       path,
     ],
@@ -162,14 +177,19 @@ export async function execute(command, exportSnapshot = convexExport) {
   }
   if (command.command === 'export') {
     if (command.dryRun)
-      return { operation: 'export', dryRun: true, includeFileStorage: true, contactedDeployment: false };
+      return {
+        operation: 'export',
+        dryRun: true,
+        includeFileStorage: !command.databaseOnly,
+        contactedDeployment: false,
+      };
     const directory = await mkdtemp(join(dirname(command.path), '.forge-export-'));
     try {
       const path = join(directory, 'snapshot.zip');
-      await exportSnapshot(command.deployment, path);
+      await exportSnapshot(command.deployment, path, { databaseOnly: !!command.databaseOnly });
       // link is atomic and refuses an occupied destination; retries never overwrite a backup.
       await link(path, command.path);
-      return { operation: 'export', complete: true, includeFileStorage: true };
+      return { operation: 'export', complete: true, includeFileStorage: !command.databaseOnly };
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -178,8 +198,9 @@ export async function execute(command, exportSnapshot = convexExport) {
   try {
     const read = async (side, name) => {
       const path = side.path ?? join(directory, `${name}.zip`);
-      if (side.deployment) await exportSnapshot(side.deployment, path);
-      return readSnapshot(path);
+      if (side.deployment)
+        await exportSnapshot(side.deployment, path, { databaseOnly: !!command.databaseOnly });
+      return readSnapshot(path, { databaseOnly: !!command.databaseOnly });
     };
     // Sequential exports limit provider load; each is its own consistent snapshot.
     const left = await read(command.left, 'left');
@@ -214,6 +235,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       'WORK_INDEX_UNAVAILABLE',
       'WORK_INDEX_INVALID',
       'STORAGE_INCOMPLETE',
+      'DATABASE_ONLY_STORAGE_REMAINS',
     ]);
     console.error(
       JSON.stringify({

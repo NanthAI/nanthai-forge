@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import type { ActionCtx } from './_generated/server';
-import { blobStore } from './blobStore';
-import { archiveBlobUrl } from './archiveBlobUrl';
+import { archiveSource } from './r2ArchiveSource';
 import { derivedArtifact, derivedBytes } from './derivedArtifactActions';
 import { invariant } from '../src/errors';
 import { workArchiveMetadata } from '../src/work-archive-metadata';
@@ -18,7 +17,8 @@ async function readOriginalMetadata(
   digest: string,
   checkAccess: () => Promise<unknown>,
 ) {
-  const metadata = await blobStore(ctx).getMetadata(storageId);
+  const source = await archiveSource(ctx, storageId);
+  const metadata = source.metadata;
   const actualDigest =
     metadata &&
     (/^[0-9a-f]{64}$/.test(metadata.sha256)
@@ -29,7 +29,7 @@ async function readOriginalMetadata(
     'INVALID_WORK_BACKUP',
     'Stored source and Work bytes differ from their original archive pins.',
   );
-  const url = await archiveBlobUrl(ctx, storageId);
+  const url = await source.getUrl();
   invariant(url, 'INVALID_WORK_BACKUP', 'Stored source and Work are unavailable.');
   await checkAccess();
   // Streamed on purpose: a Node action's storage.get buffers the whole archive.
@@ -60,7 +60,9 @@ export async function projectArchiveMetadata(
   r2 = false,
 ) {
   if (!cache) return readOriginalMetadata(ctx, storageId, size, digest, checkAccess);
-  const file = await blobStore(ctx).getMetadata(storageId);
+  const source = await archiveSource(ctx, storageId);
+  if (source.purged) return readOriginalMetadata(ctx, storageId, size, digest, checkAccess);
+  const file = source.metadata;
   const actual =
     file &&
     (/^[0-9a-f]{64}$/.test(file.sha256) ? file.sha256 : Buffer.from(file.sha256, 'base64').toString('hex'));

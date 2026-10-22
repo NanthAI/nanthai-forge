@@ -86,12 +86,24 @@ async function prepareObject(
         size,
         nonce: crypto.randomUUID(),
         removed: false,
-        ...(r2 ? { location: 'r2' as const, r2Key: r2Key(projectId, digest) } : {}),
+        ...(r2 ? { location: 'r2' as const, r2Key: r2Key(projectId, digest), r2PreparedAt: Date.now() } : {}),
       });
       row = (await ctx.db.get(id))!;
     } else if (!isStored(row) && row.location === 'r2' && !r2) {
       // Pending R2 row but R2 writes are now off: return it to the Convex path.
       await ctx.db.patch(row._id, { location: 'convex', r2Key: undefined });
+      row = (await ctx.db.get(row._id))!;
+    }
+    if (row.location === 'r2' && !isStored(row) && r2) {
+      const patch = {
+        r2PreparedAt: Date.now(),
+        ...(row.r2SweepKey === row.r2Key
+          ? {
+              r2Key: `${r2Key(projectId, digest)}/u/${crypto.randomUUID()}`,
+            }
+          : {}),
+      };
+      await ctx.db.patch(row._id, patch);
       row = (await ctx.db.get(row._id))!;
     }
     const stored = isStored(row);
@@ -179,6 +191,7 @@ export const prepareBatch = mutation({
       const project = await activeProject(ctx, projectId, user.subject);
       // R2 needs the flag and the project's opt-in; a missing setting with both on fails closed.
       const r2 = r2Enabled() && project.r2Writes ? r2Config() : null;
+      if (r2 && !project.r2StorageUsed) await ctx.db.patch(projectId, { r2StorageUsed: true });
       const result = [];
       for (const pin of objects) result.push(await prepareObject(ctx, { projectId, ...pin }, true, r2));
       return result;

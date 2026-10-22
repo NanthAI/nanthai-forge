@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { internalAction, type ActionCtx } from './_generated/server';
-import { archiveBlobUrl } from './archiveBlobUrl';
+import { archiveSource } from './r2ArchiveSource';
 import { v } from 'convex/values';
 import { reviewPaths } from '../src/native-source-review';
 import type { Doc } from './_generated/dataModel';
@@ -162,7 +162,7 @@ async function readParents(
       }
     }
   } else {
-    const url = await archiveBlobUrl(ctx, backup.storageId!);
+    const url = await (await archiveSource(ctx, backup.storageId!)).getUrl();
     invariant(url, 'SOURCE_UNAVAILABLE', 'Ancestry source archive is unavailable.');
     await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: actor });
     // Streamed on purpose: a Node action's storage.get buffers the whole archive.
