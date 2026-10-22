@@ -97,11 +97,17 @@ const ready = async root => {
 const within = (promise, ms) =>
   Promise.race([promise.then(() => true), new Promise(resolve => setTimeout(() => resolve(false), ms))]);
 
-// Node's rmSync on Linux returns early, leaving part of the tree, when the worker renames an entry under it
-// before it has seen the owner dying. Tests repeat the rm; what they assert is what happens afterwards.
+// A worker can rename an entry during deletion before observing owner death. rmSync
+// may return early (Linux) or throw ENOTEMPTY (macOS). Use the existing retry
+// budget to complete deletion, then strictly assert that the owner stays absent.
 const removeOwner = root => {
-  for (let attempt = 0; attempt < 20 && existsSync(root); attempt += 1)
-    rmSync(root, { recursive: true, force: true });
+  for (let attempt = 0; attempt < 20 && existsSync(root); attempt += 1) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch (error) {
+      if (error.code !== 'ENOTEMPTY') throw error;
+    }
+  }
   assert.equal(existsSync(root), false, 'the owner was removed');
 };
 

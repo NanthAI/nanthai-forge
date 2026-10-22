@@ -4,64 +4,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createHook } from 'node:async_hooks';
 import { fixture } from './landing-batch-fixture.mjs';
+import { until, childWorker, gatedFixture } from './landing-worker-fixture.mjs';
 import { watchLandingWorker } from '../dist/landing-worker.js';
 import { landingWorkerStates, readLandingWorkerStatus } from '../dist/landing-worker-status.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
 import { startOwnerPresence } from '../dist/presence-worker-start.js';
 import { land } from '../dist/land.js';
+import { WorkStore } from '../dist/work-store.js';
+import { ForgeError } from '../dist/errors.js';
+import { notifyAutoExchange } from '../dist/auto-exchange-notify.js';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(read, message) {
-  const end = Date.now() + 20_000;
-  while (Date.now() < end) {
-    const result = read();
-    if (result) return result;
-    await delay(30);
-  }
-  assert.fail(message);
-}
 function worker(f) {
   const controller = new AbortController();
   const pending = watchLandingWorker(f.store, controller.signal);
   return async () => {
     controller.abort();
     await pending;
-  };
-}
-async function childWorker(f) {
-  const script = `import { WorkStore } from ${JSON.stringify(new URL('../dist/work-store.js', import.meta.url).href)};
-import { watchLandingWorker } from ${JSON.stringify(new URL('../dist/landing-worker.js', import.meta.url).href)};
-const c=new AbortController();process.on('SIGTERM',()=>c.abort());
-await watchLandingWorker(new WorkStore(process.argv[1]),c.signal);`;
-  const child = spawn(process.execPath, ['--input-type=module', '-e', script, f.root], {
-    stdio: ['ignore', 'ignore', 'pipe'],
-    env: process.env,
-  });
-  let errors = '';
-  child.stderr.on('data', bytes => {
-    errors += bytes;
-  });
-  child.on('error', error => {
-    errors += error.code;
-  });
-  await until(
-    () => landingWorkerStates(f.store).find(s => s.worker.pid === child.pid),
-    `child started: ${errors}`,
-  );
-  return {
-    child,
-    stop: async (signal = 'SIGTERM') => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      const exit = once(child, 'exit');
-      child.kill(signal);
-      await exit;
-      assert.doesNotMatch(errors, /(?:Error:|Unhandled|Warning:)/, 'worker had no errors');
-    },
   };
 }
 const entries = f => f.store.load().landingEntries ?? [];
@@ -72,7 +36,7 @@ test('startup recovers durable work without an observer or land-ready', async t 
   await f.candidate('restart.txt');
   const stop = worker(f);
   try {
-    await until(() => entries(f)[0]?.status === 'accepted', 'startup lands');
+    await until(f, () => entries(f)[0]?.status === 'accepted', 'startup lands');
     assert.equal(f.content('restart.txt'), 'restart.txt\n');
     assert.equal(runs(f).length, 1);
     assert.equal(readPendingStatus(f.store).landingWorker.pendingRecovery, 0);
@@ -87,10 +51,10 @@ test('durable enqueue wakes an already idle owner lifecycle after its observer d
   const stop = startOwnerPresence(f.store),
     observer = startOwnerPresence(f.store);
   try {
-    await until(() => readLandingWorkerStatus(f.store).status === 'idle', 'idle lifecycle');
+    await until(f, () => readLandingWorkerStatus(f.store).status === 'idle', 'idle lifecycle');
     await observer();
     await f.candidate('detached.txt');
-    await until(() => entries(f)[0]?.status === 'accepted', 'owner continues without observer');
+    await until(f, () => entries(f)[0]?.status === 'accepted', 'owner continues without observer');
     assert.equal(runs(f).length, 1);
   } finally {
     await stop();
@@ -98,18 +62,24 @@ test('durable enqueue wakes an already idle owner lifecycle after its observer d
 });
 
 test('two worker processes retain one check, batch, and acceptance', async t => {
-  const f = await fixture(t, { remote: false, delay: 150 });
-  await f.candidate('two.txt');
-  const a = await childWorker(f),
-    b = await childWorker(f);
+  const f = await gatedFixture(t);
+  // Native filesystem events are hints and may be missed; durable commit and
+  // peer-release socket wakes must keep both ready controllers progressing.
+  const a = await childWorker(f, { filesystem: false });
+  let b;
   try {
-    await until(() => entries(f)[0]?.status === 'accepted', 'one driver lands');
+    b = await childWorker(f, { filesystem: false });
+    await f.candidate('two.txt');
+    await until(f, () => f.started, 'check command ready');
+    f.release();
+    await until(f, () => entries(f)[0]?.status === 'accepted', 'one driver lands');
     assert.equal(runs(f).length, 1);
     assert.equal(f.store.load().landingBatches.length, 1);
     assert.equal(f.store.load().channelMoves.length, 1);
   } finally {
+    f.release();
     await a.stop();
-    await b.stop();
+    await b?.stop();
   }
 });
 
@@ -133,7 +103,7 @@ await withQueueSlot(batchDirectory(w,'main'),async()=>{const b=await batchEdit(w
   await killed;
   const restarted = await childWorker(f);
   try {
-    await until(() => entries(f)[0]?.status === 'accepted', 'restart adopts');
+    await until(f, () => entries(f)[0]?.status === 'accepted', 'restart adopts');
     const after = f.store.load().landingBatches[0];
     assert.equal(after.id, before.id);
     assert.deepEqual(after.prefixes, before.prefixes);
@@ -145,21 +115,26 @@ await withQueueSlot(batchDirectory(w,'main'),async()=>{const b=await batchEdit(w
 });
 
 test('shutdown leaves submitted runs active and startup adopts their completion', async t => {
-  const f = await fixture(t, { remote: false, delay: 1200 });
+  const f = await gatedFixture(t);
   await f.candidate('stop.txt');
   const stop = worker(f);
-  await until(() => runs(f)[0]?.status === 'running', 'run starts');
-  const original = runs(f)[0].id;
-  await stop();
-  assert.ok(['running', 'passed'].includes(runs(f)[0].status));
-  assert.equal(runs(f)[0].cancellation, undefined);
-  const restart = worker(f);
+  let restart;
   try {
-    await until(() => entries(f)[0]?.status === 'accepted', 'original completion lands');
+    await until(f, () => f.started, 'run command ready');
+    assert.equal(runs(f)[0].status, 'running');
+    const original = runs(f)[0].id;
+    await stop();
+    assert.equal(runs(f)[0].status, 'running');
+    assert.equal(runs(f)[0].cancellation, undefined);
+    restart = worker(f);
+    f.release();
+    await until(f, () => entries(f)[0]?.status === 'accepted', 'original completion lands');
     assert.equal(runs(f).length, 1);
     assert.equal(runs(f)[0].id, original);
   } finally {
-    await restart();
+    f.release();
+    await stop();
+    await restart?.();
   }
 });
 
@@ -192,6 +167,7 @@ test('stacked dependency finish wakes after parent lands using its original requ
       waitMs: 0,
     });
     await until(
+      f,
       () => entries(f).some(e => e.id === operationId && e.status === 'accepted'),
       'dependency finish lands',
     );
@@ -207,7 +183,7 @@ test('idle service has no timer resources, Work writes, or hosted writes; status
   const f = await fixture(t, { remote: false });
   const stop = worker(f);
   try {
-    await until(() => readLandingWorkerStatus(f.store).status === 'idle', 'idle');
+    await until(f, () => readLandingWorkerStatus(f.store).status === 'idle', 'idle');
     await delay(300); // Drain notifications from fixture setup before measuring idle.
     const pointer = readFileSync(join(f.store.directory, 'work.json'));
     const fetch = t.mock.method(globalThis, 'fetch', () => {
@@ -258,6 +234,7 @@ test('legacy land journal dependency recovery keeps original child operations', 
       waitMs: 0,
     });
     await until(
+      f,
       () => entries(f).some(e => e.id === original && e.status === 'accepted'),
       'legacy child lands',
     );
@@ -297,6 +274,7 @@ test('startup adopts a finish journal interrupted before composition without rec
   const stop = worker(f);
   try {
     await until(
+      f,
       () => entries(f).some(e => e.id === operationId && e.status === 'accepted'),
       'unfinished finish lands',
     );
@@ -317,6 +295,7 @@ test('managed owner drives while another lifecycle owns advisory presence', asyn
   const stop = startOwnerPresence(f.store);
   try {
     await until(
+      f,
       () => entries(f)[0]?.status === 'accepted',
       'managed landing continues despite occupied presence',
     );
@@ -325,5 +304,106 @@ test('managed owner drives while another lifecycle owns advisory presence', asyn
     await stop();
     presenceController.abort();
     await presence;
+  }
+});
+
+test('a wake retries a transient observation failure without a new Work revision', async t => {
+  const f = await fixture(t, { remote: false });
+  await f.candidate('retry-observation.txt');
+  const load = WorkStore.prototype.load;
+  let injected = false;
+  let acknowledge;
+  const failed = new Promise(resolve => {
+    acknowledge = resolve;
+  });
+  t.mock.method(WorkStore.prototype, 'load', function () {
+    // The worker's AgentWorkflow has its own store. Fail its first drain read,
+    // after the worker has already retained this Work revision as observed.
+    if (this.root === f.store.root && this !== f.store && !injected) {
+      injected = true;
+      acknowledge();
+      throw new ForgeError('SOURCE_CHANGED', 'Synthetic concurrent observation');
+    }
+    return load.call(this);
+  });
+  const revision = f.store.revision();
+  const stop = worker(f);
+  try {
+    await failed;
+    assert.equal(injected, true);
+    const state = landingWorkerStates(f.store)[0];
+    // No enqueue, edit, or result receipt: replay an explicit lifecycle wake.
+    notifyAutoExchange(state.endpoint);
+    await until(f, () => entries(f)[0]?.status === 'accepted', 'same revision is retried');
+    assert.ok(f.store.revision() > revision);
+    assert.equal(runs(f).length, 1);
+  } finally {
+    await stop();
+  }
+});
+
+test('lifecycle wait sees a write published during its initial snapshot', async t => {
+  const f = await fixture(t, { remote: false });
+  const path = join(f.store.directory, 'test-ready');
+  let first = true;
+  await until(
+    f,
+    () => {
+      if (first) {
+        first = false;
+        writeFileSync(path, 'ready');
+        return false;
+      }
+      return existsSync(path);
+    },
+    'write during snapshot',
+  );
+});
+
+test('lifecycle wait rereads durable state before its deadline failure', async t => {
+  const f = await fixture(t, { remote: false });
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  let ready = false;
+  const pending = until(f, () => ready, 'delayed notification');
+  // Model a completed publication whose filesystem callback has not run before
+  // the timer. No real sleep or larger timeout is needed to exercise this order.
+  ready = true;
+  t.mock.timers.tick(20_000);
+  assert.equal(await pending, true);
+  t.mock.timers.reset();
+});
+
+test('queue admission contention retries the same snapshot after a peer release wake', async t => {
+  const f = await fixture(t, { remote: false });
+  await f.candidate('admission.txt');
+  const { CheckQueue } = await import('../dist/check-queue.js');
+  const position = CheckQueue.prototype.position;
+  let blocked = false;
+  let acknowledge;
+  const contended = new Promise(resolve => {
+    acknowledge = resolve;
+  });
+  t.mock.method(CheckQueue.prototype, 'position', function () {
+    if (this.path.includes('/landing-batch-drain/') && !blocked) {
+      blocked = true;
+      acknowledge();
+      // Bakery admission also waits for a peer that is still choosing a ticket;
+      // neither contender need have published a holding ticket or a Work write.
+      return { acquired: false, position: 1, holder: undefined };
+    }
+    return position.call(this);
+  });
+  const stop = worker(f);
+  try {
+    await contended;
+    const state = landingWorkerStates(f.store)[0];
+    notifyAutoExchange(state.endpoint);
+    await until(f, () => entries(f)[0]?.status === 'accepted', 'queue release retries admission');
+    assert.equal(blocked, true);
+    assert.equal(runs(f).length, 1);
+    assert.equal(f.store.load().landingBatches.length, 1);
+    assert.equal(f.store.load().channelMoves.length, 1);
+  } finally {
+    await stop();
   }
 });

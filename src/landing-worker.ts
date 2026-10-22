@@ -1,10 +1,10 @@
+import { wakeLandingWorker } from './landing-worker-wake.js';
 import { resumeLegacyLand } from './landing-worker-journals.js';
-import { batchDirectory } from './landing-batch-store.js';
 import type { AgentWorkflow } from './agent-workflow.js';
 import { land } from './land.js';
 import { drainLandingBatches } from './landing-batch.js';
 // SPDX-License-Identifier: Apache-2.0
-import { watch, statSync, readdirSync, readFileSync } from 'node:fs';
+import { watch, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { unfinishedFinishes } from './agent-finish-journal.js';
@@ -36,6 +36,10 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
   const unsubscribe = notifications.subscribe(wake);
   const watcher = watch(store.directory, { recursive: true }, (_event, filename) => {
     const path = filename?.toString().replaceAll('\\', '/');
+    // A failed nonblocking admission stays retryable, but our own transient
+    // ticket creation/release must not repeatedly wake that same attempt.
+    const ticket = path?.match(/^landing-batch-drain\/[^/]+\/([^/]+)/)?.[1];
+    if (ticket?.startsWith(`${process.pid}.`)) return;
     if (
       !path ||
       path === 'work.json' ||
@@ -67,8 +71,8 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
         const data = store.load(),
           finishes = unfinishedFinishes(store),
           lands = pendingLands(store);
-        // A result receipt or a competing driver's release can be durable even
-        // when Work's revision did not change. Ignore our own transient tickets.
+        // An exact result receipt can change without a Work publication. Peer
+        // releases retry unsuccessful admission, never a handled snapshot.
         const activeChannels = new Set(
           (data.landingEntries ?? [])
             .filter(e => ['queued', 'checking'].includes(e.status))
@@ -85,23 +89,6 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
           const { AgentWorkflow } = await import('./agent-workflow.js');
           agent = new AgentWorkflow(store.root);
         }
-        const holders = [...activeChannels].flatMap(channel => {
-          const directory = batchDirectory(agent!.work, channel);
-          try {
-            return readdirSync(directory)
-              .filter(name => !name.startsWith(`${process.pid}.`))
-              .flatMap(name => {
-                try {
-                  const ticket = JSON.parse(readFileSync(join(directory, name, 'ticket.json'), 'utf8'));
-                  return ticket.holding ? [name] : [];
-                } catch {
-                  return [];
-                }
-              });
-          } catch {
-            return [];
-          }
-        });
         const receipts = data.runs
           .filter(run => ['queued', 'preparing', 'running'].includes(run.status))
           .map(run => {
@@ -114,7 +101,6 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
           });
         const key = JSON.stringify([
           data.revision,
-          holders,
           receipts,
           finishes.map(c => c.operationId),
           lands.map(c => c.operationId),
@@ -133,7 +119,17 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
             if (channels.size || finishes.length || lands.length) publish('driving');
             for (const channel of channels) {
               assertLandingWorkerActive();
-              await drainLandingBatches(agent!.work, channel, 0);
+              try {
+                const drained = await drainLandingBatches(agent!.work, channel, 0);
+                // A peer may still be choosing its bakery ticket. No holding
+                // ticket or Work revision need change when that peer releases it.
+                if ('waiting' in drained) last = '';
+              } finally {
+                // Releasing a drain slot need not publish Work. Notify peers
+                // explicitly: native filesystem events may be delayed or lost.
+                // Exclude ourselves so contention cannot create a wake loop.
+                wakeLandingWorker(store, id);
+              }
             }
             for (const retained of lands) {
               assertLandingWorkerActive();
@@ -158,6 +154,13 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
             publish('idle');
           } catch (error) {
             if (signal.aborted) break;
+            // A failed observation is not a handled revision. A queue release
+            // or explicit wake can make it retryable without a Work mutation.
+            if (
+              error instanceof ForgeError &&
+              ['SOURCE_CHANGED', 'WORK_BUSY', 'WORK_STALE', 'LANDING_DRIVER_STALE'].includes(error.code)
+            )
+              last = '';
             publish('error', error instanceof ForgeError ? error.code : 'LANDING_WORKER_FAILED');
           }
         }
