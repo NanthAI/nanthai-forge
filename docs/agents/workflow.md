@@ -502,6 +502,42 @@ provider check. Capture age uses capture time rather than publication completion
 This read model is intended to feed the hosted **Now** screen's pending work and
 recovery summary; this command does not add a hosted UI.
 
+## Waiting for outcomes
+
+Wait on local Lanes, check run IDs, or parent finish/land operation IDs with one command:
+
+```sh
+nforge agent OWNER wait '{"laneIds":["LANE_ID"],"operationIds":["OPERATION_ID"],"until":"terminal","timeoutSeconds":600}'
+```
+
+The command prints newline-delimited JSON: an initial observation, then each observed
+change in Lane, operation, check, shard progress or recorded conflict/overlap notice,
+and a final summary. Add `--text` for one human-readable line per event. Duplicate
+observations are suppressed; a settled target emits no later updates. Fast changes
+between snapshots can be coalesced; this is a live observer, not a historical replay.
+
+`until:"any-change"` waits for a change after the initial observation. The default
+`terminal` waits until every selected target has an outcome. Completed Lanes and
+landed/passed operations succeed; failed/interrupted checks, conflicts, abandoned
+Lanes and review-required outcomes are unsuccessful. Passing a Lane's check alone
+does not mean the Lane landed. Unknown IDs remain pending until they appear or the
+wait expires. For a kept-open Lane, wait on the parent operation ID to observe landing.
+
+Exit codes are 0 when all targets reach a terminal outcome (including failed checks),
+or any change is observed in `any-change` mode, 2 for timeout, and 130 for cancellation.
+Invalid input or unreadable metadata exits nonzero. `successful` in the summary and
+`ok` on each target distinguish successful outcomes from failed/interrupted ones. The summary names every target and
+its latest state. Failures include the reason, infrastructure versus check failure
+classification, combined output paths and available failing shard log paths.
+
+`forge_wait` exposes the same inputs through agent MCP, returning JSON lines. Clients
+that supply a progress token also receive live event messages as progress notifications.
+Cancellation stops the observation only. Waiting takes no Work/Lane locks, starts no
+checks or drivers, performs no remote calls and writes no metadata. Filesystem signals
+wake the observer; a two-second local fallback covers missed signals and local runner
+death. Durable completion receipts can be observed before Work metadata catches up;
+remote controller loss stays pending for the existing recovery owner to resolve.
+
 ## Handoffs
 
 Record an optional delivery handoff before stopping so the lead or next agent can

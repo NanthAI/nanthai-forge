@@ -2,7 +2,10 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
-const siteId = process.argv[2] || JSON.parse(readFileSync('.netlify/state.json', 'utf8')).siteId;
+const production = process.argv.includes('--prod');
+const siteId =
+  process.argv.slice(2).find(arg => arg !== '--prod') ||
+  JSON.parse(readFileSync('.netlify/state.json', 'utf8')).siteId;
 let key = '',
   token = '';
 try {
@@ -26,8 +29,7 @@ try {
       'deploy',
       '--build',
       '--skip-functions-cache',
-      '--context',
-      'deploy-preview',
+      ...(production ? ['--prod'] : ['--context', 'deploy-preview']),
       '--site',
       siteId,
       '--env',

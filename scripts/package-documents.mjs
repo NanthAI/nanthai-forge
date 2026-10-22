@@ -25,6 +25,7 @@ export const packageDocuments = [
   'docs/operations/hosted-durability.md',
   'docs/operations/landing-batches.md',
   'docs/operations/optimistic-landing.md',
+  'docs/operations/release.md',
   'docs/operations/modal-checks.md',
   'docs/operations/github-actions-checks.md',
   'docs/operations/runner-fallback.md',

@@ -57,6 +57,15 @@ async function cli(f, target, reuse, env = {}) {
   assert.equal(code, 0, stderr);
   return { result: JSON.parse(stdout), stderr };
 }
+function onlyProgress(stderr) {
+  // Successful exports can exceed the documented ten-second heartbeat interval.
+  // Reject fallback/errors while retaining exact byte and command-count checks below.
+  for (const line of stderr.split('\n').filter(Boolean))
+    assert.match(
+      line,
+      /^export-native-git: (?:waiting for Git [^;\r\n]+|reading immutable States|projecting immutable States); holder=git pid=(?:\d+|none); commandWait=\d+s; commands=\d+; elapsed=\d+s$/,
+    );
+}
 function same(full, incremental) {
   assert.equal(incremental.commit, full.commit);
   assert.deepEqual(incremental.states, full.states);
@@ -85,7 +94,7 @@ test('incremental CLI exports only new States with byte-identical merge history 
   const full = await exportNativeGit(f.root, f.head, join(f.dir, 'full')),
     tracking = trackedGit(f.dir),
     incremental = await cli(f, join(f.dir, 'incremental'), previous.path, { PATH: tracking.PATH });
-  assert.equal(incremental.stderr, '');
+  onlyProgress(incremental.stderr);
   same(full, incremental.result);
   assert.throws(() =>
     workGit(join(incremental.result.path, 'repository.git'), ['cat-file', '-e', unrelatedObject]),
@@ -145,7 +154,7 @@ for (const format of ['sha1', 'sha256'])
     next(f, [f.head], 'new');
     const full = await exportNativeGit(f.root, f.head, join(f.dir, 'full')),
       incremental = await cli(f, join(f.dir, 'incremental'), previous.path);
-    assert.equal(incremental.stderr, '');
+    onlyProgress(incremental.stderr);
     same(full, incremental.result);
     writeFileSync(join(previous.path, 'mapping.json'), '{}');
     const fallback = await cli(f, join(f.dir, 'fallback'), previous.path);

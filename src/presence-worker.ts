@@ -22,7 +22,7 @@ export async function watchLanePresence(
   store: WorkStore,
   laneId: string,
   signal?: AbortSignal,
-  onEdit?: () => void,
+  onEdit?: (laneId: string) => void,
 ) {
   if (signal?.aborted) return;
   // Validate the current Work format before queue admission writes a ticket.
@@ -38,7 +38,7 @@ export async function watchLanePresence(
             if (!existsSync(store.directory)) return close();
             if (filename && !exclusion(filename.toString().replaceAll('\\', '/'))) {
               edited = true;
-              onEdit?.();
+              onEdit?.(laneId);
             }
           });
         } catch (error) {
@@ -147,7 +147,11 @@ export async function watchLanePresence(
   );
 }
 /** One detached process per owner, with native Lane watchers. No process per session. */
-export async function watchOwnerPresence(store: WorkStore, signal?: AbortSignal, onEdit?: () => void) {
+export async function watchOwnerPresence(
+  store: WorkStore,
+  signal?: AbortSignal,
+  onEdit?: (laneId: string) => void,
+) {
   if (signal?.aborted) return;
   // Validate the current Work format before queue admission writes a ticket.
   store.revision();

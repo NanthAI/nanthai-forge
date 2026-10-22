@@ -113,9 +113,16 @@ test('agent MCP profile awaits graph readiness, preserves selectors and legacy t
   };
   const client = await connect('--agent'),
     tools = (await client.listTools(undefined, requestOptions('listTools'))).tools;
-  assert.equal(tools.length, 15);
+  assert.equal(tools.length, 16);
   assert.ok(!tools.some(tool => tool.name === 'forge_work_command'));
-  for (const name of ['forge_task', 'forge_check', 'forge_work_overview', 'forge_review', 'forge_queue'])
+  for (const name of [
+    'forge_task',
+    'forge_check',
+    'forge_work_overview',
+    'forge_review',
+    'forge_queue',
+    'forge_wait',
+  ])
     assert.ok(tools.some(tool => tool.name === name));
   const call = async (name, arguments_) => {
     const result = await callTool(client, { name, arguments: arguments_ });

@@ -98,7 +98,11 @@ test('Lane watcher coalesces real edits, ignores build noise, and stops on expli
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: initial });
   const controller = new AbortController();
   t.after(() => controller.abort());
-  const watching = watchLanePresence(agent.work.store, lane.laneId, controller.signal);
+  let acknowledgeEdit;
+  const edited = new Promise(resolve => {
+    acknowledgeEdit = resolve;
+  });
+  const watching = watchLanePresence(agent.work.store, lane.laneId, controller.signal, acknowledgeEdit);
   mkdirSync(join(lane.path, 'dist'));
   writeFileSync(join(lane.path, 'dist/noise.js'), 'build');
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -106,7 +110,8 @@ test('Lane watcher coalesces real edits, ignores build noise, and stops on expli
   assert.equal(observations()[0].lastActivity, initial);
   writeFileSync(join(lane.path, 'file.txt'), 'two');
   writeFileSync(join(lane.path, 'file.txt'), 'three');
-  await new Promise(resolve => setTimeout(resolve, 100));
+  // Filesystem notification delivery has no 100 ms guarantee. Tick only after the watcher saw the edit.
+  await edited;
   t.mock.timers.tick(PRESENCE.touchMs);
   assert.equal(observations()[0].activityKind, 'edited files');
   assert.equal(observations()[0].lastActivity, initial + 2 * PRESENCE.touchMs);
@@ -200,18 +205,34 @@ test('one owner observer reconciles new Lanes and rejects a duplicate observer w
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() });
   const controller = new AbortController();
   t.after(() => controller.abort());
-  const observing = watchOwnerPresence(agent.work.store, controller.signal);
+  let acknowledgeEdit;
+  const edited = new Promise(resolve => {
+    acknowledgeEdit = resolve;
+  });
+  let editedLane;
+  const editedLanes = new Set();
+  const observing = watchOwnerPresence(agent.work.store, controller.signal, laneId => {
+    editedLanes.add(laneId);
+    if (laneId === editedLane) acknowledgeEdit();
+  });
   assert.ok((await watchOwnerPresence(agent.work.store)).waiting);
   const second = (
     await agent.dispatch({ action: 'start', outcome: 'Second synthetic Lane', actor: 'gpt-second' })
   ).result;
-  await new Promise(resolve => setTimeout(resolve, 100));
+  // Reconcile the newly created Lane before editing it, independently of root notification latency.
+  t.mock.timers.tick(PRESENCE.touchMs);
+  editedLane = second.laneId;
   writeFileSync(join(second.path, 'file.txt'), 'two');
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await edited;
   t.mock.timers.tick(PRESENCE.touchMs);
   const rows = Object.values(readHostState(agent.work.store).presence);
   assert.equal(rows.find(row => row.name === 'gpt-second').activityKind, 'edited files');
-  assert.equal(rows.find(row => row.name === 'gpt-first').activityKind, 'started');
+  // A backend may deliver pending creation events after attachment. Only the first Lane's own
+  // notification may mark it edited; an edit reported for the second Lane must not do that.
+  assert.equal(
+    rows.find(row => row.name === 'gpt-first').activityKind,
+    editedLanes.has(first.laneId) ? 'edited files' : 'started',
+  );
   await agent.dispatch({ action: 'complete', laneId: first.laneId });
   await agent.dispatch({ action: 'complete', laneId: second.laneId });
   t.mock.timers.tick(PRESENCE.touchMs);

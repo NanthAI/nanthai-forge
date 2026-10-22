@@ -35,6 +35,7 @@ import { resolve } from 'node:path';
 import { docsCli } from './docs-cli.js';
 import { describeFailure, recordFailure } from './system-errors.js';
 import { landCli } from './land-cli.js';
+import { maintainerReleaseCli } from './maintainer-release-cli.js';
 import { agentCli } from './agent-cli.js';
 import { readFileSync } from 'node:fs';
 import { nativeOwner } from './native-source.js';
@@ -48,6 +49,7 @@ Browse packaged documentation: nforge docs
 
 Usage:
   nforge improve ROOT [--json]
+  nforge release ROOT --command-file FILE | --resume UUID | --status UUID
   nforge land ROOT LANE… [--message MESSAGE] [--operation-id UUID]
   nforge docs [name]
   nforge --version
@@ -164,6 +166,7 @@ async function main(args: string[]): Promise<unknown> {
   }
   if (args[0] === 'exchange') return exchangeCli(args.slice(1));
   if (args[0] === 'land') return landCli(args.slice(1));
+  if (args[0] === 'release') return maintainerReleaseCli(args.slice(1));
   if (args[0] === 'agent') return agentCli(args.slice(1));
   if (args[0] === 'local-checks') return localChecksCli(args.slice(1));
   if (args[0] === 'plugin-config') {

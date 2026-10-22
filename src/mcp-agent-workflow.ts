@@ -1,3 +1,4 @@
+import { registerAgentWait } from './mcp-agent-wait.js';
 import { candidateActionSchema } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
 import { agentPeers, peersInputSchema } from './agent-peers.js';
@@ -14,6 +15,7 @@ import { readPendingStatus } from './pending-status-read.js';
 
 export function registerAgentWorkflow(server: McpServer, root: string) {
   const agent = new AgentWorkflow(root, true);
+  registerAgentWait(server, agent.work.store);
   server.registerTool(
     'forge_peers',
     {

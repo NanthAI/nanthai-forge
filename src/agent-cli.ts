@@ -1,3 +1,4 @@
+import { agentWaitCli } from './agent-wait.js';
 import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, realpathSync } from 'node:fs';
@@ -40,7 +41,7 @@ Once finish has checkpointed, resume its retained request with:
   nforge agent ROOT finish '{"operationId":"ORIGINAL_FINISH_UUID"}'
 Use the parent finish operationId, not an attempt's child operation ID.
 
-Actions: handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
+Actions: wait, handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
          making-of, report, friction, friction-triage, improve.
 start intentId adds a sibling Lane; finish with:[laneId] lands siblings together.
@@ -74,6 +75,7 @@ const examples: Record<string, unknown> = {
   },
   'friction-triage': { frictionIds: ['FRICTION_ID'], status: 'planned', reason: 'Next check-runner slice' },
   improve: {},
+  wait: { laneIds: ['LANE_ID'], operationIds: [], until: 'terminal', timeoutSeconds: 600 },
   tests: { laneId: 'LANE_ID' },
   peers: { laneId: 'LANE_ID', detail: true },
   'peer-ack': { laneId: 'LANE_ID', noticeId: 'NOTICE_ID', choice: 'accept-order' },
@@ -134,6 +136,9 @@ function actionHelp(action: string): string {
   invariant(action in examples, 'BAD_ARGUMENT', 'Unknown agent action. Use agent --help.');
   let result = `nforge agent ROOT ${action} '${JSON.stringify(examples[action])}'\n`;
   if (strict[action]) result += `Fully pinned: '${JSON.stringify(strict[action])}'\n`;
+  if (action === 'wait')
+    result +=
+      'Streams JSON lines; --text prints one line per event. until:any-change observes a baseline then waits for a change. Exit 0: all terminal (including failed outcomes) or any change; 2: timeout. Target ok and summary successful report outcome success. No checks or drivers are started.\n';
   if (action === 'handoff' || action === 'handoff-read')
     result +=
       'Record or read the latest optional delivery handoff on a Lane. Tests are self-reported; matching saved-head check operation IDs are linked automatically as Forge-recorded evidence. Reuse operationId and original inputs after an unknown outcome. Private Intent notes preserve handoffs through portable Work export/import.\n';
@@ -199,6 +204,8 @@ export async function agentCli(args: string[]): Promise<unknown> {
     process.stdout.write(AGENT_HELP);
     return undefined;
   }
+  const textMode = args[1] === 'wait' && args.includes('--text');
+  if (textMode) args = args.filter(arg => arg !== '--text');
   const [root, requestedAction, option, path] = args;
   if (requestedAction) noticeViewAlias(requestedAction);
   const action = requestedAction ? canonicalCandidateAction(requestedAction) : undefined;
@@ -247,6 +254,10 @@ export async function agentCli(args: string[]): Promise<unknown> {
     'BAD_ARGUMENT',
     'Command action differs from the selected action.',
   );
+  if (action === 'wait') {
+    await agentWaitCli(root, selected, textMode);
+    return undefined;
+  }
   const agent = new AgentWorkflow(root);
   const retained =
     action === 'finish' && typeof selected.operationId === 'string'
