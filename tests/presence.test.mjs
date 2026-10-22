@@ -1,8 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, existsSync } from 'node:fs';
+import fs, {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  readdirSync,
+  existsSync,
+  renameSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
+import { EventEmitter } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -14,6 +24,7 @@ import { watchLanePresence, watchOwnerPresence } from '../dist/presence-worker.j
 import { latestWorkFormat } from '../dist/work-format.js';
 import { startOwnerPresence } from '../dist/presence-worker-start.js';
 import { moduleUrl } from './convex-module.mjs';
+import { observePresenceFiles } from '../dist/presence-files.js';
 const { Sessions } = await import(moduleUrl('../web/src/cockpit/Sessions.tsx'));
 
 const session = (extra = {}) => ({
@@ -95,6 +106,10 @@ test('Lane watcher coalesces real edits, ignores build noise, and stops on expli
     .result;
   const observations = () => Object.values(readHostState(agent.work.store).presence);
   const initial = observations()[0].lastActivity;
+  // The observer deliberately unrefs its handles. Keep callback waits alive
+  // independently of mock timers and native-notification latency.
+  const keepAlive = setInterval(() => {}, PRESENCE.touchMs);
+  t.after(clearInterval.bind(null, keepAlive));
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: initial });
   const controller = new AbortController();
   t.after(() => controller.abort());
@@ -102,7 +117,10 @@ test('Lane watcher coalesces real edits, ignores build noise, and stops on expli
   const edited = new Promise(resolve => {
     acknowledgeEdit = resolve;
   });
-  const watching = watchLanePresence(agent.work.store, lane.laneId, controller.signal, acknowledgeEdit);
+  const watching = watchLanePresence(agent.work.store, lane.laneId, controller.signal, laneId => {
+    assert.equal(laneId, lane.laneId);
+    acknowledgeEdit();
+  });
   mkdirSync(join(lane.path, 'dist'));
   writeFileSync(join(lane.path, 'dist/noise.js'), 'build');
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -110,9 +128,11 @@ test('Lane watcher coalesces real edits, ignores build noise, and stops on expli
   assert.equal(observations()[0].lastActivity, initial);
   writeFileSync(join(lane.path, 'file.txt'), 'two');
   writeFileSync(join(lane.path, 'file.txt'), 'three');
-  // Filesystem notification delivery has no 100 ms guarantee. Tick only after the watcher saw the edit.
+  // macOS may miss native events entirely; its minute tick must reconcile the real edits.
+  // Other platforms publish activity on the tick after their native notification.
+  if (process.platform === 'darwin') t.mock.timers.tick(PRESENCE.touchMs);
   await edited;
-  t.mock.timers.tick(PRESENCE.touchMs);
+  if (process.platform !== 'darwin') t.mock.timers.tick(PRESENCE.touchMs);
   assert.equal(observations()[0].activityKind, 'edited files');
   assert.equal(observations()[0].lastActivity, initial + 2 * PRESENCE.touchMs);
   t.mock.timers.tick(PRESENCE.touchMs);
@@ -121,6 +141,104 @@ test('Lane watcher coalesces real edits, ignores build noise, and stops on expli
   t.mock.timers.tick(PRESENCE.touchMs);
   await watching;
   assert.equal(observations()[0].status, 'completed');
+});
+
+test('Lane observation reconciles macOS edits without notifications and retains the native path elsewhere', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-presence-dropped-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'file.txt'), 'one');
+  initNative(root);
+  const agent = new AgentWorkflow(root);
+  const lane = (await agent.dispatch({ action: 'start', outcome: 'Dropped notification regression' })).result;
+  const observation = () => Object.values(readHostState(agent.work.store).presence)[0];
+  const initial = observation().lastActivity;
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: initial });
+  let notify;
+  t.mock.method(fs, 'watch', (_path, _options, listener) => {
+    notify = listener;
+    const watcher = new EventEmitter();
+    watcher.close = () => {};
+    watcher.unref = () => watcher;
+    return watcher;
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  // The first write precedes observer attachment; no native callback is delivered.
+  writeFileSync(join(lane.path, 'file.txt'), 'two');
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const editedLanes = [];
+  const watching = watchLanePresence(agent.work.store, lane.laneId, controller.signal, laneId => {
+    editedLanes.push(laneId);
+  });
+  if (process.platform === 'darwin') {
+    assert.equal(observation().activityKind, 'edited files', 'startup detects already dirty source');
+    writeFileSync(join(lane.path, 'replacement.txt'), 'three');
+    renameSync(join(lane.path, 'replacement.txt'), join(lane.path, 'file.txt'));
+    t.mock.timers.tick(PRESENCE.touchMs);
+    assert.equal(
+      observation().lastActivity,
+      initial + PRESENCE.touchMs,
+      'missing notifications do not hide later edits',
+    );
+    assert.deepEqual(editedLanes, [lane.laneId], 'reconciliation reports the edited Lane');
+    mkdirSync(join(lane.path, 'dist'));
+    writeFileSync(join(lane.path, 'dist/noise.js'), 'generated');
+    notify('rename', 'file.txt'); // replayed FSEvents must not invent a second source edit
+    t.mock.timers.tick(PRESENCE.touchMs);
+    assert.equal(observation().lastActivity, initial + PRESENCE.touchMs);
+    assert.deepEqual(editedLanes, [lane.laneId, lane.laneId], 'native callbacks retain Lane identity');
+  } else {
+    assert.equal(observation().activityKind, 'started', 'other platforms retain native observation');
+    notify('change', 'file.txt');
+    t.mock.timers.tick(PRESENCE.touchMs);
+    assert.equal(observation().activityKind, 'edited files');
+    assert.deepEqual(editedLanes, [lane.laneId]);
+  }
+  controller.abort();
+  await watching;
+});
+
+test('metadata reconciliation detects edits without native events and ignores protected output and symlink targets', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-presence-metadata-'));
+  const external = mkdtempSync(join(tmpdir(), 'forge-presence-external-'));
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
+  });
+  mkdirSync(join(root, 'nested'));
+  writeFileSync(join(root, 'nested/file.txt'), 'one');
+  fs.symlinkSync(external, join(root, 'linked'));
+  const observe = observePresenceFiles(root);
+  assert.equal(observe(), false);
+  mkdirSync(join(root, 'dist'));
+  writeFileSync(join(root, 'dist/noise.js'), 'generated');
+  writeFileSync(join(external, 'outside.txt'), 'outside');
+  assert.equal(observe(), false);
+  writeFileSync(join(root, 'nested/file.txt'), 'two');
+  // Coarse filesystem clocks (Linux CI) can leave a same-size rewrite with an unchanged mtime.
+  const later = new Date(Date.now() + 2000);
+  fs.utimesSync(join(root, 'nested/file.txt'), later, later);
+  assert.equal(observe(), true, 'same-size edits change metadata');
+  assert.equal(observe(), false, 'edits coalesce');
+  writeFileSync(join(root, 'nested/replacement.txt'), 'replacement');
+  renameSync(join(root, 'nested/replacement.txt'), join(root, 'nested/file.txt'));
+  assert.equal(observe(), true, 'atomic editor saves change identity');
+  mkdirSync(join(root, 'new'));
+  writeFileSync(join(root, 'new/added.txt'), 'new');
+  assert.equal(observe(), true, 'new subtrees are observed');
+  rmSync(join(root, 'nested/file.txt'));
+  assert.equal(observe(), true, 'deletions are observed');
+  const moved = root + '-moved';
+  renameSync(root, moved);
+  t.after(() => rmSync(moved, { recursive: true, force: true }));
+  assert.equal(observe(), false, 'unavailable is not empty');
+  writeFileSync(join(moved, 'new/added.txt'), 'changed while unavailable');
+  renameSync(moved, root);
+  assert.equal(observe(), true, 'recovery compares with the last complete observation');
 });
 
 test('nested sessions share quiet/folded states, collapse across roots, and survive completed or accepted parents', async () => {
@@ -202,6 +320,9 @@ test('one owner observer reconciles new Lanes and rejects a duplicate observer w
   const first = (
     await agent.dispatch({ action: 'start', outcome: 'First synthetic Lane', actor: 'gpt-first' })
   ).result;
+  // Abortable observers do not own process lifetime; other platforms await a native event here.
+  const keepAlive = setInterval(() => {}, PRESENCE.touchMs);
+  t.after(clearInterval.bind(null, keepAlive));
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() });
   const controller = new AbortController();
   t.after(() => controller.abort());
@@ -223,15 +344,16 @@ test('one owner observer reconciles new Lanes and rejects a duplicate observer w
   t.mock.timers.tick(PRESENCE.touchMs);
   editedLane = second.laneId;
   writeFileSync(join(second.path, 'file.txt'), 'two');
+  if (process.platform === 'darwin') t.mock.timers.tick(PRESENCE.touchMs);
   await edited;
   t.mock.timers.tick(PRESENCE.touchMs);
   const rows = Object.values(readHostState(agent.work.store).presence);
   assert.equal(rows.find(row => row.name === 'gpt-second').activityKind, 'edited files');
-  // A backend may deliver pending creation events after attachment. Only the first Lane's own
-  // notification may mark it edited; an edit reported for the second Lane must not do that.
+  // A backend may replay creation events after attachment. macOS metadata rejects
+  // those as activity; other platforms retain main's native-notification behavior.
   assert.equal(
     rows.find(row => row.name === 'gpt-first').activityKind,
-    editedLanes.has(first.laneId) ? 'edited files' : 'started',
+    process.platform !== 'darwin' && editedLanes.has(first.laneId) ? 'edited files' : 'started',
   );
   await agent.dispatch({ action: 'complete', laneId: first.laneId });
   await agent.dispatch({ action: 'complete', laneId: second.laneId });

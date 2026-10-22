@@ -777,3 +777,14 @@ the existing dependency wait, including multi-level chains. Work formats 21/22
 protect stack metadata from older writers, with legacy/unified Intent semantics
 respectively; record pages, source exchange and explicit Intent conversion retain
 the pins. See [stacked Lanes](agents/workflow.md#stacked-lanes).
+
+## Trusted remote source computation
+
+The first fixed-code Modal source adapter reuses hosted source jobs and short
+control actions. An optional per-job transactional provider reservation permits
+one paid create across lost replies and competing bridge instances. Signed
+callbacks retain their original execution and authority pins. The worker verifies
+hash-pinned raw/recipe objects into temporary disk storage and constructs States
+through NativeSource without materializing or executing repository code. Direct
+transfer grants and publication remain with the source-operation reducers; no
+public writer or deployment is enabled. See [trusted hosted source worker](operations/hosted-source-worker.md).

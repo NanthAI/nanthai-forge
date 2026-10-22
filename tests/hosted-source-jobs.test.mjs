@@ -7,6 +7,8 @@ import { moduleUrl } from './convex-module.mjs';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 import { hostedPayloadHash } from '../dist/hosted-source-operation.js';
 import { signSourceJobCallback, sourceJobCallbackSchema } from '../dist/hosted-source-job.js';
+import { ModalSourceProvider } from '../dist/modal-source-provider.js';
+import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { driveSourceJob } from '../dist/hosted-source-job-controller.js';
 
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
@@ -38,7 +40,7 @@ after(() => {
   console.log(JSON.stringify({ sourceJobFunctionMaxima: maxima }));
 });
 
-async function fixture(actor = 'owner') {
+async function fixture(actor = 'owner', providerId = 'fake') {
   const f = recordsFixture(),
     identity = await f.setup();
   invocationCounts.push(f.counts);
@@ -49,7 +51,7 @@ async function fixture(actor = 'owner') {
     jobKind: 'compose',
     input: { sha256: hash, size: 32 },
     inputDigest: hash,
-    provider: 'fake',
+    provider: providerId,
     worker: 'forge-source-v1',
     runtime: hash,
     keyId: 'H05_SYNTHETIC_TEST',
@@ -93,7 +95,7 @@ async function fixture(actor = 'owner') {
     dispatchInputs = [],
     lookups = [];
   const provider = {
-    id: 'fake',
+    id: providerId,
     async dispatch(input) {
       // The stable key, not a process-local retry counter, owns the paid execution.
       if (!executions.has(input.dispatchKey))
@@ -699,5 +701,58 @@ test('registered enqueue, callback and cancel preserve the same internal contrac
     if (previous === undefined) delete process.env[name];
     else process.env[name] = previous;
   }
+  x.check(t);
+});
+
+test('Modal adapter uses short Convex action transitions, recovers lost dispatch and completes without owner source reads', async t => {
+  const x = await fixture('owner', 'modal');
+  let requests = 0;
+  const paid = new Map();
+  const provider = new ModalSourceProvider({
+    endpoint: 'https://synthetic-source.modal.run/',
+    token: 'synthetic-only',
+    worker: 'forge-source-v1',
+    runtime: hash,
+    timeoutMs: 1000,
+    async fetch(_url, init) {
+      requests++;
+      const { action, input } = JSON.parse(init.body);
+      if (action === 'dispatch') {
+        if (!paid.has(input.dispatchKey)) paid.set(input.dispatchKey, 'execution-1');
+        throw new Error('lost dispatch response after paid create');
+      }
+      return new Response(
+        JSON.stringify({
+          dispatchKey: input.dispatchKey,
+          input: canonicalPayload(input),
+          result: { status: 'found', executionId: paid.get(input.dispatchKey) },
+        }),
+      );
+    },
+  });
+  const ctx = {
+    runMutation: async (ref, input) => {
+      const name = getFunctionName(ref).split(':')[1];
+      const job = await x.invoke(
+        `modal:${name}`,
+        name === 'claim' ? jobs.claimSourceJob : jobs.advanceSourceJob,
+        name === 'advance' ? { ...input, command: JSON.parse(input.command) } : input,
+      );
+      return job === null ? null : JSON.stringify(job);
+    },
+  };
+  const tick = () =>
+    bridge.dispatchSourceJob(
+      ctx,
+      { projectId: x.identity.projectId, jobId: x.jobId, owner: randomUUID(), leaseMs: 1000 },
+      provider,
+    );
+  assert.equal(await tick(), 'unknown');
+  x.expire();
+  assert.equal(await tick(), 'observed');
+  assert.equal(paid.size, 1);
+  assert.equal(requests, 2);
+  await x.receive(await x.body());
+  assert.equal((await x.load()).status, 'completed');
   x.check(t);
 });

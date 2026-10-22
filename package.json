@@ -83,6 +83,8 @@
     "scripts/modal-check/collect.py",
     "scripts/modal-check/cost.py",
     "scripts/modal-check/worker.mjs",
+    "scripts/modal-source/bridge.py",
+    "scripts/modal-source/worker.mjs",
     "scripts/test-impact.mjs",
     "scripts/test-coverage.mjs",
     "scripts/test-coverage.d.mts",

@@ -46,6 +46,8 @@ const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.
 test('every relative import of every packaged script is packaged, including Modal helpers', () => {
   const files = packagedFiles(manifest.files);
   assert.ok(files.has('scripts/modal-check/worker.mjs'));
+  assert.ok(files.has('scripts/modal-source/worker.mjs'));
+  assert.ok(files.has('scripts/modal-source/bridge.py'));
   assert.ok(files.has('scripts/modal-check/collect.py'));
   assert.ok(files.has('scripts/script-impact.mjs'));
   assert.deepEqual(missingImports(files), []);

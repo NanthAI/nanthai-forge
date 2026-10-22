@@ -27,6 +27,7 @@ export const sourceJobControlSchema = z
     workerUntil: jobNumber,
     heartbeat: jobNumber,
     callbackDigest: jobHash.nullable(),
+    providerReservation: z.object({ input: jobHash, token: z.uuid() }).strict().optional(),
     failureCode: z.string().nullable(),
   })
   .strict();

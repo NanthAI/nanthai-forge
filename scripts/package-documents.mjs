@@ -22,6 +22,7 @@ export const packageDocuments = [
   'docs/operations/compute-egress.md',
   'docs/operations/egress.md',
   'docs/operations/github-project-import.md',
+  'docs/operations/hosted-source-worker.md',
   'docs/operations/hosted-durability.md',
   'docs/operations/landing-batches.md',
   'docs/operations/optimistic-landing.md',

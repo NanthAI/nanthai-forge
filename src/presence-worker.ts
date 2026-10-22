@@ -6,6 +6,9 @@ import { withQueueSlot } from './landing-queue.js';
 import { queueAgentSync } from './agent-hosted-sync.js';
 import { PRESENCE, collapseSessions } from './presence.js';
 import { exclusion } from './files.js';
+import { observePresenceFiles } from './presence-files.js';
+import { PeersSource } from './agent-peers-source.js';
+import { changedPaths } from './agent-sync.js';
 import { readHostState } from './host-binding.js';
 import { guardOwnerWorker } from './presence-worker-guard.js';
 import { allRecords } from './agent-lifecycle.js';
@@ -17,7 +20,7 @@ const touchMs = () => Number(process.env.FORGE_PRESENCE_TOUCH_MS) || PRESENCE.to
  * writes under the owner: a write during someone's `rm -r` can make it fail or leave files behind. */
 let ownerDying = false;
 
-/** Native file notifications only: no source reads, hashes or periodic repository walks. */
+/** Native notifications, plus macOS metadata reconciliation when FSEvents is delayed or drops events. */
 export async function watchLanePresence(
   store: WorkStore,
   laneId: string,
@@ -32,12 +35,29 @@ export async function watchLanePresence(
     () =>
       new Promise<void>(resolve => {
         let edited = false;
+        const observeFiles =
+          process.platform === 'darwin' ? observePresenceFiles(store.path(laneId)) : undefined;
+        if (observeFiles) {
+          // A detached observer can attach after the first edit. Compare the live
+          // source with the saved head once; subsequent ticks need metadata only.
+          try {
+            const lane = store.select('lanes', laneId);
+            if (lane) {
+              const source = new PeersSource(store, lane.base);
+              edited = changedPaths(source.state(lane.head).files, source.live(lane)).length > 0;
+            }
+          } catch {
+            /* Advisory initialization; later metadata changes still reconcile. */
+          }
+        }
         let watcher: FSWatcher;
         try {
           watcher = watch(store.path(laneId), { recursive: true }, (_event, filename) => {
             if (!existsSync(store.directory)) return close();
             if (filename && !exclusion(filename.toString().replaceAll('\\', '/'))) {
-              edited = true;
+              // FSEvents may replay materialization events from before subscription.
+              // On macOS the metadata comparison decides whether source really changed.
+              if (!observeFiles) edited = true;
               onEdit?.(laneId);
             }
           });
@@ -75,7 +95,7 @@ export async function watchLanePresence(
           }
           close();
         });
-        const timer = setInterval(() => {
+        const touch = () => {
           if (ownerDying) return;
           try {
             if (!existsSync(store.directory)) return close();
@@ -100,6 +120,10 @@ export async function watchLanePresence(
             if (!existsSync(store.path(laneId))) {
               ownerDying = true;
               return;
+            }
+            if (observeFiles?.()) {
+              edited = true;
+              onEdit?.(laneId);
             }
             const sessions = collapseSessions(Object.values(readHostState(store).presence ?? {})).filter(
               session => session.context.laneId === laneId,
@@ -138,7 +162,9 @@ export async function watchLanePresence(
           } catch {
             /* Advisory observation retries next minute; never changes source or work success. */
           }
-        }, touchMs());
+        };
+        const timer = setInterval(touch, touchMs());
+        if (edited) touch();
         if (signal) timer.unref?.();
         signal?.addEventListener('abort', close, { once: true });
         if (signal?.aborted) close();
