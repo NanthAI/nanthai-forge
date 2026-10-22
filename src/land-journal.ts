@@ -1,3 +1,4 @@
+import { landFrictionCounts } from './friction-auto.js';
 // SPDX-License-Identifier: Apache-2.0
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -84,6 +85,7 @@ export class LandJournal {
     this.save();
   }
   save() {
+    landFrictionCounts(this.state.entries);
     const temporary = `${this.path}.${randomUUID()}`,
       file = openSync(temporary, 'wx', 0o600);
     try {

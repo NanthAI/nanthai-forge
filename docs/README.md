@@ -3,6 +3,8 @@
 Forge is a source host and workspace for people and agents working on the same
 code at the same time. Start with the guide that matches your task.
 
+- [Principles](principles.md): our north star and how everyday friction guides improvement.
+- [Improvement loop](agents/improvement-loop.md): capture, rank and resolve workflow friction.
 - [Why Forge](why-forge.md): differences from GitHub, measured landing throughput and what remains unmeasured.
 - [Quickstart](quickstart.md): import Git source and reach first acceptance offline.
 - [Concepts](concepts.md): Intents, Lanes, Candidates, checks and Channels.

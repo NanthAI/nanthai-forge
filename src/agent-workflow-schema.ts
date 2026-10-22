@@ -1,4 +1,5 @@
 import { handoffSchema, handoffReadSchema } from './agent-handoff-types.js';
+import { frictionInputSchema, frictionTriageSchema } from './friction-types.js';
 import { landSchema } from './land-schema.js';
 import { peerAckSchema } from './agent-coordination-journal.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -30,6 +31,9 @@ const acceptPin = z.object({
 });
 export const agentActionSchema = z.discriminatedUnion('action', [
   ...viewReadSchemas,
+  frictionInputSchema.extend({ action: z.literal('friction') }),
+  frictionTriageSchema.safeExtend({ action: z.literal('friction-triage') }),
+  z.object({ action: z.literal('improve') }),
   landSchema,
   handoffSchema,
   handoffReadSchema,
@@ -66,6 +70,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   guidanceInputSchema.extend({ action: z.literal('guidance') }),
   z.object({
     action: z.literal('start'),
+    frictionIds: z.array(id).optional(),
     scope: peersScopeSchema.optional(),
     waitMs: z.number().int().nonnegative().safe().optional(),
     ...lockWait,
@@ -95,6 +100,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   }),
   z.object({
     action: z.literal('finish'),
+    frictionIds: z.array(id).optional(),
     scope: peersScopeSchema.optional(),
     priority: z.enum(['urgent', 'normal']).optional(),
     ...lockWait,

@@ -1,3 +1,4 @@
+import { captureTransactionFriction } from './friction-auto.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { wakeAutoExchange } from './auto-exchange-wake.js';
 import { indexPeerRecords } from './agent-peers-index.js';
@@ -203,7 +204,9 @@ export class WorkStore {
     return new WorkRecordTransaction(this.directory, manifest, bytes!);
   }
   commitRecords(transaction: WorkRecordTransaction, revision?: number) {
-    const prior = this.readRecords()?.manifest.collections.lanes?.pages ?? [];
+    const previous = this.readRecords();
+    const prior = previous?.manifest.collections.lanes?.pages ?? [];
+    captureTransactionFriction(transaction, previous);
     const result = transaction.commit(revision);
     wakeAutoExchange(this);
     try {

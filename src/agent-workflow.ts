@@ -1,4 +1,8 @@
 import { recordHandoff, readHandoff } from './agent-handoff.js';
+import { captureAutomatic, frictionReceipt } from './friction-auto.js';
+import { withRetryObservation } from './friction-retry.js';
+import { captureFriction, triageFriction, citeFriction } from './friction.js';
+import { readImprovements } from './improve.js';
 import { land } from './land.js';
 import type { LandCommand } from './land-schema.js';
 import { agentLaneTests } from './agent-lane-tests.js';
@@ -66,6 +70,7 @@ const readOnlyActions = new Set([
   'show',
   'brief',
   'handoff-read',
+  'improve',
 ]);
 export class AgentWorkflow {
   readonly work: WorkService;
@@ -150,8 +155,22 @@ export class AgentWorkflow {
       'operationId' in command && typeof command.operationId === 'string'
         ? { operationId: command.operationId }
         : {},
-      () => this.action(command),
+      () =>
+        withRetryObservation(
+          (operationId, code, retries) =>
+            captureAutomatic(store, {
+              operationId,
+              category: 'work-retries',
+              title: 'Work retries exhausted',
+              area: 'workflow',
+              detail: `Retry window exhausted with ${code}.`,
+              retries,
+              evidence: [operationId],
+            }),
+          () => this.action(command),
+        ),
     );
+    const friction = frictionReceipt(store, command, response.result);
     const ownershipStop =
       command.action === 'take' && (response.result as { status: string }).status === 'ownership';
     const hostedSync =
@@ -235,6 +254,7 @@ export class AgentWorkflow {
       ...response,
       result: {
         ...(response.result as object),
+        ...friction,
         ...(peers ? { peers } : {}),
         ...(hostedSync ? { hostedSync } : {}),
         ...(links ? { links } : {}),
@@ -248,6 +268,9 @@ export class AgentWorkflow {
     if (command.action === 'handoff')
       return recordHandoff(store, { ...command, operationId: command.operationId! });
     if (command.action === 'handoff-read') return readHandoff(store, command.laneId);
+    if (command.action === 'friction') return captureFriction(store, command);
+    if (command.action === 'friction-triage') return triageFriction(store, command);
+    if (command.action === 'improve') return readImprovements(store);
     if (command.action === 'land') return land(this.work, command as LandCommand);
     if (command.action === 'tests') return agentLaneTests(store, command.laneId);
     if (command.action === 'take') return agentTake(store, command);
@@ -669,6 +692,14 @@ export class AgentWorkflow {
           command,
           { allowUnchanged: true, actor: localActor('agent', command.actor, command.tool) },
         );
+        if (command.frictionIds?.length)
+          store.locked(() => {
+            const tx = store.records(),
+              before = tx.manifest.collections.frictionEvents?.count ?? 0;
+            citeFriction(tx, command.laneId, command.frictionIds!, command.operationId);
+            if (before !== tx.manifest.collections.frictionEvents?.count)
+              response.revision = store.commitRecords(tx);
+          });
         queueAgentSync(store, command, response.result, true);
         return response;
       },

@@ -4,6 +4,8 @@
 export const packageDocuments = [
   'docs/README.md',
   'docs/why-forge.md',
+  'docs/principles.md',
+  'docs/agents/improvement-loop.md',
   'docs/quickstart.md',
   'docs/agents.md',
   'docs/agents/briefings.md',

@@ -73,6 +73,8 @@ export function resolveAgentDefaults(
     case 'undo-sync':
     case 'report':
     case 'handoff':
+    case 'friction':
+    case 'friction-triage':
     case 'peer-ack':
       next = { ...command, operationId: pin('operationId', command.operationId, randomUUID) };
       break;

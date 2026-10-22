@@ -1,3 +1,5 @@
+import { exhaustedWorkRetries } from './friction-retry.js';
+import { workProgressIdentity } from './work-progress.js';
 // SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
 import { workLockWaitMs } from './work-lock.js';
@@ -12,7 +14,7 @@ export function preparedRecordCommit<T>(
   prepare: (tx: WorkRecordTransaction) => () => T,
 ): T {
   let end: number | undefined;
-  for (;;) {
+  for (let attempt = 0; ; attempt++) {
     try {
       let tx = store.readRecords();
       if (!tx) tx = store.locked(() => store.records(), { operation: `${operation} migration` });
@@ -40,11 +42,14 @@ export function preparedRecordCommit<T>(
       if (!(error instanceof ForgeError && ['WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)))
         throw error;
       end ??= Date.now() + (workLockWaitMs() || 1000);
-      if (Date.now() >= end)
+      if (Date.now() >= end) {
+        const operationId = workProgressIdentity().operationId;
+        if (operationId) exhaustedWorkRetries(operationId, 'WORK_BUSY', attempt);
         throw new ForgeError(
           'WORK_BUSY',
           `${operation} could not commit before lock patience expired. Retry the original operation to reconcile; existing work is preserved.`,
         );
+      }
       // Independent drivers should not restage and rejoin FIFO admission in lockstep.
       Atomics.wait(
         new Int32Array(new SharedArrayBuffer(4)),

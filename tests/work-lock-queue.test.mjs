@@ -93,6 +93,9 @@ test('Work waiters enter FIFO, report the holder once, and trace hold durations'
   await until(() =>
     readdirSync(join(directory, 'lock-queue')).some(name => name.startsWith(first.proc.pid + '.')),
   );
+  // A ticket precedes progress output. Keep the named holder alive until the
+  // waiter reports it, rather than racing that read against holder release.
+  await until(() => first.stderr().length > 0);
   const second = child(
     t,
     root,
@@ -539,9 +542,9 @@ test('four parallel CLI finishes queue behind an owner writer, report check/land
     maxRetries: 6,
     lockWaitMs: 15000,
   }));
-  // Concurrent Work manifest reads can return a resumable SOURCE_CHANGED
-  // receipt. Reconcile the original operation and resolved pins, as callers must,
-  // rather than assuming every finish completes in its first dispatch.
+  // Concurrent reads and bounded landing waits can return resumable receipts.
+  // Reconcile the original operation and resolved pins, as callers must, while
+  // retaining the same completion deadline and all final acceptance assertions.
   const body = `
     const {AgentWorkflow}=await import(${JSON.stringify(new URL('../dist/agent-workflow.js', import.meta.url).href)});
     const assert=(await import('node:assert/strict')).default;
@@ -550,12 +553,17 @@ test('four parallel CLI finishes queue behind an owner writer, report check/land
     let reply;
     for (;;) {
       reply=await agent.dispatch({...command,...reply?.result.resolved});
-      if(reply.result.status!=='source-changed')break;
+      if(!['source-changed','waiting to land'].includes(reply.result.status))break;
       assert.equal(reply.result.operationId,command.operationId);
-      assert.equal(reply.result.code,'SOURCE_CHANGED');
+      if(reply.result.status==='source-changed')assert.equal(reply.result.code,'SOURCE_CHANGED');
+      else {
+        assert.equal(reply.result.phase,'accept');
+        assert.equal(reply.result.run.status,'passed');
+        assert.ok(reply.result.position>=1);
+      }
       assert.equal(reply.result.terminal,false);
       assert.equal(reply.result.complete,false);
-      assert.ok(Date.now()<end,'finish did not reconcile concurrent Work publications');
+      assert.ok(Date.now()<end,'finish did not reconcile concurrent Work publications or landing waits');
     }
     console.log(JSON.stringify(reply));
   `;
@@ -635,6 +643,63 @@ test('four parallel CLI finishes queue behind an owner writer, report check/land
     assert.ok(file, `accepted main retains Lane ${i}'s file`);
     assert.equal(source.object(file.blob).toString(), `${i}\n`);
   }
+});
+
+test('a passed finish resumes a bounded landing wait without repeating its check', async t => {
+  const agent = fixture(t),
+    root = agent.work.store.root;
+  await agent.dispatch({
+    action: 'define-check',
+    name: 'verify',
+    executable: process.execPath,
+    args: ['-e', ''],
+  });
+  const lane = await start(agent);
+  writeFileSync(join(lane.path, 'bounded.txt'), 'bounded landing\n');
+  const ready = join(root, 'landing-ready'),
+    release = join(root, 'landing-release');
+  const holder = child(
+    t,
+    root,
+    `const {withLandingSlot}=await import(${JSON.stringify(new URL('../dist/landing-queue.js', import.meta.url).href)});
+     await withLandingSlot(store,'main',async()=>{
+       fs.writeFileSync(process.argv[2],'ready');
+       while(!fs.existsSync(process.argv[3]))await new Promise(resolve=>setTimeout(resolve,20));
+     });`,
+    [ready, release],
+  );
+  await until(() => existsSync(ready));
+  const command = {
+    action: 'finish',
+    operationId: randomUUID(),
+    laneId: lane.laneId,
+    message: 'bounded landing',
+    accept: true,
+    lockWaitMs: 1000,
+  };
+  const waiting = (await agent.dispatch(command)).result;
+  assert.equal(waiting.status, 'waiting to land', JSON.stringify(waiting));
+  assert.equal(waiting.phase, 'accept');
+  assert.equal(waiting.terminal, false);
+  assert.equal(waiting.complete, false);
+  assert.equal(waiting.position, 2);
+  assert.equal(waiting.run.status, 'passed');
+  assert.equal(agent.work.store.load().channelMoves.length, 0);
+  writeFileSync(release, 'release');
+  assert.equal((await holder.done).code, 0);
+  const resumed = (await agent.dispatch({ ...command, ...waiting.resolved })).result;
+  assert.equal(resumed.operationId, command.operationId);
+  assert.equal(resumed.status, 'accepted', JSON.stringify(resumed));
+  assert.equal(resumed.terminal, true);
+  assert.equal(resumed.complete, true);
+  assert.equal(resumed.run.runId, waiting.run.runId);
+  const data = agent.work.store.load();
+  assert.equal(data.runs.length, 1);
+  assert.equal(data.channelMoves.length, 1);
+  assert.equal(
+    new NativeSource(root).state(data.channelMoves[0].head).files.some(file => file.path === 'bounded.txt'),
+    true,
+  );
 });
 
 test('unpublished holder and bounded landing waits never become bare internal failures', async t => {

@@ -29,6 +29,8 @@ start/checkpoint/sync/finish and Lane status include a local peers digest; scope
 declares paths; start retains planned claims until the Lane closes.
 take {laneId,takeover:true} hands another actor’s Lane to you with its context. peers {laneId,detail:true} reads full details.
 Clean checkpoints succeed with the unchanged head.
+friction captures workflow cost in owner Work; improve groups it; friction-triage records a decision.
+start/finish frictionIds:[ID] links a fixing Lane and closes reports when it lands.
 sync brings main into a Lane like git pull; resolve any conflict markers, then
 finish again. Inside a Lane directory laneId may be omitted.
 
@@ -40,7 +42,7 @@ Use the parent finish operationId, not an attempt's child operation ID.
 
 Actions: handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
-         making-of, report.
+         making-of, report, friction, friction-triage, improve.
 start intentId adds a sibling Lane; finish with:[laneId] lands siblings together.
 after:{intentId} or after:{viewId} waits for that work to land; land-ready resumes waits.
 finish/accept complete included Lanes; the Intent completes when all its Lanes are done (keepOpen:true to opt out).
@@ -64,6 +66,14 @@ const examples: Record<string, unknown> = {
     next: ['Lead reviews and lands'],
   },
   'handoff-read': { laneId: 'LANE_ID' },
+  friction: {
+    title: 'Check interrupted',
+    detail: 'Runner stopped before completion',
+    area: 'checks',
+    cost: { minutes: 5, retries: 1 },
+  },
+  'friction-triage': { frictionIds: ['FRICTION_ID'], status: 'planned', reason: 'Next check-runner slice' },
+  improve: {},
   tests: { laneId: 'LANE_ID' },
   peers: { laneId: 'LANE_ID', detail: true },
   'peer-ack': { laneId: 'LANE_ID', noticeId: 'NOTICE_ID', choice: 'accept-order' },

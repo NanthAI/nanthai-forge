@@ -79,6 +79,7 @@ const targets: Record<string, string> = {
   releaseId: 'releases',
   deploymentId: 'deployments',
   runId: 'runs',
+  frictionId: 'frictionEvents',
 };
 /** Only schema-owned fields supply references; uninterpreted extension fields remain opaque. */
 export function recordReferences(collection: string, value: unknown, format = 15): RecordRef[] {
@@ -112,7 +113,11 @@ export function recordReferences(collection: string, value: unknown, format = 15
       const target = targets[field];
       if (target && typeof child === 'string')
         refs.set(recordIdentity(target, child), { collection: target, key: child });
-      else visit(child);
+      else if (field === 'frictionIds' && Array.isArray(child)) {
+        for (const id of child)
+          if (typeof id === 'string')
+            refs.set(recordIdentity('frictionEvents', id), { collection: 'frictionEvents', key: id });
+      } else visit(child);
     }
   };
   visit(parsed);

@@ -22,6 +22,8 @@ export function llmDocuments(root) {
   const introductory = new Set([
     'docs/README.md',
     'docs/why-forge.md',
+    'docs/principles.md',
+    'docs/agents/improvement-loop.md',
     'docs/quickstart.md',
     'docs/concepts.md',
     'docs/agents/workflow.md',

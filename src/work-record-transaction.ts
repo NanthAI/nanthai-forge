@@ -77,6 +77,10 @@ export class WorkRecordTransaction {
     );
     return hashes[position % pageSize]!;
   }
+  /** Immutable record identity without hydrating its histories. */
+  versionAt(collection: WorkCollection, position: number) {
+    return this.hash(collection, position);
+  }
   private validate<K extends WorkCollection>(collection: K, raw: unknown): WorkRecord<K> {
     raw = jsonValue(raw);
     const result = safeParseWork(
@@ -230,6 +234,15 @@ export class WorkRecordTransaction {
       record,
       counts: Object.fromEntries(Object.entries(header.arrays).map(([key, value]) => [key, value.count])),
     };
+  }
+  /** Read one retained array entry without hydrating the rest of its record. */
+  fieldAt(collection: WorkCollection, position: number, field: string, entry: number): unknown {
+    invariant(Number.isSafeInteger(entry) && entry >= 0, 'BAD_ARGUMENT', 'Invalid history position.');
+    const header = readFragment(this.directory, this.hash(collection, position)),
+      array = header.arrays[field];
+    if (!array || entry >= array.count) return;
+    const hashes = pageHashes(this.directory, array.pages[Math.floor(entry / pageSize)]!);
+    return readRecordValue(this.directory, hashes[entry % pageSize]!, true);
   }
   fieldFind(collection: WorkCollection, id: string, field: string, value: string, key = 'id') {
     const position = this.positions(collection, id)[0];

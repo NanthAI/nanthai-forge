@@ -1,3 +1,4 @@
+import { citeFriction } from './friction.js';
 import { workLockWaitMs } from './work-lock.js';
 import { preparedRecordCommit } from './work-prepared-commit.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -211,6 +212,7 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
             tx.patchFields('intents', existing!.id, { status: 'active' });
           }
           tx.append('lanes', lane);
+          citeFriction(tx, lane.id, command.frictionIds ?? [], command.operationId);
         }
         return () => {
           if (!original) store.commitRecords(tx);

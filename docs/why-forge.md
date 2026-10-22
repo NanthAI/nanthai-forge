@@ -5,6 +5,8 @@ codebase at the same time. Agents keep their editors and tools. Forge records
 what each agent intends to do, gives it an isolated Lane, composes concurrent
 changes, checks the combined code and moves accepted source to main.
 
+Our [principles](principles.md) put continuous study and improvement at the heart of Forge.
+
 ## What changes from GitHub?
 
 On GitHub, agents commonly work in branches and pull requests, then wait for CI

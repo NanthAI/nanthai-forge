@@ -1,3 +1,4 @@
+import { exhaustedWorkRetries } from './friction-retry.js';
 // SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
 import { workLockWaitMs } from './work-lock.js';
@@ -20,12 +21,14 @@ export async function retryWorkPhase<T>(
       if (!(error instanceof ForgeError && codes.includes(error.code))) throw error;
       // Time spent in the initial phase is not contention wait.
       end ??= Date.now() + (workLockWaitMs() || 1000);
-      if (Date.now() >= end)
+      if (Date.now() >= end) {
+        exhaustedWorkRetries(operationId, error.code, attempt);
         throw new ForgeError(
           error.code,
           `${error.message} Retry the original operation ${operationId} to reconcile its retained outcome.`,
           error.retryAt,
         );
+      }
       const backoff = Math.min(25 * 2 ** Math.min(attempt, 5), 500);
       const delay = Math.min(backoff * (0.5 + Math.random() * 0.5), end - Date.now());
       await new Promise(resolve => setTimeout(resolve, delay));

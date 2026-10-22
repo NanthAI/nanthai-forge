@@ -1,3 +1,4 @@
+import { frictionEventSchema } from './friction-types.js';
 import { checkEnvironmentSchema } from './check-environment-schema.js';
 export { checkEnvironmentSchema } from './check-environment-schema.js';
 import { landingEntrySchema, landingBatchSchema } from './landing-batch-types.js';
@@ -1001,6 +1002,7 @@ export const workSchema = z
     automaticActions: z
       .array(z.object({ id, at: z.string(), action: automaticActionSchema, result: z.string().optional() }))
       .optional(),
+    frictionEvents: z.array(frictionEventSchema).optional(),
     hostedEvents: z.array(hostedEventSchema).default([]),
     intents: z.array(intentSchema),
     lanes: z.array(laneSchema),
