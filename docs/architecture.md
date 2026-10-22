@@ -975,6 +975,50 @@ Candidate runs and shard metadata through indexes. The shared
 `requireHostedCheckEvidence` helper rechecks current definitions/configuration and
 exact passing provider evidence inside the caller's transaction. It does not move
 main, implement landing policy or require checks for person-selected acceptance.
-Live Modal dispatch, credential use, callback ingress and output transfer remain
+Live provider dispatch, credential use and callback ingress remain
 adapter work; the contract is exercised with local fake providers. See the
 [check API](operations/source-exchange.md#hosted-check-api).
+
+
+### Hosted check output and artifact manifests
+
+`projectHostedOutputApi` is an internal, provider-neutral collection boundary.
+Its domain-separated signed messages bind the original run/operation, authority
+epoch, controller fence, provider execution, source head and immutable plan.
+`prepare` signs a create-only checksum/length-bound R2 PUT in a separate check
+namespace. `commit` verifies storage with HEAD and rechecks current project,
+actor and run authority in the publication transaction. No new stdout/artifact
+byte body crosses Convex. Missing storage, corrupt checksums and unavailable
+verification remain explicit retryable outcomes, with no storage/provider fallback.
+
+The fixed collector redacts configured credentials and private roots before
+retaining or uploading bytes, including matches crossing input/chunk boundaries.
+It also masks common credential syntax and other absolute paths; binary artifact
+bytes remain unchanged outside redaction matches. Redaction cannot discover every
+unknown or encoded credential. Collector signing authority stays outside project
+commands. The collector batches output, applies storage backpressure and retains
+exact redacted chunks through an injected durable spool before publication.
+Provider adapters own that spool and reconnect/replay of original bytes and pins.
+They must preserve redaction settings and chunk size when recollecting a stream.
+
+Each stream pins shard, attempt, execution, stdout/stderr/artifact kind and a
+redacted portable name. The collector retains an opaque original-descriptor digest
+so distinct artifact names cannot collapse after redaction. Sequence, byte offset and content digest make duplicate
+chunks idempotent. Out-of-order chunks remain readable, gaps remain recoverable,
+and adjacent offsets are checked on insertion. A stream seal requires every
+sequence and byte; an immutable final root requires a terminal check, all streams
+sealed and exact current counters/hash-chain. Trusted final collection attests
+that its declared streams exhaust output; a provider status alone does not.
+Incomplete collection never claims completeness. Terminal check evidence and
+output retention remain separate, and neither changes landing policy.
+
+`projectHostedOutputRead` exposes constant-size status/completeness and paged
+stream/chunk indexes. Chunk readers resume a numeric commit revision; stream
+sequence is separate so late arrivals cannot disappear behind a sequence cursor.
+Fresh signing rechecks current read access. Downloads go directly to R2 and the
+portable reader verifies chunk digests, offsets, sequence and full sealed-stream
+hash without a whole-log server read. Existing five-minute signed GET expiry
+still bounds already-issued URL access after revocation. Reads create no timers,
+scheduled work or URL refresh loops. UI adapters use the existing idle gate.
+These APIs and transfers are covered with local fake runners/R2; no live adapter,
+UI, deployment, retention policy or account provisioning is supplied here.

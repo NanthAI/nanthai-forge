@@ -93,7 +93,13 @@ export function lanesFixture() {
                 const index = schema.tables[table].export().indexes.find(i => i.indexDescriptor === name);
                 assert(index, `${table}.${name}`);
                 const terms = [];
+                let lower = null;
                 const bounds = {
+                  gt(field, value) {
+                    assert.equal(field, index.fields[terms.length], 'index lower-bound order');
+                    lower = [field, value];
+                    return bounds;
+                  },
                   eq(field, value) {
                     assert.equal(field, index.fields[terms.length], 'index order');
                     terms.push([field, value]);
@@ -103,8 +109,15 @@ export function lanesFixture() {
                 build(bounds);
                 match = rows =>
                   [...rows.values()]
-                    .filter(row => terms.every(([k, v]) => row[k] === v))
-                    .sort((a, b) => a._creationTime - b._creationTime);
+                    .filter(
+                      row => terms.every(([k, v]) => row[k] === v) && (!lower || row[lower[0]] > lower[1]),
+                    )
+                    .sort((a, b) => {
+                      for (const field of index.fields) {
+                        if (a[field] !== b[field]) return a[field] < b[field] ? -1 : 1;
+                      }
+                      return a._creationTime - b._creationTime;
+                    });
                 return q;
               },
               unique: async () => {

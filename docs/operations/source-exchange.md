@@ -1018,3 +1018,63 @@ untracked contents are preserved on `WORK_CONFLICT`; a newer client baseline is
 `WORK_STALE`. The original server result remains successful when local install
 cannot proceed. Completed apply retries check current access but do not overwrite
 later edits. There is no filesystem watcher, background pull or recurring timer.
+
+
+## Hosted check output API
+
+The provider-neutral output contracts are in `src/hosted-check-output.ts`.
+`collectHostedOutput` redacts before the durable `OutputSink.retain` call;
+`hostedOutputPublisher` connects the sink to internal signed R2 transfer APIs.
+The adapter provides a durable redacted spool, credential/root redaction inputs
+and its fixed trusted transport. Project-code processes receive none of the
+collector key or upload-signing authority. No live provider ingress is enabled.
+
+Internal `projectHostedOutputApi` functions take `{projectId,message,signature}`.
+`message` is canonical JSON with schema 1, run/operation IDs, epoch, fence,
+execution ID, source head, plan digest and a strict `body`:
+
+- `kind:"chunk"` carries `{stream,sequence,offset,object:{sha256,size}}`. The
+  stream pins shard index, attempt, execution ID, kind and redacted display name.
+  The collector also sets a stable opaque `identity` digest before name redaction,
+  preserving separate artifacts when their redacted display names coincide. Use
+  the returned descriptor when verifying or replaying chunks.
+  `prepare` returns an exact signed R2 target; PUT the redacted bytes directly.
+  A create-only 412 reconciles through `commit`, which checks HEAD and current
+  run authority before appending metadata. Retry the same chunk after a lost ack.
+- `kind:"seal"` carries `{stream,chunks,bytes,sha256}` for the complete redacted
+  stream, including an empty stdout/stderr/artifact. `commit` requires all chunk
+  sequences and offsets. A missing chunk remains a recoverable gap.
+- `kind:"final"` carries `root` from the current manifest response. After the
+  check has a terminal result and every declared stream is sealed, upload the
+  canonical root JSON using `prepare`, then `commit`. The root binds run/execution,
+  revision, index hash-chain and stream/chunk/byte totals. It is immutable;
+  original retries succeed without replacing later work. Final collection must
+  declare every output stream, including prior attempts. No verdict implies that
+  an incomplete collector has retained the entire log.
+
+Public metadata APIs use current project reader authority, including anonymous
+public reads. They return canonical JSON text:
+
+- `projectHostedOutputRead:manifest({projectId,runId})` returns check status,
+  execution ID, `complete`, sealed-stream count and the current root. It reads
+  constant-size records, without scanning chunks or signing URLs.
+- `streams({projectId,runId,cursor})` pages retained stream metadata/seals.
+  Continue `continueCursor` until `isDone`.
+- `chunks({projectId,runId,after})` starts at `after:0` and returns a page plus
+  the next `after` revision and `more`. Resume this revision when a status
+  subscription observes new chunks. The cursor orders commits; each chunk retains
+  its own stream sequence and offset. Transport pages use 50 rows/128 KiB with
+  continuation, without a total log/stream/history ceiling.
+- `download({projectId,runId,streamId,sequence})` signs one exact committed chunk
+  after a fresh access check. A null `streamId` selects the completed root object.
+  Missing sequences return `NOT_FOUND` for recovery from the original collector.
+  Signed URLs use the existing five-minute expiry. Revocation prevents new URLs;
+  already issued capabilities remain usable until expiry. Verify direct bytes
+  with `HostedOutputReader`, which also checks the final sealed-stream digest.
+
+`completeOutputManifest` is an internal transaction helper for consumers such as
+landing; it reports complete retention separately from exact passing-run evidence
+and grants no acceptance authority. It adds no new acceptance requirement.
+Readers and collectors do not poll or schedule timers. The UI must gate metadata
+subscriptions and automatic byte downloads through its existing idle gate. The
+legacy retained-log API remains available for historical native runs.

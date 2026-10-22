@@ -12,6 +12,7 @@ import { hostedRecordTables } from './projectHostedRecordFields';
 import { hostedSyncTables } from './projectHostedSyncFields';
 import { hostedComposeTables } from './projectHostedComposeFields';
 import { hostedCheckTables } from './projectHostedCheckFields';
+import { hostedOutputTables } from './projectHostedOutputFields';
 import { hostedSaveTables } from './projectHostedSaveFields';
 import { hostedSnapshotTables } from './projectHostedSnapshotFields';
 import { checkTables } from './projectCheckFields';
@@ -418,6 +419,7 @@ export default defineSchema({
   ...hostedComposeTables,
   ...hostedSyncTables,
   ...hostedCheckTables,
+  ...hostedOutputTables,
   ...hostedSnapshotTables,
   ...objectTables,
   ...artifactBlobTables,
