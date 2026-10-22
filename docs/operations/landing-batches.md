@@ -230,3 +230,21 @@ Observe local pending status to confirm recovery. Stop driving with
 remain. Re-enable with bootstrap/enable/kickstart. Accepted history is retained;
 undo accepted source through the existing checked compensating change. These
 commands are lead installation steps, not actions performed by a finite agent.
+
+### Durable client admission
+
+CLI and MCP `finish`/`land` accept `wait:false`. The caller publishes the existing
+owner-local journal, with immutable source pins, before returning. The worker
+reconciles that same journal and canonical Work evidence; no second queue or
+acceptance authority is created. First-use finish saves source before admission.
+
+Async replays read atomically published journal snapshots without taking the
+long-lived per-operation driver slot. They validate the original request digest
+and report canonical submission outcomes. Omitted/true `wait` keeps synchronous
+compatibility, including replay of an asynchronously submitted operation.
+The observation flag is not part of the retained request digest.
+
+An absent worker is explicit in the receipt and leaves work pending. Use the
+returned status/pending/wait selectors to observe progress; client disconnect
+does not cancel submitted work. A check-only async finish is also retained for
+worker recovery and never requests acceptance.

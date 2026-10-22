@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { landSubmissions } from './landing-submission-read.js';
-import { submissionLine } from './landing-submission.js';
+import { landReceipt } from './land-receipt.js';
+import { landingAdmission } from './landing-admission.js';
+import { existsSync } from 'node:fs';
 import { savedOverlapPlan, highOverlap } from './agent-overlap-plan.js';
 import { join } from 'node:path';
 import { LandJournal, type LandEntry, type LandSelection } from './land-journal.js';
@@ -32,10 +33,24 @@ export async function land(
     'BAD_ARGUMENT',
     'Select each Lane once.',
   );
+  const { wait, ...request } = command;
+  command = request;
   const store = work.store;
+  const admitted = () => {
+    const journal = new LandJournal(store, command, selection);
+    const response = landReceipt(store, command, journal, false);
+    return {
+      ...response,
+      result: { ...response.result, ...landingAdmission(store, command.operationId, command.laneIds) },
+    };
+  };
+  // Replays read the atomically published journal without waiting for its driver.
+  if (wait === false && existsSync(join(store.directory, 'agent-land', `${command.operationId}.json`)))
+    return admitted();
   const locked = await withQueueSlot(
     join(store.directory, 'land-queue', command.operationId),
     async () => {
+      if (wait === false) return admitted();
       const journal = new LandJournal(store, command, selection);
       journal.preflight(store, command);
       const pins = new Map(
@@ -248,38 +263,7 @@ export async function land(
         if (!progressed && !submitted) break;
         if (journal.state.entries.every(entry => entry.result && !waiting(entry.result))) break;
       }
-      const entries = journal.state.entries.map(entry => ({
-        operationId: entry.command.operationId,
-        message: entry.command.message,
-        inputs: entry.inputs,
-        status: String(entry.result?.status ?? 'waiting'),
-        ...(entry.result ?? { status: 'waiting' }),
-        submissions: landSubmissions(store, entry),
-      }));
-      const counts: Record<string, number> = {};
-      for (const entry of entries) {
-        const status = String(entry.status);
-        counts[status] = (counts[status] ?? 0) + entry.inputs.length;
-      }
-      return {
-        revision: store.revision(),
-        result: {
-          operationId: command.operationId,
-          complete: entries.every(entry => entry.submissions.every(submission => submission.complete)),
-          terminal: entries.every(entry => entry.submissions.every(submission => submission.terminal)),
-          summary: entries.flatMap(entry =>
-            entry.submissions.map(
-              submission => `${submission.laneId.slice(0, 8)}: ${submissionLine(submission)}`,
-            ),
-          ),
-          counts,
-          entries,
-          replay: {
-            command,
-            shell: `nforge agent '${store.root.replaceAll("'", "'\\''")}' land '${JSON.stringify(command).replaceAll("'", "'\\''")}'`,
-          },
-        },
-      };
+      return landReceipt(store, command, journal);
     },
     { anchor: store.directory, phase: 'landing selected Lanes' },
   );

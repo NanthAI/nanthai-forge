@@ -1,4 +1,5 @@
 import { scheduleIntegrationPreview } from './integration-preview-auto.js';
+import { retainedFinishCommand } from './agent-finish-journal.js';
 import { recordHandoff, readHandoff } from './agent-handoff.js';
 import { captureAutomatic, frictionReceipt } from './friction-auto.js';
 import { withRetryObservation } from './friction-retry.js';
@@ -84,7 +85,51 @@ export class AgentWorkflow {
     this.work = new WorkService(root, localAgent());
   }
   async dispatch(input: unknown) {
-    const parsed = parseAgentAction(candidateCommand(input));
+    let selected = candidateCommand(input);
+    const retainedResolved: Record<string, unknown> = {};
+    if (
+      selected &&
+      typeof selected === 'object' &&
+      'action' in selected &&
+      selected.action === 'finish' &&
+      'operationId' in selected &&
+      typeof selected.operationId === 'string'
+    ) {
+      const retained = retainedFinishCommand(this.work.store, selected.operationId);
+      const request = selected as Record<string, unknown>;
+      const priorAccept = retained?.accept as FinishAction['accept'];
+      // The shorthand selects main only on first use. Replay must retain that
+      // original expectedPrevious, even after this submission has moved main.
+      const accept =
+        request.accept === true && priorAccept?.channel === 'main'
+          ? priorAccept
+          : request.accept &&
+              typeof request.accept === 'object' &&
+              priorAccept &&
+              ((request.accept as { channel?: string }).channel ?? 'main') === priorAccept.channel
+            ? { ...priorAccept, ...request.accept }
+            : request.accept;
+      if (retained) {
+        for (const key of ['expectedHead', 'checkId', 'expectedDefinition', 'after'])
+          if (request[key] === undefined && retained[key] !== undefined)
+            retainedResolved[key] = retained[key];
+        if (
+          request.with !== undefined &&
+          request.withInputs === undefined &&
+          retained.withInputs !== undefined
+        )
+          retainedResolved.withInputs = retained.withInputs;
+        if (
+          request.accept === true ||
+          (request.accept &&
+            typeof request.accept === 'object' &&
+            (request.accept as { expectedPrevious?: unknown }).expectedPrevious === undefined)
+        )
+          retainedResolved.accept = accept;
+      }
+      selected = { ...retained, ...request, ...(accept ? { accept } : {}) };
+    }
+    const parsed = parseAgentAction(selected);
     const settings = parsed as {
       action?: string;
       waitMs?: number;
@@ -118,20 +163,24 @@ export class AgentWorkflow {
           },
           () =>
             readOnlyActions.has(settings.action ?? '')
-              ? this.work.store.observing(() => this.dispatchAction(parsed))
-              : this.dispatchAction(parsed),
+              ? this.work.store.observing(() => this.dispatchAction(parsed, retainedResolved))
+              : this.dispatchAction(parsed, retainedResolved),
         ),
     );
   }
-  private async dispatchAction(parsed: AgentAction) {
+  private async dispatchAction(parsed: AgentAction, retainedResolved: Record<string, unknown> = {}) {
     const { lockWaitMs: _lockWaitMs, ...identity } = parsed as typeof parsed & {
       lockWaitMs?: number;
     };
     void _lockWaitMs;
     if (['start', 'checkpoint', 'sync'].includes(identity.action))
       delete (identity as { waitMs?: number }).waitMs;
+    const wait = !('wait' in identity && identity.wait === false);
+    if (identity.action === 'finish' || identity.action === 'land') delete identity.wait;
     const store = this.work.store,
-      { command, resolved } = resolveAgentDefaults(store, identity);
+      { command, resolved: defaultResolved } = resolveAgentDefaults(store, identity);
+    const filled = { ...retainedResolved, ...defaultResolved };
+    const resolved = Object.keys(filled).length ? filled : undefined;
     if (command.action === 'tests') return agentLaneTests(store, command.laneId);
     // A cleaned Lane is restored before an action needs its source.
     const needed =
@@ -170,7 +219,7 @@ export class AgentWorkflow {
               retries,
               evidence: [operationId],
             }),
-          () => this.action(command),
+          () => this.action(command, wait),
         ),
     );
     if (
@@ -178,6 +227,8 @@ export class AgentWorkflow {
       (command.action === 'sync' && (response.result as { status?: string }).status !== 'conflict')
     )
       scheduleIntegrationPreview(store);
+    if (!wait && (command.action === 'finish' || command.action === 'land'))
+      return { ...response, result: { ...(response.result as object), ...(resolved ? { resolved } : {}) } };
     const friction = frictionReceipt(store, command, response.result);
     const ownershipStop =
       command.action === 'take' && (response.result as { status: string }).status === 'ownership';
@@ -292,7 +343,7 @@ export class AgentWorkflow {
       },
     };
   }
-  private async action(command: AgentAction): Promise<{ revision: number; result: unknown }> {
+  private async action(command: AgentAction, wait = true): Promise<{ revision: number; result: unknown }> {
     const store = this.work.store;
     if (command.action === 'handoff')
       return recordHandoff(store, { ...command, operationId: command.operationId! });
@@ -300,7 +351,8 @@ export class AgentWorkflow {
     if (command.action === 'friction') return captureFriction(store, command);
     if (command.action === 'friction-triage') return triageFriction(store, command);
     if (command.action === 'improve') return readImprovements(store);
-    if (command.action === 'land') return land(this.work, command as LandCommand);
+    if (command.action === 'land')
+      return land(this.work, { ...command, ...(!wait ? { wait: false } : {}) } as LandCommand);
     if (command.action === 'tests') return agentLaneTests(store, command.laneId);
     if (command.action === 'take') return agentTake(store, command);
     if (command.action === 'peer-ack') {
@@ -352,7 +404,7 @@ export class AgentWorkflow {
       return store.native
         ? agentSync(store, command as SyncCommand)
         : agentGitSync(store, command as SyncCommand);
-    if (command.action === 'finish') return this.finish(command as FinishAction);
+    if (command.action === 'finish') return this.finish(command as FinishAction, wait);
     if (command.action === 'land-ready')
       return landReady(store, pending => this.dispatch(pending), this.work);
     if (command.action === 'diff') {
@@ -575,7 +627,7 @@ export class AgentWorkflow {
       };
     });
   }
-  private async finish(command: FinishAction) {
+  private async finish(command: FinishAction, wait = true) {
     const store = this.work.store;
     const retained = this.retainedCheckpoint(command.laneId, command.operationId);
     // Fail first-use configuration mistakes before reserving the source operation.
@@ -590,13 +642,18 @@ export class AgentWorkflow {
         'Check definition or runtime settings changed. Inspect them before starting.',
       );
     }
-    return agentFinish(this.work, command, {
-      checkpoint: async () => this.finishCheckpoint(command),
-      sync: (operationId, head, target) => this.finishSync(command, operationId, head, target),
-      phase: (input, keepOpen, actor) => this.finishPhase(input, keepOpen, actor),
-      wait: (operationId, waitMs) => this.wait(operationId, waitMs),
-      review: (viewId, reason) => this.awaitingReview(viewId, reason),
-    });
+    return agentFinish(
+      this.work,
+      command,
+      {
+        checkpoint: async () => this.finishCheckpoint(command, !wait),
+        sync: (operationId, head, target) => this.finishSync(command, operationId, head, target),
+        phase: (input, keepOpen, actor) => this.finishPhase(input, keepOpen, actor),
+        wait: (operationId, waitMs) => this.wait(operationId, waitMs),
+        review: (viewId, reason) => this.awaitingReview(viewId, reason),
+      },
+      wait,
+    );
   }
   private async awaitingReview(viewId: string, reason: string) {
     const view = this.work.store.select('views', viewId)!;
@@ -710,7 +767,7 @@ export class AgentWorkflow {
       scheduleIntegrationPreview(this.work.store);
     return response;
   }
-  private async finishCheckpoint(command: FinishAction) {
+  private async finishCheckpoint(command: FinishAction, admission = false) {
     const store = this.work.store;
     return retryWorkPhase(
       command.operationId,
@@ -737,7 +794,8 @@ export class AgentWorkflow {
               response.revision = store.commitRecords(tx);
           });
         try {
-          store.observing(() => recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT));
+          if (!admission)
+            store.observing(() => recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT));
         } catch {
           /* Advisory coordination never invalidates a saved checkpoint. */
         }

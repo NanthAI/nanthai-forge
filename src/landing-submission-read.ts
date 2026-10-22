@@ -44,22 +44,29 @@ export function landSubmissions(store: WorkStore, entry: LandEntry) {
   }));
 }
 /** Read-only local driver adapters. Work remains the authority for queued outcomes. */
-export function readLaneSubmissions(store: WorkStore, laneId?: string): Submission[] {
+export function readLaneSubmissions(store: WorkStore, laneId?: string, operationId?: string): Submission[] {
   const submissions = new Map<string, Submission>();
+  const operationIds = new Set(operationId ? [operationId] : []);
   const add = (submission: Submission) => submissions.set(submission.submissionId, submission);
   const directory = join(store.directory, 'agent-land');
   if (existsSync(directory))
-    for (const name of readdirSync(directory).filter(name => /^[0-9a-f-]+\.json$/.test(name))) {
+    for (const name of readdirSync(directory).filter(name =>
+      operationId
+        ? [operationId, finishChild(operationId, 'overlap-land')].some(id => name === `${id}.json`)
+        : /^[0-9a-f-]+\.json$/.test(name),
+    )) {
       const state = JSON.parse(readFileSync(join(directory, name), 'utf8')) as { entries: LandEntry[] };
-      for (const entry of state.entries)
+      for (const entry of state.entries) {
+        operationIds.add(entry.command.operationId);
         if (
           (!laneId || entry.inputs.some(pin => pin.laneId === laneId)) &&
           entry.inputs.every(pin => store.select('lanes', pin.laneId))
         )
           for (const submission of landSubmissions(store, entry))
             if (!laneId || submission.laneId === laneId) add(submission);
+      }
     }
-  for (const finish of laneFinishes(store, laneId)) {
+  for (const finish of laneFinishes(store, laneId, operationId)) {
     const attempt = finish.attempts.at(-1);
     if (!attempt || !finish.command.accept) continue;
     const command = finish.command as FinishAction;
@@ -97,11 +104,16 @@ export function readLaneSubmissions(store: WorkStore, laneId?: string): Submissi
       }
   }
   const tx = store.readRecords();
-  const entries = tx
-    ? Array.from({ length: tx.manifest.collections.landingEntries?.count ?? 0 }, (_, i) =>
-        tx.at('landingEntries', i),
-      )
-    : (store.load().landingEntries ?? []);
+  const entries = operationId
+    ? [...operationIds].flatMap(id => {
+        const entry = store.select('landingEntries', id);
+        return entry ? [entry] : [];
+      })
+    : tx
+      ? Array.from({ length: tx.manifest.collections.landingEntries?.count ?? 0 }, (_, i) =>
+          tx.at('landingEntries', i),
+        )
+      : (store.load().landingEntries ?? []);
   for (const entry of entries) {
     const view = store.select('views', entry.viewId);
     for (const pin of view?.inputs ?? [])

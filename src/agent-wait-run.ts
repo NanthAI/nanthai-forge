@@ -12,7 +12,7 @@ import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
 export type WaitEvent = {
-  type: 'lane' | 'operation' | 'check' | 'shard' | 'notice' | 'progress';
+  type: 'lane' | 'operation' | 'check' | 'shard' | 'notice' | 'progress' | 'submission';
   id: string;
   status: string;
   terminal: boolean;

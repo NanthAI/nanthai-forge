@@ -41,6 +41,7 @@ const schema = z.object({
   request: z.string(),
   command: fields.optional(),
   dependencyWait: z.boolean().optional(),
+  submitted: z.boolean().optional(),
   attempts: z.array(attemptSchema),
   landing: z.array(z.object({ status: z.enum(['waiting to land', 'landing']), position: z.number() })),
   result: fields.optional(),
@@ -87,6 +88,7 @@ export class FinishJournal {
     private readonly store: WorkStore,
     command: FinishAction,
     head: string,
+    submitted = false,
   ) {
     const directory = join(store.directory, 'agent-finish');
     mkdirBelow(store.directory, directory);
@@ -100,13 +102,14 @@ export class FinishJournal {
           command: JSON.parse(JSON.stringify(command)) as Record<string, unknown>,
           attempts: [finishAttempt(command, 0, head, command.accept?.expectedPrevious ?? null)],
           landing: [],
+          ...(submitted ? { submitted: true } : {}),
         };
     invariant(
       this.state.request === request,
       'WORK_OPERATION_CHANGED',
       'Reconcile the original finish request.',
     );
-    this.save();
+    if (!existsSync(this.path)) this.save();
   }
   position(position: LandingPosition) {
     const last = this.state.landing.at(-1);
@@ -160,7 +163,9 @@ export function unfinishedFinishes(store: WorkStore) {
     .filter(name => /^[0-9a-f-]+\.json$/.test(name))
     .flatMap(name => {
       const state = schema.parse(JSON.parse(readFileSync(join(directory, name), 'utf8')));
-      return !state.result && state.command?.accept ? [state.command] : [];
+      return !state.result && state.command && (state.command.accept || state.submitted)
+        ? [state.command]
+        : [];
     });
 }
 
@@ -173,11 +178,11 @@ export function retainedFinishCommand(store: WorkStore, operationId: string) {
 }
 
 /** Read retained driver context for an explicit Lane handover; never resumes a driver. */
-export function laneFinishes(store: WorkStore, laneId?: string) {
+export function laneFinishes(store: WorkStore, laneId?: string, operationId?: string) {
   const directory = join(store.directory, 'agent-finish');
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
-    .filter(name => /^[0-9a-f-]+\.json$/.test(name))
+    .filter(name => (operationId ? name === `${operationId}.json` : /^[0-9a-f-]+\.json$/.test(name)))
     .flatMap(name => {
       const state = schema.parse(JSON.parse(readFileSync(join(directory, name), 'utf8')));
       return state.command &&

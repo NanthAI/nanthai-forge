@@ -8,6 +8,7 @@ export const landSchema = z.object({
   message: z.string().trim().min(1).max(500).optional(),
   channel: z.string().trim().min(1).default('main'),
   checkId: z.uuid().optional(),
+  wait: z.boolean().optional(),
   waitMs: z.number().int().min(0).max(60000).optional(),
   keepOpen: z.boolean().optional(),
 });

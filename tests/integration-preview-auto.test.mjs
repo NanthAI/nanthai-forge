@@ -16,6 +16,8 @@ import {
 } from '../dist/integration-preview-auto.js';
 import { previewLanding } from '../dist/integration-preview-landing.js';
 import { LandJournal } from '../dist/land-journal.js';
+import { unfinishedFinishes } from '../dist/agent-finish-journal.js';
+import { watchLandingWorker } from '../dist/landing-worker.js';
 import { agentPeers } from '../dist/agent-peers.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
@@ -287,6 +289,37 @@ test('finish excludes a failing individual without a landing check, with a new-o
   ).result;
   assert.equal(skip.status, 'failed');
   assert.equal(f.store.load().runs.length, 1);
+});
+
+test('owner worker preserves preview exclusion and skip override for admitted finish', async t => {
+  const f = await fixture(t);
+  await f.save(f.a, 'b.txt', '1');
+  await f.policy({ preset: 'trusted', checks: { runner: 'local' }, integrationPreview: { auto: true } });
+  const controller = new AbortController();
+  const worker = watchLandingWorker(f.store, controller.signal);
+  try {
+    for (const skip of [false, true]) {
+      const command = {
+        action: 'finish',
+        operationId: randomUUID(),
+        laneId: f.a.laneId,
+        message: skip ? 'Override admitted preview' : 'Admitted preview',
+        accept: true,
+        wait: false,
+        ...(skip ? { preview: 'skip' } : {}),
+      };
+      const admitted = (await f.agent.dispatch(command)).result;
+      assert.equal(admitted.durable, true);
+      await until(() => !unfinishedFinishes(f.store).length);
+      const result = (await f.agent.dispatch(command)).result;
+      assert.equal(result.status, skip ? 'failed' : 'preview-excluded');
+      if (!skip) assert.equal(result.preview.excluded[0].laneId, f.a.laneId);
+      assert.equal(f.store.load().runs.length, skip ? 1 : 0);
+    }
+  } finally {
+    controller.abort();
+    await worker;
+  }
 });
 
 test('actual queue batch catches independent submissions and respects skip for an entry', async t => {

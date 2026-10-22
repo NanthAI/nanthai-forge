@@ -321,7 +321,15 @@ test('batch failure and source conflict return per-entry outcomes and retain suc
   assert.equal(f.contents('bad.txt'), undefined);
   const before = f.store.load();
   await f.land([a, b, bad, good], { operationId });
-  assert.equal(f.store.load().runs.length, before.runs.length);
+  // Detached main audits may register between these snapshots. The replay
+  // guarantee concerns the original landing checks and acceptance identities.
+  assert.deepEqual(
+    f.store
+      .load()
+      .runs.filter(run => !run.mainCheck)
+      .map(run => run.id),
+    before.runs.filter(run => !run.mainCheck).map(run => run.id),
+  );
   assert.equal(f.store.load().channelMoves.length, before.channelMoves.length);
 });
 
@@ -632,6 +640,8 @@ test('conflict and check failure causes are visible in receipts and pending stat
   const submissions = result.entries.flatMap(entry => entry.submissions);
   assert.ok(submissions.some(item => item.state === 'terminal-failed' && item.cause === 'conflict'));
   assert.ok(submissions.some(item => item.state === 'terminal-failed' && item.cause === 'check-failed'));
+  // Finish the detached audit before the fixture's intentional zero-wait status read.
+  await drainPostAccept(f.store);
   const status = readPendingStatus(f.store);
   assert.ok(status.lanes.some(lane => lane.submission?.cause === 'conflict'));
   assert.ok(status.lanes.some(lane => lane.submission?.cause === 'check-failed'));

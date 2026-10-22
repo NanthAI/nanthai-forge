@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { waitSubmissions, submissionTarget } from './agent-wait-submission.js';
 import { invariant } from './errors.js';
 import { finishChild } from './agent-finish-journal.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
@@ -65,10 +66,14 @@ export function waitObservation(store: WorkStore, kind: 'lane' | 'operation', id
     const events: WaitEvent[] = [],
       runIds = new Set<string>(),
       laneIds = new Set<string>();
+    const checked = new Map<string, WaitEvent>();
     const check = (run: CheckRun) => {
+      const previous = checked.get(run.id);
+      if (previous) return previous;
       runIds.add(run.id);
       const observed = waitRun(store, run);
       events.push(...observed.children, observed.event);
+      checked.set(run.id, observed.event);
       for (const input of run.inputs) laneIds.add(input.laneId);
       return observed.event;
     };
@@ -212,6 +217,12 @@ export function waitObservation(store: WorkStore, kind: 'lane' | 'operation', id
           failingShardLogPaths: observed?.failingShardLogPaths ?? [],
         };
       }
+    }
+    const submissions = waitSubmissions(store, kind, id, check, runIds);
+    if (submissions.length) {
+      events.push(...submissions);
+      for (const submission of submissions) laneIds.add(submission.laneId);
+      target = submissionTarget(kind, id, submissions);
     }
     for (const laneId of laneIds)
       for (const notice of new CoordinationJournal(store).context(laneId).notices)

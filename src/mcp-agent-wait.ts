@@ -9,7 +9,7 @@ export function registerAgentWait(server: McpServer, store: WorkStore) {
     'forge_wait',
     {
       description:
-        'Wait for local Lane/check/finish/land outcomes or any change. Returns one JSON line per observed change plus a summary; progress notifications carry events live when a progressToken is supplied. Read-only, no recovery, checks or network requests are started.',
+        'Wait for local Lane/check/finish/land submission outcomes or any change. Retain the returned cursor to deduplicate observations after reconnect. Returns one JSON line per observed change plus a summary; progress notifications carry events live when a progressToken is supplied. Read-only, no recovery, checks or network requests are started.',
       inputSchema: agentWaitSchema.shape,
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },

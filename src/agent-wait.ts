@@ -2,6 +2,8 @@
 import { watch, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { WaitCursor } from './agent-wait-cursor.js';
+import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import { WorkStore } from './work-store.js';
 import { waitObservation } from './agent-wait-observation.js';
@@ -9,6 +11,7 @@ import type { WaitEvent } from './agent-wait-run.js';
 export type { WaitEvent } from './agent-wait-run.js';
 
 export const agentWaitSchema = z.object({
+  cursor: z.string().nullable().optional(),
   laneIds: z.array(z.uuid()).default([]),
   operationIds: z.array(z.uuid()).default([]),
   until: z.enum(['terminal', 'any-change']).default('terminal'),
@@ -21,6 +24,7 @@ export type WaitSummary = {
   exitCode: number;
   successful: boolean;
   targets: WaitEvent[];
+  cursor: string;
 };
 
 /** Subscribe before the first read. A generation counter closes read-to-sleep races.
@@ -93,7 +97,8 @@ export async function agentWait(
   invariant(targets.length, 'BAD_ARGUMENT', 'Choose at least one Lane or operation to wait on.');
   const end = performance.now() + command.timeoutSeconds * 1000,
     signals = new WaitSignals();
-  const seen = new Map<string, string>(),
+  const cursor = new WaitCursor(store.directory, targets, command.cursor);
+  const seen = cursor.seen,
     settled = new Set<string>(),
     current = new Map<string, WaitEvent>();
   for (const target of targets)
@@ -104,14 +109,14 @@ export async function agentWait(
       terminal: false,
       ok: false,
     });
-  let baseline = true;
+  let baseline = command.cursor == null;
   const publish = (event: WaitEvent) => {
     const key = `${event.type}:${event.id}`,
-      bytes = JSON.stringify(event);
+      bytes = digest(JSON.stringify(event));
     if (settled.has(key) || seen.get(key) === bytes) return false;
     seen.set(key, bytes);
     if (event.terminal) settled.add(key);
-    emit(event);
+    emit({ ...event, cursor: cursor.encode() });
     return true;
   };
   const summary = (status: WaitSummary['status']) => {
@@ -124,6 +129,7 @@ export async function agentWait(
       exitCode: ok ? 0 : status === 'timeout' ? 2 : status === 'cancelled' ? 130 : 1,
       successful: values.length === targets.length && values.every(value => value.terminal && value.ok),
       targets: values,
+      cursor: cursor.encode(),
     };
     emit(result);
     return result;
@@ -146,11 +152,17 @@ export async function agentWait(
           throw error;
         }
         for (const runId of observed.runIds) signals.add(join(store.directory, `check-${runId}`));
-        // Read once more if a just-created run directory changed before its watch attached.
-        if (observed.runIds.length) {
-          const refreshed = waitObservation(store, target.kind, target.id);
-          observed.events = refreshed.events;
-          observed.target = refreshed.target;
+        // Register every selected run before rereading; a reread may discover another run.
+        try {
+          for (;;) {
+            const registered = new Set(observed.runIds);
+            observed = waitObservation(store, target.kind, target.id);
+            for (const runId of observed.runIds) signals.add(join(store.directory, `check-${runId}`));
+            if (observed.runIds.every(runId => registered.has(runId))) break;
+          }
+        } catch (error) {
+          if (error instanceof ForgeError && error.code === 'SOURCE_CHANGED') continue;
+          throw error;
         }
         for (const event of [...observed.events, observed.target]) changed = publish(event) || changed;
         current.set(key, observed.target);

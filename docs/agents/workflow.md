@@ -523,7 +523,7 @@ nforge agent OWNER wait '{"laneIds":["LANE_ID"],"operationIds":["OPERATION_ID"],
 ```
 
 The command prints newline-delimited JSON: an initial observation, then each observed
-change in Lane, operation, check, shard progress or recorded conflict/overlap notice,
+change in Lane, operation, submission, check, shard progress or recorded conflict/overlap notice,
 and a final summary. Add `--text` for one human-readable line per event. Duplicate
 observations are suppressed; a settled target emits no later updates. Fast changes
 between snapshots can be coalesced; this is a live observer, not a historical replay.
@@ -531,9 +531,13 @@ between snapshots can be coalesced; this is a live observer, not a historical re
 `until:"any-change"` waits for a change after the initial observation. The default
 `terminal` waits until every selected target has an outcome. Completed Lanes and
 landed/passed operations succeed; failed/interrupted checks, conflicts, abandoned
-Lanes and review-required outcomes are unsuccessful. Passing a Lane's check alone
+Lanes and superseded submissions are unsuccessful. Review and dependency waits remain
+pending until the submitted Candidate lands or the request fails. Passing a Lane's check alone
 does not mean the Lane landed. Unknown IDs remain pending until they appear or the
-wait expires. For a kept-open Lane, wait on the parent operation ID to observe landing.
+wait expires. A kept-open Lane can report its current saved head landed without
+completing the Lane. An operation always follows its original submitted head,
+including historical acceptance; a newer save reports `superseded` without crediting
+the newer head or cancelling the original work.
 
 Exit codes are 0 when all targets reach a terminal outcome (including failed checks),
 or any change is observed in `any-change` mode, 2 for timeout, and 130 for cancellation.
@@ -542,9 +546,25 @@ Invalid input or unreadable metadata exits nonzero. `successful` in the summary 
 its latest state. Failures include the reason, infrastructure versus check failure
 classification, combined output paths and available failing shard log paths.
 
+Submission events retain S01's `submissionId`, `attemptId`, immutable `head`,
+`attemptHead`, `state`, `outcome`, `pendingReason` and `cause`. Pending reasons are
+`queued`, `checking`, `waiting-for-review` and `waiting-for-dependency`; failures
+retain `conflict`, `check-failed`, `infra`, `stale-head` or `rejected`. Failed and
+interrupted runs include their original run and log pins, even before the driver
+publishes its final receipt. Multiple selected operations settle independently.
+
+Every JSON event and summary includes an opaque `cursor`. Retain the last received
+cursor and pass it back as `cursor:"…"` with the same owner and target selection
+after timeout, restart or disconnect. Reconnect rereads current records and emits
+only observations changed since that cursor; unchanged terminal outcomes still
+appear in the summary. With a cursor, `any-change` also detects changes made while
+disconnected. The cursor is client-carried deduplication data, not a durable event
+log or authority to drive work. Changes between observations may still coalesce.
+
 `forge_wait` exposes the same inputs through agent MCP, returning JSON lines. Clients
 that supply a progress token also receive live event messages as progress notifications.
-Cancellation stops the observation only. Waiting takes no Work/Lane locks, starts no
+Timeout, cancellation and transport disconnect stop observation only; they never
+cancel a submitted landing or its check. Waiting takes no Work/Lane locks, starts no
 checks or drivers, performs no remote calls and writes no metadata. Filesystem signals
 wake the observer; a two-second local fallback covers missed signals and local runner
 death. Durable completion receipts can be observed before Work metadata catches up;
@@ -692,3 +712,22 @@ failing pair before the normal landing check. Results identify the exact saved
 inputs and diagnostic. Safe inputs in `land` continue; a grouped `finish` stops
 with `preview-excluded`. To override, submit a new `finish` or `land` operation
 with `preview:"skip"`; this preserves the ordinary check and acceptance policy.
+
+### Asynchronous finish and land
+
+Pass `wait:false` to `finish` or `land` through the CLI or the existing MCP task
+tool to return once the selected request and source pins are durable. Finish
+checkpoints first; land selects saved heads and leaves unsaved edits alone.
+The owner worker then drives the retained request. Disconnecting the caller does
+not cancel submitted work. If no owner worker is running, the receipt says so;
+the submission stays pending until the owner service starts.
+
+Keep the original operation ID after a lost response. Replaying it with
+`wait:false` reads the same submitted work, including terminal outcomes. Omitted
+`wait` or `wait:true` retains synchronous behavior and can drive/observe that same
+request. The observation choice is excluded from the request identity. Changing
+source inputs or other request fields still requires a new operation.
+
+Receipts include `durable`, `landingWorker` and `observe` commands for Lane
+`status`, `pending-status` and `wait`. The caller holds no source or Work lock
+while waiting on checks. Admission does not start or install an owner service.

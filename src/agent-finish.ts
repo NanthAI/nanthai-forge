@@ -1,12 +1,12 @@
+import { admitFinish } from './landing-admission.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
-import { landingWorkerSignal } from './landing-worker-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import { finishSubmissions } from './landing-submission-read.js';
 import { strandedActionsRun } from './github-actions-recovery.js';
 import { land } from './land.js';
 import { finishChild } from './agent-finish-journal.js';
 import { savedOverlapPlan } from './agent-overlap-plan.js';
-import { CheckQueue, cancelTickets } from './check-queue.js';
+import { CheckQueue } from './check-queue.js';
 import { withWorkLockOptions } from './work-lock.js';
 import { finishQueuedBatch } from './agent-finish-batch.js';
 import { finishRetryProgress } from './agent-finish-progress.js';
@@ -49,7 +49,8 @@ type Phases = {
 };
 /** Every exact-View check runs without a Lane, Work or Channel lock. Only
  * acceptance joins the landing queue; a CAS race starts a separately pinned attempt. */
-export async function agentFinish(work: WorkService, command: FinishAction, phases: Phases) {
+export async function agentFinish(work: WorkService, command: FinishAction, phases: Phases, wait = true) {
+  if (!wait) return admitFinish(work.store, command, phases.checkpoint);
   const control = new CheckQueue(undefined, {
     identity: {
       control: true,
@@ -59,14 +60,6 @@ export async function agentFinish(work: WorkService, command: FinishAction, phas
       phase: 'finish',
     },
   });
-  const onSignal = () => {
-    cancelTickets(command.operationId);
-  };
-  if (!landingWorkerSignal()) {
-    process.on('SIGTERM', onSignal);
-    process.on('SIGINT', onSignal);
-    process.on('SIGHUP', onSignal);
-  }
   try {
     const response = await withQueueSlot(
       join(work.store.directory, 'finish-queue', command.operationId),
@@ -93,9 +86,6 @@ export async function agentFinish(work: WorkService, command: FinishAction, phas
     }
     throw error;
   } finally {
-    process.off('SIGTERM', onSignal);
-    process.off('SIGINT', onSignal);
-    process.off('SIGHUP', onSignal);
     control.release();
   }
 }
