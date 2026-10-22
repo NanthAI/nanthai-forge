@@ -10,6 +10,7 @@ import { readHostState, updateHostState } from './host-binding.js';
 import { readPendingExchange, type PendingExchange } from './pending-exchange.js';
 import { processIdentity } from './local-process.js';
 import { observeSpend, type UsageAdapter, type UsageContext } from './auto-exchange-spend.js';
+import { commandUsage, USAGE_CACHE_MS } from './auto-exchange-usage-command.js';
 import type { AutoExchangeState } from './auto-exchange-state.js';
 import { ForgeError } from './errors.js';
 import { wakeAutoExchange } from './auto-exchange-wake.js';
@@ -183,17 +184,49 @@ export async function drainAutoExchange(store: WorkStore, options: AutoExchangeO
               throw new ForgeError('AUTO_EXCHANGE_CHANGED', 'Automatic exchange selection changed.');
             if (current.policy.pauseOnDailySpend) {
               const samples = sameBinding ? (current.host.autoExchange?.samples ?? []) : [];
-              const observation = await observeSpend(binding, samples, now(), options.usage);
+              const checked = current.host.autoExchange?.spendCheck;
+              const cached =
+                !options.usage &&
+                checked?.command === current.binding.spendCommand &&
+                checked &&
+                checked.at <= now() &&
+                now() - checked.at < USAGE_CACHE_MS &&
+                current.host.autoExchange?.spend?.availability === 'measured' &&
+                samples.at(-1);
+              const observation = await observeSpend(
+                binding,
+                samples,
+                now,
+                options.usage ?? (cached ? async () => cached : commandUsage(current.binding.spendCommand)),
+              );
               const fresh = input(store);
               if (
                 !fresh.policy.enabled ||
                 fresh.binding?.projectId !== binding.projectId ||
-                fresh.binding.deployment !== binding.deployment
+                fresh.binding.deployment !== binding.deployment ||
+                fresh.binding.spendCommand !== current.binding.spendCommand
               )
                 throw new ForgeError('AUTO_EXCHANGE_CHANGED', 'Automatic exchange selection changed.');
-              update(observation);
-              if (observation.spend.paused) {
-                update({ status: 'paused', nextAttemptAt: observation.spend.resumeAt! });
+              update({
+                ...observation,
+                spendCheck:
+                  !options.usage && current.binding.spendCommand
+                    ? { command: current.binding.spendCommand, at: cached ? checked!.at : now() }
+                    : undefined,
+              });
+              if (fresh.policy.pauseOnDailySpend && observation.spend.availability !== 'measured') {
+                update({
+                  status: 'paused',
+                  code: 'AUTO_EXCHANGE_SPEND_UNAVAILABLE',
+                  nextAttemptAt: undefined,
+                });
+                throw new ForgeError(
+                  'AUTO_EXCHANGE_SPEND_UNAVAILABLE',
+                  'Automatic push deferred: spend cannot be observed.',
+                );
+              }
+              if (fresh.policy.pauseOnDailySpend && observation.spend.paused) {
+                update({ status: 'paused', code: undefined, nextAttemptAt: observation.spend.resumeAt! });
                 throw new ForgeError(
                   'AUTO_EXCHANGE_PAUSED',
                   'Automatic pushes paused by observed daily spend.',
@@ -240,6 +273,7 @@ export async function drainAutoExchange(store: WorkStore, options: AutoExchangeO
             });
           } catch (error) {
             const code = error instanceof ForgeError ? error.code : 'HOSTED_ACTION_FAILED';
+            if (code === 'AUTO_EXCHANGE_SPEND_UNAVAILABLE') return;
             if (code === 'AUTO_EXCHANGE_CHANGED' || code === 'AUTO_EXCHANGE_PAUSED') continue;
             const pending = input(store).retained;
             const transient = [

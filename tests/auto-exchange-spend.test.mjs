@@ -2,7 +2,7 @@
 import './check-runtime.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { observeSpend, SPEND_WINDOW_MS, configuredUsage } from '../dist/auto-exchange-spend.js';
+import { observeSpend, SPEND_WINDOW_MS } from '../dist/auto-exchange-spend.js';
 const context = { projectId: 'synthetic', deployment: 'https://synthetic.invalid' };
 const sample = (totalUsd, observedAt, extra = {}) => ({
   kind: 'measured',
@@ -72,11 +72,5 @@ test('counter reset and team change start a fresh baseline; duplicate observatio
 });
 
 test('unconfigured adapter is unknown without looking for accounts or tokens', async () => {
-  const old = process.env.FORGE_CONVEX_USAGE_ADAPTER;
-  delete process.env.FORGE_CONVEX_USAGE_ADAPTER;
-  try {
-    assert.equal(await configuredUsage(context), undefined);
-  } finally {
-    if (old !== undefined) process.env.FORGE_CONVEX_USAGE_ADAPTER = old;
-  }
+  assert.equal((await observeSpend(context, [], Date.now())).spend.reason, 'unconfigured');
 });

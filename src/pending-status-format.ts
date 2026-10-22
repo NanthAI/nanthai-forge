@@ -36,7 +36,7 @@ export function formatPendingStatus(value: PendingStatus) {
     `Recovery: ${r?.captureId ?? 'unknown'} · history ${r?.completeHistory == null ? 'unknown' : r.completeHistory ? 'complete' : 'incomplete'} · unavailable ${r?.unavailable?.length ?? 'unknown'}`,
     `Pending: Work ${h.work} · evidence ${h.evidence} · age ${elapsed(h.pendingAgeMs)}`,
     `Transfers: ${h.pendingPushes.length} pending · ${h.metadataPending} metadata (source coverage separate)`,
-    `Automatic hosted push: ${h.autoExchange?.status ?? 'unknown'} · spend ${h.autoExchange?.spend.availability ?? 'unknown'} · rolling delta USD ${h.autoExchange?.spend.deltaUsd ?? 'unknown'}${h.autoExchange?.status === 'paused' ? ` · ${h.autoExchange.resume}` : ''}`,
+    `Automatic hosted push: ${h.autoExchange?.status ?? 'unknown'} · spend ${h.autoExchange?.spend.availability ?? 'unknown'} · ${h.autoExchange?.spend.reason ?? 'unavailable'} · rolling delta USD ${h.autoExchange?.spend.deltaUsd ?? 'unknown'}${h.autoExchange?.status === 'paused' ? ` · ${h.autoExchange.resume}` : ''}`,
     `GitHub main: ${pin(value.github.mainHead)} · ${value.github.source} · ${value.github.status} · age ${elapsed(value.github.ageMs)}`,
     `Checks: ${value.checks.length} queued/preparing/running (process liveness unknown)`,
     `Audits: ${value.audits.filter(a => ['pending', 'queued', 'preparing', 'running'].includes(a.status)).length} pending · ${value.audits.filter(a => a.status === 'failed').length} failed`,

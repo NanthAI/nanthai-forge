@@ -3,6 +3,7 @@ import { effectivePolicy } from './autonomy-policy.js';
 import { readHostState } from './host-binding.js';
 import { readPendingExchange } from './pending-exchange.js';
 import { AUTO_EXCHANGE_RESUME, AUTO_EXCHANGE_UNDO } from './auto-exchange-state.js';
+import { SPEND_WINDOW_MS } from './auto-exchange-spend.js';
 import type { WorkStore } from './work-store.js';
 
 /** Local observations only; no usage reads, transport, export or Work mutation. */
@@ -31,6 +32,31 @@ export function readAutoExchangeStatus(store: WorkStore, now = Date.now()) {
           : state?.status === 'pushed' || !state
             ? 'queued'
             : state.status;
+  const spend = state?.spend
+    ? { ...state.spend }
+    : {
+        availability: 'unknown' as const,
+        deltaUsd: null,
+        paused: false,
+        reason: binding?.spendCommand ? ('unavailable' as const) : ('unconfigured' as const),
+        resumeAt: null,
+      };
+  if ('observedAt' in spend && spend.observedAt !== null && spend.observedAt <= now - SPEND_WINDOW_MS) {
+    spend.availability = 'unknown';
+    spend.deltaUsd = null;
+    if ('measuredTotalUsd' in spend) spend.measuredTotalUsd = null;
+    if ('estimatedTotalUsd' in spend) spend.estimatedTotalUsd = null;
+    spend.reason = 'stale';
+    spend.paused = false;
+  }
+  const resume =
+    policy.pauseOnDailySpend && spend.availability !== 'measured'
+      ? `Automatic pushes deferred: spend ${spend.reason}. ${
+          spend.reason === 'unconfigured'
+            ? 'Configure nforge host ROOT --spend-command /absolute/owner-owned/executable.'
+            : 'Fix the owner spend command to return a fresh measured observation for this project and deployment.'
+        } Retry on the next owner save/startup or by setting --spend-command again. Manual exchange push remains available.`
+      : AUTO_EXCHANGE_RESUME;
   return {
     enabled: policy.enabled,
     status,
@@ -46,15 +72,9 @@ export function readAutoExchangeStatus(store: WorkStore, now = Date.now()) {
     operationId: state?.operationId ?? null,
     nextAttemptAt: state?.nextAttemptAt ?? null,
     code: state?.code ?? null,
-    spend: state?.spend ?? {
-      availability: 'unknown',
-      deltaUsd: null,
-      paused: false,
-      reason: 'unconfigured',
-      resumeAt: null,
-    },
+    spend,
     transport: host.exchangeObservation ?? null,
-    resume: AUTO_EXCHANGE_RESUME,
+    resume,
     undo: AUTO_EXCHANGE_UNDO,
   };
 }

@@ -7,7 +7,7 @@ import {
 } from './publication-metadata.js';
 import { cachedExchangeMetadata, retainExchangeMetadata } from './exchange-receive-cache.js';
 import { ExchangeDownloadCache } from './exchange-download-cache.js';
-import { SignedDownloadCache } from './exchange-r2-read.js';
+import { SignedDownloadCache, type SignedObject } from './exchange-r2-read.js';
 import { hostedMainSchema, type MainExpectation } from './hosted-main.js';
 import { exchangeConvexFetch } from './exchange-convex-fetch.js';
 import { retryExchange } from './exchange-retry.js';
@@ -513,6 +513,34 @@ export class ConvexExchange implements ExchangeTransport {
     );
     return bytes;
   }
+  /** Prepare bounded signature windows without loading the selected object bytes. */
+  async prepareDownloads(pins: ContentPin[]) {
+    let cache = this.signedDownloads.get(this.client);
+    if (!cache) this.signedDownloads.set(this.client, (cache = new SignedDownloadCache()));
+    const missing = pins.filter(pin => !cache.get(this.projectId, pin));
+    for (let at = 0; at < missing.length; at += 100) {
+      const page = missing.slice(at, at + 100),
+        wanted = new Map(page.map(pin => [pin.sha256, pin]));
+      const signed: SignedObject[] = await this.client.mutation(
+        mutation('projectObjectDownloads:signDownloads'),
+        {
+          projectId: this.projectId,
+          digests: page.map(pin => pin.sha256),
+        },
+      );
+      for (const object of signed) {
+        invariant(
+          wanted.get(object.digest)?.size === object.size,
+          'INVALID_WORK_BACKUP',
+          'Object storage listing differs from the selected content.',
+        );
+        cache.put(this.projectId, object);
+        this.unsigned.delete(object.digest);
+        wanted.delete(object.digest);
+      }
+      for (const id of wanted.keys()) this.unsigned.add(id);
+    }
+  }
   async downloadToFile(pin: ContentPin, path: string): Promise<void> {
     const logical = this.logicalMetadata.get(pin.sha256);
     if (logical)
@@ -524,7 +552,9 @@ export class ConvexExchange implements ExchangeTransport {
       ? undefined
       : this.downloadCache.get(pin)
         ? await this.download(pin)
-        : (await this.blobs.getSigned(this.projectId, [pin])).get(pin.sha256);
+        : this.unsigned.delete(pin.sha256)
+          ? undefined
+          : (await this.blobs.getSigned(this.projectId, [pin])).get(pin.sha256);
     await downloadExchangeFile(pin, path, async offset => {
       if (direct) return direct.subarray(offset, Math.min(offset + 2 * 1024 * 1024, direct.length));
       if (logical)

@@ -447,14 +447,17 @@ test('long actions override the native HTTP header deadline at dispatch; quick c
   assert.equal(dispatched.length, 1);
 });
 
-test('a completed HEAD survives a runtime that refuses to abort its closed stream', async t => {
+test('a completed request never aborts its closed response stream', async t => {
   const { url } = await fixture(t, (_req, res) => {
     res.writeHead(200, { 'content-length': '5' });
     res.end();
   });
+  // The Convex runtime fails the action asynchronously when a completed stream is aborted.
   const abort = AbortController.prototype.abort;
-  AbortController.prototype.abort = function () {
-    throw new TypeError('The stream is not in a state that permits close');
+  let aborts = 0;
+  AbortController.prototype.abort = function (...args) {
+    aborts++;
+    return abort.apply(this, args);
   };
   t.after(() => {
     AbortController.prototype.abort = abort;
@@ -462,4 +465,5 @@ test('a completed HEAD survives a runtime that refuses to abort its closed strea
   const response = await exchangeFetch('R2 object HEAD verification', url, { method: 'HEAD' }, deadlines);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-length'), '5');
+  assert.equal(aborts, 0);
 });

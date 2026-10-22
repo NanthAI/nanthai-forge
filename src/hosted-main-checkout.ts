@@ -6,9 +6,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  readdirSync,
   lstatSync,
-  copyFileSync,
   chmodSync,
   realpathSync,
 } from 'node:fs';
@@ -16,9 +14,10 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
-import { parseNativeState, type NativeState } from './native-source.js';
+import { parseNativeState } from './native-source.js';
 import { hostedMainSchema, type HostedMain, type MainExpectation } from './hosted-main.js';
 import { durableReplace, syncDirectory, syncFile } from './native-durability.js';
+import { cleanHostedCheckout, installHostedFile, flushHostedCheckout } from './hosted-checkout-files.js';
 import { workLocked } from './work-lock.js';
 import { readSource, fingerprintPrivateFile } from './files.js';
 import type { ContentPin } from './native-exchange.js';
@@ -41,42 +40,6 @@ function save(path: string, value: unknown) {
   durableReplace(path, JSON.stringify(value));
 }
 
-function clean(root: string, state?: NativeState) {
-  if (!existsSync(root)) return;
-  invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
-  const allowed = new Map(state?.files.map(file => [file.path, file]) ?? []);
-  function visit(directory: string) {
-    for (const entry of readdirSync(join(root, directory))) {
-      const path = directory ? `${directory}/${entry}` : entry;
-      if (path === '.forge') {
-        invariant(
-          state && readdirSync(join(root, path)).every(name => name === 'hosted-main.json'),
-          'WORK_CONFLICT',
-          'Existing Forge metadata is preserved.',
-        );
-        continue;
-      }
-      const stat = lstatSync(join(root, path));
-      invariant(!stat.isSymbolicLink(), 'WORK_CONFLICT', 'Local checkout changes are preserved.');
-      if (stat.isDirectory()) visit(path);
-      else {
-        const file = allowed.get(path);
-        invariant(
-          file &&
-            stat.isFile() &&
-            stat.nlink === 1 &&
-            digest(readFileSync(join(root, path))) === file.blob &&
-            Boolean(stat.mode & 0o111) === (file.mode === 'executable'),
-          'WORK_CONFLICT',
-          'Local checkout changes are preserved.',
-        );
-        allowed.delete(path);
-      }
-    }
-  }
-  visit('');
-  invariant(!allowed.size, 'WORK_CONFLICT', 'Local checkout deletions are preserved.');
-}
 /** Client source checkout; deliberately creates no Work owner or acceptance authority. */
 export async function checkoutHostedMain(root: string, input: unknown, transport: MainTransport) {
   const request = requestSchema.parse(input);
@@ -172,22 +135,11 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
   const stage = mkdtempSync(join(cache, 'checkout-'));
   try {
     for (const file of state.files) {
-      const target = join(stage, file.path);
-      mkdirSync(dirname(target), { recursive: true });
-      copyFileSync(join(cache, 'objects', file.blob), target);
-      chmodSync(target, file.mode === 'executable' ? 0o755 : 0o644);
-      syncFile(target);
+      installHostedFile(stage, join(cache, 'objects'), file);
     }
     mkdirSync(join(stage, '.forge'), { mode: 0o700 });
     save(join(stage, '.forge', 'hosted-main.json'), { selection, state });
-    function flush(directory: string) {
-      for (const name of readdirSync(directory)) {
-        const path = join(directory, name);
-        if (lstatSync(path).isDirectory()) flush(path);
-      }
-      syncDirectory(directory);
-    }
-    flush(stage);
+    flushHostedCheckout(stage);
     workLocked(lock, () => {
       operation = json(receiptPath);
       if (operation.complete) return;
@@ -207,7 +159,12 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
         'CHANNEL_CHANGED',
         'Another pull updated this client while the selected head was downloading.',
       );
-      clean(root, marker ? parseNativeState(Buffer.from(JSON.stringify(marker.state))) : undefined);
+      cleanHostedCheckout(
+        root,
+        marker ? parseNativeState(Buffer.from(JSON.stringify(marker.state))).files : [],
+        'hosted-main.json',
+        Boolean(marker),
+      );
       if (existsSync(previous)) rmSync(previous, { recursive: true });
       if (existsSync(root)) renameSync(root, previous);
       renameSync(stage, root);

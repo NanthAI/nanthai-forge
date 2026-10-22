@@ -9,7 +9,7 @@ import {
   closeSync,
   renameSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { autoExchangeStateSchema } from './auto-exchange-state.js';
@@ -28,6 +28,8 @@ const binding = z.object({
   backupId: z.string(),
   autoSync: z.boolean().optional(),
   acceptanceOwner: z.boolean().optional(),
+  /** Local executable; never imported from portable Work policy. */
+  spendCommand: z.string().refine(isAbsolute).optional(),
 });
 const hosting = z.object({
   operationId: z.uuid(),

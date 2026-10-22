@@ -510,30 +510,89 @@ observation before admission. Until a full day has been observed, the baseline i
 the first available sample. Team totals include unrelated usage and billing can
 lag: this is an observed-delta pause, not an exact per-push cost ceiling.
 
-There is no reusable billing reader/credential in this repository. The explicit
-operator hook `FORGE_CONVEX_USAGE_ADAPTER=/absolute/operator-owned/usage.mjs` exports
-`async readUsage({projectId,deployment})`, returning:
+Configure an **owner-local executable**, not a portable policy or hosted command:
 
-```js
-return {
-  kind: 'measured', // or 'estimated'; estimates never pause
-  scope: 'team',
-  subject: 'stable-team-and-billing-counter-identity',
-  projectId,
-  deployment,
-  observedAt: Date.now(), // provider observation time, not stale-cache read time
-  totalUsd: cumulativeTeamSpendUsd,
-};
+```sh
+nforge host ROOT --spend-command /absolute/owner-owned/forge-daily-spend
 ```
 
-The adapter alone reads its provider token from private operator configuration;
-it must never log it. No token enters the returned object, policy, CLI arguments
-or status. The adapter runs only before a pending automatic attempt. Missing,
-invalid, cross-project, future, out-of-order or at-least-24-hour-old observations
-are unknown and do not pause. Counter resets or team changes start a new baseline.
-Provider errors retain no provider text. `estimated` and `unknown` are distinct
-from `measured`, and unavailable dollars stay null. The hook must be configured in
-the environment of the installed owner process so detached workers inherit it.
+The path is saved only in the local hosted binding. The executable receives
+`projectId` and `deployment` as its two arguments and writes exactly one JSON
+observation to stdout:
+
+```json
+{
+  "kind": "measured",
+  "scope": "team",
+  "subject": "stable-team-and-billing-counter-identity",
+  "projectId": "your-project-id",
+  "deployment": "https://your-deployment.convex.cloud",
+  "observedAt": 1792656000000,
+  "totalUsd": 12.34
+}
+```
+
+`totalUsd` is the cumulative team spend counter in USD. `observedAt` is the
+provider's observation time in epoch milliseconds, not the time an old cached
+response was read. Counter resets or team changes start a new baseline.
+`kind:"estimated"` is accepted as an estimate, but cannot admit a protected
+automatic attempt.
+
+Forge runs the executable without a shell, with a five-second timeout and a
+16 KiB combined stdout/stderr bound. HOME, XDG and temp directories are private
+and removed afterwards; the working directory is private too. PATH contains the
+running Node directory and system executable directories. No environment or
+Forge secrets are inherited. This is not an OS sandbox: the owner-controlled
+executable can access files with the owner's OS rights. It alone reads the
+provider token the owner already has; Forge never discovers, reads, stores or
+passes a Convex team token. Keep credentials out of command arguments, returned
+observations and logs. Provider error text is discarded.
+
+For example, this executable shape uses an **owner-provided billing reader** that
+knows the owner's existing provider API and credential file. That reader is not
+part of Forge; substitute its path and the existing credential path. Use an
+absolute Node shebang (from `command -v node`) and `chmod 700` the executable:
+
+```js
+#!/absolute/path/to/node
+const { readFileSync } = require('node:fs');
+const { readTeamSpend } = require('/absolute/owner-owned/convex-billing-reader.cjs');
+const [projectId, deployment] = process.argv.slice(2);
+(async () => {
+  // Only this owner-controlled process reads the already-existing token.
+  const { token } = JSON.parse(readFileSync('/absolute/private/provider-credentials.json', 'utf8'));
+  const usage = await readTeamSpend({ token });
+  console.log(JSON.stringify({
+    kind: 'measured',
+    scope: 'team',
+    subject: usage.counterIdentity,
+    projectId,
+    deployment,
+    observedAt: usage.observedAt,
+    totalUsd: usage.cumulativeTotalUsd,
+  }));
+})().catch(() => { process.exitCode = 1; });
+```
+
+Spend is read only before admitting a pending automatic attempt, never on idle,
+status or a manual push. Successful measured observations are reused for up to
+one minute, including across worker restarts; expiry causes a read on the next
+attempt, with no polling timer. Changing the command invalidates that cache.
+The rolling spend calculation still uses the retained 24-hour history.
+
+With `pauseOnDailySpend:true`, missing configuration, command failures/timeouts,
+invalid JSON, cross-project, future, out-of-order or at-least-24-hour-old samples
+**defer automatic pushes**. `autoExchange.status` is `paused`, with code
+`AUTO_EXCHANGE_SPEND_UNAVAILABLE`; `spend.reason` distinguishes `unconfigured`,
+`unavailable` and `stale`. `spend.paused` describes only a measured threshold
+pause; unavailable dollars remain null. Status and pending output include the
+reason and recovery guidance. Fix the executable, then set `--spend-command`
+again or resume owner activity (save/startup) to retry. There is no background
+usage polling while deferred. Manual `nforge exchange ROOT push` stays available.
+Remove the local executable setting with `nforge host ROOT --no-spend-command`;
+protected automatic attempts then remain deferred until it is configured again.
+The previous `FORGE_CONVEX_USAGE_ADAPTER` in-process module hook is replaced by
+this local executable setting.
 
 Successful bound and explicit push receipts include `observation`: measured HTTP
 attempts/RPC requests, request/response body bytes and process elapsed milliseconds.
@@ -594,3 +653,40 @@ while preserving its work. Neither changes hosted identity/authority or introduc
 a lease. Existing source/Work/Channel CAS and reconciliation govern concurrent
 owners. `exchange pull` keeps its selected-main source-client semantics.
 
+## Hosted Lane editing checkout
+
+`nforge exchange NEW_DIRECTORY open-lane --command-file REQUEST.json` opens an
+exact hosted Lane selection without restoring a Work owner. The request is
+`{url,projectId,laneId,operationId,expected?,paths?}`. Optional `expected` pins
+`{head,sourceVersion,version}`; stale pins return `WORK_STALE`. Use the existing
+login or `FORGE_AUTH_TOKEN`, never a token in the request file.
+
+Omit `paths` for all files, or select relative file/directory paths for a sparse
+checkout. An empty array initially opens only the baseline marker. Later calls
+expand the selected paths; omitting `paths` expands to a full checkout. Existing
+materialized paths and directory scopes remain selected. Paths describe editing
+scope and confer no access or landing authority.
+
+`.forge/hosted-lane.json` retains the full baseline State, exact schema-2 Lane
+selection, deployment URL, operation UUID, scope and actual `materialized` paths.
+Each baseline entry includes its digest and mode. Missing paths outside that set
+are unchanged, never deletions; a missing materialized path is a local deletion.
+Save clients must use that distinction when constructing an explicit delta.
+Hosted save publication is a separate API; checkout itself changes no server head.
+
+Verified objects and original-operation receipts live beside the directory in
+`NEW_DIRECTORY.forge-client`. Membership and R2 signing use windows of at most
+100 missing objects; full source/Work archives and Channel histories are not read.
+An unchanged checkout downloads zero new source objects. Source files are writable
+independent copies; executable modes, binary bytes and symlink target bytes are
+preserved, including dangling links. The same symlink handling applies to hosted
+main checkout.
+
+The install stages a complete selected directory before replacement. Dirty files,
+mode/link changes, local deletions and untracked content return `WORK_CONFLICT`
+with content preserved. Interrupted downloads leave the existing checkout intact;
+retry the original request UUID to resume its pinned selection. Install recovery
+restores the previous directory when replacement stopped between renames, or
+reconciles the installed operation marker after a lost completion receipt. An
+older unfinished checkout cannot overwrite a newer marker. Completed retries
+recheck access and return their original receipt without rewinding newer edits.

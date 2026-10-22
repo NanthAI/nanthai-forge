@@ -297,3 +297,34 @@ test('server-selected hosted A is materialized while uploaded native main remain
   assert.equal(readFileSync(join(client.root, 'a.txt'), 'utf8'), 'first\n');
   assert.equal(JSON.parse(s.tables.projectWorkRecords.get('native').value).head, 'b'.repeat(64));
 });
+
+test('main checkout preserves symlinks as links, including dangling and non-UTF8 targets', async t => {
+  const { lstatSync, readlinkSync } = await import('node:fs');
+  const s = setup(t),
+    bytes = Buffer.from([0xff, 0x61]);
+  const selected = s.selection();
+  selected.head = s.blob(
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [],
+      files: [
+        { path: 'normal', blob: s.blob('text'), mode: 'file' },
+        { path: 'link', blob: s.blob('normal'), mode: 'symlink' },
+        { path: 'dangling', blob: s.blob('../missing'), mode: 'symlink' },
+        { path: 'raw', blob: s.blob(bytes), mode: 'symlink' },
+        { path: 'binary', blob: s.blob(Buffer.from([0, 255, 128])), mode: 'executable' },
+      ],
+      message: 'synthetic',
+      at: '2026-01-01T00:00:00Z',
+    }),
+  );
+  s.select(selected);
+  await checkoutHostedMain(s.root, s.request(), s.transport);
+  assert(lstatSync(join(s.root, 'link')).isSymbolicLink());
+  assert.equal(readlinkSync(join(s.root, 'dangling')), '../missing');
+  assert.deepEqual(readlinkSync(join(s.root, 'raw'), { encoding: 'buffer' }), bytes);
+  assert.deepEqual(readFileSync(join(s.root, 'binary')), Buffer.from([0, 255, 128]));
+  assert(lstatSync(join(s.root, 'binary')).mode & 0o111);
+  assert.equal((await checkoutHostedMain(s.root, s.request(), s.transport)).downloadedObjects, 0);
+});

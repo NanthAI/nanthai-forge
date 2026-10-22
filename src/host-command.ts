@@ -4,6 +4,7 @@ import { readAutoExchangeStatus } from './auto-exchange-status.js';
 import { consumeOwnerRequests, startOwnerAcceptanceListener } from './owner-acceptance-consumer.js';
 import { flushAgentSync } from './agent-hosted-sync.js';
 import { spawn } from 'node:child_process';
+import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WorkStore } from './work-store.js';
 import { readHostState, updateHostState } from './host-binding.js';
@@ -48,6 +49,29 @@ export async function hostCli(args: string[]) {
       invariant(state.binding, 'HOST_NOT_BOUND', 'Host this owner first.');
       state.binding.autoSync = flags[0] === '--auto-sync';
       return { autoSync: state.binding.autoSync, sourcePush: 'explicit' };
+    });
+  }
+  if (flags[0] === '--spend-command' || flags[0] === '--no-spend-command') {
+    const command = flags[0] === '--spend-command' ? flags[1] : undefined;
+    invariant(
+      command
+        ? flags.length === 2 && isAbsolute(command)
+        : flags.length === 1 && flags[0] === '--no-spend-command',
+      'BAD_ARGUMENT',
+      'Use --spend-command /absolute/owner-owned/executable or --no-spend-command.',
+    );
+    return updateHostState(new WorkStore(root), state => {
+      invariant(state.binding, 'HOST_NOT_BOUND', 'Host this owner first.');
+      state.binding.spendCommand = command;
+      if (state.autoExchange) {
+        delete state.autoExchange.spendCheck;
+        delete state.autoExchange.spend;
+        delete state.autoExchange.nextAttemptAt;
+      }
+      return {
+        spendCommand: command ?? null,
+        next: 'Pending automatic pushes recheck spend before admission.',
+      };
     });
   }
   if (flags.includes('--status')) {

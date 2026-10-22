@@ -24,14 +24,12 @@ export async function exchangeRequest<T>(
   const attempts = (options.retries ?? 3) + 1;
   for (let attempt = 1; ; attempt++) {
     const controller = new AbortController();
-    // Cleanup only: the outcome is already settled. The Convex runtime can refuse to
-    // abort a response stream that has already closed ("not in a state that permits close").
+    // Abort only unfinished requests. The Convex runtime fails the whole action
+    // asynchronously ("not in a state that permits close") when a completed
+    // response stream is aborted, so a try/catch here cannot contain it.
+    let completed = false;
     const release = () => {
-      try {
-        controller.abort();
-      } catch {
-        /* already closed */
-      }
+      if (!completed) controller.abort();
     };
     let idle: ReturnType<typeof setTimeout> | undefined;
     let expire: (error: ForgeError) => void;
@@ -63,9 +61,12 @@ export async function exchangeRequest<T>(
         attempt < attempts
       ) {
         await response.body?.cancel();
+        completed = true;
         return { retry: true as const };
       }
-      return { retry: false as const, value: await consume(response, progressed) };
+      const value = await consume(response, progressed);
+      completed = true;
+      return { retry: false as const, value };
     };
     armIdle(options.headerTimeoutMs ?? 30_000, 'response headers');
     const totalMs = options.totalTimeoutMs ?? 120_000,

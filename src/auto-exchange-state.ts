@@ -36,6 +36,7 @@ export const autoExchangeStateSchema = z.object({
   nextAttemptAt: z.number().optional(),
   spend: spendStatusSchema.optional(),
   samples: z.array(usageObservationSchema).optional(),
+  spendCheck: z.object({ command: z.string(), at: z.number() }).optional(),
 });
 export type AutoExchangeState = z.infer<typeof autoExchangeStateSchema>;
 export const AUTO_EXCHANGE_UNDO =

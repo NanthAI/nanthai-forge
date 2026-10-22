@@ -1,25 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { isAbsolute } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { usageObservationSchema, type UsageObservation, type SpendStatus } from './auto-exchange-state.js';
 
 export const SPEND_WINDOW_MS = 24 * 60 * 60 * 1000;
 export type UsageContext = { projectId: string; deployment: string };
 export type UsageAdapter = (context: UsageContext) => Promise<unknown>;
-/** Explicit operator config hook. There is no billing endpoint/credential in the
- * repository. This module loads an absolute operator-owned ESM adapter whose
- * readUsage(context) reads its token privately. Provider text is never retained. */
-export const configuredUsage: UsageAdapter = async context => {
-  const path = process.env.FORGE_CONVEX_USAGE_ADAPTER;
-  if (!path || !isAbsolute(path)) return undefined;
-  const adapter = await import(pathToFileURL(path).href);
-  return adapter.readUsage(context);
-};
 export async function observeSpend(
   context: UsageContext,
   previous: UsageObservation[],
-  now: number,
-  adapter: UsageAdapter = configuredUsage,
+  clock: number | (() => number),
+  adapter: UsageAdapter = async () => undefined,
 ): Promise<{ samples: UsageObservation[]; spend: SpendStatus }> {
   const unknown = (
     reason: SpendStatus['reason'],
@@ -44,6 +33,7 @@ export async function observeSpend(
   } catch {
     return unknown('unavailable');
   }
+  const now = typeof clock === 'function' ? clock() : clock;
   if (input === undefined) return unknown('unconfigured');
   const parsed = usageObservationSchema.safeParse(input);
   if (!parsed.success) return unknown('unavailable');

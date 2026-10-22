@@ -1,3 +1,6 @@
+import { checkoutHostedLane } from './hosted-lane-checkout.js';
+import { hostedLaneCheckoutSchema } from './hosted-lane-checkout-marker.js';
+import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { acknowledgePendingExchange } from './pending-exchange.js';
 import { withExchangeObservation } from './exchange-observation.js';
 import { checkoutHostedMain } from './hosted-main-checkout.js';
@@ -71,6 +74,7 @@ Bound owners use stored deployment/project IDs; push pins current hosted head an
 Native bound pushes reconcile metadata and update hosted Work and its index.
 Bound pull checks out selected hosted main into a client directory (or --target).
 nforge exchange NEW_DIRECTORY open --command-file REQUEST.json
+nforge exchange NEW_DIRECTORY open-lane --command-file REQUEST.json
 nforge exchange NEW_DIRECTORY restore --command-file REQUEST.json
 nforge exchange ROOT push --command-file REQUEST.json
 nforge exchange NEW_DIRECTORY pull --command-file REQUEST.json
@@ -81,6 +85,8 @@ nforge exchange ROOT migrate-archive --command-file REQUEST.json
 Run nforge login or set FORGE_AUTH_TOKEN to your current Forge sign-in JWT. Never put it in the request file.
 Push: {url,projectId,operationId,previous,revision,returnSource?:{expectedBackupId,revision,operationId}}
 Open/pull main: {url,projectId,operationId,expected?:{head,receiptId}}
+Open-lane: {url,projectId,laneId,operationId,expected?:{head,sourceVersion,version},paths?:["path/or/directory"]}
+Lane checkout is full by default; paths expands a sparse editing directory. Its marker retains the complete baseline. Dirty files are preserved.
 Restore (legacy pull with backupId): {url,projectId,backupId,cacheRoot?,journalPath?}
 Receive-proposal: {url,projectId,proposalId,operationId}
 Pull-proposal: {url,projectId,proposalId,cacheRoot?}
@@ -119,6 +125,7 @@ export async function exchangeCli(args: string[]) {
         'push',
         'pull',
         'open',
+        'open-lane',
         'restore',
         'pull-proposal',
         'receive-proposal',
@@ -147,6 +154,17 @@ export async function exchangeCommand(root: string, action: string, input: unkno
   }
 }
 async function executeExchangeCommand(root: string, action: string, input: unknown) {
+  if (action === 'open-lane') {
+    const request = hostedLaneCheckoutSchema.parse(input);
+    const exchange = new ConvexExchange(
+      request.url,
+      process.env.FORGE_AUTH_TOKEN,
+      request.projectId,
+      request.operationId,
+      null,
+    );
+    return checkoutHostedLane(root, request, new ConvexLaneTransport(exchange));
+  }
   if (action === 'open' || (action === 'pull' && mainPullSchema.safeParse(input).success)) {
     const request = mainPullSchema.parse(input);
     const transport = new ConvexExchange(

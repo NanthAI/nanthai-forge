@@ -16,6 +16,8 @@ import { readAutoExchangeStatus } from '../dist/auto-exchange-status.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
 import { ForgeError } from '../dist/errors.js';
+import { hostCli } from '../dist/host-command.js';
+import { USAGE_CACHE_MS } from '../dist/auto-exchange-usage-command.js';
 import { SPEND_WINDOW_MS } from '../dist/auto-exchange-spend.js';
 
 // Explicit drivers below use synthetic owners and transports; no detached workers.
@@ -305,13 +307,19 @@ test('spend increase never cancels an in-flight push; the next automatic push pa
   assert.ok(f.queue().pending.length);
 });
 
-test('unknown usage does not pause; provider errors and credentials are never retained', async t => {
+test('unknown usage defers automatic pushes; manual push works and provider errors are never retained', async t => {
   const f = fixture(t, { debounceMs: 0, pauseOnDailySpend: true });
   await f.run({
     usage: async () => {
       throw new Error('token=synthetic-secret');
     },
   });
+  assert.equal(f.attempts.length, 0);
+  assert.equal(f.state().autoExchange.status, 'paused');
+  assert.equal(f.state().autoExchange.code, 'AUTO_EXCHANGE_SPEND_UNAVAILABLE');
+  assert.match(readAutoExchangeStatus(f.store).resume, /fresh measured observation/);
+  assert.match(formatPendingStatus(readPendingStatus(f.store)), /paused.*unavailable.*Fix/);
+  await f.manual();
   assert.equal(f.attempts.length, 1);
   assert.equal(f.state().autoExchange.spend.availability, 'unknown');
   assert.equal(f.state().autoExchange.spend.paused, false);
@@ -447,4 +455,104 @@ test('publication while installing the pending wake listener is observed without
   });
   assert.equal(await waiting, 'changed');
   assert.ok(f.queue().pending.length);
+});
+
+test('local spend command config persists, caches on demand, and pauses strictly above one dollar', async t => {
+  const f = fixture(t, { debounceMs: 0, pauseOnDailySpend: true });
+  const command = join(f.root, 'synthetic-usage');
+  const setSample = () =>
+    writeFileSync(
+      command,
+      `#!${process.execPath}\nconsole.log(${JSON.stringify(
+        JSON.stringify({
+          kind: 'measured',
+          scope: 'team',
+          subject: 'synthetic-team',
+          projectId: 'synthetic-project',
+          deployment: 'https://synthetic.invalid',
+          observedAt: f.now(),
+          totalUsd: f.usd,
+        }),
+      )});\n`,
+      { mode: 0o700 },
+    );
+  await assert.rejects(hostCli([f.root, '--spend-command', 'relative']), { code: 'BAD_ARGUMENT' });
+  setSample();
+  await hostCli([f.root, '--spend-command', command]);
+  assert.equal(f.state().binding.spendCommand, command);
+  await f.run({ usage: undefined });
+  assert.equal(f.attempts.length, 1);
+  // A changed command output is not consulted again during the cache minute.
+  f.usd += 1;
+  f.save();
+  setSample();
+  await f.run({ usage: undefined });
+  assert.equal(f.state().autoExchange.spend.deltaUsd, 0);
+  f.advance(USAGE_CACHE_MS);
+  f.save();
+  setSample();
+  await f.run({ usage: undefined });
+  assert.equal(f.state().autoExchange.spend.deltaUsd, 1);
+  assert.equal(f.attempts.length, 3);
+  f.advance(USAGE_CACHE_MS);
+  f.usd += 0.01;
+  f.save();
+  setSample();
+  const stop = new Error('observed command pause');
+  await assert.rejects(
+    f.run({
+      usage: undefined,
+      sleep: async () => {
+        throw stop;
+      },
+    }),
+    stop,
+  );
+  assert.equal(f.state().autoExchange.status, 'paused');
+  assert.equal(f.attempts.length, 3);
+  await f.manual();
+  assert.equal(f.attempts.length, 4);
+  // Neither idle drains nor status execute even a command that would fail.
+  writeFileSync(command, `#!${process.execPath}\nprocess.exit(1);\n`);
+  await f.run({ usage: undefined });
+  assert.equal(readAutoExchangeStatus(f.store, f.now()).status, 'idle');
+  assert.equal(f.state().autoExchange.spend.availability, 'measured');
+  await hostCli([f.root, '--no-spend-command']);
+  assert.equal(f.state().binding.spendCommand, undefined);
+});
+
+test('unconfigured, unavailable, invalid and stale command output defer automatic attempts without polling', async t => {
+  const f = fixture(t, { debounceMs: 0, pauseOnDailySpend: true });
+  const command = join(f.root, 'synthetic-usage');
+  for (const [body, reason] of [
+    [undefined, 'unconfigured'],
+    [null, 'unavailable'],
+    ['process.exit(1);', 'unavailable'],
+    ['console.log("garbage");', 'unavailable'],
+    [
+      `console.log(${JSON.stringify(JSON.stringify({ kind: 'measured', scope: 'team', subject: 'team', projectId: 'synthetic-project', deployment: 'https://synthetic.invalid', observedAt: 0, totalUsd: 1 }))});`,
+      'stale',
+    ],
+    ['setInterval(() => {}, 1000);', 'unavailable'],
+  ]) {
+    if (body === undefined) await hostCli([f.root, '--no-spend-command']);
+    else {
+      if (body !== null) writeFileSync(command, `#!${process.execPath}\n${body}\n`, { mode: 0o700 });
+      await hostCli([f.root, '--spend-command', command]);
+    }
+    await f.run({
+      usage: undefined,
+      sleep: async () => {
+        throw new Error('must not poll');
+      },
+    });
+    assert.equal(f.attempts.length, 0);
+    const status = readAutoExchangeStatus(f.store, f.now());
+    assert.equal(status.status, 'paused');
+    assert.equal(status.spend.reason, reason);
+    assert.match(status.resume, /Manual exchange push remains available/);
+    assert.match(formatPendingStatus(readPendingStatus(f.store)), new RegExp(`paused.*${reason}`));
+  }
+  await f.manual();
+  assert.equal(f.attempts.length, 1);
 });

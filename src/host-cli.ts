@@ -17,6 +17,7 @@ export const HOST_HELP = `nforge host ROOT [--deployment URL] [--name NAME] [--v
 nforge host ROOT --listen
 nforge host ROOT --status
 nforge host ROOT --no-auto-sync | --auto-sync
+nforge host ROOT --spend-command /absolute/executable | --no-spend-command
 --listen consumes hosted acceptance requests every five seconds while running.
 Run nforge login first (cli scope). Only missing source/Work objects are uploaded.
 Current source becomes usable first; history backfills in a resumable background process.
