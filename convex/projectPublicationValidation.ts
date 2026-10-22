@@ -7,7 +7,9 @@ import { requireOwnerDerived } from './projectOwnerDerived';
 import { ownerDerivedSchema } from '../src/owner-derived';
 import { ForgeError, invariant } from '../src/errors';
 import { digest } from '../src/hash';
-import { publicationHash } from '../src/publication-metadata';
+import { publicationHash, type PublicationMetadata } from '../src/publication-metadata';
+import { publicationPinWindow } from '../src/publication-pin-window';
+import { longActionExpired } from '../src/long-action';
 import type { ActionCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -220,32 +222,66 @@ export async function metadataPublication(
     'WORK_OPERATION_CHANGED',
     'Resume the original complete publication metadata.',
   );
-  const pages: string[] = [];
-  for (let position = 0; position < session.pages; position++)
-    pages.push(
-      await ctx.runQuery(internal.projectPublicationStore.read, { id: session._id, owner, position }),
+  const started = Date.now();
+  let validation = session.validation;
+  let retainedPages: string[] | undefined;
+  if (!validation) {
+    const pages: string[] = [];
+    while (pages.length < session.pages)
+      pages.push(
+        ...(await ctx.runQuery(internal.projectPublicationStore.readBatch, {
+          id: session._id,
+          owner,
+          position: pages.length,
+        })),
+      );
+    retainedPages = pages;
+    const text = pages.join('');
+    invariant(
+      publicationHash(text) === session.metadataDigest,
+      'WORK_OPERATION_CHANGED',
+      'Publication metadata digest changed.',
     );
-  const text = pages.join('');
-  invariant(
-    publicationHash(text) === session.metadataDigest,
-    'WORK_OPERATION_CHANGED',
-    'Publication metadata digest changed.',
-  );
-  const value = parseJson(text);
-  requireOwnerDerived(value.ownerDerived);
-  const data = validatePublicationMetadata(value, { sha256: input.digest, size: input.size });
-  // Snapshot identity and publication operation identity are independent in the
-  // existing exchange protocol. The session/request/root pins bind this retry.
-  for (let offset = 0; offset < data.pins.length; offset += 100)
-    await ctx.runQuery(internal.projectPublicationStore.pins, {
-      projectId: input.projectId,
-      owner,
-      pins: data.pins.slice(offset, offset + 100),
-    });
-  await ctx.runMutation(internal.projectPublicationStore.validated, {
+    const value = parseJson(text);
+    requireOwnerDerived(value.ownerDerived);
+    const data = validatePublicationMetadata(value, { sha256: input.digest, size: input.size });
+    validation = {
+      preview: JSON.stringify(data.preview),
+      ...publicationPinWindow(pages),
+      tail: '',
+      verified: 0,
+      total: data.pins.length,
+    };
+  }
+  validation = await ctx.runMutation(internal.projectPublicationProgress.prepare, {
     id: session._id,
     owner,
     metadataDigest: session.metadataDigest,
+    validation,
   });
-  return { preview: data.preview, metadataPublication: session._id };
+  // The immutable metadata has already passed complete semantic validation.
+  // Each transaction verifies one original page and advances its durable cursor.
+  // No full pin plan or Work document is copied into a progress row.
+  while (validation.verified < validation.total) {
+    validation = await ctx.runMutation(internal.projectPublicationProgress.advance, {
+      id: session._id,
+      owner,
+      position: validation.position,
+      ...(retainedPages ? { body: retainedPages[validation.position]! } : {}),
+    });
+    if (longActionExpired(started))
+      return {
+        pending: true as const,
+        progress: JSON.stringify({
+          phase: 'publication-pins',
+          cursor: validation.position,
+          done: validation.verified,
+          total: validation.total,
+        }),
+      };
+  }
+  return {
+    preview: JSON.parse(validation.preview) as PublicationMetadata['preview'],
+    metadataPublication: session._id,
+  };
 }

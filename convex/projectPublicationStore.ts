@@ -225,6 +225,42 @@ export const read = internalQuery({
     }
   },
 });
+/** Bound initial validation to at most 16 page documents (2 MiB of bodies),
+ * rather than a serial action/query round trip for every 16-KiB client page. */
+export const readBatch = internalQuery({
+  args: { ...idFields, position: v.number() },
+  returns: v.array(v.string()),
+  handler: async (ctx, { id, owner, position }) => {
+    try {
+      const session = await ctx.db.get(id);
+      invariant(session && session.owner === owner, 'PROJECT_UNAVAILABLE', 'Publication unavailable.');
+      await activeOwnedProject(ctx, session.projectId, owner);
+      const count = Math.min(16, session.pages - position);
+      invariant(
+        Number.isSafeInteger(position) && position >= 0 && count > 0,
+        'BAD_ARGUMENT',
+        'Read a bounded original publication window.',
+      );
+      const pages = await ctx.db
+        .query('projectPublicationPages')
+        .withIndex('by_publication_and_position', q =>
+          q
+            .eq('publicationId', id)
+            .gte('position', position)
+            .lt('position', position + count),
+        )
+        .take(count);
+      invariant(
+        pages.length === count && pages.every((page, i) => page.position === position + i),
+        'INVALID_WORK_BACKUP',
+        'Publication page is missing.',
+      );
+      return pages.map(page => page.body);
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
 export const validated = internalMutation({
   args: { ...idFields, metadataDigest: v.string() },
   returns: v.null(),

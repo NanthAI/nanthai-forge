@@ -9,7 +9,7 @@ import { longActionExpired } from '../src/long-action';
 export async function runPublication(
   ctx: ActionCtx,
   input: { projectId: Id<'hostedProjects'>; owner: string; operationId: string; request: string },
-  run: () => Promise<Id<'projectBackups'>>,
+  run: () => Promise<Id<'projectBackups'> | { pending: true; progress: string }>,
 ) {
   const attemptId = randomUUID(),
     started = Date.now();

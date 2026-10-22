@@ -215,6 +215,7 @@ export const publish = action({
             const started = Date.now(),
               metadataCtx = meteredStorage(ctx);
             const metadata = await metadataPublication(metadataCtx, input, owner, request);
+            if (metadata.pending) return metadata;
             const { deferHistory: _deferHistory, ...publication } = legacyInput;
             void _deferHistory;
             const id = await metadataCtx.runMutation(internal.projectExchange.publish, {

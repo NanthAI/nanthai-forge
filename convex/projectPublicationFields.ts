@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+export const publicationValidation = v.object({
+  preview: v.string(),
+  position: v.number(),
+  offset: v.number(),
+  endPosition: v.number(),
+  endOffset: v.number(),
+  tail: v.string(),
+  verified: v.number(),
+  total: v.number(),
+});
 export const publicationFields = {
   projectId: v.id('hostedProjects'),
   owner: v.string(),
@@ -13,6 +23,7 @@ export const publicationFields = {
   cursor: v.number(),
   chain: v.string(),
   validated: v.boolean(),
+  validation: v.optional(publicationValidation),
 };
 export const publicationDocument = v.object({
   _id: v.id('projectPublications'),

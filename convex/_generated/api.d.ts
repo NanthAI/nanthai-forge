@@ -5,6 +5,7 @@ import type * as projectArtifactActions from "../projectArtifactActions.js";
 import type * as projectReturnCommit from "../projectReturnCommit.js";
 import type * as projectPublicationAttempt from "../projectPublicationAttempt.js";
 import type * as projectReturnMetadataStore from "../projectReturnMetadataStore.js";
+import type * as projectPublicationProgress from "../projectPublicationProgress.js";
 import type * as projectPublicationStore from "../projectPublicationStore.js";
 import type * as importStatus from "../importStatus.js";
 import type * as projectBootstrap from "../projectBootstrap.js";
@@ -230,6 +231,7 @@ declare const fullApi: ApiFromModules<{
   projectCoordination: typeof projectCoordination;
   projectCoordinationReads: typeof projectCoordinationReads;
   projectExchange: typeof projectExchange;
+  projectPublicationProgress: typeof projectPublicationProgress;
   projectPublicationStore: typeof projectPublicationStore;
   projectPublicationAttempt: typeof projectPublicationAttempt;
   projectExchangeActions: typeof projectExchangeActions;

@@ -60,7 +60,17 @@ boundaries and resumes from that validated revision. Validation, projection and
 private index commits keep their existing shorter scheduling windows. A shared
 four-minute outer window is checked after complete work units; it never cancels
 or splits a transaction. Index rebuilds yield after committed batches, and
-publication waiters yield without taking another worker's claim.
+publication waiters yield without taking another worker's claim or reading metadata
+pages. Metadata-only publication retains its complete semantic-validation summary
+and verifies committed pins one bounded immutable metadata page per transaction.
+The initial semantic scan queries at most 16 pages (2 MiB of bodies) per call.
+The saved page cursor and incomplete-pin tail advance atomically with those checks.
+Continuations and lost replies skip verified pin pages; a retry after validation
+uses the saved preview without rereading all metadata. Initial complete JSON/digest
+validation remains indivisible; interruption before its summary commits can repeat
+that initial scan. The first action reuses its scanned bytes for pin checks. Resumed actions read
+only the next unverified pin page. Total metadata reads are at most two passes,
+independent of continuation count; a single invocation reads each page once.
 
 Pending is successful scheduling progress, not a transport retry. The client
 continues immediately with `continuation:true`, the same operation ID and inputs,
