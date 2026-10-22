@@ -481,8 +481,7 @@ export default defineSchema({
     .index('by_archive_storage', ['archiveReceipt.storageId'])
     .index('by_project', ['projectId'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
-    .index('by_storage', ['storageId'])
-    .index('by_archive_storage', ['archiveReceipt.storageId']),
+    .index('by_storage', ['storageId']),
   projectInterests: defineTable(interestFields)
     .index('by_importId', ['importId'])
     .index('by_owner_and_importId', ['owner', 'importId'])
