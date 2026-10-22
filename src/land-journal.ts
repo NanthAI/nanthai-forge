@@ -1,3 +1,8 @@
+import {
+  previewLanding,
+  previewExclusionMessage,
+  type LandingPreview,
+} from './integration-preview-landing.js';
 import { landFrictionCounts } from './friction-auto.js';
 // SPDX-License-Identifier: Apache-2.0
 import { savedOverlapPlan, highOverlap, orderOverlapGroups } from './agent-overlap-plan.js';
@@ -23,7 +28,13 @@ export type LandEntry = {
   result?: Record<string, unknown>;
 };
 export type LandSelection = { inputs: WorkView['inputs']; finish: FinishAction };
-type State = { schema: 1; request: string; entries: LandEntry[] };
+type State = {
+  schema: 1;
+  request: string;
+  entries: LandEntry[];
+  pins?: WorkView['inputs'];
+  preview?: LandingPreview | null;
+};
 /** Local parent-driver receipt. Saved source/check/acceptance evidence remains canonical Work. */
 export class LandJournal {
   readonly path: string;
@@ -46,11 +57,14 @@ export class LandJournal {
       check = command.checkId ? data.checks.find(item => item.id === command.checkId) : defaultCheck(store);
     invariant(check, 'CHECK_REQUIRED', 'Choose a defined check.');
     const groups = new Map<string, WorkView['inputs']>();
+    const pinned: WorkView['inputs'] = [];
     for (const laneId of command.laneIds) {
       const lane = data.lanes.find(item => item.id === laneId);
       invariant(lane, 'NOT_FOUND', 'Selected Lane not found.');
       const inputs = groups.get(lane.intentId) ?? [];
-      inputs.push({ laneId, head: selection?.inputs.find(pin => pin.laneId === laneId)?.head ?? lane.head });
+      const head = selection?.inputs.find(pin => pin.laneId === laneId)?.head ?? lane.head;
+      inputs.push({ laneId, head });
+      pinned.push({ laneId, head });
       groups.set(lane.intentId, inputs);
     }
     const plan = savedOverlapPlan(
@@ -94,6 +108,7 @@ export class LandJournal {
             ...(selection?.finish.actor ? { actor: selection.finish.actor } : {}),
             ...(selection?.finish.tool ? { tool: selection.finish.tool } : {}),
             ...(selection?.finish.priority ? { priority: selection.finish.priority } : {}),
+            ...(command.preview ? { preview: command.preview } : {}),
             operationId: finishChild(command.operationId, `land:${first.laneId}`),
             laneId: first.laneId,
             expectedHead: first.head,
@@ -118,7 +133,56 @@ export class LandJournal {
       schema: 1,
       request,
       entries: orderOverlapGroups(plan, entries, entry => entry.inputs.map(pin => pin.laneId)),
+      pins: pinned,
     };
+    this.save();
+  }
+  preflight(store: WorkStore, command: LandCommand) {
+    // Constructor saved these pins before any potentially long preview. Recovery
+    // never reselects live Lane heads or changes an already submitted entry.
+    if (
+      this.state.preview !== undefined ||
+      this.state.entries.some(entry => entry.viewId || entry.queued || entry.result)
+    )
+      return;
+    const preview =
+      command.channel === 'main'
+        ? previewLanding(store, this.state.pins ?? this.state.entries.flatMap(entry => entry.inputs), {
+            skip: command.preview === 'skip',
+          })
+        : undefined;
+    this.state.preview = preview ?? null;
+    if (preview?.excluded.length)
+      this.state.entries = this.state.entries.flatMap(entry => {
+        const safe = entry.inputs.filter(pin => !preview.excluded.some(item => item.laneId === pin.laneId));
+        const rejected = entry.inputs.filter(pin =>
+          preview.excluded.some(item => item.laneId === pin.laneId),
+        );
+        return [...(safe.length ? [safe] : []), ...rejected.map(pin => [pin])].map(inputs => {
+          const first = inputs[0]!;
+          return {
+            inputs,
+            command: {
+              ...entry.command,
+              operationId: finishChild(command.operationId, `land:${first.laneId}`),
+              laneId: first.laneId,
+              expectedHead: first.head,
+              with: inputs.slice(1).map(pin => pin.laneId),
+              withInputs: inputs.slice(1),
+            },
+            ...(rejected.some(pin => pin.laneId === first.laneId)
+              ? {
+                  result: {
+                    status: 'preview-excluded',
+                    code: 'INTEGRATION_PREVIEW_EXCLUDED',
+                    message: previewExclusionMessage,
+                    preview,
+                  },
+                }
+              : {}),
+          };
+        });
+      });
     this.save();
   }
   save() {

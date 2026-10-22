@@ -48,6 +48,7 @@ export const autonomyPolicySchema = z.object({
       concurrency: z.number().int().min(1).max(16).optional(),
     })
     .optional(),
+  integrationPreview: z.object({ auto: z.boolean() }).optional(),
   ownerRootUpdates: z.boolean().optional(),
   laneUpdates: z.enum(['auto', 'ask']),
   lifecycle: z.object({ completeOnAccept: z.boolean(), cleanRegenerableCopies: z.boolean() }),
@@ -65,6 +66,7 @@ export function policyPreset(preset: Exclude<AutonomyPolicy['preset'], 'custom'>
       autoActors: [],
       protectedPaths: [],
     },
+    integrationPreview: { auto: false },
     ownerRootUpdates: false,
     laneUpdates: preset === 'supervised' ? 'ask' : 'auto',
     lifecycle: { completeOnAccept: preset !== 'supervised', cleanRegenerableCopies: preset === 'autonomous' },
@@ -77,7 +79,11 @@ export function legacyPolicy(): AutonomyPolicy {
 }
 export function effectivePolicy(data: { autonomyPolicy?: AutonomyPolicy | undefined }): AutonomyPolicy {
   let policy = data.autonomyPolicy ? autonomyPolicySchema.parse(data.autonomyPolicy) : legacyPolicy();
-  policy = { ...policy, autoExchange: policy.autoExchange ?? autoExchangeSchema.parse({}) };
+  policy = {
+    ...policy,
+    integrationPreview: policy.integrationPreview ?? { auto: false },
+    autoExchange: policy.autoExchange ?? autoExchangeSchema.parse({}),
+  };
   // An absent runner policy preserves the legacy finish protocol. Fallback is
   // manual unless explicitly opted in, including when no checks policy exists.
   return policy.checks ? { ...policy, checks: { fallback: 'manual', ...policy.checks } } : policy;
@@ -91,6 +97,7 @@ export const policyWriteSchema = z
     preset: autonomyPolicySchema.shape.preset.optional(),
     acceptance: autonomyPolicySchema.shape.acceptance.partial().optional(),
     checks: autonomyPolicySchema.shape.checks.unwrap().partial().optional(),
+    integrationPreview: autonomyPolicySchema.shape.integrationPreview,
     ownerRootUpdates: autonomyPolicySchema.shape.ownerRootUpdates,
     laneUpdates: autonomyPolicySchema.shape.laneUpdates.optional(),
     lifecycle: autonomyPolicySchema.shape.lifecycle.partial().optional(),
@@ -115,6 +122,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
         ? policyPreset(command.preset)
         : previous;
   const edited =
+    command.integrationPreview ||
     command.autoExchange ||
     command.checks ||
     command.acceptance ||
@@ -133,6 +141,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
       ? { checks: { runner: 'local', fallback: 'manual', ...base.checks, ...command.checks } }
       : {}),
     acceptance: { ...base.acceptance, ...command.acceptance },
+    integrationPreview: command.integrationPreview ?? base.integrationPreview ?? { auto: false },
     ownerRootUpdates: command.ownerRootUpdates ?? base.ownerRootUpdates,
     laneUpdates: command.laneUpdates ?? base.laneUpdates,
     lifecycle: { ...base.lifecycle, ...command.lifecycle },

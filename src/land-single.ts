@@ -1,3 +1,4 @@
+import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 // SPDX-License-Identifier: Apache-2.0
 import { finishChild } from './agent-finish-journal.js';
 import { ForgeError } from './errors.js';
@@ -40,6 +41,19 @@ export async function landSingle(
   const runId = child('run');
   options.onRun?.(runId);
   if (options.cancelled?.()) return { status: 'cancelled' };
+  if (command.channel === 'main' && !store.select('runs', runId)) {
+    const preview = previewLanding(store, view.inputs, {
+      skip: command.preview === 'skip',
+      ...(single.previous ? { base: single.previous } : {}),
+    });
+    if (preview?.excluded.length)
+      return {
+        status: 'preview-excluded',
+        code: 'INTEGRATION_PREVIEW_EXCLUDED',
+        message: previewExclusionMessage,
+        preview,
+      };
+  }
   await phase({
     action: 'run-check',
     operationId: runId,

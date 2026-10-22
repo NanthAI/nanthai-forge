@@ -101,6 +101,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   }),
   z.object({
     action: z.literal('finish'),
+    preview: z.literal('skip').optional(),
     frictionIds: z.array(id).optional(),
     scope: peersScopeSchema.optional(),
     priority: z.enum(['urgent', 'normal']).optional(),

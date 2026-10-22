@@ -14,6 +14,16 @@ export const landingEntrySchema = z.object({
   environment: head,
   environmentSnapshot: checkEnvironmentSchema.optional(),
   reason: z.string().optional(),
+  preview: z.literal('skip').optional(),
+  previewDiagnostic: z
+    .object({
+      main: z.string().optional(),
+      key: z.string().optional(),
+      errors: z.array(z.string()),
+      laneId: id,
+      head,
+    })
+    .optional(),
   arrivedAt: z.string(),
   priority: z.enum(['urgent', 'normal']).default('normal'),
   submitter: z.string(),

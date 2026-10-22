@@ -29,6 +29,7 @@ export type PendingData = Pick<
 > &
   Partial<Pick<WorkData, 'intents'>>;
 export type PendingObservations = {
+  integrationPreview?: string | undefined;
   autoExchange?: AutoExchangeStatus;
   overlap?: OverlapPlan;
   recovery?: RecoveryCaptureObservation | null;
@@ -195,6 +196,7 @@ export function pendingStatus(
   return {
     overlap: observed.overlap ?? { groups: [], coverage: 'unknown' },
     schema: 1,
+    integrationPreview: observed.integrationPreview,
     snapshot: { observedAt: now, workRevision: data.revision, scope: 'local-saved-records' },
     main: { head: mainHead, acceptanceId: main?.id ?? null, acceptedAt: main?.at ?? null },
     lanes,

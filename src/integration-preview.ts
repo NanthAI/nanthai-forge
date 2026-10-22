@@ -22,7 +22,7 @@ const inputSchema = z
   })
   .strict();
 type Pair = { laneIds: string[]; heads: string[]; errors: string[]; noticeId: string };
-type PreviewResult = {
+export type PreviewResult = {
   key: string;
   main: string;
   inputs: { laneId: string; head: string }[];
@@ -47,33 +47,52 @@ export function integrationPreview(store: WorkStore, input: unknown) {
     'BAD_ARGUMENT',
     'Select each Lane once.',
   );
+  return previewPinned(store, command.laneIds);
+}
+
+/** Internal landing path: saved request pins, never reselect mutable Lane heads. */
+export function previewPinned(
+  store: WorkStore,
+  laneIds?: string[],
+  pins?: { laneId: string; head: string }[],
+  base?: string,
+) {
   return workLocked(
     join(store.directory, 'integration-preview.lock'),
     () => {
       const started = performance.now();
       const data = store.load(),
-        lanes = data.lanes
+        selected = data.lanes
           .filter(
             lane =>
-              lane.state === 'active' &&
-              lane.checkpoints.length &&
-              (!command.laneIds || command.laneIds.includes(lane.id)),
+              lane.state === 'active' && lane.checkpoints.length && (!laneIds || laneIds.includes(lane.id)),
           )
-          .sort((a, b) => a.id.localeCompare(b.id));
+          .sort((a, b) => a.id.localeCompare(b.id)),
+        lanes = pins
+          ? pins
+              .map(pin => {
+                const lane = data.lanes.find(lane => lane.id === pin.laneId);
+                invariant(lane, 'INTEGRATION_LANE_UNAVAILABLE', 'Pinned Lane is unavailable.');
+                return { ...lane, head: pin.head };
+              })
+              .sort((a, b) => a.id.localeCompare(b.id))
+          : selected;
       invariant(
-        !command.laneIds || lanes.length === command.laneIds.length,
+        !laneIds || lanes.length === laneIds.length,
         'INTEGRATION_LANE_UNAVAILABLE',
         'Every selected Lane must be active with a saved checkpoint.',
       );
-      const main = (store.native ? nativeChannels(data) : channelStatus(store, data)).find(
-        channel => channel.name === 'main',
-      )?.head;
+      const main =
+        base ??
+        (store.native ? nativeChannels(data) : channelStatus(store, data)).find(
+          channel => channel.name === 'main',
+        )?.head;
       invariant(main, 'INTEGRATION_MAIN_UNAVAILABLE', 'Integration preview needs an accepted main Channel.');
       const source = new PeersSource(store, ''),
         checks = previewChecks(source, main, data.checks),
         inputs = lanes.map(lane => ({ laneId: lane.id, head: lane.head })),
         key = digest(
-          JSON.stringify(['integration-v1', main, inputs, checks, checkEnvironment().fingerprint]),
+          JSON.stringify(['integration-v2', main, inputs, checks, checkEnvironment().fingerprint]),
         ),
         cache = new PeersCache(store.root),
         cached = cache.read<PreviewResult>(`integration:${key}`),
@@ -92,7 +111,12 @@ export function integrationPreview(store: WorkStore, input: unknown) {
         notices: [],
         durationMs: 0,
       };
-      if (lanes.length && checks.length) {
+      if (
+        lanes.length &&
+        (checks.length ||
+          source.state(main).files.some(file => file.path === 'convex/schema.ts') ||
+          lanes.some(lane => source.state(lane.head).files.some(file => file.path === 'convex/schema.ts')))
+      ) {
         const runner = new PreviewChecks(store, source, lanes, checks);
         try {
           const observations = new Map<string, PreviewObservation>();

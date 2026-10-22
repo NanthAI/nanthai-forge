@@ -1,3 +1,4 @@
+import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landingConflictPeers } from './landing-conflict-peers.js';
 import { landingOverlap } from './landing-overlap.js';
@@ -82,6 +83,7 @@ export async function enqueueLanding(work: WorkService, command: FinishAction, v
       ...(command.expectedEnvironment === undefined || command.expectedEnvironment === environment.fingerprint
         ? { environmentSnapshot: environment }
         : {}),
+      ...(command.preview ? { preview: command.preview } : {}),
       arrivedAt: new Date().toISOString(),
       priority: command.priority ?? 'normal',
       submitter: command.actor ?? work.actor.id,
@@ -228,12 +230,36 @@ export function selectBatch(
 }
 /** Prefix Views carry every pinned Lane and dependency, across Intent boundaries. */
 export async function composeBatch(work: WorkService, batch: LandingBatch) {
+  const entries = batch.entryIds.map(id => work.store.select('landingEntries', id)!);
+  const preview =
+    batch.channel === 'main'
+      ? previewLanding(
+          work.store,
+          entries.flatMap(entry => work.store.select('views', entry.viewId)!.inputs),
+          {
+            base: batch.base,
+            skip: entries.every(entry => entry.preview === 'skip'),
+            protectedLaneIds: entries
+              .filter(entry => entry.preview === 'skip')
+              .flatMap(entry => work.store.select('views', entry.viewId)!.inputs.map(pin => pin.laneId)),
+          },
+        )
+      : undefined;
+  const rejected = new Map(
+    entries.flatMap(entry => {
+      const diagnostic = preview?.excluded.find(exclusion =>
+        work.store.select('views', entry.viewId)!.inputs.some(pin => pin.laneId === exclusion.laneId),
+      );
+      return diagnostic ? [[entry.id, diagnostic] as const] : [];
+    }),
+  );
   const source = new NativeSource(work.store.root);
   let head = batch.base;
   const prefixes: LandingBatch['prefixes'] = [],
     conflicts: LandingBatch['conflicts'] = [];
   const views: WorkView[] = [];
   for (const entryId of batch.entryIds) {
+    if (rejected.has(entryId)) continue;
     const entry = work.store.select('landingEntries', entryId)!;
     const candidate = work.store.select('views', entry.viewId)!;
     const previous = views.filter(view => view.status === 'clean').at(-1);
@@ -288,6 +314,12 @@ export async function composeBatch(work: WorkService, batch: LandingBatch) {
     saved.prefixes = prefixes;
     saved.conflicts = conflicts;
     saved.status = 'checking';
+    for (const [id, diagnostic] of rejected) {
+      const entry = data.landingEntries!.find(entry => entry.id === id)!;
+      entry.status = 'failed';
+      entry.reason = previewExclusionMessage;
+      entry.previewDiagnostic = { ...diagnostic, main: preview!.main, key: preview!.key };
+    }
     for (const conflict of conflicts) {
       const entry = data.landingEntries!.find(entry => entry.id === conflict.entryId)!;
       entry.status = 'conflict';

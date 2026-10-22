@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { convexSchemaErrors } from './integration-preview-schema.js';
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -46,7 +47,10 @@ export class PreviewChecks {
       workspace = join(run, 'workspace');
     try {
       this.source.materialize(head, workspace, false);
-      this.prepareDependencies(workspace);
+      const schema = join(workspace, 'convex/schema.ts');
+      const errors = existsSync(schema) ? convexSchemaErrors(readFileSync(schema, 'utf8')) : [];
+      if (errors.length) return { status: 'failed', errors };
+      if (this.checks.length) this.prepareDependencies(workspace);
       for (const check of this.checks) {
         const environment = checkProcessEnvironment(check as Check, checkEnvironment(), run);
         environment.prepare();

@@ -1,3 +1,4 @@
+import { integrationPreviewStatus } from './integration-preview-auto.js';
 // SPDX-License-Identifier: Apache-2.0
 import { stackStatus } from './agent-stack.js';
 import { readHandoff } from './agent-handoff.js';
@@ -64,6 +65,7 @@ type Landed = {
 };
 export type PeersDigest = {
   stack?: ReturnType<typeof stackStatus>;
+  integration?: string | undefined;
   handoff?: ReturnType<typeof handoffSummary>;
   clear?: true;
   v?: 1;
@@ -107,6 +109,8 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
       tx?.fields('lanes', command.laneId)?.record ?? legacy?.lanes.find(item => item.id === command.laneId);
     invariant(lane, 'NOT_FOUND', 'Peers Lane not found.');
     if (lane.stack) result.stack = stackStatus(store, lane);
+    const integration = integrationPreviewStatus(store);
+    if (integration) result.integration = integration;
     const handoff = readHandoff(store, lane.id).result.handoff;
     if (handoff) result.handoff = handoffSummary(handoff);
     const notices =
@@ -166,6 +170,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
           coverage: 'local',
           ownership: result.ownership,
           ...(result.stack ? { stack: result.stack } : {}),
+          ...(result.integration ? { integration: result.integration } : {}),
           ...(result.handoff ? { handoff: result.handoff } : {}),
           ...(result.notices ? { notices: result.notices } : {}),
           ...(result.inbox ? { inbox: result.inbox } : {}),
@@ -173,7 +178,11 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
         command.detail,
       );
     if (!scope.length)
-      return result.notices?.length || result.inbox?.length || result.handoff || result.stack
+      return result.notices?.length ||
+        result.inbox?.length ||
+        result.handoff ||
+        result.integration ||
+        result.stack
         ? boundPeers(result, command.detail)
         : { clear: true };
     const moves: ChannelMove[] = [];
@@ -450,6 +459,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     !result.notices?.length &&
     !result.inbox?.length &&
     !result.handoff &&
+    !result.integration &&
     !result.stack
   )
     return { clear: true };

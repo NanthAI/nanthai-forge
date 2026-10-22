@@ -1,3 +1,4 @@
+import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 // SPDX-License-Identifier: Apache-2.0
 import { strandedActionsRun } from './github-actions-recovery.js';
 import { land } from './land.js';
@@ -252,6 +253,23 @@ class FinishRunner {
             }
           : {}),
       });
+    }
+    if (
+      command.accept?.channel === 'main' &&
+      !store.select('runs', attempt.operations.run) &&
+      !store.select('landingEntries', command.operationId)
+    ) {
+      const preview = previewLanding(store, store.select('views', view.viewId as string)!.inputs, {
+        skip: command.preview === 'skip',
+      });
+      if (preview?.excluded.length)
+        return this.stop(attempt, {
+          phase: 'preview',
+          status: 'preview-excluded',
+          code: 'INTEGRATION_PREVIEW_EXCLUDED',
+          message: previewExclusionMessage,
+          preview,
+        });
     }
     const batched = await finishQueuedBatch(this.work, command, attempt);
     if (batched) {

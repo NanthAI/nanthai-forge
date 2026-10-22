@@ -648,3 +648,25 @@ claims, ownership and “sync after” remain advice. There are no locks on regi
 quotas, access changes, confirmations or new acceptance requirements. Existing
 dependency, check, review, retry and undo rules still apply. Missing analysis is reported as
 incomplete and does not become evidence of independence.
+
+## Automatic local integration preview
+
+Enable it for an owner with
+`nforge agent ROOT set-policy '{"integrationPreview":{"auto":true}}'`
+(and disable it with `auto:false`). It is off by default. Checkpoints and syncs
+wake a finite, debounced local worker over main and saved active Lanes. Read its
+one-line state in `peers` or pending status; `integrate` returns exact cached pins
+and diagnostics. Unsaved files are excluded and no remote runner is called.
+
+Use `define-check` with `static:true` to mark each existing fast local command
+(`name`, `executable`, `args`, and optional `environmentLabel`). Marked commands
+replace the fallback `package.json` `typecheck`/`lint` scripts. A built-in static
+check also detects duplicate literal index names per table in `convex/schema.ts`
+without loading the schema or calling Convex. Static commands still run with OS
+rights in the normal private check environment.
+
+When enabled, landing previews exclude failing individuals and one member of a
+failing pair before the normal landing check. Results identify the exact saved
+inputs and diagnostic. Safe inputs in `land` continue; a grouped `finish` stops
+with `preview-excluded`. To override, submit a new `finish` or `land` operation
+with `preview:"skip"`; this preserves the ordinary check and acceptance policy.

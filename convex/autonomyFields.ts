@@ -41,6 +41,7 @@ export const autonomyPolicy = v.object({
       fallback: v.optional(v.union(v.literal('manual'), v.literal('local'))),
     }),
   ),
+  integrationPreview: v.optional(v.object({ auto: v.boolean() })),
   ownerRootUpdates: v.optional(v.boolean()),
   laneUpdates: v.union(v.literal('auto'), v.literal('ask')),
   lifecycle: v.object({ completeOnAccept: v.boolean(), cleanRegenerableCopies: v.boolean() }),

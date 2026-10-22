@@ -15,7 +15,7 @@ export function formatPendingStatus(value: PendingStatus) {
     .map(lane => `${lane.status} ${lane.laneId.slice(0, 8)} ${oneLine(lane.name).slice(0, 70)}`);
   const lines = [
     `Pending work · revision ${value.snapshot.workRevision} · ${value.snapshot.observedAt}`,
-    `Main: ${pin(value.main.head)}`,
+    `Main: ${pin(value.main.head)}${value.integrationPreview ? ` · Integration preview: ${oneLine(value.integrationPreview)}` : ''}`,
     `Lanes: ${value.counts.ready} ready · ${value.counts.waiting} waiting · ${value.counts.checking} checking (recorded states)`,
     ...(handoff
       ? [

@@ -1,3 +1,4 @@
+import { scheduleIntegrationPreview } from './integration-preview-auto.js';
 import { recordHandoff, readHandoff } from './agent-handoff.js';
 import { captureAutomatic, frictionReceipt } from './friction-auto.js';
 import { withRetryObservation } from './friction-retry.js';
@@ -171,6 +172,11 @@ export class AgentWorkflow {
           () => this.action(command),
         ),
     );
+    if (
+      command.action === 'checkpoint' ||
+      (command.action === 'sync' && (response.result as { status?: string }).status !== 'conflict')
+    )
+      scheduleIntegrationPreview(store);
     const friction = frictionReceipt(store, command, response.result);
     const ownershipStop =
       command.action === 'take' && (response.result as { status: string }).status === 'ownership';
@@ -679,7 +685,7 @@ export class AgentWorkflow {
       expectedHead: head,
       channel: command.accept!.channel,
     };
-    return retryWorkPhase(
+    const response = await retryWorkPhase(
       operationId,
       () =>
         (this.work.store.native ? agentSync : agentGitSync)(this.work.store, sync, {
@@ -691,6 +697,9 @@ export class AgentWorkflow {
         }),
       ['WORK_BUSY'],
     );
+    if ((response.result as { status?: string }).status !== 'conflict')
+      scheduleIntegrationPreview(this.work.store);
+    return response;
   }
   private async finishCheckpoint(command: FinishAction) {
     const store = this.work.store;
@@ -723,6 +732,7 @@ export class AgentWorkflow {
         } catch {
           /* Advisory coordination never invalidates a saved checkpoint. */
         }
+        scheduleIntegrationPreview(store);
         queueAgentSync(store, command, response.result, true);
         return response;
       },

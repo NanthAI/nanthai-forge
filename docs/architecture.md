@@ -674,12 +674,25 @@ Omitting `laneIds` selects every active Lane with a checkpoint; unsaved edits ar
 excluded. The preview uses the existing in-memory source composition and disposable
 workspace materialization, for native owners and Git compatibility workspaces.
 It never creates a Candidate, moves a Channel, runs a landing check, or calls a
-remote runner. Automatic checkpoint previews are not enabled.
+remote runner. `set-policy {integrationPreview:{auto:true}}` enables automatic local
+previews for this owner; the default is false. Successful checkpoints and syncs
+(including finish's saved phases) wake a detached finite worker. A 200 ms quiet
+window coalesces bursts across processes, one owner drain processes the latest
+saved request, and the existing preview lock also serializes manual previews.
+Requests arriving during checks trigger another pass. The worker exits as soon as
+it catches up: no idle timers, polling, subscriptions or remote calls. Failures
+are advisory local status; the checkpoint reply never waits for checks. Disable
+future work with `set-policy {integrationPreview:{auto:false}}`; saved source and
+notices are retained. `peers` and pending status include one compact observation.
 
 Checks marked `static:true` through `define-check` are the configured fast commands.
 Without marked checks, the existing `package.json` scripts `typecheck` and `lint`
 are selected when present, with npm lifecycle hooks disabled. Missing configuration
-is reported as `not-configured`, never as a passing check. Commands run locally
+is reported as `not-configured`, never as a passing check. When `convex/schema.ts`
+exists in a composed input, a built-in source-only TypeScript AST check rejects
+duplicate literal index names on each `defineTable` chain (including search and
+vector indexes). It never loads schema code or contacts Convex; computed names
+and cross-file schema construction remain outside this static check. Commands run locally
 with the normal clean check environment and private HOME/XDG/temp directories;
 explicit check environment/credential passthrough still applies. Static commands
 execute repository code with OS rights; disposable workspaces are not sandboxes.
@@ -694,8 +707,21 @@ check diagnostic lines. Text conflicts, failing main, individual failures, and
 higher-order failures without a failing pair remain distinct observations.
 The existing coordination journal retains an advisory notice for both participants;
 local brief messages include the pinned diagnostics and peers surfaces the advice
-while both saved heads remain current. Notices require no acknowledgement and do
-not establish a landing order, block acceptance, or serve as acceptance evidence.
+while both saved heads remain current. Notices require no acknowledgement and never serve as acceptance evidence.
+
+With automatic previews enabled, `land` previews precisely its saved selection
+and `finish` previews its saved Candidate inputs before a landing check starts.
+The batch driver also previews the actual queued batch against its pinned base,
+including independently submitted finishes. Exact cached inputs are reused.
+Failing individuals are excluded; for a failing pair, the later selected input is
+excluded while the first is retained. Exclusions retain main, Lane/head, cache key
+and diagnostic pins in the result; safe selected Lanes continue through normal
+checks. A grouped finish stops with `preview-excluded` if any input is excluded.
+Submit a new operation with `preview:"skip"` on `finish` or `land` to override this
+preflight (ordinary landing checks still apply). A skipped queued entry is never
+excluded by another entry's preview. Baseline failures, text conflicts, missing
+configuration, higher-order-only failures and unavailable preview execution use
+the existing landing/check path; preview advice never substitutes for evidence.
 
 A per-owner preview lock serializes execution. The disposable cache keys accepted
 main, ordered Lane/head pins, static definitions and the clean runtime fingerprint.

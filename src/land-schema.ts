@@ -2,6 +2,7 @@
 import { z } from 'zod';
 export const landSchema = z.object({
   action: z.literal('land'),
+  preview: z.literal('skip').optional(),
   operationId: z.uuid().optional(),
   laneIds: z.array(z.uuid()).min(1),
   message: z.string().trim().min(1).max(500).optional(),

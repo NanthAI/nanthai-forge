@@ -35,6 +35,7 @@ export async function land(
     join(store.directory, 'land-queue', command.operationId),
     async () => {
       const journal = new LandJournal(store, command, selection);
+      journal.preflight(store, command);
       const pins = new Map(
         journal.state.entries.flatMap(entry => entry.inputs).map(pin => [pin.laneId, pin.head]),
       );
@@ -217,6 +218,9 @@ export async function land(
                 runId: queued.runId,
                 acceptanceId: queued.acceptanceId,
                 viewId: queued.conflictViewId ?? queued.viewId,
+                ...(queued.previewDiagnostic
+                  ? { code: 'INTEGRATION_PREVIEW_EXCLUDED', preview: queued.previewDiagnostic }
+                  : {}),
                 ...(queued.conflictViewId
                   ? { conflict: store.select('views', queued.conflictViewId)?.details }
                   : {}),
