@@ -99,7 +99,11 @@ export async function source(
   await ctx.runQuery(internal.projectBackups.get, { id: backupId, owner });
   return { ...original, manifest, data, originalWorkDigest: file.sha256, publication };
 }
-const event = (projectKey: string, archiveSha256: string, item: Doc<'projectWorkEvents'>): HostedEvent => ({
+export const journalEvent = (
+  projectKey: string,
+  archiveSha256: string,
+  item: Doc<'projectWorkEvents'>,
+): HostedEvent => ({
   projectKey,
   archiveSha256,
   id: item.operationId,
@@ -156,7 +160,7 @@ export async function load(
           paginationOpts: { cursor, numItems: 100, maximumBytesRead: 500000, maximumRowsRead: 100 },
         });
       for (const item of page.page) {
-        const operation = event(project.key, snapshot.backup.digest, item);
+        const operation = journalEvent(project.key, snapshot.backup.digest, item);
         snapshot.data = migrateHostedIntents(snapshot.data, project.work.intentMigration);
         applyHostedEvent(snapshot.data, operation);
         events.push(operation);

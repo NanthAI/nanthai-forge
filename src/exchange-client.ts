@@ -1,3 +1,4 @@
+import { pendingProgressGuard } from './long-action.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
   METADATA_PUBLICATION,
@@ -647,7 +648,9 @@ export class ConvexExchange implements ExchangeTransport {
       : undefined;
     try {
       let first = true;
+      const guard = pendingProgressGuard('source return', operationId);
       while (true) {
+        const statusProbe = first && !!this.onReturnProgress;
         const result = await retryExchange('source return', operationId, () =>
           this.client.action(action('projectSourceReturn:returnSource'), {
             projectId: this.projectId,
@@ -675,12 +678,15 @@ export class ConvexExchange implements ExchangeTransport {
           });
           return result;
         }
+        // The initial status probe does no work and cannot count as a stalled continuation.
+        if (!(first && this.onReturnProgress)) guard(result.progress);
         if (result.progress)
           this.onReturnProgress?.({
             ...JSON.parse(result.progress),
             resumed: first && result.resumed === true,
           });
         first = false;
+        if (!statusProbe) await new Promise<void>(resolve => setImmediate(resolve));
       }
     } catch (error) {
       throw hostedActionError(error, 'source return');

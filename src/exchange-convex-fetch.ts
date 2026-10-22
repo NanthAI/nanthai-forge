@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { exchangeFetch, type ExchangeRequestOptions } from './exchange-request.js';
 import { ForgeError } from './errors.js';
+import { LONG_ACTION_DEADLINE_MS, pendingProgressGuard } from './long-action.js';
 import { Agent, type Dispatcher } from 'undici';
 
 // Node fetch otherwise inherits Undici's five-minute header deadline. Override
 // the dispatched request as well as our AbortController deadline.
 class LongActionAgent extends Agent {
   override dispatch(options: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) {
-    return super.dispatch({ ...options, headersTimeout: 600_000 }, handler);
+    return super.dispatch({ ...options, headersTimeout: LONG_ACTION_DEADLINE_MS }, handler);
   }
 }
 const actionDispatcher = new LongActionAgent();
@@ -72,25 +73,51 @@ export function exchangeConvexFetch(
         replaySafe.has(name) ||
         (receiptCalls.has(name) && typeof payload.args?.[0]?.operationId === 'string'),
       longAction = String(url).endsWith('/api/action') && longActions.has(name);
+    const continuable =
+      longAction && ['projectExchangeActions:publish', 'projectWorkIndexActions:ensure'].includes(name);
+    const guard = pendingProgressGuard(name, payload.args?.[0]?.operationId ?? name);
+    let progressName: string | undefined;
     onCall?.(name, true);
     try {
       const request: RequestInit & { dispatcher?: Dispatcher } = {
         ...init,
         ...(longAction ? { dispatcher: actionDispatcher } : {}),
       };
-      const response = await exchangeFetch(name, url, request, {
-        // Actions may rebuild retained Work before sending any response bytes.
-        ...(longAction ? { headerTimeoutMs: 600_000, totalTimeoutMs: 600_000 } : {}),
-        ...options,
-        retries: safe ? (options.retries ?? 3) : 0,
-      });
-      if (response.status === 429 || (response.status >= 500 && response.status !== 560))
-        throw new ForgeError(
-          'EXCHANGE_REQUEST_FAILED',
-          `${name} returned HTTP ${response.status} after bounded retries. Retry the original operation to reconcile its outcome.`,
-        );
-      return response;
+      while (true) {
+        if (continuable) request.body = JSON.stringify(payload);
+        const response = await exchangeFetch(name, url, request, {
+          // Actions may rebuild retained Work before sending any response bytes.
+          ...(longAction
+            ? { headerTimeoutMs: LONG_ACTION_DEADLINE_MS, totalTimeoutMs: LONG_ACTION_DEADLINE_MS }
+            : {}),
+          ...options,
+          retries: safe ? (options.retries ?? 3) : 0,
+        });
+        if (response.status === 429 || (response.status >= 500 && response.status !== 560))
+          throw new ForgeError(
+            'EXCHANGE_REQUEST_FAILED',
+            `${name} returned HTTP ${response.status} after bounded retries. Retry the original operation to reconcile its outcome.`,
+          );
+        if (continuable && response.ok) {
+          const envelope = await response
+            .clone()
+            .json()
+            .catch(() => null);
+          const value = envelope?.status === 'success' ? envelope.value : null;
+          if (value?.pending === true) {
+            guard(value.progress);
+            payload.args[0].continuation = true;
+            if (progressName) onCall?.(progressName, false);
+            progressName = `${name}: ${value.progress ?? 'pending'}`;
+            onCall?.(progressName, true);
+            await new Promise(resolve => setTimeout(resolve, 0));
+            continue;
+          }
+        }
+        return response;
+      }
     } finally {
+      if (progressName) onCall?.(progressName, false);
       onCall?.(name, false);
     }
   };

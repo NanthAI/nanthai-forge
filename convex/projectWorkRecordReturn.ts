@@ -53,6 +53,7 @@ export async function recordReturn(
   backup: Doc<'projectBackups'>,
   prior: Doc<'projectBackups'>,
   priorAt?: string,
+  actionStarted = Date.now(),
 ) {
   const skip = (reason: string) => {
     console.log('source-return record skip', { reason, revision: input.revision });
@@ -301,15 +302,22 @@ export async function recordReturn(
   );
   invariant(stage, 'WORK_STALE', 'Record-delta staging changed.');
   return {
-    receipt: await returnProgress(ctx, stage, input, owner, {
-      snapshot: { data: context.current, manifest: candidate.manifest, backup },
-      previous: { data: context.previous, manifest: previous.manifest, backup: prior },
-      final,
-      generationId: generation._id,
-      generation,
-      ownerDerived,
-      partial: true,
-      metadataOnly: true,
-    }),
+    receipt: await returnProgress(
+      ctx,
+      stage,
+      input,
+      owner,
+      {
+        snapshot: { data: context.current, manifest: candidate.manifest, backup },
+        previous: { data: context.previous, manifest: previous.manifest, backup: prior },
+        final,
+        generationId: generation._id,
+        generation,
+        ownerDerived,
+        partial: true,
+        metadataOnly: true,
+      },
+      actionStarted,
+    ),
   };
 }

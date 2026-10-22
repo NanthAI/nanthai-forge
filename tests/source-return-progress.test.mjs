@@ -97,3 +97,46 @@ test('CLI probes saved inner progress while a long return action is still runnin
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(calls.length, 3);
 });
+
+test('many advancing pending responses stay healthy and preserve the one original operation', async () => {
+  const exchange = Object.create(ConvexExchange.prototype),
+    calls = [],
+    receipt = { revision: 99 };
+  exchange.projectId = 'project';
+  exchange.client = {
+    action: async (_ref, args) => {
+      calls.push(args);
+      return calls.length <= 25
+        ? { pending: true, progress: JSON.stringify({ phase: 'journal', done: calls.length, total: 25 }) }
+        : receipt;
+    },
+  };
+  assert.equal(await exchange.returnSource('next', 'prior', 1, 'original'), receipt);
+  assert.equal(calls.length, 26);
+  assert(calls.every(c => c.operationId === 'original' && c.continuation));
+});
+
+test('repeated pending without saved progress fails with the original-operation resume instruction', async () => {
+  const exchange = Object.create(ConvexExchange.prototype);
+  exchange.projectId = 'project';
+  let calls = 0;
+  exchange.client = {
+    action: async () => ({
+      pending: true,
+      progress: JSON.stringify({
+        phase: 'journal',
+        step: 1,
+        done: 1,
+        total: 20,
+        elapsedMs: ++calls * 1000,
+        invocations: calls,
+        storageBytes: calls * 100,
+      }),
+    }),
+  };
+  await assert.rejects(
+    exchange.returnSource('next', 'prior', 1, 'original'),
+    e => e.code === 'EXCHANGE_ACTION_STALLED' && /original.*Retry the original operation/.test(e.message),
+  );
+  assert.equal(calls, 6);
+});

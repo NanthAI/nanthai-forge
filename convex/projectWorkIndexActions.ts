@@ -9,11 +9,16 @@ import { caller, load } from './projectWorkActions';
 import { digest } from '../src/hash';
 import { workBytes } from '../src/work-metadata';
 import { report } from './errors';
+import { ForgeError } from '../src/errors';
+import { longActionExpired } from '../src/long-action';
 async function ensureIndex(
   ctx: ActionCtx,
   projectId: Id<'hostedProjects'>,
   owner: string,
-): Promise<Id<'projectWorkGenerations'>> {
+  resumable = true,
+): Promise<Id<'projectWorkGenerations'> | { pending: true; progress: string }> {
+  const started = Date.now();
+  const expired = () => resumable && longActionExpired(started);
   while (true) {
     const existing: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
       internal.projectWorkIndexStore.current,
@@ -33,7 +38,19 @@ async function ensureIndex(
         metadata: JSON.stringify(projection.metadata),
       },
     );
-    if (!generation) continue;
+    const pending = () => ({
+      pending: true as const,
+      progress: JSON.stringify({
+        phase: 'index',
+        step: generation?.nextBatch ?? 0,
+        done: generation?.nextBatch ?? 0,
+        total: 0,
+      }),
+    });
+    if (!generation) {
+      if (expired()) return pending();
+      continue;
+    }
     if (generation.status === 'ready') {
       if (
         await ctx.runMutation(internal.projectWorkIndexStore.publish, {
@@ -45,6 +62,7 @@ async function ensureIndex(
         })
       )
         return generation._id;
+      if (expired()) return pending();
       continue;
     }
     let current = true,
@@ -61,6 +79,11 @@ async function ensureIndex(
       }
       batch++;
       if (!current) break;
+      if (batch > generation.nextBatch && expired())
+        return {
+          pending: true,
+          progress: JSON.stringify({ phase: 'index', step: batch, done: batch, total: 0 }),
+        };
     }
     if (
       current &&
@@ -73,16 +96,26 @@ async function ensureIndex(
       }))
     )
       return generation._id;
+    if (expired()) return pending();
   }
 }
 export const ensureInternal = internalAction({
   args: { projectId: v.id('hostedProjects'), owner: v.string() },
   returns: v.id('projectWorkGenerations'),
-  handler: async (ctx, input) => ensureIndex(ctx, input.projectId, input.owner),
+  handler: async (ctx, input): Promise<Id<'projectWorkGenerations'>> => {
+    const result = await ensureIndex(ctx, input.projectId, input.owner, false);
+    if (typeof result === 'string') return result;
+    // Internal commands retain their existing receipt-only contract. Their
+    // caller cannot consume an index continuation as a completed command.
+    throw new ForgeError('INTERNAL_ERROR', 'Internal index preparation returned an unexpected continuation.');
+  },
 });
 export const ensure = action({
-  args: { projectId: v.id('hostedProjects') },
-  returns: v.id('projectWorkGenerations'),
+  args: { projectId: v.id('hostedProjects'), continuation: v.optional(v.boolean()) },
+  returns: v.union(
+    v.id('projectWorkGenerations'),
+    v.object({ pending: v.literal(true), progress: v.string() }),
+  ),
   handler: async (ctx, { projectId }) => {
     try {
       return await ensureIndex(ctx, projectId, await caller(ctx));

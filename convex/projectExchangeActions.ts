@@ -183,12 +183,13 @@ export const published = action({
 export const publish = action({
   args: {
     ...publicationFields,
+    continuation: v.optional(v.boolean()),
     metadataOnly: v.optional(v.literal(1)),
     displayProtocol: v.optional(v.number()),
     ownerDerived: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   },
-  returns: v.id('projectBackups'),
-  handler: async (ctx, input): Promise<Id<'projectBackups'>> => {
+  returns: v.union(v.id('projectBackups'), v.object({ pending: v.literal(true), progress: v.string() })),
+  handler: async (ctx, input): Promise<Id<'projectBackups'> | { pending: true; progress: string }> => {
     try {
       const { owner, request, original } = await publicationReceipt(ctx, input);
       if (original) return original;
@@ -197,7 +198,13 @@ export const publish = action({
         ctx,
         { projectId: input.projectId, operationId: input.operationId, owner, request },
         async () => {
-          const { metadataOnly, displayProtocol: _displayProtocol, ...rawInput } = input;
+          const {
+            metadataOnly,
+            continuation: _continuation,
+            displayProtocol: _displayProtocol,
+            ...rawInput
+          } = input;
+          void _continuation;
           void _displayProtocol;
           const legacyInput = { ...rawInput, displayProtocol: 3 as const };
           if (metadataOnly) {

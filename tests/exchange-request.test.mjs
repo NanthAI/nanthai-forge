@@ -370,7 +370,7 @@ test('R2 GET tracking names the pending call and clears both successful and fail
   }
 });
 
-test('long actions keep the full ten-minute header and total budget; quick calls keep short deadlines', async t => {
+test('long actions keep the seven-minute header and total deadline; quick calls keep short deadlines', async t => {
   const realTimeout = globalThis.setTimeout,
     timers = [];
   t.mock.method(globalThis, 'setTimeout', (fn, ms, ...args) => {
@@ -392,7 +392,7 @@ test('long actions keep the full ten-minute header and total budget; quick calls
   ]) {
     timers.length = 0;
     await fetch('https://fixture.invalid/api/action', { body: JSON.stringify({ path, args: [{}] }) });
-    assert.deepEqual(timers.slice(0, 2), [600000, 600000], path);
+    assert.deepEqual(timers.slice(0, 2), [420000, 420000], path);
   }
   for (const [api, path] of [
     ['query', 'projectWorkJournal:page'],
@@ -440,7 +440,7 @@ test('long actions override the native HTTP header deadline at dispatch; quick c
     body: JSON.stringify({ path: 'projectExchangeActions:publish', args: [{}] }),
   });
   assert.equal(dispatched.length, 1);
-  assert.equal(dispatched[0].headersTimeout, 600000);
+  assert.equal(dispatched[0].headersTimeout, 420000);
   await fetch('https://fixture.invalid/api/query', {
     body: JSON.stringify({ path: 'projectWorkJournal:page', args: [{}] }),
   });
@@ -483,6 +483,61 @@ test('a completed request never aborts its closed response stream', async t => {
   );
   assert.equal(reads, 2);
   assert.equal(aborts, 0);
+});
+
+test('pending long actions continue the exact payload immediately and expose saved progress', async t => {
+  const events = [];
+  const f = await fixture(t, (_req, res, n) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(
+      JSON.stringify({
+        status: 'success',
+        value:
+          n < 10
+            ? { pending: true, progress: JSON.stringify({ phase: 'index', step: n, done: n, total: 10 }) }
+            : 'receipt',
+      }),
+    );
+  });
+  const client = new ConvexHttpClient(f.url, {
+    skipConvexDeploymentUrlCheck: true,
+    fetch: exchangeConvexFetch(deadlines, (name, pending) => events.push({ name, pending })),
+  });
+  assert.equal(
+    await client.action(makeFunctionReference('projectExchangeActions:publish'), {
+      operationId: 'original',
+      digest: 'pinned',
+      size: 1,
+    }),
+    'receipt',
+  );
+  assert.equal(f.requests.length, 10);
+  const args = f.requests.map(r => JSON.parse(r.body).args[0]);
+  assert.equal(args[0].continuation, undefined);
+  assert(args.slice(1).every(a => a.continuation === true));
+  assert(args.every(a => a.operationId === 'original' && a.digest === 'pinned' && a.size === 1));
+  assert(events.some(e => e.pending && e.name.includes('"done":9')));
+});
+
+test('HTTP pending with changing elapsed time but no saved position stops finitely', async t => {
+  const f = await fixture(t, (_req, res, n) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(
+      JSON.stringify({
+        status: 'success',
+        value: { pending: true, progress: JSON.stringify({ phase: 'index', step: 1, elapsedMs: n * 1000 }) },
+      }),
+    );
+  });
+  const client = new ConvexHttpClient(f.url, {
+    skipConvexDeploymentUrlCheck: true,
+    fetch: exchangeConvexFetch(deadlines),
+  });
+  await assert.rejects(
+    client.action(makeFunctionReference('projectWorkIndexActions:ensure'), { projectId: 'project' }),
+    /no committed progress.*Retry the original operation/,
+  );
+  assert.equal(f.requests.length, 6);
 });
 
 test('redirected Convex storage/recipe reads bound headers and the complete body', async t => {

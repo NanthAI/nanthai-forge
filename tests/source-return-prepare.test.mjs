@@ -148,7 +148,9 @@ for (const records of [true, false])
       statusOnly: true,
     });
     assert.equal(progress.resumed, true);
-    assert.equal(JSON.parse(progress.progress).step, 1);
+    assert.equal(JSON.parse(progress.progress).phase, 'journal');
+    assert.equal(JSON.parse(progress.progress).done, 0);
+    assert.equal(JSON.parse(progress.progress).total, 1);
     // No process memo participates in the preparation cursor.
     const cursors = await import(moduleUrl('../convex/projectSourceReturnCursor.ts'));
     cold = cursors.forgetReturnCursors;

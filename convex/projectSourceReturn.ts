@@ -55,6 +55,7 @@ export const returnSource = action({
     unmetered,
     input,
   ): Promise<Receipt | { pending: true; progress?: string; resumed: boolean }> => {
+    const started = Date.now();
     const ctx = meteredStorage(unmetered);
     let raced:
       (() => Promise<Receipt | { pending: true; progress?: string; resumed: boolean } | null>) | undefined;
@@ -115,7 +116,22 @@ export const returnSource = action({
         });
         return {
           pending: true as const,
-          ...(stage?.returnProgress ? { progress: stage.returnProgress } : {}),
+          ...(stage?.returnCommitPlan
+            ? {
+                progress: JSON.stringify({
+                  phase: 'committing',
+                  step: stage.returnStep ?? 0,
+                  done: stage.returnCommitOffset ?? 0,
+                  total: 0,
+                  cursor: stage.returnCommitCursor ?? null,
+                  itemPending: stage.returnCommitCopied ? 0 : 1,
+                  elapsedMs: Date.now() - Date.parse(stage.returnAt!),
+                  etaSeconds: null,
+                }),
+              }
+            : stage?.returnProgress
+              ? { progress: stage.returnProgress }
+              : {}),
           resumed: !!(
             priorStage?.returnCursor ||
             priorStage?.returnMetadataCursor ||
@@ -186,20 +202,22 @@ export const returnSource = action({
         };
       invariant(candidateInfo.backup.displayProtocol === 3, 'CLI_UPGRADE_REQUIRED', CLI_UPGRADE_MESSAGE);
       if (priorStage?.returnCursor || priorStage?.returnMetadataCursor)
-        return pending(await returnProgress(ctx, priorStage, input, owner));
+        return pending(await returnProgress(ctx, priorStage, input, owner, undefined, started));
       console.log('source-return prepare', { revision: input.revision });
       const reader = exchangeObjectReader(ctx, true);
-      const records = priorStage?.returnPrepareCursor
-        ? undefined
-        : await recordReturn(
-            ctx,
-            input,
-            owner,
-            reader,
-            candidateInfo.backup,
-            previousInfo.backup,
-            priorStage?.returnAt,
-          );
+      const records =
+        priorStage?.returnPrepareCursor || input.revision - previousInfo.backup.preview.revision >= 100
+          ? undefined
+          : await recordReturn(
+              ctx,
+              input,
+              owner,
+              reader,
+              candidateInfo.backup,
+              previousInfo.backup,
+              priorStage?.returnAt,
+              started,
+            );
       if (records) return pending(records.receipt);
       const prepared = await prepareLargeReturn(
         ctx,
@@ -211,6 +229,7 @@ export const returnSource = action({
         candidateInfo.backup,
         previousInfo.backup,
         priorStage,
+        started,
       );
       if (prepared?.pending) return pending(null);
       const current =
@@ -334,37 +353,44 @@ export const returnSource = action({
             ownerDerived as import('../src/owner-derived').OwnerDerived,
           );
           return pending(
-            await returnProgress(ctx, stage, input, owner, {
-              accounting: prepared?.accounting,
-              records: prepared?.records,
-              snapshot: {
-                data: candidate.data,
-                manifest: candidate.manifest,
-                backup: candidate.backup,
+            await returnProgress(
+              ctx,
+              stage,
+              input,
+              owner,
+              {
+                accounting: prepared?.accounting,
+                records: prepared?.records,
+                snapshot: {
+                  data: candidate.data,
+                  manifest: candidate.manifest,
+                  backup: candidate.backup,
+                },
+                generationId: generation?._id,
+                ownerDerived,
+                metadataOnly: true,
+                ...(!prepared && generation
+                  ? {
+                      generation,
+                      previous: { data: current.data, manifest: current.manifest, backup: current.backup },
+                    }
+                  : {}),
+                final: {
+                  projectId: input.projectId,
+                  owner,
+                  backupId: input.backupId,
+                  expectedBackupId: input.expectedBackupId,
+                  expectedRevision: input.revision,
+                  localRevision: candidate.manifest.revision,
+                  operationId: input.operationId,
+                  request,
+                  command: JSON.stringify(command),
+                  at,
+                  changes,
+                },
               },
-              generationId: generation?._id,
-              ownerDerived,
-              metadataOnly: true,
-              ...(!prepared && generation
-                ? {
-                    generation,
-                    previous: { data: current.data, manifest: current.manifest, backup: current.backup },
-                  }
-                : {}),
-              final: {
-                projectId: input.projectId,
-                owner,
-                backupId: input.backupId,
-                expectedBackupId: input.expectedBackupId,
-                expectedRevision: input.revision,
-                localRevision: candidate.manifest.revision,
-                operationId: input.operationId,
-                request,
-                command: JSON.stringify(command),
-                at,
-                changes,
-              },
-            }),
+              started,
+            ),
           );
         }
       }

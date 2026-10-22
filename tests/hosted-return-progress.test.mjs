@@ -576,7 +576,7 @@ test('full-partition diffstats batch many records into each durable step', async
   assert.equal(receipt.accounting.steps, s.tables.projectWorkGenerations.get(s.partitionId).returnStep);
 });
 
-test('an optional per-push budget stops after a committed step and resumes once raised', async t => {
+test('an optional scheduling budget yields after a committed step and continues without raising it', async t => {
   const s = await setup(t, 8, 5),
     saved = { ...progress.RETURN_BUDGET };
   Object.assign(progress.RETURN_BUDGET, { rows: 5 });
@@ -596,15 +596,12 @@ test('an optional per-push budget stops after a committed step and resumes once 
       'owner',
       s.initial,
     );
-  await assert.rejects(
-    run(),
-    e => e.code === 'SOURCE_RETURN_BUDGET' && /push again to resume/.test(e.message),
-  );
+  assert.equal(await run(), null);
   const stopped = s.tables.projectWorkGenerations.get(s.partitionId);
   assert.equal(stopped.returnStep, 2, 'progress through the stopping step is saved');
-  await assert.rejects(run(), e => e.code === 'SOURCE_RETURN_BUDGET');
+  assert.equal(await run(), null);
+  assert.equal(s.tables.projectWorkGenerations.get(s.partitionId).returnStep, 4);
   assert.equal(s.tables.hostedProjects.get('project').work.backupId, s.backupId);
-  delete process.env.FORGE_SOURCE_RETURN_MAX_STEPS;
   let receipt;
   for (let call = 0; call < 50 && !receipt; call++) receipt = await run();
   assert.equal(receipt.at, 'now');
@@ -713,4 +710,59 @@ test('competing preparation timestamps preserve the reserved stage without a mut
     stageStore.begin._handler(s.ctx, { ...args, backupId: 'other' }),
     error => error.data?.code === 'WORK_OPERATION_CHANGED',
   );
+});
+
+test('outer action clock yields after committed output and the client resumes to one receipt', async t => {
+  const s = await setup(t, 8, 5),
+    saved = { ...progress.RETURN_BUDGET };
+  Object.assign(progress.RETURN_BUDGET, { rows: 5, actionMs: Infinity, actionSteps: Infinity });
+  t.after(() => Object.assign(progress.RETURN_BUDGET, saved));
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const mutate = s.ctx.runMutation,
+    committed = [];
+  s.ctx.runMutation = async (ref, args) => {
+    const value = await mutate(ref, args);
+    if (getFunctionName(ref) === 'projectReturnIndexStage:batch') {
+      assert.equal(value, true);
+      committed.push(args.step);
+      now += 240001;
+    }
+    return value;
+  };
+  const run = () =>
+    progress.returnProgress(
+      s.ctx,
+      structuredClone(s.tables.projectWorkGenerations.get(s.partitionId)),
+      s.input,
+      'owner',
+      s.initial,
+    );
+  assert.equal(await run(), null);
+  assert.equal(s.tables.projectWorkGenerations.get(s.partitionId).returnStep, 1);
+  assert.equal(s.tables.projectWorkEvents.size, 0, 'a yield never publishes a partial return');
+  const { ConvexExchange } = await import('../dist/exchange-client.js');
+  const client = Object.create(ConvexExchange.prototype);
+  client.projectId = 'project';
+  client.client = {
+    action: async (_ref, args) => {
+      assert.equal(args.operationId, s.input.operationId);
+      assert.equal(args.continuation, true);
+      const receipt = await run();
+      return (
+        receipt ?? {
+          pending: true,
+          progress: s.tables.projectWorkGenerations.get(s.partitionId).returnProgress,
+        }
+      );
+    },
+  };
+  const receipt = await client.returnSource('candidate', s.backupId, s.input.revision, s.input.operationId);
+  assert.equal(receipt.at, 'now');
+  assert.equal(s.tables.projectWorkEvents.size, 1);
+  assert.deepEqual(
+    committed,
+    Array.from({ length: committed.length }, (_, i) => i),
+  );
+  assert(committed.length > 6, 'advancing pending responses are not a retry budget');
 });

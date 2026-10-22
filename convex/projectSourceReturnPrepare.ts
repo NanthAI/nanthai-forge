@@ -4,6 +4,8 @@ import type { ActionCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { load, source } from './projectWorkLoad';
+import { replayReturnJournal } from './projectSourceReturnJournal';
+import { longActionExpired } from '../src/long-action';
 import type { ExchangeObjectReader } from './projectExchangeReader';
 import { readReturnMetadata, storeReturnMetadata } from './projectSourceReturnMetadata';
 import {
@@ -35,8 +37,8 @@ type Current = Awaited<ReturnType<typeof load>>;
 type Candidate = Awaited<ReturnType<typeof source>>;
 type Position = {
   input: Input;
-  generationId: Id<'projectWorkGenerations'>;
-  phase: 'source' | 'validate';
+  generationId?: Id<'projectWorkGenerations'>;
+  phase: 'journal' | 'source' | 'validate';
   current: Current;
   before: { lanes: { id: string; head: string }[] };
   chunks: Id<'_storage'>[];
@@ -71,6 +73,7 @@ export async function prepareLargeReturn(
   backup: Doc<'projectBackups'>,
   prior: Doc<'projectBackups'>,
   stage: Doc<'projectWorkGenerations'> | null,
+  actionStarted = Date.now(),
 ) {
   const pins: Input = {
     projectId: input.projectId,
@@ -83,8 +86,9 @@ export async function prepareLargeReturn(
     !stage?.returnPrepareCursor &&
     (backup.transport !== 'objects' ||
       backup.preview.format !== 'native' ||
-      Math.max(await workSize(reader, backup, owner), await workSize(reader, prior, owner)) <
-        PREPARE_BUDGET.workBytes)
+      (input.revision - prior.preview.revision < 100 &&
+        Math.max(await workSize(reader, backup, owner), await workSize(reader, prior, owner)) <
+          PREPARE_BUDGET.workBytes))
   )
     return;
   const project: Doc<'hostedProjects'> = await ctx.runQuery(internal.projectWork.get, {
@@ -114,15 +118,20 @@ export async function prepareLargeReturn(
     );
     // Absence of a derived index is never a new source-return precondition.
     if (
-      !generation ||
-      generation.backupId !== input.expectedBackupId ||
-      generation.revision !== input.revision
+      (generation &&
+        (generation.backupId !== input.expectedBackupId || generation.revision !== input.revision)) ||
+      (!generation && input.revision - prior.preview.revision < 100)
     )
       return;
-    const current = await load(ctx, input.projectId, owner, reader, { metadata: true, requireCurrent: true });
+    const current: Current = {
+      ...(await source(ctx, input.expectedBackupId, owner, reader, true)),
+      project,
+      events: [],
+    };
     console.log('source-return prepare load done', { reason: 'durable-current', revision: input.revision });
     invariant(
-      current.backup._id === input.expectedBackupId && current.data.revision === input.revision,
+      current.backup._id === input.expectedBackupId &&
+        current.data.revision === project.work!.initialRevision,
       'WORK_STALE',
       'Hosted source or Work changed during return preparation.',
     );
@@ -131,7 +140,7 @@ export async function prepareLargeReturn(
       {
         projectId: input.projectId,
         owner,
-        generationId: generation._id,
+        generationId: generation?._id,
         revision: input.revision,
         backupId: input.backupId,
         localRevision: backup.preview.revision,
@@ -151,16 +160,15 @@ export async function prepareLargeReturn(
     });
     invariant(stage, 'WORK_STALE', 'Source-return staging changed.');
     const chunks: Id<'_storage'>[] = [];
-    for (const chunk of sourceReturnChunks(current.data)) chunks.push(await storeReturnJson(ctx, chunk));
-    const empty = sourceReturnChunks(current.data).next().value!.data;
+
     position = {
       input: pins,
-      generationId: generation._id,
-      phase: 'source',
+      generationId: generation?._id,
+      phase: 'journal',
       chunks,
       offset: 0,
       before: { lanes: current.data.lanes.map(({ id, head }) => ({ id, head })) },
-      current: { ...current, publication: undefined, events: [], data: empty },
+      current: { ...current, publication: undefined, events: [] },
     };
   }
   invariant(stage, 'WORK_STALE', 'Source-return staging changed.');
@@ -193,10 +201,21 @@ export async function prepareLargeReturn(
         ],
       }),
       progress: JSON.stringify({
-        phase: 'preparing',
-        step: position.phase === 'source' ? 1 : 2 + position.offset,
-        done: position.offset,
-        total: position.chunks.length,
+        phase: position.phase === 'journal' ? 'journal' : 'preparing',
+        step:
+          position.phase === 'journal'
+            ? position.current.data.revision
+            : position.phase === 'source'
+              ? 1
+              : 2 + (position.candidateRef ? 1 : 0) + position.offset + (position.records?.projected ?? 0),
+        done:
+          position.phase === 'journal'
+            ? position.current.data.revision - position.current.project.work!.initialRevision
+            : position.offset + (position.records?.projected ?? 0),
+        total:
+          position.phase === 'journal'
+            ? input.revision - position.current.project.work!.initialRevision
+            : position.chunks.length + (position.records?.refs.length ?? 0),
         elapsedMs: 0,
         etaSeconds: null,
       }),
@@ -204,6 +223,16 @@ export async function prepareLargeReturn(
     return { pending: true as const };
   };
   if (!stage.returnPrepareCursor) return save();
+  if (position.phase === 'journal') {
+    const complete = await replayReturnJournal(ctx, position.current, owner, actionStarted);
+    if (!complete) return save();
+    for (const chunk of sourceReturnChunks(position.current.data))
+      position.chunks.push(await storeReturnJson(ctx, chunk));
+    position.before = { lanes: position.current.data.lanes.map(({ id, head }) => ({ id, head })) };
+    position.current.data = sourceReturnChunks(position.current.data).next().value!.data;
+    position.phase = 'source';
+    return save();
+  }
   if (position.phase === 'source') {
     const candidate = await source(ctx, input.backupId, owner, reader, true);
     console.log('source-return prepare source done', {
@@ -248,7 +277,7 @@ export async function prepareLargeReturn(
         : candidate.data.intents;
     validateSourceReturnChunk(chunk, { ...candidate.data, intents }, candidate.manifest);
     position.offset++;
-    if (Date.now() - started >= PREPARE_BUDGET.actionMs) break;
+    if (Date.now() - started >= PREPARE_BUDGET.actionMs || longActionExpired(actionStarted)) break;
   }
   if (position.offset < position.chunks.length) return save();
   if ((position.records!.projected ?? 0) < position.records!.refs.length) {

@@ -50,6 +50,40 @@ nforge exchange ROOT migrate-archive --command-file forge-migrate.json
 
 With the token set, `nforge mcp ROOT --agent` also offers `forge_exchange` and `forge_migrate_archive` over the same code.
 
+## Large pushes and long actions
+
+A large backlog keeps the original push and nested source-return operation IDs,
+checkpoint pins and hosted revision through every continuation. Native returns
+with at least 100 journal revisions since their base use durable preparation even
+when the base Work is small. Preparation saves replayed Work at complete event
+boundaries and resumes from that validated revision. Validation, projection and
+private index commits keep their existing shorter scheduling windows. A shared
+four-minute outer window is checked after complete work units; it never cancels
+or splits a transaction. Index rebuilds yield after committed batches, and
+publication waiters yield without taking another worker's claim.
+
+Pending is successful scheduling progress, not a transport retry. The client
+continues immediately with `continuation:true`, the same operation ID and inputs,
+and a small event-loop yield. Source-return output includes the phase, completed
+and total items, and saved step; private partition copying also tracks its cursor.
+Advancing pending responses do not consume a retry budget. Six consecutive pending
+responses at the same saved position stop with `EXCHANGE_ACTION_STALLED` and an
+instruction to retry the original operation. Elapsed time, ETA, invocation counts
+and repeated storage reads do not establish progress. Existing optional source-return
+step/byte settings now select a per-invocation yield window, rather than requiring
+an operator to raise a per-push ceiling.
+
+All long exchange HTTP calls have a seven-minute header and total deadline,
+including the native HTTP dispatch deadline. Unknown replies reconcile the same
+operation; they do not start another publication or source return. A work unit
+must complete before yielding: single-object reads, full compatibility validation,
+archive conversion and initial projection construction remain indivisible. The
+four-minute window is therefore a scheduling target, not a guarantee that any
+individual unit or endpoint finishes within four minutes. Compatibility manifest,
+history validation, recipe validation, initialization, migration and full journal
+export have no durable validation cursor. Modern clients resolve manifests and
+page journals locally where supported.
+
 ## CLI upgrade
 
 New pushes require owner display protocol 3. Older CLIs and publications without
@@ -133,8 +167,8 @@ Publication validation is coordinated by project and original operation UUID in
 a transactional attempt record. An overlapping retry waits for the same receipt
 instead of starting another seed. Changed request pins still fail; failures
 release their attempt, and a crashed worker's attempt expires at the ten-minute
-action budget. Waiting callers yield a retryable `WORK_BUSY` before exhausting
-their action, retaining the original request. Final publication still checks
+action budget. Waiting callers return resumable pending progress after four minutes,
+retaining the original request; the client immediately continues that request. Final publication still checks
 current authority and the previous-checkpoint compare-and-set.
 
 Formats 16/18/20 use schema-owned unified collections, including alias keys and

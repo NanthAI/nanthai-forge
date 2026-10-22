@@ -12,6 +12,7 @@ import { advance, RETURN_BUDGET, type Cursor, type ReturnAccounting } from './pr
 import { storeReturnJson, readReturnJson, deleteReturnJson } from './projectSourceReturnCursor';
 import { storageMeter } from './storageMeter';
 import { checkReturnBudget } from './projectSourceReturnBudget';
+import { longActionExpired } from '../src/long-action';
 import type { ActionCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -45,6 +46,7 @@ async function advanceReturnProgress(
     accounting?: ReturnAccounting;
     records?: IntentRecords;
   },
+  actionStarted = Date.now(),
 ): Promise<(Doc<'projectWorkEvents'> & { accounting?: ReturnAccounting }) | null> {
   const started = Date.now();
   let c: Cursor;
@@ -202,13 +204,12 @@ async function advanceReturnProgress(
     return null;
   }
   if (stage.status !== 'ready') {
-    checkReturnBudget(accounting(step));
     let batch = stage.nextBatch;
-    const actionStarted = Date.now();
+    const drainStarted = Date.now();
     // Reuse unchanged State bytes within this action, with current authority and
     // storage checks on every use and a fixed byte bound across all history.
 
-    let committedAt = actionStarted,
+    let committedAt = drainStarted,
       items = 0;
     let batchStates = 0,
       batchSourceBytes = 0,
@@ -341,10 +342,15 @@ async function advanceReturnProgress(
       step++;
       batchStates = batchSourceBytes = batchFailures = derivedRows = pendingBytes = 0;
       pending = [];
-      if (result.last) break;
-      checkReturnBudget(c.accounting);
+      if (result.last) {
+        if (longActionExpired(actionStarted)) return null;
+        break;
+      }
+      if (checkReturnBudget({ storageBytes: meter.bytes, steps: step - (stage.returnStep ?? 0) }))
+        return null;
       if (
-        Date.now() - actionStarted >= RETURN_BUDGET.actionMs ||
+        longActionExpired(actionStarted) ||
+        Date.now() - drainStarted >= RETURN_BUDGET.actionMs ||
         step - (stage.returnStep ?? 0) >= RETURN_BUDGET.actionSteps
       )
         return null;
@@ -383,7 +389,7 @@ async function advanceReturnProgress(
         removed,
         entries: rows,
       });
-      if (Date.now() - started >= RETURN_BUDGET.actionMs) return null;
+      if (longActionExpired(actionStarted) || Date.now() - started >= RETURN_BUDGET.actionMs) return null;
     }
   }
   const receipt = await ctx.runMutation(internal.projectWork.returnSource, {

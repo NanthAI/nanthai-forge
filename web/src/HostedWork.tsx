@@ -1,3 +1,4 @@
+import { continueLongAction } from '../../src/long-action';
 import { ErrorToast } from './ui/Toast';
 import { routeUrlState } from './shell/location';
 import { reconcileBefore } from './pending-write';
@@ -330,7 +331,12 @@ export default function HostedWork({
             (error.data as { code?: string }).code !== 'PROJECT_WORK_INDEX_MISSING'
           )
             throw error;
-          await client.action(api.projectWorkIndexActions.ensure, { projectId });
+          await continueLongAction('Work index', String(projectId), continuation =>
+            client.action(api.projectWorkIndexActions.ensure, {
+              projectId,
+              ...(continuation ? { continuation } : {}),
+            }),
+          );
           await client.mutation(api.projectWorkCommand.command, args);
         }
       }

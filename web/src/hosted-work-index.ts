@@ -1,3 +1,4 @@
+import { continueLongAction } from '../../src/long-action';
 import { useReadRetry } from './ui/read-retry';
 // SPDX-License-Identifier: Apache-2.0
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -35,7 +36,11 @@ export const workIndex = {
     Project & { generationId?: string; collection: string; id: string },
     Detail
   >('projectWorkIndex:detail'),
-  ensure: makeFunctionReference<'action', Project, string>('projectWorkIndexActions:ensure'),
+  ensure: makeFunctionReference<
+    'action',
+    Project & { continuation?: boolean },
+    string | { pending: true; progress?: string }
+  >('projectWorkIndexActions:ensure'),
   checksum: makeFunctionReference<'action', Project, string>('projectWorkIndexActions:checksum'),
 };
 export type WorkIndexWorkspace = {
@@ -79,8 +84,9 @@ export function useWorkIndex(
   useEffect(() => {
     if (!source || current) return;
     let active = true;
-    void client
-      .action(workIndex.ensure, { projectId })
+    void continueLongAction('Work index', String(projectId), continuation =>
+      client.action(workIndex.ensure, { projectId, ...(continuation ? { continuation } : {}) }),
+    )
       .then(() => {
         if (active) setError('');
       })
