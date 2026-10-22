@@ -22,6 +22,40 @@ entry and composition continues. Checks run outside Work, Lane and landing
 locks. The selector receives the union of candidate changed paths, so tooling
 changes retain the full-check override.
 
+## Durable finite driver
+
+The drain advances recorded batches through selection, composition, check reservation,
+evaluation, acceptance and completion. Selection pins the original batch and inputs;
+composition publishes its prefix Candidates and run IDs together. Each check is
+reserved under that original run ID before execution. Evaluation retains an optional
+`settlement` cursor naming the passing/failing prefixes and cancellation boundary.
+A resumed evaluated batch continues at acceptance without dispatching checks again.
+Older batches without a cursor recover from their existing Candidates and run evidence.
+
+Acceptance keeps its original deterministic operation ID and expected-previous CAS.
+Recovery reconciles that canonical receipt before comparing speculative parents or
+current main, including when main advanced again after the lost reply. Acceptance
+replay also reconciles interrupted lifecycle work without moving main twice. A
+cancellation after evaluation invalidates the cursor and evaluates the applicable
+prefix using its own exact check evidence.
+
+The existing per-channel drain queue admits one driver; a competing finite call can
+observe its waiting position. Each admitted driver claims a monotonically increasing
+generation in the owner-local `landing-drivers` journal. Selection, composition,
+check reservation, evaluation, acceptance and final entry publication revalidate
+that generation inside their short Work critical section. A replaced driver cannot
+publish those transitions. Late check receipts still attach to the original run;
+replacing a driver does not cancel or restart that execution. No locks are held
+while checks execute or while their outcomes are observed. A saturated drain
+observes without writing unchanged Work.
+
+The cursor is additive and optional; current older writers preserve unknown record
+fields. The generation journal does not change Work's format, revision or queue
+contents. Keep it with the owner-local control journals on recovery; canonical
+Candidates, runs and Channel receipts remain in Work. There is no new writer-upgrade
+requirement. This remains a finite drain invoked by finish or `land-ready`: no
+background worker or automatic startup recovery is launched.
+
 ## Remote bursts
 
 Modal and GitHub Actions checks do not share the owner's CPU, so a burst need not queue

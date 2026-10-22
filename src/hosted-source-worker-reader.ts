@@ -9,11 +9,12 @@ import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import { objectRecipeSchema, readObjectRecipe } from './object-chunks.js';
 import { jobObject } from './hosted-source-job.js';
-import type { WorkerObject, WorkerPin } from './hosted-source-worker-format.js';
+import { workerObjectSchema, type WorkerObject, type WorkerPin } from './hosted-source-worker-format.js';
 
 /** Trusted transport resolves current job-scoped grants; repo bytes supply no URL.
  * upload consumes the stream completely and commits only the supplied exact pin. */
 export interface SourceWorkerTransport {
+  describe?(sha256: string): Promise<WorkerObject>;
   read(pin: WorkerPin): Promise<AsyncIterable<Uint8Array>>;
   upload(pin: WorkerPin, bytes: AsyncIterable<Uint8Array>): Promise<void>;
 }
@@ -26,6 +27,22 @@ export class SourceWorkerReader {
     cacheHits: 0,
     maxChunkBytes: 0,
   };
+  resolvedObjects = 0;
+  async resolve(sha256: string) {
+    invariant(
+      this.transport.describe,
+      'SOURCE_WORKER_UNAVAILABLE',
+      'Compose needs the job-authorized object descriptor transport.',
+    );
+    const ref = workerObjectSchema.parse(await this.transport.describe(sha256));
+    invariant(
+      ref.object.sha256 === sha256,
+      'SOURCE_HASH_MISMATCH',
+      'Object descriptor selected different bytes.',
+    );
+    await this.file(ref);
+    this.resolvedObjects++;
+  }
   private readonly saved = new Map<string, WorkerPin>();
   constructor(
     readonly directory: string,

@@ -759,3 +759,53 @@ the loser receives retained `WORK_STALE` evidence and keeps its delta. A new sav
 or sync can use that preserved source. Completed retries return their original
 receipt and never rewind later Lane work. No main, Candidate or landing authority
 is granted by a source upload or save.
+
+### Hosted compose API
+
+These APIs compose saved hosted source without a local Work owner. They do not
+add CLI commands or browser controls.
+
+- `projectHostedCompose:prepare({projectId, request})`: `request` is JSON matching
+  `composeRequestSchema`: original `operationId`, `intentId`, `authorityEpoch`,
+  `expectedMain:{head,receiptId}`, `message`, and `inputs`/`dependencies` manifests.
+  Each manifest is `{root:{sha256,size},pages,count}`. Even an empty selection uses
+  one canonical empty terminal page. Select a Lane or dependency overall.
+- Input page entries bind `{laneId,head,version,sourceVersion,lifecycleVersion,state}`.
+  Dependency entries bind `{candidateId,head,state}` to a clean immutable Candidate.
+  `state` is `{object:{sha256,size},recipe:{sha256,size}|null}`. All selections and
+  objects belong to this project. `buildComposePages` automatically splits the
+  ordered entries into canonical `forge-hosted-compose-page` objects; upload these
+  through the existing missing-object path before staging.
+- `stage({projectId,operationId,kind,index,page})` accepts the next exact JSON page
+  for `kind:"inputs"|"dependencies"`, with a zero-based index. Each page contains
+  `schema:1`, `kind:"forge-hosted-compose-page"`, `entries`, and `next` pin or null.
+  `progress({projectId,operationId})` returns the retained staging state, terminal
+  receipt, and server-pinned input once both manifests have been staged.
+- Upload the exact canonical input returned by `progress`, then call
+  `projectHostedComposeJobs:submit({projectId,operationId})`. Retry the original
+  operation and payload after unknown replies. Completed retries return the
+  original Candidate rather than computing or publishing another one.
+- `projectHostedCompose:candidate({projectId,candidateId})` reads the canonical
+  Candidate under current source access. The Candidate pins its Intent, original
+  main head/receipt, ordered input/dependency roots and algorithm plus runtime.
+  Its result is `{status:"clean",head}` or `{status:"conflict",conflicts:{sha256,size}}`.
+  `composeConflictPageSchema` describes the linked conflict pages. Exact side
+  States remain available for resolution; no resolution or sync is performed here.
+
+The trusted authenticated source-control ingress must also route `describe` to
+`projectHostedSaveTransfers:describe`, deriving `projectId` from its authenticated
+pinned dispatch. Its internal result is canonical JSON text; the HTTP response carries the decoded
+descriptor object. It returns only committed project object/recipe descriptors,
+rechecking current execution, fence, lease, epoch and contributor authority.
+The existing grant/commit transfer functions accept H08-owned compose jobs as
+well as saves; bytes continue to travel directly to/from object storage. A compose
+upload grant can return `{stored:true}` for an already committed logical object,
+including legacy or recipe storage. The fixed transport consumes and verifies its
+exact bytes without a redundant PUT/HEAD. Save-job grant replies retain their
+previous contract for already pinned worker images.
+The small signed result schedules `projectHostedComposeJobs:complete`; no client
+needs to remain connected and no recurring idle worker is created. Only the small
+result manifest crosses the finalizer action. Rebuild and pin the fixed image
+with the compose reducer and descriptor transport before enabling this route.
+Ingress provisioning, remote deployment, resolution/sync, hosted checks and landing
+remain separate work; these APIs alone do not enable a live end-to-end hosted loop.

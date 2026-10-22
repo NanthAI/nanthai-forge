@@ -5,6 +5,7 @@ import { internalMutation, internalAction, type MutationCtx } from './_generated
 import type { Id } from './_generated/dataModel';
 import { loadSourceJob } from './projectSourceJobs';
 import { loadSave, saveObject } from './projectHostedSaveStore';
+import { composeForJob, loadCompose } from './projectHostedComposeStore';
 import { saveForJob } from './projectHostedSavePublish';
 import { saveObjectSchema } from '../src/hosted-save';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -27,13 +28,20 @@ type Transfer = {
 };
 /** Authenticated control ingress only. Every grant AND post-HEAD commit rechecks
  * original execution/fence/epoch and current contributor/project authority. */
-export async function authorizeSaveTransfer(ctx: MutationCtx, request: Transfer) {
+export async function authorizeSourceTransfer(ctx: MutationCtx, request: Omit<Transfer, 'pin'>) {
   const input = JSON.parse(request.input),
-    pin = saveObjectSchema.parse(request.pin),
     job = await loadSourceJob(ctx, request.projectId, input.jobId);
-  const row = await saveForJob(ctx, request.projectId, job.id);
-  invariant(row && job.jobKind === 'save', 'SOURCE_JOB_INVALID', 'This is not a hosted save source job.');
-  const { operation, state } = await loadSave(ctx, row);
+  const row =
+    job.jobKind === 'compose'
+      ? await composeForJob(ctx, request.projectId, job.id)
+      : await saveForJob(ctx, request.projectId, job.id);
+  invariant(
+    row && ['save', 'compose'].includes(job.jobKind),
+    'SOURCE_JOB_INVALID',
+    'This is not a hosted source operation.',
+  );
+  const { operation, state } =
+    job.jobKind === 'compose' ? await loadCompose(ctx, row) : await loadSave(ctx, row);
   invariant(
     !operation.terminal &&
       state.status === 'submitted' &&
@@ -66,13 +74,29 @@ export async function authorizeSaveTransfer(ctx: MutationCtx, request: Transfer)
     'SOURCE_JOB_FENCED',
     'The source transfer execution changed or expired.',
   );
-  return { job, row, pin };
+  return { job, row };
 }
+export async function authorizeSaveTransfer(ctx: MutationCtx, request: Transfer) {
+  return { ...(await authorizeSourceTransfer(ctx, request)), pin: saveObjectSchema.parse(request.pin) };
+}
+/** Lazy descriptors are metadata only. The ingress derives the project from its authenticated dispatch. */
+export const describe = internalMutation({
+  args: { projectId: args.projectId, input: args.input, executionId: args.executionId, sha256: v.string() },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    await authorizeSourceTransfer(ctx, input);
+    invariant(/^[0-9a-f]{64}$/.test(input.sha256), 'BAD_ARGUMENT', 'Select an exact source digest.');
+    return canonicalPayload(await saveObject(ctx, input.projectId, { sha256: input.sha256 }));
+  },
+});
 export const grant = internalMutation({
   args: { ...args, action: v.union(v.literal('read'), v.literal('upload')) },
-  returns: v.object({ url: v.string(), headers: v.record(v.string(), v.string()) }),
+  returns: v.union(
+    v.object({ url: v.string(), headers: v.record(v.string(), v.string()) }),
+    v.object({ stored: v.literal(true) }),
+  ),
   handler: async (ctx, input) => {
-    const { pin, row } = await authorizeSaveTransfer(ctx, input);
+    const { pin, row, job } = await authorizeSaveTransfer(ctx, input);
     if (input.action === 'read') {
       // The fixed trusted reader requests only hash-pinned input/recipe closure.
       // Project membership is checked for each exact object, including recipe leaves.
@@ -90,12 +114,6 @@ export const grant = internalMutation({
       invariant(url, 'SOURCE_UNAVAILABLE', 'Read a raw source object or its exact recipe leaves.');
       return { url, headers: {} };
     }
-    const project = await ctx.db.get(input.projectId);
-    invariant(
-      r2Enabled() && project?.r2Writes,
-      'SOURCE_WORKER_UNAVAILABLE',
-      'Hosted source output requires the configured project object-store path.',
-    );
     let object = await ctx.db
       .query('projectObjects')
       .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
@@ -104,6 +122,15 @@ export const grant = internalMutation({
       !object || (!object.removed && object.size === pin.size),
       'SOURCE_HASH_MISMATCH',
       'Output differs from its immutable project binding.',
+    );
+    // A compose can regenerate bytes already retained in any storage format.
+    // Keep save-job replies compatible with their previously pinned worker image.
+    if (job.jobKind === 'compose' && object && isStored(object)) return { stored: true as const };
+    const project = await ctx.db.get(input.projectId);
+    invariant(
+      r2Enabled() && project?.r2Writes,
+      'SOURCE_WORKER_UNAVAILABLE',
+      'Hosted source output requires the configured project object-store path.',
     );
     // Immutable outputs may replay after a lost PUT or HEAD reply. Reuse a raw
     // committed R2 destination; never proxy source bytes through an action.

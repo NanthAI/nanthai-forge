@@ -835,3 +835,41 @@ source evidence for later compose/sync; they confer no main or landing authority
 Neither staging nor final publication loads retained Work or Channel history.
 See the [save API](operations/source-exchange.md#hosted-lane-save-api) for transfer,
 retry and provisioning boundaries.
+
+### Hosted composition and Candidates
+
+`projectHostedCompose` prepares an original operation against the authoritative
+main head **and receipt**, then stages hash-linked ordered input and dependency
+pages. Each transport window contains at most 100 selections or 128 KiB; there
+is no total Lane/history ceiling. Staging checks exact Lane record, source and
+lifecycle versions and Intent membership, or an exact clean dependency Candidate,
+and verifies committed, registered State bindings. A project object's presence
+alone does not establish source validation or ancestry. Page receipts and indexed
+selection identities make retries idempotent and reject duplicate Lane selections. Repeated dependency pins retain native semantics.
+
+`projectHostedComposeJobs:submit` pins the original plan, timestamp, implementation
+and configured fixed worker/runtime through the source-job owner. Dependencies
+compose before Lane inputs, in their declared order, starting at the pinned main.
+The worker calls `NativeSource.compose`, including its existing recursive merge
+bases and text/binary/mode/symlink/delete/path conflict semantics. Its disk-backed
+reader obtains job-authorized descriptors and fetches only missing State metadata
+and blobs actually read by the native reducer. Ancestry comes from verified State
+bytes, never client display flags. Native merge still holds manifests and the
+blobs needed for text merging in memory; this is not a constant-memory guarantee.
+
+A signed result publishes one immutable Candidate and original operation receipt.
+Clean results register their State. Conflict results reference linked conflict
+pages with exact left/right States and per-path base/left/right variants; the
+retained side States preserve all recursive-base alternatives. As in local
+composition, the first conflicting pair stops merging; the Candidate retains the
+entire ordered selection, including its remaining suffix. No Lane or main moves,
+no check runs, and source registration grants no landing permission.
+
+Lane pins are validated when their selection page is staged. Later saves do not
+change those immutable inputs: an older Candidate remains explicitly bound to
+its original Lane versions and base receipt. A fresh stale selection fails with
+`WORK_STALE`; stale main preparation fails with `CHANNEL_CHANGED`, including ABA
+receipt changes. The final publication reads only the operation, small staged
+plan, exact signed job result, committed output and Candidate/State records. It
+does not hydrate input pages, all Lane heads, Channel history or Work. Landing
+must independently validate its current main and policy/evidence pins.

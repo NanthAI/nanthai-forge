@@ -246,6 +246,7 @@ export function nativeExecute(
     attribution?: WorkActor;
     ownerRequest?: boolean;
     reconcileComposition?: boolean;
+    beforePublish?: () => void;
   } = {},
 ) {
   const parsed = commandSchema.safeParse(input),
@@ -283,6 +284,7 @@ export function nativeExecute(
   const result = (() => {
     try {
       return store.locked(() => {
+        options.beforePublish?.();
         const data = store.load(),
           source = new NativeSource(store.root),
           at = new Date().toISOString();

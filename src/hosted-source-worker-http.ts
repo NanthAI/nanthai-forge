@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
 import { readSourceControlReply } from './hosted-source-control-reply.js';
 import { invariant } from './errors.js';
 import type { SourceDispatch, SourceJobCallback } from './hosted-source-job.js';
-import type { WorkerPin } from './hosted-source-worker-format.js';
+import { workerObjectSchema, type WorkerPin } from './hosted-source-worker-format.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 
-const grant = z.object({ url: z.url(), headers: z.record(z.string(), z.string()).default({}) }).strict();
+const grant = z.union([
+  z.object({ url: z.url(), headers: z.record(z.string(), z.string()).default({}) }).strict(),
+  z.object({ stored: z.literal(true) }).strict(),
+]);
 /** Fixed trusted ingress authorizes each pin using current job authority, then
  * returns exact R2 transfer URLs. It never proxies source bytes through Convex.
  * The grant/callback ingress is provisioned with the source-operation reducers. */
@@ -45,6 +49,10 @@ export function sourceWorkerHttp(config: {
       executionId: config.executionId,
     });
     const value = grant.parse(await readSourceControlReply(response));
+    if ('stored' in value) {
+      invariant(action === 'upload', 'SOURCE_WORKER_UNAVAILABLE', 'A read requires an exact transfer URL.');
+      return value;
+    }
     const url = new URL(value.url);
     invariant(
       url.protocol === 'https:' && !url.username && !url.password && !url.hash,
@@ -54,8 +62,23 @@ export function sourceWorkerHttp(config: {
     return { url, headers: value.headers };
   };
   const transport: SourceWorkerTransport = {
+    async describe(sha256) {
+      const response = await control('describe', {
+        sha256,
+        input: config.input,
+        executionId: config.executionId,
+      });
+      const descriptor = workerObjectSchema.parse(await readSourceControlReply(response));
+      invariant(
+        descriptor.object.sha256 === sha256,
+        'SOURCE_HASH_MISMATCH',
+        'Source descriptor selected different content.',
+      );
+      return descriptor;
+    },
     async read(pin) {
       const target = await transfer('read', pin);
+      invariant('url' in target, 'SOURCE_WORKER_UNAVAILABLE', 'A read requires an exact transfer URL.');
       const response = await request(target.url, {
         headers: target.headers,
         redirect: 'error',
@@ -66,6 +89,21 @@ export function sourceWorkerHttp(config: {
     },
     async upload(pin, bytes) {
       const target = await transfer('upload', pin);
+      if ('stored' in target) {
+        const hash = createHash('sha256');
+        let size = 0;
+        for await (const chunk of bytes) {
+          size += chunk.byteLength;
+          invariant(size <= pin.size, 'SOURCE_HASH_MISMATCH', 'Output exceeds its exact committed size.');
+          hash.update(chunk);
+        }
+        invariant(
+          size === pin.size && hash.digest('hex') === pin.sha256,
+          'SOURCE_HASH_MISMATCH',
+          'Reused output differs from its exact committed content.',
+        );
+        return;
+      }
       const init: RequestInit & { duplex: 'half' } = {
         method: 'PUT',
         body: Readable.from(bytes) as unknown as BodyInit,

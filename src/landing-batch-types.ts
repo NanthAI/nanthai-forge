@@ -65,6 +65,17 @@ export const landingBatchSchema = z.object({
   conflicts: z.array(z.object({ entryId: id, viewId: id })),
   acceptanceId: id.optional(),
   culpritId: id.optional(),
+  /** Optional restart cursor; canonical Candidates/runs/Channel receipts remain authoritative. */
+  settlement: z
+    .object({
+      cancelledAt: z.number().int().min(-1),
+      passingViewId: id.optional(),
+      culpritViewId: id.optional(),
+      stopped: z
+        .enum(['failed', 'cancelled', 'interrupted', 'runner-unavailable', 'runner-budget-exhausted'])
+        .optional(),
+    })
+    .optional(),
 });
 export type LandingEntry = z.infer<typeof landingEntrySchema>;
 export type LandingBatch = z.infer<typeof landingBatchSchema>;

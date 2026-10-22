@@ -371,6 +371,7 @@ export class WorkService {
       attribution?: WorkActor;
       ownerRequest?: boolean;
       reconcileComposition?: boolean;
+      beforePublish?: () => void;
     } = {},
   ) {
     input = candidateCommand(input);
@@ -385,6 +386,7 @@ export class WorkService {
       keepOpen?: boolean | undefined;
       attribution?: WorkActor;
       reconcileComposition?: boolean;
+      beforePublish?: () => void;
     },
   ) {
     if (input && typeof input === 'object' && 'action' in input) {
@@ -664,7 +666,7 @@ export class WorkService {
           return exportCheck(this.store, parsed.data.id, expectedRevision);
         return parsed.data.action === 'import-checks'
           ? importChecks(this.store, parsed.data, expectedRevision)
-          : runWork(this.store, parsed.data, expectedRevision);
+          : runWork(this.store, parsed.data, expectedRevision, undefined, options.beforePublish);
       }
     }
     return this.execute(input, expectedRevision, options);

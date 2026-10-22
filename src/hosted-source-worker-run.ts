@@ -29,7 +29,7 @@ export async function runHostedSourceWorker(
     input.provider === 'modal' &&
       input.worker === config.worker &&
       input.runtime === config.runtime &&
-      ['save', 'register-state'].includes(input.jobKind),
+      ['save', 'register-state', 'compose'].includes(input.jobKind),
     'SOURCE_PROVIDER_CHANGED',
     'Select this fixed State-building worker and runtime.',
   );

@@ -21,9 +21,15 @@ import type { LandingBatch, LandingEntry } from './landing-batch-types.js';
 
 export const batchDirectory = (work: WorkService, channel: string) =>
   join(work.store.directory, 'landing-batch-drain', digest(channel));
-export function batchEdit<T>(work: WorkService, id: string, edit: (data: WorkData) => T) {
+export function batchEdit<T>(
+  work: WorkService,
+  id: string,
+  edit: (data: WorkData) => T,
+  beforePublish?: () => void,
+) {
   return retryWorkPhase(id, () =>
     work.store.locked(() => {
+      beforePublish?.();
       const data = work.store.load();
       const before = JSON.stringify(data);
       const result = edit(data);
@@ -229,7 +235,7 @@ export function selectBatch(
   return batch;
 }
 /** Prefix Views carry every pinned Lane and dependency, across Intent boundaries. */
-export async function composeBatch(work: WorkService, batch: LandingBatch) {
+export async function composeBatch(work: WorkService, batch: LandingBatch, beforePublish?: () => void) {
   const entries = batch.entryIds.map(id => work.store.select('landingEntries', id)!);
   const preview =
     batch.channel === 'main'
@@ -307,24 +313,29 @@ export async function composeBatch(work: WorkService, batch: LandingBatch) {
       runId: finishChild(batch.id, `run:${entryId}`),
     });
   }
-  return batchEdit(work, batch.id, data => {
-    const saved = data.landingBatches!.find(item => item.id === batch.id)!;
-    if (saved.status !== 'composing') return saved;
-    for (const view of views) if (!data.views.some(item => item.id === view.id)) data.views.push(view);
-    saved.prefixes = prefixes;
-    saved.conflicts = conflicts;
-    saved.status = 'checking';
-    for (const [id, diagnostic] of rejected) {
-      const entry = data.landingEntries!.find(entry => entry.id === id)!;
-      entry.status = 'failed';
-      entry.reason = previewExclusionMessage;
-      entry.previewDiagnostic = { ...diagnostic, main: preview!.main, key: preview!.key };
-    }
-    for (const conflict of conflicts) {
-      const entry = data.landingEntries!.find(entry => entry.id === conflict.entryId)!;
-      entry.status = 'conflict';
-      entry.conflictViewId = conflict.viewId;
-    }
-    return saved;
-  });
+  return batchEdit(
+    work,
+    batch.id,
+    data => {
+      const saved = data.landingBatches!.find(item => item.id === batch.id)!;
+      if (saved.status !== 'composing') return saved;
+      for (const view of views) if (!data.views.some(item => item.id === view.id)) data.views.push(view);
+      saved.prefixes = prefixes;
+      saved.conflicts = conflicts;
+      saved.status = 'checking';
+      for (const [id, diagnostic] of rejected) {
+        const entry = data.landingEntries!.find(entry => entry.id === id)!;
+        entry.status = 'failed';
+        entry.reason = previewExclusionMessage;
+        entry.previewDiagnostic = { ...diagnostic, main: preview!.main, key: preview!.key };
+      }
+      for (const conflict of conflicts) {
+        const entry = data.landingEntries!.find(entry => entry.id === conflict.entryId)!;
+        entry.status = 'conflict';
+        entry.conflictViewId = conflict.viewId;
+      }
+      return saved;
+    },
+    beforePublish,
+  );
 }

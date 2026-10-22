@@ -639,6 +639,7 @@ export function runWork(
   command: Exclude<EvidenceCommand, { action: 'import-checks' | 'export-check' }>,
   revision: number,
   sequence?: { id: string; complete: (error?: unknown) => void },
+  beforePublish?: () => void,
 ) {
   invariant(
     Number.isSafeInteger(revision) && revision >= 0,
@@ -700,6 +701,7 @@ export function runWork(
     command.action === 'run-check' ? prepareRunRegistration(store, command, sequence?.id) : undefined;
   let started: CheckRun | undefined;
   const result = store.locked(() => {
+    beforePublish?.();
     if (!store.native) executionGuard(store.root);
     const tx = recoverRecordRuns(store, store.records()),
       data = tx.data();

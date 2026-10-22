@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
+import { composeForJob } from './projectHostedComposeStore';
 import { saveForJob } from './projectHostedSavePublish';
 import { internalMutation, internalQuery } from './_generated/server';
 import { enqueueSourceJob, claimSourceJob, advanceSourceJob, cancelSourceJob } from './projectSourceJobs';
@@ -57,6 +58,15 @@ export const callback = internalMutation({
       (await saveForJob(ctx, input.projectId, job.id))
     )
       await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedSaveJobs:complete'), {
+        projectId: input.projectId,
+        jobId: job.id,
+      });
+    if (
+      job.jobKind === 'compose' &&
+      (job.status === 'completed' || job.status === 'failed') &&
+      (await composeForJob(ctx, input.projectId, job.id))
+    )
+      await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedComposeJobs:complete'), {
         projectId: input.projectId,
         jobId: job.id,
       });
