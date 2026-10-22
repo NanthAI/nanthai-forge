@@ -49,11 +49,13 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
   const result = output.result,
     request = state.request;
   invariant(
-    request.kind === 'resolution'
-      ? result.status === 'conflict'
-      : request.kind === 'resolve'
-        ? result.status === 'resolved'
-        : result.status === 'conflict' || result.status === 'merged' || result.status === 'up-to-date',
+    request.kind === 'revert'
+      ? result.status === 'merged'
+      : request.kind === 'resolution'
+        ? result.status === 'conflict'
+        : request.kind === 'resolve'
+          ? result.status === 'resolved'
+          : result.status === 'conflict' || result.status === 'merged' || result.status === 'up-to-date',
     'SOURCE_JOB_INVALID',
     'The source job returned a different sync operation.',
   );
@@ -81,7 +83,7 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
     return terminal;
   };
   let lane = state.lane;
-  if (request.kind !== 'resolution') {
+  if (request.kind !== 'resolution' && request.kind !== 'revert') {
     lane = await saveLane(ctx, { ...input, laneId: request.laneId });
     if (!sameSaveLane(lane, request.expected))
       return finish(
@@ -136,6 +138,27 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
         right: result.right,
         draftHead: result.state.sha256,
         status: 'pending',
+      },
+    };
+    await writeHostedRecord(ctx, { ...input, authorityEpoch, expectedVersion: null, record: lane });
+  } else if (state.work.mode === 'revert') {
+    lane = {
+      kind: 'lane',
+      id: state.resolutionLaneId,
+      version: 0,
+      sourceVersion: 0,
+      lifecycleVersion: 0,
+      at: first.at,
+      intentId: state.intentId,
+      actor: input.actor,
+      base: state.base,
+      head: result.state.sha256,
+      state: 'active',
+      authorityEpoch,
+      revert: {
+        receiptId: state.work.receiptId,
+        previous: state.work.previous.object.sha256,
+        accepted: state.work.accepted.object.sha256,
       },
     };
     await writeHostedRecord(ctx, { ...input, authorityEpoch, expectedVersion: null, record: lane });

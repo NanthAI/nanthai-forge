@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NativeSource, overlappingPaths, type NativeFile } from './native-source.js';
+import { compensatingState } from './compensating-revert.js';
 import { conflictPlan } from './agent-sync.js';
 import { LazyMergeSource, lazyMerge } from './hosted-merge-reader.js';
 import { composeConflictPageSchema } from './hosted-compose.js';
@@ -29,7 +30,14 @@ export async function buildHostedSyncState(
     source.generated.clear();
   };
   let result: typeof syncOutputSchema._output.result;
-  if (work.mode === 'resolve') {
+  if (work.mode === 'revert') {
+    await reader.file(work.previous);
+    await reader.file(work.accepted);
+    const head = await calculate(() =>
+      compensatingState(source, work.previous.object.sha256, work.accepted.object.sha256, plan.at),
+    );
+    result = { status: 'merged', state: { sha256: head, size: source.object(head).length } };
+  } else if (work.mode === 'resolve') {
     await reader.file(work.left);
     const resolution = work.resolution;
     invariant(resolution.status === 'pending', 'SOURCE_JOB_INVALID', 'Select the pending resolution.');

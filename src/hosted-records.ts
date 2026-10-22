@@ -35,6 +35,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       lifecycleVersion: version,
       state: z.enum(['active', 'completed', 'abandoned']),
       authorityEpoch: version,
+      revert: z.object({ receiptId: z.uuid(), previous: hash, accepted: hash }).strict().optional(),
       resolution: z
         .object({
           candidateId: z.uuid().nullable(),

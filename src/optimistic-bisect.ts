@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { compensatingState } from './compensating-revert.js';
 import { ForgeError } from './errors.js';
 import { NativeSource, overlappingPaths } from './native-source.js';
 import type { ChannelMove, CheckRun } from './work-types.js';
@@ -26,12 +27,7 @@ export async function bisectLandings<T>(
 export function reverseLandings(source: NativeSource, head: string, moves: ChannelMove[], at: string) {
   for (const move of [...moves].reverse()) {
     if (!move.previous) return undefined;
-    const reverse = source.writeState(
-      source.state(move.previous).files,
-      [move.head],
-      'Compensating reverse delta',
-      at,
-    );
+    const reverse = compensatingState(source, move.previous, move.head, at);
     const merged = source.compose(head, reverse, 'Compensating optimistic landing revert', at);
     if (!merged.head) return undefined;
     head = merged.head;

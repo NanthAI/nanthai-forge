@@ -15,7 +15,15 @@ const common = {
   message: z.string(),
 };
 const lane = { laneId: z.uuid(), expected: saveExpectedSchema };
+export const revertTargetSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('receipt'), receiptId: z.uuid() }).strict(),
+  z.object({ kind: z.literal('submission'), submissionId: z.uuid() }).strict(),
+]);
+export const revertRequestSchema = z
+  .object({ ...common, kind: z.literal('revert'), target: revertTargetSchema })
+  .strict();
 export const syncRequestSchema = z.discriminatedUnion('kind', [
+  revertRequestSchema,
   z
     .object({
       ...common,
@@ -33,6 +41,7 @@ export const syncRequestSchema = z.discriminatedUnion('kind', [
   z.object({ ...common, ...lane, kind: z.literal('resolve') }).strict(),
 ]);
 export const syncWorkSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('revert'), receiptId: z.uuid(), previous: source, accepted: source }).strict(),
   z.object({ mode: z.literal('sync'), left: source, right: source }).strict(),
   z.object({ mode: z.literal('resolution'), candidateId: z.uuid(), conflicts: object }).strict(),
   z.object({ mode: z.literal('resolve'), left: source, resolution: resolutionSchema }).strict(),

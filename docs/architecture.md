@@ -1230,3 +1230,28 @@ status shares the native source-relative projection: later Lane saves show
 status reads are observation only and start no compute. This API and its crash,
 contention and scale tests use local fakes; deployment and live provider qualification
 remain separate.
+
+### Hosted compensating revert
+
+`projectHostedSync:prepare` accepts `kind: revert` with an exact acceptance receipt
+or submission identity. One project-scoped indexed lookup selects the actual
+previous and accepted main heads from H14's receipt. It never reads the requested
+Lane head, guesses from current bytes, or hydrates the accepted input/history
+pages. A submission with no acceptance receipt fails explicitly, including when
+its final reply is unknown. The original operation retains its target, time,
+Intent/Lane IDs and source job; authorized retries reconcile those same identities.
+
+The existing fixed sync worker reuses native `compensatingState`: pre-acceptance
+files with the accepted head as synthetic parent. This reverses the actual main
+transition, including all batch inputs, dependency merges and prior compensation.
+It publishes an isolated active Lane with receipt provenance, preserving all
+original States and current main. Only the two State manifests are needed to
+construct the reverse; file blobs are fetched later only as ordinary merge needs.
+
+Compose that saved Lane with H08, then use H15 finish for the exact Candidate.
+Current accept authority, policy and exact agent checks remain H14's ordinary
+rules; people retain their existing unchecked acceptance capability. H15 recomposes
+and rechecks on main races. Later disjoint work survives, while overlaps retain
+H08 conflict roots usable by H09 resolution. Source preparation alone never
+claims a check or acceptance, and reverting a revert selects that new acceptance's
+actual delta by the same API. CLI/agent transport is separate H18a work.

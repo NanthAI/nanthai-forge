@@ -8,6 +8,7 @@ import { readHostedRecord } from './projectHostedRecords';
 import { hostedStartMain } from './projectHostedChannels';
 import { saveLane, sameSaveLane, saveObject } from './projectHostedSaveStore';
 import { syncRow, loadSync, hostedSyncInput, type SyncState } from './projectHostedSyncStore';
+import { prepareHostedRevert } from './projectHostedRevert';
 import { syncRequestSchema } from '../src/hosted-sync';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
@@ -39,7 +40,12 @@ export const prepare = mutation({
               resourceId: request.laneId,
               resourceVersion: request.expected.version,
             }
-          : { resourceId: request.candidateId }),
+          : request.kind === 'revert'
+            ? {
+                resourceId:
+                  request.target.kind === 'receipt' ? request.target.receiptId : request.target.submissionId,
+              }
+            : { resourceId: request.candidateId }),
       };
       const prepared = await beginHostedOperation(ctx, {
         ...auth,
@@ -52,7 +58,12 @@ export const prepare = mutation({
           parentAttemptId: null,
           at: new Date().toISOString(),
           expected,
-          ids: { lane: crypto.randomUUID(), job: crypto.randomUUID(), jobOperation: crypto.randomUUID() },
+          ids: {
+            intent: crypto.randomUUID(),
+            lane: crypto.randomUUID(),
+            job: crypto.randomUUID(),
+            jobOperation: crypto.randomUUID(),
+          },
         },
       });
       if (prepared.replayed) {
@@ -69,7 +80,12 @@ export const prepare = mutation({
         invariant(row, 'NOT_FOUND', 'Select a Candidate on this project.');
         return hostedRecordSchema.options[3].parse(JSON.parse(row.value));
       };
-      if (request.kind === 'resolution') {
+      if (request.kind === 'revert') {
+        const selected = await prepareHostedRevert(ctx, auth, request, prepared.operation.firstAttempt);
+        intentId = selected.intentId;
+        base = selected.base;
+        work = selected.work;
+      } else if (request.kind === 'resolution') {
         const selected = await candidate(request.candidateId);
         invariant(
           selected.result.status === 'conflict' &&

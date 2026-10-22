@@ -1357,3 +1357,39 @@ progress. The finite driver downloads one bounded metadata page or stores one
 small hash-verified compose plan per action, then yields. Source computation and
 check dispatch remain the existing H08/H10 jobs and configured provider routes.
 Only H14's current-authority/exact-run/main CAS and real receipt report landing.
+
+### Hosted compensating revert API
+
+Revert uses the existing durable sync phases and the ordinary compose/finish APIs:
+
+1. Call `projectHostedSync:prepare {projectId,request}` with serialized
+   `revertRequestSchema` from `src/hosted-sync.ts`:
+   `{kind:"revert",operationId,authorityEpoch,target,message}`. `target` is either
+   `{kind:"receipt",receiptId}` or `{kind:"submission",submissionId}`. Submission
+   addressing resolves the immutable accepted receipt after an unknown final reply;
+   `NOT_FOUND` means no retained acceptance was found, never permission to guess a
+   head or use the requested Lane's changes. Preparation creates a dedicated Intent
+   and pins the two actual receipt heads, without changing main.
+2. `projectHostedSync:progress {projectId,operationId}` exposes the exact worker
+   input. Upload those canonical metadata bytes through the existing missing-only
+   object path and call `projectHostedSyncJobs:submit`. Retry using the same UUID
+   and request. Existing source-job recovery/callback publication applies; no new
+   job kind, provider or periodic observer is needed.
+3. The terminal sync result contains the compensating saved Lane selection. Its
+   `status:"merged"` describes the produced source, not acceptance. The canonical
+   Lane's `revert` provenance retains `receiptId`, `previous` and `accepted` heads.
+   Compose that Lane through H08 against observed main, under its returned Intent,
+   and enqueue the ordinary H15 landing request with
+   `finish:{composeOperationId,after:null}`. Retain the compose/landing UUIDs before
+   their first calls. H15 owns checking, recomposition on races and acceptance.
+
+An overlap produces the usual conflicted Candidate; use the explicit H09 resolution
+Lane API and compose/finish its resolved selection. The original compensating Lane
+and receipt remain retained. Later disjoint source survives. A batch acceptance is
+reversed as its complete actual main transition, and a revert-of-revert uses the
+same receipt selection. Preparing or replaying checks current contributor access;
+source dispatch/publication checks the pinned epoch. Final acceptance retains all
+ordinary actor/policy/check rules, without adding an owner-only revert rule.
+Receipt lookup and source publication are constant-size metadata transactions;
+source diff/merge stays on the worker. These API-only phases do not create a local
+native owner, transport command or site control.
