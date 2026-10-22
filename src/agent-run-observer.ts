@@ -1,3 +1,4 @@
+import { landingWaitMs, assertLandingWorkerActive } from './landing-worker-context.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 // SPDX-License-Identifier: Apache-2.0
@@ -13,6 +14,8 @@ const active = (run: CheckRun) =>
   run.status === 'queued' || run.status === 'preparing' || run.status === 'running';
 
 export async function waitForAgentRun(store: WorkStore, operationId: string, waitMs?: number): Promise<void> {
+  assertLandingWorkerActive();
+  waitMs = landingWaitMs(waitMs);
   const end = waitMs === undefined ? Infinity : Date.now() + waitMs,
     reader = new SelectedRunObserver(store, operationId);
   for (;;) {

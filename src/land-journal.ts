@@ -3,10 +3,20 @@ import {
   previewExclusionMessage,
   type LandingPreview,
 } from './integration-preview-landing.js';
+import { wakeLandingWorker } from './landing-worker-wake.js';
 import { landFrictionCounts } from './friction-auto.js';
 // SPDX-License-Identifier: Apache-2.0
 import { savedOverlapPlan, highOverlap, orderOverlapGroups } from './agent-overlap-plan.js';
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { mkdirBelow } from './mkdir-below.js';
@@ -32,6 +42,8 @@ export type LandSelection = { inputs: WorkView['inputs']; finish: FinishAction }
 type State = {
   schema: 1;
   request: string;
+  command?: LandCommand;
+  selection?: LandSelection;
   entries: LandEntry[];
   pins?: WorkView['inputs'];
   preview?: LandingPreview | null;
@@ -40,7 +52,11 @@ type State = {
 export class LandJournal {
   readonly path: string;
   readonly state: State;
-  constructor(store: WorkStore, command: LandCommand, selection?: LandSelection) {
+  constructor(
+    private readonly store: WorkStore,
+    command: LandCommand,
+    selection?: LandSelection,
+  ) {
     const directory = join(store.directory, 'agent-land');
     mkdirBelow(store.directory, directory);
     this.path = join(directory, `${command.operationId}.json`);
@@ -134,6 +150,8 @@ export class LandJournal {
     this.state = {
       schema: 1,
       request,
+      command,
+      ...(selection ? { selection } : {}),
       entries: orderOverlapGroups(plan, entries, entry => entry.inputs.map(pin => pin.laneId)),
       pins: pinned,
     };
@@ -188,21 +206,50 @@ export class LandJournal {
     this.save();
   }
   save() {
-    landFrictionCounts(this.state.entries);
-    const temporary = `${this.path}.${randomUUID()}`,
-      file = openSync(temporary, 'wx', 0o600);
-    try {
-      writeFileSync(file, JSON.stringify(this.state) + '\n');
-      fsyncSync(file);
-    } finally {
-      closeSync(file);
-    }
-    renameSync(temporary, this.path);
-    const directory = openSync(join(this.path, '..'), 'r');
-    try {
-      fsyncSync(directory);
-    } finally {
-      closeSync(directory);
-    }
+    saveLandJournal(this.store, this.path, this.state);
   }
+}
+
+/** Retain and replay the original parent request, including its immutable input pins.
+ * Older journals recover through their retained child commands and exact input pins. */
+export function pendingLands(store: WorkStore) {
+  const directory = join(store.directory, 'agent-land');
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory)
+    .filter(name => /^[0-9a-f-]+\.json$/.test(name))
+    .flatMap(name => {
+      const state = JSON.parse(readFileSync(join(directory, name), 'utf8')) as State;
+      invariant(state.schema === 1, 'INVALID_WORK_STORE', 'Invalid retained land journal.');
+      return state.entries.some(entry => !entry.result || entry.result.status === 'waiting')
+        ? [
+            {
+              operationId: name.slice(0, -5),
+              command: state.command,
+              selection: state.selection,
+              state,
+              path: join(directory, name),
+            },
+          ]
+        : [];
+    });
+}
+
+export function saveLandJournal(store: WorkStore, path: string, state: State) {
+  landFrictionCounts(state.entries);
+  const temporary = `${path}.${randomUUID()}`,
+    file = openSync(temporary, 'wx', 0o600);
+  try {
+    writeFileSync(file, JSON.stringify(state) + '\n');
+    fsyncSync(file);
+  } finally {
+    closeSync(file);
+  }
+  renameSync(temporary, path);
+  const directory = openSync(join(path, '..'), 'r');
+  try {
+    fsyncSync(directory);
+  } finally {
+    closeSync(directory);
+  }
+  wakeLandingWorker(store);
 }

@@ -1,3 +1,4 @@
+import { landingWorkerSignal, assertLandingWorkerActive } from './landing-worker-context.js';
 import { candidateCommand } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
 import { executionBase } from './work-intent-local.js';
@@ -374,6 +375,17 @@ export class WorkService {
       beforePublish?: () => void;
     } = {},
   ) {
+    assertLandingWorkerActive();
+    if (landingWorkerSignal()) {
+      const beforePublish = options.beforePublish;
+      options = {
+        ...options,
+        beforePublish: () => {
+          assertLandingWorkerActive();
+          beforePublish?.();
+        },
+      };
+    }
     input = candidateCommand(input);
     const operation = input && typeof input === 'object' && 'action' in input ? String(input.action) : 'work';
     return withWorkLockOptions({ operation }, () => this.dispatchAction(input, expectedRevision, options));

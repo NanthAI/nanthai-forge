@@ -42,7 +42,7 @@ export function formatPendingStatus(value: PendingStatus) {
     `Transfers: ${h.pendingPushes.length} pending · ${h.metadataPending} metadata (source coverage separate)`,
     `Automatic hosted push: ${h.autoExchange?.status ?? 'unknown'}${h.autoExchange?.phase ? ` · ${oneLine(h.autoExchange.phase)} · last progress ${h.autoExchange.lastProgressAt === null ? 'unknown' : new Date(h.autoExchange.lastProgressAt).toISOString()}` : ''} · spend ${h.autoExchange?.spend.availability ?? 'unknown'} · ${h.autoExchange?.spend.reason ?? 'unavailable'} · rolling delta USD ${h.autoExchange?.spend.deltaUsd ?? 'unknown'}${['paused', 'stalled'].includes(h.autoExchange?.status ?? '') ? ` · ${h.autoExchange!.resume}` : ''}`,
     `GitHub main: ${pin(value.github.mainHead)} · ${value.github.source} · ${value.github.status} · age ${elapsed(value.github.ageMs)}`,
-    `Checks: ${value.checks.length} queued/preparing/running (process liveness unknown)`,
+    `Checks: ${value.checks.length} queued/preparing/running · landing worker ${value.landingWorker.status} · ${value.landingWorker.pendingRecovery} pending recovery · ${value.landingWorker.dependencyWaits} dependency waits · last event ${value.landingWorker.observedAt ?? 'unknown'}`,
     `Audits: ${value.audits.filter(a => ['pending', 'queued', 'preparing', 'running'].includes(a.status)).length} pending · ${value.audits.filter(a => a.status === 'failed').length} failed`,
     `Deployment: ${pin(value.deployment?.head ?? null)} · ${value.deployment?.source ?? 'unknown'} (last observation); installed source unknown`,
   ];

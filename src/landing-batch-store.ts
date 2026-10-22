@@ -1,4 +1,5 @@
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
+import { assertLandingWorkerActive } from './landing-worker-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landingConflictPeers } from './landing-conflict-peers.js';
 import { landingOverlap } from './landing-overlap.js';
@@ -29,6 +30,7 @@ export function batchEdit<T>(
 ) {
   return retryWorkPhase(id, () =>
     work.store.locked(() => {
+      assertLandingWorkerActive();
       beforePublish?.();
       const data = work.store.load();
       const before = JSON.stringify(data);

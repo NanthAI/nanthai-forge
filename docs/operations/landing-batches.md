@@ -1,8 +1,8 @@
 # Local landing batches
 
 Native `finish` operations with an explicitly configured check runner queue code
-candidates in Work format 17 (18 with unified Intents). `land-ready` resumes incomplete batches as well as
-dependency waits. Legacy projects without a runner policy retain their existing
+candidates in Work format 17 (18 with unified Intents). The managed owner worker resumes incomplete batches and dependency waits.
+`land-ready` remains an explicit finite recovery command. Legacy projects without a runner policy retain their existing
 finish protocol. Git, protected paths, supervised review, invariant-pinned
 acceptance and docs-only candidates retain the ordinary finish path. Applicable
 passing evidence can still use the disjoint fast lane, which checks queued paths
@@ -53,8 +53,8 @@ The cursor is additive and optional; current older writers preserve unknown reco
 fields. The generation journal does not change Work's format, revision or queue
 contents. Keep it with the owner-local control journals on recovery; canonical
 Candidates, runs and Channel receipts remain in Work. There is no new writer-upgrade
-requirement. This remains a finite drain invoked by finish or `land-ready`: no
-background worker or automatic startup recovery is launched.
+requirement. The same finite drain is used by finish, `land-ready` and the managed
+owner worker below.
 
 ## Stacked Lanes
 
@@ -168,3 +168,65 @@ entry statuses and counts remain available for compatibility; automation should
 use submission state/reason/cause to distinguish waiting from failure. Canonical
 Work records override stale local batch observations. These adapters do not start
 a worker, run checks, or change acceptance policy.
+
+
+## Managed owner lifecycle
+
+The existing `serve`/MCP owner lifecycle and detached presence worker also drive
+submitted native landing batches. No separate landing daemon is created. Start
+`nforge serve OWNER --port 4173` to recover retained work immediately. An observer
+client can disconnect while the owner service keeps running. A local Mac cannot
+drive while powered off; starting the owner again reconciles saved work.
+
+The landing worker registers wake sources before scanning, then rechecks after
+registration and each sweep. Durable Work publication wakes enqueue, check
+completion, cancellation, review and Channel/dependency changes through a private
+local notification socket. Native filesystem notifications also cover `work.json`,
+finish/land journals, exact-run `result.json` receipts and batch queue release.
+These are invalidations: saved records and original operation IDs are the authority.
+Startup repairs missed notifications. New land journals retain their exact parent
+request and selection so dependency waits replay the original pins. Retained finish
+dependency waits also resume without a person invoking `land-ready`.
+
+Idle landing workers have no polling timers, hosted subscriptions, Work writes
+or hosted writes. Local service observations live beside the driver journals in
+`landing-workers`; they update on lifecycle events, never as a periodic heartbeat.
+Pending status reports service state, live process identities, last event time,
+queued/checking recovery count and dependency waits. An unavailable worker leaves
+submissions pending, not failed. Existing presence and hosted-listener schedules
+are separate from landing wake sources. Readers never start a landing worker.
+
+Shutdown stops driving and fences further controller publication, without
+cancelling the submitted jobs. A restarted worker adopts original batch, Candidate,
+run and acceptance IDs under the same channel drain queue and generation fence.
+Multiple owner processes can observe; only the queue holder drives a channel.
+Runner/controller infrastructure recovery retains its existing semantics: no
+arbitrary local command is automatically rerun merely because its runner died.
+
+### Owner Mac launchd setup
+
+The lead installs the existing `serve` process using
+`scripts/launchd/com.nanthai.forge-owner.plist`. Replace `__NODE__` and `__CLI__`
+with absolute paths to the supported Node executable and the reviewed installed
+`dist/cli.js`; replace `__OWNER__`, `__PORT__`, `__NODE_BIN__` and `__STATE_DIR__`
+with the canonical owner, selected port, Node directory and a private log directory.
+Use XML escaping for replacements. The template contains no credentials. Preserve
+any owner-selected environment configuration in the existing service setup; do
+not embed secret values in the plist. The CLI startup URL contains a local token,
+so keep its log directory private and never copy those logs into a report.
+
+After installing the reviewed build and writing the substituted plist as
+`~/Library/LaunchAgents/com.nanthai.forge-owner.plist` (mode 0600), the lead runs:
+
+```sh
+plutil -lint "$HOME/Library/LaunchAgents/com.nanthai.forge-owner.plist"
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.nanthai.forge-owner.plist"
+launchctl enable "gui/$(id -u)/com.nanthai.forge-owner"
+launchctl kickstart "gui/$(id -u)/com.nanthai.forge-owner"
+```
+
+Observe local pending status to confirm recovery. Stop driving with
+`launchctl bootout "gui/$(id -u)/com.nanthai.forge-owner"`; saved submissions
+remain. Re-enable with bootstrap/enable/kickstart. Accepted history is retained;
+undo accepted source through the existing checked compensating change. These
+commands are lead installation steps, not actions performed by a finite agent.

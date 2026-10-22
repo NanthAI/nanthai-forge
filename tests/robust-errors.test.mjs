@@ -1,3 +1,5 @@
+import { landingWorkerStates } from '../dist/landing-worker-status.js';
+import { WorkStore } from '../dist/work-store.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -64,7 +66,8 @@ const start = (root, env = {}) => {
   return { child, exited };
 };
 // Startup is over when the owner slot and the Lane's slot both hold a ticket marked `holding`: every
-// write the worker makes without being asked has landed. Slow sandboxes take over a second to get there.
+// presence startup write has landed. The managed landing service must also report idle
+// before a deletion fixture can assume startup publication is complete.
 const ready = async root => {
   const held = name => {
     const dir = join(root, '.forge', 'work', name);
@@ -80,12 +83,16 @@ const ready = async root => {
       })
     );
   };
+  const landingReady = () => landingWorkerStates(new WorkStore(root)).some(state => state.status === 'idle');
   for (
     const end = Date.now() + 10_000;
-    Date.now() < end && !(held('presence-owner') && held('presence-workers'));
+    Date.now() < end && !(held('presence-owner') && held('presence-workers') && landingReady());
   )
     await new Promise(resolve => setTimeout(resolve, 50));
-  assert.ok(held('presence-owner') && held('presence-workers'), 'the worker finished starting');
+  assert.ok(
+    held('presence-owner') && held('presence-workers') && landingReady(),
+    'presence and landing worker finished starting',
+  );
 };
 const within = (promise, ms) =>
   Promise.race([promise.then(() => true), new Promise(resolve => setTimeout(() => resolve(false), ms))]);

@@ -1,3 +1,4 @@
+import { wakeLandingWorker } from './landing-worker-wake.js';
 import { captureTransactionFriction } from './friction-auto.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { wakeAutoExchange } from './auto-exchange-wake.js';
@@ -55,6 +56,7 @@ export class WorkStore {
       'Work metadata must be a real directory.',
     );
     wakeAutoExchange(this);
+    wakeLandingWorker(this);
   }
   path(id: string): string {
     return join(this.directory, `lane-${id}`);
@@ -209,6 +211,7 @@ export class WorkStore {
     captureTransactionFriction(transaction, previous);
     const result = transaction.commit(revision);
     wakeAutoExchange(this);
+    wakeLandingWorker(this);
     try {
       indexPeerRecords(
         this.root,
@@ -258,6 +261,7 @@ export class WorkStore {
     parseWork(data);
     writeRecords(this.directory, data);
     wakeAutoExchange(this);
+    wakeLandingWorker(this);
   }
   /** Advisory only: publication always acquires the owner lock and revalidates. */
   preparing() {

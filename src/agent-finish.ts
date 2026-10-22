@@ -1,4 +1,5 @@
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
+import { landingWorkerSignal } from './landing-worker-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import { finishSubmissions } from './landing-submission-read.js';
 import { strandedActionsRun } from './github-actions-recovery.js';
@@ -61,9 +62,11 @@ export async function agentFinish(work: WorkService, command: FinishAction, phas
   const onSignal = () => {
     cancelTickets(command.operationId);
   };
-  process.on('SIGTERM', onSignal);
-  process.on('SIGINT', onSignal);
-  process.on('SIGHUP', onSignal);
+  if (!landingWorkerSignal()) {
+    process.on('SIGTERM', onSignal);
+    process.on('SIGINT', onSignal);
+    process.on('SIGHUP', onSignal);
+  }
   try {
     const response = await withQueueSlot(
       join(work.store.directory, 'finish-queue', command.operationId),

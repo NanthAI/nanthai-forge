@@ -177,6 +177,7 @@ export async function watchOwnerPresence(
   store: WorkStore,
   signal?: AbortSignal,
   onEdit?: (laneId: string) => void,
+  lifecycle?: (signal: AbortSignal) => Promise<void>,
 ) {
   if (signal?.aborted) return;
   // Validate the current Work format before queue admission writes a ticket.
@@ -186,6 +187,8 @@ export async function watchOwnerPresence(
     () =>
       new Promise<void>(resolve => {
         const lanes = new Map<string, { controller: AbortController; pending: Promise<unknown> }>();
+        const lifecycleController = new AbortController();
+        let lifecyclePending: Promise<void> | undefined;
         let closed = false;
         const reconcile = () => {
           if (closed || ownerDying) return;
@@ -217,7 +220,7 @@ export async function watchOwnerPresence(
             if (vanished) {
               ownerDying = true;
               clearInterval(timer);
-            } else if (!active.length) close();
+            } else if (!active.length && !lifecycle) close();
           } catch {
             if (!existsSync(store.directory)) close();
           }
@@ -235,14 +238,20 @@ export async function watchOwnerPresence(
           signal?.removeEventListener('abort', close);
           const pending = [...lanes.values()];
           for (const { controller } of pending) controller.abort();
-          void Promise.all(pending.map(lane => lane.pending)).then(() => resolve());
+          lifecycleController.abort();
+          void Promise.all([...pending.map(lane => lane.pending), lifecyclePending]).then(() => resolve());
         };
         if (signal) watcher.unref();
         if (signal) timer.unref?.();
         watcher.on('error', close);
         signal?.addEventListener('abort', close, { once: true });
         if (signal?.aborted) close();
-        else reconcile();
+        else {
+          lifecyclePending = lifecycle?.(lifecycleController.signal).catch(() => {
+            close();
+          });
+          reconcile();
+        }
       }),
     { waitMs: 0, anchor: store.directory },
   );
@@ -266,7 +275,10 @@ if (process.argv[1]?.endsWith('/presence-worker.js') && process.argv[2]) {
   );
   // The guard signal unrefs the observers, so this keeps the process alive until the guard ends it.
   const keepAlive = setInterval(() => undefined, 60_000);
-  await watchOwnerPresence(store, controller.signal, guard.touch).catch(() => undefined);
+  await watchOwnerPresence(store, controller.signal, guard.touch, async signal => {
+    const { watchLandingWorker } = await import('./landing-worker.js');
+    await watchLandingWorker(store, signal);
+  }).catch(() => undefined);
   clearInterval(keepAlive);
   guard.close();
   process.exit(0);

@@ -1,4 +1,5 @@
 import { integrationPreviewStatus } from './integration-preview-auto.js';
+import { readLandingWorkerStatus } from './landing-worker-status.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readLaneSubmissions } from './landing-submission-read.js';
 import { savedOverlapPlan } from './agent-overlap-plan.js';
@@ -64,6 +65,7 @@ export function readPendingStatus(
         },
         {
           integrationPreview: integrationPreviewStatus(store),
+          landingWorker: readLandingWorkerStatus(store),
           submissions: readLaneSubmissions(store),
           autoExchange: readAutoExchangeStatus(store, Date.parse(now)),
           recovery: recovery?.(store) ?? null,

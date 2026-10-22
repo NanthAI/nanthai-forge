@@ -1,3 +1,4 @@
+import { landingWorkerSignal } from './landing-worker-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import { withQueueSlot } from './landing-queue.js';
 import { batchDirectory, batchEdit, composeBatch, landingShape, selectBatch } from './landing-batch-store.js';
@@ -126,7 +127,7 @@ export async function drainLandingBatches(
           continue;
         }
         if (!running.size) break;
-        await Promise.race([...running.values(), sleep(200)]);
+        await Promise.race(landingWorkerSignal() ? [...running.values()] : [...running.values(), sleep(200)]);
       }
       if (failure) throw failure.error;
     },

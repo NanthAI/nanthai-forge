@@ -1,3 +1,4 @@
+import { assertLandingWorkerActive, landingWaitMs } from './landing-worker-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { join } from 'node:path';
@@ -26,8 +27,9 @@ export async function withQueueSlot<T>(
     anchor?: string;
   } = {},
 ): Promise<{ value: T } | { waiting: LandingPosition }> {
+  assertLandingWorkerActive();
   if (held.getStore()?.has(directory)) return { value: await task() };
-  const waitMs = options.waitMs ?? workQueueWaitMs(),
+  const waitMs = landingWaitMs(options.waitMs) ?? workQueueWaitMs(),
     end = Date.now() + waitMs;
   invariant(
     Number.isSafeInteger(waitMs) && waitMs >= 0,

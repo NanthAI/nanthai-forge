@@ -1,3 +1,4 @@
+import type { LandingWorkerStatus } from './landing-worker-status.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landingAttemptId, projectSubmission, type Submission } from './landing-submission.js';
 import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
@@ -31,6 +32,7 @@ export type PendingData = Pick<
   Partial<Pick<WorkData, 'intents'>>;
 export type PendingObservations = {
   integrationPreview?: string | undefined;
+  landingWorker?: LandingWorkerStatus;
   autoExchange?: AutoExchangeStatus;
   submissions?: Submission[];
   overlap?: OverlapPlan;
@@ -283,6 +285,13 @@ export function pendingStatus(
       : null,
     installedSource: null,
     ownerHeartbeat: null,
+    landingWorker: {
+      ...(observed.landingWorker ?? { status: 'unknown', workers: 0, observedAt: null, code: null }),
+      pendingRecovery: (data.landingEntries ?? []).filter(entry =>
+        ['queued', 'checking'].includes(entry.status),
+      ).length,
+      dependencyWaits: observed.waitingLaneIds?.length ?? 0,
+    },
   };
 }
 export type PendingStatus = ReturnType<typeof pendingStatus>;

@@ -1,3 +1,4 @@
+import { processAlive } from '../dist/local-process.js';
 import { trustAgents } from './autonomy-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import { readWorkBytes } from './work-store-fixture.mjs';
@@ -739,11 +740,19 @@ for (const native of [true, false])
         await new Promise(resolve => setTimeout(resolve, 20));
       }
       assert.equal(run?.status, 'running');
-      assert.equal(run.runner.pid, child.pid);
+      assert.ok(run.runner.pid > 0 && run.runner.pid !== process.pid);
       assert.ok(run.childPid);
-      const exited = once(child, 'exit');
-      child.kill('SIGKILL');
-      await exited;
+      // The managed owner may adopt after the submitting CLI exits on contention.
+      // Kill the recorded runner, rather than assume the observer owns execution.
+      if (run.runner.pid !== child.pid && processAlive(run.runner)) process.kill(run.runner.pid, 'SIGKILL');
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, 'exit');
+        child.kill('SIGKILL');
+        await exited;
+      }
+      while (processAlive(run.runner) && Date.now() < deadline)
+        await new Promise(resolve => setTimeout(resolve, 20));
+      assert.equal(processAlive(run.runner), false);
       // Stop this fixture's detached command after its owning runner died. No
       // completion writer survives, so the canonical owner records interruption.
       try {

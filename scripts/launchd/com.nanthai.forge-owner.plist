@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.nanthai.forge-owner</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__CLI__</string>
+    <string>serve</string><string>__OWNER__</string>
+    <string>--port</string><string>__PORT__</string>
+  </array>
+  <key>WorkingDirectory</key><string>__OWNER__</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>__NODE_BIN__:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>__STATE_DIR__/owner.log</string>
+  <key>StandardErrorPath</key><string>__STATE_DIR__/owner-error.log</string>
+  <key>Umask</key><integer>63</integer>
+</dict>
+</plist>

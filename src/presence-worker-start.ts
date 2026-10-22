@@ -34,7 +34,14 @@ export function startOwnerPresence(store: WorkStore) {
     const pending = (async () => {
       await prior?.stop();
       const { watchOwnerPresence } = await import('./presence-worker.js');
-      await watchOwnerPresence(store, controller.signal);
+      const { watchLandingWorker } = await import('./landing-worker.js');
+      // A managed serve/MCP lifetime must keep driving even while a detached
+      // process owns presence, including after that advisory process goes idle.
+      // Each channel still has only S02's queue holder and fenced driver.
+      await Promise.all([
+        watchOwnerPresence(store, controller.signal),
+        watchLandingWorker(store, controller.signal),
+      ]);
     })().catch(() => undefined);
     owner = {
       users: 1,

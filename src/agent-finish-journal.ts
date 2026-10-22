@@ -1,3 +1,4 @@
+import { wakeLandingWorker } from './landing-worker-wake.js';
 // SPDX-License-Identifier: Apache-2.0
 import { mkdirBelow } from './mkdir-below.js';
 import {
@@ -82,7 +83,11 @@ export function finishAttempt(
 export class FinishJournal {
   readonly path: string;
   readonly state: z.infer<typeof schema>;
-  constructor(store: WorkStore, command: FinishAction, head: string) {
+  constructor(
+    private readonly store: WorkStore,
+    command: FinishAction,
+    head: string,
+  ) {
     const directory = join(store.directory, 'agent-finish');
     mkdirBelow(store.directory, directory);
     this.path = join(directory, `${command.operationId}.json`);
@@ -125,6 +130,7 @@ export class FinishJournal {
     } finally {
       closeSync(directory);
     }
+    wakeLandingWorker(this.store);
   }
 }
 
@@ -142,6 +148,19 @@ export function waitingFinishes(store: WorkStore) {
         state.command
         ? [state.command]
         : [];
+    });
+}
+
+/** Startup recovery also adopts drivers that exited between durable phases.
+ * A check-only finish is not a submitted landing; terminal results stay terminal. */
+export function unfinishedFinishes(store: WorkStore) {
+  const directory = join(store.directory, 'agent-finish');
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory)
+    .filter(name => /^[0-9a-f-]+\.json$/.test(name))
+    .flatMap(name => {
+      const state = schema.parse(JSON.parse(readFileSync(join(directory, name), 'utf8')));
+      return !state.result && state.command?.accept ? [state.command] : [];
     });
 }
 

@@ -70,7 +70,7 @@ export async function land(
         );
       };
       const recordError = (entry: LandEntry, error: unknown) => {
-        if (!(error instanceof ForgeError)) throw error;
+        if (!(error instanceof ForgeError) || error.code === 'LANDING_WORKER_STOPPED') throw error;
         entry.result = {
           status: ['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)
             ? 'waiting'
