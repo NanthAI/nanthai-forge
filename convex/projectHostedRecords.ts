@@ -103,7 +103,7 @@ export async function writeHostedRecord(
   );
   // Saves and Candidates are immutable identities; job and Lane versions retain history.
   invariant(
-    !head || record.kind === 'lane' || record.kind === 'job',
+    !head || record.kind === 'lane' || record.kind === 'job' || record.kind === 'intent',
     'WORK_OPERATION_CHANGED',
     'Saves and Candidates retain their original identity.',
   );

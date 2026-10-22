@@ -373,6 +373,13 @@ export const projectProposalDocument = v.object({
   ...projectProposalFields,
 });
 export default defineSchema({
+  // Explicit current Channel pins; recovery/display snapshots never select these.
+  projectHostedChannels: defineTable({
+    operationId: v.string(),
+    projectId: v.id('hostedProjects'),
+    name: v.string(),
+    selection: v.string(),
+  }).index('by_project_and_name', ['projectId', 'name']),
   projectReturnSupersessions: defineTable({
     projectId: v.id('hostedProjects'),
     operationId: v.string(),

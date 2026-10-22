@@ -576,17 +576,17 @@ storage or changing existing receipt formats.
 
 ### Hosted record and snapshot storage
 
-`src/hosted-records.ts` defines the server Lane, save, Candidate and source-job
+`src/hosted-records.ts` defines server Intent, Lane, save, Candidate and source-job
 records. `projectHostedRecords` retains immutable, hashed versions; their bodies
 live in `projectHostedRecordBodies`, while small indexed headers hold exact byte
 counts and content pins. `projectHostedRecordHeads` is a per-resource CAS pointer,
 with project/kind/key, parent and status indexes. Independent Lane writes touch
 no global Work revision. Old-version retries reconcile the original bytes without
-rewinding a newer head. Save and Candidate identities are immutable; Lane and job
+rewinding a newer head. Save and Candidate identities are immutable; Intent, Lane and job
 updates append versions. Candidate inputs/dependencies/conflicts and job inputs
 are immutable object/page references, never repository bytes or growing arrays.
 
-These are internal storage primitives, not an enabled source-writing API. Their
+These storage functions are internal primitives; the hosted start APIs below use them transactionally. Their
 callers must resolve the actor from current authentication and commit the source
 operation reducer, related record changes and receipt in one transaction. Existing
 project read/contributor authority applies. New writes also check the explicit
@@ -615,7 +615,7 @@ replaying an older completed publication cannot rewind a later selection.
 `projectHostedSnapshotRead` reads the selected manifest and exact immutable pages
 under current project access. Neither staging nor selecting a recovery snapshot
 moves main or a Lane. Registered source validation, schema-2 main publication,
-source-job execution and public start/save APIs remain subsequent slices.
+source-job execution and public save APIs remain subsequent slices.
 
 `projectHostedDisplayRecords` contains disposable snapshot-delta display rows.
 `projectHostedProjection:rebuildPage` reconstructs one immutable page from canonical
@@ -705,3 +705,54 @@ are advisory observations, not proof of current dependencies or external-input
 health. The result names its exact inputs and duration; a concurrent save or main
 advance does not silently change those pins. Workspaces and private dependency
 copies are removed after each preview; saved source and Work remain unchanged.
+
+
+### Hosted Intent and Lane start APIs
+
+`projectHostedStart:start` atomically creates an Intent and Lane, or a sibling
+Lane for one existing canonical hosted Intent. `createIntent` creates a planned
+Intent without a Lane. Both take a project ID, original operation UUID, authority
+epoch, expected main `{head, receiptId}` and an `intent` variant: `new` with outcome
+and optional constraints, or `existing` with Intent UUID (`start` only). Results
+are JSON validated by `hostedStartResultSchema`; an absent Lane is explicit null.
+No filesystem path, owner listener, full Work document or Channel-history read is
+involved. New canonical Intent headers preserve outcome, constraints, creator and
+assignees, base receipt and status; existing portable Intent/planning formats are
+unchanged.
+
+Start reads `projectHostedChannels` by exact project/main identity. Its selection
+is an explicit schema-2 main contract, independent of recovery or display
+selection. The internal `projectHostedChannels:seed` boundary accepts already
+validated bootstrap/cutover pins from a trusted caller under current owner and
+server/shadow authority. It is insert-only, operation-reconciled, and cannot
+rewind a later Channel selection. This is not a source validator, a public main
+writer or a conversion of native projects; bootstrap/cutover integration and
+later landing CAS publication remain separate slices. `current` returns this
+explicit schema-2 selection under current reader authority. It does not change
+the legacy `projectMain:current` generation read path. An unseeded server project
+returns `SOURCE_UNAVAILABLE`; a mismatched authority returns
+`SOURCE_AUTHORITY_CHANGED`, with no historical or native-head fallback.
+
+The first successful start retains its IDs, time, original main pins and result
+in `projectHostedOperations` in the same transaction as its resource records.
+Authorized retries return that original result after later main/Lane movement or
+authority changes, without writing it again. Changed payloads or expectations
+return `WORK_OPERATION_CHANGED`. New stale main expectations, including the same
+bytes with a different receipt, return `CHANNEL_CHANGED` atomically. Project
+owner/contributor access is checked before retries. Starting siblings preserves
+the existing creator/assignee authority rule for contributors; the project owner
+can start any hosted Intent. Concurrent new or sibling starts write distinct
+resource and operation rows; they do not update the Intent or global Work
+revision merely to add a Lane.
+
+`projectHostedLanes:head` returns the current head and record/source/lifecycle
+versions. `detail` hydrates one current or exact historical canonical record.
+`select` returns a schema-2 `HostedLaneSelection` with project/Lane/Intent IDs,
+head, versions, lifecycle state, base State/main receipt and current authority;
+it has no backup/generation dependency. Optional exact head/source/record version
+expectations return `WORK_STALE` on movement instead of silently selecting newer
+source. Selection is a read and does not move a Lane or main. `intent` reads one
+canonical hosted Intent. `siblings` pages compact Lane IDs, versions and lifecycle
+states through the parent index in 100-row/128-KiB transport windows. Continue its
+cursor until `isDone`; no total sibling or project-history ceiling is imposed.
+All reads recheck current project access, including historical records.

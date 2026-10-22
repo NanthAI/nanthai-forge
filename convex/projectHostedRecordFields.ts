@@ -2,6 +2,7 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 export const hostedKind = v.union(
+  v.literal('intent'),
   v.literal('lane'),
   v.literal('save'),
   v.literal('candidate'),

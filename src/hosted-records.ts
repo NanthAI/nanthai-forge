@@ -14,6 +14,18 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
   z
     .object({
       ...common,
+      kind: z.literal('intent'),
+      outcome: z.string().trim().min(1).max(500),
+      constraints: z.string().max(4000),
+      creatorAccountId: z.string().min(1),
+      assigneeAccountIds: z.array(z.string().min(1)),
+      base: main,
+      status: z.enum(['active', 'ready', 'completed', 'abandoned']),
+    })
+    .strict(),
+  z
+    .object({
+      ...common,
       kind: z.literal('lane'),
       intentId: z.uuid(),
       actor: z.string().min(1),
@@ -77,7 +89,7 @@ export type HostedRecord = z.infer<typeof hostedRecordSchema>;
 export type HostedRecordKind = HostedRecord['kind'];
 export const hostedRecordRefSchema = z
   .object({
-    kind: z.enum(['lane', 'save', 'candidate', 'job']),
+    kind: z.enum(['intent', 'lane', 'save', 'candidate', 'job']),
     key: z.uuid(),
     version,
     digest: hash,
@@ -87,6 +99,8 @@ export const hostedRecordRefSchema = z
 export type HostedRecordRef = z.infer<typeof hostedRecordRefSchema>;
 export function hostedRecordIndex(record: HostedRecord) {
   switch (record.kind) {
+    case 'intent':
+      return { parent: record.creatorAccountId, status: record.status };
     case 'lane':
       return { parent: record.intentId, status: record.state };
     case 'save':
