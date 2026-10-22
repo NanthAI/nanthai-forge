@@ -37,6 +37,11 @@ export const hostedActionsRecipeSchema = z
 export const hostedActionsMappingSchema = z
   .object({
     schema: z.literal(1),
+    wakeGeneration: checkNumber.default(0),
+    reconciliation: z
+      .object({ settles: checkNumber, cancelSent: z.boolean() })
+      .strict()
+      .default({ settles: 0, cancelSent: false }),
     runId: z.uuid(),
     dispatchKey: checkHash,
     head: checkHash,
@@ -114,6 +119,8 @@ export const hostedActionsCommandSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('release'), owner: z.uuid(), token: checkNumber }).strict(),
   z.object({ kind: z.literal('heartbeat'), owner: z.uuid(), token: checkNumber }).strict(),
   z.object({ kind: z.literal('cleanup'), owner: z.uuid(), token: checkNumber }).strict(),
+  z.object({ kind: z.literal('wait'), owner: z.uuid(), token: checkNumber, terminal: z.boolean() }).strict(),
+  z.object({ kind: z.literal('cancel-sent'), owner: z.uuid(), token: checkNumber }).strict(),
 ]);
 export function actionsMappingMatches(mapping: HostedActionsMapping, run: HostedCheckRun) {
   invariant(

@@ -15,8 +15,8 @@ export interface HostedActionsStore {
   control(command: unknown): Promise<{ mapping: HostedActionsMapping; acquired: boolean; effect: boolean }>;
 }
 /** A tick does one export, one ref publication, or at most one lookup + dispatch.
- * No polling/sleep loop or Convex action waits for a check. H22b owns wakes,
- * terminal reconciliation/cancellation and the exact job/log verdict. */
+ * No polling/sleep loop or Convex action waits for a check. Adoption arms the
+ * targeted durable wake; reconcileHostedActions owns exact job/log evidence. */
 export class HostedActionsProvider implements HostedCheckProvider {
   readonly id = 'github-actions';
   constructor(

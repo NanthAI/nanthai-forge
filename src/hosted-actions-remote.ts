@@ -27,6 +27,7 @@ export class HostedActionsAccessError extends ForgeError {
 }
 export interface HostedActionsRemote {
   api: Pick<ActionsApi, 'request' | 'pages'>;
+  log?(jobId: number, repository: string): Promise<string>;
   publish(mapping: HostedActionsMapping): Promise<void>;
   delete(mapping: HostedActionsMapping): Promise<void>;
 }
@@ -47,7 +48,12 @@ export function hostedActionsRemote(
         return operation(token);
       },
     );
-  const call = async (endpoint: string, method = 'GET', body?: unknown) => {
+  const call = async (
+    endpoint: string,
+    method = 'GET',
+    body?: unknown,
+    redirect: RequestRedirect = 'error',
+  ) => {
     invariant(
       endpoint.startsWith(`repos/${configuration.repository}/`) &&
         !endpoint.includes('..') &&
@@ -61,7 +67,7 @@ export function hostedActionsRemote(
         try {
           response = await request(`https://api.github.com/${endpoint}`, {
             method,
-            redirect: 'error',
+            redirect,
             signal: AbortSignal.timeout(20_000),
             headers: {
               authorization: `Bearer ${token}`,
@@ -75,7 +81,8 @@ export function hostedActionsRemote(
           throw new ActionsApiError();
         }
         if ([401, 403].includes(response.status)) throw new HostedActionsAccessError('access');
-        if (!response.ok) throw new ActionsApiError(response.status);
+        if (!response.ok && !(redirect === 'manual' && response.status === 302))
+          throw new ActionsApiError(response.status);
         return response;
       });
     } catch (error) {
@@ -150,5 +157,44 @@ export function hostedActionsRemote(
       }),
     );
   };
-  return { api, publish: m => refOperation(m, false), delete: m => refOperation(m, true) };
+  return {
+    api,
+    publish: m => refOperation(m, false),
+    delete: m => refOperation(m, true),
+    async log(jobId, repository) {
+      invariant(
+        repository === configuration.repository && Number.isSafeInteger(jobId) && jobId > 0,
+        'EVIDENCE_CHANGED',
+        'Read only the selected repository job.',
+      );
+      const response = await call(
+        `repos/${repository}/actions/jobs/${jobId}/logs`,
+        'GET',
+        undefined,
+        'manual',
+      );
+      if (response.ok) return response.text();
+      const location = response.headers.get('location');
+      let target: URL | null = null;
+      try {
+        target = location ? new URL(location) : null;
+      } catch {
+        /* Invalid provider location stays unknown. */
+      }
+      invariant(
+        target && target.protocol === 'https:' && !target.username && !target.password,
+        'GITHUB_ACTIONS_UNKNOWN',
+        'Actions log download location is unavailable.',
+      );
+      // The signed provider URL receives no installation token or account headers.
+      let download: Response;
+      try {
+        download = await request(target.href, { redirect: 'error', signal: AbortSignal.timeout(20_000) });
+      } catch {
+        throw new ActionsApiError();
+      }
+      if (!download.ok) throw new ActionsApiError(download.status);
+      return download.text();
+    },
+  };
 }

@@ -16,6 +16,7 @@ import { FinishJournal } from '../dist/agent-finish-journal.js';
 import { checkEnvironment } from '../dist/check-environment.js';
 import { CoordinationJournal } from '../dist/agent-coordination-journal.js';
 import { trustAgents } from './autonomy-fixture.mjs';
+import { until } from './landing-worker-fixture.mjs';
 const exec = promisify(execFile);
 async function fixture(t, exitCode = 0) {
   const root = mkdtempSync(join(tmpdir(), 'forge-wait-'));
@@ -25,13 +26,14 @@ async function fixture(t, exitCode = 0) {
   const agent = new AgentWorkflow(root),
     store = agent.work.store;
   const gate = join(store.directory, 'gate');
+  const started = join(store.directory, 'check-started');
   await agent.dispatch({
     action: 'define-check',
     name: 'verify',
     executable: process.execPath,
     args: [
       '-e',
-      `const f=require('fs'); const timer=setInterval(()=>{if(f.existsSync(${JSON.stringify(gate)})){clearInterval(timer);process.exit(${exitCode});}},20);`,
+      `const f=require('fs'); f.writeFileSync(${JSON.stringify(started)},'ready'); const timer=setInterval(()=>{if(f.existsSync(${JSON.stringify(gate)})){clearInterval(timer);process.exit(${exitCode});}},20);`,
     ],
   });
   const lane = (await agent.dispatch({ action: 'start', outcome: 'Synthetic wait' })).result;
@@ -54,7 +56,7 @@ async function fixture(t, exitCode = 0) {
     if (store.load().channelMoves.some(move => move.postAccept)) await drainPostAccept(store);
     rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
   });
-  return { root, agent, store, lane, gate, view };
+  return { root, agent, store, lane, gate, started, view };
 }
 function waiting(store, input, onEvent = () => {}) {
   const events = [];
@@ -68,22 +70,39 @@ function waiting(store, input, onEvent = () => {}) {
 }
 
 test('Lane and parent land stream checking through landed, with no post-terminal events', async t => {
-  const { agent, store, lane, gate } = await fixture(t);
+  const { agent, store, lane, gate, started } = await fixture(t);
   const operationId = randomUUID();
-  const wait = waiting(store, { laneIds: [lane.laneId], operationIds: [operationId] }, event => {
-    if (event.type === 'check') writeFileSync(gate, 'release');
-  });
-  const landed = await agent.dispatch({ action: 'land', operationId, laneIds: [lane.laneId] });
-  assert.equal(landed.result.complete, true);
-  const summary = await wait.done;
-  assert.equal(summary.exitCode, 0);
-  assert.ok(wait.events.some(e => e.type === 'lane' && e.status === 'checking'));
-  assert.ok(wait.events.some(e => e.type === 'operation' && e.id === operationId && e.status === 'landed'));
-  assert.equal(wait.events.at(-1).type, 'summary');
-  const count = wait.events.length;
-  writeFileSync(join(store.directory, 'unrelated'), 'later');
-  await new Promise(resolve => setTimeout(resolve, 30));
-  assert.equal(wait.events.length, count);
+  const landing = agent.dispatch({ action: 'land', operationId, laneIds: [lane.laneId] });
+  void landing.catch(() => {});
+  try {
+    // Land preparation/queueing is not part of the observer's 15-second budget.
+    // The real command stays gated until BOTH targets have reported checking.
+    await until({ store }, () => existsSync(started), 'gated check started');
+    const checking = new Set();
+    const wait = waiting(store, { laneIds: [lane.laneId], operationIds: [operationId] }, event => {
+      if (event.status === 'checking' && ['lane', 'operation'].includes(event.type)) checking.add(event.type);
+      if (checking.has('lane') && checking.has('operation')) writeFileSync(gate, 'release');
+    });
+    const summary = await wait.done;
+    assert.equal(summary.exitCode, 0, JSON.stringify(summary));
+    assert.equal(summary.status, 'terminal');
+    assert.equal(summary.successful, true);
+    const landed = await landing;
+    assert.equal(landed.result.complete, true);
+    assert.ok(wait.events.some(e => e.type === 'lane' && e.status === 'checking'));
+    assert.ok(
+      wait.events.some(e => e.type === 'operation' && e.id === operationId && e.status === 'checking'),
+    );
+    assert.ok(wait.events.some(e => e.type === 'operation' && e.id === operationId && e.status === 'landed'));
+    assert.equal(wait.events.at(-1).type, 'summary');
+    const count = wait.events.length;
+    writeFileSync(join(store.directory, 'unrelated'), 'later');
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(wait.events.length, count);
+  } finally {
+    writeFileSync(gate, 'release');
+    await landing;
+  }
 });
 
 test('failed local check returns reason and retained log paths without a Work lock', async t => {

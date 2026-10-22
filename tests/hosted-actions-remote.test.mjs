@@ -129,3 +129,49 @@ test('real remote wrapper reconciles exact run refs, uses empty/expected leases 
   await remote.delete(mapping);
   assert.equal(pushes, 2);
 });
+
+test('hosted job log redirects never forward the installation token to signed storage', async () => {
+  const { hostedActionsRemote } = await import('../dist/hosted-actions-remote.js');
+  const { actionsFixture } = await import('./hosted-actions-fixture.mjs');
+  const s = await actionsFixture(),
+    requests = [];
+  const remote = hostedActionsRemote(
+    s.runner,
+    async (_ref, _installation, _repo, use) => use('synthetic-private-installation'),
+    () => s.transport,
+    async (url, options) => {
+      requests.push({ url, options });
+      return requests.length === 1
+        ? new Response(null, { status: 302, headers: { location: 'https://synthetic-storage.invalid/log' } })
+        : new Response('synthetic complete log');
+    },
+  );
+  assert.equal(await remote.log(123, s.runner.repository), 'synthetic complete log');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].options.redirect, 'manual');
+  assert.equal(requests[1].options.headers, undefined);
+});
+
+test('job-log transport failures do not expose signed download locations', async () => {
+  const { hostedActionsRemote } = await import('../dist/hosted-actions-remote.js');
+  const { actionsFixture } = await import('./hosted-actions-fixture.mjs');
+  const s = await actionsFixture();
+  let calls = 0;
+  const remote = hostedActionsRemote(
+    s.runner,
+    async (_ref, _installation, _repo, use) => use('synthetic-private-installation'),
+    () => s.transport,
+    async () => {
+      if (++calls === 1)
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://synthetic-storage.invalid/log?signature=synthetic-private-value' },
+        });
+      throw new Error('signed URL contained synthetic-private-value');
+    },
+  );
+  await assert.rejects(
+    remote.log(123, s.runner.repository),
+    error => error.code === 'GITHUB_ACTIONS_API' && !error.message.includes('synthetic-private-value'),
+  );
+});

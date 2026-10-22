@@ -28,6 +28,7 @@ export async function collectHostedOutput(
   redaction: { secrets: readonly string[]; paths: readonly string[] },
   sink: OutputSink,
   chunkBytes = 64 * 1024,
+  flushEachInput = false,
 ): Promise<OutputSeal> {
   invariant(
     Number.isSafeInteger(chunkBytes) && chunkBytes > 0,
@@ -77,6 +78,12 @@ export async function collectHostedOutput(
   for await (const bytes of source) {
     for (let position = 0; position < bytes.length; position += chunkBytes)
       await append(redactor.write(bytes.subarray(position, position + chunkBytes)));
+    // Runner streams publish available redacted bytes while the command is
+    // alive. Replay retained chunks; recollection needs identical input framing.
+    if (flushEachInput && pending.length) {
+      await flush(pending);
+      pending = Buffer.alloc(0);
+    }
   }
   await append(redactor.end());
   if (pending.length) await flush(pending);

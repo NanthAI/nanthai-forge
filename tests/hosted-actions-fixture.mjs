@@ -84,16 +84,27 @@ export async function actionsFixture(files = []) {
   await s.control(run.id, { kind: 'reserve', owner: p.owner, token: p.token });
   const input = await s.status(run.id);
   let now = Date.now();
+  const scheduled = [];
+  const scheduler = {
+    runAfter: async (delay, reference, args) => {
+      scheduled.push({ delay, reference, args });
+      return `synthetic-task-${scheduled.length}`;
+    },
+  };
   const commands = [],
     metrics = { reads: 0, readBytes: 0, uploads: 0, uploadBytes: 0 };
   const store = {
     control: async command => {
       commands.push(structuredClone(command));
-      return s.run('actionsControl', (ctx, args) => actions.controlHostedActions(ctx, args, now), {
-        projectId: s.projectId,
-        runId: run.id,
-        command,
-      });
+      return s.run(
+        'actionsControl',
+        (ctx, args) => actions.controlHostedActions({ ...ctx, scheduler }, args, now),
+        {
+          projectId: s.projectId,
+          runId: run.id,
+          command,
+        },
+      );
     },
   };
   const transport = {
@@ -133,6 +144,8 @@ export async function actionsFixture(files = []) {
     transport,
     bytes,
     commands,
+    scheduled,
+    scheduler,
     metrics,
     exported,
     now: () => now,

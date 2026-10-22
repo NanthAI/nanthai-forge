@@ -1109,8 +1109,8 @@ workflow/recipe bytes belong only to the harness commit, not the Candidate State
 
 Each invocation performs one export, one ref publication, or a bounded
 lookup/dispatch step and returns pending without waiting for a runner. The
-mapping's `nextAt` carries lookup/rejection backoff; H22b schedules only outstanding
-jobs. The adapter reports eventually consistent absence as unknown to H10, so
+mapping's `nextAt` carries lookup/rejection backoff. Adopting a run arms an
+indexed, generation-fenced `projectHostedActionsWake` observation for that run. The adapter reports eventually consistent absence as unknown to H10, so
 H10 cannot add another recovery. Its own twelve lookups plus a fresh empty branch
 lookup permit the local path's one recovery after an ambiguous response, including
 HTTP 400. Accepted acknowledgements never permit redelivery. GitHub does not
@@ -1128,8 +1128,53 @@ unknown even if later credential/access checks fail.
 `cleanupHostedActions` first checks a committed terminal H10 result and exact
 execution mapping, then deletes only the unchanged run-owned branch. Lost delete
 replies are safe to reconcile; the State/export/run mapping stays retained.
-Cancellation, exact job verdict, stuck-job log evidence and live output belong to
-H22b/H12; export or dispatch success alone never supplies a passing check.
+`reconcileHostedActions` reads the exact retained recipe bytes, observes the
+mapped run and pages its latest jobs on the fixed worker. Run ID, run-owned title,
+export commit, original attempt and selected shard membership must match. Its
+stable signed H10 callback identities reconcile lost shard/terminal replies.
+`projectHostedActionsReconcile:evidence` checks current actor/epoch, worker lease,
+State, export commit and run mapping before invoking the existing H10 callback
+reducer. A native State is never replaced by the generated harness commit.
+Finished/undispatched checks make no provider calls. Incomplete job lists settle
+through bounded backoff observations; after the local controller's thirty
+observations, stuck status can pass only with complete `actionsJobLogEvidence`
+and a successful run with no contradictory job conclusion. Missing or failed
+logs cannot pass. Installation credentials are never forwarded to a signed log
+storage redirect. Export/dispatch success alone supplies no passing evidence.
+
+H10 cancellation remains a request until the mapped provider run settles. A
+successful cancel POST records acknowledgement; a lost reply can retry that
+idempotent cancellation for the same run. It never starts another execution or
+claims compute stopped. Transient observation failures retain the original run
+and backoff. The durable wake re-arms before calling the fixed worker, respects
+its lease/`nextAt`, ignores duplicate generations, and becomes a read-only no-op
+after terminal evidence. There is no project sweep or recurring finished-job
+observation. The fixed controller ingress is provisioned through
+`FORGE_HOSTED_ACTIONS_CONTROLLER_URL` and its backend-only
+`FORGE_HOSTED_ACTIONS_CONTROLLER_KEY`; it receives only project/run/dispatch
+identity and must use the existing installation credential-use resolver.
+
+`runHostedActionsJob` is the fixed runner supervisor integration, outside exported
+project code. Trusted runner bootstrap supplies the original run/mapping and
+provider-attested job/commit/State/shard pins, an explicit command environment,
+and H12 `hostedOutputPublisher` sinks. No output signing or installation key is
+passed to the project command. Stdout and stderr stream through the H12 redactor
+and collector, flushing available bytes while the command is alive. The private
+`HostedActionsOutputSpool` atomically fsyncs redacted immutable chunk/seal records
+before direct R2 publication. Storage failure leaves pending output on disk;
+a replacement collector replays those exact records without executing the
+command again. Interrupted collection without seals stays incomplete. Trusted
+bootstrap must preserve spool storage and supply redaction settings; the module
+is not a sandbox against arbitrary code under the same OS account.
+
+Completion-only provider logs never enter that live-output path. The existing
+H12 Check panel reads the same paged chunk protocol; no new screen or viewer
+poller is added. After all runner streams are sealed and the H10 result is
+terminal, trusted final collection publishes the existing H12 root, separately
+from check evidence. These modules do not deploy the controller ingress, install
+the runner supervisor on a live runner, or provision its authenticated H12
+transport. The lead must wire those fixed services to the generated workflow's
+check command and perform a real owner-runner smoke after landing/deployment.
 
 ## Hosted landing queue API
 

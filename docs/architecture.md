@@ -1091,9 +1091,21 @@ Nonmatching runs, incomplete lookups and transport errors do not establish an
 empty branch. This matches the local recovery semantics; GitHub offers no atomic
 idempotency key, so it is not a proof against arbitrarily delayed run visibility.
 Multiple exact matches surface an evidence error. No global project scan runs.
-The retained mapping survives terminal-result branch cleanup. H22b supplies
-outstanding-job wakes, cancellation, exact verdict and live-log reconciliation;
-H12 supplies output chunks. No live provider/ingress is enabled by these modules.
+The retained mapping survives terminal-result branch cleanup. Targeted,
+generation-fenced wakes observe only an adopted outstanding run and rearm before
+contacting the fixed controller. Exact State/export/run/job checks precede stable
+signed H10 shard and terminal callbacks. Cancellation retains its request until
+provider completion. Stuck jobs reuse the local complete-log plus run-conclusion
+rule; provider logs alone never claim live output.
+
+The fixed runner supervisor streams command pipes through H12 and atomically
+retains redacted chunks/seals in a private durable spool before publication.
+Reconnect replays exact records without rerunning commands. Missing seals remain
+incomplete; final H12 retention is separate from H10 verdict authority. Existing
+Check-panel readers consume that same output protocol. Live fixed-controller,
+runner-bootstrap and H12 ingress provisioning remains a lead deployment operation;
+the generated workflow command must run under that trusted supervisor. These
+modules do not install or deploy those services or register an App.
 
 ### Hosted landing request queue
 
