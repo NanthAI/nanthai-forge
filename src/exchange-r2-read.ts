@@ -55,7 +55,12 @@ export async function getSigned(
 ): Promise<Buffer | 'forbidden'> {
   onCall?.('R2 object download', true);
   try {
-    const response = await exchangeFetch('R2 object download', url, {}, { retries: attempts - 1, onBytes });
+    const response = await exchangeFetch(
+      'R2 object download',
+      url,
+      { headers: { 'accept-encoding': 'identity' } },
+      { retries: attempts - 1, onBytes },
+    );
     if (response.status === 403) return 'forbidden';
     if (response.status === 404)
       throw new ForgeError('R2_OBJECT_MISSING', 'An object is missing from object storage.');

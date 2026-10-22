@@ -665,3 +665,43 @@ local fake provider; a real provider action, its bounded HTTP transport, callbac
 ingress, key provisioning and trusted object/State validation are subsequent
 worker-adapter work. Verified output references alone grant no source publication
 or landing authority.
+
+## Integration preview
+
+`nforge agent ROOT integrate '{"laneIds":["LANE_ID","OTHER_LANE_ID"]}'`
+composes accepted main with the latest saved heads of the selected active Lanes.
+Omitting `laneIds` selects every active Lane with a checkpoint; unsaved edits are
+excluded. The preview uses the existing in-memory source composition and disposable
+workspace materialization, for native owners and Git compatibility workspaces.
+It never creates a Candidate, moves a Channel, runs a landing check, or calls a
+remote runner. Automatic checkpoint previews are not enabled.
+
+Checks marked `static:true` through `define-check` are the configured fast commands.
+Without marked checks, the existing `package.json` scripts `typecheck` and `lint`
+are selected when present, with npm lifecycle hooks disabled. Missing configuration
+is reported as `not-configured`, never as a passing check. Commands run locally
+with the normal clean check environment and private HOME/XDG/temp directories;
+explicit check environment/credential passthrough still applies. Static commands
+execute repository code with OS rights; disposable workspaces are not sandboxes.
+No dependencies are installed and Forge makes no network requests. A pinned npm
+lockfile requires matching, already prepared local package/lock bytes and
+`node_modules`; those dependencies are copied into the disposable preview.
+
+A failed combination is compared with main and each Lane alone on that same main.
+Every pair of individually passing Lanes is then checked, reusing observations
+within the preview. Each failing pair names both Lane/head pins and the first
+check diagnostic lines. Text conflicts, failing main, individual failures, and
+higher-order failures without a failing pair remain distinct observations.
+The existing coordination journal retains an advisory notice for both participants;
+local brief messages include the pinned diagnostics and peers surfaces the advice
+while both saved heads remain current. Notices require no acknowledgement and do
+not establish a landing order, block acceptance, or serve as acceptance evidence.
+
+A per-owner preview lock serializes execution. The disposable cache keys accepted
+main, ordered Lane/head pins, static definitions and the clean runtime fingerprint.
+An unchanged request returns its cached result and reconciles notices without
+rerunning checks; a changed main, save or definition gets a new key. Cache entries
+are advisory observations, not proof of current dependencies or external-input
+health. The result names its exact inputs and duration; a concurrent save or main
+advance does not silently change those pins. Workspaces and private dependency
+copies are removed after each preview; saved source and Work remain unchanged.

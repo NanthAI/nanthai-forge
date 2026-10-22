@@ -106,3 +106,20 @@ test('multipart completion with a 200 Error body fails; readback hashes actual b
   assert.equal(await client.head('backup/missing'), null);
   assert.deepEqual(await client.digest('backup/a'), { size: 12, sha256: hash('stored bytes') });
 });
+
+test('backup HEAD and digest request unsigned identity; missing HEAD length is an error', async () => {
+  let length = null;
+  const client = r2Client(fakeEnv, async (url, init) => {
+    assert.equal(init.headers['accept-encoding'], 'identity');
+    assert(!new URL(url).searchParams.get('X-Amz-SignedHeaders').includes('accept-encoding'));
+    if (init.method === 'HEAD')
+      return new Response(null, {
+        headers: length === null ? { 'content-encoding': 'gzip' } : { 'content-length': length },
+      });
+    return new Response('data');
+  });
+  await assert.rejects(client.head('key'), e => e.code === 'BACKUP_R2_FAILED');
+  length = '4';
+  assert.equal((await client.head('key')).size, 4);
+  assert.deepEqual(await client.digest('key'), { size: 4, sha256: hash('data') });
+});

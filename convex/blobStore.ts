@@ -51,7 +51,7 @@ export function blobStore(ctx: Context): BlobStore {
       const response = await exchangeFetch(
         'R2 artifact download',
         await presignGet(r2Config(), value.r2Key),
-        {},
+        { headers: { 'accept-encoding': 'identity' } },
       );
       invariant(response.ok, 'R2_OBJECT_UNAVAILABLE', 'Stored artifact bytes are unavailable.');
       const bytes = new Uint8Array(await response.arrayBuffer());

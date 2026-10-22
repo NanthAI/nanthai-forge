@@ -38,7 +38,7 @@ const base64 = (hex: string) =>
   btoa(String.fromCharCode(...hex.match(/../g)!.map(pair => parseInt(pair, 16))));
 
 /** Create-only PUT: signs length, `If-None-Match: *` and the sha256 R2 enforces.
- * No content-type is signed or sent. */
+ * No content-type is signed or supplied; clients can still add one. */
 export async function presignPut(
   config: R2Config,
   key: string,
@@ -86,15 +86,16 @@ export async function headObject(config: R2Config, key: string): Promise<HeadRes
     const response = await exchangeFetch(
       'R2 object HEAD verification',
       url,
-      { method: 'HEAD' },
+      { method: 'HEAD', headers: { 'accept-encoding': 'identity' } },
       { retries: 1 },
     );
     if (response.status === 404) return { status: 'missing' };
     if (!response.ok) return { status: 'error', detail: `HTTP ${response.status}` };
     const length = response.headers.get('content-length');
+    if (length === null) return { status: 'error', detail: 'R2 HEAD returned no content length' };
     return {
       status: 'ok',
-      size: length === null ? -1 : Number(length),
+      size: Number(length),
       checksum: response.headers.get('x-amz-checksum-sha256'),
     };
   } catch (error) {

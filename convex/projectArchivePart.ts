@@ -46,7 +46,7 @@ export async function projectArchivePart(
   return exchangeRequest(
     'Convex archive range download',
     url,
-    { headers: { Range: `bytes=${offset}-${end - 1}` } },
+    { headers: { Range: `bytes=${offset}-${end - 1}`, 'accept-encoding': 'identity' } },
     async (response, progressed) => {
       contentType?.(response.headers.get('content-type')?.toLowerCase() ?? '');
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;

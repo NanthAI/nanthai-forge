@@ -108,6 +108,30 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
         .select('intents', lane.intentId)
         ?.notes.filter(note => note.text.startsWith('Automatic compensating revert '))
         .map(note => ({ text: note.text })) ?? [];
+    // Retained integration results name saved pins; later saves/main clear current advice.
+    const integrationNotices = new CoordinationJournal(store)
+      .context(lane.id)
+      .notices.filter(n => n.integration);
+    const previewMain = integrationNotices.length
+      ? store.native
+        ? (tx ? tx.all('channelMoves', 'main', 'channel') : legacy!.channelMoves)
+            .filter(move => move.channel === 'main' && move.status === 'accepted')
+            .at(-1)?.head
+        : channelStatus(store, legacy ?? store.load()).find(channel => channel.name === 'main')?.head
+      : undefined;
+    notices.push(
+      ...integrationNotices
+        .filter(
+          n =>
+            n.integration!.main === previewMain &&
+            n.participants.every(
+              p =>
+                (tx?.fields('lanes', p.lane)?.record.head ??
+                  legacy?.lanes.find(l => l.id === p.lane)?.head) === p.head,
+            ),
+        )
+        .map(n => ({ text: n.reason })),
+    );
     if (notices.length) result.notices = notices;
     const source = new PeersSource(store, lane.base),
       base = source.state(lane.base).files;

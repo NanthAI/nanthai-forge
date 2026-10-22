@@ -23,7 +23,7 @@ export async function spoolBackfill(url: string, path: string, pin: BackfillPin)
   const temp = path + '.partial';
   let response: Response;
   try {
-    response = await fetch(url, { redirect: 'error' });
+    response = await fetch(url, { redirect: 'error', headers: { 'accept-encoding': 'identity' } });
   } catch {
     throw new ForgeError(
       'BACKFILL_DOWNLOAD_FAILED',
@@ -112,7 +112,7 @@ export async function putBackfill(target: BackfillTarget['target'], path: string
 export async function sampleBackfill(url: string, pin: BackfillPin) {
   let response: Response;
   try {
-    response = await fetch(url, { redirect: 'error' });
+    response = await fetch(url, { redirect: 'error', headers: { 'accept-encoding': 'identity' } });
   } catch {
     throw new ForgeError('R2_VERIFY_FAILED', 'R2 verification sample transfer failed.');
   }

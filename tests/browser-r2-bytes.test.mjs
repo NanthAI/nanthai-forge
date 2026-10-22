@@ -207,7 +207,7 @@ test('public anonymous Code reads retain exact checkpoint selection', async t =>
   );
 });
 
-test('recipe reads verify ranged R2 leaves and the complete logical hash, and support mixed leaves', async t => {
+test('recipe reads verify full R2 leaves and the complete logical hash, and support mixed leaves', async t => {
   const { s, fake } = await setup(t),
     bytes = Buffer.alloc(2 * 1024 * 1024 + 31);
   for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31 + (i >> 11)) & 255;
@@ -227,8 +227,11 @@ test('recipe reads verify ranged R2 leaves and the complete logical hash, and su
     reader = browserObjects(b, 'project');
   assert.deepEqual(Buffer.from((await reader.read([pin(bytes)]))[0]), bytes);
   assert(
-    fake.requests.slice(before).some(request => request.status === 206),
-    'R2 leaves use range GET',
+    fake.requests
+      .slice(before)
+      .filter(request => request.method === 'GET')
+      .every(request => request.status === 200),
+    'full leaf GETs avoid compressed byte ranges in browsers',
   );
   assert.deepEqual(Buffer.from(await reader.range(pin(bytes), 123, 900)), bytes.subarray(123, 1023));
   const direct = await modules.projectExchangeActions.downloadPart._handler(s.ctx, {

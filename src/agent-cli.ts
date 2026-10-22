@@ -3,6 +3,7 @@ import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js'
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, realpathSync } from 'node:fs';
 import { sep } from 'node:path';
+import { integrationPreview } from './integration-preview.js';
 import { AgentWorkflow } from './agent-workflow.js';
 import { overlapLines, type PredictiveOverlap } from './agent-predictive-overlap.js';
 import { retainedFinishCommand } from './agent-finish-journal.js';
@@ -41,7 +42,7 @@ Once finish has checkpointed, resume its retained request with:
   nforge agent ROOT finish '{"operationId":"ORIGINAL_FINISH_UUID"}'
 Use the parent finish operationId, not an attempt's child operation ID.
 
-Actions: wait, handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
+Actions: integrate, wait, handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
          making-of, report, friction, friction-triage, improve.
 start intentId adds a sibling Lane; finish with:[laneId] lands siblings together.
@@ -76,6 +77,7 @@ const examples: Record<string, unknown> = {
   'friction-triage': { frictionIds: ['FRICTION_ID'], status: 'planned', reason: 'Next check-runner slice' },
   improve: {},
   wait: { laneIds: ['LANE_ID'], operationIds: [], until: 'terminal', timeoutSeconds: 600 },
+  integrate: { laneIds: ['LANE_ID', 'OTHER_LANE_ID'] },
   tests: { laneId: 'LANE_ID' },
   peers: { laneId: 'LANE_ID', detail: true },
   'peer-ack': { laneId: 'LANE_ID', noticeId: 'NOTICE_ID', choice: 'accept-order' },
@@ -136,6 +138,9 @@ function actionHelp(action: string): string {
   invariant(action in examples, 'BAD_ARGUMENT', 'Unknown agent action. Use agent --help.');
   let result = `nforge agent ROOT ${action} '${JSON.stringify(examples[action])}'\n`;
   if (strict[action]) result += `Fully pinned: '${JSON.stringify(strict[action])}'\n`;
+  if (action === 'integrate')
+    result +=
+      'Compose main plus latest saved active Lanes and run local static checks. Omit laneIds for all checkpointed active Lanes. Results and pair notices are advisory; no acceptance or remote runner. Cached by exact source and check inputs.\n';
   if (action === 'wait')
     result +=
       'Streams JSON lines; --text prints one line per event. until:any-change observes a baseline then waits for a change. Exit 0: all terminal (including failed outcomes) or any change; 2: timeout. Target ok and summary successful report outcome success. No checks or drivers are started.\n';
@@ -259,6 +264,7 @@ export async function agentCli(args: string[]): Promise<unknown> {
     return undefined;
   }
   const agent = new AgentWorkflow(root);
+  if (action === 'integrate') return integrationPreview(agent.work.store, selected);
   const retained =
     action === 'finish' && typeof selected.operationId === 'string'
       ? retainedFinishCommand(agent.work.store, selected.operationId)

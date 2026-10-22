@@ -65,6 +65,7 @@ export function recordEvidence(
     ...(command.env?.length ? { env: [...new Set(command.env)].sort() } : {}),
     ...(command.credentials?.length ? { credentials: [...new Set(command.credentials)].sort() } : {}),
     ...(command.artifactPaths?.length ? { artifactPaths: [...new Set(command.artifactPaths)] } : {}),
+    ...(command.static !== undefined ? { static: command.static } : {}),
     ...(command.measureResources ? { measureResources: true } : {}),
     ...(command.declaredInputs?.length ? { declaredInputs: command.declaredInputs } : {}),
   };

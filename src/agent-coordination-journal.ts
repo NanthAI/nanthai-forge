@@ -229,6 +229,20 @@ export class CoordinationJournal {
       intentId: row.intentId,
       paths: [],
     }));
+    for (const notice of notices) {
+      if (notice.integration)
+        for (const participant of notice.participants.filter(p => !laneId || p.lane === laneId))
+          messages.push({
+            id: notice.noticeId,
+            actor: 'Integration preview',
+            kind: 'message',
+            text: notice.reason,
+            head: participant.head,
+            laneId: participant.lane,
+            intentId: participant.intentId,
+            paths: [],
+          });
+    }
     for (const notice of notices)
       for (const decision of notice.decisions ?? []) {
         if (!decision.text) continue;

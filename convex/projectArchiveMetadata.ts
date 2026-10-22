@@ -33,7 +33,7 @@ async function readOriginalMetadata(
   invariant(url, 'INVALID_WORK_BACKUP', 'Stored source and Work are unavailable.');
   await checkAccess();
   // Streamed on purpose: a Node action's storage.get buffers the whole archive.
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: { 'accept-encoding': 'identity' } });
   try {
     const length = response.headers.get('content-length');
     invariant(

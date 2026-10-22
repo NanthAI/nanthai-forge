@@ -306,6 +306,7 @@ export const checkSchema = z.object({
   env: checkEnvNames.optional(),
   credentials: checkEnvNames.optional(),
   artifactPaths: artifactPaths.optional(),
+  static: z.boolean().optional(),
   measureResources: z.boolean().optional(),
   declaredInputs: z.array(declaredInputSchema).optional(),
   definition: oid,
@@ -1135,6 +1136,7 @@ export const defineCheckCommandSchema = z.object({
   env: checkEnvNames.optional(),
   credentials: checkEnvNames.optional(),
   artifactPaths: artifactPaths.optional(),
+  static: z.boolean().optional(),
   measureResources: z.boolean().optional(),
   declaredInputs: z.array(declaredInputSchema).optional(),
 });

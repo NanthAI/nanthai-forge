@@ -22,6 +22,7 @@ export type NoticeParticipant = {
   startedAt: string;
 };
 export type ConflictNotice = {
+  integration?: { main: string; key: string; errors: string[] };
   noticeId: string;
   kind: 'conflict-notice';
   granularity: 'file' | 'symbol';

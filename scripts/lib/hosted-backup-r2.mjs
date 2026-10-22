@@ -33,7 +33,10 @@ export function r2Client(env = process.env, fetcher = fetch) {
       });
       const response = await fetcher(url, {
         method,
-        headers,
+        headers: {
+          ...headers,
+          ...(method === 'GET' || method === 'HEAD' ? { 'accept-encoding': 'identity' } : {}),
+        },
         ...(body === undefined ? {} : { body }),
         signal: AbortSignal.timeout(120_000),
       });
@@ -47,6 +50,7 @@ export function r2Client(env = process.env, fetcher = fetch) {
   return {
     async head(key) {
       const r = await request('HEAD', key);
+      if (r && r.headers.get('content-length') === null) throw failure('BACKUP_R2_FAILED');
       return (
         r && { size: Number(r.headers.get('content-length')), sha256: r.headers.get('x-amz-meta-sha256') }
       );

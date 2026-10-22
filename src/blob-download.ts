@@ -66,14 +66,15 @@ export class ObjectDownloadReader {
     }
     return result;
   }
-  private async get(row: DownloadRow, signed?: SignedDownload, ranged = false) {
+  private async get(row: DownloadRow, signed?: SignedDownload) {
     invariant(row.location !== 'recipe', 'INVALID_WORK_BACKUP', 'Resolve the recipe before reading bytes.');
     let url = row.location === 'r2' ? signed!.url : row.url;
     for (let attempt = 0; attempt < 2; attempt++) {
       let response: Response;
       try {
         response = await (this.transport.fetch ?? fetch)(url, {
-          ...(ranged && row.size ? { headers: { Range: `bytes=0-${row.size - 1}` } } : {}),
+          // Full GETs let browsers decode transfer compression before verification.
+          // A Range would address encoded bytes, and browsers cannot request identity.
           credentials: 'omit',
           referrerPolicy: 'no-referrer',
         });
@@ -113,11 +114,7 @@ export class ObjectDownloadReader {
     }
     throw new Error('Unreachable download retry.');
   }
-  async read(
-    pins: DownloadPin[],
-    ranged = false,
-    ancestors: ReadonlySet<string> = new Set(),
-  ): Promise<Uint8Array[]> {
+  async read(pins: DownloadPin[], ancestors: ReadonlySet<string> = new Set()): Promise<Uint8Array[]> {
     const unique = new Map(pins.map(pin => [pin.sha256, pin]));
     if (unique.size !== pins.length) {
       invariant(
@@ -125,7 +122,7 @@ export class ObjectDownloadReader {
         'INVALID_WORK_BACKUP',
         'Repeated content identities have different sizes.',
       );
-      const values = await this.read([...unique.values()], ranged, ancestors);
+      const values = await this.read([...unique.values()], ancestors);
       const found = new Map([...unique.keys()].map((id, index) => [id, values[index]!]));
       return pins.map(pin => found.get(pin.sha256)!.slice());
     }
@@ -155,7 +152,6 @@ export class ObjectDownloadReader {
               next.add(pin.sha256);
               const [recipeBytes] = await this.read(
                 [{ sha256: row.recipe.digest, size: row.recipe.size }],
-                false,
                 next,
               );
               const recipe = downloadRecipeSchema.parse(JSON.parse(new TextDecoder().decode(recipeBytes)));
@@ -165,7 +161,7 @@ export class ObjectDownloadReader {
                 'Stored recipe differs from its logical binding.',
               );
               bytes = await this.tree(pin, recipe.tree, next);
-            } else bytes = await this.get(row, signed.get(pin.sha256), ranged);
+            } else bytes = await this.get(row, signed.get(pin.sha256));
             this.remember(pin, bytes);
             return bytes.slice();
           }),
@@ -175,7 +171,7 @@ export class ObjectDownloadReader {
     await this.rows(pins);
     return result;
   }
-  /** Range leaves in full so each leaf's digest can be verified before any slice is used. */
+  /** Fetch leaves in full so each leaf's digest can be verified before any slice is used. */
   async tree(
     pin: DownloadPin,
     tree: DownloadTree,
@@ -202,7 +198,7 @@ export class ObjectDownloadReader {
         'INVALID_WORK_BACKUP',
         'Stored tree has an invalid node encoding.',
       );
-      const [content] = await this.read([ref], ref.height === 0, ancestors);
+      const [content] = await this.read([ref], ancestors);
       if (ref.height === 0) {
         invariant(
           ref.length === ref.size,

@@ -28,7 +28,12 @@ export const rawKey = (row: Doc<'projectObjects'>) => row.storageId ?? row.r2Key
  * (publication, derived views); clients read R2 directly. Verifies size and sha256. */
 async function r2Content(row: Doc<'projectObjects'>, pin: ChunkPin) {
   const url = await presignGet(r2Config(), row.r2Key!);
-  const response = await exchangeFetch('server R2 object download', url, {}, { retries: 1 });
+  const response = await exchangeFetch(
+    'server R2 object download',
+    url,
+    { headers: { 'accept-encoding': 'identity' } },
+    { retries: 1 },
+  );
   invariant(
     response.ok,
     'R2_OBJECT_UNAVAILABLE',

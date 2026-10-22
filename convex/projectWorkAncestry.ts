@@ -166,7 +166,7 @@ async function readParents(
     invariant(url, 'SOURCE_UNAVAILABLE', 'Ancestry source archive is unavailable.');
     await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: actor });
     // Streamed on purpose: a Node action's storage.get buffers the whole archive.
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: { 'accept-encoding': 'identity' } });
     invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Ancestry source archive is unavailable.');
     noteStorageRead(ctx, backup.size);
     await workArchiveMetadata(response.body, {
