@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { readSourceControlReply } from './hosted-source-control-reply.js';
 import { invariant } from './errors.js';
 import type { SourceDispatch, SourceJobCallback } from './hosted-source-job.js';
+import type { HostedActionsTransfer } from './hosted-actions.js';
 import { workerObjectSchema, type WorkerPin } from './hosted-source-worker-format.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 
@@ -19,7 +20,7 @@ export function sourceWorkerHttp(config: {
   endpoint: string;
   token: string;
   executionId: string;
-  input: SourceDispatch;
+  input: SourceDispatch | HostedActionsTransfer;
   timeoutMs: number;
   fetch?: typeof fetch;
 }) {

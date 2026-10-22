@@ -858,8 +858,8 @@ landing remain separate work; these APIs alone do not enable a live end-to-end h
 
 The check APIs operate on canonical hosted Candidates without a local owner.
 They accept/return canonical JSON text for versioned request/result contracts.
-The provider contract currently has local fake coverage; these endpoints alone
-do not start live Modal compute. Existing native check requests are unchanged.
+The provider contracts have local fake coverage; these endpoints alone do not
+start live compute. Existing native check requests are unchanged.
 
 - `projectHostedCheckDefinitions:configure({projectId,request})` takes an original
   `operationId`, `authorityEpoch`, `expected` digest (null to create), and `change`.
@@ -869,7 +869,12 @@ do not start live Modal compute. Existing native check requests are unchanged.
   For `kind:"import"`, provide the existing `check` with its UUID, definition and
   timestamp. For `kind:"runner"`, provide `configuration` with `provider:"modal"`,
   `app`, `function`, `runtime`, `environmentFingerprint` and credential-use
-  reference `{secretId,version,operation}`. No credential values are accepted.
+  reference `{secretId,version,operation}`. Alternatively, use
+  `provider:"github-actions"`, `repository:"owner/repo"`, `installationId`,
+  `runsOn`, `runtime`, `environmentFingerprint` and the same credential-use
+  reference for an existing GitHub App installation token. `runsOn` is the exact
+  GitHub-hosted or Blacksmith runner label. `hostedActionsRuntime` exports the
+  fixed Actions harness runtime fingerprint. No credential values are accepted.
   Settings use existing project-owner authority. Each mutation retains its exact
   original receipt; replay cannot rewind a later setting.
 - `projectHostedCheckDefinitions:current({projectId,checkId})` returns the selected
@@ -902,8 +907,8 @@ Convex, then supplies `head`, `definition`, `runtime`, `environmentFingerprint`,
 `lockfile`, selection/manifest `{sha256,size}` references and positive `shardCount`.
 The plan includes every selected job, including static checks. Indices cover
 `[0,shardCount)`. Plan preparation checks committed object bindings and frozen
-runtime/source pins. H11 must verify the actual source/lockfile/selection bytes
-and execute that exact manifest; client claims cannot call this internal boundary.
+runtime/source pins. The provider must verify the actual source/lockfile/selection
+bytes and execute that exact manifest; client claims cannot call this internal boundary.
 
 `dispatchHostedCheck` runs a short controller tick through that mutation. A lease
 owner/token fences responses. Dispatch intent is durable before external I/O.
@@ -922,8 +927,8 @@ backend pins `FORGE_HOSTED_CHECK_KEY_ID` at enqueue and resolves
 `forge-hosted-check-provider-v1` domain. Keep this signing authority in fixed
 collector/control code, isolated from project commands, source workers and account
 credentials; never pass a signing key in a dispatch payload or project environment.
-H11 owns real credential use, execution adoption/cancellation, ingress provisioning
-and pending-work wakes. Nothing here deploys or provisions those integrations.
+Provider integration owns ingress provisioning and pending-work wakes. Nothing
+here deploys or provisions those integrations.
 
 `hostedCheckCallbackSchema` binds project/run/operation, epoch/fence, provider and
 execution, source/definition/configuration/environment, runtime, plan digest,
@@ -1078,3 +1083,50 @@ and grants no acceptance authority. It adds no new acceptance requirement.
 Readers and collectors do not poll or schedule timers. The UI must gate metadata
 subscriptions and automatic byte downloads through its existing idle gate. The
 legacy retained-log API remains available for historical native runs.
+
+### Hosted Actions export and dispatch
+
+`HostedActionsProvider` implements the H10 provider contract over
+`projectHostedActions:control`. Supply a run-bound store, `hostedActionsRemote`
+and an exporter calling `exportHostedActions` on the fixed source worker. The
+exporter receives the current mapping/lease as its third argument. It reads
+project objects through `sourceWorkerHttp` with input
+`{kind:"forge-hosted-actions",runId,dispatchKey,owner,token}` and
+`executionId:owner`. The trusted ingress derives project/lease identity from its
+authenticated worker request and routes describe/grant/commit to the internal
+`projectHostedActionsTransfers` functions. They recheck current project/actor,
+epoch, dispatch key and live lease on every descriptor/grant and post-HEAD commit.
+Repository and bundle bytes transfer directly to object storage; Convex sees
+only exact `{sha256,size}` pins. Worker heartbeats renew the lease during export.
+
+The immutable plan manifest is a `hostedActionsRecipeSchema` JSON object:
+`{pin,head,definition,selection,groups,standard,interaction,command}`. `pin` is
+`checkPin` of those fields excluding `pin`. Its selection must match the separately
+committed selection object; command, lockfile, runtime, shard membership and State
+are verified by the worker. `shardCount` is `groups.length + 1`, including static.
+The worker reuses the existing workflow generator and runner script. Generated
+workflow/recipe bytes belong only to the harness commit, not the Candidate State.
+
+Each invocation performs one export, one ref publication, or a bounded
+lookup/dispatch step and returns pending without waiting for a runner. The
+mapping's `nextAt` carries lookup/rejection backoff; H22b schedules only outstanding
+jobs. The adapter reports eventually consistent absence as unknown to H10, so
+H10 cannot add another recovery. Its own twelve lookups plus a fresh empty branch
+lookup permit the local path's one recovery after an ambiguous response, including
+HTTP 400. Accepted acknowledgements never permit redelivery. GitHub does not
+provide atomic dispatch deduplication against arbitrarily late run visibility;
+duplicate exact matches remain explicit evidence errors.
+
+`ActionsCredentialUse` privately resolves the pinned credential reference for the
+selected installation/repository. Missing registration or repository permissions
+produce `GITHUB_APP_UNAVAILABLE` / `GITHUB_APP_ACCESS` with actionable messages;
+no App registration, personal token, `gh` or local checkout fallback occurs.
+Current authorized readers can call `projectHostedActions:status` for the retained
+mapping and structured setup error. A definitive rejection before any Actions
+dispatch becomes H10 `runner-unavailable`; an earlier ambiguous dispatch stays
+unknown even if later credential/access checks fail.
+`cleanupHostedActions` first checks a committed terminal H10 result and exact
+execution mapping, then deletes only the unchanged run-owned branch. Lost delete
+replies are safe to reconcile; the State/export/run mapping stays retained.
+Cancellation, exact job verdict, stuck-job log evidence and live output belong to
+H22b/H12; export or dispatch success alone never supplies a passing check.

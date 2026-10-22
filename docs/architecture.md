@@ -928,7 +928,8 @@ remote runner configuration with original-operation reconciliation and expected
 definition/configuration pins. Definitions use the local command normalization
 and definition digest; import preserves the original check UUID, timestamp and
 command. Project check settings use owner authority; contributors can request
-checks under current project access. Configuration contains a Modal route, exact
+checks under current project access. Configuration contains a Modal route or a
+GitHub Actions repository, App installation and selected `runsOn` label, exact
 runtime/environment fingerprints and a credential-use reference, never account
 credential values or a local credential file. These APIs do not configure a live
 provider or change existing native-owner checks.
@@ -975,8 +976,9 @@ Candidate runs and shard metadata through indexes. The shared
 `requireHostedCheckEvidence` helper rechecks current definitions/configuration and
 exact passing provider evidence inside the caller's transaction. It does not move
 main, implement landing policy or require checks for person-selected acceptance.
-Live provider dispatch, credential use and callback ingress remain
-adapter work; the contract is exercised with local fake providers. See the
+Live provider dispatch (including Modal), credential use, callback ingress and
+check-output transfer remain adapter work; the contracts are exercised with local
+fake providers. See the
 [check API](operations/source-exchange.md#hosted-check-api).
 
 
@@ -1022,3 +1024,33 @@ still bounds already-issued URL access after revocation. Reads create no timers,
 scheduled work or URL refresh loops. UI adapters use the existing idle gate.
 These APIs and transfers are covered with local fake runners/R2; no live adapter,
 UI, deployment, retention policy or account provisioning is supplied here.
+
+The hosted Actions adapter runs fixed export/control code outside Convex.
+`exportHostedActions` reads the exact pinned State, recipe and selection through
+the hash-verifying source-worker reader. It builds bare Git objects from streamed
+storage objects, preserving binary bytes, modes and symlink targets without a
+checkout, filters, hooks or project execution. The existing generated Actions
+workflow honors the selected GitHub-hosted or Blacksmith label. The native State
+and harness export commit remain distinct pins. The immutable export bundle is
+retained in project object storage before publication of `forge-check/<runId>`.
+
+`projectHostedActionsExports` retains State, configuration, plan, export bundle,
+commit, dispatch intent and adopted Actions run. Indexed, fenced control calls
+never download source or scan retained Work/history. Lost export/control replies
+reuse the saved bundle; a crash before that receipt rebuilds a deterministic
+commit/bundle. A lost ref-publication reply reconciles the exact run-owned ref.
+Publication and deletion use an exact lease, preserving any changed branch.
+The App installation token is supplied privately by the existing credential-use
+reference; this adapter registers no App and uses neither `gh` nor owner Git.
+
+Short provider ticks split export, publication and dispatch/lookup. Like the local
+Actions path, HTTP 400 is ambiguous. Accepted dispatches are only adopted, never
+redelivered. An ambiguous dispatch gets twelve spaced complete branch lookups,
+then one fresh empty lookup immediately before its single recovery dispatch.
+Nonmatching runs, incomplete lookups and transport errors do not establish an
+empty branch. This matches the local recovery semantics; GitHub offers no atomic
+idempotency key, so it is not a proof against arbitrarily delayed run visibility.
+Multiple exact matches surface an evidence error. No global project scan runs.
+The retained mapping survives terminal-result branch cleanup. H22b supplies
+outstanding-job wakes, cancellation, exact verdict and live-log reconciliation;
+H12 supplies output chunks. No live provider/ingress is enabled by these modules.

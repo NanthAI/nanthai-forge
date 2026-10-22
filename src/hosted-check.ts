@@ -38,17 +38,32 @@ export function importedHostedCheck(value: unknown) {
   );
   return check;
 }
-export const hostedCheckRunnerSchema = z
+const credential = z.object({ secretId: text, version: checkNumber, operation: text }).strict();
+export const hostedActionsRunnerSchema = z
   .object({
-    provider: z.literal('modal'),
-    app: text,
-    function: text,
+    provider: z.literal('github-actions'),
+    repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+    installationId: text,
+    runsOn: text,
     runtime: checkHash,
     environmentFingerprint: checkHash,
-    // A use reference, never a credential value or a developer's local file.
-    credential: z.object({ secretId: text, version: checkNumber, operation: text }).strict(),
+    credential,
   })
   .strict();
+export const hostedCheckRunnerSchema = z.union([
+  z
+    .object({
+      provider: z.literal('modal'),
+      app: text,
+      function: text,
+      runtime: checkHash,
+      environmentFingerprint: checkHash,
+      // A use reference, never a credential value or a developer's local file.
+      credential,
+    })
+    .strict(),
+  hostedActionsRunnerSchema,
+]);
 export const hostedCheckRequestSchema = z
   .object({
     operationId: z.uuid(),

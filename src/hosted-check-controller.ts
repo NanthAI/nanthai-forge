@@ -27,6 +27,7 @@ export interface HostedCheckProvider {
   ): Promise<
     | { status: 'found'; executionId: string }
     | { status: 'unknown' }
+    | { status: 'rejected' }
     | { status: 'empty'; authoritative: true; receipt: string }
   >;
 }
@@ -84,7 +85,9 @@ export async function dispatchHostedCheck(
             result:
               found.status === 'found'
                 ? { status: 'accepted', executionId: found.executionId }
-                : { status: 'unknown' },
+                : found.status === 'rejected'
+                  ? { status: 'rejected' }
+                  : { status: 'unknown' },
           })
         ).run;
       }
