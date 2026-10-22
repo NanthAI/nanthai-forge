@@ -8,6 +8,8 @@ import { briefTables } from './agentBriefFields';
 import { deviceTables } from './deviceFields';
 import { clientErrorTables } from './clientErrorFields';
 import { indexTables } from './projectWorkIndexFields';
+import { hostedRecordTables } from './projectHostedRecordFields';
+import { hostedSnapshotTables } from './projectHostedSnapshotFields';
 import { checkTables } from './projectCheckFields';
 import { coordinationTables } from './coordinationFields';
 import { githubImportTables } from './projectGithubImportFields';
@@ -400,6 +402,8 @@ export default defineSchema({
   ...checkTables,
   ...coordinationTables,
   ...indexTables,
+  ...hostedRecordTables,
+  ...hostedSnapshotTables,
   ...objectTables,
   ...artifactBlobTables,
   ...githubImportTables,

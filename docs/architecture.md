@@ -572,3 +572,54 @@ first-attempt and terminal data on retry. Completion retains the first terminal
 outcome, including failure. Callers must persist fresh envelopes transactionally
 before external effects; H01 defines these contracts without adding operation
 storage or changing existing receipt formats.
+
+### Hosted record and snapshot storage
+
+`src/hosted-records.ts` defines the server Lane, save, Candidate and source-job
+records. `projectHostedRecords` retains immutable, hashed versions; their bodies
+live in `projectHostedRecordBodies`, while small indexed headers hold exact byte
+counts and content pins. `projectHostedRecordHeads` is a per-resource CAS pointer,
+with project/kind/key, parent and status indexes. Independent Lane writes touch
+no global Work revision. Old-version retries reconcile the original bytes without
+rewinding a newer head. Save and Candidate identities are immutable; Lane and job
+updates append versions. Candidate inputs/dependencies/conflicts and job inputs
+are immutable object/page references, never repository bytes or growing arrays.
+
+These are internal storage primitives, not an enabled source-writing API. Their
+callers must resolve the actor from current authentication and commit the source
+operation reducer, related record changes and receipt in one transaction. Existing
+project read/contributor authority applies. New writes also check the explicit
+server/shadow authority epoch; an authorized immutable retry can still reconcile
+an original record after the epoch changes. `projectHostedOperations` persists
+H01 envelopes before external work and retains original terminal outcomes.
+Native-owner projects retain their existing Work owner and are not converted.
+Existing Intent/planning journal commands and portable Work formats are unchanged.
+
+`projectHostedSnapshots` stages recovery/export snapshots as immutable pages of
+exact canonical record-version references, pinned to a seed checkpoint, prior
+snapshot, source head/receipt and journal sequence. A later snapshot adds only new
+references; its prior snapshot retains earlier history. This is a checkpoint of
+the canonical records, not another mutable Work authority. Pages are ordered and
+unique, hash-chained, validated against indexed record headers, and committed with
+progress in the same transaction. The transport helper automatically splits at
+100 references or about 128 KiB of encoded references plus referenced metadata;
+a larger individual metadata record uses its own page. There is no total history
+or project record-count ceiling. Body/header separation bounds staging reads even
+when a supplied byte count is wrong.
+
+Only complete matching page/count/root plans can atomically select the recovery
+snapshot. Publication reads constant-size metadata, not every page or historical
+record. Lost replies reconcile original page receipts and the final result;
+replaying an older completed publication cannot rewind a later selection.
+`projectHostedSnapshotRead` reads the selected manifest and exact immutable pages
+under current project access. Neither staging nor selecting a recovery snapshot
+moves main or a Lane. Registered source validation, schema-2 main publication,
+source-job execution and public start/save APIs remain subsequent slices.
+
+`projectHostedDisplayRecords` contains disposable snapshot-delta display rows.
+`projectHostedProjection:rebuildPage` reconstructs one immutable page from canonical
+bodies without writing record heads, operation outcomes, snapshot selection or
+Channel truth. Rows represent only that snapshot's delta; consumers must follow
+its prior snapshots and seed for earlier records, and use manifest page counts
+for completeness. They must never treat partial display coverage as absence or
+use a display row to authorize a source transition.

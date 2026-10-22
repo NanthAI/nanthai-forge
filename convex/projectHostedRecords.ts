@@ -1,0 +1,184 @@
+// SPDX-License-Identifier: Apache-2.0
+import type { MutationCtx, QueryCtx } from './_generated/server';
+import type { Doc, Id } from './_generated/dataModel';
+import { activeProject, accessibleProject } from './projectAuthority';
+import { sourceAuthority } from '../src/hosted-source-authority';
+import {
+  hostedRecordSchema,
+  hostedRecordRef,
+  hostedRecordIndex,
+  type HostedRecordKind,
+} from '../src/hosted-records';
+import { canonicalPayload } from '../src/hosted-source-operation';
+import { invariant } from '../src/errors';
+import { digest } from '../src/portable-hash';
+
+export async function hostedWriteProject(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  actor: string,
+  epoch: number,
+) {
+  const project = await activeProject(ctx, projectId, actor),
+    authority = sourceAuthority(project);
+  invariant(
+    authority.mode !== 'native-owner' && authority.epoch === epoch,
+    'SOURCE_AUTHORITY_CHANGED',
+    'Hosted source authority changed.',
+  );
+  return project;
+}
+export const recordHead = (
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  kind: HostedRecordKind,
+  key: string,
+) =>
+  ctx.db
+    .query('projectHostedRecordHeads')
+    .withIndex('by_project_and_kind_and_key', q =>
+      q.eq('projectId', projectId).eq('kind', kind).eq('key', key),
+    )
+    .unique();
+export const recordVersion = (
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  kind: HostedRecordKind,
+  key: string,
+  version: number,
+) =>
+  ctx.db
+    .query('projectHostedRecords')
+    .withIndex('by_project_and_kind_and_key_and_version', q =>
+      q.eq('projectId', projectId).eq('kind', kind).eq('key', key).eq('version', version),
+    )
+    .unique();
+
+/** Immutable header/body integrity, shared by authoritative reads and rebuilds. */
+export async function hostedRecordBody(ctx: QueryCtx | MutationCtx, row: Doc<'projectHostedRecords'>) {
+  const body = await ctx.db.get(row.bodyId);
+  invariant(
+    body?.projectId === row.projectId &&
+      digest(body.value) === row.digest &&
+      new TextEncoder().encode(body.value).length === row.bytes,
+    'SOURCE_UNAVAILABLE',
+    'Exact canonical record bytes are unavailable.',
+  );
+  return body.value;
+}
+
+/** Internal transaction primitive, not a source-write API. The source operation
+ * reducer must call this in the same transaction as its Lane CAS and receipt.
+ * No global revision row is read or written, so independent Lanes do not contend. */
+export async function writeHostedRecord(
+  ctx: MutationCtx,
+  input: {
+    projectId: Id<'hostedProjects'>;
+    actor: string;
+    authorityEpoch: number;
+    record: unknown;
+    expectedVersion: number | null;
+  },
+) {
+  await activeProject(ctx, input.projectId, input.actor);
+  const record = hostedRecordSchema.parse(input.record),
+    ref = hostedRecordRef(record),
+    value = canonicalPayload(record);
+  const old = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
+  if (old) {
+    invariant(
+      old.digest === ref.digest && old.bytes === ref.bytes,
+      'WORK_OPERATION_CHANGED',
+      'A canonical record version is immutable.',
+    );
+    return { ...old, value: await hostedRecordBody(ctx, old) };
+  }
+  await hostedWriteProject(ctx, input.projectId, input.actor, input.authorityEpoch);
+  const head = await recordHead(ctx, input.projectId, record.kind, record.id);
+  invariant(
+    (head?.version ?? null) === input.expectedVersion &&
+      record.version === (input.expectedVersion === null ? 0 : input.expectedVersion + 1),
+    'WORK_STALE',
+    'The hosted record changed from its expected version.',
+  );
+  // Saves and Candidates are immutable identities; job and Lane versions retain history.
+  invariant(
+    !head || record.kind === 'lane' || record.kind === 'job',
+    'WORK_OPERATION_CHANGED',
+    'Saves and Candidates retain their original identity.',
+  );
+  const indexed = { ...hostedRecordIndex(record), version: record.version },
+    identity = { projectId: input.projectId, kind: record.kind, key: record.id };
+  const bodyId = await ctx.db.insert('projectHostedRecordBodies', { projectId: input.projectId, value });
+  const id = await ctx.db.insert('projectHostedRecords', {
+    ...identity,
+    ...indexed,
+    bodyId,
+    digest: ref.digest,
+    bytes: ref.bytes,
+  });
+  const pointer = { ...identity, ...indexed, recordId: id };
+  if (head) await ctx.db.replace(head._id, pointer);
+  else await ctx.db.insert('projectHostedRecordHeads', pointer);
+  return { ...(await ctx.db.get(id))!, value };
+}
+
+export async function readHostedRecord(
+  ctx: QueryCtx | MutationCtx,
+  input: {
+    projectId: Id<'hostedProjects'>;
+    actor: string;
+    kind: HostedRecordKind;
+    key: string;
+    version?: number;
+  },
+) {
+  await accessibleProject(ctx, input.projectId, input.actor);
+  const head =
+    input.version === undefined ? await recordHead(ctx, input.projectId, input.kind, input.key) : null;
+  const row =
+    input.version === undefined
+      ? head
+        ? await ctx.db.get(head.recordId)
+        : null
+      : await recordVersion(ctx, input.projectId, input.kind, input.key, input.version);
+  if (!row) return null;
+  return { ...row, value: await hostedRecordBody(ctx, row) };
+}
+
+/** Page sibling Lanes/saves/Candidates or pending jobs by the schema-owned index. */
+export async function hostedRecordPage(
+  ctx: QueryCtx | MutationCtx,
+  input: {
+    projectId: Id<'hostedProjects'>;
+    actor: string;
+    kind: HostedRecordKind;
+    parent?: string;
+    status?: string;
+    cursor: string | null;
+  },
+) {
+  await accessibleProject(ctx, input.projectId, input.actor);
+  invariant(
+    input.parent === undefined || input.status === undefined,
+    'BAD_ARGUMENT',
+    'Select a parent or status index.',
+  );
+  const query =
+    input.status === undefined
+      ? ctx.db.query('projectHostedRecordHeads').withIndex('by_project_and_kind_and_parent', q => {
+          const prefix = q.eq('projectId', input.projectId).eq('kind', input.kind);
+          return input.parent === undefined ? prefix : prefix.eq('parent', input.parent);
+        })
+      : ctx.db
+          .query('projectHostedRecordHeads')
+          .withIndex('by_project_and_kind_and_status', q =>
+            q.eq('projectId', input.projectId).eq('kind', input.kind).eq('status', input.status!),
+          );
+  return query.paginate({
+    cursor: input.cursor,
+    numItems: 100,
+    maximumRowsRead: 100,
+    maximumBytesRead: 128 * 1024,
+  });
+}
