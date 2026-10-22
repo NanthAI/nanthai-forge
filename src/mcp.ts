@@ -205,7 +205,7 @@ export async function startMcp(root: string, workEnabled = false, agentMode = fa
     },
     ({ laneId }) => result(() => sources.run(laneId, selected => selected.reindex())),
   );
-  if (agentMode && work) registerAgentWorkflow(server, root);
+  const stopOverlap = agentMode && work ? registerAgentWorkflow(server, root) : undefined;
   if (work && !agentMode) {
     server.registerTool(
       'forge_work_status',
@@ -270,6 +270,7 @@ export async function startMcp(root: string, workEnabled = false, agentMode = fa
   const cleanup = async () => {
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
+    stopOverlap?.();
     await stopPresence?.();
     await sources.close();
   };

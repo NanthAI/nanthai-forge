@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { savedOverlapPlan, highOverlap } from './agent-overlap-plan.js';
 import { join } from 'node:path';
-import { LandJournal, type LandEntry } from './land-journal.js';
+import { LandJournal, type LandEntry, type LandSelection } from './land-journal.js';
 import type { LandCommand } from './land-schema.js';
 import { ForgeError, invariant } from './errors.js';
 import { finishChild } from './agent-finish-journal.js';
@@ -10,13 +11,20 @@ import { batchEligible, enqueueLanding } from './landing-batch-store.js';
 import { drainLandingBatches } from './landing-batch.js';
 import { waitingDependencies, acceptedInputs } from './agent-dependencies.js';
 import { currentChannelHead } from './agent-defaults.js';
+import { cancelLandingEntry } from './landing-batch-cancel.js';
 import { landSingle } from './land-single.js';
 import type { WorkService } from './work.js';
 import type { WorkView } from './work-types.js';
 
 const waiting = (result: Record<string, unknown>) => result.status === 'waiting';
 /** Pin saved inputs once, submit the whole eligible wave, then use the existing batch driver. */
-export async function land(work: WorkService, command: LandCommand) {
+export async function land(
+  work: WorkService,
+  command: LandCommand,
+  selection?: LandSelection,
+  cancelled?: () => boolean,
+  onRun?: (runId: string) => void,
+) {
   invariant(
     new Set(command.laneIds).size === command.laneIds.length,
     'BAD_ARGUMENT',
@@ -26,7 +34,25 @@ export async function land(work: WorkService, command: LandCommand) {
   const locked = await withQueueSlot(
     join(store.directory, 'land-queue', command.operationId),
     async () => {
-      const journal = new LandJournal(store, command);
+      const journal = new LandJournal(store, command, selection);
+      const pins = new Map(
+        journal.state.entries.flatMap(entry => entry.inputs).map(pin => [pin.laneId, pin.head]),
+      );
+      const overlap = savedOverlapPlan(
+        store,
+        [...pins].map(([id, head]) => ({ ...store.select('lanes', id)!, head })),
+      );
+      const cancelSelected = async () => {
+        if (!cancelled?.()) return;
+        for (const entry of journal.state.entries) {
+          if (entry.result && !waiting(entry.result)) continue;
+          const queued = store.select('landingEntries', entry.command.operationId);
+          if (queued && ['queued', 'checking'].includes(queued.status))
+            await cancelLandingEntry(work, queued.id);
+          if (!queued) entry.result = { status: 'cancelled' };
+        }
+        journal.save();
+      };
       const phase = (input: unknown) => {
         const reconcileComposition = (input as { action?: string }).action === 'compose';
         return retryWorkPhase(
@@ -55,8 +81,10 @@ export async function land(work: WorkService, command: LandCommand) {
       };
       // Dependencies can become ready as another wave lands; never drain after just one submission.
       for (let pass = 0; pass <= journal.state.entries.length; pass++) {
+        await cancelSelected();
         let submitted = false;
-        for (const entry of journal.state.entries) {
+        const deferred = new Set<string>();
+        for (const [index, entry] of journal.state.entries.entries()) {
           if (entry.result && !waiting(entry.result)) continue;
           if (entry.queued) continue;
           const dependencies = waitingDependencies(
@@ -98,8 +126,24 @@ export async function land(work: WorkService, command: LandCommand) {
             }
             if (
               store.select('landingEntries', entry.command.operationId) ||
-              batchEligible(work, entry.command, view)
+              (!selection && batchEligible(work, entry.command, view))
             ) {
+              const predecessor = journal.state.entries.slice(0, index).find(
+                prior =>
+                  prior.viewId &&
+                  (!prior.result || waiting(prior.result)) &&
+                  highOverlap(
+                    overlap,
+                    prior.inputs.map(pin => pin.laneId),
+                    entry.inputs.map(pin => pin.laneId),
+                  ),
+              );
+              if (predecessor) {
+                deferred.add(entry.command.operationId);
+                entry.result = { status: 'waiting', overlapAfter: predecessor.inputs.map(pin => pin.laneId) };
+                continue;
+              }
+
               await enqueueLanding(work, entry.command, view);
               entry.queued = true;
               journal.save();
@@ -112,7 +156,7 @@ export async function land(work: WorkService, command: LandCommand) {
         let drainIssue: ForgeError | undefined;
         if (journal.state.entries.some(entry => entry.queued && (!entry.result || waiting(entry.result)))) {
           try {
-            await drainLandingBatches(work, command.channel, command.waitMs);
+            await drainLandingBatches(work, command.channel, command.waitMs, cancelSelected);
           } catch (error) {
             if (!(
               error instanceof ForgeError &&
@@ -123,8 +167,36 @@ export async function land(work: WorkService, command: LandCommand) {
           }
         }
         let progressed = false;
-        for (const entry of journal.state.entries) {
+        for (const [index, entry] of journal.state.entries.entries()) {
           if (entry.result && !waiting(entry.result)) continue;
+          const exhausted =
+            selection &&
+            journal.state.entries.find(prior => prior.result?.status === 'retry-exhausted')?.result;
+          if (exhausted) {
+            entry.result = {
+              status: 'retry-exhausted',
+              code: exhausted.code,
+              message: 'Existing finish retry budget exhausted before this Lane was attempted.',
+            };
+            journal.save();
+            continue;
+          }
+          if (deferred.has(entry.command.operationId)) continue;
+          if (
+            !entry.queued &&
+            journal.state.entries.slice(0, index).some(
+              prior =>
+                prior.viewId &&
+                prior.result &&
+                waiting(prior.result) &&
+                highOverlap(
+                  overlap,
+                  prior.inputs.map(pin => pin.laneId),
+                  entry.inputs.map(pin => pin.laneId),
+                ),
+            )
+          )
+            continue;
           try {
             if (entry.queued) {
               const queued = store.select('landingEntries', entry.command.operationId)!;
@@ -134,7 +206,7 @@ export async function land(work: WorkService, command: LandCommand) {
                     ? 'review-needed'
                     : ['queued', 'checking'].includes(queued.status)
                       ? 'waiting'
-                      : ['accepted', 'conflict', 'failed'].includes(queued.status)
+                      : ['accepted', 'conflict', 'failed', 'cancelled', 'interrupted'].includes(queued.status)
                         ? queued.status
                         : 'failed',
                 ...(drainIssue && ['queued', 'checking'].includes(queued.status)
@@ -145,10 +217,21 @@ export async function land(work: WorkService, command: LandCommand) {
                 runId: queued.runId,
                 acceptanceId: queued.acceptanceId,
                 viewId: queued.conflictViewId ?? queued.viewId,
+                ...(queued.conflictViewId
+                  ? { conflict: store.select('views', queued.conflictViewId)?.details }
+                  : {}),
                 ...(queued.reason ? { message: queued.reason } : {}),
               };
             } else if (!entry.result && entry.viewId) {
-              entry.result = await landSingle(work, entry, command, phase, () => journal.save());
+              entry.result = await landSingle(work, entry, command, phase, () => journal.save(), {
+                cancelled: () => cancelled?.() ?? false,
+                onRun: runId => onRun?.(runId),
+                // Inherit finish's existing operation budget; ordinary land keeps its protocol.
+                retry: () =>
+                  !selection ||
+                  journal.state.entries.reduce((n, item) => n + (item.single?.attempt ?? 0), 0) <
+                    (selection.finish.maxRetries ?? 3),
+              });
             }
             if (entry.result && !waiting(entry.result)) progressed = true;
             journal.save();

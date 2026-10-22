@@ -1,5 +1,6 @@
 import { landFrictionCounts } from './friction-auto.js';
 // SPDX-License-Identifier: Apache-2.0
+import { savedOverlapPlan, highOverlap, orderOverlapGroups } from './agent-overlap-plan.js';
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -21,16 +22,17 @@ export type LandEntry = {
   single?: { attempt: number; viewId?: string; previous: string | null };
   result?: Record<string, unknown>;
 };
+export type LandSelection = { inputs: WorkView['inputs']; finish: FinishAction };
 type State = { schema: 1; request: string; entries: LandEntry[] };
 /** Local parent-driver receipt. Saved source/check/acceptance evidence remains canonical Work. */
 export class LandJournal {
   readonly path: string;
   readonly state: State;
-  constructor(store: WorkStore, command: LandCommand) {
+  constructor(store: WorkStore, command: LandCommand, selection?: LandSelection) {
     const directory = join(store.directory, 'agent-land');
     mkdirBelow(store.directory, directory);
     this.path = join(directory, `${command.operationId}.json`);
-    const request = digest(JSON.stringify(command));
+    const request = digest(JSON.stringify(selection ? { command, selection } : command));
     if (existsSync(this.path)) {
       this.state = JSON.parse(readFileSync(this.path, 'utf8')) as State;
       invariant(
@@ -48,31 +50,62 @@ export class LandJournal {
       const lane = data.lanes.find(item => item.id === laneId);
       invariant(lane, 'NOT_FOUND', 'Selected Lane not found.');
       const inputs = groups.get(lane.intentId) ?? [];
-      inputs.push({ laneId, head: lane.head });
+      inputs.push({ laneId, head: selection?.inputs.find(pin => pin.laneId === laneId)?.head ?? lane.head });
       groups.set(lane.intentId, inputs);
     }
+    const plan = savedOverlapPlan(
+      store,
+      data.lanes
+        .filter(lane => command.laneIds.includes(lane.id))
+        .map(lane => ({
+          ...lane,
+          head: selection?.inputs.find(pin => pin.laneId === lane.id)?.head ?? lane.head,
+        })),
+    );
     const entries: LandEntry[] = [];
     for (const [intentId, pins] of groups) {
       const intent = data.intents.find(item => item.id === intentId)!;
-      // Preserve compose's existing eight-input boundary without restricting the selection.
-      for (let offset = 0; offset < pins.length; offset += 8) {
-        const inputs = pins.slice(offset, offset + 8),
-          first = inputs[0]!;
+      const compatible: WorkView['inputs'][] = [];
+      for (const pin of plan.pairs.length
+        ? [...pins].sort((a, b) => plan.order.indexOf(a.laneId) - plan.order.indexOf(b.laneId))
+        : pins) {
+        if (plan.pairs.some(pair => pair.lanes.includes(pin.laneId))) {
+          compatible.push([pin]);
+          continue;
+        }
+        const group = compatible.find(
+          group =>
+            group.length < 8 &&
+            !highOverlap(
+              plan,
+              group.map(p => p.laneId),
+              [pin.laneId],
+            ),
+        );
+        if (group) group.push(pin);
+        else compatible.push([pin]);
+      }
+      for (const inputs of compatible) {
+        const first = inputs[0]!;
         entries.push({
           inputs,
           command: {
             action: 'finish',
+            ...(selection?.finish.actor ? { actor: selection.finish.actor } : {}),
+            ...(selection?.finish.tool ? { tool: selection.finish.tool } : {}),
+            ...(selection?.finish.priority ? { priority: selection.finish.priority } : {}),
             operationId: finishChild(command.operationId, `land:${first.laneId}`),
             laneId: first.laneId,
             expectedHead: first.head,
             message: command.message ?? intent.outcome,
             with: inputs.slice(1).map(pin => pin.laneId),
             withInputs: inputs.slice(1),
-            dependencies: intent.dependencies ?? [],
+            dependencies: selection?.finish.dependencies ?? intent.dependencies ?? [],
             checkId: check.id,
-            expectedDefinition: check.definition,
-            expectedEnvironment: checkEnvironment().fingerprint,
+            expectedDefinition: selection?.finish.expectedDefinition ?? check.definition,
+            expectedEnvironment: selection?.finish.expectedEnvironment ?? checkEnvironment().fingerprint,
             accept: {
+              ...(selection?.finish.accept ?? {}),
               channel: command.channel,
               expectedPrevious: currentChannelHead(store, command.channel),
             },
@@ -81,7 +114,11 @@ export class LandJournal {
         });
       }
     }
-    this.state = { schema: 1, request, entries };
+    this.state = {
+      schema: 1,
+      request,
+      entries: orderOverlapGroups(plan, entries, entry => entry.inputs.map(pin => pin.laneId)),
+    };
     this.save();
   }
   save() {

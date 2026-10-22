@@ -485,7 +485,10 @@ The snapshot pins one Work revision and reads local transport observations under
 the owner lock. It does not run checks, recover processes, export an archive,
 contact a provider or publish anything. Ready, waiting and checking are recorded
 states, not an acceptance eligibility decision or a claim that a process is alive.
-The summary shows at most three example Lanes; JSON includes every open Lane.
+The summary stays within 15 lines, showing up to three example Lanes as space
+allows. Handoffs and overlap groups each share one summary line; multiple entries
+show totals and point to `--json`, `handoff-read` and `peers` for details. JSON
+includes every open Lane, its handoff and every overlap group.
 
 Hosted source coverage is separate from metadata publication and GitHub's last
 successfully pushed mapping. A pending/failed push does not establish a newer
@@ -607,3 +610,41 @@ Stacked owners use Work format 21 (legacy Intents) or 22 (unified Intents).
 Readers capped at 20 reject these owners before writing, preserving stack pins.
 Ordinary owners keep their existing format. These formats and commands concern
 native owners; Git compatibility Lanes retain their existing workflow.
+
+## Overlap alerts and landing order
+
+A successful checkpoint compares its saved regions and changed exports with every
+open peer's latest saved head, using predictive overlap's existing high-risk
+rule. A new or expanded region records one canonical pair/region notice in the
+local coordination journal for both Lanes. Heads and unrelated edits do not make
+a duplicate; changed overlapping ranges or symbols create a new notice. Notices
+retain source pins and attribution and are advisory inbox items, available on the
+next checkpoint, status, sync, brief or MCP call. They name the proposed region
+owner (the first Lane), the peer, the reason for the order and “sync after X
+lands”. Historical notices remain readable; current overlap is recomputed from
+source. No background polling, heartbeat or model call is added.
+
+The existing `start.scope.paths` declaration is the early signal: planned claims
+appear as planned file overlaps before either save and never become high-risk
+saved-region evidence. No new declaration action or mandatory step is needed.
+An attached MCP transport that supports logging notifications watches local
+journal publications and emits compact notices for its selected Lane; file-system
+events wake it, and closing the connection removes the watcher. The durable inbox
+and next result remain authoritative when notifications are unavailable.
+
+Landing uses the same ready/smaller/earlier-start ordering as predictive overlap.
+High-overlap components are shown in pending status. Compatible disjoint entries
+continue sharing batches; overlapping entries run in successive waves, and a
+later wave is composed onto actual newly accepted main before its check, never
+speculatively stacked across a high-overlap edge. Joint finish preflights genuine conflicts before partial acceptance; clean high overlaps split into compatible groups before landing composition. The saved Lane inputs remain
+pinned; composition updates the checked Candidate rather than overwriting dirty
+Lane files. Existing Markdown pure-insert resolution is retained. Genuine
+rewrites remain conflicts with the overlapping peer named. A single finish keeps
+its existing sync/check/accept behavior and shares this scheduler when queued;
+there is no wait for a peer that has not requested landing.
+
+Order is scheduling within already requested landing work, not a new gate:
+claims, ownership and “sync after” remain advice. There are no locks on regions,
+quotas, access changes, confirmations or new acceptance requirements. Existing
+dependency, check, review, retry and undo rules still apply. Missing analysis is reported as
+incomplete and does not become evidence of independence.

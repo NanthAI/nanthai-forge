@@ -3,6 +3,7 @@ import { captureAutomatic, frictionReceipt } from './friction-auto.js';
 import { withRetryObservation } from './friction-retry.js';
 import { captureFriction, triageFriction, citeFriction } from './friction.js';
 import { readImprovements } from './improve.js';
+import { recordOverlapAlerts } from './agent-overlap-alerts.js';
 import { land } from './land.js';
 import type { LandCommand } from './land-schema.js';
 import { agentLaneTests } from './agent-lane-tests.js';
@@ -202,6 +203,18 @@ export class AgentWorkflow {
           /* Observation reports unavailable source below. */
         }
     }
+    let overlapCoverage: string | undefined;
+    if (command.action === 'checkpoint' || command.action === 'sync') {
+      try {
+        overlapCoverage = await retryWorkPhase(
+          command.operationId!,
+          () => store.observing(() => recordOverlapAlerts(store, command.laneId)),
+          ['SOURCE_CHANGED'],
+        );
+      } catch {
+        overlapCoverage = 'local-incomplete';
+      }
+    }
     const peers =
       ['start', 'checkpoint', 'sync', 'finish'].includes(command.action) ||
       (command.action === 'status' && command.laneId)
@@ -224,6 +237,11 @@ export class AgentWorkflow {
       }
     }
     if (peers) {
+      if (overlapCoverage === 'local-incomplete') {
+        delete peers.clear;
+        peers.v = 1;
+        peers.coverage = 'local-incomplete';
+      }
       try {
         const journal = new CoordinationJournal(store);
         if (command.action !== 'status') journal.record(peers.conflicts ?? []);
@@ -700,6 +718,11 @@ export class AgentWorkflow {
             if (before !== tx.manifest.collections.frictionEvents?.count)
               response.revision = store.commitRecords(tx);
           });
+        try {
+          store.observing(() => recordOverlapAlerts(store, command.laneId));
+        } catch {
+          /* Advisory coordination never invalidates a saved checkpoint. */
+        }
         queueAgentSync(store, command, response.result, true);
         return response;
       },

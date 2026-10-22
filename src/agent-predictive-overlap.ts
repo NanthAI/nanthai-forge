@@ -27,17 +27,16 @@ export function regionsNear(a: Region, b: Region, adjacency = REGION_ADJACENCY) 
   return a.start <= end(b) + adjacency && b.start <= end(a) + adjacency;
 }
 
-export function predictiveOverlaps(
-  source: ContractSource,
-  cache: PeersCache,
+export function overlapOrder(
   lane: Lane,
-  mine: RegionSummary,
+  mine: Pick<RegionSummary, 'size'>,
   peer: Lane,
-  theirs: RegionSummary,
-): PredictiveOverlap[] {
+  theirs: Pick<RegionSummary, 'size'>,
+) {
   const ready = lane.state === 'ready',
     peerReady = peer.state === 'ready';
-  const orderReason = ready !== peerReady ? 'ready' : mine.size !== theirs.size ? 'smaller' : 'started-first';
+  const orderReason: PredictiveOverlap['orderReason'] =
+    ready !== peerReady ? 'ready' : mine.size !== theirs.size ? 'smaller' : 'started-first';
   const first =
     ready !== peerReady
       ? ready
@@ -50,6 +49,18 @@ export function predictiveOverlaps(
         : `${lane.startedAt}:${lane.id}` < `${peer.startedAt}:${peer.id}`
           ? lane
           : peer;
+  return { first: first.id, orderReason };
+}
+
+export function predictiveOverlaps(
+  source: ContractSource,
+  cache: PeersCache,
+  lane: Lane,
+  mine: RegionSummary,
+  peer: Lane,
+  theirs: RegionSummary,
+): PredictiveOverlap[] {
+  const { first, orderReason } = overlapOrder(lane, mine, peer, theirs);
   const otherFiles = new Map(theirs.files.map(file => [file.path, file]));
   return mine.files.flatMap(file => {
     const other = otherFiles.get(file.path);
@@ -93,7 +104,7 @@ export function predictiveOverlaps(
             }
           : {}),
         ...(symbols.length ? { symbols } : {}),
-        first: first.id,
+        first,
         orderReason,
       },
     ];

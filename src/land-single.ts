@@ -16,7 +16,9 @@ export async function landSingle(
   command: LandCommand,
   phase: (input: unknown) => Promise<{ result: unknown }>,
   save: () => void,
+  options: { cancelled?: () => boolean; retry?: () => boolean; onRun?: (runId: string) => void } = {},
 ): Promise<Record<string, unknown>> {
+  if (options.cancelled?.()) return { status: 'cancelled' };
   const store = work.store;
   entry.single ??= { attempt: 0, previous: currentChannelHead(store, command.channel) };
   const single = entry.single;
@@ -34,8 +36,10 @@ export async function landSingle(
     save();
   }
   const view = store.select('views', single.viewId)!;
-  if (view.status !== 'clean') return { status: 'conflict', viewId: view.id };
+  if (view.status !== 'clean') return { status: 'conflict', viewId: view.id, conflict: view.details };
   const runId = child('run');
+  options.onRun?.(runId);
+  if (options.cancelled?.()) return { status: 'cancelled' };
   await phase({
     action: 'run-check',
     operationId: runId,
@@ -54,10 +58,12 @@ export async function landSingle(
       viewId: view.id,
       checkStatus: run.status,
     };
+  if (options.cancelled?.()) return { status: 'cancelled', runId, viewId: view.id };
   try {
     const move = (
       await phase({
         action: 'accept-channel',
+        ...(entry.command.accept?.invariant ? { invariant: entry.command.accept.invariant } : {}),
         operationId: child('accept'),
         viewId: view.id,
         expectedHead: view.head,
@@ -74,6 +80,15 @@ export async function landSingle(
       return { status: 'review-needed', runId, viewId: view.id, message: error.message };
     }
     if (['CHANNEL_CHANGED', 'CHANNEL_DIVERGED', 'CONTRACT_RESYNC_REQUIRED'].includes(error.code)) {
+      if (options.retry && !options.retry())
+        return {
+          status: 'retry-exhausted',
+          code: error.code,
+          runId,
+          viewId: view.id,
+          message: 'Finish retry budget exhausted; start a new finish operation to choose a new attempt.',
+        };
+
       entry.single = { attempt: single.attempt + 1, previous: currentChannelHead(store, command.channel) };
       save();
       return { status: 'waiting', code: error.code, runId, viewId: view.id, message: error.message };

@@ -71,11 +71,12 @@ async function fixture(t, native = true) {
   const saved = { queue: process.env.FORGE_CHECK_QUEUE_DIR, limit: process.env.FORGE_MAX_CONCURRENT_CHECKS };
   process.env.FORGE_CHECK_QUEUE_DIR = join(store.directory, 'test-check-queue');
   process.env.FORGE_MAX_CONCURRENT_CHECKS = '4';
-  const children = new Set();
+  const children = new Map();
   const originalSpawn = childProcess.spawn;
   childProcess.spawn = (...args) => {
     const child = originalSpawn(...args);
-    children.add(
+    children.set(
+      child,
       new Promise(resolve => {
         child.once('close', resolve);
         child.once('error', resolve);
@@ -84,14 +85,19 @@ async function fixture(t, native = true) {
     return child;
   };
   syncBuiltinESMExports();
+  async function background() {
+    await drainPostAccept(store);
+    // Draining may spawn another check. Detached helpers unref themselves, so
+    // retain them while joining their close events, including on test failure.
+    for (let observed = -1; observed !== children.size;) {
+      observed = children.size;
+      for (const child of children.keys()) child.ref();
+      await Promise.all(children.values());
+    }
+  }
   t.after(async () => {
     try {
-      await drainPostAccept(store);
-      // Draining may spawn another check. Join every helper before removing its owner.
-      for (let observed = -1; observed !== children.size;) {
-        observed = children.size;
-        await Promise.all(children);
-      }
+      await background();
     } finally {
       childProcess.spawn = originalSpawn;
       syncBuiltinESMExports();
@@ -150,7 +156,7 @@ async function fixture(t, native = true) {
       person.store.revision(),
     );
   }
-  return { root, agent, store, lane, request, proposal, personAccept };
+  return { root, agent, store, lane, request, proposal, personAccept, background };
 }
 function unknownOnce(agent, predicate) {
   const dispatch = agent.work.dispatch.bind(agent.work);
@@ -649,7 +655,7 @@ test('fast-path finish automatically checks accepted main and creates one fix-fo
   // First observe the automatically started audit, then join its queue rather
   // than competing with its worker until the fix-forward publication finishes.
   await until(() => snapshot(f.store).runs.some(run => run.mainCheck));
-  await drainPostAccept(f.store);
+  await f.background();
   const data = snapshot(f.store),
     intent = data.intents.find(intent => intent.mainCheckFailure);
   const run = data.runs.find(run => run.id === intent.mainCheckFailure.runId);

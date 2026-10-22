@@ -6,22 +6,32 @@ const oneLine = (value: string) => value.replace(/[\r\n\t\x00-\x1f\x7f]/g, ' ');
 export function formatPendingStatus(value: PendingStatus) {
   const h = value.hosted,
     r = h.recovery;
+  const handoffs = value.lanes.filter(lane => lane.handoff);
+  const handoff = handoffs[0];
+  const stacks = value.lanes.filter(lane => lane.stack);
+  const groups = value.overlap.groups;
   const examples = value.lanes
     .filter(lane => ['ready', 'waiting', 'checking'].includes(lane.status))
-    .slice(0, 3)
     .map(lane => `${lane.status} ${lane.laneId.slice(0, 8)} ${oneLine(lane.name).slice(0, 70)}`);
-  return [
+  const lines = [
     `Pending work · revision ${value.snapshot.workRevision} · ${value.snapshot.observedAt}`,
     `Main: ${pin(value.main.head)}`,
     `Lanes: ${value.counts.ready} ready · ${value.counts.waiting} waiting · ${value.counts.checking} checking (recorded states)`,
-    ...examples,
-    ...value.lanes.filter(lane => lane.stack).map(lane => `Stack: ${lane.stack!.summary}`),
-    ...value.lanes
-      .filter(lane => lane.handoff)
-      .map(
-        lane =>
-          `Handoff ${lane.laneId.slice(0, 8)}: ${oneLine(lane.handoff!.summary)} · ${lane.handoff!.tests.commands} self-reported commands · ${lane.handoff!.recordedChecks.length} Forge-recorded checks · handoff-read {laneId:${lane.laneId}}`,
-      ),
+    ...(handoff
+      ? [
+          handoffs.length === 1
+            ? `Handoff ${handoff.laneId.slice(0, 8)}: ${oneLine(handoff.handoff!.summary)} · ${handoff.handoff!.tests.commands} self-reported commands · ${handoff.handoff!.recordedChecks.length} Forge-recorded checks · handoff-read {laneId:${handoff.laneId}}`
+            : `Handoffs: ${handoffs.length} Lanes · ${handoffs.reduce((n, lane) => n + lane.handoff!.tests.commands, 0)} self-reported commands · ${handoffs.reduce((n, lane) => n + lane.handoff!.recordedChecks.length, 0)} Forge-recorded checks · see --json and handoff-read`,
+        ]
+      : []),
+    ...(stacks.length
+      ? [
+          stacks.length === 1
+            ? `Stack: ${stacks[0]!.stack!.summary}`
+            : `Stacks: ${stacks.length} Lanes · see peers`,
+        ]
+      : []),
+    `Overlap: ${groups.length === 1 ? `${groups[0]!.paths.map(oneLine).join(', ')} · land ${groups[0]!.order.map(id => id.slice(0, 8)).join(' → ')}; compose each on accepted main` : `${groups.length} groups${groups.length ? ' · see --json and peers for paths and landing order' : ''}`} · coverage ${value.overlap.coverage}`,
     `Hosted main: ${pin(h.mainHead)} · ${h.source} · capture age ${elapsed(h.captureAgeMs)}`,
     `Recovery: ${r?.captureId ?? 'unknown'} · history ${r?.completeHistory == null ? 'unknown' : r.completeHistory ? 'complete' : 'incomplete'} · unavailable ${r?.unavailable?.length ?? 'unknown'}`,
     `Pending: Work ${h.work} · evidence ${h.evidence} · age ${elapsed(h.pendingAgeMs)}`,
@@ -31,5 +41,8 @@ export function formatPendingStatus(value: PendingStatus) {
     `Checks: ${value.checks.length} queued/preparing/running (process liveness unknown)`,
     `Audits: ${value.audits.filter(a => ['pending', 'queued', 'preparing', 'running'].includes(a.status)).length} pending · ${value.audits.filter(a => a.status === 'failed').length} failed`,
     `Deployment: ${pin(value.deployment?.head ?? null)} · ${value.deployment?.source ?? 'unknown'} (last observation); installed source unknown`,
-  ].join('\n');
+  ];
+  // Delivery and overlap summaries share the compact view's existing line budget.
+  lines.splice(3, 0, ...examples.slice(0, Math.min(3, Math.max(0, 15 - lines.length))));
+  return lines.join('\n');
 }

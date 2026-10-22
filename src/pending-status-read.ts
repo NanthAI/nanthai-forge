@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+import { savedOverlapPlan } from './agent-overlap-plan.js';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { waitingFinishes } from './agent-finish-journal.js';
 import { readHostState } from './host-binding.js';
 import { readAutoExchangeStatus } from './auto-exchange-status.js';
 import { pendingStatus, type RecoveryCaptureObservation } from './pending-status.js';
+import type { Lane } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkCollection, WorkRecord } from './work-record-transaction.js';
 
@@ -16,7 +18,8 @@ export function readPendingStatus(
   recovery?: RecoveryCaptureReader,
   now = new Date().toISOString(),
 ) {
-  return store.locked(() =>
+  let observedLanes: Lane[] = [];
+  const pending = store.locked(() =>
     store.observing(() => {
       const tx = store.readRecords();
       const data = tx ? tx.data() : store.load();
@@ -50,7 +53,7 @@ export function readPendingStatus(
       return pendingStatus(
         {
           ...data,
-          lanes: records('lanes'),
+          lanes: (observedLanes = records('lanes')),
           intents: records('intents', false),
           views: records('views', false),
           runs,
@@ -78,4 +81,13 @@ export function readPendingStatus(
       );
     }),
   );
+  const pendingIds = new Set(pending.lanes.filter(lane => lane.status !== 'landed').map(lane => lane.laneId));
+  // Immutable saved pins are analyzed after releasing the owner lock.
+  return {
+    ...pending,
+    overlap: savedOverlapPlan(
+      store,
+      observedLanes.filter(lane => pendingIds.has(lane.id)),
+    ),
+  };
 }

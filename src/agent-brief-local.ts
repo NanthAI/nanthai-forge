@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { stackStatus } from './agent-stack.js';
+import { agentPeers } from './agent-peers.js';
 import { currentPlanning } from './work-planning-state.js';
 import { planningBriefIntent } from './work-planning-lifecycle.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
@@ -77,12 +78,16 @@ export function localBrief(store: WorkStore, input: unknown, liveMcp = false) {
   context.coverage.push(
     'Local handovers and conflict negotiation are included; hosted messages and claims require a hosted coordination binding.',
   );
-  return renderBriefing(
+  const briefing = renderBriefing(
     parsed.data,
     context,
     store.root,
     new Date().toISOString(),
     undefined,
     localAgentSetup(store.root, liveMcp),
+  );
+  return Object.assign(
+    briefing,
+    context.laneId ? { peers: agentPeers(store, { laneId: context.laneId }) } : {},
   );
 }

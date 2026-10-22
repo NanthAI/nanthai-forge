@@ -48,7 +48,7 @@ Actions: integrate, wait, handoff, handoff-read, tests, peers, peer-ack, link, t
 start stackOn:LANE_ID bases a native Lane on that parent’s latest saved head and waits for its landing.
 sync restacks onto the latest parent; after landing it targets main. ontoMain:true detaches explicitly.
 status/peers/pending show the chain, parent movement and abandonment.
-start intentId adds a sibling Lane; finish with:[laneId] lands siblings together.
+start intentId adds a sibling Lane; finish with:[laneId] uses saved siblings and orders high overlaps when accepting.
 after:{intentId} or after:{viewId} waits for that work to land; land-ready resumes waits.
 finish/accept complete included Lanes; the Intent completes when all its Lanes are done (keepOpen:true to opt out).
 Lanes show merged:true when their head is already in a Channel; complete-merged
@@ -172,7 +172,7 @@ function actionHelp(action: string): string {
       'Use noticeId from peers detail:true. choice is accept-order, swap or split; optional text explains the advisory proposal. Reuse operationId and inputs after an unknown outcome. This records an answer; it does not resolve source conflicts.\n';
   if (action === 'finish')
     result +=
-      'with:[LANE_ID] includes sibling recorded heads in one Candidate/check/acceptance. after:{intentId} or after:{viewId} records a dependency; rerun the same request or land-ready after it lands. Omit accept to check only. accept:true means main at its current head. If main moved, finish syncs first; a sync conflict stops with phase "sync" and markers in the Lane. CHANNEL_CHANGED automatically retries sync/check/accept under the landing queue (maxRetries:3 by default, 0 disables retries). Receipts include attempts and queue positions. CHANNEL_DIVERGED means the Candidate lacks the Channel head: sync and finish again. CONTRACT_RESYNC_REQUIRED means main changed an export or schema your edits use; finish retries it like CHANNEL_CHANGED.\n';
+      'with:[LANE_ID] includes saved sibling heads. Acceptance groups compatible heads and checks high overlaps separately in order on current main. after:{intentId} or after:{viewId} records a dependency; rerun the same request or land-ready after it lands. Omit accept to check only. accept:true means main at its current head. If main moved, finish syncs first; a sync conflict stops with phase "sync" and markers in the Lane. CHANNEL_CHANGED automatically retries sync/check/accept under the landing queue (maxRetries:3 by default, 0 disables retries). Receipts include attempts and queue positions. CHANNEL_DIVERGED means the Candidate lacks the Channel head: sync and finish again. CONTRACT_RESYNC_REQUIRED means main changed an export or schema your edits use; finish retries it like CHANNEL_CHANGED.\n';
   if (action === 'land')
     result +=
       'Land selected recorded heads (unsaved edits remain untouched). Same-Intent inputs share a Candidate; compatible cross-Intent entries share a batch. Keep the operationId and replay the original request after a lost reply. Outcomes: accepted, failed, conflict, review-needed, waiting.\n';
@@ -285,10 +285,12 @@ export async function agentCli(args: string[]): Promise<unknown> {
   }
   const response = await agent.dispatch({ ...retained, ...selected, action });
   const result = response.result as {
-    peers?: { predictive?: PredictiveOverlap[] };
+    peers?: { predictive?: PredictiveOverlap[]; inbox?: { text: string }[] };
     predictive?: PredictiveOverlap[];
   };
   const predictions = action === 'peers' ? result.predictive : result.peers?.predictive;
+  for (const notice of result.peers?.inbox ?? [])
+    process.stderr.write(`${notice.text.replace(/[\x00-\x1f\x7f]/g, ' ')}\n`);
   for (const line of overlapLines(predictions ?? [])) process.stderr.write(`${line}\n`);
   if (action === 'show') {
     const file = response.result as ReturnType<

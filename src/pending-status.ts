@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
+import type { OverlapPlan } from './agent-overlap-plan.js';
 import type { WorkData } from './work-types.js';
 import type { AutoExchangeStatus } from './auto-exchange-status.js';
 
@@ -29,6 +30,7 @@ export type PendingData = Pick<
   Partial<Pick<WorkData, 'intents'>>;
 export type PendingObservations = {
   autoExchange?: AutoExchangeStatus;
+  overlap?: OverlapPlan;
   recovery?: RecoveryCaptureObservation | null;
   pendingPushes?: { operationId: string; revision: number }[];
   metadataPending?: number;
@@ -191,6 +193,7 @@ export function pendingStatus(
       };
     });
   return {
+    overlap: observed.overlap ?? { groups: [], coverage: 'unknown' },
     schema: 1,
     snapshot: { observedAt: now, workRevision: data.revision, scope: 'local-saved-records' },
     main: { head: mainHead, acceptanceId: main?.id ?? null, acceptedAt: main?.at ?? null },

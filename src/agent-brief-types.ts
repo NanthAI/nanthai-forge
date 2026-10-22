@@ -80,6 +80,7 @@ export type BriefContext = {
   coverage: string[];
 };
 export type Briefing = {
+  peers?: import('./agent-peers.js').PeersDigest;
   situation: BriefInput['situation'];
   title: string;
   copyText: string;

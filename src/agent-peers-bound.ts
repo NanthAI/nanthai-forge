@@ -1,7 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { OverlapAlert } from './agent-overlap-alerts.js';
 import type { PeersDigest } from './agent-peers.js';
 export const PEERS_MAX_BYTES = 1500;
 const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+
+/** Compact advice keeps exact file identity; only the human text uses a preview. */
+export function compactOverlapNotice({
+  noticeId,
+  kind,
+  lanes,
+  file,
+  proposedOrder,
+}: Pick<OverlapAlert, 'noticeId' | 'kind' | 'lanes' | 'file' | 'proposedOrder'>) {
+  const display = file.length > 120 ? `…${file.slice(-119)}` : file;
+  return {
+    noticeId,
+    kind,
+    lanes,
+    file,
+    proposedOrder,
+    text: `High overlap: ${display}; proposed region owner ${proposedOrder[0]?.slice(0, 8)}; land ${proposedOrder.map(id => id.slice(0, 8)).join(' → ')}; sync after ${proposedOrder[0]?.slice(0, 8)} lands.`,
+  };
+}
 
 /** Byte cap applies to JSON UTF-8, including escaping. `more` counts omitted entries. */
 export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
@@ -18,6 +38,10 @@ export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
     if (value.ownership.sessionId) value.ownership.sessionId = value.ownership.sessionId.slice(0, 200);
   }
   let more = 0;
+  if (value.inbox) {
+    more += Math.max(0, value.inbox.length - 3);
+    value.inbox = value.inbox.slice(-3).map(compactOverlapNotice);
+  }
   if (value.predictive) {
     more += Math.max(0, value.predictive.length - 3);
     value.predictive.splice(3);
@@ -103,14 +127,21 @@ export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
         ? value.overlaps
         : value.stalled?.length
           ? value.stalled
-          : value.conflicts?.length
-            ? value.conflicts
-            : value.dependents?.length
-              ? value.dependents
-              : value.contracts?.length
-                ? value.contracts
-                : value.predictive;
+          : value.dependents?.length
+            ? value.dependents
+            : value.contracts?.length
+              ? value.contracts
+              : value.predictive?.length
+                ? value.predictive
+                : value.inbox && value.inbox.length > 1
+                  ? value.inbox
+                  : value.conflicts;
     if (!items?.length) {
+      if (value.inbox?.length) {
+        value.inbox.shift();
+        value.more = (value.more ?? 0) + 1;
+        continue;
+      }
       if (value.notices?.length) {
         value.notices.pop();
         value.more = (value.more ?? 0) + 1;

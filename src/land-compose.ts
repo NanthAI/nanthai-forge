@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { landingConflictPeers } from './landing-conflict-peers.js';
+import { resolveDocsComposition } from './native-docs-resolve.js';
 import { NativeSource } from './native-source.js';
 import { workGit, gitIsAncestor, commitTree, executionGuard } from './work-git.js';
 import { invariant } from './errors.js';
@@ -10,9 +12,14 @@ export async function composeSavedMain(work: WorkService, view: WorkView, main: 
   const original = work.store.select('views', id);
   if (original) return original;
   const base = main ?? view.base;
-  const merged = work.store.native
-    ? new NativeSource(work.store.root).compose(base, view.head!, 'Selected saved Lane landing', view.at)
+  const source = work.store.native ? new NativeSource(work.store.root) : undefined;
+  const initial = source
+    ? source.compose(base, view.head!, 'Selected saved Lane landing', view.at)
     : composeGitMain(work.store.root, base, view.head!);
+  const merged =
+    !initial.head && source
+      ? (resolveDocsComposition(source, view.head!, base, 'Selected saved Lane landing', view.at) ?? initial)
+      : initial;
   const candidate: WorkView = {
     id,
     intentId: view.intentId,
@@ -25,7 +32,7 @@ export async function composeSavedMain(work: WorkService, view: WorkView, main: 
     status: merged.head ? 'clean' : 'conflict',
     details: merged.head
       ? 'Saved inputs composed on the pinned Channel head.'
-      : `Conflicting saved paths:\n${merged.conflicts.join('\n')}`,
+      : `Conflicting saved paths with accepted peer Lane(s) ${landingConflictPeers(work.store, base, view.inputs).join(', ') || 'unknown'}:\n${initial.conflicts.join('\n')}`,
   };
   // The source bytes above are immutable. Publish one selected record; acceptance rechecks main.
   return retryWorkPhase(id, () =>

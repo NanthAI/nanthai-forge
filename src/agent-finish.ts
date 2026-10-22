@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { strandedActionsRun } from './github-actions-recovery.js';
+import { land } from './land.js';
+import { finishChild } from './agent-finish-journal.js';
+import { savedOverlapPlan } from './agent-overlap-plan.js';
 import { CheckQueue, cancelTickets } from './check-queue.js';
 import { withWorkLockOptions } from './work-lock.js';
 import { finishQueuedBatch } from './agent-finish-batch.js';
@@ -366,6 +369,109 @@ class FinishRunner {
         delete attempt.status;
       }
       journal.save();
+    }
+    if (command.accept && command.withInputs?.length) {
+      const inputs = [
+        {
+          laneId: command.laneId,
+          head: (attempt.sync?.head as string | undefined) ?? (this.checkpoint.head as string),
+        },
+        ...command.withInputs,
+      ];
+      const lanes = inputs.map(pin => ({ ...this.store.select('lanes', pin.laneId)!, head: pin.head }));
+      if (savedOverlapPlan(this.store, lanes).pairs.length) {
+        if (attempt.previous && !this.contains(inputs[0]!.head, attempt.previous)) {
+          if (!attempt.sync && readPolicy(this.store).laneUpdates === 'ask')
+            return this.stop(attempt, {
+              phase: 'sync',
+              status: 'sync-required',
+              message: `${command.accept.channel} moved; run sync, then finish again`,
+            });
+          attempt.sync ??= (
+            await this.phases.sync(attempt.operations.sync, inputs[0]!.head, attempt.previous)
+          ).result;
+          journal.save();
+          if (attempt.sync.status === 'conflict')
+            return this.stop(attempt, {
+              phase: 'sync',
+              status: 'conflict',
+              conflicts: attempt.sync.conflicts,
+            });
+          inputs[0]!.head = attempt.sync.head as string;
+        }
+        // Joint finish retains its preflight conflict outcome before any partial acceptance.
+        const preflight = (
+          await this.phases.phase({
+            action: 'compose',
+            operationId: finishChild(command.operationId, 'overlap-preflight'),
+            intentId: lanes[0]!.intentId,
+            inputs,
+            dependencies: command.dependencies,
+          })
+        ).result as WorkView;
+        if (preflight.status !== 'clean' || !preflight.head) {
+          attempt.view = viewReceipt(preflight);
+          return this.stop(attempt, {
+            phase: 'compose',
+            status: preflight.status,
+            conflictingLanes: inputs.map(pin => ({
+              ...pin,
+              name: this.store.select('lanes', pin.laneId)!.name,
+            })),
+          });
+        }
+        const response = await land(
+          this.work,
+          {
+            action: 'land',
+            operationId: finishChild(command.operationId, 'overlap-land'),
+            laneIds: inputs.map(pin => pin.laneId),
+            channel: command.accept.channel,
+            message: command.message,
+            checkId: command.checkId,
+            ...(command.waitMs === undefined ? {} : { waitMs: command.waitMs }),
+            ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
+          },
+          { inputs, finish: command },
+          () => this.control.cancelled(),
+          runId => this.control.update({ runId, phase: 'check' }),
+        );
+        const result = response.result;
+        const exhausted = result.entries.find(entry => entry.status === 'retry-exhausted') as
+          Record<string, unknown> | undefined;
+        return this.stop(attempt, {
+          phase: result.entries.some(entry => entry.status === 'retry-exhausted')
+            ? 'accept'
+            : result.entries.some(entry => entry.status === 'conflict')
+              ? 'compose'
+              : result.terminal &&
+                  !result.complete &&
+                  !result.entries.some(entry => entry.status === 'review-needed')
+                ? 'check'
+                : 'accept',
+          status: result.complete
+            ? 'accepted'
+            : result.entries.some(entry => entry.status === 'conflict')
+              ? 'conflict'
+              : result.entries.some(entry => entry.status === 'review-needed')
+                ? 'awaiting-review'
+                : result.entries.some(entry => entry.status === 'retry-exhausted')
+                  ? 'retry-exhausted'
+                  : result.entries.some(entry => entry.status === 'cancelled')
+                    ? 'cancelled'
+                    : result.terminal
+                      ? 'failed'
+                      : 'waiting to land',
+          ...result,
+          ...(exhausted ? { code: exhausted.code, message: exhausted.message } : {}),
+          replay: {
+            command,
+            shell: `nforge agent '${this.store.root.replaceAll("'", "'\\''")}' finish '${JSON.stringify({ operationId: command.operationId })}'`,
+          },
+          operationId: command.operationId,
+          checkpoint: this.checkpoint,
+        });
+      }
     }
     // Every check is optimistic; acceptance alone holds a landing slot.
     if (attempt.number === 0 && attempt.status !== 'channel-changed') {

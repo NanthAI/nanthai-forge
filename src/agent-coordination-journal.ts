@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { latestHandoff } from './agent-handoff-types.js';
+import { publishedOverlap } from './agent-coordination-events.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { lstatSync, readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import type { OverlapAlert } from './agent-overlap-alerts.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { workLocked } from './work-lock.js';
@@ -66,6 +68,41 @@ export class CoordinationJournal {
     for (const notice of notices) {
       const name = `notice-${notice.noticeId}.json`;
       if (!this.read(name)) this.write(name, notice);
+    }
+  }
+  recordOverlaps(notices: OverlapAlert[]) {
+    if (!notices.length) return;
+    this.prepare();
+    workLocked(
+      join(this.directory, 'lock'),
+      () => {
+        for (const notice of notices) {
+          const name = `overlap-${notice.noticeId}.json`;
+          if (!this.read(name)) this.write(name, notice);
+        }
+      },
+      { operation: 'local overlap notices' },
+    );
+    publishedOverlap(this.store);
+  }
+  overlaps(laneId?: string): OverlapAlert[] {
+    try {
+      invariant(
+        !lstatSync(this.directory).isSymbolicLink(),
+        'COORDINATION_UNAVAILABLE',
+        'Local coordination journal is redirected.',
+      );
+      return readdirSync(this.directory)
+        .sort()
+        .filter(name => /^overlap-[a-f0-9]+\.json$/.test(name))
+        .flatMap(name => {
+          const row = this.read<OverlapAlert>(name);
+          return row && (!laneId || row.lanes.includes(laneId)) ? [row] : [];
+        })
+        .sort((a, b) => (a.at ?? '').localeCompare(b.at ?? '') || a.noticeId.localeCompare(b.noticeId));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
     }
   }
   decorate(notice: ConflictNotice, laneId: string): ConflictNotice {
@@ -210,7 +247,7 @@ export class CoordinationJournal {
         const row = this.read<Handover>(name);
         return row && (!laneId || row.laneId === laneId) ? [row] : [];
       })
-      .sort((a, b) => a.at.localeCompare(b.at));
+      .sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''));
     const notices = names
       .filter(name => /^notice-[a-f0-9]+\.json$/.test(name))
       .flatMap(name => {
@@ -219,6 +256,14 @@ export class CoordinationJournal {
           ? [this.decorate(row, laneId ?? '')]
           : [];
       });
+    const overlapMessages: BriefEvent[] = this.overlaps(laneId).map(row => ({
+      id: row.noticeId,
+      actor: 'Forge coordination',
+      kind: 'message',
+      text: row.text,
+      ...(laneId ? { laneId } : {}),
+      paths: [row.file],
+    }));
     const messages: BriefEvent[] = handovers.map(row => ({
       id: row.operationId,
       actor: row.actor,
@@ -243,6 +288,7 @@ export class CoordinationJournal {
             paths: [],
           });
     }
+    messages.push(...overlapMessages);
     for (const notice of notices)
       for (const decision of notice.decisions ?? []) {
         if (!decision.text) continue;

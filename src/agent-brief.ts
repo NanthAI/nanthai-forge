@@ -67,14 +67,14 @@ async function readBrief(store: WorkStore, input: unknown, liveMcp: boolean): Pr
       local.context.guidance = context.guidance;
       local.context.autonomyPolicy = context.autonomyPolicy;
       local.context.claims = context.claims;
-      local.context.messages = context.messages;
+      local.context.messages = [...local.context.messages, ...context.messages];
       if (context.messageId) local.context.messageId = context.messageId;
       local.context.coverage = local.context.coverage.filter(c => !c.startsWith('Live claims'));
       local.context.coverage.push(
         ...context.coverage.filter(c => !c.startsWith('Source paths unavailable')),
         `Live coordination from hosted project ${projectId}; source pins are from this local owner.`,
       );
-      return renderBriefing(
+      const briefing = renderBriefing(
         parsed.data,
         local.context,
         store.root,
@@ -85,6 +85,8 @@ async function readBrief(store: WorkStore, input: unknown, liveMcp: boolean): Pr
         },
         local.setup,
       );
+      if (local.peers) briefing.peers = local.peers;
+      return briefing;
     }
     context.coverage.push(
       `Hosted project ${projectId}, selected checkpoint; connect or exchange this source into ROOT before local edits.`,

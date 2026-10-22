@@ -2,6 +2,7 @@
 import { stackStatus } from './agent-stack.js';
 import { readHandoff } from './agent-handoff.js';
 import { handoffSummary } from './agent-handoff-types.js';
+import type { OverlapAlert } from './agent-overlap-alerts.js';
 import { z } from 'zod';
 import { laneOwnership, stalledLane } from './agent-ownership.js';
 import { readHostState } from './host-binding.js';
@@ -52,6 +53,7 @@ type Overlap = {
   more?: number;
   via: 'edit' | 'scope';
   claim?: 'planned' | 'editing' | 'stale';
+  risk?: 'low' | 'medium';
 };
 type Landed = {
   head: string;
@@ -68,6 +70,7 @@ export type PeersDigest = {
   coverage?: 'local' | 'local-incomplete';
   notices?: { text: string }[];
   conflicts?: ConflictNotice[];
+  inbox?: Pick<OverlapAlert, 'noticeId' | 'kind' | 'lanes' | 'file' | 'proposedOrder' | 'text'>[];
   overlaps?: Overlap[];
   /** My live regions versus every in-flight peer's latest checkpoint. */
   predictive?: PredictiveOverlap[];
@@ -140,6 +143,8 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
       base = source.state(lane.base).files;
     const journal = new CoordinationJournal(store),
       cache = new PeersCache(store.root);
+    const inbox = journal.overlaps(lane.id);
+    if (inbox.length) result.inbox = inbox;
     let participant: NoticeParticipant | undefined;
     const self = () => (participant ??= noticeParticipant(store, source, lane));
     const addNotice = (notice: ConflictNotice | undefined) => {
@@ -163,11 +168,12 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
           ...(result.stack ? { stack: result.stack } : {}),
           ...(result.handoff ? { handoff: result.handoff } : {}),
           ...(result.notices ? { notices: result.notices } : {}),
+          ...(result.inbox ? { inbox: result.inbox } : {}),
         },
         command.detail,
       );
     if (!scope.length)
-      return result.notices?.length || result.handoff || result.stack
+      return result.notices?.length || result.inbox?.length || result.handoff || result.stack
         ? boundPeers(result, command.detail)
         : { clear: true };
     const moves: ChannelMove[] = [];
@@ -419,6 +425,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
               : unlandedEdits
                 ? 'editing'
                 : 'planned',
+          risk: unlandedEdits ? 'medium' : 'low',
           via: paths.some(path => edited.some(item => pathsOverlap(path, item))) ? 'edit' : 'scope',
         });
       } catch {
@@ -441,6 +448,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     !result.stalled?.length &&
     !result.conflicts?.length &&
     !result.notices?.length &&
+    !result.inbox?.length &&
     !result.handoff &&
     !result.stack
   )

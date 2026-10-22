@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { landingConflictPeers } from './landing-conflict-peers.js';
+import { landingOverlap } from './landing-overlap.js';
+import { resolveDocsComposition } from './native-docs-resolve.js';
 import { orderLandingEntries } from './landing-batch-order.js';
 import { join } from 'node:path';
 import { digest } from './hash.js';
@@ -21,7 +24,9 @@ export function batchEdit<T>(work: WorkService, id: string, edit: (data: WorkDat
   return retryWorkPhase(id, () =>
     work.store.locked(() => {
       const data = work.store.load();
+      const before = JSON.stringify(data);
       const result = edit(data);
+      if (JSON.stringify(data) === before) return result;
       const expanded =
         Number(data.schema) >= 19 || data.landingBatches?.some(batch => batch.entryIds.length > 4);
       data.schema = (
@@ -142,9 +147,14 @@ export function selectBatch(
       entry.reason = `Queued landing pins changed: ${fields.join(', ')}. Submit finish again from the intended runtime.`;
     }
   }
-  const pending = orderLandingEntries(
+  const queued = orderLandingEntries(
     (data.landingEntries ?? []).filter(entry => entry.channel === channel && entry.status === 'queued'),
   );
+  const activeEntries = (data.landingEntries ?? []).filter(
+    entry => entry.channel === channel && entry.status === 'checking',
+  );
+  const overlap = landingOverlap(work.store, data, [...queued, ...activeEntries]);
+  const pending = overlap.ordered.filter(entry => queued.includes(entry));
   // Original insertion order breaks equal timestamp ties and survives requeue/restart.
   const first = pending[0];
   if (!first) return;
@@ -169,7 +179,7 @@ export function selectBatch(
       return;
   }
   const selected: LandingEntry[] = [];
-  for (const entry of pending) {
+  for (const [index, entry] of pending.entries()) {
     if (
       selected.length === shape.maxBatch ||
       entry.checkId !== first.checkId ||
@@ -178,8 +188,15 @@ export function selectBatch(
       entry.keepOpen !== first.keepOpen
     )
       break;
+    if (
+      pending.slice(0, index).some(earlier => overlap.overlaps(earlier, entry)) ||
+      activeEntries.some(active => overlap.overlaps(active, entry)) ||
+      selected.some(other => overlap.overlaps(other, entry))
+    )
+      continue;
     selected.push(entry);
   }
+  if (!selected.length) return;
   const projected = parent ? (parent.prefixes.at(-1)?.head ?? parent.base) : undefined;
   const previous = parent
     ? parent.prefixes.length
@@ -222,9 +239,14 @@ export async function composeBatch(work: WorkService, batch: LandingBatch) {
     const previous = views.filter(view => view.status === 'clean').at(-1);
     const inputs = [...(previous?.inputs ?? []), ...candidate.inputs];
     const dependencies = [...(previous?.dependencies ?? []), ...(candidate.dependencies ?? [])];
-    const result = source.compose(head, entry.head, 'Landing batch prefix', batch.arrivedAt);
+    const composed = source.compose(head, entry.head, 'Landing batch prefix', batch.arrivedAt);
+    const result = composed.head
+      ? composed
+      : (resolveDocsComposition(source, entry.head, head, 'Landing batch prefix', batch.arrivedAt) ??
+        composed);
     const id = finishChild(batch.id, `prefix:${entryId}`);
     if (!result.head) {
+      const peers = landingConflictPeers(work.store, head, candidate.inputs);
       views.push({
         ...candidate,
         inputs,
@@ -234,7 +256,7 @@ export async function composeBatch(work: WorkService, batch: LandingBatch) {
         head: undefined,
         status: 'conflict',
         at: batch.arrivedAt,
-        details: `Batch composition conflict; original States retained:\n${result.conflicts.join('\n')}`,
+        details: `Batch composition conflict with accepted peer Lane(s) ${[...new Set(peers)].join(', ') || 'unknown'}; original States retained:\n${composed.conflicts.join('\n')}`,
       });
       conflicts.push({ entryId, viewId: id });
       continue;

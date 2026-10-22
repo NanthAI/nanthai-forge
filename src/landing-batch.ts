@@ -83,6 +83,7 @@ async function settle(
   batch: LandingBatch,
   waitMs?: number,
   parent?: Promise<boolean>,
+  beforeAccept?: () => Promise<void>,
 ): Promise<boolean> {
   if (batch.status === 'composing') batch = await composeBatch(work, batch);
   const cancelled = () =>
@@ -105,8 +106,9 @@ async function settle(
       return status;
     },
   );
+  await beforeAccept?.();
   // An entry may be cancelled while its original full run is in flight.
-  if (cancelled() !== stop) return settle(work, batch, waitMs, parent);
+  if (cancelled() !== stop) return settle(work, batch, waitMs, parent, beforeAccept);
   if (batch.parentId && !outcome.stopped) {
     if (parent && !(await parent)) return false;
     const data = work.store.load();
@@ -148,7 +150,7 @@ async function settle(
       ).result as ChannelMove;
     } catch (error) {
       if (!(error instanceof ForgeError)) throw error;
-      if (error.code === 'LANDING_CANCELLED') return settle(work, batch, waitMs, parent);
+      if (error.code === 'LANDING_CANCELLED') return settle(work, batch, waitMs, parent, beforeAccept);
       if (['CHANNEL_CHANGED', 'CHANNEL_DIVERGED', 'CONTRACT_RESYNC_REQUIRED'].includes(error.code)) {
         await batchEdit(work, batch.id, data => {
           data.landingBatches!.find(item => item.id === batch.id)!.status = 'superseded';
@@ -223,7 +225,12 @@ async function batchWindow(work: WorkService, channel: string) {
 }
 /** Finite sweep; another finish or land-ready adopts any incomplete recorded batch. On a remote
  * runner, batches arriving while checks run are stacked on the newest one and checked at once. */
-export async function drainLandingBatches(work: WorkService, channel: string, waitMs?: number) {
+export async function drainLandingBatches(
+  work: WorkService,
+  channel: string,
+  waitMs?: number,
+  beforeAccept?: () => Promise<void>,
+) {
   return withQueueSlot(
     batchDirectory(work, channel),
     async () => {
@@ -276,7 +283,7 @@ export async function drainLandingBatches(work: WorkService, channel: string, wa
           }
           running.set(
             id,
-            settle(work, composed, waitMs, parent)
+            settle(work, composed, waitMs, parent, beforeAccept)
               .then(
                 progressed => {
                   if (!progressed) halted = true;

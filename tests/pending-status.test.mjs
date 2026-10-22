@@ -166,6 +166,60 @@ test('50 Lanes keep full JSON and compact human output; checking requires the sa
   assert.ok(formatPendingStatus(status).split('\n').length <= 15);
   assert.equal(status.checks[0].processState, 'unknown');
 });
+test('handoffs and overlap groups share the 15-line budget without truncating JSON', () => {
+  const lanes = Array.from({ length: 50 }, (_, i) => ({
+    id: `lane-${i}`,
+    intentId: `intent-${i}`,
+    name: `Lane ${i}\nsynthetic`,
+    head,
+    state: 'ready',
+  }));
+  const intents = lanes.map(lane => ({
+    id: lane.intentId,
+    notes: [
+      {
+        handoff: {
+          operationId: `handoff-${lane.id}`,
+          laneId: lane.id,
+          head,
+          at,
+          summary: `Delivery ${lane.id}\nwith details`,
+          tests: [{ command: `test-${lane.id}` }],
+          recordedChecks: [{ operationId: `check-${lane.id}`, source: 'forge-recorded', status: 'passed' }],
+        },
+      },
+    ],
+  }));
+  const groups = lanes
+    .filter((_, i) => i % 2 === 0)
+    .map((lane, i) => ({
+      paths: [`src/file-${i}\nsynthetic.ts`],
+      order: [lane.id, lanes[i * 2 + 1].id],
+    }));
+  for (const coverage of ['local', 'local-incomplete', 'unknown']) {
+    for (const count of [0, 1, groups.length]) {
+      const overlap = { groups: groups.slice(0, count), coverage };
+      const status = pendingStatus(data({ lanes, intents }), { overlap }, now);
+      const before = JSON.stringify(status);
+      const text = formatPendingStatus(status);
+      assert.ok(text.split('\n').length <= 15, text);
+      assert.match(text, /Handoffs: 50 Lanes · 50 self-reported commands · 50 Forge-recorded checks/);
+      assert.match(text, new RegExp(`coverage ${coverage}`));
+      if (count > 1) assert.match(text, /Overlap: 25 groups.*--json and peers/);
+      if (count === 1) assert.match(text, /Overlap: src\/file-0 synthetic.ts · land lane-0 → lane-1/);
+      const json = JSON.parse(JSON.stringify(status));
+      assert.equal(json.lanes.length, 50);
+      assert.deepEqual(json.overlap, overlap);
+      for (const [i, lane] of json.lanes.entries()) {
+        assert.equal(lane.handoff.operationId, `handoff-lane-${i}`);
+        assert.equal(lane.handoff.summary, `Delivery lane-${i}\nwith details`);
+        assert.equal(lane.handoff.tests.commands, 1);
+        assert.equal(lane.handoff.recordedChecks[0].operationId, `check-lane-${i}`);
+      }
+      assert.equal(JSON.stringify(status), before);
+    }
+  }
+});
 test('dependency waits, review and failed audits retain their recorded state', () => {
   const status = pendingStatus(
     data({
