@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { latestHandoff } from './agent-handoff-types.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { lstatSync, readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -173,6 +174,23 @@ export class CoordinationJournal {
     );
   }
   context(laneId?: string) {
+    const lanes = laneId
+      ? [this.store.select('lanes', laneId)].filter((lane): lane is Lane => !!lane)
+      : this.store.load().lanes;
+    const handoffs = lanes.flatMap(lane => {
+      const handoff = latestHandoff(this.store.select('intents', lane.intentId)?.notes ?? [], lane.id);
+      return handoff ? [handoff] : [];
+    });
+    const deliveryMessages: BriefEvent[] = handoffs.map(row => ({
+      id: row.operationId,
+      actor: row.actor,
+      kind: 'handoff',
+      text: row.summary,
+      head: row.head,
+      laneId: row.laneId,
+      intentId: row.intentId,
+      paths: [],
+    }));
     let names: string[];
     try {
       invariant(
@@ -183,7 +201,7 @@ export class CoordinationJournal {
       names = readdirSync(this.directory).sort();
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-        return { handovers: [], notices: [], messages: [] as BriefEvent[] };
+        return { handovers: [], handoffs, notices: [], messages: deliveryMessages };
       throw error;
     }
     const handovers = names
@@ -224,6 +242,6 @@ export class CoordinationJournal {
           paths: notice.conflicts.map(c => c.path),
         });
       }
-    return { handovers, notices, messages };
+    return { handovers, handoffs, notices, messages: [...deliveryMessages, ...messages] };
   }
 }

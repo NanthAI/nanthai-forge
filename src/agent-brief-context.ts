@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { latestHandoff } from './agent-handoff-types.js';
 import { invariant } from './errors.js';
 import { overlappingPaths } from './coordination-paths.js';
 import type { BriefInput, BriefState, BriefRecords, BriefContext } from './agent-brief-types.js';
@@ -160,6 +161,9 @@ export function briefingContext(
     ...(lane
       ? {
           laneId: lane.id,
+          ...(latestHandoff(intent?.notes ?? [], lane.id)
+            ? { handoff: latestHandoff(intent?.notes ?? [], lane.id) }
+            : {}),
           lane: {
             name: lane.name,
             head: lane.head,

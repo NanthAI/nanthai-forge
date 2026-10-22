@@ -114,9 +114,10 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
         'clean',
         'guidance',
         'peer-ack',
+        'handoff',
       ],
       description:
-        'Receipts include local peers and pre-compose conflict notices; peers detail:true returns exact hunks, intents, messages and known owner sessions. peer-ack records accept-order, swap or split advisory choices using noticeId and laneId; it never pauses or resolves source. start scope.paths retains planned claims; other calls add relevance for that call. take transfers an open Lane with context; takeover:true is required for another actor’s Lane, and ownership remains advisory. Clean checkpoints reuse the unchanged head. Start isolated work (intentId adds a sibling Lane; after records a landing dependency), checkpoint edits, sync a Lane with main, undo-sync, set-policy, compose Lane heads, finish (checkpoint, sync, compose, check, optional accept:true) or accept a Candidate; finish with:[laneId] composes sibling recorded heads together; land-ready resumes dependency waits. Acceptance follows project policy and completes input Lanes when completeOnAccept is enabled unless keepOpen:true. Finish retries CHANNEL_CHANGED up to maxRetries (default 3), checking without Work/Lane/Channel locks and queuing only acceptance; receipts list attempts and waiting positions. land {operationId,laneIds,message?} lands selected saved heads without checkpointing, queues compatible entries before checking, and returns aggregate outcomes plus a replay command; keep operationId after an unknown reply. Supervised finish stops at awaiting-review. Automatic sync/acceptance records undo instructions. abandon a Lane or Intent with a reason (saveFirst saves dirty edits; cascade closes open child Lanes); complete/reopen a Lane or Intent; complete-merged completes Lanes already in main. clean lists (default) or with apply:true deletes regenerable local disk: finished check workspaces, build dirs and fully captured directories of completed Lanes (reopen restores them). Work/Lane locks wait FIFO (default ten minutes; lockWaitMs or FORGE_WORK_LOCK_WAIT_MS), with periodic stderr phase/run/queue/holder progress; start/checkpoint/sync also accept waitMs. Omitted pins are filled and returned as resolved; retry an unknown outcome with them.',
+        'handoff {laneId,summary,changes?,tests?,unrun?,next?,evidence?} stores an optional portable delivery note. Test counts remain self-reported; saved-head check operation IDs are linked automatically as Forge-recorded evidence. Receipts include local peers and pre-compose conflict notices; peers detail:true returns exact hunks, intents, messages and known owner sessions. peer-ack records accept-order, swap or split advisory choices using noticeId and laneId; it never pauses or resolves source. start scope.paths retains planned claims; other calls add relevance for that call. take transfers an open Lane with context; takeover:true is required for another actor’s Lane, and ownership remains advisory. Clean checkpoints reuse the unchanged head. Start isolated work (intentId adds a sibling Lane; after records a landing dependency), checkpoint edits, sync a Lane with main, undo-sync, set-policy, compose Lane heads, finish (checkpoint, sync, compose, check, optional accept:true) or accept a Candidate; finish with:[laneId] composes sibling recorded heads together; land-ready resumes dependency waits. Acceptance follows project policy and completes input Lanes when completeOnAccept is enabled unless keepOpen:true. Finish retries CHANNEL_CHANGED up to maxRetries (default 3), checking without Work/Lane/Channel locks and queuing only acceptance; receipts list attempts and waiting positions. land {operationId,laneIds,message?} lands selected saved heads without checkpointing, queues compatible entries before checking, and returns aggregate outcomes plus a replay command; keep operationId after an unknown reply. Supervised finish stops at awaiting-review. Automatic sync/acceptance records undo instructions. abandon a Lane or Intent with a reason (saveFirst saves dirty edits; cascade closes open child Lanes); complete/reopen a Lane or Intent; complete-merged completes Lanes already in main. clean lists (default) or with apply:true deletes regenerable local disk: finished check workspaces, build dirs and fully captured directories of completed Lanes (reopen restores them). Work/Lane locks wait FIFO (default ten minutes; lockWaitMs or FORGE_WORK_LOCK_WAIT_MS), with periodic stderr phase/run/queue/holder progress; start/checkpoint/sync also accept waitMs. Omitted pins are filled and returned as resolved; retry an unknown outcome with them.',
     },
     {
       name: 'forge_check',
@@ -126,9 +127,19 @@ export function registerAgentWorkflow(server: McpServer, root: string) {
     },
     {
       name: 'forge_work_overview',
-      actions: ['pending-status', 'peers', 'status', 'records', 'policy', 'link', 'making-of', 'report'],
+      actions: [
+        'handoff-read',
+        'pending-status',
+        'peers',
+        'status',
+        'records',
+        'policy',
+        'link',
+        'making-of',
+        'report',
+      ],
       description:
-        'pending-status reads one pinned local pending-work/recovery summary without remote calls, process recovery or archive export. Read Forge URLs with link (laneId, viewId or save; optional path/line), policy, concise Work pins and counts, or page one retained collection directly with records without reconstructing all Work history. making-of reads one Intent’s derived record: Lanes, saves, check runs with queued/running time, landings, sessions, wall clock and active time. report records cumulative self-reported harness, model and token totals for a Lane session (advisory). All source and history remain retained.',
+        'handoff-read {laneId} reads the latest portable delivery note. pending-status reads one pinned local pending-work/recovery summary without remote calls, process recovery or archive export. Read Forge URLs with link (laneId, viewId or save; optional path/line), policy, concise Work pins and counts, or page one retained collection directly with records without reconstructing all Work history. making-of reads one Intent’s derived record: Lanes, saves, check runs with queued/running time, landings, sessions, wall clock and active time. report records cumulative self-reported harness, model and token totals for a Lane session (advisory). All source and history remain retained.',
     },
     {
       name: 'forge_review',

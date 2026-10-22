@@ -24,6 +24,8 @@ nforge agent OWNER start '{"outcome":"What you are changing"}'   # returns a Lan
 nforge agent OWNER finish '{"laneId":"…","message":"…","accept":true}'
 ```
 
+Record a handoff before stopping.
+
 `finish` checkpoints, merges the latest `main`, runs the `verify` check and accepts on pass. Details: [agent workflow](docs/agents/workflow.md). Lifecycle receipts include advisory local peers; incomplete coverage never establishes independence. `start.scope.paths` retains planned claims; other lifecycle scopes declare relevance for that call. Use `peers {"laneId":"…","detail":true}` or `forge_peers` for details. Clean checkpoints succeed with an unchanged head. When Forge gets in your way, add an entry to the friction log in the [roadmap](docs/roadmap.md) — that log decides what we fix next.
 
 ## Agent source commands

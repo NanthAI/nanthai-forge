@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { validate } from 'convex-helpers/validators';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -424,4 +425,46 @@ test('hosted add-lane and land-together briefings include indexed sibling tracks
     );
     s.caller('owner');
   }
+});
+
+test('portable delivery context uses current hosted authority on every read', async () => {
+  const s = await setup();
+  const handoff = {
+    schema: 1,
+    operationId: randomUUID(),
+    request: 'a'.repeat(64),
+    laneId: ids.lane,
+    intentId: ids.intent,
+    head,
+    at: new Date().toISOString(),
+    actor: 'synthetic-agent',
+    summary: 'Portable handoff',
+    tests: [{ source: 'self-reported', command: 'synthetic test', passed: 2, failed: 0, skipped: 0 }],
+    recordedChecks: [],
+    unrun: ['Full suite'],
+    next: ['Lead reviews'],
+  };
+  const row = { text: handoff.summary, kind: 'comment', at: handoff.at, handoff };
+  s.tables.projectWorkRecords.set('delivery-note', {
+    _id: 'delivery-note',
+    _creationTime: 1000,
+    projectId: s.projectId,
+    generationId: 'generation',
+    collection: 'notes',
+    key: 'delivery-note',
+    parent: ids.intent,
+    position: 1000,
+    value: JSON.stringify(row),
+  });
+  const input = { projectId: s.projectId, situation: 'continue-lane', laneId: ids.lane };
+  s.caller('reader');
+  await assert.rejects(briefs.brief._handler(s.ctx, input), code('PROJECT_UNAVAILABLE'));
+  s.tables.projectContributors.set('delivery-reader', { projectId: s.projectId, contributor: 'reader' });
+  const result = await briefs.brief._handler(s.ctx, input);
+  assert.deepEqual(result.context.handoff, handoff);
+  const { briefingResult } = await import(moduleUrl('../convex/agentBriefFields.ts'));
+  assert.equal(validate(briefingResult, result), true);
+  assert.match(result.full, /self-reported/);
+  s.tables.projectContributors.delete('delivery-reader');
+  await assert.rejects(briefs.brief._handler(s.ctx, input), code('PROJECT_UNAVAILABLE'));
 });

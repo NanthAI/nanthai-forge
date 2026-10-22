@@ -38,7 +38,7 @@ Once finish has checkpointed, resume its retained request with:
   nforge agent ROOT finish '{"operationId":"ORIGINAL_FINISH_UUID"}'
 Use the parent finish operationId, not an attempt's child operation ID.
 
-Actions: tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
+Actions: handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
          making-of, report.
 start intentId adds a sibling Lane; finish with:[laneId] lands siblings together.
@@ -56,6 +56,14 @@ Read the packaged agent skill: nforge docs agent.
 `;
 
 const examples: Record<string, unknown> = {
+  handoff: {
+    laneId: 'LANE_ID',
+    summary: 'What changed and why',
+    tests: [{ command: 'node --test tests/example.test.mjs', passed: 3, failed: 0, skipped: 0 }],
+    unrun: ['Full suite'],
+    next: ['Lead reviews and lands'],
+  },
+  'handoff-read': { laneId: 'LANE_ID' },
   tests: { laneId: 'LANE_ID' },
   peers: { laneId: 'LANE_ID', detail: true },
   'peer-ack': { laneId: 'LANE_ID', noticeId: 'NOTICE_ID', choice: 'accept-order' },
@@ -116,6 +124,9 @@ function actionHelp(action: string): string {
   invariant(action in examples, 'BAD_ARGUMENT', 'Unknown agent action. Use agent --help.');
   let result = `nforge agent ROOT ${action} '${JSON.stringify(examples[action])}'\n`;
   if (strict[action]) result += `Fully pinned: '${JSON.stringify(strict[action])}'\n`;
+  if (action === 'handoff' || action === 'handoff-read')
+    result +=
+      'Record or read the latest optional delivery handoff on a Lane. Tests are self-reported; matching saved-head check operation IDs are linked automatically as Forge-recorded evidence. Reuse operationId and original inputs after an unknown outcome. Private Intent notes preserve handoffs through portable Work export/import.\n';
   if (action === 'review')
     result += `Candidate: ${JSON.stringify({ kind: 'view', id: 'CANDIDATE_ID', expectedHead: 'HEAD', expectedBase: 'BASE', expectedStatus: 'clean', paths: ['src/file.ts'] })}\nUse full 40- or 64-character source digests; abbreviated heads are invalid. Omit paths for changed-path summaries. Body budget: maxBytes 1024..48000 (default 12000), context 0..10 (default 3), limit 1..100 (default 20), offset 0 or higher. Continue with nextOffset and expectedReviewTree:reviewTree; keep the same source pins.\n`;
   if (action === 'diff')
@@ -232,7 +243,7 @@ export async function agentCli(args: string[]): Promise<unknown> {
       ? retainedFinishCommand(agent.work.store, selected.operationId)
       : undefined;
   if (
-    ['checkpoint', 'sync', 'finish'].includes(action) &&
+    ['checkpoint', 'sync', 'finish', 'handoff', 'handoff-read'].includes(action) &&
     selected.laneId === undefined &&
     retained?.laneId === undefined
   ) {

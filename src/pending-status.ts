@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
 import type { WorkData } from './work-types.js';
 
 /** R1 integration contract: only successfully published captures belong here.
@@ -23,7 +24,8 @@ export type PendingData = Pick<
   | 'landingEntries'
   | 'githubSync'
   | 'githubAutoPush'
->;
+> &
+  Partial<Pick<WorkData, 'intents'>>;
 export type PendingObservations = {
   recovery?: RecoveryCaptureObservation | null;
   pendingPushes?: { operationId: string; revision: number }[];
@@ -113,6 +115,9 @@ export function pendingStatus(
         status,
         after: after ?? null,
         landingId: entry?.id ?? null,
+        handoff: handoffSummary(
+          latestHandoff(data.intents?.find(intent => intent.id === lane.intentId)?.notes ?? [], lane.id),
+        ),
       };
     });
   const recovery = observed.recovery ?? null;

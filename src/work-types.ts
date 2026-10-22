@@ -4,6 +4,7 @@ import { landingEntrySchema, landingBatchSchema } from './landing-batch-types.js
 import { checkBackendSchema } from './check-backend.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { deliveryHandoffSchema } from './agent-handoff-types.js';
 import { githubSyncSchema, githubSyncHistorySchema, githubAutoPushSchema } from './github-sync-types.js';
 import { workActorSchema } from './work-actor-types.js';
 import { autonomyPolicySchema, hostedAcceptanceCommandSchema } from './autonomy-policy.js';
@@ -64,6 +65,7 @@ export const dependencySchema = z.discriminatedUnion('kind', [
 ]);
 export type DependencyPin = z.infer<typeof dependencySchema>;
 export const noteSchema = z.object({
+  handoff: deliveryHandoffSchema.optional(),
   text: z.string().min(1).max(4000),
   at: z.string(),
   kind: z.enum(['comment', 'decision']),

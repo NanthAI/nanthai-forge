@@ -50,6 +50,7 @@ export function readPendingStatus(
         {
           ...data,
           lanes: records('lanes'),
+          intents: records('intents', false),
           views: records('views', false),
           runs,
           channelMoves: records('channelMoves'),

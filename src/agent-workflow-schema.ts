@@ -1,3 +1,4 @@
+import { handoffSchema, handoffReadSchema } from './agent-handoff-types.js';
 import { landSchema } from './land-schema.js';
 import { peerAckSchema } from './agent-coordination-journal.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -30,6 +31,8 @@ const acceptPin = z.object({
 export const agentActionSchema = z.discriminatedUnion('action', [
   ...viewReadSchemas,
   landSchema,
+  handoffSchema,
+  handoffReadSchema,
   peerAckSchema,
   peersInputSchema.extend({ action: z.literal('peers') }),
   z.object({

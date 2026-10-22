@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { deliveryHandoff } from './agentHandoffFields';
 import { autonomyPolicy } from './autonomyFields';
 import { v } from 'convex/values';
 import { defineTable } from 'convex/server';
@@ -44,6 +45,7 @@ export const briefingResult = v.object({
     setupLine: v.string(),
   }),
   context: v.object({
+    handoff: v.optional(v.union(deliveryHandoff, v.null())),
     autonomyPolicy: v.optional(autonomyPolicy),
     laneId: v.optional(v.string()),
     intentId: v.optional(v.string()),

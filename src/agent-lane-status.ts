@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { latestHandoff, handoffSummary } from './agent-handoff-types.js';
 import { ForgeError, invariant } from './errors.js';
 import { NativeSource } from './native-source.js';
 import { changedPaths } from './agent-sync.js';
@@ -70,6 +71,15 @@ export function agentLaneStatus(
   const end = command.offset + command.limit;
   return {
     ...laneReceipt(lane, store.path(lane.id)),
+    handoff: handoffSummary(
+      latestHandoff(
+        (
+          tx?.find('intents', lane.intentId)?.record ??
+          data?.intents.find(intent => intent.id === lane.intentId)
+        )?.notes ?? [],
+        lane.id,
+      ),
+    ),
     saves: lane.checkpoints.length,
     changedPathCount,
     changedPathsSource: 'saved-head' as const,

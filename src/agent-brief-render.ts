@@ -92,6 +92,11 @@ export function renderBriefing(
   const selectedMessage = context.messages.find(m => m.id === context.messageId);
   const factPaths = context.conflictPaths.length ? context.conflictPaths : context.paths;
   const facts = [
+    ...(context.handoff
+      ? [
+          `- Delivery handoff: ${plain(context.handoff.summary)}; ${context.handoff.tests.length} self-reported test commands; ${context.handoff.recordedChecks.length} Forge-recorded checks. Read handoff-read for unrun work and next steps.`,
+        ]
+      : []),
     ...(context.ownership
       ? [
           `- Lane owner: ${plain(context.ownership.actor)} (${context.ownership.state}); take with takeover:true to hand ownership to another actor.`,
@@ -169,9 +174,11 @@ export function renderBriefing(
     ? '\nSet ROOT to your connected local owner and DEPLOYMENT to the Forge deployment URL. Live hosted reads use your existing FORGE_AUTH_TOKEN environment; keep the token out of commands and source.'
     : '';
   const workflowStep =
-    input.situation === 'take-handoff' && context.handoverTaken
-      ? 'Read the handoff and linked Intent/Lane, then continue the agreed work in the Lane. Ownership transfer is already recorded.'
-      : steps[input.situation];
+    input.situation === 'take-handoff' && context.handoff?.operationId === context.messageId
+      ? 'Read the delivery handoff, including unrun work and next steps, then continue the agreed work in the Lane.'
+      : input.situation === 'take-handoff' && context.handoverTaken
+        ? 'Read the handoff and linked Intent/Lane, then continue the agreed work in the Lane. Ownership transfer is already recorded.'
+        : steps[input.situation];
   const workflow = `\n\n## Forge workflow\nAcceptance: ${policy.acceptance.mode}. Protected paths: ${JSON.stringify(policy.acceptance.protectedPaths)}. Lane updates: ${policy.laneUpdates}. Agents must stop at awaiting-review when review is required.\n${workflowStep}${startLine}${bindingNote}\nRun brief again when context changes. Finish ordinary Lane edits with \`nforge agent ${commandRoot} finish '{"laneId":"${context.laneId ?? 'LANE_ID'}","message":"Describe the change","accept":true}'\`. This checkpoints, updates from main when policy permits, checks and requests acceptance under project policy. Preserve operation IDs when retrying an unknown outcome.\n${linkRule}\n${optional}`;
   const forgeGuidance =
     '\n\n## Working on Forge, not GitHub\nRun only affected tests plus typecheck, lint and format checks on touched files. Never run the full suite locally: finish runs the project check on its runner for the combined work of concurrent Lanes.\nLet finish compose concurrent Lanes into one check; a failing Lane drops out and the others land after passing, so a failed candidate never turns main red. Do not rebase, babysit a merge queue or rerun CI per PR. Configured native runners batch code changes; other paths keep ordinary checks and acceptance policy.\nRead peers/presence to see who is working on which files. Announce paths, hand off related work and resolve overlap before conflict; missing observations do not prove independence.';

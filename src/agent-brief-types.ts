@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { DeliveryHandoff } from './agent-handoff-types.js';
 import type { AutonomyPolicy } from './autonomy-policy.js';
 import { z } from 'zod';
 import type { Lane, WorkData, WorkView, CheckRun } from './work-types.js';
@@ -53,6 +54,7 @@ export type BriefRecords = {
   claims: BriefClaim[];
 };
 export type BriefContext = {
+  handoff?: DeliveryHandoff | null;
   autonomyPolicy?: AutonomyPolicy | undefined;
   handoverTaken?: boolean;
   ownership?: { actor: string; state: string; quietMs?: number | undefined } | undefined;

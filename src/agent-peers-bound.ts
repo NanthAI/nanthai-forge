@@ -7,6 +7,7 @@ const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
   if (detail) return value;
   delete value.changes;
+  if (value.handoff) value.handoff.recordedChecks = value.handoff.recordedChecks.slice(-1);
   if (value.predictive) {
     value.predictive = value.predictive.filter(item => item.risk === 'high');
     if (!value.predictive.length) delete value.predictive;
@@ -112,6 +113,10 @@ export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
       if (value.notices?.length) {
         value.notices.pop();
         value.more = (value.more ?? 0) + 1;
+        continue;
+      }
+      if (value.handoff?.recordedChecks.length) {
+        value.handoff.recordedChecks = [];
         continue;
       }
       delete value.next;

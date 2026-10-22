@@ -501,3 +501,31 @@ Deployment pins, when recorded, are labelled as the last observation, not a live
 provider check. Capture age uses capture time rather than publication completion.
 This read model is intended to feed the hosted **Now** screen's pending work and
 recovery summary; this command does not add a hosted UI.
+
+## Handoffs
+
+Record an optional delivery handoff before stopping so the lead or next agent can
+read what changed, the verification performed, unrun work and next steps:
+
+```sh
+nforge agent OWNER handoff '{"laneId":"LANE_ID","summary":"What changed and why","changes":["src/example.ts"],"tests":[{"command":"node --test tests/example.test.mjs","passed":3,"failed":0,"skipped":0}],"unrun":["Full suite"],"next":["Lead reviews and lands"],"evidence":["operation UUID or log path"]}'
+nforge agent OWNER handoff-read '{"laneId":"LANE_ID"}'
+```
+
+Keep the returned operation ID and original inputs to reconcile an unknown reply.
+The versioned delivery payload lives on existing private Intent notes, linked to
+the Lane and its saved head, and survives portable Work export/import. Ownership
+takeover remains a separate operation. No file is ingested automatically.
+
+Test commands and counts are labelled **self-reported**. Forge automatically links
+**Forge-recorded** check operation IDs whose Candidates include the exact saved
+Lane head, retaining each Candidate head, check definition and observed outcome.
+A combined Candidate check is evidence for that Candidate; it does not prove a
+standalone Lane passed. Supplied evidence paths/IDs remain advisory references.
+Later checks or source edits do not rewrite an earlier handoff.
+
+`forge_task` exposes `handoff`; `forge_work_overview` exposes `handoff-read`. Lane
+status, peers, Lane diff and local pending status show the latest handoff summary
+and retrieval command. Briefs include the latest structured delivery context for
+the next agent, with self-reports separate from recorded checks. Handoffs do not
+gate checks or acceptance and add no acknowledgement step or external delivery.

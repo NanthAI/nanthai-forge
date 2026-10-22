@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { handoffSummary } from './agent-handoff-types.js';
+import { readHandoff } from './agent-handoff.js';
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -88,6 +90,7 @@ function readReview(
       ...(selection ? { kind: selection.kind, id: selection.id } : { kind: 'states' }),
       base,
       head,
+      ...(lane ? { handoff: handoffSummary(readHandoff(store, lane.id).result.handoff) } : {}),
       ...(view ? { status: view.status, inputs: view.inputs, dependencies: view.dependencies ?? [] } : {}),
     };
     if (view?.status === 'conflict')

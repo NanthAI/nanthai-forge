@@ -1,3 +1,4 @@
+import { recordHandoff, readHandoff } from './agent-handoff.js';
 import { land } from './land.js';
 import type { LandCommand } from './land-schema.js';
 import { agentLaneTests } from './agent-lane-tests.js';
@@ -56,7 +57,16 @@ import { readMakingOf, reportUsage } from './making-of-read.js';
 import type { CheckRun, WorkView, WorkData } from './work-types.js';
 export { agentActionSchema, type AgentAction } from './agent-workflow-schema.js';
 import type { AgentAction } from './agent-workflow-schema.js';
-const readOnlyActions = new Set(['status', 'tests', 'peers', 'review', 'diff', 'show', 'brief']);
+const readOnlyActions = new Set([
+  'status',
+  'tests',
+  'peers',
+  'review',
+  'diff',
+  'show',
+  'brief',
+  'handoff-read',
+]);
 export class AgentWorkflow {
   readonly work: WorkService;
   constructor(
@@ -145,7 +155,7 @@ export class AgentWorkflow {
     const ownershipStop =
       command.action === 'take' && (response.result as { status: string }).status === 'ownership';
     const hostedSync =
-      ownershipStop || readOnlyActions.has(command.action)
+      ownershipStop || command.action === 'handoff' || readOnlyActions.has(command.action)
         ? undefined
         : queueAgentSync(store, command, response.result, false, this.liveMcp ? 'MCP call' : undefined);
     let links: unknown;
@@ -235,6 +245,9 @@ export class AgentWorkflow {
   }
   private async action(command: AgentAction): Promise<{ revision: number; result: unknown }> {
     const store = this.work.store;
+    if (command.action === 'handoff')
+      return recordHandoff(store, { ...command, operationId: command.operationId! });
+    if (command.action === 'handoff-read') return readHandoff(store, command.laneId);
     if (command.action === 'land') return land(this.work, command as LandCommand);
     if (command.action === 'tests') return agentLaneTests(store, command.laneId);
     if (command.action === 'take') return agentTake(store, command);
