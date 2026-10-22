@@ -178,7 +178,20 @@ test('Intent-only creation and concurrent sibling starts preserve the Intent ver
   assert.equal(a.intentId, b.intentId);
   assert.notEqual(a.lane.laneId, b.lane.laneId);
   assert.equal(s.tables.projectHostedRecords.size, 3);
-  assert(s.counts.every(c => c.retries === 0));
+  // A cascade's complete child-set CAS requires an Intent-scoped revision.
+  // Concurrent siblings may retry that narrow guard while preserving both Lanes
+  // and leaving the canonical Intent record/version unchanged.
+  const guard = [...s.tables.projectHostedLifecycleGuards.values()].find(
+    g => g.intentId === planned.intentId,
+  );
+  assert.equal(guard.revision, 2);
+  assert.equal(guard.planId, null);
+  assert.equal(
+    [...s.tables.projectHostedRecordHeads.values()].find(
+      h => h.kind === 'intent' && h.key === planned.intentId,
+    ).version,
+    0,
+  );
   await assert.rejects(s.begin(input), code('WORK_OPERATION_CHANGED'));
 });
 

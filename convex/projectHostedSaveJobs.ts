@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import { wakeLifecycleSave } from './projectHostedLifecycleCascade';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, internalMutation, internalAction } from './cliServer';
 import { loadSave, saveObject, writeSaveState } from './projectHostedSaveStore';
@@ -142,6 +143,7 @@ export const resultDownload = internalMutation({
       });
       const loaded = await loadSave(ctx, row);
       await writeSaveState(ctx, row._id, { ...loaded.state, status: 'failed' });
+      await wakeLifecycleSave(ctx, row);
       return null;
     }
     invariant(

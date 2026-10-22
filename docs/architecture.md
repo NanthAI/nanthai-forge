@@ -768,8 +768,9 @@ bytes with a different receipt, return `CHANNEL_CHANGED` atomically. Project
 owner/contributor access is checked before retries. Starting siblings preserves
 the existing creator/assignee authority rule for contributors; the project owner
 can start any hosted Intent. Concurrent new or sibling starts write distinct
-resource and operation rows; they do not update the Intent or global Work
-revision merely to add a Lane.
+resource and operation rows and the Intent-scoped child revision used by
+lifecycle cascades; they do not update the Intent record or global Work revision
+merely to add a Lane.
 
 `projectHostedLanes:head` returns the current head and record/source/lifecycle
 versions. `detail` hydrates one current or exact historical canonical record.
@@ -814,6 +815,45 @@ hash-pinned raw/recipe objects into temporary disk storage and constructs States
 through NativeSource without materializing or executing repository code. Direct
 transfer grants and publication remain with the source-operation reducers; no
 public writer or deployment is enabled. See [trusted hosted source worker](operations/hosted-source-worker.md).
+
+### Hosted Lane and Intent lifecycle APIs
+
+`projectHostedLifecycle:transition` changes canonical server/shadow saved work
+through an original operation UUID and exact record/source/lifecycle pins.
+Abandon and reopen retain source, saves and acceptance history and never move
+main. Known dirty client abandonment uses an explicit save-first child; unknown
+disconnected drafts remain on that client and are never claimed saved. Reopen
+requires no reason and changes only its selected target. Intent reopen retains
+independent child lifecycle states. Native-owner menus keep their owner path.
+
+Intent abandonment can cascade over active children. Bounded parent-index pages
+stage private immutable Lane versions and events. Every canonical Lane writer
+increments a separate Intent-scoped revision; new siblings, saves, completion or
+reopen invalidate a staged selection. Final publication compares that revision,
+the original Intent version, current authority and preparation identity, then
+activates one marker with the Intent event and terminal receipt. It never reads
+all children. A stale selection leaves every staged child invisible. Authoritative
+current/version reads and sibling pages resolve the applied marker immediately;
+bounded scheduled projection promotes these same versions into canonical head
+indexes. A later writer promotes its selected visible version first, retaining
+save and landed-head lifecycle CAS behavior. No project-wide revision, source
+scan, cleanup, count ceiling or idle observer is introduced.
+
+The thin `transitionHostedLane` helper retains its command, child UUID and exact
+capture in its private client cache. H07 handles direct source transfers and
+save reconciliation. The lifecycle parent can wait durably for that exact save;
+terminal save publication and a parent wake commit together. Failed saves never
+apply abandonment. Pending work sleeps until its save callback or explicit resume.
+Working files and sparse scope stay intact, including newer local edits after
+capture and lost replies. Only a matching baseline's metadata advances on replay.
+Check cancellation remains a separate H10 request and provider acknowledgement;
+lifecycle receipts say `cancellation: not-requested`.
+
+Lifecycle plans, events and staged versions remain retained authoritative
+metadata. Portable source-return/export folding and authority-cutover recovery
+must include them with H14's acceptance ledger; they are not legacy owner Work
+journal events. CLI/MCP routing and UI controls use these APIs in their separate
+integration slices.
 
 ### Hosted Lane delta saves
 

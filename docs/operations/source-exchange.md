@@ -1221,3 +1221,59 @@ resumes its retained page/entry cursor after a lost reply or stopped task. A nam
 internal call can repair a failed task; there is no idle scan. Completion never
 closes a newer saved/reopened version or an entire Intent. Accepted-source receipt
 and completion-ledger visibility do not wait for these canonical status projections.
+
+
+## Hosted saved-work lifecycle API
+
+`projectHostedLifecycle:transition({projectId,request})` accepts JSON validated by
+`hostedLifecycleRequestSchema`: original `operationId`, `authorityEpoch`,
+`action: abandon | reopen`, and a target. Abandon requires a retained reason;
+reopen's reason is optional.
+
+- Lane: `{kind: lane, laneId, expected: {head,version,sourceVersion,lifecycleVersion},
+  dirty?, saveOperationId?}`. A known dirty client uses an explicit save-first
+  child. `saveOperationId` pins H07's original save on the same actor, project,
+  Lane, epoch and **original baseline**. The parent can return pending while that
+  save runs. Its terminal callback wakes the retained parent without a client;
+  successful publication compares the child's exact resulting pins before
+  abandonment. A failed child is retained as a failed parent with no lifecycle
+  write. A later save/reopen makes the original parent stale.
+- Intent: `{kind: intent, intentId, version, cascade?}`. Abandon with cascade stages
+  every active child in twenty-row/128-KiB transaction windows. Source saves,
+  starts, completion and lifecycle changes invalidate its Intent revision. One
+  final marker activates the complete staged selection, with no all-child final
+  read. Reopen changes only the Intent. Completed/abandoned siblings stay as they
+  were; no source or history is deleted.
+
+Results use `hostedLifecycleResultSchema`: original receipt/time, pending/applied/
+stale/failed status, selected target, child count, optional exact applied Lane
+pins, retained save child and `cancellation: not-requested`. Current write
+access is checked even on replay; successful replay returns its original receipt
+without rewinding newer source or reapplying lifecycle. Pending work also checks
+the current authority epoch at each step. Ordinary source saves remain available
+on retained work; no new lifecycle access policy is added.
+
+`progress({projectId,operationId})` is a finite status read with projection progress.
+`advance` explicitly resumes the same operation after a stopped scheduler. Normal
+cascade work runs in bounded internal ticks and stops at terminal/projection
+completion. `history({projectId,kind,key,cursor})` pages retained applied events
+under current reader access. Staged/stale events are not exposed as applied;
+continue opaque cursors even for an empty filtered page. Canonical Lane reads and
+parent pages resolve all applied children before background head-index promotion
+finishes. Status-filtered internal Lane pages evaluate effective state over
+bounded indexed pages; an empty page is not end of history.
+
+`transitionHostedLane(root,{operationId,action,reason?,saveFirst?},exchange)` is an
+API helper for an ordinary H04 checkout, with no native owner/listener. It refuses
+known dirty abandonment with `LANE_DIRTY` unless `saveFirst:true`, retains the
+original command and child capture/UUID, drives H07 once, then submits the
+compound parent. Pending returns preserve both identities. Lost uploads/replies,
+failed saves, stale pins and disconnects retain local files and captured bytes.
+Reconciliation advances only matching checkout metadata, never working bytes;
+reopen retains newer drafts. Intent cascade closes saved server work and cannot
+claim to save a disconnected client's unknown edits.
+
+Cancellation uses the separate `projectHostedChecks:cancel` API. An abandon
+receipt never means a running check or arbitrary process stopped. Main,
+acceptance receipts, source objects and saves are untouched by lifecycle changes.
+These are API-only primitives; hosted CLI/MCP and site controls are separate work.

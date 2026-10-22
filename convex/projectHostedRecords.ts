@@ -12,6 +12,13 @@ import {
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { digest } from '../src/portable-hash';
+import {
+  effectiveLifecycleRecord,
+  visibleLifecycleRecord,
+  materializeLifecycleLane,
+  touchLifecycleIntent,
+  lifecycleGuard,
+} from './projectHostedLifecycleOverlay';
 
 export async function hostedWriteProject(
   ctx: MutationCtx | QueryCtx,
@@ -40,19 +47,28 @@ export const recordHead = (
       q.eq('projectId', projectId).eq('kind', kind).eq('key', key),
     )
     .unique();
-export const recordVersion = (
+export async function recordVersion(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
   kind: HostedRecordKind,
   key: string,
   version: number,
-) =>
-  ctx.db
+) {
+  const row = await ctx.db
     .query('projectHostedRecords')
-    .withIndex('by_project_and_kind_and_key_and_version', q =>
-      q.eq('projectId', projectId).eq('kind', kind).eq('key', key).eq('version', version),
+    .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
+      q
+        .eq('projectId', projectId)
+        .eq('kind', kind)
+        .eq('key', key)
+        .eq('version', version)
+        .eq('lifecyclePlanId', undefined),
     )
     .unique();
+  if (row || kind !== 'lane') return row;
+  const overlay = await visibleLifecycleRecord(ctx, projectId, key);
+  return overlay?.row.version === version ? overlay.row : null;
+}
 
 /** Immutable header/body integrity, shared by authoritative reads and rebuilds. */
 export async function hostedRecordBody(ctx: QueryCtx | MutationCtx, row: Doc<'projectHostedRecords'>) {
@@ -84,6 +100,7 @@ export async function writeHostedRecord(
   const record = hostedRecordSchema.parse(input.record),
     ref = hostedRecordRef(record),
     value = canonicalPayload(record);
+  if (record.kind === 'lane') await materializeLifecycleLane(ctx, input.projectId, record.id);
   const old = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
   if (old) {
     invariant(
@@ -120,6 +137,7 @@ export async function writeHostedRecord(
   const pointer = { ...identity, ...indexed, recordId: id };
   if (head) await ctx.db.replace(head._id, pointer);
   else await ctx.db.insert('projectHostedRecordHeads', pointer);
+  if (record.kind === 'lane') await touchLifecycleIntent(ctx, input.projectId, record.intentId);
   return { ...(await ctx.db.get(id))!, value };
 }
 
@@ -136,13 +154,14 @@ export async function readHostedRecord(
   await accessibleProject(ctx, input.projectId, input.actor);
   const head =
     input.version === undefined ? await recordHead(ctx, input.projectId, input.kind, input.key) : null;
-  const row =
+  let row =
     input.version === undefined
       ? head
         ? await ctx.db.get(head.recordId)
         : null
       : await recordVersion(ctx, input.projectId, input.kind, input.key, input.version);
   if (!row) return null;
+  if (input.version === undefined) row = await effectiveLifecycleRecord(ctx, row);
   return { ...row, value: await hostedRecordBody(ctx, row) };
 }
 
@@ -165,7 +184,7 @@ export async function hostedRecordPage(
     'Select a parent or status index.',
   );
   const query =
-    input.status === undefined
+    input.status === undefined || input.kind === 'lane'
       ? ctx.db.query('projectHostedRecordHeads').withIndex('by_project_and_kind_and_parent', q => {
           const prefix = q.eq('projectId', input.projectId).eq('kind', input.kind);
           return input.parent === undefined ? prefix : prefix.eq('parent', input.parent);
@@ -175,10 +194,26 @@ export async function hostedRecordPage(
           .withIndex('by_project_and_kind_and_status', q =>
             q.eq('projectId', input.projectId).eq('kind', input.kind).eq('status', input.status!),
           );
-  return query.paginate({
+  const result = await query.paginate({
     cursor: input.cursor,
     numItems: 100,
     maximumRowsRead: 100,
     maximumBytesRead: 128 * 1024,
   });
+  if (input.kind === 'lane') {
+    const cascades = new Map<string, boolean>();
+    for (const head of result.page) {
+      if (!cascades.has(head.parent))
+        cascades.set(head.parent, Boolean((await lifecycleGuard(ctx, input.projectId, head.parent))?.planId));
+      if (!cascades.get(head.parent)) continue;
+      const overlay = await visibleLifecycleRecord(ctx, input.projectId, head.key);
+      if (overlay?.pointer.baseRecordId === head.recordId) {
+        head.version = overlay.row.version;
+        head.status = overlay.row.status;
+        head.recordId = overlay.row._id;
+      }
+    }
+    if (input.status !== undefined) result.page = result.page.filter(row => row.status === input.status);
+  }
+  return result;
 }

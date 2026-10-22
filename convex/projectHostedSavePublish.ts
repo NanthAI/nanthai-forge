@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { wakeLifecycleSave } from './projectHostedLifecycleCascade';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import {
@@ -83,6 +84,7 @@ export async function publishHostedSave(ctx: MutationCtx, input: SaveIdentity & 
     };
     await finishHostedOperation(ctx, { ...input, receipt: terminal });
     await writeSaveState(ctx, row._id, { ...state, status: 'stale' });
+    await wakeLifecycleSave(ctx, input);
     return terminal;
   }
   const unchanged = head === lane.head,
@@ -145,6 +147,7 @@ export async function publishHostedSave(ctx: MutationCtx, input: SaveIdentity & 
   const terminal = { attemptId: first.id, at: first.at, outcome: { status: 'completed' as const, result } };
   await finishHostedOperation(ctx, { ...input, receipt: terminal });
   await writeSaveState(ctx, row._id, { ...state, status: 'completed' });
+  await wakeLifecycleSave(ctx, input);
   return terminal;
 }
 export async function saveForJob(ctx: MutationCtx, projectId: Id<'hostedProjects'>, jobId: string) {
