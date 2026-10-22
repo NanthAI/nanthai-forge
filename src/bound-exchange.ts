@@ -1,4 +1,5 @@
 import { acknowledgePendingExchange } from './pending-exchange.js';
+import { currentExchangeObservation, withExchangeObservation } from './exchange-observation.js';
 import { supersedeRetainedPush } from './bound-exchange-supersede.js';
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -23,6 +24,25 @@ import { reconcileExchange } from './exchange-reconcile.js';
 import { ForgeError, invariant } from './errors.js';
 type PendingPush = NonNullable<HostState['push']>;
 const REBASE_ATTEMPTS = 3;
+export type BoundExchangeOptions = {
+  beforePush?: () => Promise<void>;
+  expectedBinding?: { projectId: string; deployment: string };
+  exchange?: (
+    deployment: string,
+    projectId: string,
+    operationId: string,
+    previous: string | null,
+  ) => ConvexExchange;
+};
+const exchangeClient = (
+  options: BoundExchangeOptions,
+  deployment: string,
+  projectId: string,
+  operationId: string,
+  previous: string | null,
+) =>
+  options.exchange?.(deployment, projectId, operationId, previous) ??
+  new ConvexExchange(deployment, process.env.FORGE_AUTH_TOKEN, projectId, operationId, previous);
 import { pushAttemptId } from './bound-push-id.js';
 export { pushAttemptId } from './bound-push-id.js';
 const hostedState = async (client: ConvexExchange, projectId: string) =>
@@ -34,6 +54,19 @@ export async function boundExchange(
   action: 'push' | 'pull',
   target?: string,
   supersedeRetained = false,
+  options: BoundExchangeOptions = {},
+) {
+  const { value, observation } = await withExchangeObservation(() =>
+    runBoundExchange(root, action, target, supersedeRetained, options),
+  );
+  return { ...value, observation };
+}
+async function runBoundExchange(
+  root: string,
+  action: 'push' | 'pull',
+  target: string | undefined,
+  supersedeRetained: boolean,
+  options: BoundExchangeOptions,
 ) {
   return withWorkLockOptions({ operation: `exchange ${action}` }, () =>
     withWorkProgress({ phase: `exchange ${action}` }, async () => {
@@ -52,15 +85,16 @@ export async function boundExchange(
       const heartbeat = setInterval(() => workProgress(phase, detail), 5000);
       heartbeat.unref();
       try {
-        if (action === 'pull') return await boundExchangeAction(root, action, target, report);
+        if (action === 'pull') return await boundExchangeAction(root, action, target, report, options);
         const store = new WorkStore(root);
         // Serialize the complete transport operation, not local Work writers. A
         // second process must not rebase/remove the request another is using.
         const queued = await withQueueSlot(
           join(store.directory, 'bound-push-queue'),
           async () => {
+            await options.beforePush?.();
             await supersedeRetainedPush(store, supersedeRetained, report);
-            return boundExchangeAction(root, action, target, report);
+            return boundExchangeAction(root, action, target, report, options);
           },
           { anchor: store.directory, phase: 'exchange push' },
         );
@@ -79,16 +113,18 @@ async function boundExchangeAction(
   action: 'push' | 'pull',
   target: string | undefined,
   report: (phase: string, announce?: boolean) => void,
+  options: BoundExchangeOptions,
 ) {
   const store = new WorkStore(root),
     binding = requireHostedBinding(store);
-  const client = new ConvexExchange(
-    binding.deployment,
-    process.env.FORGE_AUTH_TOKEN,
-    binding.projectId,
-    '',
-    null,
+  invariant(
+    !options.expectedBinding ||
+      (binding.projectId === options.expectedBinding.projectId &&
+        binding.deployment === options.expectedBinding.deployment),
+    'AUTO_EXCHANGE_CHANGED',
+    'Automatic exchange binding changed.',
   );
+  const client = exchangeClient(options, binding.deployment, binding.projectId, '', null);
   if (action === 'pull') {
     report('checking out hosted main');
     const destination = resolve(target ?? join(dirname(store.root), `${basename(store.root)}-hosted-main`));
@@ -134,7 +170,7 @@ async function boundExchangeAction(
   for (;;) {
     let result;
     try {
-      result = await pushAttempt(root, store, request, report);
+      result = await pushAttempt(root, store, request, report, options);
     } catch (error) {
       // Known stale/conflicting phases can use fresh pins next time. A checkpoint
       // may already be published if source return was stale; it remains retained.
@@ -218,6 +254,10 @@ async function boundExchangeAction(
         push => push.operationId === request.operationId,
       );
       invariant(original, 'WORK_OPERATION_CHANGED', 'Bound push changed.');
+      // Reuse the existing completion commit; diagnostic observations must not
+      // acquire another owner lock after the successful operation is cleared.
+      const observation = currentExchangeObservation();
+      if (observation) state.exchangeObservation = observation;
       // A push started on the previous binding must not rebind the owner if --new
       // completed while its upload was in flight.
       if (state.binding?.projectId === binding.projectId && state.binding.deployment === binding.deployment)
@@ -241,6 +281,7 @@ async function pushAttempt(
   store: WorkStore,
   request: PendingPush,
   report: (phase: string, announce?: boolean) => void,
+  options: BoundExchangeOptions,
 ) {
   const persist = (update: (pending: PendingPush) => void) =>
     updateHostState(store, state => {
@@ -250,9 +291,9 @@ async function pushAttempt(
       invariant(pending, 'WORK_OPERATION_CHANGED', 'Bound push changed.');
       update(pending);
     });
-  const transport = new ConvexExchange(
+  const transport = exchangeClient(
+    options,
     request.deployment,
-    process.env.FORGE_AUTH_TOKEN,
     request.projectId,
     request.operationId,
     request.previous,
@@ -298,7 +339,7 @@ async function pushAttempt(
       delete pending.needsBaseline;
     });
     // The transport was constructed before observing the hosted baseline.
-    return pushAttempt(root, store, request, report);
+    return pushAttempt(root, store, request, report, options);
   }
   const captureBytes = captured ? readFileSync(join(captured.directory, 'work.json')) : undefined;
   if (captured && captureBytes) {

@@ -35,7 +35,7 @@ export function indexPeerRecords(root: string, tx: WorkRecordTransaction, change
 export function indexPeerSource(store: WorkStore, laneId: string) {
   const lane = store.select('lanes', laneId, 'id', true);
   if (!lane || !['active', 'paused', 'ready'].includes(lane.state)) return;
-  const source = new PeersSource(store, () => {}, lane.base);
+  const source = new PeersSource(store, lane.base);
   source.state(lane.base);
   source.state(lane.head);
   regionSummary(source, new PeersCache(store.root), lane.base, lane.head, () => [

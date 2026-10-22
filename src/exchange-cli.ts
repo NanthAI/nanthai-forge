@@ -1,4 +1,5 @@
 import { acknowledgePendingExchange } from './pending-exchange.js';
+import { withExchangeObservation } from './exchange-observation.js';
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 import { mainExpectationSchema } from './hosted-main.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -134,6 +135,12 @@ export async function exchangeCli(args: string[]) {
 }
 export async function exchangeCommand(root: string, action: string, input: unknown) {
   try {
+    if (action === 'push') {
+      const { value, observation } = await withExchangeObservation(() =>
+        executeExchangeCommand(root, action, input),
+      );
+      return { ...value, observation };
+    }
     return await executeExchangeCommand(root, action, input);
   } catch (error) {
     throw hostedActionError(error, `exchange ${action}`);

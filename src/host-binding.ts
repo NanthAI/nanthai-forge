@@ -12,6 +12,9 @@ import {
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { autoExchangeStateSchema } from './auto-exchange-state.js';
+import { exchangeObservationSchema } from './exchange-observation.js';
+import { wakeAutoExchange } from './auto-exchange-wake.js';
 import { WorkStore } from './work-store.js';
 import { invariant } from './errors.js';
 import { reportedTokensSchema } from './making-of.js';
@@ -79,6 +82,8 @@ const push = z.object({
 });
 const schema = z.object({
   schema: z.literal(1),
+  autoExchange: autoExchangeStateSchema.optional(),
+  exchangeObservation: exchangeObservationSchema.optional(),
   acceptancePublications: z.record(z.string(), z.string()).optional(),
   acceptanceReceipts: z.record(z.string(), z.string()).optional(),
   binding: binding.optional(),
@@ -146,7 +151,7 @@ export function readHostState(store: WorkStore): HostState {
 }
 /** Transport metadata lives alongside Work, serialized by its owner lock without changing Work revision. */
 export function updateHostState<T>(store: WorkStore, update: (state: HostState) => T): T {
-  return store.locked(() => {
+  const result = store.locked(() => {
     const state = readHostState(store),
       result = update(state);
     const path = join(store.directory, 'hosted-binding.json'),
@@ -167,6 +172,8 @@ export function updateHostState<T>(store: WorkStore, update: (state: HostState) 
     }
     return result;
   });
+  wakeAutoExchange(store);
+  return result;
 }
 export function requireHostedBinding(store: WorkStore): HostedBinding {
   const state = readHostState(store);

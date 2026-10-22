@@ -476,9 +476,72 @@ metadata do not enqueue new work themselves.
 The project policy has a separate `autoExchange` preference: `enabled:false`,
 `debounceMs:30000`, `maxPendingAgeMs:300000` by default. Partial `set-policy` edits
 preserve unspecified fields; changing an acceptance preset preserves this project
-preference. This persistence layer starts no driver, timers or background pushes,
-even when the preference is enabled. Binding `autoSync` and GitHub mirror
-`autoPush` retain their existing meanings. Manual exchange remains available.
+preference. Enabling it wakes a detached per-owner driver on startup and saved
+Work publications. It uses a trailing quiet debounce and the oldest pending save's
+maximum age, with no check-green gate. Startup recovers a dead worker using kernel
+process identity; the existing bound-push queue serializes automatic and manual
+pushes. Unknown replies reconcile the retained original operation before another
+snapshot. Saves during transfer get a follow-up capture. Bookkeeping does not
+publish Work. Binding `autoSync` and GitHub `autoPush` remain separate.
+
+The worker listens on a private local wake socket and watches publication events only while pending. Lifecycle clients notify the retained live worker directly, including after disable/rebind; filesystem events are advisory. When idle it
+exits: no polling, usage read or network request. Pending retries use backoff;
+pauses use one expiry timer that local changes can wake. Authentication failures
+and journal conflicts retain pending work and a safe error code; owner activity
+retries after the operator fixes the cause. An incomplete capture remains visible
+and does not upload identical saves repeatedly; new saves or a manual push retry
+it. No first-host history backfill is started by this worker.
+
+`nforge host ROOT --status` and `nforge pending ROOT` include `autoExchange` with
+pending age, status, retained operation, next attempt, spend observation, transport
+observation, resume guidance and Undo. Disable future automatic pushes with
+`set-policy {"autoExchange":{"enabled":false}}`; published history is retained.
+Manual pushes remain available, including during a spend pause.
+
+### Optional daily spend observation
+
+For the dogfood project, enable `autoExchange.pauseOnDailySpend:true` alongside
+`enabled:true`, `debounceMs:30000` and `maxPendingAgeMs:300000`. It is absent/off for
+other projects. This defers new automatic attempts when measured team spend rises
+**strictly more than USD 1** against the earliest retained observation within the
+rolling 24-hour window. It never kills an in-flight push or blocks a manual one.
+A pause resumes automatically when that baseline leaves the window, with a fresh
+observation before admission. Until a full day has been observed, the baseline is
+the first available sample. Team totals include unrelated usage and billing can
+lag: this is an observed-delta pause, not an exact per-push cost ceiling.
+
+There is no reusable billing reader/credential in this repository. The explicit
+operator hook `FORGE_CONVEX_USAGE_ADAPTER=/absolute/operator-owned/usage.mjs` exports
+`async readUsage({projectId,deployment})`, returning:
+
+```js
+return {
+  kind: 'measured', // or 'estimated'; estimates never pause
+  scope: 'team',
+  subject: 'stable-team-and-billing-counter-identity',
+  projectId,
+  deployment,
+  observedAt: Date.now(), // provider observation time, not stale-cache read time
+  totalUsd: cumulativeTeamSpendUsd,
+};
+```
+
+The adapter alone reads its provider token from private operator configuration;
+it must never log it. No token enters the returned object, policy, CLI arguments
+or status. The adapter runs only before a pending automatic attempt. Missing,
+invalid, cross-project, future, out-of-order or at-least-24-hour-old observations
+are unknown and do not pause. Counter resets or team changes start a new baseline.
+Provider errors retain no provider text. `estimated` and `unknown` are distinct
+from `measured`, and unavailable dollars stay null. The hook must be configured in
+the environment of the installed owner process so detached workers inherit it.
+
+Successful bound and explicit push receipts include `observation`: measured HTTP
+attempts/RPC requests, request/response body bytes and process elapsed milliseconds.
+Retries count as requests. Counts exclude headers/TLS and server-internal work;
+source-return accounting remains separately available. Scope is the current local
+attempt (including receipt replay), not cumulative billing for the original
+operation. `estimatedUsd` and `billedUsd` are null: bytes and RPCs are not prices.
+The latest successful bound observation is retained for local status.
 
 ## Recovery inventory
 
@@ -515,3 +578,19 @@ archive when recording its identity. Receipts describe observed successful captu
 not current remote storage health or a promised backup cadence. A reporting write
 failure returns `RECOVERY_INVENTORY_UNAVAILABLE` without changing publication
 success; missing/corrupt inventory never establishes coverage.
+## Guided existing-project recovery
+
+`nforge recover NEW_OWNER --command-file REQUEST.json` obtains a matching full
+checkpoint and hosted journal with current owner authority, reports restored
+main/Lane/evidence coverage, and explicitly reconnects the existing project.
+Requests carry `{operationId,url,projectId,archivePath?,cacheRoot?}` and no token.
+Native archives and hosted object checkpoints retain their original hashes;
+whole-deployment weekly ZIP recovery first restores its application/backend.
+See [the recovery drill](recovery-drill.md) for commands and qualification.
+
+An explicit `recover OWNER reconnect` binds an independent restore as owner;
+`recover OLD_OWNER client` returns the original Mac to an independent-copy role
+while preserving its work. Neither changes hosted identity/authority or introduces
+a lease. Existing source/Work/Channel CAS and reconciliation govern concurrent
+owners. `exchange pull` keeps its selected-main source-client semantics.
+

@@ -2,6 +2,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { posix, join } from 'node:path';
 import ts from 'typescript';
+import { coverageShadow } from './test-coverage.mjs';
 import { classifyCheckPath, webTest } from './check-path-scopes.mjs';
 import { builtinModules } from 'node:module';
 import {
@@ -336,6 +337,7 @@ export function standardSelection({
   interaction,
   optimistic,
   recovery,
+  coverage,
   env = process.env,
 }) {
   if (optimistic && !mainCheck) env = { ...env, FORGE_CHECK_SCOPED: '1', FORGE_CHECK_FULL: '0' };
@@ -366,6 +368,7 @@ export function standardSelection({
     selection.tests = [...new Set([...selection.tests, ...recovery.tests])].sort();
     selection.reason += '; failed audit shards plus newly affected tests';
   }
+  selection.coverage = coverageShadow({ selection, paths, files, coverage });
   return selection;
 }
 

@@ -373,6 +373,17 @@ export const checkRunSchema = z.object({
       scope: z.enum(['docs', 'interaction', 'scoped', 'full']),
       reason: z.string(),
       tests: z.array(z.string()),
+      coverage: z
+        .object({
+          mode: z.literal('shadow'),
+          head: oid.optional(),
+          age: z.number().int().nonnegative().optional(),
+          currentCount: z.number().int().nonnegative(),
+          coverageCount: z.number().int().nonnegative(),
+          tests: z.array(z.string()),
+          fallback: z.string().nullable(),
+        })
+        .optional(),
     })
     .optional(),
   status: z.enum([

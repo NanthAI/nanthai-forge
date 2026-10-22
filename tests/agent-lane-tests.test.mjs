@@ -97,13 +97,15 @@ for (const native of [true, false])
       throw new Error('read must not lock');
     };
     const reply = await agent.dispatch({ action: 'tests', laneId: lane.laneId });
-    const { scope, reason, tests, command, ...pins } = reply.result;
+    const { scope, reason, tests, command, coverage, ...pins } = reply.result;
     assert.deepEqual(
       { scope, reason, tests },
       { scope: expected.scope, reason: expected.reason, tests: expected.tests },
     );
     assert.ok(tests.includes('tests/leaf.test.mjs'));
     assert.ok(!tests.includes('tests/unrelated.test.mjs'));
+    assert.equal(coverage.mode, 'shadow');
+    assert.equal(coverage.currentCount, tests.length);
     assert.deepEqual(pins, { laneId: lane.laneId, head, main });
     assert.equal(typeof reply.revision, 'number');
     assert.match(command, /^node --import \.\/tests\/check-runtime\.mjs --test /);

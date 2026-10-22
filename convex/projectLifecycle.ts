@@ -349,6 +349,7 @@ export const purge = internalMutation({
       'projectContributors',
       'projectWorkHeads',
       'projectWorkEvents',
+      'projectRecoveryConnections',
     ] as const) {
       const rows =
         table === 'projectReaders'
@@ -366,15 +367,20 @@ export const purge = internalMutation({
                   .query('projectContributors')
                   .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId))
                   .take(50)
-              : table === 'projectWorkHeads'
+              : table === 'projectRecoveryConnections'
                 ? await ctx.db
-                    .query('projectWorkHeads')
-                    .withIndex('by_project', q => q.eq('projectId', projectId))
+                    .query('projectRecoveryConnections')
+                    .withIndex('by_project_and_operation', q => q.eq('projectId', projectId))
                     .take(50)
-                : await ctx.db
-                    .query('projectWorkEvents')
-                    .withIndex('by_project_and_revision', q => q.eq('projectId', projectId))
-                    .take(50);
+                : table === 'projectWorkHeads'
+                  ? await ctx.db
+                      .query('projectWorkHeads')
+                      .withIndex('by_project', q => q.eq('projectId', projectId))
+                      .take(50)
+                  : await ctx.db
+                      .query('projectWorkEvents')
+                      .withIndex('by_project_and_revision', q => q.eq('projectId', projectId))
+                      .take(50);
       for (const row of rows) await ctx.db.delete(row._id);
       if (rows.length === 50) {
         await ctx.db.patch(projectId, { task: undefined });

@@ -24,7 +24,7 @@ Tests use synthetic repositories and real Git, Node and MCP subprocesses. Pass-o
 
 The compact Work/detail and native companion fixtures close their MCP clients and HTTP servers before removing owner directories. CLI presence workers are detached; directory removal retries transient `ENOTEMPTY` errors while those workers release their queue files.
 
-Interaction finish fixtures isolate the outer `FORGE_CHECK_FULL` override so their nested checks exercise the explicitly selected docs, scoped and interaction scenarios. The enclosing verification run keeps its full selection. Interaction and landing fixtures drain post-accept work and join spawned helpers before deleting their owners. Finish replay assertions compare recorded receipt fields separately from live peer observations, which may exhaust their read budget under load. The running-output exchange fixture holds its writer at an explicit barrier during preparation, then verifies that later appended bytes do not change the pinned retry.
+Interaction finish fixtures isolate the outer `FORGE_CHECK_FULL` override so their nested checks exercise the explicitly selected docs, scoped and interaction scenarios. The enclosing verification run keeps its full selection. Interaction and landing fixtures drain post-accept work and join spawned helpers before deleting their owners. Finish replay assertions compare recorded receipt fields separately from live peer observations, whose coverage can change when source becomes unavailable. Peer coverage is independent of machine speed; load regressions require complete reads without retries, while unavailable source remains incomplete. The running-output exchange fixture holds its writer at an explicit barrier during preparation, then verifies that later appended bytes do not change the pinned retry.
 
 `npm run check` fails if `docs/dependency-licenses.md` is out of date. After changing dependencies, run `node scripts/render-dependency-licenses.mjs`.
 
@@ -167,6 +167,32 @@ not proof of every possible runtime dependency. File fixtures, generated modules
 child processes and source loaded by path require conservative treatment; helper,
 fixture and configuration paths without explicit ownership still take the full path. The full post-main
 check remains the safety net for runtime relationships static imports cannot express.
+
+Full standard runs record V8 coverage in a private temporary directory for each
+supervised test file, including inherited worker/child-process coverage. The
+supervisor emits compact `__FORGE_COVERAGE__` records into the retained check logs;
+native local, Modal and Actions runners reconstruct `coverage/test-impact.json` as a
+check artifact only when every selected file has a successful complete report.
+The artifact pins the checked head, source SHA-256 digests and the test-to-source
+execution map. Built core JavaScript maps to its TypeScript source by path.
+Files loaded by custom loaders or children that replace their environment may be
+absent; this evidence does not prove that unexecuted branches are irrelevant.
+
+The selector and `agent tests` expose an additive `coverage` shadow comparison
+with current/coverage counts, the recommendation, source head/age when usable,
+and an explicit fallback reason. The actual test list and all static checks stay
+unchanged; no coverage-enforcement switch is enabled by this implementation.
+Only retained coverage from a passed full run on an accepted native main head is read.
+Git-backed owners retain graph selection.
+After more than ten accepted main moves it is stale. Source drift outside the
+current changed paths, new/deleted files, missing test reports, malformed or
+modified artifacts and files with no recorded execution use the existing graph
+selection. Shadow narrowing applies only to ordinary `src/*.ts` implementations;
+configuration, schema, fixtures, generated code, web/backend domains, scripts and
+test changes retain graph coverage. Fixed smoke tests and full/docs/interaction
+overrides remain intact. A lead must separately decide any future activation
+using production shadow evidence; historical logs without traces cannot establish
+a smaller sound test set or recording overhead.
 
 For recorded historical replays, `scripts/measure-test-impact.mjs` accepts explicit retained base/head/path pins, runs the same static/build/test pipeline, and reports command wall time and selected files. It also honors `FORGE_CHECK_FULL=1` for a matched full baseline. This measurement harness does not relax the standard wrapper's full fallback for legacy Candidates without a composed-main pin.
 

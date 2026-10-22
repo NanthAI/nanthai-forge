@@ -476,6 +476,12 @@ export default defineSchema({
   projectWorkEvents: defineTable(hostedWorkEventFields)
     .index('by_project_and_revision', ['projectId', 'revision'])
     .index('by_project_and_operation', ['projectId', 'operationId']),
+  projectRecoveryConnections: defineTable({
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    request: v.string(),
+    receipt: v.string(),
+  }).index('by_project_and_operation', ['projectId', 'operationId']),
   hostedProjects: defineTable(projectFields)
     .index('by_owner', ['owner'])
     .index('by_owner_and_key', ['owner', 'key'])

@@ -151,6 +151,8 @@ def main():
                                "import {execFileSync as x} from 'node:child_process';import {runDocumentationChecks as d} from './scripts/check-documentation.mjs';d({npm:(...a)=>x('npm',a,{stdio:'inherit'}),node:s=>x('node',[s],{stdio:'inherit'}),interaction:" + ('true' if plan['interaction'] else 'false') + "})"]
             else:
                 command = ['node', 'scripts/test-files.mjs', *files]
+            if plan['standard'] and files is not None and plan['selection']['scope'] == 'full':
+                env['FORGE_TEST_COVERAGE_HEAD'] = plan['head']
             env['FORGE_MODAL_COMMAND'] = json.dumps({'command': command, 'artifacts': plan.get('artifacts', []) if files is None else []})
             command = ['node', '/tmp/forge-worker.mjs']
             journal['creating'] = True

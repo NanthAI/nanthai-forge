@@ -31,6 +31,7 @@ export function runActionsCheck(execute = execFileSync, { install = true } = {})
     if (!Number.isInteger(index) || !plan.groups[index]) throw new Error('Unselected Actions shard.');
     npm('run', 'build:core');
     npm('run', 'build:web');
+    if (plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;
     run('node', ['scripts/test-files.mjs', ...plan.groups[index]]);
   }
 }

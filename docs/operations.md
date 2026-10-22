@@ -21,6 +21,15 @@ An older CLI refuses an owner it cannot preserve. Upgrade by installing the new 
 
 ### Hosted backups and return
 
+`nforge recover NEW_OWNER --command-file recovery.json` guides full native-owner
+recovery and reconnects an existing project using current owner authority. The
+request contains `{operationId,url,projectId,archivePath?,cacheRoot?}` without
+credentials. Keep the operation ID and destination for retry. Saved main/Lanes,
+journal revision, exact evidence hashes and unavailable evidence are reported.
+See the [recovery drill](operations/recovery-drill.md) for both the weekly
+deployment ZIP and surviving-hosted routes, independent native archives, runner
+configuration, and returning the old machine as a source client.
+
 For whole-deployment Convex snapshots, fresh-target restore and offline/live
 comparison tooling, see [hosted deployment durability](operations/hosted-durability.md).
 This complements project archives; the live restore drill remains unverified.

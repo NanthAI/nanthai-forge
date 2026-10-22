@@ -643,7 +643,12 @@ export async function pullNativeExchange(
   backupId: string,
   target: string,
   transport: ExchangeTransport,
-  options: { cacheRoot?: string | undefined; journalPath?: string | undefined; exportOnly?: boolean } = {},
+  options: {
+    cacheRoot?: string | undefined;
+    journalPath?: string | undefined;
+    exportOnly?: boolean;
+    beforePublish?: (root: string) => void;
+  } = {},
 ) {
   invariant(
     !existsSync(resolve(target)),
@@ -800,7 +805,7 @@ export async function pullNativeExchange(
     }
     const result =
       manifest.kind === 'forge-native-work-backup'
-        ? await restoreNativeExchangeStage(directory, target)
+        ? await restoreNativeExchangeStage(directory, target, options.beforePublish)
         : await restoreWork(directory, target);
     return {
       ...result,

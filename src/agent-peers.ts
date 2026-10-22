@@ -12,7 +12,6 @@ import {
   type NoticeParticipant,
 } from './agent-conflict-notice.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
-import { performance } from 'node:perf_hooks';
 import { PeersCache } from './agent-peers-cache.js';
 import { pageHashes, pageSize } from './work-records.js';
 import { NativeAncestry } from './native-ancestry.js';
@@ -31,7 +30,7 @@ import { changedPaths } from './agent-sync.js';
 import { pathsOverlap } from './coordination-paths.js';
 import { overlappingPaths } from './native-source.js';
 import { safeRelative } from './files.js';
-import { ForgeError, invariant } from './errors.js';
+import { invariant } from './errors.js';
 import { nativeChannels } from './native-work.js';
 import { channelStatus } from './work-channel.js';
 import type { WorkStore } from './work-store.js';
@@ -88,17 +87,14 @@ const clip = (value: string) => value.slice(0, 200);
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Advisory observation only: no locks, network, Work writes or source publication.
- * Two seconds of cooperative read budget; incomplete observations never claim clear. */
+ * Finish the selected reads regardless of elapsed time; real gaps never claim clear. */
 export function agentPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): PeersDigest {
   const command = peersInputSchema.parse(input);
   return store.observing(() => readPeers(store, command));
 }
 function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): PeersDigest {
-  const command = peersInputSchema.parse(input),
-    started = performance.now();
+  const command = peersInputSchema.parse(input);
   const result: PeersDigest = { v: 1, coverage: 'local', overlaps: [], landed: [], conflicts: [] };
-  const tick = () =>
-    invariant(performance.now() - started < 2000, 'PEERS_BUDGET', 'Local peers read budget elapsed.');
   try {
     const tx = store.readRecords(),
       legacy = tx ? undefined : store.load();
@@ -113,7 +109,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
         ?.notes.filter(note => note.text.startsWith('Automatic compensating revert '))
         .map(note => ({ text: note.text })) ?? [];
     if (notices.length) result.notices = notices;
-    const source = new PeersSource(store, tick, lane.base),
+    const source = new PeersSource(store, lane.base),
       base = source.state(lane.base).files;
     const journal = new CoordinationJournal(store),
       cache = new PeersCache(store.root);
@@ -147,7 +143,6 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     const moves: ChannelMove[] = [];
     if (tx) {
       for (const position of tx.positions('channelMoves', 'main', 'channel').reverse()) {
-        tick();
         const move = tx.fieldsAt('channelMoves', position).record;
         moves.push(move);
         if (move.status === 'accepted' && move.head === lane.base) break;
@@ -163,7 +158,6 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     if (main && !ancestry.contains(lane.head, main)) {
       const since = moves.filter(move => move.status === 'accepted' && move.channel === 'main').reverse();
       for (const move of since) {
-        tick();
         if (ancestry.contains(lane.base, move.head)) break;
         const before = move.previous ?? lane.base;
         const paths = changedPaths(source.state(before).files, source.state(move.head).files).filter(path =>
@@ -239,7 +233,6 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     let page: Lane[] = [];
     const peers: Lane[] = [];
     for (let index = 0; index < count; index++) {
-      tick();
       if (tx && index % pageSize === 0) {
         const key = `lane-fields-v1:${tx.manifest.collections.lanes!.pages[Math.floor(index / pageSize)]}`;
         page = cache.read<Lane[]>(key) ?? [];
@@ -256,7 +249,6 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
           );
           const prior = cache.read<{ hashes: string[]; records: Lane[] }>(slotKey);
           page = hashes.map((hash, offset) => {
-            tick();
             return prior?.hashes[offset] === hash && prior.records[offset]
               ? prior.records[offset]!
               : tx.fieldsAt('lanes', index + offset).record;
@@ -274,7 +266,6 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     const ownSummary = regionSummary(source, cache, lane.base, liveHead, () => [base, live]);
     const own = ownSummary.contracts;
     for (const peer of peers) {
-      tick();
       try {
         if (main && ancestry.contains(main, peer.head)) continue;
         const theirs = regionSummary(source, cache, peer.base, peer.head, () => [
@@ -289,15 +280,13 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
           if (item.risk === 'unknown') result.coverage = 'local-incomplete';
         }
         (result.predictive ??= []).push(...predictions);
-      } catch (error) {
-        if (error instanceof ForgeError && error.code === 'PEERS_BUDGET') throw error;
+      } catch {
         result.coverage = 'local-incomplete';
       }
     }
     if (command.detail && own.length) result.changes = own;
     if (own.length)
       for (const peer of peers.slice(0, 20)) {
-        tick();
         if (lane.head !== lane.base && ancestry.contains(peer.head, lane.head)) continue;
         try {
           // Dirty bytes count: an unsaved edit that imports a changed export already depends on it.
@@ -316,14 +305,12 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
             uses: uses.slice(0, 3),
             ...(uses.length > 3 ? { more: uses.length - 3 } : {}),
           });
-        } catch (error) {
-          if (error instanceof ForgeError && error.code === 'PEERS_BUDGET') throw error;
+        } catch {
           result.coverage = 'local-incomplete';
         }
       }
     if (peers.length > 20 && own.length) result.coverage = 'local-incomplete';
     for (const peer of peers) {
-      tick();
       try {
         const livePeer = source.live(peer, scope),
           liveFiles = new Map(livePeer.map(file => [file.path, file]));
@@ -404,17 +391,13 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
                 : 'planned',
           via: paths.some(path => edited.some(item => pathsOverlap(path, item))) ? 'edit' : 'scope',
         });
-      } catch (error) {
-        if (error instanceof ForgeError && error.code === 'PEERS_BUDGET') throw error;
+      } catch {
         result.coverage = 'local-incomplete';
       }
     }
-  } catch (error) {
+  } catch {
     result.coverage = 'local-incomplete';
-    result.next =
-      error instanceof ForgeError && error.code === 'PEERS_BUDGET'
-        ? 'Local peers read budget elapsed; retry peers for a fresh observation.'
-        : 'Some local peer source is unavailable; retry peers for a fresh observation.';
+    result.next = 'Some local peer source is unavailable; retry peers for a fresh observation.';
   }
   if (!result.conflicts?.length) delete result.conflicts;
   if (

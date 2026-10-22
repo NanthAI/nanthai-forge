@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
 import type { WorkData } from './work-types.js';
+import type { AutoExchangeStatus } from './auto-exchange-status.js';
 
 /** R1 integration contract: only successfully published captures belong here.
  * Missing observations stay null; metadata publication is never a source receipt. */
@@ -27,6 +28,7 @@ export type PendingData = Pick<
 > &
   Partial<Pick<WorkData, 'intents'>>;
 export type PendingObservations = {
+  autoExchange?: AutoExchangeStatus;
   recovery?: RecoveryCaptureObservation | null;
   pendingPushes?: { operationId: string; revision: number }[];
   metadataPending?: number;
@@ -167,6 +169,7 @@ export function pendingStatus(
       checking: lanes.filter(lane => lane.status === 'checking').length,
     },
     hosted: {
+      autoExchange: observed.autoExchange ?? null,
       mainHead: recovery?.mainHead ?? null,
       source,
       work,

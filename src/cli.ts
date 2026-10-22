@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { noticeViewAlias } from './candidate-names.js';
 import { refreshOwnerRoot } from './owner-root.js';
+import { recoveryCli } from './recovery-cli.js';
 // SPDX-License-Identifier: Apache-2.0
 import { ghCli, forgeVersion } from './gh-cli.js';
 import { queueCli } from './queue-control.js';
@@ -64,6 +65,7 @@ Usage:
   nforge exchange <root> push|pull|open|restore|receive-proposal|pull-proposal|reconcile|migrate-archive --command-file FILE
   nforge agent <root> <action> [json | --command-file FILE]
   nforge owner refresh <root>
+  nforge recover NEW_OWNER [reconnect|client] --command-file REQUEST.json
   nforge policy <root>
   nforge set-policy <root> JSON
   nforge import-native-git <git-root> <exact-commit> <new-directory>
@@ -125,6 +127,7 @@ async function main(args: string[]): Promise<unknown> {
   if (['login', 'logout', 'auth'].includes(args[0]!)) return authCli(args[0]!, args.slice(1));
   if (args[0] === 'queue') return queueCli(args.slice(1));
   if (args[0] === 'github-sync') return githubSyncCli(args.slice(1));
+  if (args[0] === 'recover') return recoveryCli(args.slice(1));
   if (args[0] === 'owner') {
     invariant(
       args[1] === 'refresh' && args.length === 3 && args[2],

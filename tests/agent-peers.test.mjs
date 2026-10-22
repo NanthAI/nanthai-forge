@@ -163,12 +163,7 @@ test('20-Lane digest enforces byte/item/path caps with counts and full detail re
     for (let n = 0; n < 5; n++) writeFileSync(join(peer.path, `src/overlap-${n}.txt`), `${i}\n`);
   }
   const input = { laneId: mine.laneId, scope: { paths: ['src'] } };
-  let all;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    all = agentPeers(agent.work.store, { ...input, detail: true });
-    if (all.coverage === 'local') break;
-    assert.equal(all.clear, undefined);
-  }
+  const all = agentPeers(agent.work.store, { ...input, detail: true });
   const digest = agentPeers(agent.work.store, input);
   assert.equal(all.coverage, 'local');
   assert.equal(all.overlaps.length, 20);
@@ -196,6 +191,38 @@ test('20-Lane digest enforces byte/item/path caps with counts and full detail re
       }),
     );
   }
+});
+test('slow peer reads finish with complete coverage; unavailable source stays incomplete', async t => {
+  const { agent } = fixture(t),
+    mine = await start(agent),
+    peer = await start(agent);
+  writeFileSync(join(peer.path, 'src/a.txt'), 'peer\n');
+  const input = { laneId: mine.laneId, scope: { paths: ['src/a.txt'] }, detail: true };
+  const live = PeersSource.prototype.live;
+  let paused = false;
+  const slowRead = t.mock.method(PeersSource.prototype, 'live', function (...args) {
+    if (!paused) {
+      paused = true;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2100);
+    }
+    return live.apply(this, args);
+  });
+  try {
+    const result = agentPeers(agent.work.store, input);
+    assert.equal(paused, true);
+    assert.equal(result.coverage, 'local');
+    assert.deepEqual(
+      result.overlaps.map(item => item.lane),
+      [peer.laneId],
+    );
+  } finally {
+    slowRead.mock.restore();
+  }
+  // Neither a warm cache nor successful prior reads establish current availability.
+  rmSync(join(peer.path, '.forge/native.json'));
+  const missing = agentPeers(agent.work.store, input);
+  assert.equal(missing.coverage, 'local-incomplete');
+  assert.equal(missing.clear, undefined);
 });
 test('unavailable source never blocks a lifecycle receipt or claims clear; no Work format change', async t => {
   const { agent } = fixture(t),
@@ -350,17 +377,7 @@ test('50-Lane complete coverage survives stale and deleted derived indexes', asy
   const peers = [];
   for (let i = 0; i < 50; i++) peers.push(await start(agent));
   const input = { laneId: mine.laneId, scope: { paths: ['src'] }, detail: true };
-  let rebuildPartial = 0;
-  const observe = () => {
-    let result;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      result = agentPeers(agent.work.store, input);
-      if (result.coverage !== 'local-incomplete') return result;
-      rebuildPartial++;
-      assert.equal(result.clear, undefined);
-    }
-    return result;
-  };
+  const observe = () => agentPeers(agent.work.store, input);
   assert.deepEqual(observe(), { clear: true });
   // Warm indexes must not hide dirty changes, new files, deletions or ignore changes.
   writeFileSync(join(peers[0].path, 'src/a.txt'), 'changed\n');
@@ -379,7 +396,7 @@ test('50-Lane complete coverage survives stale and deleted derived indexes', asy
   assert.equal(result.coverage, 'local');
   assert.equal(result.overlaps.length, 3);
   for (const name of readdirSync(cache)) writeFileSync(join(cache, name), '{}');
-  // Budget misses remain honest and retain rebuild progress for the next read.
+  // Corrupt disposable indexes rebuild in this observation, even on a slow machine.
   result = observe();
   assert.equal(result.coverage, 'local');
   assert.equal(result.overlaps.length, 3);
@@ -390,14 +407,11 @@ test('50-Lane complete coverage survives stale and deleted derived indexes', asy
   writeFileSync(join(peers[3].path, '.forge/native.json'), retained);
   assert.equal(observe().coverage, 'local');
   const times = [];
-  let partial = 0;
   for (let i = 0; i < 20; i++) {
     const began = performance.now();
     const measured = agentPeers(agent.work.store, input);
-    if (measured.coverage === 'local-incomplete') {
-      partial++;
-      assert.equal(measured.clear, undefined);
-    }
+    assert.equal(measured.coverage, 'local');
+    assert.equal(measured.overlaps.length, 3);
     times.push(performance.now() - began);
   }
   times.sort((a, b) => a - b);
@@ -406,9 +420,7 @@ test('50-Lane complete coverage survives stale and deleted derived indexes', asy
       fixture: '50-Lane',
       medianMs: times[10],
       p95Ms: times[18],
-      complete: 20 - partial,
-      partial,
-      rebuildPartial,
+      complete: times.length,
     }),
   );
   rmSync(cache, { recursive: true, force: true });

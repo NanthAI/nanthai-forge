@@ -3,6 +3,7 @@ import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { waitingFinishes } from './agent-finish-journal.js';
 import { readHostState } from './host-binding.js';
+import { readAutoExchangeStatus } from './auto-exchange-status.js';
 import { pendingStatus, type RecoveryCaptureObservation } from './pending-status.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkCollection, WorkRecord } from './work-record-transaction.js';
@@ -57,6 +58,7 @@ export function readPendingStatus(
           landingEntries: records('landingEntries'),
         },
         {
+          autoExchange: readAutoExchangeStatus(store, Date.parse(now)),
           recovery: recovery?.(store) ?? null,
           pendingPushes: pushes.map(push => ({ operationId: push!.operationId, revision: push!.revision })),
           metadataPending: host.agentSync?.pending.length ?? 0,

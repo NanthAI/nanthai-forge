@@ -51,6 +51,7 @@ import { evidenceView } from './work-evidence.js';
 import { executionGuard, workGit } from './work-git.js';
 import { checkRunSchema, type CheckRun, type EvidenceCommand, type WorkData } from './work-types.js';
 import type { WorkStore } from './work-store.js';
+import { latestCheckCoverage, retainCheckCoverage } from './check-coverage.js';
 import { captureArtifacts } from './work-artifacts.js';
 import { resourceCommand, readResources } from './work-resources.js';
 
@@ -331,6 +332,7 @@ async function launchLocal(
     } catch {
       /* Optional command-reported selection is unavailable; logs retain command output. */
     }
+    artifacts = [...(artifacts ?? []), ...retainCheckCoverage(store, run, path, checkSelection)];
     const receipt = createRunReceipt({
       backend: {
         ...(run.backend ?? { requested: 'local', actual: 'local' }),
@@ -439,6 +441,13 @@ async function launchLocal(
       } catch (error) {
         if (lightweight) throw error;
         // An unavailable comparison runs the full standard check.
+      }
+      delete processEnvironment.env.FORGE_CHECK_COVERAGE;
+      const coverage = run.comparisonBase ? latestCheckCoverage(store, run.comparisonBase) : undefined;
+      if (coverage) {
+        const coveragePath = join(path, 'coverage-input.json');
+        writeFileSync(coveragePath, JSON.stringify(coverage), { mode: 0o600 });
+        processEnvironment.env.FORGE_CHECK_COVERAGE = coveragePath;
       }
       processEnvironment.env.FORGE_CHECK_SELECTION = join(path, 'selection.json');
       const out = openSync(

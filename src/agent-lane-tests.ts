@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { latestCheckCoverage } from './check-coverage.js';
 import { NativeSource } from './native-source.js';
 import { workGit } from './work-git.js';
 import { checkChangedPaths } from './work-check-scope.js';
@@ -50,7 +51,8 @@ async function readLaneTests(store: WorkStore, laneId: string) {
         );
     }
   }
-  const { scope, reason, tests } = standardSelection({
+  const { scope, reason, tests, coverage } = standardSelection({
+    coverage: latestCheckCoverage(store, main),
     files,
     paths: checkChangedPaths(store, main, lane.head),
     env: { ...checkEnvironment().env, FORGE_CHECK_SCOPED: '1' },
@@ -61,6 +63,7 @@ async function readLaneTests(store: WorkStore, laneId: string) {
       scope,
       reason,
       tests,
+      coverage,
       command: tests.length
         ? `node --import ./tests/check-runtime.mjs --test ${tests.map(quote).join(' ')}`
         : null,

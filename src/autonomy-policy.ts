@@ -6,6 +6,7 @@ export const autoExchangeSchema = z.object({
   enabled: z.boolean().default(false),
   debounceMs: z.number().safe().nonnegative().default(30_000),
   maxPendingAgeMs: z.number().safe().nonnegative().default(300_000),
+  pauseOnDailySpend: z.boolean().optional(),
 });
 /** Portable API shape, shared by local owners, hosted projects and UI clients. */
 export const autonomyPolicySchema = z.object({
@@ -98,6 +99,7 @@ export const policyWriteSchema = z
     autoExchange: z
       .object({
         enabled: z.boolean().optional(),
+        pauseOnDailySpend: z.boolean().optional(),
         debounceMs: autoExchangeSchema.shape.debounceMs.removeDefault().optional(),
         maxPendingAgeMs: autoExchangeSchema.shape.maxPendingAgeMs.removeDefault().optional(),
       })

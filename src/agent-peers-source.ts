@@ -22,7 +22,6 @@ export class PeersSource extends NativeSource {
   private readonly states = new Map<string, NativeState>();
   constructor(
     private readonly store: WorkStore,
-    private readonly tick: () => void,
     private readonly boundary: string,
   ) {
     super(store.root);
@@ -38,13 +37,11 @@ export class PeersSource extends NativeSource {
     return new NativeAncestry(id => (id === this.boundary ? [] : this.state(id).parents));
   }
   override put(bytes: Buffer) {
-    this.tick();
     const id = digest(bytes);
     this.memory.set(id, bytes);
     return id;
   }
   override object(id: string): Buffer {
-    this.tick();
     const live = this.liveObjects.get(id);
     if (live) {
       const bytes = nativeFile(live.root, live.path).bytes;
@@ -59,7 +56,6 @@ export class PeersSource extends NativeSource {
     );
   }
   override state(id: string): NativeState {
-    this.tick();
     let state = this.states.get(id);
     if (state) return state;
     if (this.memory.has(id) || this.store.native) {
@@ -223,7 +219,6 @@ export class PeersSource extends NativeSource {
     const selected = (file: string) => !scope || scope.some(item => pathsOverlap(file, item));
     const files = saved.filter(file => !selected(file.path));
     for (const file of [...new Set(paths)].filter(selected).sort()) {
-      this.tick();
       try {
         if (this.store.native) checkParents(file);
         const stamp = this.store.native ? peersFileStamp(join(path, file)) : '';

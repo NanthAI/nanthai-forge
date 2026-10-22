@@ -84,6 +84,8 @@
     "scripts/modal-check/cost.py",
     "scripts/modal-check/worker.mjs",
     "scripts/test-impact.mjs",
+    "scripts/test-coverage.mjs",
+    "scripts/test-coverage.d.mts",
     "scripts/script-impact.mjs",
     "scripts/test-impact.d.mts",
     "scripts/check-path-scopes.mjs",

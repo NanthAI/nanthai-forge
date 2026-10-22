@@ -28,6 +28,7 @@ export const packageDocuments = [
   'docs/operations/runner-fallback.md',
   'docs/operations/source-exchange.md',
   'docs/operations/r2-backfill.md',
+  'docs/operations/recovery-drill.md',
   'docs/r2-storage-plan.md',
   'docs/readable-urls.md',
   'docs/roadmap.md',

@@ -817,6 +817,7 @@ for (const scenario of [
       scope: local.scope,
       reason: local.reason,
       tests: local.tests,
+      ...(local.coverage ? { coverage: local.coverage } : {}),
     });
     const dispatch = fake.calls.find(call => call.endpoint.endsWith('/dispatches'));
     const matrix = JSON.parse(dispatch.body.inputs.plan);

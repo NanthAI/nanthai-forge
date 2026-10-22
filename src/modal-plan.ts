@@ -2,6 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { latestCheckCoverage } from './check-coverage.js';
 import { digest } from './hash.js';
 import { MODAL_COST_SAFETY_MARGIN } from './modal-cost.js';
 import { NativeSource } from './native-source.js';
@@ -40,7 +41,7 @@ export async function modalPlan(
     (run.check.executable === process.execPath || /(?:^|\/)node$/.test(run.check.executable));
   const files = new Map(state.files.map(file => [file.path, source.object(file.blob).toString('utf8')]));
   const { standardSelection } = await import('../scripts/test-impact.mjs');
-  let comparison: { paths?: string[] } = {};
+  let comparison: { paths?: string[]; base?: string } = {};
   try {
     const observed = JSON.parse(readFileSync(writeCheckScope(store, run, path), 'utf8'));
     // Match forge-check's pinnedComparison contract; view-base comparisons are not scoped.
@@ -51,6 +52,7 @@ export async function modalPlan(
   const selection = standard
     ? standardSelection({
         files,
+        coverage: comparison.base ? latestCheckCoverage(store, comparison.base) : undefined,
         ...comparison,
         ...(run.mainCheck ? { mainCheck: run.mainCheck } : {}),
         ...(run.interaction !== undefined ? { interaction: run.interaction } : {}),

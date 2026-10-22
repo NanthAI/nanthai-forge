@@ -1,3 +1,4 @@
+import { retainCheckCoverage } from './check-coverage.js';
 import { modalCredentials } from './modal-credentials.js';
 import { readPolicy } from './work-autonomy.js';
 import { modalRunCost } from './check-cost.js';
@@ -334,19 +335,18 @@ export async function launchModalRun(
             },
           }
         : {}),
-      ...(run.check.artifactPaths?.length
-        ? {
-            artifacts: run.check.artifactPaths.map(
-              (sourcePath, index) =>
-                artifacts[index] ?? {
-                  status: 'unavailable',
-                  sourcePath,
-                  details:
-                    'Remote selected output capture is unavailable; execution IDs and source are retained.',
-                },
-            ),
-          }
-        : {}),
+      artifacts: [
+        ...(run.check.artifactPaths ?? []).map(
+          (sourcePath, index) =>
+            artifacts[index] ?? {
+              status: 'unavailable' as const,
+              sourcePath,
+              details:
+                'Remote selected output capture is unavailable; execution IDs and source are retained.',
+            },
+        ),
+        ...retainCheckCoverage(store, run, path, plan.standard ? plan.selection : undefined),
+      ],
       endedAt,
       exitCode: outcome?.exitCode ?? null,
       signal: null,

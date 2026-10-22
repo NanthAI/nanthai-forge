@@ -31,7 +31,7 @@ For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [co
 | Netlify worker | Public-repository analysis in the background | `netlify/functions/` |
 | Git compatibility | Import, export, projections and publication | `src/native-git*.ts`, `src/work-git*.ts` |
 
-The local native owner is canonical for Forge's own development. A hosted project holds checkpoints you send it plus its own metadata journal. Source synchronization is explicit. Bound owners also send advisory agent presence and lifecycle metadata automatically, with a binding opt-out; these updates do not transfer source or check artifacts.
+The local native owner is canonical for Forge's own development. A hosted project holds checkpoints you send it plus its own metadata journal. Source synchronization is explicit unless the owner enables the separate `autoExchange` policy. Its saved-mutation driver shares bound-push serialization and retained-operation reconciliation, with no idle polling. Bound owners also send advisory agent presence and lifecycle metadata automatically, with a binding opt-out; these updates do not transfer source or check artifacts.
 
 ## Four kinds of state
 
@@ -265,8 +265,9 @@ Candidate has a new identity; it does not inherit a passing run on that identity
 Local Channel moves are durable before network delivery. The binding retains
 terminal receipts and exact metadata publication payloads for lost-reply replay.
 The consumer refreshes indexed hosted main from local receipts before reporting
-completion. Source and check-artifact transfer remains explicit: indexed source
-pins do not promise that newly composed bytes have already been uploaded.
+completion. Source and check-artifact transfer uses exchange, manually or through
+opt-in `autoExchange`: indexed source pins do not promise that newly composed
+bytes have already been uploaded.
 The browser says Requested / Waiting for the named machine, and only says
 Accepted into main after the local receipt arrives. Git-backed and hosted-canonical
 projects retain their existing hosted selection path.
@@ -375,7 +376,7 @@ normal Candidate dependencies, and queues the configured check through the exist
 runner. It never accepts source. Original request ids replay the same composed
 Candidate and run even if main advances later. A text conflict retains a conflict Candidate
 and reports why no check was queued. Re-check receipts are separate from acceptance
-receipts; new source/check artifacts still use explicit exchange. Deterministic
+receipts; new source/check artifacts still require manual or opt-in automatic exchange. Deterministic
 acceptance failures do not offer an unchanged acceptance retry; transient owner
 failures retain Request again.
 

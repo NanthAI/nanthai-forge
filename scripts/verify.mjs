@@ -68,6 +68,10 @@ function runCommand(name, command, args) {
       const lines = pending.split('\n');
       pending = lines.pop();
       for (const raw of lines) {
+        if (raw.startsWith('__FORGE_COVERAGE__')) {
+          process.stdout.write(`${raw}\n`);
+          continue;
+        }
         if (raw.startsWith('__FORGE_TEST_FAILURE__')) {
           const failure = JSON.parse(raw.slice('__FORGE_TEST_FAILURE__'.length));
           process.stdout.write(`[test] Failed test file: ${failure.file}\n${failure.output}\n`);
@@ -153,6 +157,8 @@ const tests = coreBuild.then(ok => {
   const workers = workerBudget(env);
   console.log(`Test workers: ${workers} (FORGE_TEST_WORKERS overrides the default)`);
   console.log(`Test file timeout: ${fileTimeout(env)}ms (FORGE_TEST_FILE_TIMEOUT_MS overrides it)`);
+  if ((!selection || selection.scope === 'full') && env.FORGE_CHECK_HEAD)
+    env.FORGE_TEST_COVERAGE_HEAD = env.FORGE_CHECK_HEAD;
   return run('test', process.execPath, [
     fileURLToPath(new URL('./test-files.mjs', import.meta.url)),
     ...files,

@@ -231,7 +231,12 @@ function pruneStage(directory: string, paths: Set<string>, prefix = '') {
     } else if (!paths.has(path)) rmSync(join(directory, path));
   }
 }
-async function restoreDirectory(directory: string, target: string, disposable = false) {
+async function restoreDirectory(
+  directory: string,
+  target: string,
+  disposable = false,
+  beforePublish?: (root: string) => void,
+) {
   let manifest: z.infer<typeof manifestSchema>;
   try {
     manifest = manifestSchema.parse(JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')));
@@ -335,6 +340,7 @@ async function restoreDirectory(directory: string, target: string, disposable = 
       }
     if (interrupted) data.revision++;
     if (interrupted) new WorkStore(materialized).save(data);
+    beforePublish?.(materialized);
     mkdirSync(destination, { mode: 0o700 });
     try {
       renameSync(materialized, destination);
@@ -362,8 +368,12 @@ async function restoreDirectory(directory: string, target: string, disposable = 
 
 // Internal handoff: only a caller-created disposable exchange directory may be consumed.
 // Public archive/directory restore below always leaves its supplied input intact.
-export async function restoreNativeExchangeStage(directory: string, target: string) {
-  return restoreDirectory(directory, target, true);
+export async function restoreNativeExchangeStage(
+  directory: string,
+  target: string,
+  beforePublish?: (root: string) => void,
+) {
+  return restoreDirectory(directory, target, true, beforePublish);
 }
 
 export async function restoreNativeWork(input: string, target: string, journalPath?: string) {

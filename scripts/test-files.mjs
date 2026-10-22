@@ -3,7 +3,10 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { coverageMarker, v8Touched } from './test-coverage.mjs';
 import { workerBudget } from '../tests/worker-budget.mjs';
 
 export function fileTimeout(env = process.env) {
@@ -17,6 +20,18 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
   const totals = Object.fromEntries(
     ['tests', 'pass', 'fail', 'cancelled', 'skipped', 'todo'].map(k => [k, 0]),
   );
+  const coverageHead = process.env.FORGE_TEST_COVERAGE_HEAD;
+  let coverageFiles = null;
+  if (coverageHead) {
+    try {
+      const { sourceFiles } = await import('./test-impact.mjs');
+      coverageFiles = sourceFiles();
+    } catch {
+      process.stdout.write(
+        '# Coverage unavailable: source inventory could not be read; graph selection remains active.\n',
+      );
+    }
+  }
   let next = 0,
     failed = false;
   const children = new Set();
@@ -40,6 +55,17 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
     return new Promise(resolve => {
       const childEnv = { ...process.env };
       delete childEnv.NODE_TEST_CONTEXT;
+      let coverageDirectory = null;
+      if (coverageFiles) {
+        try {
+          coverageDirectory = mkdtempSync(join(tmpdir(), 'forge-v8-'));
+        } catch {
+          process.stdout.write(
+            `# Coverage unavailable for ${file}: temporary storage could not be prepared.\n`,
+          );
+        }
+      }
+      if (coverageDirectory) childEnv.NODE_V8_COVERAGE = coverageDirectory;
       const child = spawn(
         process.execPath,
         [
@@ -89,6 +115,24 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
         process.stdout.write(`not ok - ${file}: ${error.message}\n`);
       });
       child.once('close', code => {
+        if (coverageDirectory) {
+          try {
+            const touched = v8Touched(coverageDirectory, coverageFiles);
+            process.stdout.write(
+              `${coverageMarker}${JSON.stringify({ version: 1, head: coverageHead, test: file, complete: code === 0 && !timedOut, touched })}\n`,
+            );
+          } catch {
+            process.stdout.write(
+              `${coverageMarker}${JSON.stringify({ version: 1, head: coverageHead, test: file, complete: false })}\n`,
+            );
+          } finally {
+            try {
+              rmSync(coverageDirectory, { recursive: true, force: true });
+            } catch {
+              process.stdout.write(`# Coverage temporary files retained for ${file}.\n`);
+            }
+          }
+        }
         clearTimeout(timer);
         children.delete(child);
         if (code !== 0 || timedOut) {

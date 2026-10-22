@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
+import { observeExchangeRequest, observeExchangeResponse } from './exchange-observation-hooks.js';
 
 export type ExchangeRequestOptions = {
   retries?: number;
@@ -45,6 +46,7 @@ export async function exchangeRequest<T>(
       if (!controller.signal.aborted) armIdle(options.idleTimeoutMs ?? 30_000, 'body idle');
     };
     const request = async () => {
+      observeExchangeRequest(url, init);
       const response = await fetch(url, { ...init, signal: controller.signal });
       progressed();
       if (
@@ -107,6 +109,7 @@ export function exchangeFetch(
           if (!part.value.length) continue;
           chunks.push(part.value);
           done += part.value.length;
+          observeExchangeResponse(part.value.length);
           progressed();
           options.onBytes?.(done, total);
         }

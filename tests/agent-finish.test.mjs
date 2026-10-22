@@ -12,6 +12,7 @@ import { once } from 'node:events';
 import { WorkService } from '../dist/work.js';
 import { AgentWorkflow, agentActionSchema } from '../dist/agent-workflow.js';
 import { NativeSource } from '../dist/native-source.js';
+import { PeersSource } from '../dist/agent-peers-source.js';
 import { initNative } from '../dist/native-work.js';
 import { ForgeError } from '../dist/errors.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -462,17 +463,18 @@ for (const native of [true, false])
       assert.equal(receipt.acceptance, null);
       assert.equal(agent.work.store.load().runs.length, 0);
       assert.equal(agent.work.store.load().channelMoves.length, 0);
-      // Reproduce the load-sensitive read-budget expiry without delaying the test.
-      let elapsed = 0;
-      const clock = t.mock.method(performance, 'now', () => (elapsed += 3000));
+      // A live source gap may change advisory peers, never original terminal evidence.
+      const unavailable = t.mock.method(PeersSource.prototype, 'live', () => {
+        throw new ForgeError('LANE_UNAVAILABLE', 'Synthetic unavailable peer source.');
+      });
       let replay;
       try {
         replay = (await new AgentWorkflow(root).dispatch(request)).result;
       } finally {
-        clock.mock.restore();
+        unavailable.mock.restore();
       }
       assert.equal(replay.peers.coverage, 'local-incomplete');
-      assert.match(replay.peers.next, /read budget elapsed/);
+      assert.match(replay.peers.next, /peer source is unavailable/);
       assert.deepEqual(canonicalReceipt(replay), canonicalReceipt(receipt));
       assert.equal(readFileSync(join(lane.path, 'file.txt'), 'utf8'), 'changed\n');
     } finally {

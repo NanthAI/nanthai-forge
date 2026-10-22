@@ -4,7 +4,7 @@
 //   nforge agent ROOT define-check '{"name":"verify","executable":"/abs/node","args":["scripts/forge-check.mjs"]}'
 import { execFileSync } from 'node:child_process';
 import { runDocumentationChecks } from './check-documentation.mjs';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -40,7 +40,14 @@ const npm = (...args) => execFileSync(process.execPath, [npmCli, ...args], { env
 npm('ci', '--ignore-scripts');
 const { pinnedComparison, standardSelection, sourceFiles } = await import('./test-impact.mjs');
 const comparison = pinnedComparison();
+let coverage;
+try {
+  if (env.FORGE_CHECK_COVERAGE) coverage = JSON.parse(readFileSync(env.FORGE_CHECK_COVERAGE, 'utf8'));
+} catch {
+  /* Missing advisory evidence uses the graph selection. */
+}
 const selection = standardSelection({
+  coverage,
   paths: comparison?.paths,
   optimistic: comparison?.optimistic,
   recovery: comparison?.recovery,

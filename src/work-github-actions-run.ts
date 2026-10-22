@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retainCheckCoverage } from './check-coverage.js';
 import { actionsCost, actionsRate, unknownCost } from './check-cost.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
@@ -116,15 +117,14 @@ export async function launchGithubActionsRun(
       checkSelection: plan.standard ? plan.selection : undefined,
       endedAt: new Date().toISOString(),
       signal: null,
-      ...(run.check.artifactPaths?.length
-        ? {
-            artifacts: run.check.artifactPaths.map(sourcePath => ({
-              status: 'unavailable',
-              sourcePath,
-              details: 'Actions output remains in retained job logs; selected file download is unavailable.',
-            })),
-          }
-        : {}),
+      artifacts: [
+        ...(run.check.artifactPaths ?? []).map(sourcePath => ({
+          status: 'unavailable' as const,
+          sourcePath,
+          details: 'Actions output remains in retained job logs; selected file download is unavailable.',
+        })),
+        ...retainCheckCoverage(store, run, path, plan.standard ? plan.selection : undefined),
+      ],
       details: `GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} ${outcome.status === 'passed' ? 'Run ref is removed after recording this result.' : 'Run ref and logs retained for diagnosis; remove the run-owned ref after inspection.'}`,
     });
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
