@@ -24,6 +24,7 @@ import { publicationTables } from './projectPublicationFields';
 import { objectTables } from './projectObjectFields';
 import { artifactBlobTables } from './artifactBlobFields';
 import { derivedFields } from './derivedArtifactFields';
+import { hostedAcceptanceTables } from './projectHostedAcceptanceFields';
 import { defineSchema, defineTable } from 'convex/server';
 import { accountFields, accountItemFields } from './accountTypes';
 import { v } from 'convex/values';
@@ -424,6 +425,7 @@ export default defineSchema({
   ...hostedOutputTables,
   ...hostedActionsTables,
   ...hostedLandingTables,
+  ...hostedAcceptanceTables,
   ...hostedSnapshotTables,
   ...objectTables,
   ...artifactBlobTables,

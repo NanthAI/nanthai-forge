@@ -194,6 +194,7 @@ export async function settleLandingOperation(ctx: MutationCtx, state: HostedLand
               attemptId: state.attemptId,
               phase: state.phase,
               observation: state.observation,
+              ...(state.acceptance ? { acceptance: state.acceptance } : {}),
             },
           },
   };

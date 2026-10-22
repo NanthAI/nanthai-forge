@@ -1101,3 +1101,40 @@ current authority, main head **and receipt**, policy and exact check evidence, t
 records its canonical receipt and request settlement together. The queue lease and
 policy snapshot do not grant acceptance. Large included-Lane/projection work stays
 outside that boundary. See the [landing queue API](operations/source-exchange.md#hosted-landing-queue-api).
+
+### Hosted final acceptance
+
+`projectHostedAcceptance` consumes H13's prepared attempts. Preparation stages the
+Candidate's hash-bound ordered input/dependency metadata in transport pages, retaining
+the original accept operation UUID. No Lane or Channel changes during staging.
+The final transaction independently validates the live queue fence, server authority
+and epoch, main head and receipt, canonical clean Candidate/registered source,
+current policy digest and exact passing run/definition/configuration/environment.
+A same-source new receipt still invalidates the old attempt. Server-shadow prepares
+source but cannot publish a competing main.
+
+Publication atomically writes the immutable acceptance, journal event, selected
+source-snapshot delta, main CAS, landed request/original operation settlement and
+queue release. The receipt retains input/dependency roots, previous head/receipt,
+actor, policy, exact run and terminal evidence, authority epoch and attempt. Automatic
+acceptance records its revert target; compensation remains the ordinary revert
+path. Original authorized retries return that receipt after later main/policy/epoch
+changes without repeating publication. H15 owns named recomposition/recheck on races;
+H14 never substitutes another Candidate or transfers old check evidence.
+
+The accepted receipt activates the staged landed-head completion ledger. Canonical
+Lane status is materialized in finite scheduled transactions of at most twenty
+entries, with retained page/entry progress. Each write compares the exact saved
+record/source/lifecycle versions and head; saves or reopen events before or after
+publication remain active. Intent/sibling completion, source cleanup and deletion
+are not performed. The receipt and its input pages are authoritative acceptance
+and completion evidence while Lane status materialization is pending. Failed
+materialization can resume from the retained receipt; completed work schedules
+nothing. Recovery/export folding of these snapshot deltas remains H21 work.
+
+People can accept clean unchecked Candidates. Agents still need an exact passing
+run and current autonomy permission. Existing supervised/actor/protected-path rules
+return waiting-for-review. H08 currently supplies no trusted changed-path coverage;
+protected-path policy therefore uses its existing unavailable-coverage review rule,
+never caller-supplied path claims. No new policy, UI step, provider call or cutover
+is introduced. The API is exercised with local metadata/provider/source-worker fakes.

@@ -86,6 +86,7 @@ export const hostedLandingStateSchema = z
     attemptId: z.uuid(),
     phase: z.enum(['queued', 'checking', 'ready', 'terminal-failed', 'landed']),
     observation: landingObservationSchema,
+    acceptance: z.object({ receiptId: z.uuid(), head: hash }).strict().optional(),
     error: z
       .object({ code: z.string().min(1), message: z.string() })
       .strict()

@@ -1188,3 +1188,36 @@ internal `projectHostedLandingDriver:recover` repairs pending/leased queue work;
 it is an event/startup hook, never a scheduled scan of idle projects. Failed wake
 receipts also reconcile on original enqueue replay. Check waiters wake from H10
 result events in bounded byte-aware windows; they do not poll provider status.
+
+### Hosted final acceptance API
+
+H14's `projectHostedAcceptance:prepare({projectId,submissionId,attemptId})` retains a
+plan under the attempt's original accept UUID. `stage` adds `{kind:"inputs" |
+"dependencies",index,page}` where `page` is the JSON H08 compose metadata page.
+Stage inputs first, then dependencies, following each committed hash/size/next pin
+until null. Pages automatically split under H08's 100-entry/128-KiB transport window;
+there is no total Lane/history ceiling. Replays require the exact original page.
+Staging reads immutable included Lane versions, so later saves remain possible.
+
+`accept` takes the same selection and uses the shared Channel fence/final CAS.
+`publish` is its internal fenced primitive for H15, taking the retained claim
+`{projectId,channel:"main",owner,token,submissionId,attemptId}`. These return
+`{status:"landed",receipt}` only after actual atomic publication, or pending queue/
+review observations. Stale main head/receipt, epoch, policy and exact-run evidence
+return structured errors without consuming the request or replacing its source.
+An agent request needs current exact-run evidence; an account can submit an exact
+person request without a check. Devices always retain agent authority.
+
+`receipt({projectId,receiptId})` returns immutable evidence and completion progress
+under current project read access. The acceptance ID also selects its source-snapshot
+delta and staged input ledger. Original retries authorize current access first and
+return the original receipt, without moving later main or repeating effects. Run
+references use H10 IDs; no dependency on H12 output-manifest internals is introduced.
+
+When the existing lifecycle policy enables completion, publication activates the
+staged exact-head ledger and schedules finite `complete({projectId,receiptId})`
+materialization. It writes at most twenty Lane status versions per invocation and
+resumes its retained page/entry cursor after a lost reply or stopped task. A named
+internal call can repair a failed task; there is no idle scan. Completion never
+closes a newer saved/reopened version or an entire Intent. Accepted-source receipt
+and completion-ledger visibility do not wait for these canonical status projections.
