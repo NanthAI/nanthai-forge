@@ -1,3 +1,4 @@
+import { composeStack } from './native-stack-compose.js';
 import {
   checkpointPreparationChanged,
   prepareNativeObjects,
@@ -313,25 +314,8 @@ export function agentSync(
       const message = `Sync ${command.channel}`,
         operation = { id: command.operationId, request: hash },
         from = source.state(lane.head).files,
-        rebased = stack
-          ? source.mergeFiles(
-              lane.head,
-              target,
-              new Set([stack.before.head]),
-              new Set([stack.before.head]),
-              undefined,
-              { insertionOrder: 'right-first' },
-            )
-          : undefined,
-        // Retain the old child lineage: Candidate composition must recognize
-        // that an explicit retarget already removed inherited parent-only files.
-        composed = rebased
-          ? {
-              conflicts: [...rebased.conflicts.map(item => item.path), ...overlappingPaths(rebased.files)],
-              ...(!rebased.conflicts.length && !overlappingPaths(rebased.files).length
-                ? { head: source.writeState(rebased.files, [...new Set([target, lane.head])], message, at) }
-                : {}),
-            }
+        composed = stack
+          ? composeStack(source, lane.head, target, stack.before.head, message, at)
           : source.compose(lane.head, target, message, at, { insertionOrder: 'right-first' }),
         docs =
           !stack && !composed.head && options.resolveDocs

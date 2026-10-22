@@ -56,6 +56,21 @@ Candidates, runs and Channel receipts remain in Work. There is no new writer-upg
 requirement. This remains a finite drain invoked by finish or `land-ready`: no
 background worker or automatic startup recovery is launched.
 
+## Stacked Lanes
+
+After a stack parent lands, single and batch landing reapply the saved child's
+delta from its pinned parent base onto selected current main, using sync's
+three-way merge. The composed Candidate retains its original Lane/head inputs
+and records the selected main; neither saved Lane metadata nor working files are
+rewritten. Parent-only updates and unrelated accepted work stay on main. This
+also handles whole-file replacements when main equals the saved parent's version.
+Each level in a deeper stack retargets after its own parent lands.
+
+Real conflicts retain the original States and name accepted Lane deltas that
+touch the conflicting paths, excluding unrelated accepted inputs and inherited
+parent source. Resolution uses the existing sync/checkpoint flow. See
+[stacked Lanes](../agents/workflow.md#stacked-lanes).
+
 ## Remote bursts
 
 Modal and GitHub Actions checks do not share the owner's CPU, so a burst need not queue

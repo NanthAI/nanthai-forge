@@ -57,11 +57,6 @@ export async function drainPostAccept(store: WorkStore, push?: { channel: string
             'CANCELLED',
             'Main audit interrupted by a termination signal; accepted source and pending audit are retained.',
           );
-        if (foregroundQueued()) {
-          await new Promise(resolve => setTimeout(resolve, 250));
-          continue;
-        }
-        wakeGithubPush(store);
         try {
           const pending = store.load();
           const failed = pending.runs.find(
@@ -70,6 +65,23 @@ export async function drainPostAccept(store: WorkStore, push?: { channel: string
               !recoveryResult(pending, run) &&
               !pending.intents.some(intent => intent.id === fixMainIntentId(run)),
           );
+          // A detached wake can arrive after another driver completed the audit.
+          // Select on this private snapshot before waiting or taking the writer
+          // lock: an idle worker must not race a zero-patience checkpoint. Any
+          // actual selection is repeated against fresh Work under the lock below.
+          if (!failed && !selectMainAudit(pending, push)) {
+            wakeGithubPush(store);
+            return;
+          }
+          if (foregroundQueued()) {
+            // Keep the idle probe from repeatedly loading Work while an audit
+            // yields its machine capacity to foreground checks.
+            do {
+              await new Promise(resolve => setTimeout(resolve, 250));
+            } while (!runInterruption.signal.aborted && foregroundQueued());
+            continue;
+          }
+          wakeGithubPush(store);
           if (failed) await recoverOptimisticMain(store, failed);
           const selected = store.locked(() => {
             // Recheck before loading Work: foreground arrivals never make a waiting

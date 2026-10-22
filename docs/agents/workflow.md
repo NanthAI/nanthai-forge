@@ -603,6 +603,16 @@ This reapplies only the child's delta onto main (or the native bootstrap source
 when main has no receipt yet); parent-only changes are omitted and overlaps remain
 conflicts. `undo-sync` restores the pre-sync source base and stack pin.
 
+When `land` picks up a saved child after its parent has landed, both single and
+batch landing compose the child's aggregate delta from its saved parent base onto
+the selected current main. This uses sync's three-way merge semantics, including
+whole-file changes where main still has the saved parent's version. The resulting
+Candidate retains the original Lane input/head pins; the saved Lane and working
+files stay unchanged, including unsaved edits. The Candidate records its selected
+main and exact checked source. A deeper chain retargets each child after its own
+parent lands, without a manual sync. Real conflicts retain the original States
+and identify accepted Lane deltas touching the conflicting paths.
+
 Child `finish` and `land` use the existing dependency wait until the parent has an
 accepted input in the destination Channel. `land {"laneIds":["PARENT","CHILD"]}`
 can process the chain in order; `land-ready` resumes waiting finishes after their

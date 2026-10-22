@@ -1,28 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
-import { savedOverlapPlan } from './agent-overlap-plan.js';
+import { savedStack } from './landing-compose-source.js';
 import { NativeSource } from './native-source.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkView } from './work-types.js';
-/** Attribute an actual merge conflict to saved, accepted overlapping inputs. */
-export function landingConflictPeers(store: WorkStore, main: string, inputs: WorkView['inputs']) {
-  if (!store.native) return [];
+/** Attribute only accepted deltas that touch the paths of the actual conflict. */
+export function landingConflictPeers(
+  store: WorkStore,
+  main: string,
+  inputs: WorkView['inputs'],
+  paths: string[],
+) {
+  if (!store.native || !paths.length) return [];
   const data = store.load(),
-    source = new NativeSource(store.root);
-  const mine = new Set(inputs.map(pin => pin.laneId));
-  const accepted = data.channelMoves
-    .filter(move => move.status === 'accepted' && source.contains(main, move.head))
-    .flatMap(move => data.views.find(view => view.id === move.viewId)?.inputs ?? [])
-    .filter(pin => !mine.has(pin.laneId));
-  const pins = new Map([...accepted, ...inputs].map(pin => [pin.laneId, pin.head]));
-  const plan = savedOverlapPlan(
-    store,
-    data.lanes.filter(lane => pins.has(lane.id)).map(lane => ({ ...lane, head: pins.get(lane.id)! })),
-  );
-  return [
-    ...new Set(
-      plan.pairs
-        .filter(pair => pair.lanes.some(id => mine.has(id)))
-        .flatMap(pair => pair.lanes.filter(id => !mine.has(id))),
-    ),
-  ];
+    source = new NativeSource(store.root),
+    ancestry = source.ancestry();
+  const mine = new Set(inputs.map(pin => pin.laneId)),
+    peers = new Set<string>();
+  const touches = (before: string, after: string) => {
+    const a = new Map(source.state(before).files.map(file => [file.path, `${file.mode}:${file.blob}`]));
+    const b = new Map(source.state(after).files.map(file => [file.path, `${file.mode}:${file.blob}`]));
+    return [...new Set([...a.keys(), ...b.keys()])].some(
+      path =>
+        a.get(path) !== b.get(path) &&
+        paths.some(
+          conflict => path === conflict || path.startsWith(conflict + '/') || conflict.startsWith(path + '/'),
+        ),
+    );
+  };
+  for (const move of data.channelMoves) {
+    if (move.status !== 'accepted' || !ancestry.contains(main, move.head)) continue;
+    const previous = move.previous ?? data.nativeHead;
+    if (!previous || !touches(previous, move.head)) continue;
+    for (const pin of data.views.find(view => view.id === move.viewId)?.inputs ?? []) {
+      if (mine.has(pin.laneId) || inputs.some(input => ancestry.contains(input.head, pin.head))) continue;
+      const lane = data.lanes.find(lane => lane.id === pin.laneId);
+      if (!lane) continue;
+      const synced = [...lane.checkpoints]
+        .reverse()
+        .find(checkpoint => checkpoint.sync && ancestry.contains(pin.head, checkpoint.head));
+      const base = savedStack(lane, pin.head)?.head ?? synced?.sync?.target ?? lane.base;
+      if (touches(base, pin.head)) peers.add(pin.laneId);
+    }
+  }
+  return [...peers];
 }

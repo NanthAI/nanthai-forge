@@ -2,7 +2,7 @@ import { previewLanding, previewExclusionMessage } from './integration-preview-l
 // SPDX-License-Identifier: Apache-2.0
 import { landingConflictPeers } from './landing-conflict-peers.js';
 import { landingOverlap } from './landing-overlap.js';
-import { resolveDocsComposition } from './native-docs-resolve.js';
+import { composeLandingSource } from './landing-compose-source.js';
 import { orderLandingEntries } from './landing-batch-order.js';
 import { join } from 'node:path';
 import { digest } from './hash.js';
@@ -271,14 +271,17 @@ export async function composeBatch(work: WorkService, batch: LandingBatch, befor
     const previous = views.filter(view => view.status === 'clean').at(-1);
     const inputs = [...(previous?.inputs ?? []), ...candidate.inputs];
     const dependencies = [...(previous?.dependencies ?? []), ...(candidate.dependencies ?? [])];
-    const composed = source.compose(head, entry.head, 'Landing batch prefix', batch.arrivedAt);
-    const result = composed.head
-      ? composed
-      : (resolveDocsComposition(source, entry.head, head, 'Landing batch prefix', batch.arrivedAt) ??
-        composed);
+    const result = composeLandingSource(
+      work.store,
+      source,
+      candidate,
+      head,
+      'Landing batch prefix',
+      batch.arrivedAt,
+    );
     const id = finishChild(batch.id, `prefix:${entryId}`);
     if (!result.head) {
-      const peers = landingConflictPeers(work.store, head, candidate.inputs);
+      const peers = landingConflictPeers(work.store, head, candidate.inputs, result.conflicts);
       views.push({
         ...candidate,
         inputs,
@@ -288,7 +291,7 @@ export async function composeBatch(work: WorkService, batch: LandingBatch, befor
         head: undefined,
         status: 'conflict',
         at: batch.arrivedAt,
-        details: `Batch composition conflict with accepted peer Lane(s) ${[...new Set(peers)].join(', ') || 'unknown'}; original States retained:\n${composed.conflicts.join('\n')}`,
+        details: `Batch composition conflict with accepted peer Lane(s) ${[...new Set(peers)].join(', ') || 'unknown'}; original States retained:\n${result.conflicts.join('\n')}`,
       });
       conflicts.push({ entryId, viewId: id });
       continue;

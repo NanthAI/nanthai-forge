@@ -10,7 +10,7 @@ const currentChannelHead = (store: WorkStore, channel: string) =>
 
 /** A landing is established by a Candidate input and a receipt still on main,
  * never by coincidental source containment or the parent's lifecycle alone. */
-export function stackLanding(store: WorkStore, lane: Lane) {
+export function stackLanding(store: WorkStore, lane: Lane, mainTarget?: string) {
   const stack = lane.stack;
   if (!stack || stack.detached) return undefined;
   const parent = store.select('lanes', stack.laneId);
@@ -25,9 +25,9 @@ export function stackLanding(store: WorkStore, lane: Lane) {
   );
   if (!inputs.size) return undefined;
   const moves = allRecords<ChannelMove>(store, 'channelMoves');
-  const main = moves
-    .filter(move => move.channel === stack.channel && move.status === 'accepted')
-    .at(-1)?.head;
+  const main =
+    mainTarget ??
+    moves.filter(move => move.channel === stack.channel && move.status === 'accepted').at(-1)?.head;
   if (!main) return undefined;
   const ancestry = new NativeSource(store.root).ancestry();
   return moves.reverse().find(move => {
