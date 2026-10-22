@@ -424,6 +424,46 @@ test('runner records result before deleting success ref; recovery reads receipt'
   assert.equal(run.status, 'passed');
   assert.equal(read(join(path, 'modal-plan.json')).head, run.head);
 });
+test('a stuck job recovery is explained in the result receipt and retained journal', async t => {
+  const { work, run, path } = fixture(t);
+  let api;
+  const proxy = {
+    request: (...args) => api.request(...args),
+    pages: (...args) => api.pages(...args),
+    log: (...args) => api.log(...args),
+    sleep: async () => {},
+  };
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    proxy,
+    async (plan, journal, save) => {
+      journal.commit = 'a'.repeat(40);
+      journal.pushed = true;
+      save();
+      api = transport(plan, journal, {
+        log: '# tests 1\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n',
+      }).api;
+      const pages = api.pages;
+      api.pages = async (...args) =>
+        (await pages(...args)).map(job =>
+          job.name === 'forge-static'
+            ? { ...job, status: 'in_progress', conclusion: null, completed_at: null }
+            : job,
+        );
+    },
+    async () => assert.equal(read(join(path, 'result.json')).status, 'passed'),
+  );
+  const receipt = read(join(path, 'result.json'));
+  assert.equal(receipt.status, 'passed');
+  assert.equal(receipt.exitCode, 0);
+  assert.match(
+    receipt.details,
+    /job status stuck on GitHub.*log shows 1 passed, 0 failed.*run concluded success/,
+  );
+  assert.equal(read(join(path, 'github-actions.json')).stuckJobs[20].source, 'node-test-summary');
+  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /using log and run evidence/);
+});
 test('raw transport diagnostics never enter receipts and logs', async t => {
   const { work, run, path } = fixture(t);
   await launchGithubActionsRun(work.store, run, {}, async () => {

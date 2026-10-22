@@ -89,7 +89,17 @@ an hour per wait), says so in progress, and continues. Because GitHub performed
 nothing, a rate-limited dispatch, rerun or cancel is sent again after the wait; any
 other rerun or cancel failure is still never repeated. Cancellation is observed after a
 wait ends. A run reported completed while its job list still shows unfinished or
-missing jobs is polled again for up to five minutes before it counts as interrupted. Each shard status transition appears in numbered progress.
+missing jobs is polled again for up to five minutes. If a job status remains stuck,
+the controller fetches and retains its log. Complete `__FORGE_TESTS__` markers for
+every selected file, or a complete Node test summary with consistent counts and
+no failures or cancellations, can corroborate a successful run conclusion. Only
+that combination recovers the stuck job as passing. The journal records the log
+evidence source, counts and run conclusion; progress and the result receipt explain
+that GitHub's job status was stuck and which evidence was used. Observed job
+statuses and timestamps remain unchanged. Missing jobs, unavailable/truncated logs
+and incomplete evidence remain interrupted, even when the run is green. Failure
+evidence in the log or a failed run conclusion stays failed. Each shard status
+transition appears in numbered progress.
 Completed job logs, including failures, use the existing `shards/<index>.log` and
 `shards/static.log` layout, with attempt suffixes for retries. GitHub exposes job
 logs after completion; this backend does not claim live stdout streaming.

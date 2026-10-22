@@ -10,6 +10,7 @@ import { githubActionsRecipe, githubActionsWorkflow } from './github-actions-wor
 import type { JobUsage } from './check-cost.js';
 import type { ModalPlan } from './modal-plan.js';
 import type { ActionsFailure } from './github-actions-api.js';
+import type { ActionsJobLogEvidence } from './github-actions-job-evidence.js';
 
 export type ActionsJournal = {
   pin: string;
@@ -33,6 +34,7 @@ export type ActionsJournal = {
   logged: number[];
   oom: number[];
   states: Record<string, string>;
+  stuckJobs?: Record<string, ActionsJobLogEvidence & { runConclusion: string | null; message: string }>;
   deleted?: boolean;
   terminal?: boolean;
 };

@@ -466,4 +466,21 @@ test('a completed request never aborts its closed response stream', async t => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-length'), '5');
   assert.equal(aborts, 0);
+  // A reader that throws after the response arrived, and its retry, also never abort.
+  let reads = 0;
+  await assert.rejects(
+    exchangeRequest(
+      'R2 object HEAD verification',
+      url,
+      { method: 'HEAD' },
+      async () => {
+        reads++;
+        throw new Error('synthetic reader failure');
+      },
+      { ...deadlines, retries: 1, delayMs: 1 },
+    ),
+    error => error.code === 'EXCHANGE_REQUEST_FAILED',
+  );
+  assert.equal(reads, 2);
+  assert.equal(aborts, 0);
 });

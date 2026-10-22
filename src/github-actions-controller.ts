@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mutate, observe, type ActionsApi, type ActionsJob, type ActionsRun } from './github-actions-api.js';
 import { ensureActionsDispatch } from './github-actions-dispatch.js';
 import type { ActionsJournal } from './github-actions-export.js';
 import type { ModalPlan } from './modal-plan.js';
-import { ModalShardLogs } from './modal-shard-logs.js';
+import { ModalShardLogs, shardLogName } from './modal-shard-logs.js';
+import { actionsJobLogEvidence } from './github-actions-job-evidence.js';
 import { actionsCost, actionsRate } from './check-cost.js';
 import { invariant } from './errors.js';
 
@@ -43,6 +44,45 @@ export async function controlActions(
     retryPolls = 0,
     settlePolls = 0;
   const oom = new Set<number>(journal.oom);
+  const collectLog = async (job: ActionsJob, shard: number) => {
+    const attempt =
+      journal.retrySources[shard] !== undefined && journal.retrySources[shard] !== job.id ? 1 : 0;
+    if (journal.logged.includes(job.id)) {
+      try {
+        return readFileSync(
+          join(
+            plan.output,
+            'shards',
+            shardLogName(shard === plan.groups.length ? 'static' : shard, attempt + 1),
+          ),
+          'utf8',
+        );
+      } catch {
+        return '';
+      }
+    }
+    let text: string;
+    try {
+      text = await observe(api, () => api.log(job.id, journal.repo), progress);
+    } catch {
+      text = 'GitHub job logs unavailable; consult retained execution identity.\n';
+      progress(`Logs unavailable for job ${job.id}; observed verdict retained.`);
+    }
+    if (job.conclusion === 'failure' && oomSignal.test(text)) oom.add(job.id);
+    journal.oom = [...oom];
+    logs.register({
+      kind: 'execution',
+      executionId: String(job.id),
+      image: journal.commit!,
+      index: shard,
+      attempt,
+    });
+    logs.append(String(job.id), text);
+    appendFileSync(join(plan.output, 'stdout.log'), text, { mode: 0o600 });
+    journal.logged.push(job.id);
+    save();
+    return text;
+  };
   for (;;) {
     const run = await observe(api, () => api.request<ActionsRun>(`${base}/runs/${journal.runId}`), progress);
     invariant(run.head_sha === journal.commit, 'EVIDENCE_CHANGED', 'Actions execution source changed.');
@@ -83,31 +123,7 @@ export async function controlActions(
         journal.states[job.id] = state;
         save();
       }
-      if (job.status === 'completed' && !journal.logged.includes(job.id)) {
-        let text: string;
-        try {
-          text = await observe(api, () => api.log(job.id, journal.repo), progress);
-        } catch {
-          text = 'GitHub job logs unavailable; consult retained execution identity.\n';
-          progress(`Logs unavailable for job ${job.id}; observed verdict retained.`);
-        }
-        // Only runner/kernel lines: test names that mention SIGKILL or OOM are not a diagnosis.
-        if (job.conclusion === 'failure' && oomSignal.test(text)) oom.add(job.id);
-        journal.oom = [...oom];
-        const attempt =
-          journal.retrySources[shard] !== undefined && journal.retrySources[shard] !== job.id ? 1 : 0;
-        logs.register({
-          kind: 'execution',
-          executionId: String(job.id),
-          image: journal.commit!,
-          index: shard,
-          attempt,
-        });
-        logs.append(String(job.id), text);
-        appendFileSync(join(plan.output, 'stdout.log'), text, { mode: 0o600 });
-        journal.logged.push(job.id);
-        save();
-      }
+      if (job.status === 'completed' && !journal.logged.includes(job.id)) await collectLog(job, shard);
     }
     if (run.status !== 'completed') {
       await api.sleep(10_000);
@@ -150,6 +166,32 @@ export async function controlActions(
       await api.sleep(10_000);
       continue;
     }
+    const recovered = new Set<number>();
+    const stuckFailures = new Set<number>();
+    const summaries: string[] = [];
+    for (const [shard, job] of latest) {
+      if (job.status === 'completed') continue;
+      const evidence = actionsJobLogEvidence(await collectLog(job, shard), plan.groups[shard] ?? []);
+      if (evidence.status === 'failed') stuckFailures.add(job.id);
+      const corroborated =
+        evidence.status === 'passed' &&
+        run.conclusion === 'success' &&
+        (job.conclusion === null || job.conclusion === 'success');
+      if (corroborated) recovered.add(job.id);
+      const message = `${job.name}: job status stuck on GitHub (${job.status}); ${
+        evidence.status === 'passed' || evidence.failed
+          ? `log shows ${evidence.passed} passed, ${evidence.failed} failed (${evidence.source})`
+          : evidence.status === 'failed'
+            ? 'log reports a failure'
+            : 'log missing or incomplete'
+      }; run concluded ${run.conclusion ?? 'unknown'}; ${corroborated ? 'using log and run evidence' : 'no passing evidence'}.`;
+      (journal.stuckJobs ??= {})[job.id] = { ...evidence, runConclusion: run.conclusion, message };
+      summaries.push(message);
+      progress(message);
+      save();
+    }
+    if (latest.size < plan.groups.length + 1)
+      summaries.push('Actions job list remains incomplete; missing jobs have no passing evidence.');
     // A lost rerun response never licenses another rerun; adoption observes new jobs.
     let timing: Cost = {};
     try {
@@ -164,14 +206,16 @@ export async function controlActions(
       })),
     );
     const complete =
-      latest.size === plan.groups.length + 1 && [...latest.values()].every(job => job.status === 'completed');
-    const failed = [...latest.values()].some(job =>
-      ['failure', 'action_required'].includes(job.conclusion ?? ''),
-    );
+      latest.size === plan.groups.length + 1 &&
+      [...latest.values()].every(job => job.status === 'completed' || recovered.has(job.id));
+    const failed =
+      stuckFailures.size > 0 ||
+      ['failure', 'action_required'].includes(run.conclusion ?? '') ||
+      [...latest.values()].some(job => ['failure', 'action_required'].includes(job.conclusion ?? ''));
     const interrupted =
       run.conclusion !== 'success' ||
       !complete ||
-      [...latest.values()].some(job => job.conclusion !== 'success');
+      [...latest.values()].some(job => job.conclusion !== 'success' && !recovered.has(job.id));
     journal.terminal = true;
     save();
     return {
@@ -191,8 +235,9 @@ export async function controlActions(
           : 0,
       billableMinutes,
       cost: cost(),
+      jobStatusSummary: summaries.join('\n'),
       failureSummary: [...latest.values()]
-        .filter(job => job.conclusion !== 'success')
+        .filter(job => job.conclusion !== 'success' && !recovered.has(job.id))
         .map(
           job =>
             `${job.name}: ${job.conclusion}; job ${job.id}; inspect retained shard log (exit 137/SIGKILL indicates likely OOM).`,

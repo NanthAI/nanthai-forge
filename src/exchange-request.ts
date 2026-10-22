@@ -24,12 +24,18 @@ export async function exchangeRequest<T>(
   const attempts = (options.retries ?? 3) + 1;
   for (let attempt = 1; ; attempt++) {
     const controller = new AbortController();
-    // Abort only unfinished requests. The Convex runtime fails the whole action
-    // asynchronously ("not in a state that permits close") when a completed
-    // response stream is aborted, so a try/catch here cannot contain it.
-    let completed = false;
-    const release = () => {
-      if (!completed) controller.abort();
+    // Abort at most once, and after a response arrives only to stop a timed-out body.
+    // The Convex runtime fails the whole action asynchronously ("not in a state that
+    // permits close") when a response stream that already closed is aborted, so a
+    // try/catch cannot contain it. Ordinary cleanup cancels the body instead.
+    let response: Response | undefined,
+      released = false;
+    const release = (timedOut = false) => {
+      if (released) return;
+      released = true;
+      if (!response || timedOut) controller.abort();
+      else if (response.body && !response.bodyUsed && !response.body.locked)
+        void response.body.cancel().catch(() => {});
     };
     let idle: ReturnType<typeof setTimeout> | undefined;
     let expire: (error: ForgeError) => void;
@@ -43,7 +49,7 @@ export async function exchangeRequest<T>(
           `${call} timed out (${kind}, ${ms} ms; attempt ${attempt}/${attempts}). Retry the original operation to reconcile its outcome.`,
         ),
       );
-      release();
+      release(true);
     };
     function armIdle(ms: number, kind: string) {
       clearTimeout(idle);
@@ -54,19 +60,17 @@ export async function exchangeRequest<T>(
     };
     const request = async () => {
       observeExchangeRequest(url, init);
-      const response = await fetch(url, { ...init, signal: controller.signal });
+      const received = await fetch(url, { ...init, signal: controller.signal });
+      response = received;
       progressed();
       if (
-        (response.status === 429 || (response.status >= 500 && response.status !== 560)) &&
+        (received.status === 429 || (received.status >= 500 && received.status !== 560)) &&
         attempt < attempts
       ) {
-        await response.body?.cancel();
-        completed = true;
+        await received.body?.cancel();
         return { retry: true as const };
       }
-      const value = await consume(response, progressed);
-      completed = true;
-      return { retry: false as const, value };
+      return { retry: false as const, value: await consume(received, progressed) };
     };
     armIdle(options.headerTimeoutMs ?? 30_000, 'response headers');
     const totalMs = options.totalTimeoutMs ?? 120_000,

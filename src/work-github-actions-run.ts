@@ -124,6 +124,7 @@ export async function launchGithubActionsRun(
     if (!cancelled() || journal.dispatching)
       await exportSnapshot(plan, journal, save, undefined, undefined, ms => api.sleep(ms), progress);
     const outcome = await controlActions(plan, journal, save, api, cancelled, progress);
+    const jobStatusSummary = 'jobStatusSummary' in outcome ? outcome.jobStatusSummary : '';
     run.backend.executionIds = journal.runId ? [String(journal.runId)] : [];
     run.backend.billableMinutes = outcome.billableMinutes;
     run.backend.cost = outcome.cost;
@@ -144,7 +145,7 @@ export async function launchGithubActionsRun(
         })),
         ...retainCheckCoverage(store, run, path, plan.standard ? plan.selection : undefined),
       ],
-      details: `GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} Source, result and collected logs remain retained; the run-owned ref is removed after the remote run is terminal.`,
+      details: `${jobStatusSummary ? `${jobStatusSummary} ` : ''}GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} Source, result and collected logs remain retained; the run-owned ref is removed after the remote run is terminal.`,
     });
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
     await cleanupActionsResult(plan, journal, save, api, progress, deleteRef);

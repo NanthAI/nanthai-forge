@@ -2,7 +2,7 @@
 // Actions controller under GitHub-side stress: rate limits, lagging job lists, OOM diagnosis.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -28,7 +28,7 @@ function setup(t, groups = [['a']]) {
   return { plan, journal };
 }
 // jobs(poll) returns the job list for the nth jobs read; fail(endpoint, n) may throw per call.
-function fakeApi(plan, journal, { jobs, logs = {}, fail = () => {}, resetMs } = {}) {
+function fakeApi(plan, journal, { jobs, logs = {}, conclusion = 'success', fail = () => {}, resetMs } = {}) {
   const calls = [],
     waits = [],
     counts = {};
@@ -40,7 +40,7 @@ function fakeApi(plan, journal, { jobs, logs = {}, fail = () => {}, resetMs } = 
       fail(endpoint, counts[endpoint]);
       if (endpoint.includes('/branches/')) return { commit: { sha: journal.commit } };
       if (endpoint.endsWith('/dispatches') || endpoint.endsWith('/timing')) return {};
-      return { id: 10, head_sha: journal.commit, status: 'completed', conclusion: 'success' };
+      return { id: 10, head_sha: journal.commit, status: 'completed', conclusion };
     },
     async pages(endpoint) {
       counts[endpoint] = (counts[endpoint] ?? 0) + 1;
@@ -51,6 +51,8 @@ function fakeApi(plan, journal, { jobs, logs = {}, fail = () => {}, resetMs } = 
       return jobs(++jobPolls);
     },
     async log(id) {
+      calls.push({ endpoint: `repos/${journal.repo}/actions/jobs/${id}/logs`, log: id });
+      if (logs[id] instanceof Error) throw logs[id];
       return logs[id] ?? 'ok\n';
     },
     async sleep(ms) {
@@ -92,6 +94,7 @@ test('a completed run whose job list lags is observed again, not interrupted', a
   assert.equal(outcome.exitCode, 0);
   assert.equal(waits.filter(ms => ms === 10_000).length, 3);
   assert.ok(progress.some(line => /job list to settle/.test(line)));
+  assert.equal(journal.stuckJobs, undefined);
 });
 
 test('a job list that never settles is interrupted after a bounded wait', async t => {
@@ -102,6 +105,119 @@ test('a job list that never settles is interrupted after a bounded wait', async 
   const outcome = await control(plan, journal, api);
   assert.equal(outcome.status, 'interrupted');
   assert.equal(waits.length, 30);
+  assert.match(outcome.jobStatusSummary, /log missing or incomplete/);
+});
+
+const passingSummary =
+  '# tests 785\n# suites 0\n# pass 785\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n';
+const marker = (file, results, complete = true) =>
+  `__FORGE_TESTS__${JSON.stringify({ file, results, complete })}\n`;
+
+test('a successful run with a stuck job passes using complete timestamped node summary evidence', async t => {
+  const { plan, journal } = setup(t);
+  const log = passingSummary.replace(/^/gm, '2026-10-22T14:44:47.0000000Z ');
+  const { api, calls, waits } = fakeApi(plan, journal, {
+    jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0', 'in_progress')],
+    logs: { 2: log },
+  });
+  const progress = [];
+  const outcome = await control(plan, journal, api, progress);
+  assert.equal(outcome.status, 'passed');
+  assert.equal(outcome.exitCode, 0);
+  assert.equal(outcome.failureSummary, '');
+  assert.equal(waits.length, 30);
+  assert.equal(calls.filter(call => call.log === 2).length, 1);
+  assert.equal(readFileSync(join(plan.output, 'shards/0.log'), 'utf8'), log);
+  assert.equal(journal.states[2], 'in_progress/');
+  assert.equal(journal.stuckJobs[2].source, 'node-test-summary');
+  assert.equal(journal.stuckJobs[2].passed, 785);
+  assert.equal(journal.stuckJobs[2].failed, 0);
+  assert.equal(journal.stuckJobs[2].runConclusion, 'success');
+  assert.match(
+    outcome.jobStatusSummary,
+    /job status stuck on GitHub.*log shows 785 passed, 0 failed.*run concluded success/,
+  );
+  assert.ok(progress.includes(journal.stuckJobs[2].message));
+  // Adoption reads retained output and does not duplicate or refetch it.
+  api.log = async () => assert.fail('retained logs must be reused');
+  assert.equal((await control(plan, journal, api)).status, 'passed');
+  assert.equal(readFileSync(join(plan.output, 'shards/0.log'), 'utf8'), log);
+});
+
+test('complete result markers cover every selected file before recovering a stuck job', async t => {
+  const { plan, journal } = setup(t, [['a', 'b']]);
+  const { api } = fakeApi(plan, journal, {
+    jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0', 'in_progress')],
+    logs: { 2: marker('a', [{ name: 'one', passed: true }]) + marker('b', [{ name: 'two', passed: true }]) },
+  });
+  assert.equal((await control(plan, journal, api)).status, 'passed');
+  assert.equal(journal.stuckJobs[2].source, 'forge-test-markers');
+  assert.equal(journal.stuckJobs[2].passed, 2);
+});
+
+test('failing logs or a failed run cannot be overridden by a stuck job status', async t => {
+  const cases = [
+    { log: passingSummary.replace('# fail 0', '# fail 1'), conclusion: 'success' },
+    { log: `not ok 1 - failed assertion\n${passingSummary}`, conclusion: 'success' },
+    { log: marker('a', [{ name: 'failed', passed: false }]), conclusion: 'success' },
+    { log: `##[error]Process completed with exit code 1.\n${passingSummary}`, conclusion: 'success' },
+    { log: passingSummary, conclusion: 'failure' },
+  ];
+  for (const { log, conclusion } of cases) {
+    const { plan, journal } = setup(t);
+    const { api } = fakeApi(plan, journal, {
+      jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0', 'in_progress')],
+      logs: { 2: log },
+      conclusion,
+    });
+    const outcome = await control(plan, journal, api);
+    assert.equal(outcome.status, 'failed');
+    assert.equal(outcome.exitCode, 1);
+    assert.match(outcome.jobStatusSummary, /no passing evidence/);
+  }
+});
+
+test('missing, truncated and incomplete log evidence always interrupts a stuck job', async t => {
+  for (const log of [
+    '',
+    new Error('unavailable'),
+    'ok 1 - only the start\n',
+    '# tests 785\n# pass 785\n# fail 0\n',
+    marker('a', [{ name: 'one', passed: true }], false) + passingSummary,
+    marker('other', [{ name: 'one', passed: true }]) + passingSummary,
+    '__FORGE_TESTS__{truncated\n' + passingSummary,
+  ]) {
+    const { plan, journal } = setup(t);
+    const { api } = fakeApi(plan, journal, {
+      jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0', 'in_progress')],
+      logs: { 2: log },
+    });
+    const outcome = await control(plan, journal, api);
+    assert.equal(outcome.status, 'interrupted');
+    assert.equal(outcome.exitCode, null);
+    assert.equal(journal.stuckJobs[2].status, 'incomplete');
+    assert.match(outcome.jobStatusSummary, /log missing or incomplete/);
+  }
+});
+
+test('passing logs never replace a missing job or a non-successful run conclusion', async t => {
+  for (const conclusion of ['neutral', null, 'cancelled']) {
+    const { plan, journal } = setup(t);
+    const { api } = fakeApi(plan, journal, {
+      jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0', 'in_progress')],
+      logs: { 2: passingSummary },
+      conclusion,
+    });
+    assert.equal((await control(plan, journal, api)).status, 'interrupted');
+  }
+  const { plan, journal } = setup(t);
+  const { api } = fakeApi(plan, journal, {
+    jobs: () => [job(1, 'forge-static')],
+    logs: { 1: passingSummary },
+  });
+  const outcome = await control(plan, journal, api);
+  assert.equal(outcome.status, 'interrupted');
+  assert.match(outcome.jobStatusSummary, /missing jobs have no passing evidence/);
 });
 
 test('rate-limited reads wait for the reported reset and continue past the transport retry cap', async t => {
