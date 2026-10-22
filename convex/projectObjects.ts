@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { v } from 'convex/values';
+import { v, type Infer } from 'convex/values';
 import { blobStore } from './blobStore';
 import type { Id } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
@@ -61,12 +61,13 @@ async function prepareObject(
   { projectId, digest, size }: { projectId: Id<'hostedProjects'>; digest: string; size: number },
   authorized = false,
   r2: R2Config | null = null,
-) {
+): Promise<Infer<typeof preparedObject>> {
   try {
     if (!authorized) {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
-      await activeProject(ctx, projectId, user.subject);
+      const project = await activeProject(ctx, projectId, user.subject);
+      r2 = r2Enabled() && project.r2Writes ? r2Config() : null;
     }
     invariant(valid(digest, size), 'BAD_ARGUMENT', 'Use the exact content digest and size.');
     let row = await ctx.db
@@ -125,15 +126,7 @@ async function prepareObject(
 export const prepare = mutation({
   args: { projectId: v.id('hostedProjects'), ...pin.fields },
   returns: preparedObject,
-  // The legacy browser uploader uses this API; R2 clients use prepareBatch.
-  handler: (ctx, args) =>
-    prepareObject(ctx, args) as Promise<{
-      id: Id<'projectObjects'>;
-      created: boolean;
-      stored: boolean;
-      contentType: string;
-      uploadUrl?: string;
-    }>,
+  handler: (ctx, args) => prepareObject(ctx, args),
 });
 async function completeObject(
   ctx: MutationCtx,

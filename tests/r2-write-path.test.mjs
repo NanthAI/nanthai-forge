@@ -61,6 +61,57 @@ test('missing configuration with the flag on fails closed with a typed error and
   assert.equal(rows(s).length, 0);
 });
 
+test('single-object prepare uses the same R2 opt-in and Convex fallback as batches', async t => {
+  for (const options of [{}, { flag: '' }, { optIn: false }, { flag: 'other' }])
+    await t.test(JSON.stringify(options), async t => {
+      const { s } = await setup(t, options),
+        pin = pinOf('single object'),
+        prepared = await objects.prepare._handler(s.ctx, { projectId: 'project', ...pin }),
+        [batch] = await prepare(s, ['single object']);
+      assert.equal(prepared.id, batch.id);
+      assert.equal(prepared.stored, false);
+      assert.equal(prepared.uploadUrl, batch.uploadUrl);
+      assert.deepEqual(prepared.target?.headers, batch.target?.headers);
+      if (options.flag === undefined && options.optIn !== false) {
+        assert.equal(prepared.target.kind, 'r2');
+        assert.equal(rows(s)[0].location, 'r2');
+        assert.equal(prepared.uploadUrl, undefined);
+      } else {
+        assert.equal(prepared.target, undefined);
+        assert.equal(prepared.uploadUrl, 'https://fixture.invalid/upload');
+      }
+    });
+});
+
+test('single-object prepare with missing R2 configuration inserts nothing', async t => {
+  const { s } = await setup(t, { credentials: false });
+  await assert.rejects(
+    objects.prepare._handler(s.ctx, { projectId: 'project', ...pinOf('single object') }),
+    e => e.data?.code === 'R2_NOT_CONFIGURED',
+  );
+  assert.equal(rows(s).length, 0);
+});
+
+test('single-object prepare refuses foreign, anonymous, reader and revoked callers before signing', async t => {
+  const { s, fake } = await setup(t),
+    args = { projectId: 'project', ...pinOf('guarded single object') };
+  s.tables.projectReaders.set('reader-grant', { projectId: 'project', reader: 'reader' });
+  for (const actor of ['stranger', null, 'reader']) {
+    s.caller(actor);
+    await assert.rejects(objects.prepare._handler(s.ctx, args), e => e.data?.code === 'PROJECT_UNAVAILABLE');
+    assert.equal(rows(s).length, 0);
+  }
+  s.tables.projectContributors.set('grant', { projectId: 'project', contributor: 'contributor' });
+  s.caller('contributor');
+  const prepared = await objects.prepare._handler(s.ctx, args);
+  assert.equal(prepared.target.kind, 'r2');
+  s.tables.projectContributors.clear();
+  await assert.rejects(objects.prepare._handler(s.ctx, args), e => e.data?.code === 'PROJECT_UNAVAILABLE');
+  assert.equal(rows(s).length, 1);
+  assert.equal(rows(s)[0].r2Committed, undefined);
+  assert.equal(fake.requests.length, 0);
+});
+
 test('CLI uploads go straight to R2, commit after a HEAD check, and dedupe afterwards', async t => {
   const { s, fake } = await setup(t),
     exchange = client(s),
@@ -182,6 +233,7 @@ test('commitBatch needs current project access and an r2 row', async t => {
   await assert.rejects(commit.commitBatch._handler(s.ctx, { objects: [{ id: row.id }] }));
   assert.equal(rows(s)[0].r2Committed, undefined);
   s.caller('owner');
+  s.tables.hostedProjects.get('project').r2Writes = false;
   const convexRow = (await objects.prepare._handler(s.ctx, { projectId: 'project', ...pinOf('legacy') })).id;
   await assert.rejects(
     commit.commitBatch._handler(s.ctx, { objects: [{ id: convexRow }] }),

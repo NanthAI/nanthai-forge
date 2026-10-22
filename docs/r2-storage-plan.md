@@ -31,7 +31,7 @@ Principle: R2 holds every blob. No database function receives or returns file by
 | R2 | Signed GET read path; readers dispatch on each row's location; browser sha256 helper; mixed-location tests, revoked members, expired URLs | Landed; local fake qualification, real-bucket smoke pending |
 | R3 | Owner display data, metadata publication and durable source return | Landed; protocol 3 removes push-time display derivation, local qualification only |
 | R4 | Browser bytes: code view, review and archive download through signed URLs; CORS | Done; awaiting landing, local fake-browser qualification, live CORS qualification remains lead-only |
-| R5 | Imports, zones, agents and proposals build artifacts into R2 | Done; awaiting landing, server/runner paths implemented; legacy browser archive uploader belongs to R4 |
+| R5 | Imports, zones, agents and proposals build artifacts into R2 | Done; server/runner artifacts and browser logical-object uploads use the project opt-in |
 | R6 | Backfill: export, upload each file after checking its digest, flip rows in pages; keep old storage 14 days as fallback | Landed; lead-run command implemented, deployment qualification and actual run remain |
 | R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Done; awaiting landing |
 | R5 | Imports, zones, agents and proposals build artifacts into R2 | Done; awaiting landing |
@@ -44,7 +44,8 @@ Order: R0, R1, R2, then R3a and R4 in parallel, R3b, R6, R5, R7. R0 to R2 alone 
 
 Off by default, and byte-for-byte the old behaviour when off. New objects go to R2 only when both the Convex environment has `FORGE_BLOBS=r2` and the project owner has opted in. Objects already stored stay where they are.
 
-- `projectObjects:prepareBatch` inserts new rows with `location: 'r2'` and `r2Key` (`v1/p/<projectId>/o/<sha256>`) and returns `target: { kind: 'r2', url, headers }`, a 15 minute presigned PUT. The signature covers `content-length`, `if-none-match: *` and `x-amz-checksum-sha256`; no content type is signed or sent. A pending R2 row whose opt-in was later turned off returns to the Convex path.
+- `projectObjects:prepare` and `prepareBatch` insert new rows with `location: 'r2'` and `r2Key` (`v1/p/<projectId>/o/<sha256>`) and return `target: { kind: 'r2', url, headers }`, a 15 minute presigned PUT. The signature covers `content-length`, `if-none-match: *` and `x-amz-checksum-sha256`; no content type is signed or sent. A pending R2 row whose opt-in was later turned off returns to the Convex path.
+- The browser archive importer uploads each logical source/Work object through `projectObjects:prepare`. Opted-in new objects use the signed PUT directly from the browser, omitting JavaScript's forbidden Content-Length header so the browser supplies it from the Blob. A successful PUT or create-only 412 goes through the same HEAD-based `commitBatch`; failed or aborted transfers leave pending rows and do not complete the import. Existing Convex objects and projects without the opt-in keep the POST/reconcile/complete path.
 - The CLI sends the PUT with those headers, with the existing bounded upload concurrency (8 per window), retries 5xx, 429 and network errors with backoff, and treats 412 (object already there) as success.
 - `projectObjectCommit:commitBatch` (an action) sends one signed HEAD per new object in parallel and checks the size, and the checksum when R2 returns it. Verified rows get `r2Committed`; a missing or wrong object returns a typed error (`R2_OBJECT_MISSING`, `R2_OBJECT_SIZE_MISMATCH`, `R2_OBJECT_CHECKSUM_MISMATCH`, `R2_VERIFY_FAILED`) and leaves the row pending. Retrying the same call is safe.
 - Missing R2 settings with the flag and opt-in on fail closed with `R2_NOT_CONFIGURED`.
@@ -197,10 +198,9 @@ R2 artifacts readable with the existing R2 configuration.
 Compatibility boundaries: empty-project bootstrap and the first hosted-import
 cursor precede any project opt-in, so they retain their existing placement. New
 backup/proposal archives are already retired; resumptions of old archive uploads
-retain their original Convex upload protocol. The legacy browser archive uploader
-uses `projectObjects:prepare`, which still returns a Convex URL; its direct-R2
-upload/commit change must be coordinated with the R4 web byte work. R2-capable
-clients use `prepareBatch`. No backfill or live migration runs as part of R5.
+retain their original Convex upload protocol. The browser archive uploader
+uses `projectObjects:prepare` with the same opt-in and verified R2 upload/commit
+path as `prepareBatch`; existing Convex objects retain their original placement. No backfill or live migration runs as part of R5.
 
 ## Spike findings
 

@@ -19,7 +19,17 @@ export async function uploadArchiveObjects(
       size = bytes.length;
     if (!uploaded.has(digest)) {
       const prepared = await client.mutation(api.projectObjects.prepare, { projectId, digest, size });
-      if (!prepared.stored) {
+      if (!prepared.stored && prepared.target) {
+        // The browser supplies Content-Length from the Blob; JavaScript cannot set it.
+        const headers = Object.fromEntries(
+          Object.entries(prepared.target.headers).filter(([name]) => name.toLowerCase() !== 'content-length'),
+        );
+        const response = await fetch(prepared.target.url, { method: 'PUT', headers, body: blob });
+        if (!response.ok && response.status !== 412)
+          throw new Error(`Content upload returned HTTP ${response.status}.`);
+        // A create-only retry may find existing bytes; HEAD still verifies their exact pins.
+        await client.action(api.projectObjectCommit.commitBatch, { objects: [{ id: prepared.id }] });
+      } else if (!prepared.stored) {
         const observed = prepared.created
           ? undefined
           : await client.mutation(api.projectObjects.reconcile, { id: prepared.id, cursor: null });

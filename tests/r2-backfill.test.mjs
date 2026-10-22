@@ -34,7 +34,15 @@ async function harness(t) {
   return { s, fake, transport, options, lines, dir };
 }
 const seed = async (h, texts) => {
-  for (const text of texts) await upload(h.s, Buffer.from(text));
+  // Backfill starts with legacy Convex bytes; single-object prepare now honors the opt-in.
+  const project = h.s.tables.hostedProjects.get('project'),
+    optIn = project.r2Writes;
+  project.r2Writes = false;
+  try {
+    for (const text of texts) await upload(h.s, Buffer.from(text));
+  } finally {
+    project.r2Writes = optIn;
+  }
 };
 const stored = (s, id) => s.tables.projectObjects.get(id);
 const requests = (h, method) => h.fake.requests.filter(r => r.method === method);
