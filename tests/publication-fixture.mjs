@@ -62,11 +62,18 @@ export function setup(t, options = {}) {
   writeFileSync(
     join(bin, 'git'),
     `#!${process.execPath}
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 ${writeState.toString()}
 const stateFile = ${JSON.stringify(stateFile)};
 const args = process.argv.slice(2).map(a => a === 'https://github.com/tests/example.git' ? ${JSON.stringify(remote)} : a);
+// Batch protocols answer requests before EOF; never buffer their duplex pipes.
+if (args.includes('--stdin-paths') || (args.includes('mktree') && args.includes('--batch'))) {
+  const child = spawn(${JSON.stringify(realGit)}, args, { stdio: 'inherit' });
+  child.on('error', () => process.exit(1));
+  const code = await new Promise(resolve => child.on('close', resolve));
+  process.exit(code ?? 1);
+}
 try {
   const before = JSON.parse(readFileSync(stateFile, 'utf8'));
   if (args.includes('push') && before.mirrorRace) {

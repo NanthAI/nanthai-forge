@@ -24,6 +24,15 @@ export async function exchangeRequest<T>(
   const attempts = (options.retries ?? 3) + 1;
   for (let attempt = 1; ; attempt++) {
     const controller = new AbortController();
+    // Cleanup only: the outcome is already settled. The Convex runtime can refuse to
+    // abort a response stream that has already closed ("not in a state that permits close").
+    const release = () => {
+      try {
+        controller.abort();
+      } catch {
+        /* already closed */
+      }
+    };
     let idle: ReturnType<typeof setTimeout> | undefined;
     let expire: (error: ForgeError) => void;
     const deadline = new Promise<never>((_, reject) => {
@@ -36,7 +45,7 @@ export async function exchangeRequest<T>(
           `${call} timed out (${kind}, ${ms} ms; attempt ${attempt}/${attempts}). Retry the original operation to reconcile its outcome.`,
         ),
       );
-      controller.abort();
+      release();
     };
     function armIdle(ms: number, kind: string) {
       clearTimeout(idle);
@@ -77,7 +86,7 @@ export async function exchangeRequest<T>(
     } finally {
       clearTimeout(idle);
       clearTimeout(totalTimer);
-      controller.abort();
+      release();
     }
     await new Promise(resolve => setTimeout(resolve, (options.delayMs ?? 100) * 2 ** (attempt - 1)));
   }

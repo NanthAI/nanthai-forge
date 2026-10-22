@@ -756,3 +756,24 @@ canonical hosted Intent. `siblings` pages compact Lane IDs, versions and lifecyc
 states through the parent index in 100-row/128-KiB transport windows. Continue its
 cursor until `isDone`; no total sibling or project-history ceiling is imposed.
 All reads recheck current project access, including historical records.
+
+### Native Lane stacks
+
+A stacked Lane stores its parent Lane ID, saved parent State and target Channel.
+The stack pin is independent of an Intent's source base and of a Candidate's
+inputs. Start reserves it with the new Lane before materializing source. Sync
+uses the pinned parent tree as its explicit three-way base, then writes the
+child's aggregate delta as a new State on the selected target, retaining the prior
+child head as a second parent. This preserves causal history for ordinary Candidate
+composition without reintroducing the old parent's tree. Checkpoint history
+retains pre-restack source; conflicts retain the selected target until resolution.
+Sync's durable selection and checkpoint receipts also retain the old/new stack
+pins, so interrupted application and undo restore the same base.
+
+A retained accepted Candidate input and Channel receipt establish parent landing;
+source containment or lifecycle status alone does not. Landing retargets the
+child's next sync to main without mutating its live files. Finish/land preserve
+the existing dependency wait, including multi-level chains. Work formats 21/22
+protect stack metadata from older writers, with legacy/unified Intent semantics
+respectively; record pages, source exchange and explicit Intent conversion retain
+the pins. See [stacked Lanes](agents/workflow.md#stacked-lanes).

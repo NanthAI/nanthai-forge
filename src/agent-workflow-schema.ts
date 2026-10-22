@@ -70,6 +70,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   guidanceInputSchema.extend({ action: z.literal('guidance') }),
   z.object({
     action: z.literal('start'),
+    stackOn: id.optional(),
     frictionIds: z.array(id).optional(),
     scope: peersScopeSchema.optional(),
     waitMs: z.number().int().nonnegative().safe().optional(),
@@ -127,6 +128,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   }),
   z.object({
     action: z.literal('sync'),
+    ontoMain: z.boolean().optional(),
     detail: z.boolean().optional(),
     scope: peersScopeSchema.optional(),
     waitMs: z.number().int().nonnegative().safe().optional(),

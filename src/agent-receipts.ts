@@ -2,6 +2,7 @@
 import type { CheckRun, Lane, WorkView, WorkData } from './work-types.js';
 export const laneReceipt = (lane: Lane, path: string) => ({
   laneId: lane.id,
+  ...(lane.stack ? { stack: lane.stack } : {}),
   ...(lane.after ? { after: lane.after } : {}),
   ...(lane.startedBy ? { startedBy: lane.startedBy } : {}),
   ...(lane.startedAt ? { startedAt: lane.startedAt } : {}),

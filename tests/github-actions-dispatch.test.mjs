@@ -345,3 +345,132 @@ test('same-op recovery excludes completed outcomes, cancellation and changed dis
   set({}, { ...run, status: 'passed' });
   assert.equal(strandedActionsRun(store, run), false, 'a newer passed receipt cannot be replaced');
 });
+
+for (const appear of ['after-recovery', 'during-window', 'fresh-lookup']) {
+  test(`HTTP 400 recovers in the same check, with one dispatch when a run appears ${appear}`, async () => {
+    const f = fixture({
+      reject: [
+        new ActionsApiError(400, {
+          message: 'Invalid request body',
+          documentation_url: 'https://docs.github.com/rest/actions/workflows',
+        }),
+      ],
+      runs: ({ lookups, dispatches, run }) =>
+        (appear === 'during-window' && lookups === 3) ||
+        (appear === 'fresh-lookup' && lookups === 14) ||
+        dispatches === 2
+          ? [run]
+          : [],
+    });
+    await f.control();
+    assert.equal(f.journal.runId, 10);
+    assert.equal(f.calls.filter(call => call.method === 'POST').length, appear === 'after-recovery' ? 2 : 1);
+    assert.equal(
+      f.waits.reduce((sum, ms) => sum + ms, 0),
+      appear === 'during-window' ? 20_000 : 120_000,
+    );
+    assert.ok(f.saves.some(save => save.dispatchError?.message === 'Invalid request body'));
+    assert.match(f.progress.join('\n'), /Invalid request body.*https:\/\/docs.github.com/);
+  });
+}
+
+test('HTTP 400 recovery is durable, one-shot, and still rejects multiple or unrelated runs', async () => {
+  for (const mode of ['empty', 'multiple', 'unrelated']) {
+    const f = fixture({
+      reject: [new ActionsApiError(400), new ActionsApiError(400)],
+      runs: ({ run, lookups }) =>
+        mode === 'multiple'
+          ? [run, { ...run, id: 11 }]
+          : mode === 'unrelated' && lookups === 14
+            ? [{ ...run, display_title: 'other' }]
+            : [],
+    });
+    await assert.rejects(
+      f.control(),
+      error => error.code === (mode === 'multiple' ? 'EVIDENCE_CHANGED' : 'GITHUB_ACTIONS_UNKNOWN'),
+    );
+    const posts = f.calls.filter(call => call.method === 'POST').length;
+    if (mode === 'empty') {
+      assert.equal(posts, 2);
+      assert.equal(f.journal.dispatchRecoveryUsed, true);
+      f.reload();
+      await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
+      assert.equal(f.calls.filter(call => call.method === 'POST').length, posts);
+    } else assert.equal(posts, 1);
+  }
+});
+
+test('cancellation after the HTTP 400 lookup window prevents its recovery dispatch', async () => {
+  let cancelled = false;
+  const f = fixture({ reject: [new ActionsApiError(400)], runs: () => [], cancelled: () => cancelled });
+  f.api.sleep = async () => {
+    cancelled = true;
+  };
+  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
+  assert.equal(f.journal.dispatchRecoveryUsed, undefined);
+});
+
+test('gh sends dispatch inputs as a JSON object and retains only structured failure fields', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-actions-body-'));
+  const previous = process.env.PATH;
+  t.after(() => {
+    process.env.PATH = previous;
+    rmSync(root, { recursive: true, force: true });
+  });
+  writeFileSync(
+    join(root, 'gh'),
+    `#!${process.execPath}
+let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{
+ const body=JSON.parse(input); if(!process.argv.includes('--input') || body.inputs.runId!=='run' || body.inputs.plan!=='[0,1]') process.exit(2);
+ process.stdout.write(JSON.stringify({message:'Invalid request body', documentation_url:'https://docs.github.com/rest/actions/workflows',url:'https://api.github.com/users/private-account',account:'private-account'}));
+ process.stderr.write('gh: private-account secret (HTTP 400)');process.exit(1);
+});`,
+    { mode: 0o755 },
+  );
+  process.env.PATH = `${root}:${previous}`;
+  await assert.rejects(
+    actionsApi.request('synthetic', 'POST', {
+      ref: 'forge-check/run',
+      inputs: { runId: 'run', plan: '[0,1]' },
+    }),
+    error => {
+      assert.equal(error.httpStatus, 400);
+      assert.deepEqual(error.response, {
+        status: 400,
+        message: 'Invalid request body',
+        documentation_url: 'https://docs.github.com/rest/actions/workflows',
+      });
+      assert.match(error.message, /Invalid request body/);
+      assert.doesNotMatch(JSON.stringify(error) + error.message, /private-account|secret/);
+      return true;
+    },
+  );
+});
+
+test('a rejected HTTP 400 recovery never licenses a third dispatch', async () => {
+  const f = fixture({ reject: [new ActionsApiError(400), new ActionsApiError(422)], runs: () => [] });
+  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
+  assert.equal(f.journal.dispatchRecoveryUsed, true);
+  assert.equal(f.journal.dispatchOutcome, 'ambiguous');
+  f.reload();
+  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 2);
+});
+
+test('structured diagnostics redact account identifiers and keep documentation anchors', async () => {
+  const { actionsFailure } = await import('../dist/github-actions-api.js');
+  const failure = actionsFailure(
+    [
+      {
+        message:
+          'API limit for user ID 12345; account "octo-private"; person@example.test; https://api.github.com/users/octo-private ghp_synthetic123456',
+        documentation_url: 'https://docs.github.com/rest/actions/workflows#create-a-workflow-dispatch-event',
+        account: 'octo-private',
+      },
+    ],
+    403,
+  );
+  assert.match(failure.documentation_url, /#create-a-workflow-dispatch-event$/);
+  assert.doesNotMatch(JSON.stringify(failure), /12345|octo-private|person@example|ghp_synthetic/);
+});

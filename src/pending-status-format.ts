@@ -15,6 +15,7 @@ export function formatPendingStatus(value: PendingStatus) {
     `Main: ${pin(value.main.head)}`,
     `Lanes: ${value.counts.ready} ready · ${value.counts.waiting} waiting · ${value.counts.checking} checking (recorded states)`,
     ...examples,
+    ...value.lanes.filter(lane => lane.stack).map(lane => `Stack: ${lane.stack!.summary}`),
     ...value.lanes
       .filter(lane => lane.handoff)
       .map(

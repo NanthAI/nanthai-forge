@@ -88,14 +88,37 @@ export function pendingStatus(
       const entries = (data.landingEntries ?? []).filter(entry => candidateIds.has(entry.viewId));
       const entry = entries.at(-1);
       const after = lane.after;
+      const parent = lane.stack ? data.lanes.find(item => item.id === lane.stack!.laneId) : undefined;
+      const parentLanded =
+        !!lane.stack &&
+        [lane.stack.head, parent?.head].some(head => acceptedInputs.has(`${lane.stack!.laneId}:${head}`));
+      const chain = [lane.id];
+      let ancestor = lane;
+      while (ancestor.stack && !ancestor.stack.detached && !chain.includes(ancestor.stack.laneId)) {
+        chain.unshift(ancestor.stack.laneId);
+        const next = data.lanes.find(item => item.id === ancestor.stack!.laneId);
+        if (!next) break;
+        ancestor = next;
+      }
+      const stackState = lane.stack?.detached
+        ? 'main'
+        : parentLanded
+          ? 'parent-landed'
+          : parent?.state === 'abandoned'
+            ? 'parent-abandoned'
+            : parent?.head !== lane.stack?.head
+              ? 'parent-moved'
+              : 'up-to-date';
       const dependencyWaiting =
-        after &&
-        ('viewId' in after
-          ? !accepted.has(after.viewId)
-          : data.lanes.filter(item => item.intentId === after.intentId).length === 0 ||
-            data.lanes.some(
-              item => item.intentId === after.intentId && !acceptedInputs.has(`${item.id}:${item.head}`),
-            ));
+        (lane.stack && !lane.stack.detached && !parentLanded) ||
+        (after &&
+          !(parentLanded && 'intentId' in after && after.intentId === parent?.intentId) &&
+          ('viewId' in after
+            ? !accepted.has(after.viewId)
+            : data.lanes.filter(item => item.intentId === after.intentId).length === 0 ||
+              data.lanes.some(
+                item => item.intentId === after.intentId && !acceptedInputs.has(`${item.id}:${item.head}`),
+              )));
       const status = acceptedInputs.has(`${lane.id}:${lane.head}`)
         ? 'landed'
         : checks.some(run => candidateIds.has(run.viewId)) || entry?.status === 'checking'
@@ -116,6 +139,15 @@ export function pendingStatus(
         head: lane.head,
         status,
         after: after ?? null,
+        ...(lane.stack
+          ? {
+              stack: {
+                status: stackState,
+                depth: chain.length,
+                summary: `${chain.map(id => id.slice(0, 8)).join(' → ')} · ${stackState}`,
+              },
+            }
+          : {}),
         landingId: entry?.id ?? null,
         handoff: handoffSummary(
           latestHandoff(data.intents?.find(intent => intent.id === lane.intentId)?.notes ?? [], lane.id),

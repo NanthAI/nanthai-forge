@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { stackStatus } from './agent-stack.js';
 import { latestHandoff, handoffSummary } from './agent-handoff-types.js';
 import { ForgeError, invariant } from './errors.js';
 import { NativeSource } from './native-source.js';
@@ -71,6 +72,7 @@ export function agentLaneStatus(
   const end = command.offset + command.limit;
   return {
     ...laneReceipt(lane, store.path(lane.id)),
+    ...(lane.stack ? { stackStatus: stackStatus(store, lane) } : {}),
     handoff: handoffSummary(
       latestHandoff(
         (

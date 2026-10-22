@@ -92,6 +92,12 @@ export function renderBriefing(
   const selectedMessage = context.messages.find(m => m.id === context.messageId);
   const factPaths = context.conflictPaths.length ? context.conflictPaths : context.paths;
   const facts = [
+    ...(context.stack ? [`- Stack: ${plain(context.stack)}`] : []),
+    ...(context.parentHandoff
+      ? [
+          `- Parent handoff (${context.parentHandoff.laneId} @ ${context.parentHandoff.head}): ${plain(context.parentHandoff.summary)}`,
+        ]
+      : []),
     ...(context.handoff
       ? [
           `- Delivery handoff: ${plain(context.handoff.summary)}; ${context.handoff.tests.length} self-reported test commands; ${context.handoff.recordedChecks.length} Forge-recorded checks. Read handoff-read for unrun work and next steps.`,

@@ -49,7 +49,10 @@ target repository and runner label so policy changes cannot redirect adoption.
 Git-backed checks and declared environment/credential inputs keep existing local
 routing. The shared Modal export rules for local credential configuration apply.
 No owner token is sent in the plan or check environment; checkout does not retain
-its credential, and raw gh/git error output is never logged.
+its credential, and raw gh/git error output is never logged. Failed Actions API calls retain only
+the HTTP status and GitHub’s structured `message` and `documentation_url` fields
+in the journal and progress log, with account identifiers and credentials redacted.
+This includes transient reads and optional log/timing failures.
 
 Before dispatch, the controller waits for GitHub's branch API to report the pushed
 commit (up to sixty seconds of backoff). It records dispatch intent before sending
@@ -59,8 +62,16 @@ and retries up to five attempts with seventy-five seconds of total backoff.
 Exhaustion records a failed check with `GITHUB_ACTIONS_DISPATCH_REJECTED` and its
 HTTP status, rather than an interrupted check.
 
-An ambiguous dispatch response (transport failure, HTTP 5xx or unknown status)
-is reconciled by looking up the run. If that lookup window ends without a run,
+An ambiguous HTTP 400 dispatch gets a two-minute lookup window (thirteen reads,
+ten seconds apart). If it stays empty, the same check verifies branch visibility
+and makes one fresh complete branch query before reserving its single recovery
+dispatch. A run appearing at either lookup is adopted without another dispatch;
+any other run on the branch prevents recovery. The recovery allowance is saved
+before sending and survives process restarts. A rejected recovery does not settle
+the original ambiguous request and never authorizes another recovery.
+
+Other ambiguous dispatch responses (transport failure, HTTP 5xx or unknown status)
+keep the longer lookup window. If that window ends without a run,
 a later retry of the same operation may send one recovery dispatch, only after
 another lookup window and a fresh complete branch query confirm zero runs.
 Historical stranded dispatch journals use the same recovery. Retrying the original
@@ -112,13 +123,24 @@ $0.004/job-minute, before its shared free allowance. Override any label through
 `checks.ratesUsdPerMinute`; see [cost basis and summaries](../operations.md#native-runner-selection). Selected output files are currently marked unavailable;
 remote native process resource metrics are unavailable.
 
-The result is recorded before deleting a successful run's ref. Failed/interrupted
-refs and local source/log evidence remain for diagnosis, matching Modal's retained
-failure artifacts. Cleanup never deletes a ref that no longer names this run's
-commit. A cleanup error preserves the result and records the remaining action in
-progress. Undo the published temporary source by deleting only the recorded
-`forge-check/<runId>` branch after diagnosis. No local fallback is inferred from an
-ambiguous remote outcome.
+The result and collected logs are recorded before deleting a terminal run’s ref,
+including failed and cancelled executions. Unresolved dispatches and reruns keep
+their refs. Source, results and local logs remain retained. Cleanup never deletes
+a ref that no longer names this run’s commit; it uses the same exact Git lease
+as ref creation. A cleanup error preserves the result and reports reconciliation
+in progress. To restore a removed temporary branch, push the journal’s retained
+`commit` from the retained plan’s `source` repository to `refs/heads/forge-check/<runId>`
+using an empty-ref lease. No local fallback is inferred from an ambiguous outcome.
+
+After an observed result, a best-effort sweep visits up to twenty local run records
+and reconciles at most five eligible refs. Its disposable cursor rotates through
+retained history on subsequent checks. Only locally terminal operations with a
+matching retained plan, journal and result qualify. An execution must also still
+match the run ID, commit and run-name and be terminal on GitHub. Definitively
+rejected dispatches with no ambiguous recovery can be cleaned without an execution.
+Live or reopened local operations, unknown dispatch outcomes, unavailable evidence,
+other repositories and changed remote refs are preserved. The sweep uses retained
+local ownership records rather than assuming every `forge-check/*` branch is ours.
 
 Offline tests inject fake gh/API and Git transports; they never contact GitHub:
 

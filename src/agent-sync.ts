@@ -3,6 +3,7 @@ import {
   prepareNativeObjects,
   preparedCheckpointCurrent,
 } from './native-checkpoint-publication.js';
+import { stackSyncTarget } from './agent-stack.js';
 import { workLockWaitMs } from './work-lock.js';
 import { preparedRecordCommit } from './work-prepared-commit.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -28,7 +29,13 @@ import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 import type { Lane } from './work-types.js';
 
-export type SyncCommand = { operationId: string; laneId: string; expectedHead: string; channel: string };
+export type SyncCommand = {
+  ontoMain?: boolean;
+  operationId: string;
+  laneId: string;
+  expectedHead: string;
+  channel: string;
+};
 type Conflict = NonNullable<Lane['pendingMerge']>['conflicts'][number];
 
 const RESOLVED = 'resolved Markdown conflicts in';
@@ -67,10 +74,23 @@ export function changedPaths(from: NativeFile[], to: Target[]) {
 const clean = (source: NativeSource, path: string, head: string) =>
   source.tree(source.capture(path, false, head)) === source.tree(source.state(head).files);
 /** Working files for a conflicted sync: merged files, marker hunks for text, Lane version otherwise. */
-export function conflictPlan(source: NativeSource, laneHead: string, target: string, channel: string) {
-  const merged = source.mergeFiles(laneHead, target, undefined, undefined, undefined, {
-      insertionOrder: 'right-first',
-    }),
+export function conflictPlan(
+  source: NativeSource,
+  laneHead: string,
+  target: string,
+  channel: string,
+  base?: string,
+) {
+  const merged = source.mergeFiles(
+      laneHead,
+      target,
+      base ? new Set([base]) : undefined,
+      base ? new Set([base]) : undefined,
+      undefined,
+      {
+        insertionOrder: 'right-first',
+      },
+    ),
     files: Target[] = [...merged.files],
     conflicts: Conflict[] = [];
   const empty = Buffer.alloc(0),
@@ -256,7 +276,11 @@ export function agentSync(
         journal = join(path, '.forge', selectionName),
         previous = readSyncJournal(path, selectionName, syncSelection),
         resume = previous?.head === lane.head,
-        target = resume ? previous.target : (options.target ?? channelHead(tx, command.channel));
+        selected = stackSyncTarget(store, lane, command.ontoMain, options.target),
+        stack = resume ? previous.stack : selected?.stack,
+        target = resume
+          ? previous.target
+          : (selected?.target ?? options.target ?? channelHead(tx, command.channel));
       invariant(target, 'NOT_FOUND', `Channel ${command.channel} has no accepted head.`);
       source.state(target);
       if (resume)
@@ -265,7 +289,7 @@ export function agentSync(
           'WORK_OPERATION_CHANGED',
           'Retry the interrupted sync with its original inputs; its selected target is retained.',
         );
-      if (source.contains(lane.head, target)) {
+      if (!stack && source.contains(lane.head, target)) {
         invariant(
           clean(source, path, lane.head),
           'LANE_DIRTY',
@@ -277,14 +301,40 @@ export function agentSync(
       if (!resume)
         durableReplace(
           journal,
-          JSON.stringify({ head: lane.head, channel: command.channel, target, at, request: hash }),
+          JSON.stringify({
+            head: lane.head,
+            channel: command.channel,
+            target,
+            at,
+            request: hash,
+            ...(stack ? { stack } : {}),
+          }),
         );
       const message = `Sync ${command.channel}`,
         operation = { id: command.operationId, request: hash },
         from = source.state(lane.head).files,
-        composed = source.compose(lane.head, target, message, at, { insertionOrder: 'right-first' }),
+        rebased = stack
+          ? source.mergeFiles(
+              lane.head,
+              target,
+              new Set([stack.before.head]),
+              new Set([stack.before.head]),
+              undefined,
+              { insertionOrder: 'right-first' },
+            )
+          : undefined,
+        // Retain the old child lineage: Candidate composition must recognize
+        // that an explicit retarget already removed inherited parent-only files.
+        composed = rebased
+          ? {
+              conflicts: [...rebased.conflicts.map(item => item.path), ...overlappingPaths(rebased.files)],
+              ...(!rebased.conflicts.length && !overlappingPaths(rebased.files).length
+                ? { head: source.writeState(rebased.files, [...new Set([target, lane.head])], message, at) }
+                : {}),
+            }
+          : source.compose(lane.head, target, message, at, { insertionOrder: 'right-first' }),
         docs =
-          !composed.head && options.resolveDocs
+          !stack && !composed.head && options.resolveDocs
             ? resolveDocsComposition(source, lane.head, target, message, at)
             : null,
         merged = docs ? { ...docs, conflicts: [] } : composed;
@@ -318,10 +368,24 @@ export function agentSync(
           message,
           at,
           operation,
-          sync: { channel: command.channel, target, changedPaths: paths },
+          sync: { channel: command.channel, target, changedPaths: paths, ...(stack ? { stack } : {}) },
           ...(automatic ? { automatic } : {}),
         });
-        tx.patchFields('lanes', lane.id, { head: merged.head });
+        tx.patchFields('lanes', lane.id, {
+          head: merged.head,
+          ...(stack
+            ? {
+                base: target,
+                stack: stack.after,
+                ...(stack.after.detached &&
+                lane.after &&
+                'intentId' in lane.after &&
+                lane.after.intentId === store.select('lanes', stack.before.laneId)?.intentId
+                  ? { after: undefined }
+                  : {}),
+              }
+            : {}),
+        });
         return {
           revision: publish(new Map([...objects, [merged.head, stateBytes]])),
           result: receipt({
@@ -336,7 +400,7 @@ export function agentSync(
           }),
         };
       }
-      const plan = conflictPlan(source, lane.head, target, command.channel),
+      const plan = conflictPlan(source, lane.head, target, command.channel, stack?.before.head),
         retained = new Set([...from, ...source.state(target).files].map(file => file.blob)),
         files = plan.files.map(file =>
           file.blob && !retained.has(file.blob) ? { ...file, bytes: source.object(file.blob) } : file,
@@ -354,6 +418,7 @@ export function agentSync(
       tx.patchFields('lanes', lane.id, {
         pendingMerge: {
           parent: target,
+          ...(stack ? { stack } : {}),
           channel: command.channel,
           operation,
           conflicts: plan.conflicts,

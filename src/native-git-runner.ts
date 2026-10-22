@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
+import { nativeGitBatch } from './native-git-batch.js';
 import { gitCommand, gitFailure, gitPhase, gitTimeout } from './work-git-command.js';
 
 /** One lock-free export session. Keep stderr progress alive during Git subprocess waits. */
@@ -14,8 +15,25 @@ export function nativeGitRunner() {
       `export-native-git: ${phase}; holder=git pid=${pid ?? 'none'}; commandWait=${Math.floor((Date.now() - commandBegan) / 1000)}s; commands=${commands}; elapsed=${Math.floor((Date.now() - began) / 1000)}s\n`,
     );
   }, 10_000);
+  const batches: ReturnType<typeof nativeGitBatch>[] = [];
   return {
-    close: () => clearInterval(progress),
+    async close() {
+      clearInterval(progress);
+      await Promise.all(batches.map(batch => batch.abort()));
+    },
+    batch(root: string, args: string[]) {
+      commands++;
+      const batch = nativeGitBatch(root, args, active => {
+        pid = active;
+        phase = active ? `waiting for Git ${gitPhase(args)}` : 'projecting immutable States';
+        commandBegan = Date.now();
+      });
+      batches.push(batch);
+      return batch;
+    },
+    async finishBatches() {
+      for (const batch of batches) await batch.finish();
+    },
     git(root: string, args: string[], input?: string | Buffer): Promise<string> {
       phase = `waiting for Git ${gitPhase(args)}`;
       commandBegan = Date.now();

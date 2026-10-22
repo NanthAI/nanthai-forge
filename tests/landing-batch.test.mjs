@@ -23,7 +23,7 @@ import { drainPostAccept } from '../dist/post-accept-main.js';
 import { migrateIntentWork } from '../dist/work-intent-migration.js';
 import { unifiedWorkSchema } from '../dist/work-unified-types.js';
 import { hostedPushWork } from '../dist/work-intent-local.js';
-import { assertWorkFormat } from '../dist/work-format.js';
+import { assertWorkFormat, latestWorkFormat } from '../dist/work-format.js';
 import { workSchema } from '../dist/work-types.js';
 import { ForgeError } from '../dist/errors.js';
 import { trustAgents } from './autonomy-fixture.mjs';
@@ -265,7 +265,7 @@ test('parallel failure checks all proper prefixes concurrently, and keeps a nonm
   assert.equal(result.culprit, prefixes[3]);
 });
 
-test('Work17 requires its version and survives portable serialization; reserved unified Work16 stays unsupported', async t => {
+test('Work17 requires its version, survives portable serialization and rejects future formats', async t => {
   const f = await fixture(t);
   await f.candidate('portable.txt');
   const data = f.store.load();
@@ -291,7 +291,7 @@ test('Work17 requires its version and survives portable serialization; reserved 
       .map(entry => JSON.parse(entry.value)),
     data.landingEntries,
   );
-  assert.throws(() => assertWorkFormat({ schema: 21 }), { code: 'WORK_UPGRADE_REQUIRED' });
+  assert.throws(() => assertWorkFormat({ schema: latestWorkFormat + 1 }), { code: 'WORK_UPGRADE_REQUIRED' });
   assertWorkFormat({ schema: 16 });
   assertWorkFormat({ schema: 18 });
   assertWorkFormat({ schema: 17 });

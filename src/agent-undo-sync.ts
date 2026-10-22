@@ -77,7 +77,13 @@ export function agentUndoSync(store: WorkStore, command: UndoSync) {
             );
             const files = source.capture(path, false, lane.head),
               expected = conflict
-                ? conflictPlan(source, lane.head, conflict.parent, conflict.channel).files.map(file => ({
+                ? conflictPlan(
+                    source,
+                    lane.head,
+                    conflict.parent,
+                    conflict.channel,
+                    conflict.stack?.before.head,
+                  ).files.map(file => ({
                     path: file.path,
                     blob: file.bytes ? digest(file.bytes) : file.blob!,
                     mode: file.mode,
@@ -135,7 +141,29 @@ export function agentUndoSync(store: WorkStore, command: UndoSync) {
             operation: pending.operation,
             undoSync: pending.syncOperationId,
           });
-          tx.patchFields('lanes', lane.id, { head: pending.target, pendingUndo: undefined });
+          const originalSync = tx.fieldFind(
+            'lanes',
+            lane.id,
+            'checkpoints',
+            command.syncOperationId,
+            'operation',
+          ) as Lane['checkpoints'][number] | undefined;
+          const stack = originalSync?.sync?.stack;
+          tx.patchFields('lanes', lane.id, {
+            head: pending.target,
+            pendingUndo: undefined,
+            ...(stack
+              ? {
+                  base: stack.base,
+                  stack: stack.before,
+                  ...(!stack.before.detached &&
+                  !lane.after &&
+                  store.select('lanes', stack.before.laneId)?.intentId !== lane.intentId
+                    ? { after: { intentId: store.select('lanes', stack.before.laneId)!.intentId } }
+                    : {}),
+                }
+              : {}),
+          });
           return { revision: store.commitRecords(tx), result: receipt(pending.target, pending.forced) };
         },
         { operation: 'undo sync publication' },

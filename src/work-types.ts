@@ -127,6 +127,18 @@ export const automaticActionSchema = z.object({
   runId: z.string().uuid().optional(),
   policy: autonomyPolicySchema.optional(),
 });
+export const stackSchema = z.object({
+  laneId: id,
+  startHead: oid,
+  head: oid,
+  channel: z.string(),
+  detached: z.boolean().optional(),
+});
+export const stackSyncSchema = z.object({
+  base: oid,
+  before: stackSchema,
+  after: stackSchema,
+});
 const checkpointSchema = z.object({
   actor: workActorSchema.optional(),
   head: oid,
@@ -141,6 +153,7 @@ const checkpointSchema = z.object({
       channel: z.string(),
       target: oid,
       changedPaths: z.array(z.string()),
+      stack: stackSyncSchema.optional(),
       status: z.enum(['merged', 'conflict']).optional(),
     })
     .optional(),
@@ -150,6 +163,7 @@ export const afterSchema = z.union([z.object({ intentId: id }).strict(), z.objec
 export const laneSchema = z.object({
   agentStart: agentOperationSchema.optional(),
   after: afterSchema.optional(),
+  stack: stackSchema.optional(),
   id,
   startedBy: workActorSchema.optional(),
   startedAt: z.string().optional(),
@@ -180,7 +194,7 @@ export const laneSchema = z.object({
   checkpoints: z.array(checkpointSchema),
   pending: checkpointSchema.optional(),
   pendingSync: checkpointSchema.optional(),
-  /** Unresolved Channel sync: the next checkpoint records `parent` as its second parent. */
+  /** Unresolved sync target; resolution checkpoints retain both source heads. */
   pendingUndo: z
     .object({
       operation: agentOperationSchema,
@@ -195,6 +209,7 @@ export const laneSchema = z.object({
     .object({
       parent: oid,
       workspaceHead: oid.optional(),
+      stack: stackSyncSchema.optional(),
       channel: z.string(),
       operation: agentOperationSchema,
       conflicts: z.array(z.object({ path: z.string(), kind: z.enum(['text', 'binary']) })),
@@ -983,6 +998,7 @@ export const workSchema = z
       z.literal(15),
       z.literal(17),
       z.literal(19),
+      z.literal(21),
     ]),
     landingEntries: z.array(landingEntrySchema).optional(),
     landingBatches: z.array(landingBatchSchema).optional(),
@@ -1047,6 +1063,7 @@ export const workSchema = z
       ) &&
         !data.intents.some(intent => intent.lifecycle?.some(entry => entry.operation))) ||
         data.schema >= 13) &&
+      (!data.lanes.some(lane => lane.stack) || data.schema >= 21) &&
       (!data.lanes.some(
         lane =>
           lane.after ||

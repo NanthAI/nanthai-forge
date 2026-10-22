@@ -172,6 +172,8 @@ export async function controlActions(
       run.conclusion !== 'success' ||
       !complete ||
       [...latest.values()].some(job => job.conclusion !== 'success');
+    journal.terminal = true;
+    save();
     return {
       status: cancelled()
         ? ('cancelled' as const)

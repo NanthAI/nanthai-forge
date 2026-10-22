@@ -134,7 +134,15 @@ export function briefingContext(
     (!!lane && item.laneId === lane.id) ||
     overlappingPaths(scopes, item.paths).length > 0;
   const siblings = records.lanes.filter(item => item.intentId === intent?.id && item.id !== lane?.id);
+  const parent = lane?.stack ? records.lanes.find(item => item.id === lane.stack!.laneId) : undefined;
+  const parentIntent = parent ? records.intents.find(item => item.id === parent.intentId) : undefined;
   return {
+    ...(parent
+      ? {
+          parentHandoff: latestHandoff(parentIntent?.notes ?? [], parent.id),
+          stack: `${parent.id} → ${lane!.id} · ${parent.head !== lane!.stack!.head ? 'parent-moved' : parent.state}`,
+        }
+      : {}),
     ...(siblings.length
       ? {
           siblingLanes: siblings.map(item => ({

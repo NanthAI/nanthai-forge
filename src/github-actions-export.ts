@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { commitActionsSnapshot } from './github-actions-commit.js';
 import { retrySyncGit, syncGit, syncGitSleep } from './github-sync-git.js';
 import { durableReplace } from './native-durability.js';
@@ -8,6 +9,7 @@ import { invariant } from './errors.js';
 import { githubActionsRecipe, githubActionsWorkflow } from './github-actions-workflow.js';
 import type { JobUsage } from './check-cost.js';
 import type { ModalPlan } from './modal-plan.js';
+import type { ActionsFailure } from './github-actions-api.js';
 
 export type ActionsJournal = {
   pin: string;
@@ -20,6 +22,8 @@ export type ActionsJournal = {
   dispatching?: boolean;
   dispatchOutcome?: 'accepted' | 'rejected' | 'ambiguous';
   dispatchStatus?: number;
+  dispatchError?: ActionsFailure;
+  apiFailures?: ActionsFailure[];
   dispatchRejections?: number;
   dispatchLookupExhausted?: boolean;
   dispatchRecoveryUsed?: boolean;
@@ -30,6 +34,7 @@ export type ActionsJournal = {
   oom: number[];
   states: Record<string, string>;
   deleted?: boolean;
+  terminal?: boolean;
 };
 export function actionsJournal(path: string, plan: ModalPlan, repo: string, runsOn: string) {
   const filename = join(path, 'github-actions.json');
@@ -129,21 +134,31 @@ export async function deleteActionsRef(
   if (journal.deleted) return;
   const ref = `refs/heads/forge-check/${plan.runId}`,
     remote = `https://github.com/${journal.repo}.git`;
-  await retrySyncGit(
-    async () => {
-      const observed = (await git(plan.source, ['ls-remote', '--refs', remote, ref])).trim();
-      if (observed) {
-        invariant(
-          observed === `${journal.commit}\t${ref}`,
-          'EVIDENCE_CHANGED',
-          'Actions cleanup refused changed ref.',
-        );
-        await git(plan.source, ['push', `--force-with-lease=${ref}:${journal.commit}`, remote, `:${ref}`]);
-      }
-    },
-    sleep,
-    progress,
-  );
-  journal.deleted = true;
-  save();
+  // Deletion needs no source objects. A reclaimed export can use an empty disposable Git repo.
+  const temporary = existsSync(join(plan.source, '.git'))
+    ? undefined
+    : mkdtempSync(join(tmpdir(), 'forge-ref-cleanup-'));
+  const root = temporary ?? plan.source;
+  try {
+    if (temporary) await git(root, ['init', '--bare', '--template=']);
+    await retrySyncGit(
+      async () => {
+        const observed = (await git(root, ['ls-remote', '--refs', remote, ref])).trim();
+        if (observed) {
+          invariant(
+            observed === `${journal.commit}\t${ref}`,
+            'EVIDENCE_CHANGED',
+            'Actions cleanup refused changed ref.',
+          );
+          await git(root, ['push', `--force-with-lease=${ref}:${journal.commit}`, remote, `:${ref}`]);
+        }
+      },
+      sleep,
+      progress,
+    );
+    journal.deleted = true;
+    save();
+  } finally {
+    if (temporary) rmSync(temporary, { recursive: true, force: true });
+  }
 }

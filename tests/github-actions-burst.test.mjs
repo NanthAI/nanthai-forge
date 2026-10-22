@@ -260,7 +260,12 @@ for (const landed of [false, true]) {
       journal,
       () => {},
       async (_, args) => {
+        if (args[0] === 'init') {
+          assert.deepEqual(args, ['init', '--bare', '--template=']);
+          return '';
+        }
         if (args[0] === 'ls-remote') return remote;
+        assert.equal(args[0], 'push');
         assert.ok(args.includes(`--force-with-lease=${ref}:${commit}`));
         assert.equal(args.at(-1), `:${ref}`);
         pushes++;

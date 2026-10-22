@@ -19,6 +19,7 @@ import { WorkStore } from './work-store.js';
 import { workSchema, type GitProjection } from './work-types.js';
 import { workGit } from './work-git.js';
 import { asyncGitTreeWriter } from './native-git-tree.js';
+import { batchObjectWriter } from './native-git-batch.js';
 import { nativeGitRunner } from './native-git-runner.js';
 import { nativeCommitBytes, reuseNativeGit } from './native-git-reuse.js';
 export { treeForGit } from './native-git-tree.js';
@@ -273,7 +274,17 @@ export async function exportNativeGit(input: string, head: string, target: strin
       }
     }
     const mappings = new Map<string, string>(),
-      writeTree = asyncGitTreeWriter(repo, source, git, reused.blobs);
+      writeObject = batchObjectWriter(scratch, args => runner.batch(repo, args));
+    let trees: ReturnType<typeof runner.batch> | undefined;
+    const writeTree = asyncGitTreeWriter(
+      source,
+      bytes => writeObject('blob', bytes),
+      bytes => {
+        trees ??= runner.batch(repo, ['mktree', '--batch', '-z']);
+        return trees.request(bytes);
+      },
+      reused.blobs,
+    );
     async function project(id: string): Promise<string> {
       const existing = mappings.get(id);
       if (existing) return existing;
@@ -297,18 +308,13 @@ export async function exportNativeGit(input: string, head: string, target: strin
         );
         commit = state.git.commit;
       } else {
-        commit = (
-          await git(
-            repo,
-            ['hash-object', '-t', 'commit', '-w', '--stdin'],
-            nativeCommitBytes(id, state, tree, parents),
-          )
-        ).trim();
+        commit = await writeObject('commit', nativeCommitBytes(id, state, tree, parents));
       }
       mappings.set(id, commit);
       return commit;
     }
     const commit = await project(head);
+    await runner.finishBatches();
     const branch = `refs/heads/forge-native/${head}`;
     await git(repo, ['update-ref', branch, commit, '']);
     await git(repo, ['symbolic-ref', 'HEAD', branch]);
@@ -341,7 +347,7 @@ export async function exportNativeGit(input: string, head: string, target: strin
     publish(output, destination);
     return { ...mapping, path: destination, bundle: { ...bundle, path: join(destination, 'source.bundle') } };
   } finally {
-    runner.close();
+    await runner.close();
     rmSync(scratch, { recursive: true, force: true });
   }
 }

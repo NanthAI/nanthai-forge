@@ -1275,7 +1275,7 @@ test('exhausted dispatch rejections record failed with HTTP status, not interrup
       journal.pushed = true;
       save();
     },
-    async () => assert.fail('failed ref must be retained'),
+    async () => assert.equal(read(join(path, 'result.json')).status, 'failed'),
   );
   const receipt = read(join(path, 'result.json'));
   assert.equal(receipt.status, 'failed');
@@ -1334,7 +1334,7 @@ for (const via of ['run-check', 'finish', 'observation']) {
     mkdirSync(bin);
     writeFileSync(
       join(bin, 'git'),
-      `#!${process.execPath}\nif(process.argv.includes('ls-remote'))process.stdout.write(${JSON.stringify(`${commit}\trefs/heads/forge-check/${run.id}`)});else if(!process.argv.includes('push'))process.exit(1);\n`,
+      `#!${process.execPath}\nif(process.argv.includes('ls-remote'))process.stdout.write(${JSON.stringify(`${commit}\trefs/heads/forge-check/${run.id}`)});else if(!process.argv.includes('push')&&!process.argv.includes('init'))process.exit(1);\n`,
       { mode: 0o755 },
     );
     process.env.PATH = `${bin}:${previousPath}`;
@@ -1419,3 +1419,257 @@ for (const via of ['run-check', 'finish', 'observation']) {
     assert.equal(read(join(path, previous)).status, 'interrupted');
   });
 }
+
+for (const conclusion of ['success', 'failure', 'cancelled']) {
+  test(`runner retains results and logs before deleting a terminal ${conclusion} branch`, async t => {
+    const { work, run, path } = fixture(t);
+    let api,
+      deleted = 0;
+    const proxy = {
+      request: (...args) => api.request(...args),
+      pages: (...args) => api.pages(...args),
+      log: (...args) => api.log(...args),
+      sleep: async () => {},
+    };
+    await launchGithubActionsRun(
+      work.store,
+      run,
+      proxy,
+      async (plan, journal, save) => {
+        journal.commit = 'a'.repeat(40);
+        journal.pushed = true;
+        save();
+        api = transport(plan, journal, { conclusion }).api;
+      },
+      async () => {
+        deleted++;
+        assert.equal(read(join(path, 'github-actions.json')).terminal, true);
+        assert.equal(
+          read(join(path, 'result.json')).status,
+          conclusion === 'success' ? 'passed' : conclusion === 'failure' ? 'failed' : 'interrupted',
+        );
+        assert.match(readFileSync(join(path, 'shards/static.log'), 'utf8'), /synthetic smoke/);
+      },
+    );
+    assert.equal(deleted, 1);
+  });
+}
+
+test('HTTP 400 recovers within the same controller and retains response diagnostics', async t => {
+  const { work, run, path } = fixture(t);
+  let api,
+    dispatches = 0;
+  const proxy = {
+    request: (...args) => api.request(...args),
+    pages: (...args) => api.pages(...args),
+    log: (...args) => api.log(...args),
+    sleep: async () => {},
+  };
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    proxy,
+    async (plan, journal, save) => {
+      journal.commit = 'a'.repeat(40);
+      journal.pushed = true;
+      save();
+      api = transport(plan, journal).api;
+      const request = api.request,
+        pages = api.pages;
+      api.request = async (...args) => {
+        if (args[0].endsWith('/dispatches') && ++dispatches === 1)
+          throw new ActionsApiError(400, {
+            message: 'Invalid request body',
+            documentation_url: 'https://docs.github.com/rest/actions/workflows',
+          });
+        return request(...args);
+      };
+      api.pages = (...args) => (args[0].includes('/runs?') && dispatches < 2 ? [] : pages(...args));
+    },
+    async () => {},
+  );
+  assert.equal(read(join(path, 'result.json')).status, 'passed');
+  const journal = read(join(path, 'github-actions.json'));
+  assert.equal(journal.dispatchRecoveryUsed, true);
+  assert.equal(dispatches, 2);
+  assert.equal(journal.apiFailures[0].message, 'Invalid request body');
+  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /Invalid request body/);
+});
+
+test('non-dispatch API failures survive retry and optional timing/log fallback', async t => {
+  const { work, run, path } = fixture(t);
+  let api;
+  const proxy = {
+    request: (...args) => api.request(...args),
+    pages: (...args) => api.pages(...args),
+    log: (...args) => api.log(...args),
+    sleep: async () => {},
+  };
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    proxy,
+    async (plan, journal, save) => {
+      journal.commit = 'a'.repeat(40);
+      journal.pushed = true;
+      save();
+      api = transport(plan, journal).api;
+      const request = api.request;
+      api.request = async (...args) => {
+        if (args[0].endsWith('/timing')) throw new ActionsApiError(503, { message: 'Timing unavailable' });
+        return request(...args);
+      };
+      api.log = async () => {
+        throw new ActionsApiError(404, {
+          message: 'Logs unavailable',
+          documentation_url: 'https://docs.github.com/rest/actions',
+        });
+      };
+    },
+    async () => {},
+  );
+  assert.equal(read(join(path, 'result.json')).status, 'passed');
+  const failures = read(join(path, 'github-actions.json')).apiFailures;
+  assert.equal(failures.filter(error => error.message === 'Timing unavailable').length, 6);
+  assert.equal(failures.filter(error => error.message === 'Logs unavailable').length, 6);
+  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /GitHub: Logs unavailable/);
+});
+
+for (const mode of [
+  'terminal',
+  'local-running',
+  'remote-running',
+  'wrong-head',
+  'wrong-title',
+  'unknown-dispatch',
+  'reopened',
+]) {
+  test(`stale check-ref sweep requires local and remote terminal evidence: ${mode}`, async t => {
+    const { sweepActionsRefs } = await import('../dist/github-actions-cleanup.js');
+    const { work, run, path } = fixture(t);
+    let api;
+    const proxy = {
+      request: (...args) => api.request(...args),
+      pages: (...args) => api.pages(...args),
+      log: (...args) => api.log(...args),
+      sleep: async () => {},
+    };
+    await launchGithubActionsRun(
+      work.store,
+      run,
+      proxy,
+      async (plan, journal, save) => {
+        journal.commit = 'a'.repeat(40);
+        journal.pushed = true;
+        save();
+        api = transport(plan, journal).api;
+      },
+      async () => {},
+    );
+    recoverRuns(work.store, { runs: [run] });
+    if (mode === 'local-running') run.status = 'running';
+    const saveRun = () =>
+      work.store.locked(() => {
+        const tx = work.store.records();
+        tx.replace('runs', tx.find('runs', run.id).position, run);
+        work.store.commitRecords(tx);
+      });
+    saveRun();
+    const journalPath = join(path, 'github-actions.json'),
+      journal = read(journalPath);
+    if (mode === 'unknown-dispatch') {
+      delete journal.runId;
+      journal.dispatchOutcome = 'ambiguous';
+    }
+    writeFileSync(journalPath, JSON.stringify(journal));
+    let deleted = 0,
+      reads = 0;
+    await sweepActionsRefs(
+      work.store,
+      'synthetic/checks',
+      {
+        async request() {
+          reads++;
+          if (mode === 'reopened') {
+            run.status = 'running';
+            saveRun();
+          }
+          return {
+            id: journal.runId,
+            head_sha: mode === 'wrong-head' ? 'wrong' : journal.commit,
+            display_title: mode === 'wrong-title' ? 'other' : `forge-check/${run.id}`,
+            status: mode === 'remote-running' ? 'in_progress' : 'completed',
+          };
+        },
+        sleep: async () => {},
+      },
+      () => {},
+      async (_plan, selected, save) => {
+        deleted++;
+        selected.deleted = true;
+        save();
+      },
+    );
+    assert.equal(deleted, mode === 'terminal' ? 1 : 0);
+    assert.equal(reads, ['local-running', 'unknown-dispatch'].includes(mode) ? 0 : 1);
+    assert.equal(read(journalPath).deleted, mode === 'terminal' ? true : undefined);
+  });
+}
+
+test('stale check-ref sweep reads bounded pages and rotates through retained history', async t => {
+  const { sweepActionsRefs } = await import('../dist/github-actions-cleanup.js');
+  const root = mkdtempSync(join(tmpdir(), 'forge-actions-sweep-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const offsets = [];
+  const store = {
+    directory: root,
+    page(collection, offset, limit) {
+      assert.equal(collection, 'runs');
+      assert.equal(limit, 20);
+      offsets.push(offset);
+      return {
+        total: 45,
+        records: Array.from({ length: Math.min(20, 45 - offset) }, () => ({ status: 'running' })),
+      };
+    },
+  };
+  for (let attempt = 0; attempt < 4; attempt++)
+    await sweepActionsRefs(
+      store,
+      'synthetic/checks',
+      {},
+      () => {},
+      async () => assert.fail('no terminal ops'),
+    );
+  assert.deepEqual(offsets, [0, 20, 40, 0]);
+});
+
+test('ref cleanup survives reclaimed source exports using an empty disposable Git repository', async t => {
+  const { plan, journal } = controllerFixture(t);
+  plan.source = join(plan.output, 'reclaimed-source');
+  let temporary,
+    deleted = false;
+  await deleteActionsRef(
+    plan,
+    journal,
+    () => {},
+    async (root, args) => {
+      temporary = root;
+      assert.notEqual(root, plan.source);
+      assert.equal(existsSync(root), true);
+      if (args[0] === 'init') {
+        assert.deepEqual(args, ['init', '--bare', '--template=']);
+        return '';
+      }
+      if (args[0] === 'ls-remote') return `${journal.commit}\trefs/heads/forge-check/${plan.runId}`;
+      assert.equal(args[0], 'push');
+      assert.ok(args.includes(`--force-with-lease=refs/heads/forge-check/${plan.runId}:${journal.commit}`));
+      assert.equal(args.at(-1), `:refs/heads/forge-check/${plan.runId}`);
+      deleted = true;
+      return '';
+    },
+  );
+  assert.equal(deleted, true);
+  assert.equal(journal.deleted, true);
+  assert.equal(existsSync(temporary), false);
+});

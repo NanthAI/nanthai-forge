@@ -1,5 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ActionsApiError, mutate, observe, type ActionsApi, type ActionsRun } from './github-actions-api.js';
+import {
+  ActionsApiError,
+  actionsFailureText,
+  mutate,
+  observe,
+  type ActionsApi,
+  type ActionsRun,
+  type ActionsFailure,
+} from './github-actions-api.js';
 import type { ActionsJournal } from './github-actions-export.js';
 import type { ModalPlan } from './modal-plan.js';
 import { ForgeError, invariant } from './errors.js';
@@ -9,20 +17,24 @@ export class ActionsDispatchRejected extends ForgeError {
   constructor(
     readonly httpStatus: number,
     readonly attempts: number,
+    readonly response?: ActionsFailure,
   ) {
     super(
       DISPATCH_REJECTED,
-      `GitHub Actions dispatch rejected (HTTP ${httpStatus}) after ${attempts} attempts; no execution was created.`,
+      `GitHub Actions dispatch rejected (HTTP ${httpStatus}) after ${attempts} attempts; no execution was created.${actionsFailureText(response)}`,
     );
   }
 }
 const rejected = (journal: ActionsJournal) =>
-  new ActionsDispatchRejected(journal.dispatchStatus!, journal.dispatchRejections!);
+  new ActionsDispatchRejected(journal.dispatchStatus!, journal.dispatchRejections!, journal.dispatchError);
 export class ActionsDispatchUnknown extends ForgeError {
-  constructor(readonly httpStatus?: number) {
+  constructor(
+    readonly httpStatus?: number,
+    readonly response?: ActionsFailure,
+  ) {
     super(
       'GITHUB_ACTIONS_UNKNOWN',
-      `Actions dispatch outcome ambiguous${httpStatus === undefined ? '' : ` (HTTP ${httpStatus})`}; retained dispatch must be reconciled.`,
+      `Actions dispatch outcome ambiguous${httpStatus === undefined ? '' : ` (HTTP ${httpStatus})`}; retained dispatch must be reconciled.${actionsFailureText(response)}`,
     );
   }
 }
@@ -90,10 +102,13 @@ export async function ensureActionsDispatch(
     }
   };
   const lookup = async () => {
-    for (let attempt = 0; attempt < 12; attempt++) {
+    // HTTP 400 normally means no run was created; retain a two-minute visibility window.
+    const short = journal.dispatchOutcome === 'ambiguous' && journal.dispatchStatus === 400;
+    const polls = short ? 13 : 12;
+    for (let attempt = 0; attempt < polls; attempt++) {
       adopt(await readRuns());
       if (journal.runId) return;
-      if (attempt < 11) await api.sleep(Math.min(60_000, 5_000 * (attempt + 1)));
+      if (attempt < polls - 1) await api.sleep(short ? 10_000 : Math.min(60_000, 5_000 * (attempt + 1)));
     }
   };
   const unknown = () => {
@@ -101,7 +116,7 @@ export async function ensureActionsDispatch(
       journal.dispatchLookupExhausted = true;
       save();
     }
-    throw new ActionsDispatchUnknown(journal.dispatchStatus);
+    throw new ActionsDispatchUnknown(journal.dispatchStatus, journal.dispatchError);
   };
 
   let recovery = journal.dispatchRecoveryUsed === true;
@@ -110,7 +125,9 @@ export async function ensureActionsDispatch(
     const recover =
       ambiguous() &&
       !journal.dispatchRecoveryUsed &&
-      (journal.dispatchOutcome === undefined || journal.dispatchLookupExhausted);
+      (journal.dispatchOutcome === undefined ||
+        journal.dispatchLookupExhausted ||
+        journal.dispatchStatus === 400);
     await lookup();
     if (journal.runId) return;
     if (!recover || cancelled()) unknown();
@@ -119,62 +136,80 @@ export async function ensureActionsDispatch(
 
   if ((journal.dispatchRejections ?? 0) >= 5) throw rejected(journal);
   let branchVisible = false;
-  while (!cancelled()) {
-    if (!branchVisible) {
-      await visibleBranch(plan, journal, api, progress);
-      branchVisible = true;
-    }
-    if (cancelled()) return;
-    if (recovery) {
-      // After branch visibility, a fresh, complete query must still be empty.
-      const fresh = await readRuns();
-      adopt(fresh);
-      if (journal.runId) return;
-      if (fresh.length) unknown();
-      journal.dispatchRecoveryUsed = true;
-      progress('No Actions runs found on the retained branch; using the single recovery dispatch.');
-    }
-    journal.dispatching = true;
-    // A crash before recording the response must be treated as ambiguous.
-    journal.dispatchOutcome = 'ambiguous';
-    journal.dispatchLookupExhausted = false;
-    delete journal.dispatchStatus;
-    save();
-    try {
-      await mutate(
-        api,
-        () =>
-          api.request(`${base}/workflows/forge-check.yml/dispatches`, 'POST', {
-            ref: branch,
-            inputs: { runId: plan.runId, plan: JSON.stringify(plan.groups.map((_, index) => index)) },
-          }),
-        progress,
-      );
-      journal.dispatchOutcome = 'accepted';
+  for (;;) {
+    while (!cancelled()) {
+      if (!branchVisible) {
+        await visibleBranch(plan, journal, api, progress);
+        branchVisible = true;
+      }
+      if (cancelled()) return;
+      if (recovery) {
+        // After branch visibility, a fresh, complete query must still be empty.
+        const fresh = await readRuns();
+        adopt(fresh);
+        if (journal.runId) return;
+        if (fresh.length || cancelled()) unknown();
+        journal.dispatchRecoveryUsed = true;
+        progress('No Actions runs found on the retained branch; using the single recovery dispatch.');
+      }
+      journal.dispatching = true;
+      // A crash before recording the response must be treated as ambiguous.
+      journal.dispatchOutcome = 'ambiguous';
+      journal.dispatchLookupExhausted = false;
+      delete journal.dispatchStatus;
       save();
-      break;
-    } catch (error) {
-      if (error instanceof ActionsApiError && error.httpStatus !== undefined)
-        journal.dispatchStatus = error.httpStatus;
-      if (!(error instanceof ActionsApiError) || error.outcome !== 'rejected') {
+      try {
+        await mutate(
+          api,
+          () =>
+            api.request(`${base}/workflows/forge-check.yml/dispatches`, 'POST', {
+              ref: branch,
+              inputs: { runId: plan.runId, plan: JSON.stringify(plan.groups.map((_, index) => index)) },
+            }),
+          progress,
+        );
+        journal.dispatchOutcome = 'accepted';
+        save();
+        break;
+      } catch (error) {
+        if (error instanceof ActionsApiError) {
+          journal.dispatchError = error.response;
+          if (error.httpStatus !== undefined) journal.dispatchStatus = error.httpStatus;
+        }
+        if (!(error instanceof ActionsApiError) || error.outcome !== 'rejected') {
+          save();
+          progress(
+            `Actions dispatch response ambiguous${journal.dispatchStatus === undefined ? '' : ` (HTTP ${journal.dispatchStatus})`}; looking up the retained run.${actionsFailureText(journal.dispatchError)}`,
+          );
+          break;
+        }
+        // Rejection of the recovery request cannot settle the original ambiguous request.
+        // The one-shot allowance was durably consumed before sending it.
+        if (recovery) {
+          save();
+          unknown();
+        }
+        journal.dispatchOutcome = 'rejected';
+        journal.dispatching = false;
+        journal.dispatchRejections = (journal.dispatchRejections ?? 0) + 1;
         save();
         progress(
-          `Actions dispatch response ambiguous${journal.dispatchStatus === undefined ? '' : ` (HTTP ${journal.dispatchStatus})`}; looking up the retained run.`,
+          `Actions dispatch rejected (HTTP ${journal.dispatchStatus}); attempt ${journal.dispatchRejections}/5.${actionsFailureText(journal.dispatchError)}`,
         );
-        break;
+        if (journal.dispatchRejections >= 5) throw rejected(journal);
+        await api.sleep(5_000 * 2 ** (journal.dispatchRejections - 1));
       }
-      journal.dispatchOutcome = 'rejected';
-      journal.dispatching = false;
-      journal.dispatchRejections = (journal.dispatchRejections ?? 0) + 1;
-      save();
-      progress(
-        `Actions dispatch rejected (HTTP ${journal.dispatchStatus}); attempt ${journal.dispatchRejections}/5.`,
-      );
-      if (journal.dispatchRejections >= 5) throw rejected(journal);
-      await api.sleep(5_000 * 2 ** (journal.dispatchRejections - 1));
     }
+    if (!journal.dispatching) return;
+    await lookup();
+    if (journal.runId) return;
+    if (ambiguous() && journal.dispatchStatus === 400 && !journal.dispatchRecoveryUsed && !cancelled()) {
+      journal.dispatchLookupExhausted = true;
+      save();
+      recovery = true;
+      branchVisible = false;
+      continue;
+    }
+    unknown();
   }
-  if (!journal.dispatching) return;
-  await lookup();
-  if (!journal.runId) unknown();
 }

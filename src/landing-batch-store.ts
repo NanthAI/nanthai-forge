@@ -25,7 +25,15 @@ export function batchEdit<T>(work: WorkService, id: string, edit: (data: WorkDat
       const expanded =
         Number(data.schema) >= 19 || data.landingBatches?.some(batch => batch.entryIds.length > 4);
       data.schema = (
-        [16, 18, 20].includes(Number(data.schema)) ? (expanded ? 20 : 18) : expanded ? 19 : 17
+        Number(data.schema) >= 21
+          ? data.schema
+          : [16, 18, 20].includes(Number(data.schema))
+            ? expanded
+              ? 20
+              : 18
+            : expanded
+              ? 19
+              : 17
       ) as WorkData['schema'];
       data.revision++;
       work.store.save(data);

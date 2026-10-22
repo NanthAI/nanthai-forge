@@ -47,8 +47,8 @@ async function fixture(t, format = 15, readerFormat = 14) {
         },
       ];
     }
-    if ([16, 18, 20].includes(format)) {
-      data.schema = format === 20 ? 19 : format === 18 ? 17 : 15;
+    if ([16, 18, 20, 22].includes(format)) {
+      data.schema = format === 22 ? 21 : format === 20 ? 19 : format === 18 ? 17 : 15;
       Object.assign(data, format === 16 ? convertWork15To16(data) : convertWorkTo18(data));
     } else data.schema = format;
     data.autonomyPolicy = policyPreset('trusted');
@@ -172,6 +172,8 @@ for (const [format, reader] of [
   [18, 17],
   [19, 18],
   [20, 18],
+  [21, 20],
+  [22, 20],
 ])
   test(`format-${reader} compatibility probe rejects format${format} before writer preparation and preserves retained bytes`, async t => {
     const f = await fixture(t, format, reader),

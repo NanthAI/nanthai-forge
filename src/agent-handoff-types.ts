@@ -19,7 +19,7 @@ export const handoffSchema = z.object({
 });
 export const handoffReadSchema = z.object({ action: z.literal('handoff-read'), laneId: id });
 /** Optional extension of existing private Intent notes; no new retention owner. */
-export const deliveryHandoffSchema = z.object({
+const handoffRecordSchema = z.object({
   schema: z.literal(1),
   operationId: id,
   request: z.string().regex(/^[a-f0-9]{64}$/),
@@ -53,6 +53,9 @@ export const deliveryHandoffSchema = z.object({
       endedAt: z.string().nullable(),
     }),
   ),
+});
+export const deliveryHandoffSchema = handoffRecordSchema.extend({
+  parentHandoff: handoffRecordSchema.nullable().optional(),
 });
 export type DeliveryHandoff = z.infer<typeof deliveryHandoffSchema>;
 export function latestHandoff(notes: { handoff?: DeliveryHandoff | undefined }[], laneId: string) {

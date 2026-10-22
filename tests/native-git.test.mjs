@@ -288,7 +288,7 @@ for (const format of ['sha1', 'sha256'])
       const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
       writeFileSync(
         join(bin, 'git'),
-        `#!/bin/sh\ncase " $* " in *" hash-object -w --stdin "*) echo blob >> '${called}';; esac\nexec '${realGit}' "$@"\n`,
+        `#!/bin/sh\ncase " $* " in *" hash-object -t blob -w --stdin-paths "*) echo blob >> '${called}';; esac\nexec '${realGit}' "$@"\n`,
       );
       chmodSync(join(bin, 'git'), 0o700);
       const priorPath = process.env.PATH;
@@ -299,7 +299,8 @@ for (const format of ['sha1', 'sha256'])
       } finally {
         process.env.PATH = priorPath;
       }
-      assert.equal(readFileSync(called, 'utf8').trim().split('\n').length, ids.size);
+      assert.equal(readFileSync(called, 'utf8').trim().split('\n').length, 1);
+      assert.ok(ids.size > 1);
       assert.ok(oldWrites > ids.size * 8);
       const repo = join(exported.path, 'repository.git'),
         mappings = new Map(exported.states.map(item => [item.state, item.commit]));

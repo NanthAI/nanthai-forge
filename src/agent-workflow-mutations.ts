@@ -1,3 +1,4 @@
+import { isUnifiedWork } from './work-unified-types.js';
 import { citeFriction } from './friction.js';
 import { workLockWaitMs } from './work-lock.js';
 import { preparedRecordCommit } from './work-prepared-commit.js';
@@ -30,7 +31,7 @@ import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import type { CheckpointAction, StartAction } from './agent-workflow-schema.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
-import type { Lane } from './work-types.js';
+import type { Lane, WorkData } from './work-types.js';
 import { laneReceipt } from './agent-receipts.js';
 import { assertMergeResolved } from './agent-sync.js';
 const request = (command: unknown) => digest(JSON.stringify(command));
@@ -109,12 +110,16 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
             'CHANNEL_CHANGED',
             'Selected Channel has no intact acceptance receipt. Reconcile that Channel, or explicitly select channel:null to start from the workspace source.',
           );
+          const parent = command.stackOn ? tx.fields('lanes', command.stackOn)?.record : undefined;
+          invariant(!command.stackOn || parent, 'NOT_FOUND', 'Stack parent Lane not found.');
+          invariant(!parent || store.native, 'UNSUPPORTED', 'Stacked Lanes use native source.');
           const base =
-            channel?.head && channel.moveId && !channel.diagnostic
+            parent?.head ??
+            (channel?.head && channel.moveId && !channel.diagnostic
               ? channel.head
               : store.native
                 ? data.nativeHead!
-                : headAt(store.root);
+                : headAt(store.root));
 
           const at = new Date().toISOString(),
             laneId = randomUUID();
@@ -163,6 +168,9 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
             'Add a Lane to an open Intent.',
           );
           if (command.after) validateAfter(store, command.after, existing?.id);
+          const after =
+            command.after ??
+            (parent && parent.intentId !== existing?.id ? { intentId: parent.intentId } : undefined);
           intent =
             existing ??
             applyIntentMetadata(
@@ -172,7 +180,7 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
                 outcome: command.outcome,
                 constraints: command.constraints,
                 base,
-                ...(channel?.head && channel.moveId && !channel.diagnostic
+                ...(base === channel?.head && channel.moveId && !channel.diagnostic
                   ? {
                       baseChannel: { name: channel.name, head: channel.head, acceptanceId: channel.moveId },
                     }
@@ -184,7 +192,17 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
           lane = {
             id: laneId,
             ...(existing ? { agentStart: { id: command.operationId, request: hash } } : {}),
-            ...(command.after ? { after: command.after } : {}),
+            ...(after ? { after } : {}),
+            ...(parent
+              ? {
+                  stack: {
+                    laneId: parent.id,
+                    startHead: parent.head,
+                    head: parent.head,
+                    channel: command.channel ?? 'main',
+                  },
+                }
+              : {}),
             startedBy: localActor('agent', command.actor, command.tool),
             startedAt: at,
             ...(command.scope ? { scope: command.scope } : {}),
@@ -198,7 +216,9 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
             state: 'creating',
             checkpoints: [],
           };
-          tx.setSchema(existing || command.after ? 12 : 7);
+          tx.setSchema(
+            (parent ? (isUnifiedWork(data) ? 22 : 21) : existing || after ? 12 : 7) as WorkData['schema'],
+          );
           if (!existing) tx.append('intents', intent);
           // A planned schema-16 Intent's first Lane captures its exact source pin.
           else if (!existing.base) tx.patchFields('intents', existing.id, { base });
@@ -245,7 +265,8 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
                   siblingLanes: siblings,
                   ...(warnings.length ? { warnings } : {}),
                   ...laneReceipt(lane, store.path(lane.id)),
-                  head: lane.base,
+                  base: lane.stack?.startHead ?? lane.base,
+                  head: lane.stack?.startHead ?? lane.base,
                   currentHead: lane.head,
                   baseChannel: intent.baseChannel ?? null,
                 },
@@ -481,6 +502,19 @@ export function agentCheckpoint(
                   tx.appendField('lanes', lane.id, 'checkpoints', checkpoint);
                   tx.patchFields('lanes', lane.id, {
                     head,
+                    ...(lane.pendingMerge?.stack && !options.preserveMerge
+                      ? {
+                          base: lane.pendingMerge.parent,
+                          stack: lane.pendingMerge.stack.after,
+                          ...(lane.pendingMerge.stack.after.detached &&
+                          lane.after &&
+                          'intentId' in lane.after &&
+                          lane.after.intentId ===
+                            store.select('lanes', lane.pendingMerge.stack.before.laneId)?.intentId
+                            ? { after: undefined }
+                            : {}),
+                        }
+                      : {}),
                     ...(lane.pendingMerge && !options.preserveMerge ? { pendingMerge: undefined } : {}),
                   });
                   return store.locked(

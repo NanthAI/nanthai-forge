@@ -45,6 +45,9 @@ Use the parent finish operationId, not an attempt's child operation ID.
 Actions: integrate, wait, handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
          making-of, report, friction, friction-triage, improve.
+start stackOn:LANE_ID bases a native Lane on that parent’s latest saved head and waits for its landing.
+sync restacks onto the latest parent; after landing it targets main. ontoMain:true detaches explicitly.
+status/peers/pending show the chain, parent movement and abandonment.
 start intentId adds a sibling Lane; finish with:[laneId] lands siblings together.
 after:{intentId} or after:{viewId} waits for that work to land; land-ready resumes waits.
 finish/accept complete included Lanes; the Intent completes when all its Lanes are done (keepOpen:true to opt out).
@@ -138,6 +141,9 @@ function actionHelp(action: string): string {
   invariant(action in examples, 'BAD_ARGUMENT', 'Unknown agent action. Use agent --help.');
   let result = `nforge agent ROOT ${action} '${JSON.stringify(examples[action])}'\n`;
   if (strict[action]) result += `Fully pinned: '${JSON.stringify(strict[action])}'\n`;
+  if (action === 'start' || action === 'sync')
+    result +=
+      'start stackOn:LANE_ID uses the parent’s saved head; sync restacks onto its latest save, or main after its receipt. sync ontoMain:true detaches and reapplies only the child delta. Resolve conflicts then checkpoint. Child finish/land waits for the parent; land-ready resumes waiting finishes.\n';
   if (action === 'integrate')
     result +=
       'Compose main plus latest saved active Lanes and run local static checks. Omit laneIds for all checkpointed active Lanes. Results and pair notices are advisory; no acceptance or remote runner. Cached by exact source and check inputs.\n';

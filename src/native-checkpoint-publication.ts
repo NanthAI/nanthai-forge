@@ -95,7 +95,11 @@ function prepareCandidate(store: WorkStore, command: CheckpointAction, preserveM
     ? lane.head
     : source.writeState(
         candidate.capture.files,
-        lane.pendingMerge && !preserveMerge ? [lane.head, lane.pendingMerge.parent] : [lane.head],
+        lane.pendingMerge && !preserveMerge
+          ? lane.pendingMerge.stack
+            ? [lane.pendingMerge.parent, lane.head]
+            : [lane.head, lane.pendingMerge.parent]
+          : [lane.head],
         command.message,
         candidate.at,
       );

@@ -565,3 +565,45 @@ status, peers, Lane diff and local pending status show the latest handoff summar
 and retrieval command. Briefs include the latest structured delivery context for
 the next agent, with self-reports separate from recorded checks. Handoffs do not
 gate checks or acceptance and add no acknowledgement step or external delivery.
+
+### Stacked Lanes
+
+For native owners, `start {"outcome":"Next slice","stackOn":"PARENT_LANE_ID"}`
+materializes the parent's latest **saved** head, including its unlanded source.
+Unsaved parent files are excluded. The Lane retains its parent/head pin and a
+landing dependency; a new Intent also records `after:{intentId:parentIntentId}`.
+Stacks can span multiple Intents or Lanes of one Intent. The dependency is the
+exact parent Lane, so unrelated siblings do not delay a stack.
+
+`sync {"laneId":"CHILD_LANE_ID"}` reapplies the child's aggregate delta from its
+pinned parent head onto the parent's latest saved head. Existing checkpoints stay
+retained. Overlaps use the normal sync markers and checkpoint resolution flow.
+Each child is synced in its own working directory; syncing one Lane does not edit
+another agent's files. Restack a deeper chain from oldest to newest.
+
+A parent's accepted Candidate input and Channel receipt automatically select main
+as the child's next target. This retargeting does not rewrite a child working copy
+while its agent is editing: `sync`, or the existing automatic sync during `finish`,
+brings in the accepted source. Status identifies the landing receipt; a later
+main advance is included on sync. An abandoned parent remains visible until an
+explicit `sync {"laneId":"CHILD_LANE_ID","ontoMain":true}` detaches the child.
+This reapplies only the child's delta onto main (or the native bootstrap source
+when main has no receipt yet); parent-only changes are omitted and overlaps remain
+conflicts. `undo-sync` restores the pre-sync source base and stack pin.
+
+Child `finish` and `land` use the existing dependency wait until the parent has an
+accepted input in the destination Channel. `land {"laneIds":["PARENT","CHILD"]}`
+can process the chain in order; `land-ready` resumes waiting finishes after their
+parents land. A child never supplies its parent's acceptance merely by containing
+its source. Operation IDs retain the original start/sync selection on replay,
+including interruption after working files were applied.
+
+`status`, `peers` and `pending` show the stack chain and parent movement,
+abandonment or landing in one line. Child briefs include the parent's latest
+handoff; child handoffs retain its pinned fields and `handoff-read` also returns
+the latest parent handoff. Missing handoffs are reported as absent.
+
+Stacked owners use Work format 21 (legacy Intents) or 22 (unified Intents).
+Readers capped at 20 reject these owners before writing, preserving stack pins.
+Ordinary owners keep their existing format. These formats and commands concern
+native owners; Git compatibility Lanes retain their existing workflow.

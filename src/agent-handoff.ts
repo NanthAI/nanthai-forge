@@ -44,7 +44,12 @@ export function recordHandoff(store: WorkStore, command: Command) {
       const { action: _action, ...payload } = command;
       void _action;
       const at = new Date().toISOString();
+      const parent = lane.stack ? tx.fields('lanes', lane.stack.laneId)?.record : undefined;
+      const parentHandoff = parent
+        ? latestHandoff(tx.find('intents', parent.intentId)?.record.notes ?? [], parent.id)
+        : null;
       const handoff = deliveryHandoffSchema.parse({
+        ...(lane.stack ? { parentHandoff } : {}),
         ...payload,
         schema: 1,
         request,
@@ -78,7 +83,26 @@ export function readHandoff(store: WorkStore, laneId: string) {
     invariant(intent, 'NOT_FOUND', 'Intent not found.');
     return {
       revision: tx?.revision ?? data!.revision,
-      result: { laneId, handoff: latestHandoff(intent.notes, laneId) },
+      result: {
+        laneId,
+        handoff: latestHandoff(intent.notes, laneId),
+        ...(lane.stack
+          ? {
+              parentHandoff: (() => {
+                const parent =
+                  tx?.fields('lanes', lane.stack.laneId)?.record ??
+                  data?.lanes.find(item => item.id === lane.stack!.laneId);
+                const notes = parent
+                  ? ((
+                      tx?.find('intents', parent.intentId)?.record ??
+                      data?.intents.find(item => item.id === parent.intentId)
+                    )?.notes ?? [])
+                  : [];
+                return parent ? latestHandoff(notes, parent.id) : null;
+              })(),
+            }
+          : {}),
+      },
     };
   });
 }

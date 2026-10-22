@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFile } from 'node:child_process';
 import { ForgeError } from './errors.js';
+import { redactGitStderr } from './github-sync-git.js';
 
 export type ActionsJob = {
   id: number;
@@ -30,16 +31,47 @@ export interface ActionsApi {
 }
 /** GitHub rejected the request for budget (primary/secondary limit). Nothing was performed. */
 export const RATE_LIMITED = 'GITHUB_ACTIONS_RATE_LIMITED';
-/** Only status and outcome survive transport classification; stderr may carry account data. */
+export type ActionsFailure = { status?: number; message?: string; documentation_url?: string };
+/** Retain only GitHub's structured response fields; never retain gh stderr or response headers. */
+export function actionsFailure(body: unknown, status?: number): ActionsFailure {
+  const value = (Array.isArray(body) ? body.at(-1) : body) as {
+    message?: unknown;
+    documentation_url?: unknown;
+  } | null;
+  const message =
+    typeof value?.message === 'string'
+      ? redactGitStderr(value.message, value.message.length)
+          .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]+\b/g, '[account]')
+          .replace(/\b(user|account|installation) ID[ :#]+[\w-]+/gi, '$1 ID [account]')
+          .replace(/\b(user|account) ["'][^"']+["']/gi, '$1 [account]')
+          .replace(/https:\/\/(?:api\.)?github\.com\/[^\s)]+/gi, '[GitHub URL]')
+      : undefined;
+  const url = typeof value?.documentation_url === 'string' ? value.documentation_url : undefined;
+  return {
+    ...(status === undefined ? {} : { status }),
+    ...(message ? { message } : {}),
+    ...(url && /^https:\/\/docs\.github\.com\/[^\s?]*$/.test(url) ? { documentation_url: url } : {}),
+  };
+}
+export function actionsFailureText(failure?: ActionsFailure) {
+  return `${failure?.message ? ` GitHub: ${failure.message}` : ''}${failure?.documentation_url ? ` (${failure.documentation_url})` : ''}`;
+}
 export class ActionsApiError extends ForgeError {
   readonly outcome: 'rejected' | 'ambiguous';
-  constructor(readonly httpStatus?: number) {
+  readonly response: ActionsFailure;
+  constructor(
+    readonly httpStatus?: number,
+    body?: unknown,
+    rateLimited = false,
+  ) {
     const outcome = httpStatus === 404 || httpStatus === 422 ? 'rejected' : 'ambiguous';
+    const response = actionsFailure(body, httpStatus);
     super(
-      'GITHUB_ACTIONS_API',
-      `GitHub Actions request ${outcome}${httpStatus === undefined ? '' : ` (HTTP ${httpStatus})`}; retained operation requires reconciliation.`,
+      rateLimited ? RATE_LIMITED : 'GITHUB_ACTIONS_API',
+      `GitHub Actions request ${outcome}${httpStatus === undefined ? '' : ` (HTTP ${httpStatus})`}; retained operation requires reconciliation.${actionsFailureText(response)}`,
     );
     this.outcome = outcome;
+    this.response = response;
   }
 }
 // Rate-limit detection retains the existing primary/secondary-budget handling.
@@ -58,11 +90,19 @@ function gh(args: string[], input?: string): Promise<string> {
       (error, stdout, stderr) => {
         if (!error) return resolve(stdout);
         const status = /\bHTTP(?:\/\d(?:\.\d)?)?\s+(\d{3})\b/i.exec(String(stderr))?.[1];
-        const failure = new ActionsApiError(status === undefined ? undefined : Number(status));
+        const httpStatus = status === undefined ? undefined : Number(status);
+        let body: unknown;
+        try {
+          body = JSON.parse(stdout);
+        } catch {
+          /* Non-JSON output is not safe diagnostic data. */
+        }
         reject(
-          failure.httpStatus === 429 || (failure.httpStatus === 403 && rateLimitText.test(String(stderr)))
-            ? new ForgeError(RATE_LIMITED, 'GitHub API rate limit reached; waiting for the budget to reset.')
-            : failure,
+          new ActionsApiError(
+            httpStatus,
+            body,
+            httpStatus === 429 || (httpStatus === 403 && rateLimitText.test(String(stderr))),
+          ),
         );
       },
     );
@@ -93,6 +133,24 @@ export const actionsApi: ActionsApi = {
     }
   },
 };
+/** Records even transient/swallowed failures before the controller retries or continues. */
+export function recordActionsFailures(api: ActionsApi, record: (error: ActionsApiError) => void): ActionsApi {
+  const attempt = async <T>(call: () => Promise<T>): Promise<T> => {
+    try {
+      return await call();
+    } catch (error) {
+      if (error instanceof ActionsApiError) record(error);
+      throw error;
+    }
+  };
+  return {
+    request: <T>(...args: Parameters<ActionsApi['request']>) => attempt(() => api.request<T>(...args)),
+    pages: <T>(...args: Parameters<ActionsApi['pages']>) => attempt(() => api.pages<T>(...args)),
+    log: (...args) => attempt(() => api.log(...args)),
+    sleep: ms => api.sleep(ms),
+    rateLimitResetMs: () => api.rateLimitResetMs?.() ?? Promise.resolve(undefined),
+  };
+}
 const isRateLimited = (error: unknown) => (error as { code?: unknown })?.code === RATE_LIMITED;
 /** Wait out a rate limit: until the reported reset (bounded to an hour), at least a minute. */
 async function waitForBudget(api: ActionsApi, progress?: (message: string) => void) {

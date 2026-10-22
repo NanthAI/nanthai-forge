@@ -48,22 +48,18 @@ export function treeForGit(root: string, files: NativeFile[], source: NativeSour
 }
 
 export function asyncGitTreeWriter(
-  root: string,
   source: NativeSource,
-  git: (root: string, args: string[], input?: string | Buffer) => Promise<string>,
+  writeBlob: (bytes: Buffer) => Promise<string>,
+  writeTree: (bytes: Buffer) => Promise<string>,
   blobs = new Map<string, string>(),
 ) {
   // Only IDs live across States. Validate bytes before their first write in this repository.
   return async (files: NativeFile[]): Promise<string> => {
     for (const file of files)
-      if (!blobs.has(file.blob))
-        blobs.set(
-          file.blob,
-          (await git(root, ['hash-object', '-w', '--stdin'], source.object(file.blob))).trim(),
-        );
+      if (!blobs.has(file.blob)) blobs.set(file.blob, await writeBlob(source.object(file.blob)));
     const trees = new Map<string, string>();
     for (const [path, node] of treeNodes(files, blobs))
-      trees.set(path, (await git(root, ['mktree', '-z'], treeInput(path, node, trees))).trim());
+      trees.set(path, await writeTree(Buffer.concat([treeInput(path, node, trees), Buffer.from('\0')])));
     return trees.get('')!;
   };
 }

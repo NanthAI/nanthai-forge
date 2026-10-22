@@ -446,3 +446,20 @@ test('long actions override the native HTTP header deadline at dispatch; quick c
   });
   assert.equal(dispatched.length, 1);
 });
+
+test('a completed HEAD survives a runtime that refuses to abort its closed stream', async t => {
+  const { url } = await fixture(t, (_req, res) => {
+    res.writeHead(200, { 'content-length': '5' });
+    res.end();
+  });
+  const abort = AbortController.prototype.abort;
+  AbortController.prototype.abort = function () {
+    throw new TypeError('The stream is not in a state that permits close');
+  };
+  t.after(() => {
+    AbortController.prototype.abort = abort;
+  });
+  const response = await exchangeFetch('R2 object HEAD verification', url, { method: 'HEAD' }, deadlines);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-length'), '5');
+});

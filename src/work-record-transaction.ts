@@ -351,6 +351,7 @@ export class WorkRecordTransaction {
       'id',
       'intentId',
       'base',
+      'stack',
       'head',
       'pending',
       'pendingMerge',
@@ -379,9 +380,18 @@ export class WorkRecordTransaction {
         'This operation belongs to another retained action.',
       );
     }
+    const changedAfter = !isDeepStrictEqual(lane.after, before.after);
+    invariant(
+      !changedAfter || isDeepStrictEqual(current.after, before.after),
+      'LANE_STALE',
+      'Lane landing dependency changed; retry from its current source.',
+    );
     this.setSchema(candidate.manifest.fields.schema as WorkData['schema']);
     this.replace('lanes', this.positions('lanes', laneId)[0]!, {
       ...current,
+      base: lane.base,
+      stack: lane.stack,
+      ...(changedAfter ? { after: lane.after } : {}),
       head: lane.head,
       pendingMerge: lane.pendingMerge,
       pending: lane.pending,

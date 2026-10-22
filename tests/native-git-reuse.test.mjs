@@ -103,9 +103,9 @@ test('incremental CLI exports only new States with byte-identical merge history 
     .trim()
     .split('\n')
     .map(line => JSON.parse(line));
-  assert.equal(commands.filter(args => args.includes('hash-object') && args.includes('commit')).length, 3);
-  assert.equal(commands.filter(args => args.includes('mktree')).length, 6);
-  assert.equal(commands.filter(args => args.includes('hash-object') && !args.includes('commit')).length, 3);
+  assert.equal(commands.filter(args => args.includes('hash-object') && args.includes('commit')).length, 1);
+  assert.equal(commands.filter(args => args.includes('mktree')).length, 1);
+  assert.equal(commands.filter(args => args.includes('hash-object') && !args.includes('commit')).length, 1);
   assert.deepEqual(readFileSync(join(previous.path, 'mapping.json')), before);
   rmSync(previous.path, { recursive: true });
   assert.equal(workGit(join(incremental.result.path, 'repository.git'), ['fsck', '--full']).trim(), '');

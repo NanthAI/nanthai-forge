@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { stackStatus } from './agent-stack.js';
 import { gitIsAncestor } from './work-git.js';
 import { nativeChannels } from './native-work.js';
 import { channelStatus } from './work-channel.js';
@@ -53,7 +54,11 @@ export function annotateLanes<T extends { head: string; base: string }>(
   data?: Pick<WorkData, 'channelMoves'>,
 ) {
   const merged = mergedChecker(store, channelHeads(store, data));
-  return items.map(item => ({ ...item, ...mergedFields(merged(item)) }));
+  return items.map(item => ({
+    ...item,
+    ...mergedFields(merged(item)),
+    ...((item as unknown as Lane).stack ? { stackStatus: stackStatus(store, item as unknown as Lane) } : {}),
+  }));
 }
 
 async function setState(work: WorkService, command: Record<string, unknown>) {

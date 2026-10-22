@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { stackLanding } from './agent-stack.js';
 import { invariant } from './errors.js';
 import { allRecords } from './agent-lifecycle.js';
 import { NativeSource } from './native-source.js';
@@ -18,8 +19,11 @@ export function validateAfter(store: WorkStore, after: After, intentId?: string)
  * A dependency must have landed in the destination Channel's retained history. */
 export function waitingDependencies(store: WorkStore, laneIds: string[], channel = 'main') {
   const dependencies = laneIds.flatMap(laneId => {
-    const after = store.select('lanes', laneId, 'id', true)?.after;
-    return after ? [{ laneId, after }] : [];
+    const lane = store.select('lanes', laneId, 'id', true);
+    const after = lane?.after;
+    return after || (lane?.stack && !lane.stack.detached)
+      ? [{ laneId, after: after ?? { intentId: store.select('lanes', lane!.stack!.laneId)!.intentId } }]
+      : [];
   });
   if (!dependencies.length) return [];
   const moves = allRecords<WorkData['channelMoves'][number]>(store, 'channelMoves').filter(
@@ -30,7 +34,14 @@ export function waitingDependencies(store: WorkStore, laneIds: string[], channel
   const contains = (candidate: string) =>
     !!head && (ancestry ? ancestry.contains(head, candidate) : gitIsAncestor(store.root, candidate, head));
   const views = allRecords<WorkView>(store, 'views');
-  return dependencies.filter(({ after }) => {
+  return dependencies.filter(({ laneId, after }) => {
+    const lane = store.select('lanes', laneId)!;
+    if (lane.stack && !lane.stack.detached) {
+      if (!stackLanding(store, lane)) return true;
+      const parent = store.select('lanes', lane.stack.laneId);
+      if ('intentId' in after && after.intentId === parent?.intentId) return false;
+    }
+
     if ('viewId' in after) return !moves.some(move => move.viewId === after.viewId && contains(move.head));
     const landedViews = views.filter(
       view =>

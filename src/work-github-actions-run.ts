@@ -6,7 +6,8 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readPolicy } from './work-autonomy.js';
 import { modalPlan, validateModalPlan, type ModalPlan } from './modal-plan.js';
-import { actionsApi, ActionsApiError, type ActionsApi } from './github-actions-api.js';
+import { actionsApi, ActionsApiError, recordActionsFailures, type ActionsApi } from './github-actions-api.js';
+import { cleanupActionsResult, sweepActionsRefs } from './github-actions-cleanup.js';
 import { actionsJournal, deleteActionsRef, exportActionsSnapshot } from './github-actions-export.js';
 import { ActionsDispatchRejected, ActionsDispatchUnknown } from './github-actions-dispatch.js';
 import { controlActions } from './github-actions-controller.js';
@@ -46,6 +47,7 @@ export async function launchGithubActionsRun(
     appendFileSync(join(path, 'stdout.log'), `${line}\n`, { mode: 0o600 });
     workProgress('github-actions check', line, `${run.id}:${sequence}`);
   };
+  let cleanupRejected: (() => Promise<void>) | undefined;
   try {
     const policy = readPolicy(store).checks;
     // Adopt retained routing, even if the project's runner settings changed.
@@ -87,6 +89,23 @@ export async function launchGithubActionsRun(
     run.status = 'running';
     updateModalRun(store, run);
     const { journal, save } = actionsJournal(path, plan, repo, runsOn);
+    api = recordActionsFailures(api, error => {
+      (journal.apiFailures ??= []).push(error.response);
+      save();
+      progress(error.message);
+    });
+    cleanupRejected = async () => {
+      if (
+        journal.runId ||
+        journal.dispatching ||
+        journal.dispatchRecoveryUsed ||
+        journal.dispatchOutcome !== 'rejected'
+      )
+        return;
+      journal.terminal = true; // Definitive rejections created no execution.
+      save();
+      await cleanupActionsResult(plan, journal, save, api, progress, deleteRef);
+    };
     if (journal.rateUsdPerMinute === undefined) {
       journal.rateUsdPerMinute = policy?.ratesUsdPerMinute?.[runsOn] ?? actionsRate(runsOn);
     }
@@ -125,17 +144,11 @@ export async function launchGithubActionsRun(
         })),
         ...retainCheckCoverage(store, run, path, plan.standard ? plan.selection : undefined),
       ],
-      details: `GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} ${outcome.status === 'passed' ? 'Run ref is removed after recording this result.' : 'Run ref and logs retained for diagnosis; remove the run-owned ref after inspection.'}`,
+      details: `GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} Source, result and collected logs remain retained; the run-owned ref is removed after the remote run is terminal.`,
     });
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
-    if (outcome.status === 'passed') {
-      try {
-        await deleteRef(plan, journal, save, undefined, ms => api.sleep(ms), progress);
-        progress('Removed run-owned ref after recording result.');
-      } catch {
-        progress('Result recorded; run-owned ref cleanup requires reconciliation.');
-      }
-    }
+    await cleanupActionsResult(plan, journal, save, api, progress, deleteRef);
+    await sweepActionsRefs(store, repo, api, progress, deleteRef);
   } catch (error) {
     try {
       const journalFile = join(path, 'github-actions.json');
@@ -171,6 +184,7 @@ export async function launchGithubActionsRun(
     });
     progress(receipt.details);
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
+    if (dispatchRejected) await cleanupRejected?.();
   } finally {
     for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.off(signal, onSignal);
     control.release();
@@ -180,7 +194,7 @@ export async function launchGithubActionsRun(
 // Only a stable code or error class: transport messages can contain credentials.
 function errorKind(error: unknown) {
   if (error instanceof ActionsApiError || error instanceof ActionsDispatchUnknown)
-    return `${error.code}: ${error instanceof ActionsApiError ? error.outcome : 'ambiguous'}${error.httpStatus === undefined ? '' : ` HTTP ${error.httpStatus}`}`;
+    return `${error.code}: ${error.message}`;
   const code = (error as { code?: unknown })?.code;
   if (typeof code === 'string' && /^[A-Z_]{3,64}$/.test(code)) return code;
   return error instanceof Error && /^[A-Za-z]{1,40}$/.test(error.name) ? error.name : 'unknown';

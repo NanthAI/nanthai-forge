@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { stackStatus } from './agent-stack.js';
 import { currentPlanning } from './work-planning-state.js';
 import { planningBriefIntent } from './work-planning-lifecycle.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
@@ -64,6 +65,7 @@ export function localBrief(store: WorkStore, input: unknown, liveMcp = false) {
   });
   context.autonomyPolicy = effectivePolicy(data);
   const selectedLane = data.lanes.find(lane => lane.id === context.laneId);
+  if (selectedLane?.stack) context.stack = stackStatus(store, selectedLane)!.summary;
   if (selectedLane) context.ownership = laneOwnership(store, selectedLane);
   if (coordination.handovers.some(row => row.operationId === context.messageId)) context.handoverTaken = true;
   if (context.lane && context.laneId) context.lane.path = store.path(context.laneId);

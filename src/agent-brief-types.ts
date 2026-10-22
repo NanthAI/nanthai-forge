@@ -55,6 +55,8 @@ export type BriefRecords = {
 };
 export type BriefContext = {
   handoff?: DeliveryHandoff | null;
+  parentHandoff?: DeliveryHandoff | null;
+  stack?: string;
   autonomyPolicy?: AutonomyPolicy | undefined;
   handoverTaken?: boolean;
   ownership?: { actor: string; state: string; quietMs?: number | undefined } | undefined;

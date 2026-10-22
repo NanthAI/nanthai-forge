@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { stackStatus } from './agent-stack.js';
 import { readHandoff } from './agent-handoff.js';
 import { handoffSummary } from './agent-handoff-types.js';
 import { z } from 'zod';
@@ -60,6 +61,7 @@ type Landed = {
   sync: 'clean' | 'conflict' | 'unknown';
 };
 export type PeersDigest = {
+  stack?: ReturnType<typeof stackStatus>;
   handoff?: ReturnType<typeof handoffSummary>;
   clear?: true;
   v?: 1;
@@ -101,6 +103,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     const lane =
       tx?.fields('lanes', command.laneId)?.record ?? legacy?.lanes.find(item => item.id === command.laneId);
     invariant(lane, 'NOT_FOUND', 'Peers Lane not found.');
+    if (lane.stack) result.stack = stackStatus(store, lane);
     const handoff = readHandoff(store, lane.id).result.handoff;
     if (handoff) result.handoff = handoffSummary(handoff);
     const notices =
@@ -157,13 +160,16 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
           v: 1,
           coverage: 'local',
           ownership: result.ownership,
+          ...(result.stack ? { stack: result.stack } : {}),
           ...(result.handoff ? { handoff: result.handoff } : {}),
           ...(result.notices ? { notices: result.notices } : {}),
         },
         command.detail,
       );
     if (!scope.length)
-      return result.notices?.length || result.handoff ? boundPeers(result, command.detail) : { clear: true };
+      return result.notices?.length || result.handoff || result.stack
+        ? boundPeers(result, command.detail)
+        : { clear: true };
     const moves: ChannelMove[] = [];
     if (tx) {
       for (const position of tx.positions('channelMoves', 'main', 'channel').reverse()) {
@@ -435,7 +441,8 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     !result.stalled?.length &&
     !result.conflicts?.length &&
     !result.notices?.length &&
-    !result.handoff
+    !result.handoff &&
+    !result.stack
   )
     return { clear: true };
   return boundPeers(result, command.detail);
