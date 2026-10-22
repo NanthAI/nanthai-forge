@@ -11,7 +11,8 @@ const encoded = rows => JSON.stringify(rows);
 export function lanesFixture() {
   const tables = Object.fromEntries(Object.keys(schema.tables).map(name => [name, new Map()]));
   const counts = [];
-  let serial = 0;
+  let serial = 0,
+    decorate;
   const insert = (table, value) => {
     const _id = `${table}-${++serial}`;
     tables[table].set(_id, { ...value, _id, _creationTime: serial });
@@ -87,11 +88,14 @@ export function lanesFixture() {
             put(table, id, { ...local[table].get(id), ...value });
           },
           query: table => {
-            let match;
+            let match,
+              indexFields,
+              descending = false;
             const q = {
               withIndex: (name, build) => {
                 const index = schema.tables[table].export().indexes.find(i => i.indexDescriptor === name);
                 assert(index, `${table}.${name}`);
+                indexFields = index.fields;
                 const terms = [];
                 let lower = null;
                 const bounds = {
@@ -119,6 +123,24 @@ export function lanesFixture() {
                       return a._creationTime - b._creationTime;
                     });
                 return q;
+              },
+              order: direction => {
+                descending = direction === 'desc';
+                return q;
+              },
+              take: async n => {
+                assert(match, 'indexed reads only');
+                return read(table, rows =>
+                  match(rows)
+                    .sort((a, b) => {
+                      for (const field of [...indexFields, '_creationTime']) {
+                        if (a[field] === b[field]) continue;
+                        return (a[field] < b[field] ? -1 : 1) * (descending ? -1 : 1);
+                      }
+                      return 0;
+                    })
+                    .slice(0, n),
+                );
               },
               unique: async () => {
                 assert(match, 'indexed reads only');
@@ -155,6 +177,7 @@ export function lanesFixture() {
         },
       };
       try {
+        if (decorate) await decorate(ctx, input, name);
         const result = await fn._handler(ctx, input);
         if (reads.every(unchanged => unchanged())) {
           for (const [table, id, row] of writes) tables[table].set(id, row);
@@ -174,6 +197,10 @@ export function lanesFixture() {
     counts,
     insert,
     call,
+    transaction: call,
+    decorateContext(fn) {
+      decorate = fn;
+    },
     patch(table, id, value) {
       tables[table].set(id, { ...tables[table].get(id), ...value });
     },

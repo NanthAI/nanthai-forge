@@ -2,6 +2,7 @@
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
+import { notifyLandingCheck } from './projectHostedLandingWake';
 import { hostedWriteProject } from './projectHostedRecords';
 import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import {
@@ -101,6 +102,7 @@ export async function writeHostedCheck(
   run: HostedCheckRun,
 ) {
   await ctx.db.patch(id, { status: run.status, value: canonicalPayload(hostedCheckRunSchema.parse(run)) });
+  await notifyLandingCheck(ctx, { projectId: run.projectId as Id<'hostedProjects'>, runId: run.id });
 }
 export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {
   const row = await hostedOperationRow(

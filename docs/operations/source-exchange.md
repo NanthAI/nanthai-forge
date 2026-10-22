@@ -1130,3 +1130,61 @@ execution mapping, then deletes only the unchanged run-owned branch. Lost delete
 replies are safe to reconcile; the State/export/run mapping stays retained.
 Cancellation, exact job verdict, stuck-job log evidence and live output belong to
 H22b/H12; export or dispatch success alone never supplies a passing check.
+
+## Hosted landing queue API
+
+`projectHostedLanding:enqueue({projectId, request})` accepts JSON metadata:
+
+```json
+{
+  "operationId": "<original UUID>",
+  "authorityEpoch": 1,
+  "channel": "main",
+  "expectedMain": { "head": "<State SHA-256>", "receiptId": "<main receipt>" },
+  "candidateId": "<canonical Candidate UUID>",
+  "expectedHead": "<clean State SHA-256, or null for a conflict Candidate>",
+  "agent": true,
+  "check": { "kind": "run", "runId": "<exact H10 run UUID>" }
+}
+```
+
+`check` may instead be null, or `{kind:"request", checkId, expectedDefinition,
+expectedConfiguration, expectedEnvironment}` using the current H10 pins. The latter
+atomically enqueues one H10 check under a retained child operation. It does not run
+project code inside Convex or replace the H11 provider adapter. Account/device
+identity determines actor kind; `agent:true` explicitly downscopes an account.
+Person-selected clean unchecked Candidates remain representable. Existing agent
+check/policy requirements still belong to final acceptance, not queue admission.
+
+A fresh request selects the current hosted main head and receipt and the Candidate's
+exact base. Reusing an operation with different pins returns `WORK_OPERATION_CHANGED`.
+Authorized original retries return the retained submission/current progress after
+later main, definition or epoch changes, without replacing source/check pins.
+Current project write authority precedes replay; current read authority precedes
+`status`, `list` and `attempts`. Stale/foreign Candidate/run selections fail explicitly.
+Source/file/log bytes are not accepted by this API.
+
+`status({projectId, submissionId})` returns the current request and exact attempt.
+`list({projectId,channel:"main",phase?,cursor})` and
+`attempts({projectId,submissionId,cursor})` return complete continuation contracts in
+100-row/128-KiB transport pages. Keep following `continueCursor` until `isDone`;
+partial pages do not establish absence. Immutable attempt IDs, Candidate roots,
+main receipts, policy context and run pins remain available for later review.
+
+The scheduled driver returns after metadata preparation, with phase `checking`,
+`ready` or `terminal-failed`; queued/checking/ready observations remain pending.
+A fake-provider test seam exercises H10 completion and lease recovery. `ready` is
+not acceptance evidence and is not a claim that current policy permits publication.
+No hosted Channel is moved by H13. H14 supplies final CAS/receipt/lifecycle handling;
+H11 supplies actual check dispatch. Nothing here enables a native-owner cutover,
+UI, deployment or real provider configuration.
+
+For integration, `claimReadyLanding`/`requireLandingLease` fence H14's final
+transaction. `pinLandingAttempt`, `insertLandingAttempt` and `writeLanding` support
+named agent child attempts under that fence, preserving the original request and
+check identities. Final settlement must accompany H14's actual canonical receipt.
+`releaseLandingQueue` wakes later runnable work in the same transaction. A named
+internal `projectHostedLandingDriver:recover` repairs pending/leased queue work;
+it is an event/startup hook, never a scheduled scan of idle projects. Failed wake
+receipts also reconcile on original enqueue replay. Check waiters wake from H10
+result events in bounded byte-aware windows; they do not poll provider status.

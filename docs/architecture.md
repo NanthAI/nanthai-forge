@@ -1054,3 +1054,50 @@ Multiple exact matches surface an evidence error. No global project scan runs.
 The retained mapping survives terminal-result branch cleanup. H22b supplies
 outstanding-job wakes, cancellation, exact verdict and live-log reconciliation;
 H12 supplies output chunks. No live provider/ingress is enabled by these modules.
+
+### Hosted landing request queue
+
+`projectHostedLanding:enqueue` records a durable submission, immutable first attempt,
+original H01 operation and coalesced Channel wake in one transaction. The request
+selects an exact canonical Candidate/head (or a retained conflict), main head and
+receipt, authority epoch and optional exact check run or check request. Actor kind
+comes from the existing account/device acceptance boundary. The check-request
+variant calls the same H10 enqueue transaction, retaining one child operation and
+run before any provider I/O. This API does not require a check for person requests
+or publish source. Native-owner projects retain their current acceptance route.
+
+Requests and attempts have their own indexed tables, separate from Work/display
+projections. An attempt freezes canonical Candidate digest/input/dependency roots,
+main receipt, actor, current policy snapshot/digest, exact check identity and child
+operations. Progress updates never replace those pins. A later agent rebase can
+append a named child attempt; the original request and all earlier attempts remain.
+A person request cannot silently become approval of another Candidate. The shared
+`landing-submission-state` module is extracted from the S01 submission contract;
+queued/checking observations are pending, conflicts and check/infrastructure failures
+retain their causes, and ready remains pending until an actual landing receipt.
+
+The finite internal driver makes two short metadata transactions: claim, then
+advance. Claim also schedules a lease-recovery wake. A stopped driver therefore
+recovers the same attempt and run with a higher fencing token. Lease expiry grants
+reconciliation only; H13 never submits/repeats provider work or allocates a replacement
+run. Driver replies and scheduler deliveries are safe to repeat. Enqueue retries
+can repair a failed wake by inspecting its durable scheduler receipt. There is no
+empty-queue poller, browser heartbeat or recurring check observation.
+
+Only runnable requests enter selection, ordered by Channel sequence. Checking,
+ready and terminal records remain readable without hiding later independent work.
+H10 run updates transactionally schedule one coalesced check wake; bounded metadata
+pages reactivate its waiters and wake their Channel. Fan-out automatically continues
+below document/byte windows, with no total request/history ceiling. A complete
+passing run is revalidated with `requireHostedCheckEvidence`; an overall success
+without complete shard evidence remains checking. Unexpected failures abort the
+step with its recovery wake intact; structured request failures retain an outcome
+and let later work proceed. Idle checking/ready/terminal queues schedule no work.
+
+H13 stops at `ready`. It never moves a Channel, selects a snapshot, issues an
+acceptance receipt or completes a Lane/Intent. H14 uses `claimReadyLanding` and
+`requireLandingLease` in its constant-size final transaction, independently rechecks
+current authority, main head **and receipt**, policy and exact check evidence, then
+records its canonical receipt and request settlement together. The queue lease and
+policy snapshot do not grant acceptance. Large included-Lane/projection work stays
+outside that boundary. See the [landing queue API](operations/source-exchange.md#hosted-landing-queue-api).
