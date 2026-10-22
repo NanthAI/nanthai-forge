@@ -133,7 +133,14 @@ export function selectTests({ paths, files, forceFull = false }) {
     };
     function visit(node) {
       if (ts.isImportDeclaration(node) && node.importClause?.isTypeOnly) return;
-      if (ts.isImportTypeNode(node)) return;
+      if (ts.isExportDeclaration(node) && node.isTypeOnly) return;
+      if (ts.isImportEqualsDeclaration(node) && node.isTypeOnly) return;
+      if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) return;
+      // Type literals can look like source paths or computed runtime loaders. They
+      // disappear during compilation and belong to the always-on static checks.
+      // A class's `extends` is ExpressionWithTypeArguments too: its expression
+      // executes, so retain it (and only discard its nested type arguments).
+      if (ts.isTypeNode(node) && !ts.isExpressionWithTypeArguments(node)) return;
       if (ts.isStringLiteralLike(node)) {
         const value = node.text;
         const target = resolve(path, value);

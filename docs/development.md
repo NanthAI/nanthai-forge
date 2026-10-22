@@ -99,6 +99,17 @@ the diff source. Older runners without this input remain compatible and run full
 `dist/*.js` to `src/*.ts`, resolves extensionless web imports and `.mts` modules, and recognizes literal
 source reads and CLI paths in tests. Type-only imports are covered by the full
 TypeScript checks. Every scoped run adds `files`, `ci-scope`, `test-impact` and `check-path-scopes` smoke tests.
+Erased type re-exports (`export type`, including star and namespace forms),
+type-only import-equals declarations, interfaces, aliases and type annotations
+do not create behavior-test edges. A type re-export hub therefore does not pull
+in tests of its unrelated runtime exports. Literal source readers still count.
+Value imports/re-exports, side-effect imports and inline `import/export { type T }`
+shells retain conservative coverage: compiler settings can preserve an empty
+runtime import/export and its module initialization. Class `extends` expressions
+also retain runtime coverage. This applies to both `agent tests` and scoped
+landing shards; the final full landing/main verification is unchanged. Runtime
+hubs still select their transitive consumers; export names alone do not establish
+independence when module initialization or shared state can affect another export.
 Web edits also run the UI regression files. Computed module paths, including joined `dist/` paths, widen to their source domain; unknown dynamic imports
 widen to all source domains. The existing `tests/convex-module.mjs` adapter is modelled
 through its callers' paths and the loaded sources' imports. Its recursive moduleUrl

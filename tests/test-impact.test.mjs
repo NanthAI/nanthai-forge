@@ -148,6 +148,103 @@ test('generated declaration imports stay in typechecks and JavaScript specifiers
   assert.ok(select(['src/leaf.ts'], { files: generated }).tests.includes('tests/declarations.test.mjs'));
 });
 
+test('erased type re-export hubs do not fan out to their runtime consumers', () => {
+  for (const declaration of [
+    "export type { Value } from './leaf.js'",
+    "export type * from './leaf.js'",
+    "export type * as Types from './leaf.js'",
+    "import type Leaf = require('./leaf.js')",
+  ]) {
+    const fixture = new Map([
+      ...files,
+      ['src/type-hub.ts', `${declaration}; export const stable = 1;`],
+      ['tests/hub.test.mjs', "import { stable } from '../dist/type-hub.js'"],
+      ['tests/source.test.mjs', "readFileSync('../src/leaf.ts')"],
+    ]);
+    const result = select(['src/leaf.ts'], { files: fixture });
+    assert.equal(result.scope, 'scoped');
+    assert.ok(!result.tests.includes('tests/hub.test.mjs'), declaration);
+    assert.ok(result.tests.includes('tests/leaf.test.mjs'));
+    assert.ok(result.tests.includes('tests/source.test.mjs'));
+  }
+});
+
+test('type syntax source strings and loader-shaped expressions do not create runtime edges', () => {
+  for (const declaration of [
+    "export type Source = '../dist/leaf.js'",
+    "export interface Source { '../dist/leaf.js': string }",
+    "export type Source = typeof import('../dist/leaf.js')",
+    "export type Source = { path: '../dist/leaf.js' }; export const value = (x: Source) => x",
+    "export const value = (x: '../dist/leaf.js') => x",
+    "export const value = 1 as unknown as '../dist/leaf.js'",
+    "export const value = '' satisfies '../dist/leaf.js'",
+  ]) {
+    const fixture = new Map([
+      ...files,
+      ['src/types.ts', declaration],
+      ['tests/types.test.mjs', "import '../dist/types.js'"],
+    ]);
+    assert.ok(
+      !select(['src/leaf.ts'], { files: fixture }).tests.includes('tests/types.test.mjs'),
+      declaration,
+    );
+  }
+});
+
+test('runtime class heritage and expressions next to type annotations retain coverage', () => {
+  for (const declaration of [
+    "export class Derived extends load('../dist/leaf.js') {}",
+    "export class Derived extends (await import('../dist/leaf.js')).Base<string> {}",
+    "export const value = readFileSync('../dist/leaf.js') as string",
+    "export const value = readFileSync('../dist/leaf.js') satisfies string",
+    "export class Value { ['../dist/leaf.js'] = 1 }",
+  ]) {
+    const fixture = new Map([
+      ...files,
+      ['src/runtime.ts', declaration],
+      ['tests/runtime.test.mjs', "import '../dist/runtime.js'"],
+    ]);
+    assert.ok(
+      select(['src/leaf.ts'], { files: fixture }).tests.includes('tests/runtime.test.mjs'),
+      declaration,
+    );
+  }
+});
+
+test('value, side-effect and inline-type import/export shells remain conservative', () => {
+  for (const declaration of [
+    "import './leaf.js'",
+    "import { type Value } from './leaf.js'",
+    "export { type Value } from './leaf.js'",
+    "export { leaf as other } from './leaf.js'",
+    "export * from './leaf.js'",
+    "export * as values from './leaf.js'",
+    "import type { Value } from './leaf.js'; import './leaf.js'",
+    "export type { Value } from './leaf.js'; export * from './leaf.js'",
+  ]) {
+    const fixture = new Map([
+      ...files,
+      ['src/hub.ts', declaration],
+      ['tests/hub.test.mjs', "import '../dist/hub.js'"],
+    ]);
+    assert.ok(select(['src/leaf.ts'], { files: fixture }).tests.includes('tests/hub.test.mjs'), declaration);
+  }
+});
+
+test('unknown erased type dependencies stay in static checks; unresolved values still force full', () => {
+  for (const declaration of [
+    "export type { Missing } from '@local/missing'",
+    "export type * from './missing.js'",
+    "import type Missing = require('@local/missing')",
+    "export type Missing = typeof import('@local/missing')",
+  ]) {
+    const fixture = new Map([...files, ['src/types.ts', declaration]]);
+    assert.equal(select(['src/leaf.ts'], { files: fixture }).scope, 'scoped', declaration);
+  }
+  const fixture = new Map([...files, ['src/types.ts', "export { Missing } from '@local/missing'"]]);
+  assert.equal(select(['src/leaf.ts'], { files: fixture }).scope, 'full');
+});
+
 test('core ignore and cleanup directory names do not imply runtime module dependencies', () => {
   const ignored = new Map([
     ...files,
