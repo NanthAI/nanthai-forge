@@ -154,7 +154,7 @@ test('provider metadata checks original size/digest before URL access, cancels i
   assert.equal(fetched, 0);
   await assert.rejects(
     projectArchiveMetadata(ctx, 'id', bytes.length, sha, async () => undefined),
-    /offline/,
+    error => error.code === 'EXCHANGE_REQUEST_FAILED',
   );
   for (const response of [
     { status: 503, headers: {} },
@@ -171,7 +171,7 @@ test('provider metadata checks original size/digest before URL access, cancels i
       );
     await assert.rejects(projectArchiveMetadata(ctx, 'id', bytes.length, sha, async () => undefined));
   }
-  assert.equal(canceled, 2);
+  assert.equal(canceled, 3);
   globalThis.fetch = async () =>
     new Response(fragment(bytes, [1, 65536, 3]).stream, {
       headers: { 'content-length': String(bytes.length) },
@@ -247,7 +247,10 @@ test('registered source validates exact pins and final access after streamed rea
   globalThis.fetch = async () => {
     throw Error('provider failure');
   };
-  await assert.rejects(actions.source(f.s.ctx, 'backup', 'owner'), /provider failure/);
+  await assert.rejects(
+    actions.source(f.s.ctx, 'backup', 'owner'),
+    error => error.code === 'EXCHANGE_REQUEST_FAILED',
+  );
   assert.deepEqual(project, before);
   globalThis.fetch = prior;
   const getUrl = f.s.ctx.storage.getUrl;
@@ -288,4 +291,95 @@ test('registered source validates exact pins and final access after streamed rea
   f.s.ctx.storage.getUrl = getUrl;
   await assert.rejects(actions.source(f.s.ctx, 'backup', 'owner'), e => e.code === 'INVALID_WORK_BACKUP');
   assert.equal(project.currentBackup, 'backup');
+});
+
+test('legacy archive metadata bounds silent headers and partial compressed bodies then recovers exact metadata', async t => {
+  const { createServer } = await import('node:http');
+  const bytes = archive(),
+    sha = digest(bytes),
+    ctx = state([]).ctx;
+  const realTimeout = globalThis.setTimeout;
+  t.mock.method(globalThis, 'setTimeout', (fn, ms, ...args) =>
+    realTimeout(fn, ms === 30_000 ? 150 : ms === 120_000 ? 2000 : ms, ...args),
+  );
+  for (const halfBody of [false, true]) {
+    let requests = 0;
+    const sockets = new Set();
+    const server = createServer((_req, res) => {
+      requests++;
+      if (requests <= 2) {
+        if (halfBody) {
+          res.writeHead(200, { 'Content-Length': bytes.length });
+          res.write(bytes.subarray(0, 10));
+        }
+        return;
+      }
+      res.end(bytes);
+    });
+    server.on('connection', socket => {
+      sockets.add(socket);
+      socket.on('close', () => sockets.delete(socket));
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise(resolve => server.close(resolve));
+    });
+    ctx.storage.getMetadata = async () => ({ size: bytes.length, sha256: sha });
+    ctx.storage.getUrl = async () => `http://127.0.0.1:${server.address().port}`;
+    const read = () => projectArchiveMetadata(ctx, 'id', bytes.length, sha, async () => {}, false);
+    await assert.rejects(read(), error => error.code === 'EXCHANGE_REQUEST_TIMEOUT');
+    assert.equal(requests, 2);
+    const output = await read();
+    assert.equal(Buffer.from(output.work).toString(), '{}');
+    assert.equal(requests, 3);
+  }
+});
+
+test('optional legacy ancestry also yields on silent headers/body and rechecks access after timeout', async t => {
+  const { sourceParents } = await import(moduleUrl('../convex/projectWorkAncestry.ts'));
+  const { createServer } = await import('node:http');
+  const f = await nativeFixture(t),
+    backup = f.s.tables.projectBackups.get('backup');
+  // Ancestry is only requested when there is retained View/check history.
+  const data = { ...f.data, views: [{ id: 'synthetic-view' }] };
+  const realTimeout = globalThis.setTimeout;
+  t.mock.method(globalThis, 'setTimeout', (fn, ms, ...args) =>
+    realTimeout(fn, ms === 30_000 ? 150 : ms === 120_000 ? 2000 : ms, ...args),
+  );
+  for (const halfBody of [false, true]) {
+    let requests = 0,
+      revoked = false;
+    const sockets = new Set();
+    const server = createServer((_req, res) => {
+      requests++;
+      if (requests <= 2 || revoked) {
+        if (revoked) f.s.tables.hostedProjects.get('project').owner = 'other';
+        if (halfBody) {
+          res.writeHead(200);
+          res.write(f.bytes.subarray(0, 10));
+        }
+        return;
+      }
+      res.end(f.bytes);
+    });
+    server.on('connection', socket => {
+      sockets.add(socket);
+      socket.on('close', () => sockets.delete(socket));
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise(resolve => server.close(resolve));
+    });
+    f.s.ctx.storage.getUrl = async () => `http://127.0.0.1:${server.address().port}`;
+    const read = () => sourceParents(f.s.ctx, backup, f.manifest, data, 'owner');
+    assert.equal((await read()).size, 0);
+    assert.equal(requests, 2);
+    assert.ok((await read()).has(f.manifest.head));
+    assert.equal(requests, 3);
+    revoked = true;
+    await assert.rejects(read(), error => error.data?.code === 'PROJECT_UNAVAILABLE');
+    f.s.tables.hostedProjects.get('project').owner = 'owner';
+  }
 });

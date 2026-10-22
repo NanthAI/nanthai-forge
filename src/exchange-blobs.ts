@@ -85,7 +85,10 @@ export class ConvexExchangeBlobs implements ExchangeBlobs {
   private directReader(projectId: string) {
     return new ObjectDownloadReader({
       fetch: (url, init) =>
-        fetch(url, { ...init, headers: { ...init?.headers, 'accept-encoding': 'identity' } }),
+        exchangeFetch('Stored content download', url, {
+          ...init,
+          headers: { ...init?.headers, 'accept-encoding': 'identity' },
+        }),
       describe: digests =>
         this.client.mutation(makeFunctionReference<'mutation'>('projectObjectDownloads:describe'), {
           projectId,

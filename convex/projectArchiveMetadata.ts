@@ -3,6 +3,7 @@
 import type { ActionCtx } from './_generated/server';
 import { archiveSource } from './r2ArchiveSource';
 import { derivedArtifact, derivedBytes } from './derivedArtifactActions';
+import { exchangeRequest } from '../src/exchange-request';
 import { invariant } from '../src/errors';
 import { workArchiveMetadata } from '../src/work-archive-metadata';
 import { encodeWorkMetadataSidecar, decodeWorkMetadataSidecar } from './workMetadataSidecar';
@@ -32,20 +33,30 @@ async function readOriginalMetadata(
   const url = await source.getUrl();
   invariant(url, 'INVALID_WORK_BACKUP', 'Stored source and Work are unavailable.');
   await checkAccess();
-  // Streamed on purpose: a Node action's storage.get buffers the whole archive.
-  const response = await fetch(url, { headers: { 'accept-encoding': 'identity' } });
-  try {
-    const length = response.headers.get('content-length');
-    invariant(
-      response.ok && response.body && (length === null || (/^\d+$/.test(length) && Number(length) === size)),
-      'INVALID_WORK_BACKUP',
-      'Stored source and Work are unavailable or incomplete.',
-    );
-    noteStorageRead(ctx, size);
-    return await workArchiveMetadata(response.body);
-  } finally {
-    if (response.body && !response.body.locked) await response.body.cancel().catch(() => undefined);
-  }
+  // Keep streaming/early cancellation: buffering the whole archive defeats
+  // metadata-only reads. Every upstream chunk renews the request's idle timer.
+  return exchangeRequest(
+    'archive metadata download',
+    url,
+    { headers: { 'accept-encoding': 'identity' } },
+    async (response, progressed) => {
+      try {
+        const length = response.headers.get('content-length');
+        invariant(
+          response.ok &&
+            response.body &&
+            (length === null || (/^\d+$/.test(length) && Number(length) === size)),
+          'INVALID_WORK_BACKUP',
+          'Stored source and Work are unavailable or incomplete.',
+        );
+        noteStorageRead(ctx, size);
+        return await workArchiveMetadata(response.body, undefined, progressed);
+      } finally {
+        if (response.body && !response.body.locked) await response.body.cancel().catch(() => undefined);
+      }
+    },
+    { retries: 1 },
+  );
 }
 
 // Exact UTF-8 metadata bytes are retained, including unknown Work fields. The

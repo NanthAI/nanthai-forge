@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { verifiedBytes } from './verified-blob.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import {
   downloadPageSchema,
   downloadRecipeSchema,
@@ -78,7 +78,8 @@ export class ObjectDownloadReader {
           credentials: 'omit',
           referrerPolicy: 'no-referrer',
         });
-      } catch {
+      } catch (error) {
+        if (error instanceof ForgeError) throw error;
         // R2's expired responses can omit CORS headers, appearing as a network error.
         invariant(
           row.location === 'r2' && attempt === 0,

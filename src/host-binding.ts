@@ -12,6 +12,7 @@ import {
 import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { pushProgressSchema } from './push-progress-state.js';
 import { autoExchangeStateSchema } from './auto-exchange-state.js';
 import { exchangeObservationSchema } from './exchange-observation.js';
 import { wakeAutoExchange } from './auto-exchange-wake.js';
@@ -85,6 +86,7 @@ const push = z.object({
 const schema = z.object({
   schema: z.literal(1),
   autoExchange: autoExchangeStateSchema.optional(),
+  pushProgress: pushProgressSchema.optional(),
   exchangeObservation: exchangeObservationSchema.optional(),
   acceptancePublications: z.record(z.string(), z.string()).optional(),
   acceptanceReceipts: z.record(z.string(), z.string()).optional(),

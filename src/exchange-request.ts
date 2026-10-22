@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { currentExchangeProgress } from './exchange-progress-hooks.js';
 import { ForgeError } from './errors.js';
 import { observeExchangeRequest, observeExchangeResponse } from './exchange-observation-hooks.js';
 
@@ -21,8 +22,12 @@ export async function exchangeRequest<T>(
   consume: (response: Response, progressed: () => void) => Promise<T>,
   options: ExchangeRequestOptions = {},
 ): Promise<T> {
+  const scope = currentExchangeProgress();
+  const signal = scope?.signal ?? init.signal;
   const attempts = (options.retries ?? 3) + 1;
   for (let attempt = 1; ; attempt++) {
+    signal?.throwIfAborted();
+    scope?.progress?.(call, false);
     const controller = new AbortController();
     // Abort at most once, and after a response arrives only to stop a timed-out body.
     // The Convex runtime fails the whole action asynchronously ("not in a state that
@@ -42,6 +47,12 @@ export async function exchangeRequest<T>(
     const deadline = new Promise<never>((_, reject) => {
       expire = reject;
     });
+    const cancel = () => {
+      expire(signal!.reason);
+      release();
+    };
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
     const timeout = (kind: string, ms: number) => {
       expire(
         new ForgeError(
@@ -56,9 +67,13 @@ export async function exchangeRequest<T>(
       idle = setTimeout(() => timeout(kind, ms), ms);
     }
     const progressed = () => {
-      if (!controller.signal.aborted) armIdle(options.idleTimeoutMs ?? 30_000, 'body idle');
+      if (!controller.signal.aborted) {
+        armIdle(options.idleTimeoutMs ?? 30_000, 'body idle');
+        scope?.progress?.(call);
+      }
     };
     const request = async () => {
+      signal?.throwIfAborted();
       observeExchangeRequest(url, init);
       const received = await fetch(url, { ...init, signal: controller.signal });
       response = received;
@@ -79,6 +94,7 @@ export async function exchangeRequest<T>(
       const result = await Promise.race([request(), deadline]);
       if (!result.retry) return result.value;
     } catch (error) {
+      signal?.throwIfAborted();
       // Validation/authority failures are final, rather than transport retries.
       if (error instanceof ForgeError && error.code !== 'EXCHANGE_REQUEST_TIMEOUT') throw error;
       if (attempt >= attempts)
@@ -89,6 +105,7 @@ export async function exchangeRequest<T>(
               `${call} failed after ${attempts} attempts. Retry the original operation to reconcile its outcome.`,
             );
     } finally {
+      signal?.removeEventListener('abort', cancel);
       clearTimeout(idle);
       clearTimeout(totalTimer);
       release();

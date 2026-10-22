@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { autoDriverStalled } from './push-progress-state.js';
+import { withExchangeProgress } from './exchange-progress.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { watch } from 'node:fs';
@@ -112,6 +114,16 @@ export async function drainAutoExchange(store: WorkStore, options: AutoExchangeO
         return;
       const worker = processIdentity();
       const notifications = await openAutoExchangeNotifications();
+      const controller = new AbortController();
+      const unsubscribe = notifications.subscribe(() => {
+        if (autoDriverStalled(readHostState(store), now()))
+          controller.abort(
+            new ForgeError(
+              'AUTO_EXCHANGE_STALLED',
+              'Stalled push yielded. Retry the retained operation after queue release.',
+            ),
+          );
+      });
       let attempts = 0;
       let context: UsageContext | undefined;
       const update = (patch: Partial<AutoExchangeState>) =>
@@ -241,14 +253,14 @@ export async function drainAutoExchange(store: WorkStore, options: AutoExchangeO
             });
           };
           try {
-            const pushed = (
+            const pushed = (await withExchangeProgress({ signal: controller.signal }, async () =>
               options.push
                 ? await options.push(admission)
                 : await boundExchange(store.root, 'push', undefined, false, {
                     beforePush: admission,
                     expectedBinding: binding,
-                  })
-            ) as
+                  }),
+            )) as
               | { operationId?: string; pendingCoverage?: { capture: { throughSequence: number } } }
               | undefined;
             attempts = 0;
@@ -272,6 +284,7 @@ export async function drainAutoExchange(store: WorkStore, options: AutoExchangeO
               code: undefined,
             });
           } catch (error) {
+            if (controller.signal.aborted) return;
             const code = error instanceof ForgeError ? error.code : 'HOSTED_ACTION_FAILED';
             if (code === 'AUTO_EXCHANGE_SPEND_UNAVAILABLE') return;
             if (code === 'AUTO_EXCHANGE_CHANGED' || code === 'AUTO_EXCHANGE_PAUSED') continue;
@@ -297,6 +310,7 @@ export async function drainAutoExchange(store: WorkStore, options: AutoExchangeO
           }
         }
       } finally {
+        unsubscribe();
         try {
           updateHostState(store, host => {
             if (
@@ -312,7 +326,11 @@ export async function drainAutoExchange(store: WorkStore, options: AutoExchangeO
         }
       }
     },
-    { anchor: store.directory, waitMs: 0, phase: 'automatic hosted push' },
+    {
+      anchor: store.directory,
+      waitMs: autoDriverStalled(readHostState(store), now()) ? 5000 : 0,
+      phase: 'automatic hosted push',
+    },
   );
   const state = readHostState(store).autoExchange;
   if (

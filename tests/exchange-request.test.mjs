@@ -484,3 +484,60 @@ test('a completed request never aborts its closed response stream', async t => {
   assert.equal(reads, 2);
   assert.equal(aborts, 0);
 });
+
+test('redirected Convex storage/recipe reads bound headers and the complete body', async t => {
+  const { ConvexExchangeBlobs } = await import('../dist/exchange-blobs.js');
+  const realTimeout = globalThis.setTimeout;
+  t.mock.method(globalThis, 'setTimeout', (fn, ms, ...args) =>
+    realTimeout(fn, ms === 30_000 ? 150 : ms === 120_000 ? 2000 : ms, ...args),
+  );
+  const bytes = Buffer.from('complete'),
+    pin = { sha256: digest(bytes), size: bytes.length };
+  for (const halfBody of [false, true]) {
+    const f = await fixture(t, (_req, res, n) => {
+      if (n <= 4) {
+        if (halfBody) {
+          res.writeHead(200, { 'Content-Length': bytes.length });
+          res.write('half');
+        }
+        return;
+      }
+      res.end(bytes);
+    });
+    const blobs = new ConvexExchangeBlobs({
+      action: async () => ({ direct: true, digest: pin.sha256, size: pin.size }),
+      mutation: async () => [{ digest: pin.sha256, size: pin.size, location: 'convex', url: f.url }],
+    });
+    await assert.rejects(
+      blobs.getPart('synthetic', pin, 0),
+      error => error.code === 'EXCHANGE_REQUEST_TIMEOUT',
+    );
+    assert.equal(f.requests.length, 4);
+    assert.deepEqual(Buffer.from((await blobs.getPart('synthetic', pin, 0)).data), bytes);
+  }
+});
+
+test('cooperative cancellation stops retries and aborts a header/body stall before queue release', async t => {
+  const { withExchangeProgress } = await import('../dist/exchange-progress.js');
+  for (const halfBody of [false, true]) {
+    let accepted;
+    const entered = new Promise(resolve => {
+      accepted = resolve;
+    });
+    const f = await fixture(t, (_req, res) => {
+      if (halfBody) {
+        res.writeHead(200);
+        res.write('half');
+      }
+      accepted();
+    });
+    const controller = new AbortController();
+    const pending = withExchangeProgress({ signal: controller.signal }, () =>
+      exchangeFetch('synthetic read', f.url, {}, deadlines),
+    );
+    await entered;
+    controller.abort(new ForgeError('AUTO_EXCHANGE_STALLED', 'Yield to retained-operation recovery.'));
+    await assert.rejects(pending, error => error.code === 'AUTO_EXCHANGE_STALLED');
+    assert.equal(f.requests.length, 1);
+  }
+});

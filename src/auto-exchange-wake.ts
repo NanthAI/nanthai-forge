@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { autoDriverStalled } from './push-progress-state.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { effectivePolicy } from './autonomy-policy.js';
@@ -23,7 +24,9 @@ export function wakeAutoExchange(store: WorkStore, afterDrain = false, launch: t
       const state = host.autoExchange;
       if (state?.worker && processAlive(state.worker)) {
         if (state.wakeEndpoint) notifyAutoExchange(state.wakeEndpoint);
-        return;
+        if (!autoDriverStalled(host)) return;
+        // A successor waits for cooperative cancellation and the existing queue
+        // slots. Never remove a live holder or send an OS process signal.
       }
       const policy = effectivePolicy(store.readRecords()?.data() ?? store.load()).autoExchange;
       if (!policy?.enabled || !binding || host.hosting) return;

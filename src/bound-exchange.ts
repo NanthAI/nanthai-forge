@@ -1,3 +1,5 @@
+import { withBoundPushProgress } from './bound-push-progress.js';
+import { currentExchangeProgress } from './exchange-progress-hooks.js';
 import { acknowledgePendingExchange } from './pending-exchange.js';
 import { currentExchangeObservation, withExchangeObservation } from './exchange-observation.js';
 import { supersedeRetainedPush } from './bound-exchange-supersede.js';
@@ -73,6 +75,8 @@ async function runBoundExchange(
       let phase = `preparing exchange ${action}`,
         detail = 'in progress';
       const report = (next: string, announce = true) => {
+        currentExchangeProgress()?.signal?.throwIfAborted();
+        if (announce) currentExchangeProgress()?.progress?.(next);
         if (!announce) {
           detail = next;
           return;
@@ -91,11 +95,12 @@ async function runBoundExchange(
         // second process must not rebase/remove the request another is using.
         const queued = await withQueueSlot(
           join(store.directory, 'bound-push-queue'),
-          async () => {
-            await options.beforePush?.();
-            await supersedeRetainedPush(store, supersedeRetained, report);
-            return boundExchangeAction(root, action, target, report, options);
-          },
+          () =>
+            withBoundPushProgress(store, async () => {
+              await options.beforePush?.();
+              await supersedeRetainedPush(store, supersedeRetained, report);
+              return boundExchangeAction(root, action, target, report, options);
+            }),
           { anchor: store.directory, phase: 'exchange push' },
         );
         invariant('value' in queued, 'WORK_BUSY', 'A bound push is still running. Retry to resume it.');

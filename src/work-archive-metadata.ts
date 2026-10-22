@@ -228,6 +228,7 @@ export async function workArchiveMetadata(
     select(name: string, prefix: Uint8Array): boolean;
     read(name: string, bytes: Uint8Array): void | Promise<void>;
   },
+  progressed?: () => void,
 ): Promise<{ manifest: Uint8Array; work: Uint8Array }> {
   const compressed = archiveStream(input),
     upstream = compressed.stream.getReader(),
@@ -270,7 +271,10 @@ export async function workArchiveMetadata(
       if (next.input.done) {
         upstreamDone = true;
         writing = writer.close();
-      } else writing = writer.write(next.input.value);
+      } else {
+        if (next.input.value.length) progressed?.();
+        writing = writer.write(next.input.value);
+      }
       // A decoded result can win the race; retain the write for the next read and
       // handle a later rejection even if metadata is already complete.
       void writing.catch(() => undefined);

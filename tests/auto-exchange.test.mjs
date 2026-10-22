@@ -110,6 +110,7 @@ function fixture(t, policy = {}) {
       return receipt;
     },
   });
+  f.exchange = exchange;
   f.manual = () => boundExchange(root, 'push', undefined, false, { exchange });
   f.run = (options = {}) =>
     drainAutoExchange(new WorkStore(root), {
@@ -122,7 +123,7 @@ function fixture(t, policy = {}) {
       push: admission =>
         boundExchange(root, 'push', undefined, false, {
           beforePush: admission,
-          exchange,
+          exchange: f.exchange,
         }),
       ...options,
     });
@@ -555,4 +556,176 @@ test('unconfigured, unavailable, invalid and stale command output defer automati
   }
   await f.manual();
   assert.equal(f.attempts.length, 1);
+});
+
+test('a silent Convex publication times out, retries its exact operation and completes on recovery', async t => {
+  const { createServer } = await import('node:http');
+  const { ConvexExchange } = await import('../dist/exchange-client.js');
+  const { PUSH_STALL_MS } = await import('../dist/push-progress-state.js');
+  const f = fixture(t, { debounceMs: 0 });
+  const realTimeout = globalThis.setTimeout;
+  t.mock.method(globalThis, 'setTimeout', (fn, ms, ...args) =>
+    realTimeout(fn, ms === 600_000 ? 1250 : ms, ...args),
+  );
+  const requests = [],
+    sockets = new Set();
+  let firstProgress,
+    status,
+    publications = 0;
+  const committed = new Map();
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const part of req) chunks.push(part);
+    requests.push(Buffer.concat(chunks).toString());
+    const originalId = JSON.parse(requests.at(-1)).args[0].operationId;
+    if (!committed.has(originalId)) {
+      publications++;
+      committed.set(originalId, 'backup-recovered');
+    }
+    if (requests.length === 1) {
+      const progress = f.state().pushProgress;
+      firstProgress = progress.lastProgressAt;
+      assert.equal(progress.phase, 'projectExchangeActions:publish');
+      status = readAutoExchangeStatus(f.store, progress.lastProgressAt + PUSH_STALL_MS);
+      assert.equal(status.status, 'stalled');
+      assert.match(status.resume, /retained operation/);
+      assert.equal(status.operationId, f.state().push.operationId);
+      return; // Accept the complete request; leave the socket open without headers.
+    }
+    assert.equal(f.state().pushProgress.lastProgressAt, firstProgress, 'a silent retry is not progress');
+    res.end(JSON.stringify({ status: 'success', value: committed.get(originalId) }));
+  });
+  server.on('connection', socket => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    for (const socket of sockets) socket.destroy();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const base = f.exchange;
+  f.exchange = (...args) => {
+    const transport = base(...args);
+    const rpc = new ConvexExchange(
+      `http://127.0.0.1:${server.address().port}`,
+      'synthetic',
+      args[1],
+      args[2],
+      null,
+    );
+    transport.publish = pin => rpc.publish(pin);
+    return transport;
+  };
+  await f.run();
+  assert.equal(requests.length, 2);
+  assert.equal(publications, 1);
+  assert.equal(requests[0], requests[1]);
+  assert.equal(JSON.parse(requests[0]).args[0].operationId, status.operationId);
+  assert.deepEqual(f.queue().pending, []);
+  assert.equal(f.state().push, undefined);
+  assert.equal(f.state().pushProgress, undefined);
+  assert.equal(readAutoExchangeStatus(f.store).status, 'idle');
+});
+
+test('stalled wake cooperatively yields both queue slots; successor resumes the same pending operation', async t => {
+  const { exchangeFetch } = await import('../dist/exchange-request.js');
+  const { notifyAutoExchange } = await import('../dist/auto-exchange-notify.js');
+  const { wakeAutoExchange } = await import('../dist/auto-exchange-wake.js');
+  const { PUSH_STALL_MS } = await import('../dist/push-progress-state.js');
+  const f = fixture(t, { debounceMs: 0 }),
+    entered = deferred();
+  const base = f.exchange;
+  let active = 0,
+    maximum = 0,
+    pendingId,
+    phases = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    active++;
+    maximum = Math.max(maximum, active);
+    entered.resolve();
+    return new Promise((_resolve, reject) => {
+      init.signal.addEventListener(
+        'abort',
+        () => {
+          active--;
+          reject(init.signal.reason);
+        },
+        { once: true },
+      );
+    });
+  });
+  f.exchange = (...args) => {
+    const transport = base(...args),
+      publish = transport.publish;
+    transport.publish = async pin => {
+      if (!pendingId) {
+        pendingId = args[2];
+        return exchangeFetch('synthetic blocked publication', 'https://fixture.invalid');
+      }
+      assert.equal(args[2], pendingId);
+      phases.push('successor');
+      return publish(pin);
+    };
+    return transport;
+  };
+  const first = f.run();
+  await entered.promise;
+  // Move only the test clock. Console heartbeats do not change last progress.
+  const progress = f.state().pushProgress;
+  f.advance(progress.lastProgressAt + PUSH_STALL_MS - f.now());
+  updateHostState(f.store, host => {
+    host.pushProgress.lastProgressAt = Date.now() - PUSH_STALL_MS;
+  });
+  let second;
+  wakeAutoExchange(f.store, true, () => {
+    phases.push('launched');
+    second = f.run();
+    return { on() {}, unref() {} };
+  });
+  // Exercise the same private wake channel as startup/save recovery.
+  notifyAutoExchange(f.state().autoExchange.wakeEndpoint);
+  await first;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(second);
+  await second;
+  assert.deepEqual(phases, ['launched', 'successor']);
+  assert.equal(maximum, 1);
+  assert.equal(active, 0);
+  assert.equal(f.attempts[0], pendingId);
+  assert.deepEqual(f.queue().pending, []);
+});
+
+test('manual push phase and stale progress are visible even when automatic pushing is disabled', async t => {
+  const { PUSH_STALL_MS } = await import('../dist/push-progress-state.js');
+  const f = fixture(t, { enabled: false }),
+    entered = deferred(),
+    release = deferred();
+  f.beforePublish = async () => {
+    entered.resolve();
+    await release.promise;
+  };
+  const pending = f.manual();
+  await entered.promise;
+  const progress = f.state().pushProgress;
+  const fresh = readAutoExchangeStatus(f.store, progress.lastProgressAt);
+  assert.equal(fresh.status, 'pushing');
+  assert.equal(fresh.enabled, false);
+  assert.match(fresh.phase, /uploading/);
+  const stale = readAutoExchangeStatus(f.store, progress.lastProgressAt + PUSH_STALL_MS);
+  assert.equal(stale.status, 'stalled');
+  const value = readPendingStatus(f.store);
+  value.hosted.autoExchange = stale;
+  assert.match(formatPendingStatus(value), /stalled.*last progress.*Retry/);
+  release.resolve();
+  await pending;
+});
+
+test('unbound push keeps its structured setup error and creates no progress record', async t => {
+  const f = fixture(t, { enabled: false });
+  updateHostState(f.store, host => {
+    delete host.binding;
+  });
+  await assert.rejects(f.manual(), error => error.code === 'HOST_NOT_BOUND');
+  assert.equal(f.state().pushProgress, undefined);
 });

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { autoDriverStalled, pushStalled, PUSH_STALL_MS, PUSH_STALL_RESUME } from './push-progress-state.js';
 import { effectivePolicy } from './autonomy-policy.js';
 import { readHostState } from './host-binding.js';
 import { readPendingExchange } from './pending-exchange.js';
@@ -21,17 +22,29 @@ export function readAutoExchangeStatus(store: WorkStore, now = Date.now()) {
     push => push?.projectId === binding?.projectId && push?.deployment === binding?.deployment,
   );
   const pending = !!queue?.pending.length || retained;
-  const status = !policy.enabled
-    ? 'disabled'
-    : !binding
-      ? 'unbound'
-      : !queue && !retained
-        ? 'unknown'
-        : !pending
-          ? 'idle'
-          : state?.status === 'pushed' || !state
-            ? 'queued'
-            : state.status;
+  const progress =
+    binding &&
+    host.pushProgress?.projectId === binding.projectId &&
+    host.pushProgress.deployment === binding.deployment
+      ? host.pushProgress
+      : undefined;
+  const stalled =
+    pending && (pushStalled(progress, now) || (autoDriverStalled({ autoExchange: state }, now) && !progress));
+  const status = stalled
+    ? 'stalled'
+    : progress
+      ? 'pushing'
+      : !policy.enabled
+        ? 'disabled'
+        : !binding
+          ? 'unbound'
+          : !queue && !retained
+            ? 'unknown'
+            : !pending
+              ? 'idle'
+              : state?.status === 'pushed' || !state
+                ? 'queued'
+                : state.status;
   const spend = state?.spend
     ? { ...state.spend }
     : {
@@ -69,12 +82,15 @@ export function readAutoExchangeStatus(store: WorkStore, now = Date.now()) {
       : queue
         ? 0
         : null,
-    operationId: state?.operationId ?? null,
+    phase: progress?.phase ?? null,
+    lastProgressAt: progress?.lastProgressAt ?? (state?.status === 'pushing' ? state.at : null),
+    stalledAfterMs: PUSH_STALL_MS,
+    operationId: progress?.operationId ?? state?.operationId ?? null,
     nextAttemptAt: state?.nextAttemptAt ?? null,
     code: state?.code ?? null,
     spend,
     transport: host.exchangeObservation ?? null,
-    resume,
+    resume: stalled ? PUSH_STALL_RESUME : resume,
     undo: AUTO_EXCHANGE_UNDO,
   };
 }

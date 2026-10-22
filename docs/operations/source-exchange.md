@@ -271,7 +271,9 @@ ID. Exhausted network failures report `EXCHANGE_REQUEST_TIMEOUT` or
 `EXCHANGE_REQUEST_FAILED` with the call name, never a signed URL. Structured Convex
 function errors keep their original code. Upload POSTs to Convex storage are bounded
 but not blindly replayed: retrying the exchange reconciles their existing nonce-bound
-objects. Server-side R2 and archive range reads use the same 30-second/two-minute
+objects. Redirected Convex storage downloads and recipe leaf reads also buffer the complete
+response inside these deadlines; a partial body never outlives its timer. Legacy archive metadata and ancestry keep their streaming/early-cancellation behavior inside the
+same deadlines. Server-side R2 and archive range reads use the same 30-second/two-minute
 bounds with one retry; range-less archive responses still discard their prefix and
 cancel the unused suffix.
 
@@ -494,7 +496,24 @@ it. No first-host history backfill is started by this worker.
 
 `nforge host ROOT --status` and `nforge pending ROOT` include `autoExchange` with
 pending age, status, retained operation, next attempt, spend observation, transport
-observation, resume guidance and Undo. Disable future automatic pushes with
+observation, resume guidance and Undo. Both automatic and manual bound pushes report
+`phase`, `lastProgressAt` (Unix milliseconds), and `stalledAfterMs`. Actual phase
+changes, received headers and received bytes update progress; repeated attempts
+of the same call and console heartbeats do not. After eleven minutes without progress, status reads `stalled` with the
+instruction to retry on owner save/startup or run `nforge exchange ROOT push`.
+The bound push remains retained with its original operation and capture pins.
+
+On the next wake, a stalled automatic driver receives a cooperative cancellation
+through its existing private wake socket. Its active exchange requests abort and
+unwind before releasing the bound-push and automatic-driver queue slots. A
+successor waits up to five seconds for those slots, then resumes the same retained
+operation. Queue tickets still use kernel process-start identities: no live
+holder is evicted on elapsed time alone, and no OS process signal is sent. An
+older, unresponsive driver that cannot cooperate keeps its slot; status remains
+stalled until it exits, and later startup/save retries recovery. Manual pushes
+share the same serialization and cannot overlap it.
+
+Disable future automatic pushes with
 `set-policy {"autoExchange":{"enabled":false}}`; published history is retained.
 Manual pushes remain available, including during a spend pause.
 

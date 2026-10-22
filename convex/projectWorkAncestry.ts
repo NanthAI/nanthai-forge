@@ -14,6 +14,7 @@ import { workArchiveMetadata, workSourcePins, type sourceManifestSchema } from '
 import type { WorkData } from '../src/work-types';
 import type { z } from 'zod';
 import { digest } from '../src/hash';
+import { exchangeRequest } from '../src/exchange-request';
 import { invariant } from '../src/errors';
 import { noteStorageRead } from './storageMeter';
 const statePin = v.object({ sha256: v.string(), size: v.number() });
@@ -165,18 +166,37 @@ async function readParents(
     const url = await (await archiveSource(ctx, backup.storageId!)).getUrl();
     invariant(url, 'SOURCE_UNAVAILABLE', 'Ancestry source archive is unavailable.');
     await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: actor });
-    // Streamed on purpose: a Node action's storage.get buffers the whole archive.
-    const response = await fetch(url, { headers: { 'accept-encoding': 'identity' } });
-    invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Ancestry source archive is unavailable.');
-    noteStorageRead(ctx, backup.size);
-    await workArchiveMetadata(response.body, {
-      select: (name, prefix) =>
-        manifest.kind === 'forge-native-work-backup'
-          ? /^objects\/[a-f0-9]{64}$/.test(name) &&
-            new TextDecoder().decode(prefix).includes('"kind":"forge-source-state"')
-          : name === 'source.bundle',
-      read: (name, bytes) => remember(name.slice(8), bytes),
-    });
+    // The optional ancestry read must also yield on a silent archive response.
+    await exchangeRequest(
+      'archive ancestry download',
+      url,
+      { headers: { 'accept-encoding': 'identity' } },
+      async (response, progressed) => {
+        try {
+          invariant(
+            response.ok && response.body,
+            'SOURCE_UNAVAILABLE',
+            'Ancestry source archive is unavailable.',
+          );
+          noteStorageRead(ctx, backup.size);
+          await workArchiveMetadata(
+            response.body,
+            {
+              select: (name, prefix) =>
+                manifest.kind === 'forge-native-work-backup'
+                  ? /^objects\/[a-f0-9]{64}$/.test(name) &&
+                    new TextDecoder().decode(prefix).includes('"kind":"forge-source-state"')
+                  : name === 'source.bundle',
+              read: (name, bytes) => remember(name.slice(8), bytes),
+            },
+            progressed,
+          );
+        } finally {
+          if (response.body && !response.body.locked) await response.body.cancel().catch(() => undefined);
+        }
+      },
+      { retries: 1 },
+    );
   }
   await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: actor });
   return parents;
