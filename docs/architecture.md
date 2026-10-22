@@ -873,3 +873,50 @@ receipt changes. The final publication reads only the operation, small staged
 plan, exact signed job result, committed output and Candidate/State records. It
 does not hydrate input pages, all Lane heads, Channel history or Work. Landing
 must independently validate its current main and policy/evidence pins.
+
+### Hosted explicit sync and resolution Lanes
+
+`projectHostedSync:prepare` pins one explicit source operation: a saved Lane plus
+an exact main head/receipt or clean Candidate, an immutable conflict Candidate
+plus its conflict root, or completion of a pending resolution Lane. Progress
+returns the original worker plan; `projectHostedSyncJobs:submit` dispatches the
+existing fixed source worker once under the retained job identity. There is no
+recurring sync, idle worker, owner listener or browser lifetime dependency.
+
+The sync worker uses native right-first sync composition and `conflictPlan`.
+Only missing State metadata and blobs read by the merge are fetched. A clean
+sync registers its exact State and CAS-updates its original Lane. A conflict
+retains the original Lane and creates an isolated resolution sibling, with the
+exact left/right States, conflict root and draft head. Starting a resolution
+from an older Candidate never substitutes newer Lane saves or current main.
+Drafts keep the left parent and local conflict markers (binary/path conflicts
+keep the Lane side); they do not claim the right input as a resolved ancestor.
+
+Resolution source saves use the existing H07 delta API. An explicit `resolve`
+operation validates descent from that draft, applies the local text-marker
+rule, and records a two-parent State and `resolved` receipt on a final Lane CAS.
+This is a source API phase that callers can drive as part of their resolution
+flow, not a new person-review requirement. Pending resolution Lanes cannot be
+submitted as completed composition inputs. To compose after resolving, first compose the
+resolved Lane alone with empty dependencies to obtain a clean resolution Candidate.
+Prepend that Candidate to the original ordered dependencies, then retain the
+original ordered Lane inputs and unmerged suffix at explicitly observed heads.
+This also handles conflicts reached during dependency composition, which runs
+before Lane inputs. Native ancestry preserves later disjoint saves and surfaces
+new overlap as a new conflict. Main never moves.
+
+Original operation receipts survive retries and later source/authority changes
+after current access checks. A concurrent save on the target Lane retains a
+terminal `WORK_STALE` result and the newer Lane; another Lane's save does not
+invalidate the operation. Finalization reads constant-size canonical metadata
+and only the small signed result manifest, without Work/Channel history or
+repository bytes in the action. Draft/resolved States remain source evidence,
+not check or landing permission.
+
+`applyHostedSync` uses the checkout's exact result pins and an added previous
+client-baseline guard under its cache lock. It preserves sparse scope and uses
+verified cached unchanged blobs. Dirty contents, deletions, modes, links and
+untracked obstructions, including changes during transfer, retain the old marker
+and files. Interrupted original-operation retries cannot replace a newer client
+marker, and completed retries never reinstall over later edits. Server source
+publication and optional local installation have separate outcomes.

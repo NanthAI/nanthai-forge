@@ -103,6 +103,18 @@ export async function checkoutHostedLane(root: string, input: unknown, transport
       'The Lane changed from its expected source pins.',
     );
     const marker = baseline();
+    invariant(
+      !request.previous ||
+        (marker &&
+          canonicalPayload(request.previous) ===
+            canonicalPayload({
+              head: marker.selection.head,
+              version: marker.selection.version,
+              sourceVersion: marker.selection.sourceVersion,
+            })),
+      'WORK_STALE',
+      'The client baseline changed before applying the pinned sync result.',
+    );
     cleanHostedCheckout(root, materializedFiles(marker), hostedLaneMarkerName, Boolean(marker));
     const next = { request, selection: observed, complete: false, previousMarker: markerDigest() };
     durableReplace(receiptPath, JSON.stringify(next));

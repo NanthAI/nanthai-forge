@@ -843,3 +843,80 @@ result manifest crosses the finalizer action. Rebuild and pin the fixed image
 with the compose reducer and descriptor transport before enabling this route.
 Ingress provisioning, remote deployment, resolution/sync, hosted checks and landing
 remain separate work; these APIs alone do not enable a live end-to-end hosted loop.
+
+### Hosted explicit sync and conflict resolution APIs
+
+These APIs operate on hosted source records, without restoring a native owner.
+There is no automatic recurring sync or added UI in this source API layer.
+Every request has `operationId`, `authorityEpoch`, `message`, and one variant:
+
+- `kind:"sync"`, `laneId`, exact `expected` Lane pins
+  (`head`, `version`, `sourceVersion`, `lifecycleVersion`), and `target`:
+  `{kind:"main",head,receiptId}` or `{kind:"candidate",candidateId,head}` for a
+  clean immutable Candidate. Main's receipt distinguishes same-byte ABA moves.
+- `kind:"resolution"`, `candidateId`, and exact `conflicts:{sha256,size}` from
+  that conflict Candidate. This selects the original conflict, even after its
+  input Lanes save again.
+- `kind:"resolve"`, `laneId`, and exact `expected` pins for the saved resolution
+  Lane. This completes its pending merge against the retained original inputs.
+
+Call `projectHostedSync:prepare` with `{projectId,request:JSON.stringify(request)}`.
+`projectHostedSync:progress` takes `{projectId,operationId}` and returns the
+original `input` plan, staging state and optional terminal receipt. Commit the
+canonical plan bytes as the exact project object, then call
+`projectHostedSyncJobs:submit` with that identity. Source transfers and signed
+callbacks reuse the existing job-authorized descriptor/grant/commit seam.
+Rebuild and pin the fixed worker image with sync support before provisioning it;
+this code does not deploy or configure a provider. Server finalization is short
+and independent of a browser, coding host or native-owner process.
+
+A completed terminal result contains `status` (`up-to-date`, `merged`, `conflict`
+or `resolved`), exact schema-2 `lane` selection, the original `from` Lane pins
+(or null), resolution provenance (or null), and original time/operation ID.
+Conflict returns a **new resolution Lane**; its original Lane stays unchanged.
+Its `resolution` retains `candidateId` (null for a direct sync conflict), exact
+`conflicts`, `left`, `right`, `draftHead` and `status:"pending"`. Read/open that
+Lane with the existing Lane checkout API. Text uses the local native sync
+markers; binary and path conflicts retain the Lane side.
+
+Save chosen resolution files through `saveHostedLane` or the existing paged save
+APIs, then drive `resolve` against that saved head. The worker verifies draft
+ancestry and the same unresolved-marker rule as local sync. Resolution can
+explicitly choose unchanged binary bytes or delete a conflicted path. Success
+retains the saved resolution head and original right input as parents and returns
+`resolved`; it never resolves against silently newer source. A pending resolution
+cannot be used as a completed compose input. Callers may drive this API phase
+within their existing save/resolve action; it requires no new person approval.
+
+For the next composition, first compose only the resolved Lane with empty
+dependencies, producing a clean resolution Candidate. Prepend that Candidate to
+the original ordered dependencies, then retain the original ordered Lane inputs
+(including the suffix after the first conflict), using explicitly observed heads.
+Dependencies execute before Lane inputs, so this prefix also resolves conflicts
+that occurred during dependency composition. When there are no dependency-stage
+conflicts, selecting the resolved Lane first among the original inputs can avoid
+the intermediate Candidate. Later disjoint changes merge through ancestry; later
+overlap creates another explicit conflict. These are source API phases that
+callers drive, not extra person approvals. The Candidate and any required
+check/landing remain separate operations under their current contracts. H15
+finish and H17 compensation can reuse these pinned phases; none of these receipts
+authorizes main movement or reuses a check on new bytes.
+
+A same-Lane save while sync/resolve runs fails the final CAS with a retained
+`WORK_STALE` receipt; its newer source and the original attempt remain available.
+A fresh attempt uses a new operation UUID and explicit observations. Retry an
+unknown result with the **original** request, including all expected pins. Current
+access is checked even for completed retries, which return their original receipt
+without moving source or starting another job.
+
+For optional local application of a clean sync/resolved result, call
+`applyHostedSync(root,{operationId,url,status,from,lane},transport)` using
+`LaneTransport`. `from` is `{laneId,head,version,sourceVersion}` from the result.
+This helper pins both the
+previous client marker and exact server selection. It preserves sparse scope,
+downloads only missing selected objects, and stages installation before checking
+local bytes and marker again. Local edits, deletions, link/mode changes and
+untracked contents are preserved on `WORK_CONFLICT`; a newer client baseline is
+`WORK_STALE`. The original server result remains successful when local install
+cannot proceed. Completed apply retries check current access but do not overwrite
+later edits. There is no filesystem watcher, background pull or recurring timer.

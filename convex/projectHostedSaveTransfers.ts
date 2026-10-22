@@ -5,6 +5,7 @@ import { internalMutation, internalAction, type MutationCtx } from './_generated
 import type { Id } from './_generated/dataModel';
 import { loadSourceJob } from './projectSourceJobs';
 import { loadSave, saveObject } from './projectHostedSaveStore';
+import { syncForJob, loadSync } from './projectHostedSyncStore';
 import { composeForJob, loadCompose } from './projectHostedComposeStore';
 import { saveForJob } from './projectHostedSavePublish';
 import { saveObjectSchema } from '../src/hosted-save';
@@ -32,16 +33,22 @@ export async function authorizeSourceTransfer(ctx: MutationCtx, request: Omit<Tr
   const input = JSON.parse(request.input),
     job = await loadSourceJob(ctx, request.projectId, input.jobId);
   const row =
-    job.jobKind === 'compose'
-      ? await composeForJob(ctx, request.projectId, job.id)
-      : await saveForJob(ctx, request.projectId, job.id);
+    job.jobKind === 'sync'
+      ? await syncForJob(ctx, request.projectId, job.id)
+      : job.jobKind === 'compose'
+        ? await composeForJob(ctx, request.projectId, job.id)
+        : await saveForJob(ctx, request.projectId, job.id);
   invariant(
-    row && ['save', 'compose'].includes(job.jobKind),
+    row && ['save', 'compose', 'sync'].includes(job.jobKind),
     'SOURCE_JOB_INVALID',
     'This is not a hosted source operation.',
   );
   const { operation, state } =
-    job.jobKind === 'compose' ? await loadCompose(ctx, row) : await loadSave(ctx, row);
+    job.jobKind === 'sync'
+      ? await loadSync(ctx, row)
+      : job.jobKind === 'compose'
+        ? await loadCompose(ctx, row)
+        : await loadSave(ctx, row);
   invariant(
     !operation.terminal &&
       state.status === 'submitted' &&
@@ -125,7 +132,8 @@ export const grant = internalMutation({
     );
     // A compose can regenerate bytes already retained in any storage format.
     // Keep save-job replies compatible with their previously pinned worker image.
-    if (job.jobKind === 'compose' && object && isStored(object)) return { stored: true as const };
+    if (['compose', 'sync'].includes(job.jobKind) && object && isStored(object))
+      return { stored: true as const };
     const project = await ctx.db.get(input.projectId);
     invariant(
       r2Enabled() && project?.r2Writes,

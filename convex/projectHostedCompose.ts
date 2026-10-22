@@ -162,6 +162,11 @@ export const stage = mutation({
             'WORK_STALE',
             'Selected Lane changed or belongs to another Intent.',
           );
+          invariant(
+            lane.resolution?.status !== 'pending',
+            'CONFLICT_MARKERS',
+            'Complete the pinned resolution before composing its Lane.',
+          );
         } else {
           const row = await readHostedRecord(ctx, { ...auth, kind: 'candidate', key: entry.candidateId });
           invariant(row, 'NOT_FOUND', 'Pinned dependency Candidate is unavailable.');

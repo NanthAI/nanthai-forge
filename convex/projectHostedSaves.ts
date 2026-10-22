@@ -27,7 +27,7 @@ async function caller(
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to save hosted source.');
   await activeProject(ctx, input.projectId, user.subject);
-  return { ...input, actor: user.subject };
+  return { projectId: input.projectId, operationId: input.operationId, actor: user.subject };
 }
 export const prepare = mutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },

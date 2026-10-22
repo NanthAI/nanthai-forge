@@ -18,6 +18,7 @@ export const hostedLaneCheckoutSchema = z
     laneId: z.uuid(),
     operationId: z.uuid(),
     expected: hostedLaneExpectationSchema.optional(),
+    previous: hostedLaneExpectationSchema.optional(),
     paths: z.array(z.string().refine(safeRelative)).optional(),
   })
   .strict();

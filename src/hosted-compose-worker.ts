@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NativeSource, overlappingPaths } from './native-source.js';
 import { invariant } from './errors.js';
@@ -14,33 +14,9 @@ import {
   composeDependencySchema,
 } from './hosted-compose.js';
 import type { SourceWorkerReader } from './hosted-source-worker-reader.js';
+import { LazyMergeSource, lazyMerge } from './hosted-merge-reader.js';
 import type { WorkerPin } from './hosted-source-worker-format.js';
 
-class NeededObject extends Error {
-  constructor(readonly id: string) {
-    super('Fetch exact immutable merge input.');
-  }
-}
-/** Retry the fixed synchronous native reducer only at a missing-object read.
- * Verified inputs and generated objects remain on private disk across retries. */
-class LazyMergeSource extends NativeSource {
-  readonly generated = new Set<string>();
-  readonly states = new Set<string>();
-  override state(id: string) {
-    const state = super.state(id);
-    this.states.add(id);
-    return state;
-  }
-  override object(id: string): Buffer {
-    if (!existsSync(join(this.directory, id))) throw new NeededObject(id);
-    return super.object(id);
-  }
-  override put(bytes: Buffer): string {
-    const id = super.put(bytes);
-    this.generated.add(id);
-    return id;
-  }
-}
 export async function buildHostedComposeState(
   input: WorkerPin,
   value: unknown,
@@ -50,22 +26,9 @@ export async function buildHostedComposeState(
 ) {
   const plan = composeInputSchema.parse(value),
     source = new LazyMergeSource(original.owner);
-  const resolve = async (id: string) => {
-    await reader.resolve(id);
-    await progress();
-  };
   await reader.file(plan.main);
   invariant(plan.main.object.sha256 === plan.base.head, 'SOURCE_JOB_INVALID', 'Compose main pins differ.');
-  const calculate = async <T>(action: () => T): Promise<T> => {
-    for (;;) {
-      try {
-        return action();
-      } catch (error) {
-        if (!(error instanceof NeededObject)) throw error;
-        await resolve(error.id);
-      }
-    }
-  };
+  const calculate = <T>(action: () => T) => lazyMerge(reader, progress, action);
   let head = plan.base.head,
     pageCount = 0,
     selected = 0;
