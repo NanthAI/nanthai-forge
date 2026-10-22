@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { submissionLine } from './landing-submission.js';
 import type { PendingStatus } from './pending-status.js';
 const pin = (head: string | null) => head?.slice(0, 12) ?? 'unknown';
 const elapsed = (ms: number | null) => (ms === null ? 'unknown' : `${Math.floor(ms / 60_000)}m`);
@@ -11,8 +12,11 @@ export function formatPendingStatus(value: PendingStatus) {
   const stacks = value.lanes.filter(lane => lane.stack);
   const groups = value.overlap.groups;
   const examples = value.lanes
-    .filter(lane => ['ready', 'waiting', 'checking'].includes(lane.status))
-    .map(lane => `${lane.status} ${lane.laneId.slice(0, 8)} ${oneLine(lane.name).slice(0, 70)}`);
+    .filter(lane => lane.submission || ['ready', 'waiting', 'checking'].includes(lane.status))
+    .map(
+      lane =>
+        `${lane.laneId.slice(0, 8)} ${lane.submission ? submissionLine(lane.submission) : lane.status} ${oneLine(lane.name).slice(0, 70)}`,
+    );
   const lines = [
     `Pending work · revision ${value.snapshot.workRevision} · ${value.snapshot.observedAt}`,
     `Main: ${pin(value.main.head)}${value.integrationPreview ? ` · Integration preview: ${oneLine(value.integrationPreview)}` : ''}`,
@@ -43,6 +47,11 @@ export function formatPendingStatus(value: PendingStatus) {
     `Deployment: ${pin(value.deployment?.head ?? null)} · ${value.deployment?.source ?? 'unknown'} (last observation); installed source unknown`,
   ];
   // Delivery and overlap summaries share the compact view's existing line budget.
+  if (examples.length && lines.length >= 15) {
+    const recovery = lines.findIndex(line => line.startsWith('Recovery:'));
+    lines[recovery - 1] += ` · ${lines[recovery]}`;
+    lines.splice(recovery, 1);
+  }
   lines.splice(3, 0, ...examples.slice(0, Math.min(3, Math.max(0, 15 - lines.length))));
   return lines.join('\n');
 }

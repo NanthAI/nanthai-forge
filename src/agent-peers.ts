@@ -17,8 +17,7 @@ import {
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { PeersCache } from './agent-peers-cache.js';
 import { pageHashes, pageSize } from './work-records.js';
-import { NativeAncestry } from './native-ancestry.js';
-import { PeersSource } from './agent-peers-source.js';
+import { PeersSource, RECEIPT_ANCESTRY_READS } from './agent-peers-source.js';
 import { regionSummary } from './agent-region-summary.js';
 import { predictiveOverlaps, type PredictiveOverlap } from './agent-predictive-overlap.js';
 import {
@@ -74,7 +73,7 @@ export type PeersDigest = {
   conflicts?: ConflictNotice[];
   inbox?: Pick<OverlapAlert, 'noticeId' | 'kind' | 'lanes' | 'file' | 'proposedOrder' | 'text'>[];
   overlaps?: Overlap[];
-  /** My live regions versus every in-flight peer's latest checkpoint. */
+  /** My live regions versus selected in-flight peer checkpoints; coverage names gaps. */
   predictive?: PredictiveOverlap[];
   ownership?: ReturnType<typeof laneOwnership>;
   stalled?: { lane: string; actor: string; quietMs: number; offer: 'take' }[];
@@ -90,16 +89,24 @@ export type PeersDigest = {
 };
 export { PEERS_MAX_BYTES, boundPeers } from './agent-peers-bound.js';
 import { boundPeers } from './agent-peers-bound.js';
+// Lifecycle receipts reserve expensive prediction/dependency work for a few peers.
+// Explicit peers reads retain complete observation; this is not a source limit.
+export const RECEIPT_PEER_LIMIT = 3;
 const clip = (value: string) => value.slice(0, 200);
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Advisory observation only: no locks, network, Work writes or source publication.
- * Finish the selected reads regardless of elapsed time; real gaps never claim clear. */
-export function agentPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): PeersDigest {
+ * Lifecycle calls bound expensive advice; explicit reads finish their selected work.
+ * Unavailable or deferred analysis never claims clear. */
+export function agentPeers(
+  store: WorkStore,
+  input: z.input<typeof peersInputSchema>,
+  options: { receipt?: boolean } = {},
+): PeersDigest {
   const command = peersInputSchema.parse(input);
-  return store.observing(() => readPeers(store, command));
+  return store.observing(() => readPeers(store, command, options.receipt));
 }
-function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): PeersDigest {
+function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, receipt = false): PeersDigest {
   const command = peersInputSchema.parse(input);
   const result: PeersDigest = { v: 1, coverage: 'local', overlaps: [], landed: [], conflicts: [] };
   try {
@@ -143,7 +150,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
         .map(n => ({ text: n.reason })),
     );
     if (notices.length) result.notices = notices;
-    const source = new PeersSource(store, lane.base),
+    const source = new PeersSource(store, lane.base, receipt ? RECEIPT_ANCESTRY_READS : Infinity),
       base = source.state(lane.base).files;
     const journal = new CoordinationJournal(store),
       cache = new PeersCache(store.root);
@@ -200,77 +207,84 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     const main = channels.find(item => item.name === 'main')?.head;
     const ancestry = source.ancestry();
     const mainFiles = main ? new Map(source.files(main, scope).map(file => [file.path, file])) : undefined;
-    if (main && !ancestry.contains(lane.head, main)) {
-      const since = moves.filter(move => move.status === 'accepted' && move.channel === 'main').reverse();
-      for (const move of since) {
-        if (ancestry.contains(lane.base, move.head)) break;
-        const before = move.previous ?? lane.base;
-        const paths = changedPaths(source.state(before).files, source.state(move.head).files).filter(path =>
-          scope.some(item => pathsOverlap(path, item)),
-        );
-        if (ancestry.contains(lane.head, move.head)) continue;
-        const used = usedByLane(
-          source,
-          moveDelta(source, cache, before, move.head, () => [
-            source.state(before).files,
-            source.state(move.head).files,
-          ]),
-          scopedCode(live, scope),
-          live,
-        );
-        if (used.length)
-          (result.contracts ??= []).push({
+    try {
+      if (main && !ancestry.contains(lane.head, main)) {
+        const since = moves.filter(move => move.status === 'accepted' && move.channel === 'main').reverse();
+        for (const move of since) {
+          if (ancestry.contains(lane.base, move.head)) break;
+          const before = move.previous ?? lane.base;
+          const paths = changedPaths(source.state(before).files, source.state(move.head).files).filter(path =>
+            scope.some(item => pathsOverlap(path, item)),
+          );
+          if (ancestry.contains(lane.head, move.head)) continue;
+          const used = usedByLane(
+            source,
+            moveDelta(source, cache, before, move.head, () => [
+              source.state(before).files,
+              source.state(move.head).files,
+            ]),
+            scopedCode(live, scope),
+            live,
+          );
+          if (used.length)
+            (result.contracts ??= []).push({
+              head: move.head,
+              ...(move.acceptedBy?.name ? { by: clip(move.acceptedBy.name) } : {}),
+              changes: used,
+            });
+          if (!paths.length) continue;
+          result.landed!.push({
             head: move.head,
             ...(move.acceptedBy?.name ? { by: clip(move.acceptedBy.name) } : {}),
-            changes: used,
+            paths,
+            sync: 'unknown',
           });
-        if (!paths.length) continue;
-        result.landed!.push({
-          head: move.head,
-          ...(move.acceptedBy?.name ? { by: clip(move.acceptedBy.name) } : {}),
-          paths,
-          sync: 'unknown',
-        });
+        }
+        if (result.landed!.length) {
+          // A synthetic State preserves dirty bytes and the real Lane's ancestry.
+          const merged = source.mergeFiles(liveHead, main);
+          const sync =
+            merged.conflicts.length || overlappingPaths(merged.files).length ? 'conflict' : 'clean';
+          for (const item of result.landed!) item.sync = sync;
+          const move = [...moves].reverse().find(item => item.head === main && item.status === 'accepted');
+          const view =
+            move && (tx?.find('views', move.viewId)?.record ?? legacy?.views.find(v => v.id === move.viewId));
+          const acceptedLaneId = view?.inputs[0]?.laneId;
+          const acceptedLane =
+            acceptedLaneId &&
+            (tx?.fields('lanes', acceptedLaneId)?.record ?? legacy?.lanes.find(l => l.id === acceptedLaneId));
+          const accepted = acceptedLane ? noticeParticipant(store, source, acceptedLane) : undefined;
+          addNotice(
+            conflictNotice(
+              source,
+              [
+                self(),
+                {
+                  ...accepted,
+                  lane: 'main',
+                  head: main,
+                  intentId: accepted?.intentId ?? view?.intentId ?? '',
+                  intent: accepted?.intent ?? 'Accepted main',
+                  owner: move?.acceptedBy ?? accepted?.owner ?? null,
+                  sessions: accepted?.sessions ?? [],
+                  message: source.state(main).message,
+                  state: 'ready',
+                  startedAt: move?.at ?? '',
+                },
+              ],
+              liveHead,
+              main,
+              merged.conflicts,
+              overlappingPaths(merged.files),
+            ),
+          );
+          result.next = `sync: ${result.landed!.length} landed changes touch your paths (${sync})`;
+        }
       }
-      if (result.landed!.length) {
-        // A synthetic State preserves dirty bytes and the real Lane's ancestry.
-        const merged = source.mergeFiles(liveHead, main);
-        const sync = merged.conflicts.length || overlappingPaths(merged.files).length ? 'conflict' : 'clean';
-        for (const item of result.landed!) item.sync = sync;
-        const move = [...moves].reverse().find(item => item.head === main && item.status === 'accepted');
-        const view =
-          move && (tx?.find('views', move.viewId)?.record ?? legacy?.views.find(v => v.id === move.viewId));
-        const acceptedLaneId = view?.inputs[0]?.laneId;
-        const acceptedLane =
-          acceptedLaneId &&
-          (tx?.fields('lanes', acceptedLaneId)?.record ?? legacy?.lanes.find(l => l.id === acceptedLaneId));
-        const accepted = acceptedLane ? noticeParticipant(store, source, acceptedLane) : undefined;
-        addNotice(
-          conflictNotice(
-            source,
-            [
-              self(),
-              {
-                ...accepted,
-                lane: 'main',
-                head: main,
-                intentId: accepted?.intentId ?? view?.intentId ?? '',
-                intent: accepted?.intent ?? 'Accepted main',
-                owner: move?.acceptedBy ?? accepted?.owner ?? null,
-                sessions: accepted?.sessions ?? [],
-                message: source.state(main).message,
-                state: 'ready',
-                startedAt: move?.at ?? '',
-              },
-            ],
-            liveHead,
-            main,
-            merged.conflicts,
-            overlappingPaths(merged.files),
-          ),
-        );
-        result.next = `sync: ${result.landed!.length} landed changes touch your paths (${sync})`;
-      }
+    } catch {
+      result.coverage = 'local-incomplete';
+      result.next =
+        'Main source analysis unavailable or deferred; peers {laneId,detail:true} returns full advice.';
     }
     if (result.contracts?.length)
       result.next = `sync and recheck: main changed ${result.contracts.reduce((n, item) => n + item.changes.length, 0)} contract(s) you use`;
@@ -307,12 +321,25 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     }
     let composed = 0;
     peers.sort((a, b) => compare(a.id, b.id));
+    const advicePeers = receipt ? peers.slice(0, RECEIPT_PEER_LIMIT) : peers;
+    const deferred = peers.length - advicePeers.length;
+    if (deferred) {
+      result.coverage = 'local-incomplete';
+      result.more = deferred;
+      result.next = 'Additional peer analysis deferred; peers {laneId,detail:true} returns full advice.';
+    }
     // Contracts I changed that other open Lanes use: told again when I land.
     const ownSummary = regionSummary(source, cache, lane.base, liveHead, () => [base, live]);
     const own = ownSummary.contracts;
-    for (const peer of peers) {
+    const fullAncestry = source.ancestry('');
+    for (const peer of advicePeers) {
       try {
-        if (main && ancestry.contains(main, peer.head)) continue;
+        if (
+          main &&
+          !(peer.head !== main && ancestry.contains(peer.head, main)) &&
+          fullAncestry.contains(main, peer.head)
+        )
+          continue;
         const theirs = regionSummary(source, cache, peer.base, peer.head, () => [
           source.state(peer.base).files,
           source.state(peer.head).files,
@@ -331,9 +358,9 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
     }
     if (command.detail && own.length) result.changes = own;
     if (own.length)
-      for (const peer of peers.slice(0, 20)) {
-        if (lane.head !== lane.base && ancestry.contains(peer.head, lane.head)) continue;
+      for (const peer of advicePeers.slice(0, 20)) {
         try {
+          if (lane.head !== lane.base && ancestry.contains(peer.head, lane.head)) continue;
           // Dirty bytes count: an unsaved edit that imports a changed export already depends on it.
           const theirs = source.live(peer),
             edits = changedPaths(source.state(peer.base).files, theirs),
@@ -396,8 +423,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>): P
           const first = lane.id < peer.id;
           const left = first ? liveHead : peerHead,
             right = first ? peerHead : liveHead;
-          const ancestry =
-            peer.base === lane.base ? source.ancestry() : new NativeAncestry(id => source.state(id).parents);
+          const ancestry = peer.base === lane.base ? source.ancestry() : source.ancestry('');
           const merged = source.mergeFiles(left, right, undefined, undefined, ancestry);
           addNotice(
             conflictNotice(

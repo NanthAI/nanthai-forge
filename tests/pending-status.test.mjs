@@ -339,3 +339,23 @@ test('one immutable Work pointer pins the summary even when a newer revision exi
   });
   assert.equal(readPendingStatus(store, undefined, now).snapshot.workRevision, original + 1);
 });
+
+test('journals newer than the pinned Work snapshot cannot introduce unavailable Lane references', t => {
+  const store = fixture(t);
+  const directory = join(store.directory, 'agent-land');
+  mkdirSync(directory, { recursive: true });
+  const operationId = randomUUID(),
+    laneId = randomUUID();
+  writeFileSync(
+    join(directory, `${operationId}.json`),
+    JSON.stringify({
+      schema: 1,
+      request: 'future request',
+      entries: [{ command: { operationId, laneId }, inputs: [{ laneId, head }] }],
+    }),
+  );
+  const before = readFileSync(join(store.directory, 'work.json'));
+  const status = readPendingStatus(store, undefined, now);
+  assert.deepEqual(status.lanes, []);
+  assert.deepEqual(readFileSync(join(store.directory, 'work.json')), before);
+});

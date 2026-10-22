@@ -9,6 +9,7 @@ import { deviceTables } from './deviceFields';
 import { clientErrorTables } from './clientErrorFields';
 import { indexTables } from './projectWorkIndexFields';
 import { hostedRecordTables } from './projectHostedRecordFields';
+import { hostedSaveTables } from './projectHostedSaveFields';
 import { hostedSnapshotTables } from './projectHostedSnapshotFields';
 import { checkTables } from './projectCheckFields';
 import { coordinationTables } from './coordinationFields';
@@ -410,6 +411,7 @@ export default defineSchema({
   ...coordinationTables,
   ...indexTables,
   ...hostedRecordTables,
+  ...hostedSaveTables,
   ...hostedSnapshotTables,
   ...objectTables,
   ...artifactBlobTables,

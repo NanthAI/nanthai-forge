@@ -14,7 +14,7 @@ import { invariant } from '../src/errors';
 import { digest } from '../src/portable-hash';
 
 export async function hostedWriteProject(
-  ctx: QueryCtx | MutationCtx,
+  ctx: MutationCtx | QueryCtx,
   projectId: Id<'hostedProjects'>,
   actor: string,
   epoch: number,

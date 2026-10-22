@@ -95,7 +95,12 @@ test('child finish waits and a reverse-order depth-three chain lands through lan
   await f.save(b);
   const c = await f.start('Third', b);
   f.edit(c, 'c.txt', 'c\n');
-  assert.equal((await f.finish(c)).status, 'waiting-for-dependency');
+  const waiting = await f.finish(c);
+  assert.equal(waiting.status, 'waiting-for-dependency');
+  assert.equal(waiting.terminal, false);
+  assert.equal(waiting.submissions[0].state, 'pending');
+  assert.equal(waiting.submissions[0].pendingReason, 'waiting-for-dependency');
+  assert.deepEqual((await f.status(c)).submissions, waiting.submissions);
   assert.equal((await f.finish(b)).status, 'waiting-for-dependency');
   assert.equal(f.store.load().channelMoves.length, 0);
   assert.equal((await f.finish(a)).status, 'accepted');

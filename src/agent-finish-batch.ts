@@ -27,10 +27,10 @@ export async function finishQueuedBatch(work: WorkService, command: FinishAction
   if (entry.acceptanceId)
     attempt.acceptance = acceptanceReceipt(store.select('channelMoves', entry.acceptanceId)!);
   if (entry.conflictViewId) attempt.view = viewReceipt(store.select('views', entry.conflictViewId)!);
-  const pending = ['queued', 'checking'].includes(entry.status);
+  const pending = ['queued', 'checking', 'awaiting-review'].includes(entry.status);
   return {
     phase: entry.status === 'conflict' ? 'compose' : entry.status === 'accepted' ? 'accept' : 'check',
-    status: pending ? 'waiting to land' : entry.status,
+    status: entry.status === 'awaiting-review' ? entry.status : pending ? 'waiting to land' : entry.status,
     terminal: !pending,
     complete: entry.status === 'accepted',
     batchId: entry.batchId,

@@ -13,6 +13,9 @@ import { WorkStore } from '../dist/work-store.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
+import { readPendingStatus } from '../dist/pending-status-read.js';
+import { formatPendingStatus } from '../dist/pending-status-format.js';
+import { LandJournal } from '../dist/land-journal.js';
 import { trustAgents } from './autonomy-fixture.mjs';
 
 const git = (root, args) =>
@@ -217,11 +220,24 @@ for (const batching of [true, false]) {
     };
     await assert.rejects(f.land([a, b], { operationId }), /Synthetic lost reply/);
     const before = f.store.load();
+    const savedSubmissions = readPendingStatus(f.store).lanes.flatMap(lane => lane.submissions);
+    const selected = JSON.parse(
+      readFileSync(join(f.store.directory, 'agent-land', `${operationId}.json`), 'utf8'),
+    ).entries;
     assert.equal(before.channelMoves.length, 1);
     const result = (
       await new AgentWorkflow(f.root).dispatch({ action: 'land', operationId, laneIds: [a.laneId, b.laneId] })
     ).result;
     assert.deepEqual(result.counts, { accepted: 2 });
+    const submissions = result.entries.flatMap(entry => entry.submissions);
+    assert.equal(submissions.length, 2);
+    assert.ok(submissions.every(item => item.state === 'landed'));
+    for (const old of savedSubmissions)
+      assert.ok(submissions.some(item => item.submissionId === old.submissionId));
+    assert.deepEqual(
+      result.entries.map(entry => entry.operationId),
+      selected.map(entry => entry.command.operationId),
+    );
     const data = f.store.load();
     assert.equal(data.runs.filter(run => !run.mainCheck).length, batching ? 1 : 2);
     assert.equal(data.channelMoves.length, batching ? 1 : 2);
@@ -266,8 +282,10 @@ for (const protectedInput of [false, true]) {
     const a = await f.lane(path, { text: 'changed\n' });
     const result = (await f.land([a])).result;
     assert.deepEqual(result.counts, { 'review-needed': 1 });
-    assert.equal(result.terminal, true);
+    assert.equal(result.terminal, false);
     assert.equal(result.complete, false);
+    assert.equal(result.entries[0].submissions[0].state, 'pending');
+    assert.equal(result.entries[0].submissions[0].pendingReason, 'waiting-for-review');
     assert.equal(f.store.load().channelMoves.length, 0);
     assert.equal(f.store.load().runs.length, 1);
     assert.equal(f.store.load().runs[0].status, 'passed');
@@ -527,4 +545,95 @@ test('land reconciles transient source observation with the original phase opera
   assert.equal(operations[0], operations[1]);
   assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
   assert.equal(f.store.load().channelMoves.length, 1);
+});
+
+test('pending submission and attempt identities survive replay and later driver adoption', async t => {
+  const f = await fixture(t),
+    a = await f.lane('a.txt');
+  const command = { action: 'land', operationId: randomUUID(), laneIds: [a.laneId], channel: 'main' };
+  const journal = new LandJournal(f.store, command);
+  const entry = journal.state.entries[0];
+  const savedId = entry.command.operationId;
+  const dispatch = f.agent.work.dispatch.bind(f.agent.work);
+  f.agent.work.dispatch = async (...args) => {
+    if (args[0].action === 'run-check') throw new ForgeError('WORK_BUSY', 'Synthetic queue wait');
+    return dispatch(...args);
+  };
+  const pending = (await f.agent.dispatch(command)).result;
+  const submission = pending.entries[0].submissions[0];
+  assert.equal(pending.terminal, false);
+  assert.equal(submission.state, 'pending');
+  assert.equal(submission.pendingReason, 'checking');
+  assert.ok(submission.attemptId);
+  assert.equal(pending.entries[0].operationId, savedId);
+  const status = readPendingStatus(f.store);
+  assert.deepEqual(status.lanes[0].submission, submission);
+  assert.match(formatPendingStatus(status), /pending \(checking\).*submission .*attempt/);
+  const laneStatus = (await f.agent.dispatch({ action: 'status', laneId: a.laneId })).result.lane;
+  assert.deepEqual(laneStatus.submissions, [submission]);
+  f.agent.work.dispatch = dispatch;
+  const landed = (await f.agent.dispatch(command)).result.entries[0].submissions[0];
+  assert.equal(landed.state, 'landed');
+  assert.equal(landed.submissionId, submission.submissionId);
+  assert.equal(landed.attemptId, submission.attemptId);
+  assert.deepEqual((await f.agent.dispatch(command)).result.entries[0].submissions[0], landed);
+  await assert.rejects(f.agent.dispatch({ ...command, message: 'Changed payload' }), {
+    code: 'WORK_OPERATION_CHANGED',
+  });
+});
+
+test('a new saved head supersedes the old landed submission without changing its request or outcome', async t => {
+  const f = await fixture(t),
+    a = await f.lane('a.txt');
+  const command = { action: 'land', operationId: randomUUID(), laneIds: [a.laneId], keepOpen: true };
+  const before = (await f.agent.dispatch(command)).result.entries[0].submissions[0];
+  await drainPostAccept(f.store);
+  writeFileSync(join(a.path, 'a.txt'), 'new saved bytes\n');
+  const saved = (await f.agent.dispatch({ action: 'checkpoint', laneId: a.laneId, message: 'New save' }))
+    .result;
+  assert.notEqual(saved.head, before.head);
+  const replay = (await new AgentWorkflow(f.root).dispatch(command)).result;
+  const old = replay.entries[0].submissions[0];
+  assert.equal(old.submissionId, before.submissionId);
+  assert.equal(old.head, before.head);
+  assert.equal(old.state, 'superseded');
+  assert.equal(old.outcome, 'landed');
+  assert.equal(old.complete, false);
+  assert.equal(replay.complete, false);
+  assert.equal(f.store.load().channelMoves.length, 1);
+  assert.equal(readPendingStatus(f.store).lanes[0].submission.state, 'superseded');
+});
+
+test('dependency waits expose the same submission before and after its first Candidate', async t => {
+  const f = await fixture(t),
+    parent = await f.lane('parent.txt');
+  const child = await f.lane('child.txt', { after: { intentId: parent.intentId } });
+  const command = { action: 'land', operationId: randomUUID(), laneIds: [child.laneId] };
+  const pending = (await f.agent.dispatch(command)).result.entries[0].submissions[0];
+  assert.equal(pending.state, 'pending');
+  assert.equal(pending.pendingReason, 'waiting-for-dependency');
+  assert.equal(pending.attemptId, null);
+  assert.deepEqual(
+    readPendingStatus(f.store).lanes.find(lane => lane.laneId === child.laneId).submission,
+    pending,
+  );
+  await f.land([parent]);
+  const landed = (await f.agent.dispatch(command)).result.entries[0].submissions[0];
+  assert.equal(landed.submissionId, pending.submissionId);
+  assert.equal(landed.state, 'landed');
+});
+
+test('conflict and check failure causes are visible in receipts and pending status without journal inspection', async t => {
+  const f = await fixture(t),
+    a = await f.lane('same.txt', { text: 'a\n' }),
+    b = await f.lane('same.txt', { text: 'b\n' });
+  const bad = await f.lane('bad.txt');
+  const result = (await f.land([a, b, bad], { keepOpen: true, settleAll: true })).result;
+  const submissions = result.entries.flatMap(entry => entry.submissions);
+  assert.ok(submissions.some(item => item.state === 'terminal-failed' && item.cause === 'conflict'));
+  assert.ok(submissions.some(item => item.state === 'terminal-failed' && item.cause === 'check-failed'));
+  const status = readPendingStatus(f.store);
+  assert.ok(status.lanes.some(lane => lane.submission?.cause === 'conflict'));
+  assert.ok(status.lanes.some(lane => lane.submission?.cause === 'check-failed'));
+  assert.match(result.summary.join('\n'), /terminal-failed \(conflict\)/);
 });

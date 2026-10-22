@@ -920,3 +920,22 @@ test('finish returns a resumable result for a changed check observation and repl
   assert.equal(store.load().runs.length, 1);
   assert.equal(store.load().channelMoves.length, 1);
 });
+
+test('finish submission remains stable through new saves and reports the original landed head as superseded', async t => {
+  const { root, agent, lane, command } = await setup(true);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const request = { ...command, keepOpen: true, accept: { expectedPrevious: null } };
+  const landed = (await agent.dispatch(request)).result;
+  const submission = landed.submissions[0];
+  assert.equal(submission.state, 'landed');
+  assert.equal(submission.attemptId, landed.attempts[0].operationId);
+  writeFileSync(join(lane.path, 'file.txt'), 'new save\n');
+  await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'New saved source' });
+  const replay = (await agent.dispatch(request)).result;
+  assert.equal(replay.submissions[0].submissionId, submission.submissionId);
+  assert.equal(replay.submissions[0].head, submission.head);
+  assert.equal(replay.submissions[0].state, 'superseded');
+  assert.equal(replay.submissions[0].outcome, 'landed');
+  assert.equal(replay.complete, false);
+  assert.equal(agent.work.store.load().channelMoves.length, 1);
+});

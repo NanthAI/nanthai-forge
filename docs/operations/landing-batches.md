@@ -75,3 +75,47 @@ Readers capped at format 18 reject 19/20 with `WORK_UPGRADE_REQUIRED` and
 sharing the owner before creating a larger batch. Writers must support the owner’s
 current format. Original source, checks, conflicts and acceptance history remain
 retained. Undo accepted work through a checked compensating change.
+
+## Submission observations
+
+Landing receipts add a `submissions` array per saved Lane/Intent input. Each
+`submissionId` is deterministic from its retained operation and Lane/Intent IDs;
+replaying that operation preserves the identity and selected `head`. `land`
+uses the retained per-entry child operation; `finish` uses its parent operation,
+including when overlap ordering delegates to child landing entries.
+`entryOperationId` identifies that child without replacing the submission's
+operation identity. A new request has a new submission identity. Changing a payload under
+the same operation remains `WORK_OPERATION_CHANGED`.
+
+`attemptId` identifies a particular landing try, separately from its check run
+and provider execution. Batch selection derives it from the entry and batch IDs;
+a requeued entry on another batch gets another attempt, while adoption retains
+it. Ordinary finish uses the existing attempt operation ID; single-entry land
+uses its retained attempt ordinal. Before an attempt is selected it is null.
+Existing Work and driver journals need no migration to expose these fields.
+
+The additive `state` is `pending`, `terminal-failed`, `landed` or `superseded`.
+Pending reasons are `queued`, `checking`, `waiting-for-review` and
+`waiting-for-dependency`. Pending is never a failed verdict, and review waits
+have `terminal:false`, `complete:false`. Failure `cause` is `conflict`,
+`check-failed`, `infra`, `stale-head` or `rejected`; cancellation retains its
+existing status and projects as rejected. Runner interruption/unavailability is
+infra evidence, not a failed source check. These labels do not add retry policy.
+
+A newer saved Lane head makes the original submission observation `superseded`,
+with `complete:false`; `outcome` retains its original pending, failed or landed
+observation. The original `head`, operation, attempt and acceptance evidence stay
+unchanged. Unsaved edits do not change this saved-head observation. Finish's
+recorded sync head (`attemptHead`) belongs to its attempt, so syncing within that request alone
+does not supersede it. Supersession is observational: it never cancels a driver,
+discards source, or marks the newer save landed. The original pinned request may
+still progress. Explicit review acceptance settles the reviewed Candidate.
+
+Lane `status` and pending-status JSON expose these same submissions, including
+pre-Candidate dependency waits retained in local journals. Compact pending text
+shows one line per displayed Lane, within its existing 15-line budget; full JSON
+retains all inputs. `land` includes one summary line per input Lane. Existing
+entry statuses and counts remain available for compatibility; automation should
+use submission state/reason/cause to distinguish waiting from failure. Canonical
+Work records override stale local batch observations. These adapters do not start
+a worker, run checks, or change acceptance policy.

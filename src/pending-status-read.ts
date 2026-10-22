@@ -1,5 +1,6 @@
 import { integrationPreviewStatus } from './integration-preview-auto.js';
 // SPDX-License-Identifier: Apache-2.0
+import { readLaneSubmissions } from './landing-submission-read.js';
 import { savedOverlapPlan } from './agent-overlap-plan.js';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -63,6 +64,7 @@ export function readPendingStatus(
         },
         {
           integrationPreview: integrationPreviewStatus(store),
+          submissions: readLaneSubmissions(store),
           autoExchange: readAutoExchangeStatus(store, Date.parse(now)),
           recovery: recovery?.(store) ?? null,
           pendingPushes: pushes.map(push => ({ operationId: push!.operationId, revision: push!.revision })),

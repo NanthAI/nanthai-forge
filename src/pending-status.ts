@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { landingAttemptId, projectSubmission, type Submission } from './landing-submission.js';
 import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
 import type { OverlapPlan } from './agent-overlap-plan.js';
 import type { WorkData } from './work-types.js';
@@ -31,6 +32,7 @@ export type PendingData = Pick<
 export type PendingObservations = {
   integrationPreview?: string | undefined;
   autoExchange?: AutoExchangeStatus;
+  submissions?: Submission[];
   overlap?: OverlapPlan;
   recovery?: RecoveryCaptureObservation | null;
   pendingPushes?: { operationId: string; revision: number }[];
@@ -90,6 +92,45 @@ export function pendingStatus(
       const candidateIds = new Set(candidates.map(view => view.id));
       const entries = (data.landingEntries ?? []).filter(entry => candidateIds.has(entry.viewId));
       const entry = entries.at(-1);
+      const submissions = new Map(
+        (observed.submissions ?? [])
+          .filter(item => item.laneId === lane.id)
+          .map(item => [item.submissionId, item]),
+      );
+      for (const queued of data.landingEntries ?? []) {
+        const pin = views.get(queued.viewId)?.inputs.find(pin => pin.laneId === lane.id);
+        if (!pin) continue;
+        const previous = [...submissions.values()].find(
+          item => item.entryOperationId === queued.id && item.laneId === lane.id,
+        );
+        const submission = projectSubmission(
+          previous?.operationId ?? queued.id,
+          previous ? { ...pin, head: previous.head } : pin,
+          lane,
+          {
+            status:
+              queued.status === 'awaiting-review' &&
+              data.channelMoves.some(
+                move =>
+                  move.channel === queued.channel &&
+                  move.status === 'accepted' &&
+                  move.viewId === (data.runs.find(run => run.id === queued.runId)?.viewId ?? queued.viewId),
+              )
+                ? 'accepted'
+                : queued.status,
+            checkStatus: data.runs.find(run => run.id === queued.runId)?.status,
+            ...(queued.reason ? { code: 'EVIDENCE_CHANGED' } : {}),
+          },
+          landingAttemptId(queued),
+          pin.head,
+        );
+        submissions.set(submission.submissionId, { ...submission, entryOperationId: queued.id });
+      }
+      const submissionList = [...submissions.values()];
+      const submission =
+        [...submissionList].reverse().find(item => item.state !== 'superseded') ??
+        submissionList.at(-1) ??
+        null;
       const after = lane.after;
       const parent = lane.stack ? data.lanes.find(item => item.id === lane.stack!.laneId) : undefined;
       const parentLanded =
@@ -141,6 +182,8 @@ export function pendingStatus(
         name: lane.name,
         head: lane.head,
         status,
+        submission,
+        submissions: submissionList,
         after: after ?? null,
         ...(lane.stack
           ? {

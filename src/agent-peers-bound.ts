@@ -37,7 +37,7 @@ export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
     value.ownership.actor = value.ownership.actor.slice(0, 200);
     if (value.ownership.sessionId) value.ownership.sessionId = value.ownership.sessionId.slice(0, 200);
   }
-  let more = 0;
+  let more = value.more ?? 0;
   if (value.inbox) {
     more += Math.max(0, value.inbox.length - 3);
     value.inbox = value.inbox.slice(-3).map(compactOverlapNotice);

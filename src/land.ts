@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { landSubmissions } from './landing-submission-read.js';
+import { submissionLine } from './landing-submission.js';
 import { savedOverlapPlan, highOverlap } from './agent-overlap-plan.js';
 import { join } from 'node:path';
 import { LandJournal, type LandEntry, type LandSelection } from './land-journal.js';
@@ -252,6 +254,7 @@ export async function land(
         inputs: entry.inputs,
         status: String(entry.result?.status ?? 'waiting'),
         ...(entry.result ?? { status: 'waiting' }),
+        submissions: landSubmissions(store, entry),
       }));
       const counts: Record<string, number> = {};
       for (const entry of entries) {
@@ -262,8 +265,13 @@ export async function land(
         revision: store.revision(),
         result: {
           operationId: command.operationId,
-          complete: entries.every(entry => entry.status === 'accepted'),
-          terminal: entries.every(entry => entry.status !== 'waiting'),
+          complete: entries.every(entry => entry.submissions.every(submission => submission.complete)),
+          terminal: entries.every(entry => entry.submissions.every(submission => submission.terminal)),
+          summary: entries.flatMap(entry =>
+            entry.submissions.map(
+              submission => `${submission.laneId.slice(0, 8)}: ${submissionLine(submission)}`,
+            ),
+          ),
           counts,
           entries,
           replay: {

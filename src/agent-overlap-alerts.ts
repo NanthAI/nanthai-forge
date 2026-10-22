@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { currentChannelHead } from './agent-defaults.js';
-import { NativeSource } from './native-source.js';
+import { PeersSource, RECEIPT_ANCESTRY_READS } from './agent-peers-source.js';
 import { digest } from './hash.js';
 import { allRecords } from './agent-lifecycle.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
@@ -54,14 +54,40 @@ export function overlapRegions(item: PredictiveOverlap) {
   return out;
 }
 /** A checkpoint fans out one immutable inbox item to both participants. */
-export function recordOverlapAlerts(store: WorkStore, laneId: string) {
+export function recordOverlapAlerts(store: WorkStore, laneId: string, maxPeers = Infinity) {
   const main = currentChannelHead(store, 'main');
-  const source = store.native ? new NativeSource(store.root) : undefined;
-  const lanes = allRecords<Lane>(store, 'lanes').filter(
-    lane =>
-      ['active', 'paused', 'ready'].includes(lane.state) && !(main && source?.contains(main, lane.head)),
-  );
+  const tx = store.readRecords();
+  const fields = tx
+    ? Array.from(
+        { length: tx.manifest.collections.lanes?.count ?? 0 },
+        (_, index) => tx.fieldsAt('lanes', index).record,
+      )
+    : allRecords<Lane>(store, 'lanes');
+  const open = fields
+    .filter(lane => ['active', 'paused', 'ready'].includes(lane.state))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const focus = open.find(lane => lane.id === laneId);
+  const peers = open.filter(lane => lane.id !== laneId);
+  const selected = [...(focus ? [focus] : []), ...peers.slice(0, maxPeers)];
+  const source = store.native
+    ? new PeersSource(store, focus?.base ?? '', Number.isFinite(maxPeers) ? RECEIPT_ANCESTRY_READS : Infinity)
+    : undefined;
+  const recent = source?.ancestry(),
+    ancestry = source?.ancestry('');
+  let incomplete = peers.length > maxPeers;
+  const lanes = selected.filter(lane => {
+    try {
+      // A verified descendant of main cannot already be contained by main.
+      // Prove that short direction first; older/unrelated heads still use full ancestry.
+      if (main && lane.head !== main && recent?.contains(lane.head, main)) return true;
+      return !(main && ancestry?.contains(main, lane.head));
+    } catch {
+      incomplete = true;
+      return false;
+    }
+  });
   const plan = savedOverlapPlan(store, lanes, laneId);
+  if (incomplete) plan.coverage = 'local-incomplete';
   const alerts = plan.pairs
     .filter(pair => pair.lanes.includes(laneId))
     .flatMap(pair =>

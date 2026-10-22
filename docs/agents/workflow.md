@@ -12,7 +12,7 @@ For a known-file question, search and read the selected directory normally. Do n
 
 For a change, run `nforge agent ROOT start '{"outcome":"Describe the change"}'`. The receipt gives the Lane `laneId` and `path`; edit only that path. Start uses accepted main when present; `channel:null` uses workspace source.
 
-Then run `nforge agent ROOT finish '{"laneId":"LANE_ID","message":"Describe the change","accept":true}'`. finish checkpoints, updates from main when policy permits, composes a Candidate, runs the `verify` check (or the only check) and requests acceptance under the project policy. New supervised projects return `awaiting-review`, `complete:false`, `readyToReview:true` and “Waiting for review by a person; not in main yet”. The Intent is ready; the Candidate and passing run remain available for a person to accept. Read `policy` and the policy section of `brief` before delivery. Omit `accept` for check-only work. With no new edits (for example right after `sync`) finish reuses the Lane head. From inside a Lane directory the CLI fills `laneId`.
+Then run `nforge agent ROOT finish '{"laneId":"LANE_ID","message":"Describe the change","accept":true}'`. finish checkpoints, updates from main when policy permits, composes a Candidate, runs the `verify` check (or the only check) and requests acceptance under the project policy. New supervised projects return `awaiting-review`, `terminal:false`, `complete:false`, `readyToReview:true` and “Waiting for review by a person; not in main yet”. The Intent is ready; the Candidate and passing run remain available for a person to accept. Read `policy` and the policy section of `brief` before delivery. Omit `accept` for check-only work. With no new edits (for example right after `sync`) finish reuses the Lane head. From inside a Lane directory the CLI fills `laneId`.
 
 Multi-Lane work: `start` with `intentId` adds a Lane to an open Intent and returns `siblingLanes`; checkpoint each sibling, then `finish` with `with:["SIBLING_LANE_ID"]` composes their current recorded heads and the finishing Lane into one Candidate/check/acceptance through the same landing queue and autonomy policy (unsaved sibling edits are not included; conflicts stop at compose). `resolved.withInputs` pins those heads for retries. `start` or `finish` accepts `after:{intentId}` or `after:{viewId}`; the Lane retains this dependency, and finish returns `waiting-for-dependency`, `terminal:false` until the dependency lands in the destination Channel. An Intent dependency waits for all its current Lane heads to land; a Candidate dependency waits for that exact Candidate acceptance. Replay the original finish plus `resolved`, or run `nforge agent ROOT land-ready` on the same owner, to refresh main, check and request acceptance. Preserve `agent-finish/` for resumable waits; dependency links remain portable in Work format12. `brief` situations `add-lane` and `land-together` include sibling context; `status` and Intent `records` list Lanes, Candidate receipts list input pins, and hosted Lane summaries include `after`.
 
@@ -36,7 +36,14 @@ rejected before submission.
 
 The result includes `counts` by Lane and `entries` by Candidate, with exact input
 heads and `accepted`, `failed`, `conflict`, `review-needed` or `waiting` outcomes.
-Entries include available batch, check and acceptance ids. Incompatible entries
+Entries include available batch, check and acceptance ids. Their additive
+`submissions` identify each Lane/Intent input and landing attempt, with `state`
+(`pending`, `terminal-failed`, `landed` or `superseded`), `pendingReason` and
+`cause`. A new save supersedes the old-head observation while retaining its
+original `head` and `outcome`; it does not make the new save landed. Queued,
+checking, review and dependency waits are pending. Lane status and compact
+pending status expose the same contract; land's `summary` has one line per Lane.
+See [submission observations](../operations/landing-batches.md#submission-observations). Incompatible entries
 use their own exact-Candidate checks; partial success retains all successful
 landings. Supervised and protected inputs keep the existing person-review path.
 A changed recorded head before composition fails that entry; it never silently
@@ -47,7 +54,9 @@ UUID: replaying the original request resumes waiting entries and reconciles
 unknown outcomes without repeating recorded checks or acceptances. Transient
 lock contention or source observation changes return `waiting` with their code;
 replay the same request to continue. A terminal
-failure or review result stays original; use a new operation after resolving it.
+failure stays original; use a new operation after resolving it. Review is pending,
+with `terminal:false`; replay observes the retained checked Candidate without
+rerunning its check.
 Parent selection/driver state lives in local `agent-land/`; canonical source,
 Candidates, runs and acceptances remain in Work. Preserve that directory for
 parent replay; copying portable Work alone does not retain this local driver.
@@ -113,11 +122,11 @@ Autonomy still applies on every attempt. `laneUpdates:"ask"` stops at `sync-requ
 
 Start, checkpoint, sync, finish and Lane-specific status include an advisory local `peers` digest. `scope.paths` declares relevance for the call; start also retains planned path claims until the Lane closes. Use `peers {"laneId":"…","detail":true}` or `forge_peers` for detailed observations. A clean checkpoint returns its unchanged retained head, including after an up-to-date sync. Save edits before sync; the sync receipt itself identifies the resulting saved head.
 
-`peers.predictive` compares this Lane's live changed regions against every open peer's latest saved checkpoint. Each entry names the peer Lane, checkpoint head, Intent outcome, file, base ranges and suggested first Lane (`first`, with `orderReason`: ready, smaller change, then earlier start). Ranges are one-based `{start,lines}`; zero lines denotes an insertion before `start`. Overlapping ranges, ranges within three lines, shared changed exported contracts and structural path changes are high risk. Exact renames appear as deletion at the old path and addition at the destination. Same-file disjoint changes are low risk and appear only with `detail:true`. Changed base blobs are aligned before comparison; `alignedPeer` gives peer ranges in this Lane's base coordinates. Unsupported text or expensive alignment is explicitly unknown and makes coverage incomplete. Contract scanning retains its syntactic limitations described above; implementation-only shared exports may be missed.
+`peers.predictive` compares this Lane's live changed regions against peer checkpoints. Explicit `peers` reads compare every open peer's latest saved checkpoint. Each entry names the peer Lane, checkpoint head, Intent outcome, file, base ranges and suggested first Lane (`first`, with `orderReason`: ready, smaller change, then earlier start). Ranges are one-based `{start,lines}`; zero lines denotes an insertion before `start`. Overlapping ranges, ranges within three lines, shared changed exported contracts and structural path changes are high risk. Exact renames appear as deletion at the old path and addition at the destination. Same-file disjoint changes are low risk and appear only with `detail:true`. Changed base blobs are aligned before comparison; `alignedPeer` gives peer ranges in this Lane's base coordinates. Unsupported text or expensive alignment is explicitly unknown and makes coverage incomplete. Contract scanning retains its syntactic limitations described above; implementation-only shared exports may be missed.
 
-Checkpoint/sync prime disposable summaries keyed by exact base/head; reads reuse them and rebuild missing entries once. Peer predictions use saved bytes even if that peer has newer unsaved edits; existing path/conflict observations still include live files. CLI prints at most three compact high-overlap lines on stderr and keeps stdout JSON; when bases differ it shows the aligned peer ranges. Omitted entries are counted by the existing compact digest's `more`, with full observations available through `detail:true`. The suggested order is advice: land the suggested Lane first, then sync the other after it lands. Predictions never block or change landing, and no polling or hosted surface is added.
+Checkpoint/sync prime disposable summaries keyed by exact base/head; reads reuse them and rebuild missing entries once. Lifecycle receipts analyze saved regions and contract dependents for at most three peer Lanes, in stable Lane-ID order; additional peer analysis is deferred with `coverage:"local-incomplete"`, `more` and a pointer to `peers {laneId,detail:true}`. Each receipt advice pass reads at most sixteen additional source States for ancestry; deeper history is reported as incomplete and stays available through explicit `peers` reads. Live path claims still cover all open peers, and up to three overlapping peers still receive conflict previews with ordering advice. Detailed `peers` reads compare every peer's saved regions. Peer predictions use saved bytes even if that peer has newer unsaved edits; existing path/conflict observations still include live files. CLI prints at most three compact high-overlap lines on stderr and keeps stdout JSON; when bases differ it shows the aligned peer ranges. Omitted entries are counted by the existing compact digest's `more`, with full observations available through `detail:true`. The suggested order is advice: land the suggested Lane first, then sync the other after it lands. Predictions never block or change landing, and no polling or hosted surface is added.
 
-Lifecycle observations pre-compose main and up to three overlapping open Lanes. Notices include a proposed order and `granularity` (`file` today). Detailed reads return exact hunks/object pins, Intent, checkpoint message, actor/workspace and known owner sessions. Empty sessions mean unknown. Compact receipts keep the 1,500-byte budget and point to detailed reads. Observations finish their selected reads regardless of elapsed time, rebuilding missing or corrupt disposable indexes in the same call. Unavailable source, unsupported analysis and skipped composition or dependency work still report incomplete coverage; missing overlaps never establish independence.
+Lifecycle observations pre-compose main and up to three overlapping open Lanes. Notices include a proposed order and `granularity` (`file` today). Detailed reads return exact hunks/object pins, Intent, checkpoint message, actor/workspace and known owner sessions. Empty sessions mean unknown. Compact receipts keep the 1,500-byte budget and point to detailed reads. Explicit `peers` observations finish their selected reads regardless of elapsed time, rebuilding missing or corrupt disposable indexes in the same call. Lifecycle receipts bound expensive peer analysis before computing it; deferred work is not evidence of independence. Unavailable source, unsupported analysis and skipped composition or dependency work still report incomplete coverage; missing overlaps never establish independence.
 
 `peer-ack {"operationId":"UUID","laneId":"…","noticeId":"…","choice":"accept-order|swap|split","text":"optional explanation"}` records an advisory answer in the local journal outside portable Work. Reuse the operation ID and inputs after an unknown reply. `accept-order` keeps the order, `swap` proposes this Lane first, and `split` proposes splitting source. Both participants see answers in subsequent observations. Current source is re-composed; resolved or changed notices clear. The receiving agent resolves source using its own model; no resolver model is invoked. Hosted relay remains future work.
 
@@ -601,6 +610,8 @@ parents land. A child never supplies its parent's acceptance merely by containin
 its source. Operation IDs retain the original start/sync selection on replay,
 including interruption after working files were applied.
 
+Stack landing detection checks Candidate inputs before traversing source ancestry,
+so unrelated acceptance history does not re-read every source tree for a new stack.
 `status`, `peers` and `pending` show the stack chain and parent movement,
 abandonment or landing in one line. Child briefs include the parent's latest
 handoff; child handoffs retain its pinned fields and `handoff-read` also returns
@@ -613,9 +624,10 @@ native owners; Git compatibility Lanes retain their existing workflow.
 
 ## Overlap alerts and landing order
 
-A successful checkpoint compares its saved regions and changed exports with every
-open peer's latest saved head, using predictive overlap's existing high-risk
-rule. A new or expanded region records one canonical pair/region notice in the
+A successful checkpoint compares its saved regions and changed exports with up to
+three open peers' latest saved heads, using predictive overlap's existing high-risk
+rule and the same stable selection as receipt advice. Remaining peer analysis is
+reported as incomplete; a detailed `peers` read compares every open peer. A new or expanded region records one canonical pair/region notice in the
 local coordination journal for both Lanes. Heads and unrelated edits do not make
 a duplicate; changed overlapping ranges or symbols create a new notice. Notices
 retain source pins and attribution and are advisory inbox items, available on the

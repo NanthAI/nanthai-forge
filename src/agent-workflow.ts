@@ -5,6 +5,7 @@ import { withRetryObservation } from './friction-retry.js';
 import { captureFriction, triageFriction, citeFriction } from './friction.js';
 import { readImprovements } from './improve.js';
 import { recordOverlapAlerts } from './agent-overlap-alerts.js';
+import { readLaneSubmissions } from './landing-submission-read.js';
 import { land } from './land.js';
 import type { LandCommand } from './land-schema.js';
 import { agentLaneTests } from './agent-lane-tests.js';
@@ -18,7 +19,7 @@ import { parseAgentAction } from './agent-action-parse.js';
 import { undoOptimisticRevert } from './optimistic-undo.js';
 import { indexPeerSource } from './agent-peers-index.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
-import { agentPeers, boundPeers } from './agent-peers.js';
+import { agentPeers, boundPeers, RECEIPT_PEER_LIMIT } from './agent-peers.js';
 import { cancelLandingEntry } from './landing-batch-cancel.js';
 import { modalMonthCost } from './check-backend.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -214,7 +215,7 @@ export class AgentWorkflow {
       try {
         overlapCoverage = await retryWorkPhase(
           command.operationId!,
-          () => store.observing(() => recordOverlapAlerts(store, command.laneId)),
+          () => store.observing(() => recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT)),
           ['SOURCE_CHANGED'],
         );
       } catch {
@@ -224,14 +225,18 @@ export class AgentWorkflow {
     const peers =
       ['start', 'checkpoint', 'sync', 'finish'].includes(command.action) ||
       (command.action === 'status' && command.laneId)
-        ? agentPeers(store, {
-            laneId:
-              command.action === 'start'
-                ? (response.result as { laneId: string }).laneId
-                : (command as { laneId: string }).laneId,
-            scope: (command as { scope?: { paths: string[] } }).scope,
-            detail: true,
-          })
+        ? agentPeers(
+            store,
+            {
+              laneId:
+                command.action === 'start'
+                  ? (response.result as { laneId: string }).laneId
+                  : (command as { laneId: string }).laneId,
+              scope: (command as { scope?: { paths: string[] } }).scope,
+              detail: true,
+            },
+            { receipt: true },
+          )
         : undefined;
     if (command.action === 'start') {
       const result = response.result as { laneId: string; warnings?: string[] };
@@ -380,6 +385,7 @@ export class AgentWorkflow {
       const records = store.readRecords();
       if (records) return agentRecordStatus(store, command, records);
       const data = store.load();
+      const submissions = readLaneSubmissions(store);
       const lane = command.laneId ? agentLaneStatus(store, command, undefined, data) : undefined;
       if (lane && !command.detail) return { revision: data.revision, result: { lane } };
       invariant(
@@ -427,7 +433,10 @@ export class AgentWorkflow {
             page(
               data.lanes
                 .filter(lane => selected(lane.intentId))
-                .map(lane => laneReceipt(lane, store.path(lane.id))),
+                .map(lane => ({
+                  ...laneReceipt(lane, store.path(lane.id)),
+                  submissions: submissions.filter(item => item.laneId === lane.id),
+                })),
             ),
             data,
           ),
@@ -728,7 +737,7 @@ export class AgentWorkflow {
               response.revision = store.commitRecords(tx);
           });
         try {
-          store.observing(() => recordOverlapAlerts(store, command.laneId));
+          store.observing(() => recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT));
         } catch {
           /* Advisory coordination never invalidates a saved checkpoint. */
         }

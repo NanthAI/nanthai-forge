@@ -6,6 +6,7 @@ import { NativeSource } from './native-source.js';
 import { parseNativeState, type NativeFile } from './native-state-format.js';
 import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
+import { buildHostedSaveState } from './hosted-save-worker.js';
 import { SourceWorkerReader, type SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import {
   workerInputSchema,
@@ -27,7 +28,10 @@ export async function buildHostedSourceState(
     const source = new NativeSource(root);
     await mkdir(source.directory, { recursive: true, mode: 0o700 });
     const reader = new SourceWorkerReader(source.directory, transport, progress);
-    const plan = workerInputSchema.parse(await reader.json(input));
+    const value = await reader.json(input);
+    if (value && typeof value === 'object' && 'kind' in value && value.kind === 'forge-hosted-save-input')
+      return await buildHostedSaveState(input, value, reader, source, progress);
+    const plan = workerInputSchema.parse(value);
     const inventory = new Map<string, WorkerObject>(),
       files: NativeFile[] = [],
       pages = new Set<string>();

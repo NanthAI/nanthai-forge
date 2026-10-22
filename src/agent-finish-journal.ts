@@ -154,14 +154,17 @@ export function retainedFinishCommand(store: WorkStore, operationId: string) {
 }
 
 /** Read retained driver context for an explicit Lane handover; never resumes a driver. */
-export function laneFinishes(store: WorkStore, laneId: string) {
+export function laneFinishes(store: WorkStore, laneId?: string) {
   const directory = join(store.directory, 'agent-finish');
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
     .filter(name => /^[0-9a-f-]+\.json$/.test(name))
     .flatMap(name => {
       const state = schema.parse(JSON.parse(readFileSync(join(directory, name), 'utf8')));
-      return state.command?.laneId === laneId
+      return state.command &&
+        (!laneId ||
+          state.command.laneId === laneId ||
+          (state.command.withInputs as { laneId: string }[] | undefined)?.some(pin => pin.laneId === laneId))
         ? [
             {
               operationId: name.slice(0, -5),

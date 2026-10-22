@@ -1,5 +1,6 @@
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 // SPDX-License-Identifier: Apache-2.0
+import { finishSubmissions } from './landing-submission-read.js';
 import { strandedActionsRun } from './github-actions-recovery.js';
 import { land } from './land.js';
 import { finishChild } from './agent-finish-journal.js';
@@ -116,18 +117,32 @@ class FinishRunner {
       acceptance: null,
     };
   }
+  private submissionReceipt(fields: Fields) {
+    if (!this.command.accept) return fields;
+    const submissions = finishSubmissions(this.store, this.command, this.journal.state.attempts, fields);
+    return {
+      ...fields,
+      submissions,
+      terminal: submissions.every(item => item.terminal),
+      complete: submissions.every(item => item.complete),
+    };
+  }
   private async receipt(fields: Fields) {
-    const result = {
+    const result = this.submissionReceipt({
       operationId: this.command.operationId,
       terminal: true,
       complete: false,
       ...fields,
       attempts: structuredClone(this.journal.state.attempts),
       ...(this.journal.state.landing.length ? { landing: structuredClone(this.journal.state.landing) } : {}),
-    };
+    });
     // Match the wire receipt on first use and replay, including omitted undefined fields.
     const canonical = JSON.parse(JSON.stringify(result)) as typeof result;
-    if (canonical.terminal) {
+    // Supersession is an observation, not permission to stop a resumable driver.
+    const stopped = Array.isArray(fields.entries)
+      ? fields.entries.every(entry => (entry as Fields).status !== 'waiting')
+      : fields.terminal !== false;
+    if (stopped || ['awaiting-review', 'review-needed'].includes(String(fields.status))) {
       this.journal.state.result = canonical;
       this.journal.save();
     }
@@ -340,7 +355,10 @@ class FinishRunner {
         journal.state.result.status !== 'interrupted' ||
         !strandedActionsRun(this.store, run)
       )
-        return { revision: await this.observedRevision(), result: journal.state.result };
+        return {
+          revision: await this.observedRevision(),
+          result: this.submissionReceipt(journal.state.result),
+        };
       // Replay this exact run through normal registration, before a retained
       // landing batch is observed. Only its unresolved dispatch may recover.
       await this.phases.phase({

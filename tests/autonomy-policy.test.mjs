@@ -7,6 +7,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, existsSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { readLaneSubmissions } from '../dist/landing-submission-read.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
@@ -59,7 +60,12 @@ for (const native of [true, false])
     p.edit(lane, 'a.txt', 'reviewed\n');
     const result = await p.finish(lane);
     assert.equal(result.status, 'awaiting-review');
+    assert.equal(result.terminal, false);
     assert.equal(result.complete, false);
+    const submission = result.submissions[0];
+    assert.equal(submission.state, 'pending');
+    assert.equal(submission.pendingReason, 'waiting-for-review');
+    assert.deepEqual(readLaneSubmissions(p.store, lane.laneId), result.submissions);
     assert.equal(result.message, 'Waiting for review by a person; not in main yet');
     assert.equal(p.store.select('intents', lane.intentId).status, 'ready');
     assert.equal(currentChannelHead(p.store, 'main'), null);
@@ -79,6 +85,10 @@ for (const native of [true, false])
       e => e.code === 'REVIEW_REQUIRED',
     );
     assert.equal((await p.human.dispatch(command, p.store.revision())).result.status, 'accepted');
+    const landedSubmission = readLaneSubmissions(p.store, lane.laneId)[0];
+    assert.equal(landedSubmission.submissionId, submission.submissionId);
+    assert.equal(landedSubmission.state, 'landed');
+    assert.equal(landedSubmission.complete, true);
     assert.equal(p.store.select('lanes', lane.laneId).state, 'active');
   });
 for (const native of [true, false])

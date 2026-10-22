@@ -814,3 +814,24 @@ hash-pinned raw/recipe objects into temporary disk storage and constructs States
 through NativeSource without materializing or executing repository code. Direct
 transfer grants and publication remain with the source-operation reducers; no
 public writer or deployment is enabled. See [trusted hosted source worker](operations/hosted-source-worker.md).
+
+### Hosted Lane delta saves
+
+The hosted save APIs retain one original operation and a separate small staging
+record per save. Immutable linked delta pages are project objects; bounded staging
+transactions validate their order, counts and committed blob/recipe pins. A
+server-pinned input binds the exact baseline State, delta root, message and first
+attempt time. Source construction runs through the fixed Modal worker, using the
+native State format and streaming changed blobs to private disk. Unchanged paths
+are preserved from the verified baseline; no repository code runs.
+
+A signed source-job completion schedules the save finalizer independently of the
+editing client. Only its small result manifest passes through the finalizing
+action. One publication transaction verifies the original job/input/output and
+committed State, compares Lane source/record/lifecycle versions, appends the save,
+updates that Lane and retains the terminal operation receipt. A stale attempt
+retains its original delta and failure receipt. Registered States are immutable
+source evidence for later compose/sync; they confer no main or landing authority.
+Neither staging nor final publication loads retained Work or Channel history.
+See the [save API](operations/source-exchange.md#hosted-lane-save-api) for transfer,
+retry and provisioning boundaries.

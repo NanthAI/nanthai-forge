@@ -13,6 +13,8 @@ import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 
+export const RECEIPT_ANCESTRY_READS = 16;
+
 /** Per-read overlay: even text merge's put() stays in memory. Never publishes objects. */
 export class PeersSource extends NativeSource {
   private readonly scopedFiles = new Map<string, NativeState['files']>();
@@ -20,9 +22,11 @@ export class PeersSource extends NativeSource {
   private readonly cache: PeersCache;
   private readonly memory = new Map<string, Buffer>();
   private readonly states = new Map<string, NativeState>();
+  private ancestryReads = 0;
   constructor(
     private readonly store: WorkStore,
     private readonly boundary: string,
+    private readonly maxAncestryReads = Infinity,
   ) {
     super(store.root);
     this.cache = new PeersCache(store.root);
@@ -33,8 +37,18 @@ export class PeersSource extends NativeSource {
         'Native object storage is redirected.',
       );
   }
-  override ancestry() {
-    return new NativeAncestry(id => (id === this.boundary ? [] : this.state(id).parents));
+  override ancestry(boundary = this.boundary) {
+    return new NativeAncestry(id => {
+      if (id === boundary) return [];
+      const known = this.states.get(id);
+      if (known) return known.parents;
+      invariant(
+        this.ancestryReads++ < this.maxAncestryReads,
+        'ADVICE_DEFERRED',
+        'Receipt source ancestry analysis deferred; use peers {laneId,detail:true} for full advice.',
+      );
+      return this.state(id).parents;
+    });
   }
   override put(bytes: Buffer) {
     const id = digest(bytes);

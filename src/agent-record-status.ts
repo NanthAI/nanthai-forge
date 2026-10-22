@@ -1,3 +1,4 @@
+import { readLaneSubmissions } from './landing-submission-read.js';
 import { agentLaneStatus } from './agent-lane-status.js';
 import { agentCostSummary } from './agent-cost-summary.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -77,6 +78,7 @@ export function agentRecordStatus(
       ),
     };
   };
+  const submissions = readLaneSubmissions(store);
   // Channel receipts are a global namespace; only this collection is needed to reconcile refs.
   data.channelMoves = positions('channelMoves').map(position => tx.at('channelMoves', position));
   return {
@@ -109,7 +111,10 @@ export function agentRecordStatus(
         const section = records(
           'lanes',
           selected('lanes'),
-          lane => laneReceipt(lane, store.path(lane.id)),
+          lane => ({
+            ...laneReceipt(lane, store.path(lane.id)),
+            submissions: submissions.filter(item => item.laneId === lane.id),
+          }),
           true,
         );
         return { ...section, items: annotateLanes(store, section.items, data) };

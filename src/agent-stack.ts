@@ -2,7 +2,7 @@
 import { NativeSource } from './native-source.js';
 import { allRecords } from './agent-lifecycle.js';
 import type { WorkStore } from './work-store.js';
-import type { Lane, ChannelMove } from './work-types.js';
+import type { Lane, ChannelMove, WorkView } from './work-types.js';
 const currentChannelHead = (store: WorkStore, channel: string) =>
   allRecords<ChannelMove>(store, 'channelMoves')
     .filter(move => move.channel === channel && move.status === 'accepted')
@@ -13,23 +13,35 @@ const currentChannelHead = (store: WorkStore, channel: string) =>
 export function stackLanding(store: WorkStore, lane: Lane) {
   const stack = lane.stack;
   if (!stack || stack.detached) return undefined;
-  const main = currentChannelHead(store, stack.channel);
+  const parent = store.select('lanes', stack.laneId);
+  const tx = store.readRecords();
+  const views =
+    tx && parent ? tx.all('views', parent.intentId, 'intentId') : allRecords<WorkView>(store, 'views');
+  const inputs = new Map(
+    views.flatMap(view => {
+      const input = view.inputs.find(pin => pin.laneId === stack.laneId);
+      return input ? [[view.id, input] as const] : [];
+    }),
+  );
+  if (!inputs.size) return undefined;
+  const moves = allRecords<ChannelMove>(store, 'channelMoves');
+  const main = moves
+    .filter(move => move.channel === stack.channel && move.status === 'accepted')
+    .at(-1)?.head;
   if (!main) return undefined;
-  const source = new NativeSource(store.root);
-  return allRecords<ChannelMove>(store, 'channelMoves')
-    .reverse()
-    .find(move => {
-      if (move.channel !== stack.channel || move.status !== 'accepted' || !source.contains(main, move.head))
-        return false;
-      const input = store.select('views', move.viewId)?.inputs.find(pin => pin.laneId === stack.laneId);
-      // A parent can have been restacked itself; its saved checkpoint history is
-      // retained even when its new State no longer has the old head as an ancestor.
-      const parent = store.select('lanes', stack.laneId);
-      return (
-        !!input &&
-        (input.head === stack.head || input.head === parent?.head || source.contains(input.head, stack.head))
-      );
-    });
+  const ancestry = new NativeSource(store.root).ancestry();
+  return moves.reverse().find(move => {
+    if (move.channel !== stack.channel || move.status !== 'accepted') return false;
+    const input = inputs.get(move.viewId);
+    // Unrelated acceptances cannot establish a parent landing. In particular,
+    // do not traverse every full source tree in main's history for a new stack.
+    if (!input || !ancestry.contains(main, move.head)) return false;
+    // A parent can have been restacked itself; its saved checkpoint history is
+    // retained even when its new State no longer has the old head as an ancestor.
+    return (
+      input.head === stack.head || input.head === parent?.head || ancestry.contains(input.head, stack.head)
+    );
+  });
 }
 export function stackStatus(store: WorkStore, lane: Lane) {
   const stack = lane.stack;

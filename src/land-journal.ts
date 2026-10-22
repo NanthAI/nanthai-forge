@@ -20,6 +20,7 @@ import type { FinishAction } from './agent-workflow-schema.js';
 import type { LandCommand } from './land-schema.js';
 import type { WorkView } from './work-types.js';
 export type LandEntry = {
+  submissionOperationId?: string;
   command: FinishAction;
   inputs: WorkView['inputs'];
   viewId?: string;
@@ -102,6 +103,7 @@ export class LandJournal {
       for (const inputs of compatible) {
         const first = inputs[0]!;
         entries.push({
+          ...(selection ? { submissionOperationId: selection.finish.operationId } : {}),
           inputs,
           command: {
             action: 'finish',

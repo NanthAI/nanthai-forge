@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import { makeFunctionReference } from 'convex/server';
+import { saveForJob } from './projectHostedSavePublish';
 import { internalMutation, internalQuery } from './_generated/server';
 import { enqueueSourceJob, claimSourceJob, advanceSourceJob, cancelSourceJob } from './projectSourceJobs';
 import { receiveSourceJobCallback } from './projectSourceJobCallbacks';
@@ -43,14 +45,23 @@ export const advance = internalMutation({
 export const callback = internalMutation({
   args: { projectId: v.id('hostedProjects'), callback: v.string(), signature: v.string() },
   returns: v.string(),
-  handler: async (ctx, input) =>
-    JSON.stringify(
-      await receiveSourceJobCallback(
-        ctx,
-        { ...input, callback: JSON.parse(input.callback) },
-        keyId => process.env[`FORGE_SOURCE_JOB_KEY_${keyId}`] ?? '',
-      ),
-    ),
+  handler: async (ctx, input) => {
+    const job = await receiveSourceJobCallback(
+      ctx,
+      { ...input, callback: JSON.parse(input.callback) },
+      keyId => process.env[`FORGE_SOURCE_JOB_KEY_${keyId}`] ?? '',
+    );
+    if (
+      job.jobKind === 'save' &&
+      (job.status === 'completed' || job.status === 'failed') &&
+      (await saveForJob(ctx, input.projectId, job.id))
+    )
+      await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedSaveJobs:complete'), {
+        projectId: input.projectId,
+        jobId: job.id,
+      });
+    return JSON.stringify(job);
+  },
 });
 export const cancel = internalMutation({
   args: { ...identity, actor: v.string() },

@@ -690,3 +690,53 @@ restores the previous directory when replacement stopped between renames, or
 reconciles the installed operation marker after a lost completion receipt. An
 older unfinished checkout cannot overwrite a newer marker. Completed retries
 recheck access and return their original receipt without rewinding newer edits.
+
+### Hosted Lane save API
+
+`saveHostedLane(root, {operationId, message}, exchange)` saves a thin hosted Lane
+checkout through the hosted save APIs. This is a source-client API; CLI and
+browser editor wiring are separate. The operation retains its command, captured
+bytes, full baseline and delta pages in the sibling `.forge-client/saves` cache.
+Retry the original operation after a lost upload, commit or response. Later local
+edits remain on disk; retry uploads the captured bytes. Successful reconciliation
+advances only the matching checkout baseline marker, without installing files.
+
+A delta names each changed path's exact prior blob/mode and its replacement or
+explicit deletion. Unmaterialized absent paths remain unchanged. Local additions,
+rename-as-delete/add, executable modes, symlinks and binary bytes use the same
+contract. The client first discovers missing logical objects in 100-object
+windows, reuses existing chunk/recipe upload and verification, and stages ordered
+metadata pages of at most 100 changes and 128 KiB. These windows do not limit the
+total source size. An unchanged save records success without moving the head or
+launching a worker.
+
+`projectHostedSaves:prepare`, `stage` and `progress` retain the original operation,
+baseline, counts and exact linked page root. `projectHostedSaveJobs:submit` creates
+one child source job pinned to Modal, `FORGE_SOURCE_WORKER`,
+`FORGE_SOURCE_RUNTIME` and `FORGE_SOURCE_KEY_ID`. The trusted worker verifies the
+baseline State and each prior delta entry, downloads changed blobs with bounded
+buffers/private disk, preserves other paths and constructs the native State with
+server-selected parent/time. It never materializes or executes repository code.
+State metadata still scales with the file manifest in worker memory.
+
+The authenticated source-control ingress maps the worker's `grant` and `commit`
+requests to internal `projectHostedSaveTransfers` functions, passing the exact
+serialized dispatch, execution ID and content pin. Each call rechecks current
+project/contributor access, authority epoch, worker lease and fence. Read grants
+sign committed project objects, including verified recipe leaves; output grants
+use the existing configured R2 path and create-only checksum-bound PUTs. Commit
+performs HEAD verification and then rechecks authorization and the exact storage
+key before binding the bytes. Source bytes do not pass through a Convex action.
+These functions are internal: deployment, authenticated ingress routing, key and
+provider provisioning remain required operator integration, not an enabled public
+HTTP endpoint or a live end-to-end qualification.
+
+A signed terminal source-job callback schedules `projectHostedSaveJobs:complete`.
+That action reads only the small result manifest; the final mutation binds it to
+the original input and signed job output, checks committed State membership and
+atomically registers the State, CAS-updates the Lane, appends one save and retains
+the original receipt. Two changed saves racing on one baseline have one winner;
+the loser receives retained `WORK_STALE` evidence and keeps its delta. A new save
+or sync can use that preserved source. Completed retries return their original
+receipt and never rewind later Lane work. No main, Candidate or landing authority
+is granted by a source upload or save.
