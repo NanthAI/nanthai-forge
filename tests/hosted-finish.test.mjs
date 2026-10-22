@@ -1,0 +1,468 @@
+// SPDX-License-Identifier: Apache-2.0
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import {
+  finishFixture,
+  api,
+  driver,
+  control,
+  landingApi,
+  records,
+  code,
+  maxima,
+} from './hosted-finish-fixture.mjs';
+import { hostedFinishBackoff } from '../dist/hosted-finish.js';
+const synthetic = {
+  FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
+  FORGE_SOURCE_WORKER: 'fixed-worker',
+  FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
+  FORGE_SOURCE_KEY_ID: 'SYNTHETIC',
+  R2_ACCOUNT_ID: 'synthetic',
+  R2_BUCKET: 'synthetic',
+  R2_ACCESS_KEY_ID: 'synthetic',
+  R2_SECRET_ACCESS_KEY: 'synthetic',
+};
+const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
+test.before(() => Object.assign(process.env, synthetic));
+test.after(() => {
+  for (const [key, value] of Object.entries(prior)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+const stateOf = f => [...f.tables.projectHostedLandingRequests.values()].map(x => JSON.parse(x.value));
+async function begin(f, overrides = {}) {
+  const request = f.request(overrides),
+    state = await f.enqueue(request);
+  await f.drain();
+  return { request, state };
+}
+async function complete(f) {
+  await f.passChecks();
+  await f.drain();
+}
+
+test('finish lands through ordinary H13/H14 evidence and original operation retry is immutable', async t => {
+  const f = await finishFixture(t),
+    { request, state } = await begin(f);
+  assert.equal((await f.current(state.id)).submission.observation.pendingReason, 'checking');
+  await complete(f);
+  const landed = await f.current(state.id);
+  assert.equal(landed.submission.phase, 'landed');
+  assert.equal(f.tables.projectHostedAcceptances.size, 1);
+  assert.deepEqual(await f.enqueue(request), landed.submission);
+  await assert.rejects(f.enqueue({ ...request, check: null }), code('WORK_OPERATION_CHANGED'));
+  assert.equal(f.tables.projectHostedCheckRuns.size, 1);
+  assert.equal(f.pending().length, 0);
+  assert(f.metrics.stepCalls.every(calls => calls.length <= 2));
+  const cursor = JSON.parse(
+    await f.tx('finishCursor', api.status, {
+      projectId: f.projectId,
+      submissionId: state.id,
+      version: landed.version,
+    }),
+  );
+  assert.equal(cursor.unchanged, true);
+});
+
+test('disjoint main movement during check recomposes and rechecks with named IDs while a person selection stays pinned across later saves', async t => {
+  const f = await finishFixture(t),
+    { request, state } = await begin(f, { agent: false });
+  const initial = (await f.status(state.id)).attempt;
+  const main = f.moveMain();
+  const original = await f.readLane(f.lane.laneId);
+  const later = f.c.state(
+    [
+      f.c.baseFile,
+      f.c.hidden,
+      f.c.file('selected.txt', 'selected\n'),
+      f.c.file('later-save.txt', 'leave open\n'),
+    ],
+    [original.head],
+  );
+  f.c.register(later);
+  await f.changeLane(original.id, { head: later.sha256, sourceVersion: original.sourceVersion + 1 });
+  await complete(f);
+  const checked = await f.current(state.id),
+    second = (await f.status(state.id)).attempt;
+  assert.equal(checked.submission.phase, 'checking');
+  assert.equal(second.parentAttemptId, initial.id);
+  assert.equal(second.number, 1);
+  assert.notEqual(second.check.runId, initial.check.runId);
+  assert.deepEqual(second.main, { head: main.head, receiptId: main.receipt.id });
+  assert.deepEqual(second.candidate.inputs, initial.candidate.inputs);
+  assert.deepEqual(second.candidate.dependencies, initial.candidate.dependencies);
+  assert.equal(f.metrics.sourceJobs, 1);
+  assert.deepEqual((await f.enqueue(request)).request, request);
+  await complete(f);
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  const files = JSON.parse(f.c.objects.get(f.currentMain().head).toString()).files;
+  assert(files.some(x => x.path === 'selected.txt'));
+  assert(files.some(x => x.path === 'accepted.txt'));
+  assert(!files.some(x => x.path === 'later-save.txt'));
+  assert.equal((await f.readLane(original.id)).head, later.sha256);
+  assert.equal((await f.readLane(original.id)).state, 'active');
+  const history = JSON.parse(
+    await f.tx('finishAttempts', landingApi.attempts, {
+      projectId: f.projectId,
+      submissionId: state.id,
+      cursor: null,
+    }),
+  );
+  assert.equal(history.page[0].observation.state, 'superseded');
+  assert.equal(history.page[1].observation.state, 'landed');
+});
+
+test('overlapping main movement retains the new conflicted Candidate and H09 resolution root without accepting old passing evidence', async t => {
+  const f = await finishFixture(t, { overlap: true }),
+    { state } = await begin(f);
+  const main = f.moveMain({ overlap: true });
+  await complete(f);
+  const result = await f.current(state.id),
+    attempt = (await f.status(state.id)).attempt;
+  assert.equal(result.submission.observation.cause, 'conflict');
+  assert.equal(result.submission.phase, 'terminal-failed');
+  const row = await f.tx(
+    'finishConflictRead',
+    {
+      _handler: ctx =>
+        records.readHostedRecord(ctx, { ...f.auth, kind: 'candidate', key: attempt.candidate.id }),
+    },
+    {},
+  );
+  assert.equal(JSON.parse(row.value).result.status, 'conflict');
+  assert(JSON.parse(row.value).result.conflicts.sha256);
+  assert.equal(f.currentMain().head, main.head);
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 1);
+});
+
+test('a same-head new main receipt starts a distinct exact Candidate/check attempt', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  f.moveMain({ sameHead: true });
+  await complete(f);
+  await complete(f);
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 2);
+  assert.equal(f.tables.projectHostedLandingAttempts.size, 2);
+});
+
+for (const crash of ['before-step', 'after-step', 'before-resume']) {
+  test(`crash ${crash} during acceptance metadata resumes only the retained phase`, async t => {
+    const f = await finishFixture(t),
+      { state } = await begin(f);
+    await f.passChecks();
+    while (f.pending()[0]?.name !== 'projectHostedFinishDriver:drive') await f.execute();
+    const task = f.pending()[0];
+    if (crash === 'before-step') {
+      await f.execute(task, crash);
+      // A process died before acquiring a step: explicit startup/reconnect repair.
+      f.patch('_scheduled_functions', task._id, { state: { kind: 'failed' } });
+      await f.tx('finishRepair', api.resume, { projectId: f.projectId, submissionId: state.id });
+    } else await assert.rejects(f.execute(task, crash), /synthetic crash/);
+    await f.drain();
+    assert.equal((await f.current(state.id)).submission.phase, 'landed');
+    assert.equal(f.tables.projectHostedCheckRuns.size, 1);
+    assert.equal(f.tables.projectHostedAcceptances.size, 1);
+  });
+}
+
+test('crash after plan upload and after source publication does not create another source job, attempt or check', async t => {
+  const f = await finishFixture(t),
+    { state, request } = await begin(f);
+  f.moveMain();
+  await f.passChecks();
+  // Stop when the named pending attempt has been reserved, before source IO.
+  while (!(await f.current(state.id)).pendingAttempt) await f.execute();
+  const pending = (await f.current(state.id)).pendingAttempt;
+  await assert.rejects(f.execute(f.pending()[0], 'before-resume'), /synthetic crash/);
+  await f.tx('finishRepair', api.resume, { projectId: f.projectId, submissionId: state.id });
+  assert.equal((await f.current(state.id)).pendingAttempt.id, pending.id);
+  await f.drain();
+  assert.equal(f.metrics.sourceJobs, 1);
+  assert.equal((await f.status(state.id)).attempt.id, pending.id);
+  await complete(f);
+  const accepted = await f.current(state.id),
+    main = f.currentMain();
+  assert.deepEqual(await f.enqueue(request), accepted.submission);
+  assert.deepEqual(f.currentMain(), main);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 2);
+  assert.equal(f.tables.projectHostedLandingAttempts.size, 2);
+});
+
+test('stacked dependency waits own no idle timer and resume on the parent receipt', async t => {
+  const f = await finishFixture(t),
+    parent = await begin(f);
+  const childRequest = f.request({
+    finish: { composeOperationId: f.selection.request.operationId, after: parent.state.id },
+  });
+  const child = await f.enqueue(childRequest);
+  await f.drain();
+  assert.equal((await f.current(child.id)).submission.observation.pendingReason, 'waiting-for-dependency');
+  assert.equal(f.pending().length, 0);
+  await complete(f); // parent lands; child rebases its original selection onto parent
+  await complete(f);
+  assert.equal((await f.current(parent.state.id)).submission.phase, 'landed');
+  assert.equal((await f.current(child.id)).submission.phase, 'landed');
+  assert.equal(f.tables.projectHostedAcceptances.size, 2);
+  assert.equal(f.pending().length, 0);
+});
+
+test('changed selection roots and old IO generations are refused without changing a newer attempt', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  await f.passChecks();
+  while (f.pending()[0]?.name !== 'projectHostedFinishDriver:drive') await f.execute();
+  const input = f.pending()[0].args[0];
+  const command = JSON.parse(await f.tx('finishStep', driver.step, input));
+  const original = f.c.objects.get(command.pin.sha256).toString();
+  await assert.rejects(
+    f.tx('finishResume', driver.resume, {
+      ...input,
+      command: JSON.stringify(command),
+      page: JSON.stringify({ ...JSON.parse(original), entries: [] }),
+    }),
+    code('WORK_OPERATION_CHANGED'),
+  );
+  await f.tx('finishResume', driver.resume, { ...input, command: JSON.stringify(command), page: original });
+  const before = (await f.current(state.id)).submission;
+  await f.tx('finishResume', driver.resume, { ...input, command: JSON.stringify(command), page: original });
+  assert.deepEqual((await f.current(state.id)).submission, before);
+  await f.drain();
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+});
+
+test('repeated main contention yields bounded backoff and preserves all earlier attempts instead of spinning', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  for (let i = 0; i < 3; i++) {
+    f.moveMain({ sameHead: true });
+    await f.passChecks();
+    while (!(await f.current(state.id)).pendingAttempt) await f.execute();
+    const row = f.row(state.id),
+      pending = (await f.current(state.id)).pendingAttempt;
+    assert(row.wake.at - Date.now() >= hostedFinishBackoff(pending.number));
+    assert.equal(pending.number, i + 1);
+    await f.drain();
+  }
+  await complete(f);
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 4);
+  assert.equal(f.metrics.sourceJobs, 3);
+  assert.equal(hostedFinishBackoff(500), 30_000);
+  t.diagnostic(JSON.stringify({ maxima, metrics: f.metrics, rss: process.memoryUsage().rss }));
+});
+
+test('concurrent lost enqueue replies keep one finish, submission and check; a different original composition is rejected', async t => {
+  const f = await finishFixture(t),
+    request = f.request();
+  const [one, two] = await Promise.all([f.enqueue(request), f.enqueue(request)]);
+  assert.equal(one.id, two.id);
+  assert.equal(f.tables.projectHostedFinishes.size, 1);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 1);
+  await assert.rejects(
+    f.enqueue({ ...request, finish: { ...request.finish, composeOperationId: randomUUID() } }),
+    code('WORK_OPERATION_CHANGED'),
+  );
+  await f.drain();
+  await complete(f);
+  assert.equal(f.tables.projectHostedAcceptances.size, 1);
+});
+
+test('an old passing run cannot supply evidence for a recomposed Candidate', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  const first = (await f.status(state.id)).attempt;
+  f.moveMain();
+  await complete(f);
+  const child = (await f.status(state.id)).attempt;
+  const row = [...f.tables.projectHostedLandingAttempts.values()].find(x => x.attemptId === child.id);
+  f.patch('projectHostedLandingAttempts', row._id, {
+    value: JSON.stringify({ ...child, check: first.check }),
+  });
+  await f.tx('finishRepair', api.resume, { projectId: f.projectId, submissionId: state.id });
+  // Wake the original child request through its run; publication independently
+  // validates Candidate/head/digest and refuses the substituted old evidence.
+  await complete(f);
+  const result = await f.current(state.id);
+  assert.equal(result.submission.phase, 'terminal-failed');
+  assert.equal(result.submission.error.code, 'EVIDENCE_CHANGED');
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+});
+
+test('current project access precedes finish status and resume, including completed receipts', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  await complete(f);
+  await assert.rejects(
+    f.tx('finishDeniedRead', api.status, { projectId: f.projectId, submissionId: state.id }, 'stranger'),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  await assert.rejects(
+    f.tx('finishDeniedResume', api.resume, { projectId: f.projectId, submissionId: state.id }, 'stranger'),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  assert.equal(f.pending().length, 0);
+});
+
+test('a failed parent settles its dependent without an idle wake or acceptance', async t => {
+  const f = await finishFixture(t),
+    parent = await begin(f);
+  const child = await f.enqueue(
+    f.request({ finish: { composeOperationId: f.selection.request.operationId, after: parent.state.id } }),
+  );
+  await f.drain();
+  const run = (await f.status(parent.state.id)).attempt.check.runId;
+  const { checks } = await import('./hosted-checks-fixture.mjs');
+  await f.tx('finishCancelParent', checks.cancel, {
+    projectId: f.projectId,
+    request: JSON.stringify({ operationId: randomUUID(), runId: run, authorityEpoch: 1 }),
+  });
+  await f.drain();
+  assert.equal((await f.current(child.id)).submission.phase, 'terminal-failed');
+  assert.equal((await f.current(child.id)).submission.error.code, 'DEPENDENCY_NOT_LANDED');
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  assert.equal(f.pending().length, 0);
+});
+
+test('included-input status uses the native superseded state while retaining the actual landed outcome', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  await complete(f);
+  await f.changeLane(f.lane.laneId, { head: 'a'.repeat(64), sourceVersion: 1 });
+  const page = JSON.parse(
+    await f.tx('finishInputs', api.inputs, {
+      projectId: f.projectId,
+      submissionId: state.id,
+      attemptId: state.attemptId,
+      index: 0,
+    }),
+  );
+  assert.equal(page.entries[0].state, 'superseded');
+  assert.equal(page.entries[0].outcome, 'landed');
+  assert.equal(page.entries[0].head, f.lane.head);
+  assert.equal(page.entries[0].complete, false);
+  assert.equal(page.nextIndex, null);
+});
+
+for (const crash of ['before-source', 'after-source-callback', 'after-source-publish']) {
+  test(`source crash ${crash} repairs the original named job and only its pending attempt`, async t => {
+    const f = await finishFixture(t),
+      { state } = await begin(f);
+    f.moveMain();
+    await f.passChecks();
+    while (f.pending()[0]?.name !== 'projectModalSource:dispatch') await f.execute();
+    const pending = (await f.current(state.id)).pendingAttempt;
+    const sourceCount = f.tables.projectHostedComposes.size;
+    await assert.rejects(f.execute(f.pending()[0], crash), /synthetic crash/);
+    await f.tx('finishRepair', api.resume, { projectId: f.projectId, submissionId: state.id });
+    await f.drain();
+    assert.equal((await f.status(state.id)).attempt.id, pending.id);
+    assert.equal(f.tables.projectHostedComposes.size, sourceCount);
+    assert.equal(f.metrics.sourceJobs, 1);
+    await complete(f);
+    assert.equal((await f.current(state.id)).submission.phase, 'landed');
+    assert.equal(f.tables.projectHostedCheckRuns.size, 2);
+  });
+}
+
+test('lost final publication reply is reconciled through the actual receipt without another effect', async t => {
+  const f = await finishFixture(t),
+    { state, request } = await begin(f);
+  await f.passChecks();
+  while (true) {
+    const plan = [...f.tables.projectHostedAcceptancePlans.values()][0];
+    if (plan && plan.inputsNext === null && plan.dependenciesNext === null) break;
+    await f.execute();
+  }
+  await assert.rejects(f.execute(f.pending()[0], 'after-step'), /synthetic crash/);
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  const main = f.currentMain();
+  assert.equal((await f.enqueue(request)).acceptance.receiptId, main.receipt.id);
+  await f.drain();
+  assert.equal(f.tables.projectHostedAcceptances.size, 1);
+  assert.deepEqual(f.currentMain(), main);
+});
+
+test('205 exact inputs and 10050 unrelated receipts keep final finish calls constant and metadata pages bounded', async t => {
+  const f = await finishFixture(t, { inputCount: 205 });
+  for (let i = 0; i < 10050; i++)
+    f.insert('projectHostedAcceptances', {
+      projectId: f.projectId,
+      receiptId: randomUUID(),
+      submissionId: randomUUID(),
+      attemptId: randomUUID(),
+      sequence: i + 10,
+      value: '{}',
+    });
+  const started = performance.now(),
+    { state } = await begin(f);
+  await complete(f);
+  const result = await f.current(state.id);
+  assert.equal(result.submission.phase, 'landed');
+  const plan = [...f.tables.projectHostedAcceptancePlans.values()].find(x => x.submissionId === state.id);
+  assert.equal(plan.inputPages, 3);
+  assert.equal(plan.lanes, 205);
+  assert.equal(f.metrics.transfers, 4);
+  const pages = [];
+  let index = 0;
+  while (index !== null) {
+    const page = JSON.parse(
+      await f.tx('finishInputPage', api.inputs, {
+        projectId: f.projectId,
+        submissionId: state.id,
+        attemptId: state.attemptId,
+        index,
+      }),
+    );
+    pages.push(page.entries.length);
+    index = page.nextIndex;
+  }
+  assert.deepEqual(pages, [100, 100, 5]);
+  assert.equal(f.pending().length, 0);
+  t.diagnostic(
+    JSON.stringify({
+      elapsedMs: performance.now() - started,
+      rssBytes: process.memoryUsage().rss,
+      maxRssBytes: process.resourceUsage().maxRSS * 1024,
+      metrics: f.metrics,
+      maxima,
+    }),
+  );
+});
+
+test('unchecked person finish stays available without adding a check obligation', async t => {
+  const f = await finishFixture(t);
+  const person = await begin(f, { agent: false, check: null });
+  assert.equal((await f.current(person.state.id)).submission.phase, 'landed');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 0);
+  assert.equal(f.pending().length, 0);
+});
+
+test('a prepared but uncommitted metadata binding reconciles to the verified plan without replacing the pending job', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  f.moveMain();
+  await f.passChecks();
+  while (!(await f.current(state.id)).pendingAttempt) await f.execute();
+  const task = f.pending()[0];
+  f.advanceClock(task.scheduledTime - Date.now());
+  const raw = await f.tx('finishStep', driver.step, task.args[0]),
+    command = JSON.parse(raw);
+  assert.equal(command.kind, 'plan');
+  f.insert('projectObjects', {
+    projectId: f.projectId,
+    digest: command.pin.sha256,
+    size: command.pin.size,
+    nonce: randomUUID(),
+    removed: false,
+  });
+  // Recover this same IO generation. The real action uploads its exact plan and
+  // the completion transaction makes the prepared object readable atomically.
+  await f.drain();
+  await complete(f);
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  assert.equal(f.metrics.sourceJobs, 1);
+});

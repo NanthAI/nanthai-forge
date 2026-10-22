@@ -1322,3 +1322,38 @@ Cancellation uses the separate `projectHostedChecks:cancel` API. An abandon
 receipt never means a running check or arbitrary process stopped. Main,
 acceptance receipts, source objects and saves are untouched by lifecycle changes.
 These are API-only primitives; hosted CLI/MCP and site controls are separate work.
+
+### Hosted finish API
+
+Add `finish:{composeOperationId,after:null}` to the ordinary hosted landing request
+to drive its exact selected composition through check and acceptance. The compose
+operation must be the caller's original completed H08 operation for that Candidate;
+its ordered manifests, versions and settings remain pinned. `after` may name an
+existing parent submission in the same project. Its receipt resumes the dependent;
+its failure remains an explicit dependent failure. No recurring observer is needed.
+Omit `finish` to retain the existing prepare-only landing behavior.
+
+Original-operation replay returns the same submission and repairs outstanding
+scheduler receipts. A changed payload under that operation ID is rejected. A main
+head or receipt race creates an explicitly named child attempt, yields with backoff,
+then recomposes and rechecks the original selection. Check evidence is never reused
+for a different Candidate. Later Lane saves remain open and outside the selection.
+Conflicted child Candidates retain their original conflict object for the existing
+[resolution Lane API](#hosted-explicit-sync-and-conflict-resolution-apis).
+
+`projectHostedFinish:status {projectId,submissionId,version?}` returns the submission,
+version cursor, exact selection roots and named pending source attempt. It is a
+reactive metadata read; it does not schedule work. `projectHostedFinish:inputs
+{projectId,submissionId,attemptId,index}` reads one staged immutable input page and
+compares each selected head with its current Lane. `superseded` retains the actual
+outcome, as in the native submission contract. `staged:false` means that page has
+not been prepared yet; continue after progress rather than treating it as empty
+selection. Historical attempts remain available through the landing attempts API.
+
+`projectHostedFinish:resume {projectId,submissionId}` repairs only the original
+actor's named pending request on reconnect/startup. It creates no replacement
+attempt or check. Source/check callbacks and parent terminal events normally wake
+progress. The finite driver downloads one bounded metadata page or stores one
+small hash-verified compose plan per action, then yields. Source computation and
+check dispatch remain the existing H08/H10 jobs and configured provider routes.
+Only H14's current-authority/exact-run/main CAS and real receipt report landing.

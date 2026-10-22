@@ -5,7 +5,7 @@ import type { LandingEntry } from './landing-batch-types.js';
 import type { ChannelMove } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
-import { submissionOutcome, type Submission } from './landing-submission-state.js';
+import { submissionOutcome, sourceSubmission, type Submission } from './landing-submission-state.js';
 export * from './landing-submission-state.js';
 export function landingAttemptId(entry: LandingEntry) {
   return entry.batchId ? finishChild(entry.id, `landing-attempt:${entry.batchId}`) : null;
@@ -62,7 +62,6 @@ export function projectSubmission(
   attemptHead = pin.head,
 ): Submission {
   const outcome = submissionOutcome(result);
-  const state = lane.head === attemptHead ? outcome.state : 'superseded';
   return {
     submissionId: finishChild(operationId, `submission:${lane.intentId}:${lane.id}`),
     operationId,
@@ -72,11 +71,7 @@ export function projectSubmission(
     head: pin.head,
     attemptHead,
     attemptId,
-    ...outcome,
-    outcome: outcome.state,
-    state,
-    terminal: state !== 'pending',
-    complete: state === 'landed',
+    ...sourceSubmission(outcome, lane.head, attemptHead),
   };
 }
 export function submissionLine(value: Submission) {

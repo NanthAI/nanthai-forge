@@ -13,6 +13,7 @@ import {
   type HostedLandingAttempt,
 } from '../src/hosted-landing';
 import { hostedOperationRow } from './projectHostedOperations';
+import { notifyFinish } from './projectHostedFinishWake';
 import { invariant } from '../src/errors';
 export type LandingChannel = { projectId: Id<'hostedProjects'>; channel: 'main' };
 export type LandingIdentity = { projectId: Id<'hostedProjects'>; submissionId: string };
@@ -170,6 +171,7 @@ export async function writeLanding(
     runnable,
     value: canonicalPayload(state),
   });
+  await notifyFinish(ctx, state);
 }
 /** Internal queue bookkeeping can retain a rejected outcome after actor revocation.
  * This never reads/returns source or grants the revoked actor publication authority. */

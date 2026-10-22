@@ -12,6 +12,7 @@ import {
   insertLandingAttempt,
 } from './projectHostedLandingStore';
 import { wakeLandingQueue, notifyLandingCheck } from './projectHostedLandingWake';
+import { initializeFinish } from './projectHostedFinishStore';
 import { pinLandingAttempt } from './projectHostedLandingPins';
 import {
   hostedLandingRequestSchema,
@@ -69,6 +70,7 @@ export const enqueue = mutation({
           await wakeLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
         else if (state.phase === 'checking' && row.runId)
           await notifyLandingCheck(ctx, { projectId: input.projectId, runId: row.runId });
+        await initializeFinish(ctx, state);
         return canonicalPayload(state);
       }
       const submissionId = first.ids.submission!;
@@ -117,6 +119,7 @@ export const enqueue = mutation({
       });
       await ctx.db.patch(queue._id, { sequence });
       await wakeLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
+      await initializeFinish(ctx, state);
       return canonicalPayload(state);
     } catch (error) {
       return report(error);
@@ -213,7 +216,18 @@ export const attempts = query({
           maximumRowsRead: 100,
           maximumBytesRead: 128 * 1024,
         });
-      return canonicalPayload({ ...page, page: page.page.map(row => JSON.parse(row.value)) });
+      const { state } = await loadLanding(ctx, input);
+      return canonicalPayload({
+        ...page,
+        version: state.version,
+        page: page.page.map(row => ({
+          ...JSON.parse(row.value),
+          observation:
+            row.attemptId === state.attemptId
+              ? state.observation
+              : { state: 'superseded', pendingReason: null, cause: null },
+        })),
+      });
     } catch (error) {
       return report(error);
     }

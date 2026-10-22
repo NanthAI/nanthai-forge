@@ -24,6 +24,10 @@ export const hostedLandingRequestSchema = z
     expectedHead: hash.nullable(),
     agent: z.boolean().default(false),
     check: landingCheckSelectionSchema.nullable(),
+    finish: z
+      .object({ composeOperationId: z.uuid(), after: z.uuid().nullable().default(null) })
+      .strict()
+      .optional(),
   })
   .strict();
 export const hostedLandingAttemptSchema = z
@@ -66,7 +70,7 @@ export const hostedLandingAttemptSchema = z
   .strict();
 export const landingObservationSchema = z
   .object({
-    state: z.enum(['pending', 'terminal-failed', 'landed']),
+    state: z.enum(['pending', 'terminal-failed', 'landed', 'superseded']),
     pendingReason: z.enum(['queued', 'checking', 'waiting-for-review', 'waiting-for-dependency']).nullable(),
     cause: z.enum(['conflict', 'check-failed', 'infra', 'stale-head', 'rejected']).nullable(),
   })

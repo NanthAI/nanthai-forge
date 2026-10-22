@@ -7,7 +7,11 @@ import { enqueueHostedCheck } from './projectHostedChecks';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { saveObject } from './projectHostedSaveStore';
 import { hostedRecordSchema } from '../src/hosted-records';
-import { hostedLandingAttemptSchema, type HostedLandingRequest } from '../src/hosted-landing';
+import {
+  hostedLandingAttemptSchema,
+  type HostedLandingRequest,
+  type HostedLandingAttempt,
+} from '../src/hosted-landing';
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
@@ -27,10 +31,11 @@ export async function pinLandingAttempt(
     number: number;
     at: string;
     operations: { check: string; accept: string };
+    retainedSelection?: HostedLandingAttempt['candidate'];
   },
 ) {
   invariant(
-    input.parentAttemptId === null || input.actor.kind === 'agent',
+    input.parentAttemptId === null || input.actor.kind === 'agent' || input.retainedSelection !== undefined,
     'VIEW_STALE',
     'A person request retains the exact reviewed Candidate; a different selection uses a new request.',
   );
@@ -43,7 +48,8 @@ export async function pinLandingAttempt(
     'Main and current project source authority differ.',
   );
   invariant(
-    main.head === r.expectedMain.head && main.receipt.id === r.expectedMain.receiptId,
+    input.retainedSelection !== undefined ||
+      (main.head === r.expectedMain.head && main.receipt.id === r.expectedMain.receiptId),
     'CHANNEL_CHANGED',
     'Select the current main head and receipt.',
   );
@@ -68,6 +74,14 @@ export async function pinLandingAttempt(
     'CHANNEL_CHANGED',
     'The Candidate retains a different main base receipt.',
   );
+  if (input.retainedSelection) {
+    invariant(
+      canonicalPayload(candidate.inputs) === canonicalPayload(input.retainedSelection.inputs) &&
+        canonicalPayload(candidate.dependencies) === canonicalPayload(input.retainedSelection.dependencies),
+      'WORK_OPERATION_CHANGED',
+      'A finish retry must retain the original ordered selection.',
+    );
+  }
   let check = null;
   if (candidate.result.status === 'clean') {
     const head = candidate.result.head;

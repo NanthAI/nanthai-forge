@@ -1190,3 +1190,43 @@ return waiting-for-review. H08 currently supplies no trusted changed-path covera
 protected-path policy therefore uses its existing unavailable-coverage review rule,
 never caller-supplied path claims. No new policy, UI step, provider call or cutover
 is introduced. The API is exercised with local metadata/provider/source-worker fakes.
+
+### Hosted finish orchestration
+
+`projectHostedLanding:enqueue` accepts an optional `finish` selection naming the
+original completed compose operation and an optional parent submission (`after`).
+The original request, actor, ordered input/dependency manifests and check settings
+are immutable. Ordinary enqueue continues to stop at ready; finish schedules the
+short driver that prepares and publishes through the same H14 acceptance path.
+Person requests keep their selected Lane versions across recomposition, including
+when a later save changes that Lane. Unchecked person acceptance remains available.
+
+A main head **or receipt** race reserves a named child with distinct compose/check/
+accept identities before source IO. The driver yields with exponential backoff,
+recomposes the original H08-validated manifests on the newly observed main and
+requests a new exact-Candidate check. It never rereads current Lane heads, changes
+selection order, transfers evidence between Candidates or treats a queue lease as
+permission to accept. Overlap retains a conflicted Candidate with the exact H09
+resolution root; the existing explicit resolution path remains available.
+
+Each driver action makes one short control transaction, at most one metadata
+transfer, and one guarded completion transaction. Acceptance input pages stay within
+H08's transport windows. A small canonical compose-plan object uses the existing
+hash-verified storage boundary; repository source and logs never cross this action.
+H08's fixed source job and H10's configured check provider retain execution ownership.
+No persistent worker, long action, project scan or idle polling loop is introduced.
+A retained IO generation/watchdog fences late replies. Event/startup repair resumes
+only the pending source job, run, page or publication; expiry allocates no replacement
+compute. Repeated metadata uploads after an interrupted reply may retain unused
+storage objects; no new retention or deletion policy is applied.
+
+Check/source completion wakes the selected request. A parent receipt or failure
+wakes dependent submissions through indexed bounded windows. Pending dependencies
+and review waits schedule nothing while idle. Current authorization, epoch, policy,
+registered source, exact check and main CAS remain H14's publication conditions.
+Submission status reuses the native pending reasons and terminal causes. Input-page
+status shares the native source-relative projection: later Lane saves show
+`superseded` while preserving the actual pending/failed/landed outcome. Versioned
+status reads are observation only and start no compute. This API and its crash,
+contention and scale tests use local fakes; deployment and live provider qualification
+remain separate.

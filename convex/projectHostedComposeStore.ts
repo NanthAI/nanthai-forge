@@ -8,6 +8,7 @@ import { hostedOperationRow } from './projectHostedOperations';
 import { hostedOperationSchema, canonicalPayload } from '../src/hosted-source-operation';
 import { composeRequestSchema, composeInputSchema, COMPOSE_ALGORITHM } from '../src/hosted-compose';
 import { saveObjectSchema, saveWorkerObjectSchema } from '../src/hosted-save';
+import { notifyFinishCompose } from './projectHostedFinishWake';
 import { invariant } from '../src/errors';
 import type { SaveIdentity } from './projectHostedSaveStore';
 const progress = z
@@ -53,6 +54,10 @@ export async function writeComposeState(
   state: ComposeState,
 ) {
   await ctx.db.patch(id, { value: canonicalPayload(composeStateSchema.parse(state)) });
+  if (state.status === 'completed' || state.status === 'failed') {
+    const row = (await ctx.db.get(id))!;
+    await notifyFinishCompose(ctx, row.projectId, row.operationId);
+  }
 }
 export function hostedComposeInput(state: ComposeState, at: string) {
   return composeInputSchema.parse({

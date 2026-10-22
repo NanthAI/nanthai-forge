@@ -2,7 +2,7 @@
 import type { MutationCtx } from './_generated/server';
 import { activeProject } from './projectAuthority';
 import { requireLandingLease, type LandingClaim } from './projectHostedLandingControl';
-import { writeLanding, settleLandingOperation } from './projectHostedLandingStore';
+import { writeLanding, settleLandingOperation, loadLanding } from './projectHostedLandingStore';
 import { releaseLandingQueue } from './projectHostedLandingWake';
 import { acceptanceSelection, acceptanceRow, acceptancePlan } from './projectHostedAcceptanceStore';
 import { channelRow } from './projectHostedChannels';
@@ -37,6 +37,17 @@ export async function publishAcceptance(ctx: MutationCtx, claim: LandingClaim, n
   }
   const { row, state, attempt, queue } = await requireLandingLease(ctx, claim, now);
   invariant(state.phase === 'ready', 'WORK_STALE', 'Only the prepared exact attempt can publish.');
+  if (state.request.finish?.after) {
+    const parent = await loadLanding(ctx, {
+      projectId: claim.projectId,
+      submissionId: state.request.finish.after,
+    });
+    invariant(
+      parent.state.phase === 'landed',
+      'LANDING_DEPENDENCY_PENDING',
+      'The pinned parent submission has not landed.',
+    );
+  }
   const project = await hostedWriteProject(ctx, claim.projectId, attempt.actor.id, attempt.authorityEpoch);
   invariant(
     project.sourceAuthority?.mode === 'server',

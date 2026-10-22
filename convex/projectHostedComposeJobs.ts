@@ -28,77 +28,84 @@ export const submit = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to compose hosted source.');
-      const auth = { ...input, actor: user.subject },
-        { row, state, operation } = await loadCompose(ctx, auth, false);
-      if (operation.terminal) return canonicalPayload(operation.terminal);
-      await loadCompose(ctx, auth);
-      invariant(
-        state.status === 'ready' || state.status === 'submitted',
-        'SOURCE_JOB_INVALID',
-        'Stage every original selection page before submitting.',
-      );
-      if (state.status === 'ready') {
-        const inputPin = savePin(hostedComposeInput(state, operation.firstAttempt.at));
-        await saveObject(ctx, input.projectId, inputPin);
-        const worker = process.env.FORGE_SOURCE_WORKER,
-          runtime = process.env.FORGE_SOURCE_RUNTIME,
-          keyId = process.env.FORGE_SOURCE_KEY_ID;
-        invariant(
-          worker && runtime && keyId,
-          'SOURCE_WORKER_UNAVAILABLE',
-          'The pinned Modal source worker is not configured.',
-        );
-        const expected = operation.expected,
-          operationId = state.jobOperationId,
-          payload = {
-            jobKind: 'compose',
-            input: inputPin,
-            inputDigest: inputPin.sha256,
-            provider: 'modal',
-            worker,
-            runtime,
-            keyId,
-            workerLeaseMs: 60000,
-          };
-        await enqueueSourceJob(ctx, {
-          ...auth,
-          request: {
-            schema: 1,
-            projectId: input.projectId,
-            actor: auth.actor,
-            operationId,
-            expected,
-            payloadHash: hostedPayloadHash(payload, expected),
-          },
-          payload,
-          firstAttempt: {
-            projectId: input.projectId,
-            operationId,
-            id: row.jobId,
-            parentAttemptId: null,
-            at: operation.firstAttempt.at,
-            expected,
-            ids: { job: row.jobId },
-          },
-        });
-        await writeComposeState(ctx, row._id, { ...state, status: 'submitted' });
-      }
-      const job = await loadSourceJob(ctx, input.projectId, row.jobId);
-      await ctx.scheduler.runAfter(
-        0,
-        makeFunctionReference<'action'>(
-          job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
-            ? 'projectHostedComposeJobs:complete'
-            : 'projectModalSource:dispatch',
-        ),
-        { projectId: input.projectId, jobId: row.jobId },
-      );
-      return canonicalPayload({ status: 'submitted', jobId: row.jobId });
+      return await submitHostedCompose(ctx, { ...input, actor: user.subject });
     } catch (error) {
       return report(error);
     }
   },
 });
+/** Internal driver uses the same retained source job and dispatch identity. */
+export async function submitHostedCompose(
+  ctx: import('./_generated/server').MutationCtx,
+  input: import('./projectHostedSaveStore').SaveIdentity,
+) {
+  const auth = input,
+    { row, state, operation } = await loadCompose(ctx, auth, false);
+  if (operation.terminal) return canonicalPayload(operation.terminal);
+  await loadCompose(ctx, auth);
+  invariant(
+    state.status === 'ready' || state.status === 'submitted',
+    'SOURCE_JOB_INVALID',
+    'Stage every original selection page before submitting.',
+  );
+  if (state.status === 'ready') {
+    const inputPin = savePin(hostedComposeInput(state, operation.firstAttempt.at));
+    await saveObject(ctx, input.projectId, inputPin);
+    const worker = process.env.FORGE_SOURCE_WORKER,
+      runtime = process.env.FORGE_SOURCE_RUNTIME,
+      keyId = process.env.FORGE_SOURCE_KEY_ID;
+    invariant(
+      worker && runtime && keyId,
+      'SOURCE_WORKER_UNAVAILABLE',
+      'The pinned Modal source worker is not configured.',
+    );
+    const expected = operation.expected,
+      operationId = state.jobOperationId,
+      payload = {
+        jobKind: 'compose',
+        input: inputPin,
+        inputDigest: inputPin.sha256,
+        provider: 'modal',
+        worker,
+        runtime,
+        keyId,
+        workerLeaseMs: 60000,
+      };
+    await enqueueSourceJob(ctx, {
+      ...auth,
+      request: {
+        schema: 1,
+        projectId: input.projectId,
+        actor: auth.actor,
+        operationId,
+        expected,
+        payloadHash: hostedPayloadHash(payload, expected),
+      },
+      payload,
+      firstAttempt: {
+        projectId: input.projectId,
+        operationId,
+        id: row.jobId,
+        parentAttemptId: null,
+        at: operation.firstAttempt.at,
+        expected,
+        ids: { job: row.jobId },
+      },
+    });
+    await writeComposeState(ctx, row._id, { ...state, status: 'submitted' });
+  }
+  const job = await loadSourceJob(ctx, input.projectId, row.jobId);
+  await ctx.scheduler.runAfter(
+    0,
+    makeFunctionReference<'action'>(
+      job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
+        ? 'projectHostedComposeJobs:complete'
+        : 'projectModalSource:dispatch',
+    ),
+    { projectId: input.projectId, jobId: row.jobId },
+  );
+  return canonicalPayload({ status: 'submitted', jobId: row.jobId });
+}
 export const publish = internalMutation({
   args: { ...jobIdentity, result: v.string() },
   returns: v.union(v.string(), v.null()),

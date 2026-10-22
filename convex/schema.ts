@@ -14,6 +14,7 @@ import { hostedComposeTables } from './projectHostedComposeFields';
 import { hostedCheckTables } from './projectHostedCheckFields';
 import { hostedOutputTables } from './projectHostedOutputFields';
 import { hostedActionsTables } from './projectHostedActionsFields';
+import { hostedFinishTables } from './projectHostedFinishFields';
 import { hostedLandingTables } from './projectHostedLandingFields';
 import { hostedSaveTables } from './projectHostedSaveFields';
 import { hostedSnapshotTables } from './projectHostedSnapshotFields';
@@ -426,6 +427,7 @@ export default defineSchema({
   ...hostedOutputTables,
   ...hostedActionsTables,
   ...hostedLandingTables,
+  ...hostedFinishTables,
   ...hostedAcceptanceTables,
   ...hostedLifecycleTables,
   ...hostedSnapshotTables,

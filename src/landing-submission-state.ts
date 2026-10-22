@@ -66,3 +66,20 @@ export function submissionOutcome(result: Record<string, unknown> = {}): {
             : 'rejected';
   return { state: 'terminal-failed', pendingReason: null, cause };
 }
+
+/** Source-relative presentation shared by native and hosted submissions. Later
+ * saved bytes supersede this selected input without erasing its actual outcome. */
+export function sourceSubmission(
+  outcome: ReturnType<typeof submissionOutcome>,
+  currentHead: string,
+  attemptHead: string,
+) {
+  const state: SubmissionState = currentHead === attemptHead ? outcome.state : 'superseded';
+  return {
+    ...outcome,
+    outcome: outcome.state,
+    state,
+    terminal: state !== 'pending',
+    complete: state === 'landed',
+  };
+}
