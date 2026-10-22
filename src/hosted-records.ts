@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';
 import { invariant } from './errors.js';
+import { sourceJobControlSchema } from './hosted-source-job.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 const version = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -68,6 +69,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       status: z.enum(['pending', 'dispatching', 'running', 'completed', 'failed', 'cancelled']),
       executionId: z.string().nullable(),
       output: object.nullable(),
+      control: sourceJobControlSchema.optional(),
     })
     .strict(),
 ]);

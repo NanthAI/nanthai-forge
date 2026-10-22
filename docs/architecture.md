@@ -624,3 +624,44 @@ Channel truth. Rows represent only that snapshot's delta; consumers must follow
 its prior snapshots and seed for earlier records, and use manifest page counts
 for completeness. They must never treat partial display coverage as absence or
 use a display row to authorize a source transition.
+
+### Trusted source-job dispatch contract
+
+`projectSourceJobApi` exposes internal enqueue, controller claim/advance,
+callback, cancellation and paged pending-job recovery. Enqueue pins the H01
+operation's original job ID/time, input page root/digest, authority epoch and
+fixed trusted worker/runtime/provider. Transitions append H02 job versions;
+they do not publish source, finish the parent operation, or move a Lane/main.
+Legacy job records remain readable without the optional dispatch control data.
+
+`hosted-source-job-controller` performs one bounded control tick through
+`projectSourceJobDispatch`: at most two provider lookups and one dispatch, with
+no worker wait or repository bytes in Convex. A control lease fences competing
+actions and late provider responses. Durable dispatch intent precedes the
+external request. Every adapter must submit idempotently by the original stable
+dispatch key and bind lookup results to that exact request. Ambiguous errors and
+eventually consistent empty lookups remain unknown. A single recovery request
+requires two distinct, fresh, authoritative empty lookups, including the final
+lookup immediately before reservation. It reuses the same execution key and
+worker pins. Accepted executions are only reconciled. A rejected recovery request
+cannot prove that the original ambiguous request created no execution.
+
+Callbacks use HMAC-SHA-256 with a backend-resolved key identified by the pinned
+worker configuration (`FORGE_SOURCE_JOB_KEY_<keyId>`). The signature binds project,
+job, operation, attempt, fence, authority epoch, input digest, provider, worker,
+runtime, execution identity and the completed output manifest digest/size or
+failure code. Current project/contributor authority and epoch are rechecked on
+every callback, including duplicates. A verified callback may reconcile before
+the dispatch response. Terminal receipts cannot be rewritten. Signed sequential
+heartbeats renew a worker lease across action lifetimes; replayed heartbeats do
+not extend it, and expired workers cannot commit. Cancellation advances the
+worker fence without implying that remote compute was stopped. Controller lease
+takeover preserves a running worker's execution fence.
+
+Recovery reads only a selected project's pending/dispatching/running status
+index in bounded pages; it does not scan terminal history or every project.
+There is no persistent idle source worker. The dispatch seam is exercised with a
+local fake provider; a real provider action, its bounded HTTP transport, callback
+ingress, key provisioning and trusted object/State validation are subsequent
+worker-adapter work. Verified output references alone grant no source publication
+or landing authority.
