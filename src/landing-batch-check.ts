@@ -1,3 +1,4 @@
+import { retainDiagnosisNode, validatePrefixRun, diagnosticStatus } from './landing-diagnosis.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 // SPDX-License-Identifier: Apache-2.0
 import { waitForAgentRun } from './agent-run-observer.js';
@@ -8,14 +9,16 @@ import type { CheckRun } from './work-types.js';
 import type { LandingBatch, BatchPrefix } from './landing-batch-types.js';
 import type { LandingDriver } from './landing-driver.js';
 
-/** Remote failure attribution checks all proper prefixes in one parallel round.
+/** Remote diagnosis checks all proper prefixes in one parallel round.
  * Local fallback halves the prefix interval and never lands an unchecked subset. */
 export async function passingPrefix(
   prefixes: BatchPrefix[],
   mode: LandingBatch['mode'] | (() => LandingBatch['mode']),
-  check: (prefix: BatchPrefix) => Promise<CheckRun['status']>,
+  check: (prefix: BatchPrefix, parent?: BatchPrefix) => Promise<CheckRun['status']>,
 ): Promise<{
   passing?: BatchPrefix | undefined;
+  failing?: BatchPrefix | undefined;
+  /** Compatibility alias for the observed failing boundary prefix. */
   culprit?: BatchPrefix | undefined;
   stopped?: CheckRun['status'];
 }> {
@@ -24,29 +27,42 @@ export async function passingPrefix(
   const status = await check(full);
   if (status === 'passed') return { passing: full };
   if (status !== 'failed') return { stopped: status };
+  // One evaluation observes each exact run once, including the failing boundary.
+  const observed = new Map<BatchPrefix, CheckRun['status']>([[full, status]]);
+  const probe = async (prefix: BatchPrefix, parent: BatchPrefix) => {
+    const known = observed.get(prefix);
+    if (known) return known;
+    const status = await check(prefix, parent);
+    observed.set(prefix, status);
+    return status;
+  };
   let index = -1;
   if ((typeof mode === 'function' ? mode() : mode) === 'parallel') {
-    const outcomes = await Promise.all(prefixes.slice(0, -1).map(check));
+    const outcomes = await Promise.all(prefixes.slice(0, -1).map(prefix => probe(prefix, full)));
     const stopped = outcomes.find(status => status !== 'passed' && status !== 'failed');
     if (stopped) return { stopped };
     index = outcomes.lastIndexOf('passed');
   } else {
     let low = 0,
-      high = prefixes.length - 2;
+      high = prefixes.length - 2,
+      parent = full;
     while (low <= high) {
       const mid = Math.floor((low + high) / 2),
-        status = await check(prefixes[mid]!);
+        status = await probe(prefixes[mid]!, parent);
+      parent = prefixes[mid]!;
       if (status !== 'passed' && status !== 'failed') return { stopped: status };
       if (status === 'passed') {
         index = mid;
         low = mid + 1;
       } else high = mid - 1;
     }
-    // Retain the exact failing run for the entry immediately after the passing prefix.
-    const culprit = prefixes[index + 1]!;
-    if (culprit !== full) await check(culprit);
+    // This is an observed failing combination. Halving does not establish
+    // monotonicity, the longest pass, or a standalone/minimal failing Lane.
+    const failing = prefixes[index + 1]!;
+    const status = await probe(failing, full);
+    if (status !== 'failed') return { stopped: status };
   }
-  return { passing: prefixes[index], culprit: prefixes[index + 1] };
+  return { passing: prefixes[index], failing: prefixes[index + 1], culprit: prefixes[index + 1] };
 }
 export const cancellationBoundary = (work: WorkService, batch: LandingBatch) =>
   batch.prefixes.findIndex(
@@ -63,9 +79,11 @@ export async function evaluateBatch(
   const outcome = await passingPrefix(
     cancelledAt < 0 ? batch.prefixes : batch.prefixes.slice(0, cancelledAt),
     () => batch.mode,
-    async prefix => {
+    async (prefix, parent) => {
+      await retainDiagnosisNode(work, batch, prefix, parent, driver);
       const first = work.store.select('landingEntries', batch.entryIds[0]!)!;
       const recorded = work.store.select('runs', prefix.runId);
+      if (recorded) validatePrefixRun(work, batch, prefix, recorded);
       // Completed exact-plan evidence needs no dispatch or controller replay.
       if (!recorded || ['queued', 'preparing', 'running', 'interrupted'].includes(recorded.status)) {
         await retryWorkPhase(prefix.runId, () =>
@@ -86,6 +104,8 @@ export async function evaluateBatch(
         await waitForAgentRun(work.store, prefix.runId, waitMs);
       }
       const run = work.store.select('runs', prefix.runId)!;
+      validatePrefixRun(work, batch, prefix, run);
+      await retainDiagnosisNode(work, batch, prefix, parent, driver, run);
       if (run.backend?.actual === 'local' && batch.mode === 'parallel') {
         batch.mode = 'halving';
         await batchEdit(
@@ -97,7 +117,7 @@ export async function evaluateBatch(
           driver.beforePublish,
         );
       }
-      return run.status;
+      return diagnosticStatus(run);
     },
   );
   const infraRun = batch.prefixes
@@ -130,7 +150,9 @@ export async function evaluateBatch(
       saved.settlement = {
         cancelledAt,
         ...(outcome.passing ? { passingViewId: outcome.passing.viewId } : {}),
-        ...(outcome.culprit ? { culpritViewId: outcome.culprit.viewId } : {}),
+        ...(outcome.failing
+          ? { failingViewId: outcome.failing.viewId, culpritViewId: outcome.failing.viewId }
+          : {}),
         ...(stopped && stopped !== 'passed' ? { stopped } : {}),
       };
     },

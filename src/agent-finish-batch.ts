@@ -1,3 +1,4 @@
+import { landingDiagnosis } from './landing-diagnosis.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 // SPDX-License-Identifier: Apache-2.0
 import { prepareOptimistic } from './optimistic-landing.js';
@@ -44,12 +45,17 @@ export async function finishQueuedBatch(work: WorkService, command: FinishAction
     terminal: !pending,
     complete: entry.status === 'accepted',
     batchId: entry.batchId,
+    ...landingDiagnosis(store, entry),
     ...(entry.previewDiagnostic
       ? { code: 'INTEGRATION_PREVIEW_EXCLUDED', preview: entry.previewDiagnostic }
       : {}),
     ...(entry.reason
       ? {
-          code: entry.previewDiagnostic ? 'INTEGRATION_PREVIEW_EXCLUDED' : 'EVIDENCE_CHANGED',
+          ...(entry.previewDiagnostic
+            ? { code: 'INTEGRATION_PREVIEW_EXCLUDED' }
+            : entry.status === 'interrupted'
+              ? { code: 'EVIDENCE_CHANGED' }
+              : {}),
           message: entry.reason,
         }
       : {}),

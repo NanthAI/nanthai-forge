@@ -1,3 +1,4 @@
+import type { LandingDiagnosisReport } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
 export type SubmissionState = 'pending' | 'terminal-failed' | 'landed' | 'superseded';
 export type PendingReason =
@@ -18,6 +19,7 @@ export type Submission = {
   cause: SubmissionCause | null;
   terminal: boolean;
   complete: boolean;
+  diagnosis?: LandingDiagnosisReport;
 };
 const busy = ['queued', 'preparing', 'running', 'checking', 'waiting', 'waiting to land', 'source-changed'];
 /** Additive vocabulary over existing receipts; it neither drives nor authorizes landing. */

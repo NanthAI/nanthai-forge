@@ -1,3 +1,4 @@
+import { validatePassingPrefix, diagnosticStatus } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
 import { finishChild } from './agent-finish-journal.js';
 import { ForgeError } from './errors.js';
@@ -44,19 +45,22 @@ export async function advanceLandingBatch(
   // An older driver may have accepted a shorter prefix before it could save
   // completion. Recover its exact next failing prefix from canonical run evidence.
   const next = acceptedPrefix && batch.prefixes[batch.prefixes.indexOf(acceptedPrefix) + 1];
-  const legacyCulprit = next && work.store.select('runs', next.runId)?.status === 'failed' ? next : undefined;
+  const nextRun = next && work.store.select('runs', next.runId);
+  const legacyFailure = nextRun && diagnosticStatus(nextRun) === 'failed' ? next : undefined;
   const outcome =
     batch.settlement ??
     (receipt
       ? {
           cancelledAt: cancellationBoundary(work, batch),
-          ...(legacyCulprit ? { culpritViewId: legacyCulprit.viewId } : {}),
+          ...(legacyFailure ? { failingViewId: legacyFailure.viewId } : {}),
         }
       : undefined);
   const passing = batch.prefixes.find(
     prefix => prefix.viewId === (acceptedPrefix?.viewId ?? outcome?.passingViewId),
   );
-  const culprit = batch.prefixes.find(prefix => prefix.viewId === outcome?.culpritViewId);
+  const failing = batch.prefixes.find(
+    prefix => prefix.viewId === (outcome?.failingViewId ?? outcome?.culpritViewId),
+  );
   const edit = <T>(update: Parameters<typeof batchEdit<T>>[2]) =>
     batchEdit(work, batch.id, update, driver.beforePublish);
   await options.beforeAccept?.();
@@ -99,7 +103,14 @@ export async function advanceLandingBatch(
               expectedPrevious: batch.previous,
             },
             work.store.revision(),
-            { keepOpen: first.keepOpen, beforePublish: driver.beforePublish },
+            {
+              keepOpen: first.keepOpen,
+              beforePublish: () => {
+                driver.beforePublish();
+                // Receipt replay reconciles an already-authorized acceptance even after policy/definition drift.
+                if (!receipt) validatePassingPrefix(work, batch, passing);
+              },
+            },
           ),
         )
       ).result as ChannelMove;
@@ -132,8 +143,9 @@ export async function advanceLandingBatch(
     const saved = data.landingBatches!.find(item => item.id === batch.id)!;
     saved.status = 'completed';
     if (move) saved.acceptanceId = move.id;
-    const culpritId = culprit?.entryIds.at(-1);
-    if (culpritId) saved.culpritId = culpritId;
+    // Preserve the legacy boundary id for readers, without asserting standalone blame.
+    const boundaryId = failing?.entryIds.at(-1);
+    if (boundaryId) saved.culpritId = boundaryId;
     for (const entry of data.landingEntries!.filter(
       entry => entry.batchId === batch.id && entry.status === 'checking',
     )) {
@@ -141,13 +153,14 @@ export async function advanceLandingBatch(
         entry.status = 'accepted';
         entry.acceptanceId = move.id;
         entry.runId = passing!.runId;
-      } else if (entry.id === culpritId) {
+      } else if (entry.id === boundaryId) {
         entry.status = 'failed';
-        entry.runId = culprit!.runId;
+        entry.runId = failing!.runId;
+        entry.reason = `Observed failing prefix of ${failing!.entryIds.length} landing entries on base ${batch.base}; run ${failing!.runId}. This does not establish a standalone or minimal failing Lane.`;
       } else if (outcome?.stopped) {
         entry.status = outcome.stopped === 'cancelled' ? 'cancelled' : 'interrupted';
         entry.runId = batch.prefixes.find(prefix =>
-          data.runs.some(run => run.id === prefix.runId && run.status === outcome.stopped),
+          data.runs.some(run => run.id === prefix.runId && diagnosticStatus(run) === outcome.stopped),
         )?.runId;
       } else entry.status = 'queued';
     }

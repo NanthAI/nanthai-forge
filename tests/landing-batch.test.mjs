@@ -23,6 +23,7 @@ import { hostedPushWork } from '../dist/work-intent-local.js';
 import { assertWorkFormat, latestWorkFormat } from '../dist/work-format.js';
 import { workSchema } from '../dist/work-types.js';
 import { ForgeError } from '../dist/errors.js';
+import { NativeSource } from '../dist/native-source.js';
 import { fixture } from './landing-batch-fixture.mjs';
 
 test('four ready entries land with one exact combined check and one Channel move', async t => {
@@ -57,7 +58,7 @@ test('compose conflict ejects only its entry and retains the conflict View', asy
 });
 
 for (const remote of [true, false])
-  test(`${remote ? 'Modal parallel' : 'local halving'} failure lands checked prefix, attributes culprit, preserves later age`, async t => {
+  test(`${remote ? 'Modal parallel' : 'local halving'} failure lands checked prefix, records failing combination, preserves later age`, async t => {
     const f = await fixture(t, { remote });
     const entries = [];
     for (const path of ['good.txt', 'bad.txt', 'third.txt', 'fourth.txt'])
@@ -84,6 +85,22 @@ for (const remote of [true, false])
     assert.deepEqual(
       data.landingEntries.map(entry => entry.status),
       ['accepted', 'failed', 'accepted', 'accepted'],
+      JSON.stringify(
+        data.runs
+          .filter(run => !run.mainCheck)
+          .map(({ id, status, exitCode, signal, details, error, inputs, head, failureSummary }) => ({
+            id,
+            status,
+            exitCode,
+            signal,
+            details,
+            error,
+            inputs,
+            head,
+            failureSummary,
+            sourcePaths: new NativeSource(f.root).state(head).files.map(file => file.path),
+          })),
+      ),
     );
     assert.equal(f.content('bad.txt'), undefined);
     assert.equal(f.content('fourth.txt'), 'fourth.txt\n');

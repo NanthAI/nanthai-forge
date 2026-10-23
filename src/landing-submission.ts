@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { landingDiagnosis, diagnosticStatus, type LandingDiagnosisReport } from './landing-diagnosis.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 import { allRecords } from './agent-lifecycle.js';
 import { finishChild } from './agent-finish-journal.js';
 import type { LandingEntry } from './landing-batch-types.js';
-import type { ChannelMove } from './work-types.js';
+import type { ChannelMove, CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
 import { submissionOutcome, sourceSubmission, type Submission } from './landing-submission-state.js';
@@ -11,19 +12,30 @@ export * from './landing-submission-state.js';
 export function landingAttemptId(entry: LandingEntry) {
   return entry.batchId ? finishChild(entry.id, `landing-attempt:${entry.batchId}`) : null;
 }
+/** Shared read-only queue vocabulary for receipts and the pure pending projection. */
+export function queueObservation(
+  entry: LandingEntry,
+  run: CheckRun | undefined,
+  diagnosis: ReturnType<typeof landingDiagnosis> = {},
+) {
+  return {
+    status: entry.status,
+    queueStatus: entry.status,
+    ...diagnosis,
+    checkStatus: run ? diagnosticStatus(run) : undefined,
+    ...(run && pendingActionsInfra(run) && entry.status !== 'cancelled'
+      ? { code: run.error!.code, message: run.error!.message }
+      : {}),
+    ...(entry.reason
+      ? { ...(entry.status === 'interrupted' ? { code: 'EVIDENCE_CHANGED' } : {}), message: entry.reason }
+      : {}),
+  };
+}
 export function queuedOutcome(store: WorkStore, entry: LandingEntry) {
   const run = entry.runId ? store.select('runs', entry.runId) : undefined;
   return reviewedOutcome(
     store,
-    {
-      status: entry.status,
-      queueStatus: entry.status,
-      checkStatus: run?.status,
-      ...(run && pendingActionsInfra(run) && entry.status !== 'cancelled'
-        ? { code: run.error!.code, message: run.error!.message }
-        : {}),
-      ...(entry.reason ? { code: 'EVIDENCE_CHANGED', message: entry.reason } : {}),
-    },
+    queueObservation(entry, run, landingDiagnosis(store, entry)),
     run?.viewId ?? entry.viewId,
     entry.channel,
   );
@@ -76,6 +88,7 @@ export function projectSubmission(
     attemptHead,
     attemptId,
     ...sourceSubmission(outcome, lane.head, attemptHead),
+    ...(result.diagnosis ? { diagnosis: result.diagnosis as LandingDiagnosisReport } : {}),
   };
 }
 export function submissionLine(value: Submission) {

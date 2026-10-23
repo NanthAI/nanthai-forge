@@ -1,3 +1,4 @@
+import { landingDiagnosis } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landReceipt } from './land-receipt.js';
 import { landingAdmission } from './landing-admission.js';
@@ -232,6 +233,7 @@ export async function land(
                   : {}),
                 queueStatus: queued.status,
                 batchId: queued.batchId,
+                ...landingDiagnosis(store, queued),
                 runId: queued.runId,
                 acceptanceId: queued.acceptanceId,
                 viewId: queued.conflictViewId ?? queued.viewId,

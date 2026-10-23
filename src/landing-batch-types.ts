@@ -49,6 +49,38 @@ export const batchPrefixSchema = z.object({
   head,
   runId: id,
 });
+/** A diagnostic attempt is one exact prefix check, never a proof of minimal blame. */
+export const landingDiagnosisNodeSchema = batchPrefixSchema.extend({
+  id,
+  inputs: z.array(z.object({ laneId: id, head: z.string().regex(/^[a-f0-9]{40,64}$/) })),
+  parentId: id.optional(),
+  base: head,
+  previous: head.nullable(),
+  checkId: id,
+  definition: head,
+  environment: head,
+  status: z.enum([
+    'reserved',
+    'queued',
+    'preparing',
+    'running',
+    'passed',
+    'failed',
+    'cancelled',
+    'interrupted',
+    'runner-unavailable',
+    'runner-budget-exhausted',
+  ]),
+  cause: z.enum(['check-failed', 'pending-infra', 'infra', 'unknown-outcome', 'cancelled']).optional(),
+  /** The original run owns exact inputs, dependencies, plan, logs and physical executions. */
+  selection: z.object({
+    runId: id,
+    known: z.boolean(),
+    scope: z.enum(['docs', 'interaction', 'scoped', 'full']).optional(),
+    tests: z.array(z.string()).optional(),
+    plan: z.string().optional(),
+  }),
+});
 export const landingBatchSchema = z.object({
   id,
   channel: z.string(),
@@ -64,13 +96,23 @@ export const landingBatchSchema = z.object({
   prefixes: z.array(batchPrefixSchema),
   conflicts: z.array(z.object({ entryId: id, viewId: id })),
   acceptanceId: id.optional(),
+  /** Legacy boundary entry, not a minimal-culprit claim. */
   culpritId: id.optional(),
+  diagnosis: z
+    .object({
+      version: z.literal(1),
+      strategy: z.literal('prefix'),
+      minimization: z.literal('incomplete'),
+      nodes: z.array(landingDiagnosisNodeSchema),
+    })
+    .optional(),
   /** Optional restart cursor; canonical Candidates/runs/Channel receipts remain authoritative. */
   settlement: z
     .object({
       cancelledAt: z.number().int().min(-1),
       passingViewId: id.optional(),
       culpritViewId: id.optional(),
+      failingViewId: id.optional(),
       stopped: z
         .enum(['failed', 'cancelled', 'interrupted', 'runner-unavailable', 'runner-budget-exhausted'])
         .optional(),

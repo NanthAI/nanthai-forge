@@ -1,7 +1,12 @@
-import { pendingActionsInfra } from './github-actions-infra.js';
+import { batchDiagnosis } from './landing-diagnosis.js';
 import type { LandingWorkerStatus } from './landing-worker-status.js';
 // SPDX-License-Identifier: Apache-2.0
-import { landingAttemptId, projectSubmission, type Submission } from './landing-submission.js';
+import {
+  landingAttemptId,
+  projectSubmission,
+  queueObservation,
+  type Submission,
+} from './landing-submission.js';
 import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
 import type { OverlapPlan } from './agent-overlap-plan.js';
 import type { WorkData } from './work-types.js';
@@ -30,7 +35,7 @@ export type PendingData = Pick<
   | 'githubSync'
   | 'githubAutoPush'
 > &
-  Partial<Pick<WorkData, 'intents'>>;
+  Partial<Pick<WorkData, 'intents' | 'landingBatches'>>;
 export type PendingObservations = {
   integrationPreview?: string | undefined;
   landingWorker?: LandingWorkerStatus;
@@ -107,11 +112,19 @@ export function pendingStatus(
           item => item.entryOperationId === queued.id && item.laneId === lane.id,
         );
         const queuedRun = data.runs.find(run => run.id === queued.runId);
+        const batch = data.landingBatches?.find(batch => batch.id === queued.batchId);
+        const observedDiagnosis = previous?.diagnosis;
+        const diagnosis = batch
+          ? batchDiagnosis(batch)
+          : observedDiagnosis && observedDiagnosis.batchId === queued.batchId
+            ? { diagnosis: observedDiagnosis }
+            : {};
         const submission = projectSubmission(
           previous?.operationId ?? queued.id,
           previous ? { ...pin, head: previous.head } : pin,
           lane,
           {
+            ...queueObservation(queued, queuedRun, diagnosis),
             status:
               queued.status === 'awaiting-review' &&
               data.channelMoves.some(
@@ -122,11 +135,6 @@ export function pendingStatus(
               )
                 ? 'accepted'
                 : queued.status,
-            checkStatus: queuedRun?.status,
-            ...(queuedRun && pendingActionsInfra(queuedRun) && queued.status !== 'cancelled'
-              ? { code: queuedRun.error!.code }
-              : {}),
-            ...(queued.reason ? { code: 'EVIDENCE_CHANGED' } : {}),
           },
           landingAttemptId(queued),
           pin.head,

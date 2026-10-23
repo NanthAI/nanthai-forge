@@ -11,7 +11,10 @@ import { enqueueLanding } from '../dist/landing-batch-store.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { trustAgents } from './autonomy-fixture.mjs';
 
-export async function fixture(t, { remote = true, delay = 25, files = { 'same.txt': 'original\n' } } = {}) {
+export async function fixture(
+  t,
+  { remote = true, delay = 25, failWhen = "exists('bad.txt')", files = { 'same.txt': 'original\n' } } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), 'forge-batch-'));
   const credentialRoot = mkdtempSync(join(tmpdir(), 'forge-batch-credentials-'));
   const credentialsRef = { kind: 'file', path: join(credentialRoot, 'modal.json') };
@@ -39,7 +42,8 @@ export async function fixture(t, { remote = true, delay = 25, files = { 'same.tx
     mock,
     `#!${process.execPath}\nimport fs from 'node:fs';import path from 'node:path';
 const plan=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
-setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.head,definition:plan.definition,exitCode:fs.existsSync(path.join(plan.source,'bad.txt'))?1:0,estimatedCostUsd:0})),${delay});\n`,
+const exists=name=>fs.existsSync(path.join(plan.source,name));
+setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.head,definition:plan.definition,exitCode:(${failWhen})?1:0,estimatedCostUsd:0})),${delay});\n`,
   );
   chmodSync(mock, 0o700);
   process.env.FORGE_MODAL_PYTHON = mock;
@@ -48,7 +52,10 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
       action: 'define-check',
       name: 'verify',
       executable: process.execPath,
-      args: ['-e', `setTimeout(()=>process.exit(require('fs').existsSync('bad.txt')?1:0),${delay})`],
+      args: [
+        '-e',
+        `const exists=name=>require('fs').existsSync(name);setTimeout(()=>process.exit((${failWhen})?1:0),${delay})`,
+      ],
     })
   ).result;
   await agent.dispatch({
@@ -70,8 +77,14 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
     rmSync(credentialRoot, { recursive: true, force: true });
   });
   const pending = [];
-  async function candidate(path, text = `${path}\n`, enqueue = true) {
-    const lane = (await agent.dispatch({ action: 'start', outcome: `Synthetic ${path}` })).result;
+  async function candidate(path, text = `${path}\n`, enqueue = true, intentId) {
+    const lane = (
+      await agent.dispatch({
+        action: 'start',
+        outcome: `Synthetic ${path}`,
+        ...(intentId ? { intentId } : {}),
+      })
+    ).result;
     writeFileSync(join(lane.path, path), text);
     const checkpoint = (
       await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'Synthetic candidate' })

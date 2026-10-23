@@ -16,7 +16,7 @@ other submitters in that priority class. This changes order without imposing a
 quota. Requeued entries retain their arrival timestamps.
 
 The batch retains its base, ordered entries, cumulative prefix Candidates, conflict
-Candidates, deterministic run IDs, attribution and acceptance receipt. Source pins
+Candidates, deterministic run IDs, diagnostic observations and acceptance receipt. Source pins
 are immutable even if an input Lane advances. A composition conflict ejects that
 entry and composition continues. Checks run outside Work, Lane and landing
 locks. The selector receives the union of candidate changed paths, so tooling
@@ -111,12 +111,50 @@ never stack or wait.
 
 A passing batch moves main once, with every included Lane head recorded in its
 Candidate. A remote failure (Modal or GitHub Actions) checks all proper prefixes in one parallel round, lands
-the longest passing prefix, and attributes the next entry to its exact failed
+the longest observed passing prefix, and records the next entry's failed prefix
 run. The remaining entries requeue. Local runners halve the prefix interval
-instead, only accepting a prefix that passed its own exact-Candidate check. Interrupted
+instead, only accepting a prefix that passed its own exact-Candidate check. A
+failed prefix is evidence about that exact combination on its recorded base;
+it does not establish a standalone or minimal failing Lane. Halving does not
+assume monotonicity for attribution or promise the longest passing prefix. Interrupted
 or cancelled checks remain distinct from failed checks. `cancel` also accepts a
 queued entry operation ID: it ejects that entry, checks and lands only the prefix
 before it, and requeues the later entries. Already accepted work is retained.
+
+## Retained failure diagnosis
+
+Each scheduled prefix probe has a diagnostic node reserved in the batch before
+external execution. Its ID is the original child run ID; parent links retain the
+split path. Nodes retain ordered entry IDs and saved Lane/head inputs, base/previous main, Candidate/head,
+check definition and runtime fingerprint, observed status/cause and the selection
+reference. The canonical run retains exact Lane/dependency pins, executor plan,
+physical executions and logs. Unknown selection stays explicitly unknown; a plan
+pin or command-reported selection is recorded when available.
+
+Restart traverses the same prefix plan, reconciles reserved nodes from canonical
+runs and adopts unfinished executions under their original IDs. Completed exact
+checks are not dispatched again, including when the driver stopped between a
+child result and its diagnostic publication. Cancellation re-evaluates only the
+applicable prefix; earlier observations remain retained. Pending infrastructure
+is inconclusive and remains resumable under the existing adapter's semantics.
+Structured runner/preparation errors and failed non-executions without an exit
+or signal remain inconclusive instead of triggering source bisection. Signal
+failures and exit 137 remain failed checks; they do not prove transient infra.
+
+Finish and land receipts expose `diagnosis`, including observed failing sets,
+the smallest **observed** failing set and `minimization: "incomplete"`. The legacy
+`culpritId`/`culpritViewId` fields identify a boundary entry/prefix only; they do
+not assert minimal blame. Parallel diagnosis retains earlier failed prefixes even
+when a longer prefix passes. A full passing batch still accepts atomically,
+without requiring every intermediate prefix to pass.
+
+Passing independent halves or pairs never licenses accepting their union. Later
+queued entries are recomposed and checked on actual main after a passing prefix
+lands; evidence from the old composition is not transferred. Candidate dependency
+closures stay intact and pre-Candidate dependency waits remain pending. Speculative
+child observations stay provisional until the actual predecessor matches; a
+superseded batch keeps historical diagnostics. This strategy checks prefixes,
+not arbitrary subsets, and makes no exhaustive or minimal-set search claim.
 
 If main advances while checking, acceptance uses the existing manifest-disjoint
 proof when available. Otherwise it retains the old attempt and requeues on the
