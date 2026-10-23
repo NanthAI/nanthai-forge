@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { pendingActionsInfra } from './github-actions-infra.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type ActionsApi, type ActionsRun, observe } from './github-actions-api.js';
@@ -38,7 +39,12 @@ export async function sweepActionsRefs(
       const path = join(store.directory, `check-${run.id}`);
       try {
         const receipt = receiptSchema.parse(JSON.parse(readFileSync(join(path, 'result.json'), 'utf8')));
-        if (receipt.status !== run.status || receipt.backend?.pin !== run.backend.pin) continue;
+        if (
+          receipt.status !== run.status ||
+          receipt.backend?.pin !== run.backend.pin ||
+          pendingActionsInfra(receipt)
+        )
+          continue;
         const plan = JSON.parse(readFileSync(join(path, 'modal-plan.json'), 'utf8')) as ModalPlan;
         validateModalPlan(plan, run);
         const { journal, save } = actionsJournal(path, plan, repo, 'ubuntu-latest');

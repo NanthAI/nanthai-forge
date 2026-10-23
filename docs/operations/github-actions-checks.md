@@ -120,6 +120,15 @@ logs after completion; this backend does not claim live stdout streaming.
 
 Failed test jobs stay failed. Confirmed unfinished jobs (runner loss, timeout or
 startup failure) can retry once individually; successful siblings are retained.
+The rerun intent and original job ID are durable before the replacement request.
+A lost rerun reply or a replacement missing from a later job-list window stays
+`pending-infra`; the submission driver reopens the same run operation and adopts
+the replacement job without another rerun. Original and replacement logs and
+cost observations remain separate. The run-owned ref stays retained while that
+replacement is unresolved. Recovery uses the original source, definition, shard
+selection, repository and runner label even if current runner settings change;
+new settings apply to new operations. Durable recovery receipts explicitly wake
+the owner landing worker, including before Work metadata reconciliation.
 Unrecoverable incomplete runs are interrupted; requested cancellation cancels the
 retained Actions run and records cancellation only after observing it terminal.
 When a newer Candidate supersedes the checked Candidate in the same Intent and

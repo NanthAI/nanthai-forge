@@ -9,6 +9,7 @@ import { ModalShardLogs, shardLogName } from './modal-shard-logs.js';
 import { actionsJobLogEvidence } from './github-actions-job-evidence.js';
 import { actionsCost, actionsRate } from './check-cost.js';
 import { invariant } from './errors.js';
+import { PENDING_ACTIONS_INFRA } from './github-actions-infra.js';
 
 // Runner "exit code 137", a SIGKILL/OOM error annotation, or the kernel OOM killer.
 const oomSignal =
@@ -143,12 +144,32 @@ export async function controlActions(
       await api.sleep(10_000);
       continue;
     }
-    if (Object.entries(journal.retrySources).some(([index, id]) => latest.get(Number(index))?.id === id)) {
+    if (
+      Object.entries(journal.retrySources).some(([index, id]) => {
+        const replacement = latest.get(Number(index));
+        return !replacement || replacement.id === id;
+      })
+    ) {
       if (++retryPolls < 12 && !cancelled()) {
         await api.sleep(10_000);
         continue;
       }
-      return { status: 'interrupted' as const, exitCode: null, billableMinutes: [], cost: cost() };
+      const cancelledNow = cancelled();
+      return {
+        status: cancelledNow ? ('cancelled' as const) : ('interrupted' as const),
+        ...(!cancelledNow
+          ? {
+              error: {
+                code: PENDING_ACTIONS_INFRA,
+                message:
+                  'pending-infra: retained shard replacement requires discovery; no rerun is repeated.',
+              },
+            }
+          : {}),
+        exitCode: null,
+        billableMinutes: [],
+        cost: cost(),
+      };
     }
     const unfinished = [...latest.entries()].filter(([, job]) =>
       ['cancelled', 'timed_out', 'stale', 'startup_failure'].includes(job.conclusion ?? ''),

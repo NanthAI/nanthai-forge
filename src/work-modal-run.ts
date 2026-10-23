@@ -1,3 +1,4 @@
+import { wakeLandingWorker } from './landing-worker-wake.js';
 import { retainCheckCoverage } from './check-coverage.js';
 import { modalCredentials } from './modal-credentials.js';
 import { readPolicy } from './work-autonomy.js';
@@ -102,6 +103,7 @@ export async function launchModalRun(
             details: `Modal cannot use local credential configuration in source. ${runnerRetryMessage('runner-unavailable')}`,
           });
           durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
+          wakeLandingWorker(store);
           return true;
         }
         modalFallback(run, 'local credential configuration in source');
@@ -382,6 +384,7 @@ export async function launchModalRun(
     syncFile(temp);
     renameSync(temp, join(path, 'result.json'));
     syncDirectory(path);
+    wakeLandingWorker(store);
     return true;
   } catch (error) {
     if (error instanceof ForgeError && error.code === 'MODAL_CREDENTIALS_REQUIRED') {
@@ -395,6 +398,7 @@ export async function launchModalRun(
         details: error.message,
       });
       durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
+      wakeLandingWorker(store);
       return true;
     }
     run.backend!.cost = modalRunCost(run.backend!);
@@ -424,6 +428,7 @@ export async function launchModalRun(
       details: run.details,
     });
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
+    wakeLandingWorker(store);
     updateModalRun(store, run);
     return true;
   } finally {

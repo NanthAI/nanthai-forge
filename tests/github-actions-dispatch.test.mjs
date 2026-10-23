@@ -320,12 +320,18 @@ test('same-op recovery excludes completed outcomes, cancellation and changed dis
     { pin: 'other' },
     { pushed: false },
     { dispatching: false },
-    { runId: 10 },
+    { runId: 10, terminal: true },
     { dispatchOutcome: 'rejected' },
   ]) {
     set(changes);
     assert.equal(strandedActionsRun(store, run), false, JSON.stringify(changes));
   }
+  set({ runId: 10 });
+  assert.equal(
+    strandedActionsRun(store, run),
+    true,
+    'an adopted execution with an unresolved shard replacement remains observable',
+  );
   set({ dispatchOutcome: 'accepted' });
   assert.equal(
     strandedActionsRun(store, run),

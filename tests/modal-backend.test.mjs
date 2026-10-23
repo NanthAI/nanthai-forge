@@ -1062,6 +1062,24 @@ test('automatic infrastructure recovery keeps finish active and reuses the exact
       const plan = read(file);
       if (calls === 1) {
         retained = plan;
+        setPolicy(
+          work.store,
+          {
+            action: 'set-policy',
+            operationId: randomUUID(),
+            checks: {
+              runner: 'local',
+              shards: 8,
+              credentialsRef: {
+                kind: 'env',
+                tokenId: 'FORGE_UNUSED_MODAL_ID',
+                tokenSecret: 'FORGE_UNUSED_MODAL_SECRET',
+              },
+            },
+          },
+          localPerson(),
+          work.store.revision(),
+        );
         emit({ kind: 'error', category: 'network', safeFallback: true });
       } else {
         assert.deepEqual(plan, retained);
@@ -1289,3 +1307,26 @@ for (const changed of ['src/synthetic.ts', 'tests/synthetic.test.mjs', 'missing-
     }
   });
 }
+
+test('cancellation after Modal infrastructure loss prevents the replacement attempt', async t => {
+  const { work, run, path } = fixture(t);
+  let calls = 0;
+  await launchModalRun(
+    work.store,
+    run,
+    async (_file, emit) => {
+      calls++;
+      work.store.locked(() => {
+        const tx = work.store.records();
+        const selected = tx.find('runs', run.id);
+        tx.replace('runs', selected.position, { ...selected.record, cancelRequested: true });
+        work.store.commitRecords(tx);
+      });
+      emit({ kind: 'error', category: 'network', safeFallback: true });
+    },
+    1,
+  );
+  assert.equal(calls, 1);
+  assert.equal(read(join(path, 'result.json')).status, 'cancelled');
+  assert.equal(read(join(path, 'result.json')).backend.retryable, false);
+});

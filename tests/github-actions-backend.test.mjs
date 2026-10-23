@@ -1738,3 +1738,105 @@ test('ref cleanup survives reclaimed source exports using an empty disposable Gi
   assert.equal(journal.deleted, true);
   assert.equal(existsSync(temporary), false);
 });
+
+test('lost shard rerun reply reopens the same run under its retained route after configuration drift', async t => {
+  const { work, run, path } = fixture(t);
+  let fake;
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    {
+      request: (...args) => fake.api.request(...args),
+      pages: (...args) => fake.api.pages(...args),
+      log: (...args) => fake.api.log(...args),
+      sleep: async () => {},
+    },
+    async (plan, journal, save) => {
+      journal.commit = 'a'.repeat(40);
+      journal.pushed = true;
+      save();
+      fake = transport(plan, journal, { conclusion: 'startup_failure' });
+      const request = fake.api.request;
+      fake.api.request = async (...args) => {
+        const value = await request(...args);
+        if (args[0].endsWith('/rerun')) throw Error('synthetic lost rerun response');
+        return value;
+      };
+    },
+    async () => assert.fail('pending recovery must retain its ref'),
+  );
+  recoverRuns(work.store, { runs: [run] });
+  assert.equal(run.status, 'interrupted');
+  assert.equal(run.error.code, 'GITHUB_ACTIONS_PENDING_INFRA');
+  const { strandedActionsRun } = await import('../dist/github-actions-recovery.js');
+  assert.equal(strandedActionsRun(work.store, run), true);
+  assert.equal(strandedActionsRun(work.store, { ...run, status: 'failed' }), false);
+  assert.equal(strandedActionsRun(work.store, { ...run, cancelRequested: true }), false);
+  work.store.locked(() => {
+    const tx = work.store.records();
+    tx.replace('runs', tx.find('runs', run.id).position, run);
+    work.store.commitRecords(tx);
+  });
+  setPolicy(
+    work.store,
+    {
+      action: 'set-policy',
+      operationId: randomUUID(),
+      checks: { runner: 'local', repo: 'synthetic/different', runsOn: 'ubuntu-24.04', shards: 8 },
+    },
+    localPerson(),
+    work.store.revision(),
+  );
+  const plan = read(join(path, 'modal-plan.json'));
+  const retained = read(join(path, 'github-actions.json'));
+  const resumed = transport(plan, retained);
+  const pages = resumed.api.pages;
+  resumed.api.pages = async (...args) => (await pages(...args)).map(job => ({ ...job, id: 21 }));
+  t.mock.method(actionsApi, 'request', (...args) => resumed.api.request(...args));
+  t.mock.method(actionsApi, 'pages', (...args) => resumed.api.pages(...args));
+  t.mock.method(actionsApi, 'log', (...args) => resumed.api.log(...args));
+  t.mock.method(actionsApi, 'sleep', async () => {});
+  const bin = join(path, 'fake-bin');
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, 'git'),
+    `#!${process.execPath}\nif(process.argv.includes('ls-remote'))process.stdout.write(${JSON.stringify(`${retained.commit}\trefs/heads/forge-check/${run.id}`)});else if(!process.argv.includes('push')&&!process.argv.includes('init'))process.exit(1);\n`,
+    { mode: 0o755 },
+  );
+  const previous = process.env.PATH;
+  process.env.PATH = `${bin}:${previous}`;
+  t.after(() => {
+    process.env.PATH = previous;
+  });
+  const command = {
+    action: 'run-check',
+    operationId: run.id,
+    viewId: run.viewId,
+    expectedHead: run.head,
+    checkId: run.check.id,
+    expectedDefinition: run.check.definition,
+    expectedEnvironment: run.environment.fingerprint,
+  };
+  const { CheckQueue } = await import('../dist/check-queue.js');
+  let released;
+  const finished = new Promise(resolve => {
+    released = resolve;
+  });
+  const release = CheckQueue.prototype.release;
+  t.mock.method(CheckQueue.prototype, 'release', function () {
+    const selected = read(join(this.path, 'ticket.json'));
+    const result = release.call(this);
+    if (selected.control && selected.runId === run.id) released();
+    return result;
+  });
+  await work.dispatch(command, work.store.revision());
+  await (await import('../dist/agent-run-observer.js')).waitForAgentRun(work.store, run.id, 10_000);
+  await finished;
+  assert.equal(work.store.select('runs', run.id).status, 'passed');
+  assert.deepEqual(read(join(path, 'modal-plan.json')), plan);
+  assert.equal(work.store.load().runs.length, 1);
+  assert.equal(fake.calls.filter(call => call.endpoint.endsWith('/rerun')).length, 1);
+  assert.equal(resumed.calls.filter(call => call.method === 'POST').length, 0);
+  assert.ok(resumed.calls.every(call => call.endpoint.startsWith('repos/synthetic/checks/')));
+  assert.equal(strandedActionsRun(work.store, work.store.select('runs', run.id)), false);
+});

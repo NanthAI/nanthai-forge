@@ -100,7 +100,11 @@ Shard reads combine stdout and stderr; `attempt` defaults to 1. Older bridge
 observations without shard identity retain their run-level logs.
 
 Restart reuses completed shard receipts and observes saved sandbox IDs. It replaces only confirmed stopped incomplete standard work and the recorded test-failure/static-OOM retries. A creation with an unknown response is
-never repeated. Cancelling records a local control file and terminates retained
+never repeated. Recovery completion explicitly wakes the owner landing worker
+after its result receipt is durable; a missed filesystem event or delayed Work
+publication does not require the submitter to redo passing shards. Recovery keeps
+the original plan, image, shard membership and credential-use reference; current
+settings do not replace those attempt pins. Cancelling records a local control file and terminates retained
 sandboxes through the owner-side SDK. For unaccepted Candidates, a newer Candidate
 in the same Intent and Lane-input family cancels the superseded Candidate's retained execution through
 that same control file. New runs retain the latest family Candidate at request time,

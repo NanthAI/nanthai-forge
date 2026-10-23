@@ -394,3 +394,76 @@ test('git transport classifies push failures before truncating redacted diagnost
     });
   }
 });
+
+for (const missing of [false, true])
+  test(`a retained replacement stays pending across discovery windows (${missing ? 'missing job' : 'old job'})`, async t => {
+    const { plan, journal } = setup(t, [['a'], ['b']]);
+    journal.runId = 10;
+    let visible = false;
+    const { api, calls } = fakeApi(plan, journal, {
+      jobs: () => [
+        job(1, 'forge-static'),
+        job(2, 'forge-shard-0'),
+        ...(visible
+          ? [job(4, 'forge-shard-1')]
+          : missing && journal.retrying.length
+            ? []
+            : [job(3, 'forge-shard-1', 'completed', 'startup_failure')]),
+      ],
+    });
+    const pending = await control(plan, journal, api);
+    assert.equal(pending.status, 'interrupted');
+    assert.equal(pending.error.code, 'GITHUB_ACTIONS_PENDING_INFRA');
+    assert.equal(journal.terminal, undefined);
+    assert.deepEqual(journal.retrySources, { 1: 3 });
+    visible = true;
+    assert.equal((await control(plan, journal, api)).status, 'passed');
+    assert.equal(calls.filter(call => call.endpoint.endsWith('/rerun')).length, 1);
+    assert.deepEqual(journal.logged.sort(), [1, 2, 3, 4]);
+    assert.equal(calls.filter(call => call.log === 2).length, 1);
+    assert.equal(readFileSync(join(plan.output, 'shards/1.log'), 'utf8'), 'ok\n');
+    assert.equal(readFileSync(join(plan.output, 'shards/1.attempt-2.log'), 'utf8'), 'ok\n');
+  });
+
+test('test failure and likely OOM keep failure evidence while only the lost sibling is replaced', async t => {
+  const { plan, journal } = setup(t, [['a'], ['b']]);
+  journal.runId = 10;
+  const { api, calls } = fakeApi(plan, journal, {
+    conclusion: 'failure',
+    jobs: poll => [
+      job(1, 'forge-static'),
+      job(2, 'forge-shard-0', 'completed', 'failure'),
+      poll === 1 ? job(3, 'forge-shard-1', 'completed', 'startup_failure') : job(4, 'forge-shard-1'),
+    ],
+    logs: { 2: 'not ok 1 - source failure\n##[error]Process completed with exit code 137.\n' },
+  });
+  const result = await control(plan, journal, api);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.exitCode, 137);
+  assert.deepEqual(journal.retrySources, { 1: 3 });
+  assert.deepEqual(
+    calls.filter(call => call.endpoint.endsWith('/rerun')).map(call => call.endpoint),
+    ['repos/synthetic/checks/actions/jobs/3/rerun'],
+  );
+});
+
+test('cancelling while a replacement is undiscovered never reopens or reruns it', async t => {
+  const { plan, journal } = setup(t);
+  journal.runId = 10;
+  journal.retrying = [0];
+  journal.retrySources = { 0: 2 };
+  const { api, calls } = fakeApi(plan, journal, {
+    jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0', 'completed', 'startup_failure')],
+  });
+  const result = await controlActions(
+    plan,
+    journal,
+    () => {},
+    api,
+    () => true,
+    () => {},
+  );
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.error, undefined);
+  assert.equal(calls.filter(call => call.endpoint.endsWith('/rerun')).length, 0);
+});

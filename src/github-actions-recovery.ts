@@ -8,7 +8,7 @@ import type { WorkRecordTransaction } from './work-record-transaction.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
-/** Reopen only unresolved provider operations; recovery observes the original identity. */
+/** Reopen unresolved dispatches or shard replacements; observe the original identity. */
 export function strandedActionsRun(store: WorkStore, run: CheckRun | undefined): boolean {
   if (run?.status !== 'interrupted' || run.backend?.actual !== 'github-actions' || run.cancelRequested)
     return false;
@@ -24,8 +24,8 @@ export function strandedActionsRun(store: WorkStore, run: CheckRun | undefined):
       !run.backend.pin ||
       journal.pin !== run.backend.pin ||
       !journal.commit ||
-      journal.runId ||
-      (!unresolvedPush && !unresolvedDispatch)
+      journal.terminal ||
+      (!journal.runId && !unresolvedPush && !unresolvedDispatch)
     )
       return false;
     const result = join(path, 'result.json');
@@ -64,7 +64,11 @@ export function reopenActionsLanding(tx: WorkRecordTransaction, run: CheckRun) {
     if (!id) continue;
     const saved = tx.find('landingBatches', id);
     if (saved?.record.status !== 'completed' || saved.record.acceptanceId) continue;
-    tx.replace('landingBatches', saved.position, { ...saved.record, status: 'checking' });
+    const resumed = { ...saved.record, status: 'checking' as const };
+    // A pre-recovery driver may have persisted its interrupted evaluation.
+    // Reconcile the same run before settling again; its old cursor is no verdict.
+    delete resumed.settlement;
+    tx.replace('landingBatches', saved.position, resumed);
     for (const { entry, position } of entries) {
       if (entry.batchId !== id || entry.status !== 'interrupted' || entry.runId !== run.id) continue;
       tx.replace('landingEntries', position, { ...entry, status: 'checking' });

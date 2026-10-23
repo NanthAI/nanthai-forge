@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { wakeLandingWorker } from './landing-worker-wake.js';
 import { retainCheckCoverage } from './check-coverage.js';
 import { actionsCost, actionsRate, unknownCost } from './check-cost.js';
 import { mkdirBelow } from './mkdir-below.js';
@@ -82,6 +83,7 @@ export async function launchGithubActionsRun(
             }),
           ),
         );
+        wakeLandingWorker(store);
         return;
       }
       plan = created;
@@ -150,6 +152,7 @@ export async function launchGithubActionsRun(
       details: `${jobStatusSummary ? `${jobStatusSummary} ` : ''}GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} Source, result and collected logs remain retained; the run-owned ref is removed after the remote run is terminal.`,
     });
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
+    wakeLandingWorker(store);
     await cleanupActionsResult(plan, journal, save, api, progress, deleteRef);
     await sweepActionsRefs(store, repo, api, progress, deleteRef);
   } catch (error) {
@@ -161,9 +164,9 @@ export async function launchGithubActionsRun(
           readFileSync(journalFile, 'utf8'),
         ) as import('./github-actions-export.js').ActionsJournal;
         if (
-          !journal.runId &&
+          !journal.terminal &&
           (error as { code?: string })?.code !== 'EVIDENCE_CHANGED' &&
-          (journal.dispatching || journal.pushOutcome === 'ambiguous')
+          (journal.runId || journal.dispatching || journal.pushOutcome === 'ambiguous')
         )
           pendingInfra = true;
         run.backend!.cost = actionsCost(
@@ -179,6 +182,7 @@ export async function launchGithubActionsRun(
       run.backend!.cost = unknownCost('github-actions');
       delete run.backend!.estimatedCostUsd;
     }
+    pendingInfra &&= !run.cancelRequested;
     // Never serialize raw transport errors or stacks. Git's stderr is kept only after redaction.
     const dispatchRejected = error instanceof ActionsDispatchRejected;
     const pendingMessage =
@@ -194,13 +198,14 @@ export async function launchGithubActionsRun(
       exitCode: dispatchRejected ? 1 : null,
       signal: null,
       details: pendingInfra
-        ? `${pendingMessage} Source export, attempt outcomes, rejection classes, branch visibility and discovery windows are retained in github-actions.json. Reconcile this same operation to adopt the original execution; no ambiguous push or dispatch is repeated. No source failure is established.`
+        ? `${pendingMessage} Source export, attempt outcomes, rejection classes, branch visibility and discovery windows are retained in github-actions.json. Reconcile this same operation to adopt the original execution; no ambiguous push, dispatch or shard rerun is repeated. This interruption adds no source verdict; earlier job evidence remains retained.`
         : dispatchRejected
           ? `${error.code}: ${error.message} Source export and dispatch rejections are retained.`
           : `GitHub Actions controller interrupted (${errorKind(error)}${error instanceof GitSyncError && error.detail ? `: git said "${error.detail}"` : ''}); source export, dispatch intent and job identities are retained. Check gh access and workflow registration, then reconcile the retained run. Retained dispatch outcomes govern recovery; ambiguous reruns are never repeated.`,
     });
     progress(receipt.details);
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
+    wakeLandingWorker(store);
     if (dispatchRejected) await cleanupRejected?.();
   } finally {
     for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.off(signal, onSignal);
