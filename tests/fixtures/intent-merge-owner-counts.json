@@ -1,0 +1,2299 @@
+{
+  "schema": 15,
+  "intents": 250,
+  "lanes": 210,
+  "views": 553,
+  "planningVersions": 24,
+  "planningComments": 3,
+  "notes": 64,
+  "issues": 5,
+  "initiatives": 14,
+  "intentShape": [
+    {
+      "id": 1,
+      "status": "completed",
+      "notes": 3
+    },
+    {
+      "id": 2,
+      "status": "completed",
+      "notes": 2
+    },
+    {
+      "id": 3,
+      "status": "completed",
+      "notes": 4
+    },
+    {
+      "id": 4,
+      "status": "completed",
+      "notes": 3
+    },
+    {
+      "id": 5,
+      "status": "completed",
+      "notes": 2
+    },
+    {
+      "id": 6,
+      "status": "completed",
+      "notes": 3
+    },
+    {
+      "id": 7,
+      "status": "completed",
+      "notes": 2
+    },
+    {
+      "id": 8,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 9,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 10,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 11,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 12,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 13,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 14,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 15,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 16,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 17,
+      "status": "abandoned",
+      "notes": 0
+    },
+    {
+      "id": 18,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 19,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 20,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 21,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 22,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 23,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 24,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 25,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 26,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 27,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 28,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 29,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 30,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 31,
+      "status": "abandoned",
+      "notes": 0
+    },
+    {
+      "id": 32,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 33,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 34,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 35,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 36,
+      "status": "completed",
+      "notes": 2
+    },
+    {
+      "id": 37,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 38,
+      "status": "abandoned",
+      "notes": 1
+    },
+    {
+      "id": 39,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 40,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 41,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 42,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 43,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 44,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 45,
+      "status": "completed",
+      "notes": 2
+    },
+    {
+      "id": 46,
+      "status": "completed",
+      "notes": 2
+    },
+    {
+      "id": 47,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 48,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 49,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 50,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 51,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 52,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 53,
+      "status": "completed",
+      "notes": 2
+    },
+    {
+      "id": 54,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 55,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 56,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 57,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 58,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 59,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 60,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 61,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 62,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 63,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 64,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 65,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 66,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 67,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 68,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 69,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 70,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 71,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 72,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 73,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 74,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 75,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 76,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 77,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 78,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 79,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 80,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 81,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 82,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 83,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 84,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 85,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 86,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 87,
+      "status": "abandoned",
+      "notes": 0
+    },
+    {
+      "id": 88,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 89,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 90,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 91,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 92,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 93,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 94,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 95,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 96,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 97,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 98,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 99,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 100,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 101,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 102,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 103,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 104,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 105,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 106,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 107,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 108,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 109,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 110,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 111,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 112,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 113,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 114,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 115,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 116,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 117,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 118,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 119,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 120,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 121,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 122,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 123,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 124,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 125,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 126,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 127,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 128,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 129,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 130,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 131,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 132,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 133,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 134,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 135,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 136,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 137,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 138,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 139,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 140,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 141,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 142,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 143,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 144,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 145,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 146,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 147,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 148,
+      "status": "abandoned",
+      "notes": 0
+    },
+    {
+      "id": 149,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 150,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 151,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 152,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 153,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 154,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 155,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 156,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 157,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 158,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 159,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 160,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 161,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 162,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 163,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 164,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 165,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 166,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 167,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 168,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 169,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 170,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 171,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 172,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 173,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 174,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 175,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 176,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 177,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 178,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 179,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 180,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 181,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 182,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 183,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 184,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 185,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 186,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 187,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 188,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 189,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 190,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 191,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 192,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 193,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 194,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 195,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 196,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 197,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 198,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 199,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 200,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 201,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 202,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 203,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 204,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 205,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 206,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 207,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 208,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 209,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 210,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 211,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 212,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 213,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 214,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 215,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 216,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 217,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 218,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 219,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 220,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 221,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 222,
+      "status": "completed",
+      "notes": 1
+    },
+    {
+      "id": 223,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 224,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 225,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 226,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 227,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 228,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 229,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 230,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 231,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 232,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 233,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 234,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 235,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 236,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 237,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 238,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 239,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 240,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 241,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 242,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 243,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 244,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 245,
+      "status": "completed",
+      "notes": 0
+    },
+    {
+      "id": 246,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 247,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 248,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 249,
+      "status": "active",
+      "notes": 0
+    },
+    {
+      "id": 250,
+      "status": "active",
+      "notes": 0
+    }
+  ],
+  "planningShape": [
+    {
+      "id": 251,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": []
+    },
+    {
+      "id": 252,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": []
+    },
+    {
+      "id": 253,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": []
+    },
+    {
+      "id": 254,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": []
+    },
+    {
+      "id": 255,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": []
+    },
+    {
+      "id": 256,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": []
+    },
+    {
+      "id": 257,
+      "kind": "issue",
+      "status": "in-progress",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [
+        3
+      ],
+      "initiativeId": 255
+    },
+    {
+      "id": 257,
+      "kind": "issue",
+      "status": "in-progress",
+      "version": 2,
+      "previousVersion": 1,
+      "intentIds": [
+        3
+      ],
+      "initiativeId": 255
+    },
+    {
+      "id": 257,
+      "kind": "issue",
+      "status": "closed",
+      "version": 3,
+      "previousVersion": 2,
+      "intentIds": [
+        3
+      ],
+      "initiativeId": 255
+    },
+    {
+      "id": 258,
+      "kind": "issue",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [],
+      "initiativeId": 255
+    },
+    {
+      "id": 258,
+      "kind": "issue",
+      "status": "open",
+      "version": 2,
+      "previousVersion": 1,
+      "intentIds": [],
+      "initiativeId": 254
+    },
+    {
+      "id": 258,
+      "kind": "issue",
+      "status": "open",
+      "version": 3,
+      "previousVersion": 2,
+      "intentIds": [],
+      "initiativeId": 255
+    },
+    {
+      "id": 259,
+      "kind": "issue",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [],
+      "initiativeId": 254
+    },
+    {
+      "id": 260,
+      "kind": "issue",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [
+        6
+      ],
+      "initiativeId": 254
+    },
+    {
+      "id": 261,
+      "kind": "issue",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [],
+      "initiativeId": 256
+    },
+    {
+      "id": 261,
+      "kind": "issue",
+      "status": "in-progress",
+      "version": 2,
+      "previousVersion": 1,
+      "intentIds": [],
+      "initiativeId": 256
+    },
+    {
+      "id": 262,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [
+        181,
+        182,
+        151,
+        150
+      ]
+    },
+    {
+      "id": 263,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [
+        192,
+        188,
+        189,
+        186,
+        185,
+        187,
+        183,
+        179,
+        193,
+        190,
+        191
+      ]
+    },
+    {
+      "id": 264,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [
+        184,
+        162,
+        154,
+        155,
+        180,
+        153,
+        152,
+        156
+      ]
+    },
+    {
+      "id": 265,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [
+        159,
+        158
+      ]
+    },
+    {
+      "id": 266,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [
+        173,
+        169,
+        164,
+        175,
+        165,
+        166,
+        170,
+        167,
+        168,
+        177
+      ]
+    },
+    {
+      "id": 267,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [
+        176,
+        178,
+        161
+      ]
+    },
+    {
+      "id": 268,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [
+        174,
+        171,
+        172
+      ]
+    },
+    {
+      "id": 269,
+      "kind": "initiative",
+      "status": "open",
+      "version": 1,
+      "previousVersion": 0,
+      "intentIds": [
+        163,
+        157,
+        160
+      ]
+    }
+  ],
+  "commentTargets": [
+    257,
+    257,
+    261
+  ],
+  "laneIntentOrdinals": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    16,
+    16,
+    16,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    64,
+    65,
+    58,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71,
+    72,
+    73,
+    72,
+    74,
+    75,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+    86,
+    87,
+    88,
+    89,
+    90,
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    98,
+    99,
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    115,
+    116,
+    117,
+    118,
+    119,
+    120,
+    121,
+    122,
+    123,
+    124,
+    125,
+    126,
+    127,
+    128,
+    129,
+    130,
+    131,
+    132,
+    133,
+    134,
+    135,
+    136,
+    137,
+    138,
+    139,
+    140,
+    141,
+    142,
+    143,
+    144,
+    145,
+    146,
+    147,
+    148,
+    149,
+    194,
+    195,
+    196,
+    197,
+    198,
+    199,
+    200,
+    201,
+    202,
+    203,
+    204,
+    205,
+    206,
+    207,
+    208,
+    209,
+    210,
+    211,
+    212,
+    213,
+    214,
+    215,
+    216,
+    217,
+    218,
+    219,
+    220,
+    221,
+    223,
+    224,
+    225,
+    226,
+    227,
+    228,
+    229,
+    230,
+    231,
+    232,
+    233,
+    234,
+    235,
+    236,
+    237,
+    238,
+    239,
+    240,
+    241,
+    242,
+    243,
+    244,
+    245,
+    246,
+    247,
+    248,
+    249,
+    250
+  ],
+  "viewIntentOrdinals": [
+    1,
+    2,
+    3,
+    3,
+    3,
+    4,
+    4,
+    5,
+    5,
+    5,
+    6,
+    6,
+    7,
+    8,
+    8,
+    8,
+    9,
+    10,
+    11,
+    12,
+    12,
+    13,
+    14,
+    15,
+    16,
+    14,
+    15,
+    16,
+    13,
+    14,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    16,
+    20,
+    20,
+    18,
+    19,
+    20,
+    20,
+    21,
+    22,
+    23,
+    20,
+    20,
+    20,
+    20,
+    25,
+    26,
+    27,
+    27,
+    27,
+    27,
+    28,
+    24,
+    30,
+    29,
+    29,
+    29,
+    29,
+    29,
+    29,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    37,
+    37,
+    37,
+    39,
+    39,
+    39,
+    40,
+    41,
+    41,
+    41,
+    41,
+    41,
+    41,
+    41,
+    41,
+    42,
+    43,
+    44,
+    44,
+    44,
+    45,
+    45,
+    45,
+    45,
+    46,
+    48,
+    47,
+    49,
+    49,
+    46,
+    48,
+    47,
+    49,
+    49,
+    48,
+    47,
+    49,
+    49,
+    48,
+    47,
+    49,
+    49,
+    49,
+    50,
+    51,
+    52,
+    53,
+    50,
+    53,
+    53,
+    53,
+    53,
+    53,
+    53,
+    55,
+    56,
+    54,
+    55,
+    57,
+    56,
+    57,
+    57,
+    59,
+    61,
+    60,
+    62,
+    64,
+    63,
+    64,
+    63,
+    62,
+    65,
+    58,
+    58,
+    58,
+    66,
+    68,
+    70,
+    69,
+    70,
+    67,
+    69,
+    70,
+    69,
+    70,
+    70,
+    68,
+    68,
+    70,
+    68,
+    70,
+    71,
+    72,
+    72,
+    72,
+    72,
+    72,
+    72,
+    72,
+    72,
+    73,
+    73,
+    73,
+    72,
+    72,
+    72,
+    72,
+    72,
+    72,
+    74,
+    74,
+    75,
+    75,
+    75,
+    76,
+    76,
+    77,
+    77,
+    78,
+    78,
+    78,
+    78,
+    78,
+    78,
+    78,
+    79,
+    80,
+    81,
+    80,
+    82,
+    82,
+    83,
+    82,
+    83,
+    85,
+    82,
+    84,
+    85,
+    86,
+    84,
+    88,
+    85,
+    86,
+    86,
+    88,
+    88,
+    89,
+    89,
+    90,
+    91,
+    91,
+    88,
+    88,
+    92,
+    88,
+    93,
+    88,
+    95,
+    88,
+    95,
+    88,
+    95,
+    95,
+    94,
+    88,
+    88,
+    95,
+    96,
+    88,
+    88,
+    97,
+    98,
+    97,
+    98,
+    88,
+    98,
+    98,
+    99,
+    100,
+    99,
+    102,
+    100,
+    102,
+    100,
+    102,
+    102,
+    101,
+    88,
+    88,
+    103,
+    104,
+    104,
+    105,
+    103,
+    106,
+    105,
+    103,
+    106,
+    105,
+    103,
+    107,
+    103,
+    107,
+    111,
+    107,
+    111,
+    112,
+    112,
+    110,
+    109,
+    108,
+    116,
+    114,
+    115,
+    116,
+    113,
+    117,
+    115,
+    117,
+    116,
+    113,
+    117,
+    118,
+    113,
+    118,
+    115,
+    118,
+    123,
+    122,
+    125,
+    118,
+    122,
+    115,
+    124,
+    125,
+    117,
+    126,
+    120,
+    121,
+    118,
+    115,
+    125,
+    127,
+    127,
+    129,
+    128,
+    127,
+    127,
+    120,
+    130,
+    126,
+    118,
+    126,
+    126,
+    119,
+    121,
+    130,
+    124,
+    127,
+    120,
+    117,
+    124,
+    131,
+    127,
+    131,
+    135,
+    135,
+    131,
+    135,
+    135,
+    132,
+    135,
+    135,
+    133,
+    135,
+    135,
+    135,
+    136,
+    148,
+    136,
+    136,
+    137,
+    137,
+    137,
+    137,
+    136,
+    147,
+    146,
+    141,
+    142,
+    134,
+    143,
+    144,
+    145,
+    139,
+    138,
+    140,
+    149,
+    149,
+    147,
+    146,
+    141,
+    142,
+    134,
+    143,
+    144,
+    145,
+    139,
+    138,
+    140,
+    149,
+    149,
+    141,
+    134,
+    144,
+    149,
+    149,
+    194,
+    195,
+    194,
+    195,
+    195,
+    196,
+    196,
+    197,
+    197,
+    197,
+    197,
+    199,
+    198,
+    198,
+    198,
+    199,
+    200,
+    200,
+    201,
+    201,
+    202,
+    202,
+    203,
+    203,
+    203,
+    206,
+    207,
+    206,
+    205,
+    204,
+    207,
+    204,
+    205,
+    207,
+    208,
+    207,
+    205,
+    208,
+    205,
+    209,
+    208,
+    208,
+    209,
+    209,
+    210,
+    211,
+    215,
+    215,
+    213,
+    218,
+    217,
+    212,
+    218,
+    213,
+    212,
+    212,
+    217,
+    218,
+    213,
+    217,
+    218,
+    220,
+    217,
+    219,
+    213,
+    218,
+    217,
+    217,
+    213,
+    219,
+    218,
+    219,
+    218,
+    218,
+    216,
+    218,
+    221,
+    216,
+    221,
+    221,
+    218,
+    218,
+    218,
+    218,
+    223,
+    223,
+    223,
+    224,
+    225,
+    225,
+    230,
+    230,
+    233,
+    229,
+    231,
+    233,
+    229,
+    231,
+    227,
+    236,
+    228,
+    233,
+    232,
+    227,
+    231,
+    229,
+    226,
+    236,
+    242,
+    240,
+    241,
+    228,
+    239,
+    238,
+    227,
+    234,
+    232,
+    232,
+    231,
+    229,
+    244,
+    226,
+    243,
+    242,
+    236,
+    229,
+    240,
+    245,
+    226,
+    240,
+    228,
+    242,
+    228,
+    246,
+    238,
+    241,
+    227,
+    234,
+    243,
+    244,
+    234,
+    245,
+    245,
+    242,
+    229,
+    240,
+    238,
+    236,
+    226,
+    244,
+    243,
+    246,
+    242,
+    240,
+    238,
+    229,
+    236,
+    226,
+    241,
+    227,
+    228,
+    239
+  ]
+}

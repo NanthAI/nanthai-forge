@@ -1,0 +1,9 @@
+.upstream-request{margin:14px 0;max-width:720px;min-width:0;overflow-wrap:anywhere;font-size:13px}
+.upstream-request>summary{padding:8px 0;cursor:pointer;color:var(--muted)}
+.upstream-request form{display:grid;gap:12px;margin:16px 0}
+.upstream-request label{display:grid;gap:6px;min-width:0}
+.upstream-request :is(input,select,textarea){width:100%;min-width:0;max-width:100%;padding:10px;color:var(--fg);background:var(--surface);border:1px solid var(--border);border-radius:6px}
+.upstream-request textarea{resize:vertical}
+.upstream-request-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px}
+.upstream-request p{line-height:1.6}
+.upstream-request code{overflow-wrap:anywhere}

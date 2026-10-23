@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "status": "designed_not_run",
+  "model": "gpt-6.1-sol",
+  "reasoning": "high",
+  "runtime": "Node24.19.0",
+  "harness": "codex-cli0.159.0-alpha.12.1",
+  "scope": "Seven paired observations; descriptive only, not statistically representative or a billed cost estimate.",
+  "conditions": [
+    "git",
+    "forge"
+  ],
+  "sourceBoundary": "Matched synthetic TypeScript and an isolated exact prior670-file seed; no private Edge source, provider calls, canonical writes, paid inference or new service.",
+  "metrics": [
+    "total input tokens",
+    "cached input tokens",
+    "uncached input tokens",
+    "output tokens",
+    "reasoning output tokens",
+    "command calls",
+    "command output bytes",
+    "generated command bytes",
+    "failures",
+    "dispatch wall seconds",
+    "package installation seconds",
+    "skill installation seconds",
+    "native/git bootstrap seconds",
+    "warm preparation seconds",
+    "full attributable seconds"
+  ],
+  "pairs": [
+    {
+      "id": "investigate-cold-graph",
+      "kind": "investigation",
+      "temperature": "cold",
+      "order": [
+        "git",
+        "forge"
+      ],
+      "task": "Identify the entry used to create a checkout quote, its transitive local source dependencies, the coupon boundary rule, and quoteCheckout({subtotal:100,coupon:\"SAVE\",label:\"\"}). Return JSON fields entry, dependencies (sorted relative paths excluding entry), couponEligibleAt100, labelAtEmpty. Do not edit source."
+    },
+    {
+      "id": "investigate-warm-graph",
+      "kind": "investigation",
+      "temperature": "warm",
+      "order": [
+        "forge",
+        "git"
+      ],
+      "task": "Identify the entry used to preview an invoice, its transitive local source dependencies, the tax calculation for100 cents at7.5%, and displayLabel(null). Return JSON fields entry, dependencies (sorted relative paths excluding entry), taxAt100, labelAtNull. Do not edit source."
+    },
+    {
+      "id": "investigate-known-file",
+      "kind": "investigation",
+      "temperature": "cold",
+      "order": [
+        "git",
+        "forge"
+      ],
+      "task": "Read src/coupon.ts. Return JSON fields eligibleAt99, eligibleAt100, eligibleAt101 for couponEligible, and discountAt100 for discountAmount(100,\"SAVE\"). Do not edit source. This known-file task does not require indexing."
+    },
+    {
+      "id": "deliver-coupon-boundary",
+      "kind": "delivery",
+      "temperature": "cold",
+      "order": [
+        "forge",
+        "git"
+      ],
+      "task": "Fix coupon eligibility: the minimum subtotal100 must be inclusive. Preserve lower-subtotal rejection and existing discount arithmetic. Change only src/coupon.ts and an optional focused tests file. Verify and deliver the exact candidate with retained check evidence and final acceptance/commit."
+    },
+    {
+      "id": "deliver-tax-rounding",
+      "kind": "delivery",
+      "temperature": "warm",
+      "order": [
+        "git",
+        "forge"
+      ],
+      "task": "Fix taxAmount so money in integer cents rounds to nearest cent, rather than dropping fractional cents. Preserve existing API and nonnegative inputs. Change only src/tax.ts and an optional focused tests file. Verify and deliver the exact candidate with retained check evidence and final acceptance/commit."
+    },
+    {
+      "id": "deliver-empty-label",
+      "kind": "delivery",
+      "temperature": "cold",
+      "order": [
+        "forge",
+        "git"
+      ],
+      "task": "Fix displayLabel so an explicitly supplied empty string is preserved. Only null or undefined should get default label General. Change only src/label.ts and an optional focused tests file. Verify and deliver the exact candidate with retained check evidence and final acceptance/commit."
+    },
+    {
+      "id": "deliver-prior670-portable-path",
+      "kind": "delivery",
+      "temperature": "cold",
+      "order": [
+        "git",
+        "forge"
+      ],
+      "seed": "prior670",
+      "task": "Repair safeRelative portable relative-path validation so it rejects dot/traversal components, empty components, absolute paths, backslashes, NUL and CR/LF, preserving valid Unicode, spaces, hidden files and ordinary dotted names. Change only src/files.ts and an optional focused tests file. Use supplied lock-pinned dependencies for core build and focused tests. Deliver exact candidate with retained actual-check evidence and acceptance/commit."
+    }
+  ],
+  "validity": "Every dispatched run remains in results, including failures. Exclude only predeclared harness invalidity (nonmatching seed or unavailable tool before dispatch), with explicit reason and retained receipt. No retries replace an earlier result. Warm preparation is separately reported and included in full attributable totals.",
+  "limitations": [
+    "Seven observations cannot prove general speed/cost advantages.",
+    "The repeated prior670 task uses minimal equivalent harness and new interface; old versus new is not an isolated causal comparison.",
+    "Same-model sequential sessions can have different server/model cache conditions; cached input is reported explicitly.",
+    "Source-only investigation and full recorded delivery are separate outcome classes."
+  ],
+  "dispatchTimeoutSeconds": 600,
+  "modeComparison": "Source identity compares file bytes and file/executable class, matching native Source modes. Native retained/materialized ordinary files are private0600; Git files may be0644. Raw permission bits are not interchangeable source identities.",
+  "priorSeedContext": "Prior seed has670 tracked files. AGENTS.md is replaced with the same isolated evaluation instructions in both conditions and excluded from scored source manifest (669 remaining files). The old/new harness/context changes prevent isolated causal attribution."
+}

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 236 64" width="236" height="64" role="img" aria-label="NanthAi Forge">
+<g><path d="M8 6 L20 6 L20 58 L14 58 L8 52 Z" fill="#e8ecf2"/>
+<path d="M8 6 L58 6 L52 18 L8 18 Z" fill="#ff6b3d"/>
+<path d="M8 6 L20 6 L20 18 L8 18 Z" fill="#ffb347"/>
+<path d="M8 28 L48 28 L42 40 L8 40 Z" fill="#ff6b3d"/>
+<path d="M8 28 L20 28 L20 40 L8 40 Z" fill="#23cbff"/></g>
+<text x="76" y="24" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif" font-size="11" font-weight="600" letter-spacing="2" fill="#6f7a8a">NANTHAI</text>
+<text x="75" y="52" font-family="Manrope,-apple-system,BlinkMacSystemFont,system-ui,sans-serif" font-size="34" font-weight="750" letter-spacing="-1" fill="#e8ecf2">Forge</text>
+</svg>

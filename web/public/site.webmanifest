@@ -1,0 +1,20 @@
+{
+  "name": "NanthAi:Forge",
+  "short_name": "Forge",
+  "start_url": "/",
+  "display": "standalone",
+  "icons": [
+    {
+      "src": "/forge-badge-256.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

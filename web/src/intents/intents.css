@@ -1,0 +1,205 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.fx-intent-title {
+  display: block;
+  font-weight: 650;
+  font-size: 13.5px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.fx-wr-fact:has(.fx-intent-lane) {
+  column-gap: 12px;
+}
+.fx-intent-decisions .fx-glyph {
+  vertical-align: -1px;
+}
+.fx-intent-lane {
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.fx-intent-lane > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-intent-lane .fx-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+}
+.fx-new-intent {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 14px;
+}
+.fx-field-label {
+  font-weight: 650;
+  font-size: 12.5px;
+}
+input.fx-input {
+  height: 34px;
+  resize: none;
+}
+
+/* Detail */
+.fx-intent-page h1 {
+  margin-top: 4px;
+}
+.fx-intent-constraints {
+  margin-top: 6px;
+  max-width: 80ch;
+  font-size: 13px;
+  color: var(--fx-text-2);
+  white-space: pre-wrap;
+}
+.fx-views,
+.fx-plans,
+.fx-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fx-views > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto 52px;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 14px;
+  border-top: 1px solid var(--fx-line);
+  font-size: 12.5px;
+}
+.fx-views > li:first-child {
+  border-top: 0;
+}
+.fx-views a,
+.fx-views > li > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.fx-views > li > span:last-child {
+  text-align: right;
+}
+.fx-plans > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--fx-line);
+  font-size: 12.5px;
+}
+.fx-plans > li:first-child {
+  border-top: 0;
+}
+.fx-plan-kind {
+  font: 600 10.5px/18px var(--fx-font-ui);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fx-text-3);
+}
+.fx-notes > li {
+  padding: 10px 14px;
+  border-top: 1px solid var(--fx-line);
+}
+.fx-notes > li:first-child {
+  border-top: 0;
+}
+.fx-note-kind {
+  font: 650 10.5px/1 var(--fx-font-ui);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fx-text-3);
+}
+.fx-note-decision .fx-note-kind {
+  color: var(--fx-accent);
+}
+.fx-notes p {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.fx-notes time {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--fx-text-3);
+}
+.fx-flush {
+  border-top: 0;
+  padding-top: 12px;
+}
+.fx-inline-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.fx-inline-form .fx-input {
+  width: 180px;
+  height: 26px;
+  padding: 2px 8px;
+}
+.fx-hosted-more {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.fx-intent-toolbar .fx-filter-count { min-width: 0; white-space: nowrap; }
+
+.fx-intent-toolbar .fx-filter-separator { margin-inline: 4px; }
+
+/* The Intent shares the Lane detail geometry. */
+.fx-intent-page h1 { margin-top: 0; overflow-wrap: anywhere; }
+.fx-intent-lanes, .fx-intent-candidates, .fx-intent-thread { list-style: none; padding: 0; margin: 0; }
+.fx-intent-lanes > .fx-wr { padding-left: 0; }
+.fx-ltag { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 5px; border: 1px solid var(--fx-line); border-radius: 3px; background: var(--fx-surface-2); color: var(--fx-text-2); font: 500 11px/1.45 var(--fx-font-ui); overflow-wrap: anywhere; vertical-align: baseline; }
+.fx-ltag .fx-glyph { flex: none; }
+.fx-intent-page .fx-feed-text { min-width: 0; overflow-wrap: anywhere; }
+.fx-intent-page .fx-feed-detail { display: block; }
+.fx-intent-candidates > li { display: grid; grid-template-columns: minmax(0, 1fr) auto 44px; gap: 12px; align-items: center; padding: 11px 14px; border-top: 1px solid var(--fx-line); }
+.fx-intent-candidates > li:first-child { border-top: 0; }
+.fx-candidate-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 650; }
+.fx-candidate-name > .fx-glyph { color: var(--fx-text-3); }
+.fx-candidate-name code { color: var(--fx-text-2); font-size: 11.5px; }
+.fx-candidate-check { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 3px; font-size: 12px; color: var(--fx-text-2); }
+.fx-intent-candidates time { font-size: 11px; text-align: right; }
+.fx-intent-thread > li { padding: 10px 14px; border-top: 1px solid var(--fx-line); font-size: 12.5px; }
+.fx-intent-thread > li:first-child { border-top: 0; }
+.fx-intent-thread .fx-msg-head { display: flex; align-items: center; gap: 6px; color: var(--fx-text-3); }
+.fx-intent-thread .fx-msg-head b { color: var(--fx-text); }
+.fx-intent-thread p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fx-intent-thread .fx-btn { margin-top: 4px; }
+.fx-intent-reply { display: flex; align-items: center; gap: 8px; flex-basis: 100%; }
+@media (max-width: 720px) {
+  .fx-intent-candidates > li { grid-template-columns: minmax(0, 1fr) auto; }
+  .fx-intent-candidates > li > div { grid-column: 1 / -1; }
+  .fx-intent-page .fx-inline-form { flex-wrap: wrap; max-width: 100%; }
+}
+.fx-intent-page .fx-intent-why { padding: 14px; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; }
+
+.fx-intent-status { padding: 0; margin-left: 10px; border: 0; background: transparent; cursor: pointer; vertical-align: 2px; font: inherit; }
+.fx-intent-status .fx-st { gap: 5px; }
+.fx-intent-empty { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px; font-size: 12.5px; color: var(--fx-text-2); }
+.fx-intent-edit { margin: 0; border: 0; }
+.fx-intent-page .fx-lane-meta a { display: inline-flex; align-items: center; gap: 4px; overflow-wrap: anywhere; }
+.fx-intent-page .fx-intent-why { overflow-wrap: anywhere; }
+@media (max-width: 720px) { .fx-intent-status { margin-left: 0; margin-top: 6px; } }
+
+@media (max-width: 720px) {
+  .fx-intent-page .fx-lane-head-actions { justify-content: flex-start; }
+  .fx-intent-page .fx-lane-head-actions > .fx-btn { flex: none; min-height: 32px; padding: 0 8px; }
+  .fx-intent-page .fx-compose .fx-btn { min-height: 32px; height: 32px; padding: 0 10px; }
+}
+
+.fx-menu .fx-intent-current { background: var(--fx-hover); }
+.fx-intent-status-separator { align-self: stretch; width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--fx-line); }
