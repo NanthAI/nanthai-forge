@@ -1,6 +1,6 @@
 # Use Forge as an agent's source repository
 
-The installed package includes `skills/forge-agent/SKILL.md`. Install it in your coding agent's skill directory for recorded Work or graph context. It is optional and self-contained; ordinary local-file questions use normal tools without loading workflow guidance. Use supported Node 22 or 24. `nforge agent --help` lists actions; `nforge agent ROOT ACTION --help` gives required parameters. Use `--command-file FILE` for parameters that are awkward to quote.
+The installed package includes `skills/forge-agent/SKILL.md`. Install it in your coding agent's skill directory for recorded Work or graph context. It is optional and self-contained; ordinary local-file questions use normal tools without loading workflow guidance. Use Node 22.23.4+ (22.x) or 24.22.1+ (24.x). `nforge agent --help` lists actions; `nforge agent ROOT ACTION --help` gives required parameters. Use `--command-file FILE` for parameters that are awkward to quote.
 
 ## Working on Forge, not GitHub
 
@@ -203,7 +203,7 @@ When given a Forge prompt, run `nforge agent ROOT brief` (or `forge_brief`) for 
 
 ## Reproduce a small installed delivery
 
-Put the installed package's `node_modules/.bin` and a supported Node22/24 on PATH. Use a new directory, then run:
+Put the installed package's `node_modules/.bin` and Node 22.23.4+ (22.x) or 24.22.1+ (24.x) on PATH. Use a new directory, then run:
 
 ```sh
 mkdir forge-agent-demo

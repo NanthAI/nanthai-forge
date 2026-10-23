@@ -12,7 +12,7 @@ npm run format      # Prettier; verify fails on unformatted code
 npm run verify      # docs check, format check, typecheck, lint, all tests
 ```
 
-Use Node 22.12+ or 24. A change is done when `npm run verify` passes. If you could not run something, say so.
+Use Node 22.23.4+ (22.x) or 24.22.1+ (24.x). A change is done when `npm run verify` passes. If you could not run something, say so.
 
 ## We build Forge with Forge
 

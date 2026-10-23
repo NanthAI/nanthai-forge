@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '24.19.0'
+          node-version: '24.22.1'
       - run: node scripts/forge-check.mjs
         env:
           FORGE_ACTIONS_PLAN: .github/forge-check-plan.json
@@ -45,7 +45,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '24.19.0'
+          node-version: '24.22.1'
       - run: node scripts/forge-check.mjs
         env:
           FORGE_ACTIONS_PLAN: .github/forge-check-plan.json

@@ -4,7 +4,7 @@ import { checkHash, checkNumber, checkObject, checkPin, type HostedCheckRun } fr
 import { invariant } from './errors.js';
 
 export const hostedActionsRuntime = checkPin(
-  'github-actions;node:24.19.0;checkout:v4;setup-node:v4;forge-check:v1',
+  'github-actions;node:24.22.1;checkout:v4;setup-node:v4;forge-check:v1',
 );
 export const actionsAccessMessage = (reason: 'registration' | 'access') =>
   reason === 'registration'

@@ -2,7 +2,7 @@
 
 Forge is a source host and workspace for humans and AI agents working on the same
 code. This flow uses local files and commands, with no account or network service.
-Install Forge and Node 22.12+ or 24 first. Read this document from any directory
+Install Forge and Node 22.23.4+ (22.x) or 24.22.1+ (24.x) first. Read this document from any directory
 with `nforge docs quickstart`; `nforge docs` lists the packaged documentation.
 
 ## Import a committed snapshot

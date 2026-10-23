@@ -15,6 +15,12 @@ from collect import collect_all, stop_all
 from cost import allocation_rate, compute_estimate
 
 LOCK = threading.Lock()
+NODE_IMAGE = 'node:24.22.1-trixie-slim'
+
+
+def require_current_node(plan):
+    if plan.get('runtime', '').split(';', 1)[0] != NODE_IMAGE:
+        raise ValueError('Pinned Node runtime cannot start a new execution')
 
 def exit_summary(code):
     return 'out of memory (137)' if code == 137 else 'exit ' + str(code)
@@ -103,13 +109,14 @@ def main():
         resilient = ';resume:1;' in plan.get('runtime', '')
         flaky_retry = ';flake-retry:1;' in plan.get('runtime', '')
         if not journal_path.exists():
+            require_current_node(plan)
             source = validate(plan)
             emit('progress', message='Verified exact source; preparing lockfile runtime')
             # Detached ephemeral App: no deployment, endpoint, secrets, volumes or tunnels.
             app = modal.App('forge-check')
             # A normal context exit stops even detached Apps. Keep it alive through collection.
             lifetime.enter_context(app.run(detach=True))
-            image = (modal.Image.from_registry('node:24.19.0-trixie-slim')
+            image = (modal.Image.from_registry(NODE_IMAGE)
                      .apt_install('git', 'ca-certificates', 'procps', 'time', 'python3')
                      .workdir('/repo'))
             if (source / 'package-lock.json').exists():
@@ -131,6 +138,7 @@ def main():
             save(journal_path, journal)
         def launch(index, files, memory):
             nonlocal app, image
+            require_current_node(plan)
             if (output / 'modal-cancel').exists():
                 raise RuntimeError('Cancelled before sandbox creation')
 

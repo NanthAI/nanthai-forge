@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { improveCli } from './improve-cli.js';
 import { noticeViewAlias } from './candidate-names.js';
 import { refreshOwnerRoot } from './owner-root.js';
@@ -384,6 +385,7 @@ function shellQuote(value: string) {
   return "'" + value.replaceAll("'", "'\\''") + "'";
 }
 try {
+  invariant(supportedNode(), 'UNSUPPORTED_NODE', nodeRequirement);
   const output = await main(process.argv.slice(2));
   if (output !== undefined) {
     process.stdout.write(

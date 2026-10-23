@@ -17,7 +17,7 @@ ${
           ref: \${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
-          node-version: '24.19.0'
+          node-version: '24.22.1'
       - name: Scoped check (same selection as Forge)
         env:
           FORGE_CHECK_SCOPED: '1'

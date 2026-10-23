@@ -209,7 +209,7 @@ try {
   }
   assert.equal(manifest.private, true);
   assert.equal(manifest.license, 'Apache-2.0');
-  assert.equal(manifest.engines.node, '>=22.12 <25');
+  assert.equal(manifest.engines.node, '^22.23.4 || >=24.22.1 <25');
   const bin = join(directory, 'no-git');
   mkdirSync(bin);
   const gitCalled = join(directory, 'git-called');

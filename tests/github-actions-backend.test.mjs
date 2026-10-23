@@ -165,6 +165,60 @@ function controllerFixture(t, groups = []) {
   };
   return { plan, journal };
 }
+
+for (const mode of ['completed', 'discover', 'cancel', 'unfinished', 'unstarted']) {
+  test(`pre-upgrade Actions runtime permits observation without new execution: ${mode}`, async t => {
+    const { work, run, path } = fixture(t);
+    mkdirSync(path, { recursive: true });
+    const plan = await modalPlan(
+      work.store,
+      run,
+      path,
+      undefined,
+      'github-actions;repo:synthetic/checks;node:24.19.0;runs-on:ubuntu-latest;unfinished-retry:1',
+    );
+    run.backend.pin = plan.pin;
+    const journal = {
+      pin: plan.pin,
+      repo: 'synthetic/checks',
+      runsOn: 'ubuntu-latest',
+      commit: 'a'.repeat(40),
+      pushed: true,
+      retrying: [],
+      retrySources: {},
+      oom: [],
+      logged: [],
+      states: {},
+      ...(mode === 'unstarted' ? {} : mode === 'discover' ? { dispatching: true } : { runId: 10 }),
+    };
+    writeFileSync(join(path, 'github-actions.json'), JSON.stringify(journal));
+    if (mode === 'cancel') run.cancelRequested = true;
+    const fake = transport(plan, journal, {
+      running: mode === 'cancel',
+      conclusion: mode === 'unfinished' ? 'startup_failure' : 'success',
+    });
+    await launchGithubActionsRun(
+      work.store,
+      run,
+      fake.api,
+      async () => assert.fail('Old runtime must not export a replacement workflow'),
+      async () => {},
+    );
+    const result = read(join(path, 'result.json'));
+    assert.equal(
+      result.status,
+      mode === 'cancel' ? 'cancelled' : ['unfinished', 'unstarted'].includes(mode) ? 'interrupted' : 'passed',
+    );
+    assert.equal(result.backend.runtime, plan.runtime);
+    assert.equal(
+      fake.calls.filter(call => call.method === 'POST' && !call.endpoint.endsWith('/cancel')).length,
+      0,
+    );
+    if (mode === 'unstarted') assert.match(result.details, /UNSUPPORTED_NODE/);
+    else assert.ok(fake.calls.some(call => call.endpoint.endsWith('/timing')));
+  });
+}
+
 test('policy, native routing and workflow preserve labels and shard selection', () => {
   const policy = editedPolicy(policyPreset('trusted'), {
     checks: {

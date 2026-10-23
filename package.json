@@ -6,7 +6,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=22.12 <25"
+    "node": "^22.23.4 || >=24.22.1 <25"
   },
   "scripts": {
     "check": "node scripts/check-foundation.mjs",
@@ -76,6 +76,7 @@
   },
   "files": [
     "skills/forge-agent/SKILL.md",
+    "scripts/node-runtime.mjs",
     "scripts/check-quarantine.mjs",
     "scripts/check-documentation.mjs",
     "scripts/github-actions-check.mjs",
