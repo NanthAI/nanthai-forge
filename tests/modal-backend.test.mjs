@@ -15,7 +15,7 @@ import { NativeSource } from '../dist/native-source.js';
 import { launchModalRun } from '../dist/work-modal-run.js';
 import { ForgeError } from '../dist/errors.js';
 import { CheckQueue } from '../dist/check-queue.js';
-import { modalClient } from '../dist/modal-client.js';
+import { modalClient, modalEventSchema } from '../dist/modal-client.js';
 
 function fixture(t, files = {}) {
   // Mock clients must not wait behind real checks in the owner's Modal pool.
@@ -105,6 +105,39 @@ function result(plan, patch = {}) {
   };
 }
 const read = path => JSON.parse(readFileSync(path, 'utf8'));
+
+test('Modal timing metadata preserves valid wall times without changing legacy or invalid-timing verdicts', () => {
+  for (const durationMs of [undefined, 1250, -1, 'invalid']) {
+    const parsed = modalEventSchema.parse({
+      kind: 'result',
+      pin: 'synthetic',
+      head: 'synthetic',
+      definition: 'synthetic',
+      exitCode: 0,
+      estimatedCostUsd: 0,
+      executions: [
+        {
+          executionId: 'synthetic',
+          index: 0,
+          attempt: 0,
+          tests: {
+            'tests/a.test.mjs': {
+              file: 'tests/a.test.mjs',
+              complete: true,
+              results: [],
+              ...(durationMs === undefined ? {} : { durationMs }),
+            },
+          },
+        },
+      ],
+    });
+    assert.equal(parsed.exitCode, 0);
+    assert.equal(
+      parsed.executions[0].tests['tests/a.test.mjs'].durationMs,
+      durationMs === 1250 ? 1250 : undefined,
+    );
+  }
+});
 
 test('policy selects Modal and preserves local defaults and declared secret inputs', () => {
   const policy = editedPolicy(policyPreset('trusted'), {
@@ -357,7 +390,7 @@ test('remote artifacts stream selected bytes and reject digest/selection changes
   }
 });
 
-test('recorded whole-file durations feed subsequent balancing', async t => {
+test('completed whole-file reports feed owner timing history, not live timing events', async t => {
   const { work, run, path } = fixture(t, { 'tests/alpha.test.mjs': '// synthetic test source' });
   run.check.args = ['scripts/forge-check.mjs'];
   await launchModalRun(work.store, run, async (file, emit) => {
@@ -365,12 +398,44 @@ test('recorded whole-file durations feed subsequent balancing', async t => {
     assert.deepEqual(plan.selection.tests, ['tests/alpha.test.mjs']);
     emit({ kind: 'timing', file: 'tests/alpha.test.mjs', seconds: 1.25 });
     emit({ kind: 'timing', file: 'tests/unselected.test.mjs', seconds: 100 });
-    emit(result(plan));
+    assert.equal(existsSync(join(work.store.directory, 'test-timings.json')), false);
+    emit({ kind: 'execution', executionId: 'sb-timing', image: 'im-timing', index: 0 });
+    emit({ kind: 'execution', executionId: 'sb-static', image: 'im-timing', index: 1 });
+    emit(
+      modalEventSchema.parse(
+        result(plan, {
+          executions: [
+            { executionId: 'sb-static', index: 1, attempt: 0, exitCode: 0 },
+            {
+              executionId: 'sb-timing',
+              index: 0,
+              attempt: 0,
+              exitCode: 0,
+              tests: {
+                'tests/alpha.test.mjs': {
+                  file: 'tests/alpha.test.mjs',
+                  durationMs: 1250,
+                  complete: true,
+                  results: [],
+                },
+                'tests/unselected.test.mjs': {
+                  file: 'tests/unselected.test.mjs',
+                  durationMs: 100000,
+                  complete: true,
+                  results: [],
+                },
+              },
+            },
+          ],
+        }),
+      ),
+    );
   });
   assert.equal(read(join(path, 'result.json')).status, 'passed');
-  assert.deepEqual(read(join(work.store.directory, 'modal-durations.json')), {
-    'tests/alpha.test.mjs': 1.25,
-  });
+  assert.equal(recoverRuns(work.store, { runs: [run] }), true);
+  const history = read(join(work.store.directory, 'test-timings.json'));
+  assert.deepEqual(Object.keys(history.files), ['tests/alpha.test.mjs']);
+  assert.equal(history.files['tests/alpha.test.mjs'].durationMs, 1250);
 });
 
 test('restart ownership is claimed atomically; concurrent observers start one adopter', async t => {

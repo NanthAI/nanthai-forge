@@ -562,11 +562,18 @@ test('a silent Convex publication times out, retries its exact operation and com
   const { createServer } = await import('node:http');
   const { ConvexExchange } = await import('../dist/exchange-client.js');
   const { PUSH_STALL_MS } = await import('../dist/push-progress-state.js');
+  const { LONG_ACTION_DEADLINE_MS } = await import('../dist/long-action.js');
   const f = fixture(t, { debounceMs: 0 });
   const realTimeout = globalThis.setTimeout;
-  t.mock.method(globalThis, 'setTimeout', (fn, ms, ...args) =>
-    realTimeout(fn, ms === 600_000 ? 1250 : ms, ...args),
-  );
+  let deadlineExpirations = 0;
+  // Compress the current production deadline, retaining real HTTP abort/retry.
+  t.mock.method(globalThis, 'setTimeout', (fn, ms, ...args) => {
+    if (ms !== LONG_ACTION_DEADLINE_MS) return realTimeout(fn, ms, ...args);
+    return realTimeout(() => {
+      deadlineExpirations++;
+      fn(...args);
+    }, 1250);
+  });
   const requests = [],
     sockets = new Set();
   let firstProgress,
@@ -618,6 +625,7 @@ test('a silent Convex publication times out, retries its exact operation and com
     return transport;
   };
   await f.run();
+  assert.equal(deadlineExpirations, 1, 'the silent request must expire before its retry');
   assert.equal(requests.length, 2);
   assert.equal(publications, 1);
   assert.equal(requests[0], requests[1]);

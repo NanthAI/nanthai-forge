@@ -68,6 +68,7 @@ export const modalEventSchema = z.discriminatedUnion('kind', [
               z.object({
                 file: z.string(),
                 complete: z.boolean(),
+                durationMs: z.number().positive().finite().optional().catch(undefined),
                 results: z.array(z.object({ name: z.string(), passed: z.boolean() })),
               }),
             )

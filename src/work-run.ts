@@ -54,6 +54,7 @@ import type { WorkStore } from './work-store.js';
 import { latestCheckCoverage, retainCheckCoverage } from './check-coverage.js';
 import { captureArtifacts } from './work-artifacts.js';
 import { resourceCommand, readResources } from './work-resources.js';
+import { recordCheckTimings } from './check-test-timings.js';
 
 export const runInterruption = new AbortController();
 
@@ -90,6 +91,7 @@ export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>): boo
             result.data.backend?.pin === run.backend?.pin)
         ) {
           Object.assign(run, result.data);
+          recordCheckTimings(store, run, path);
           changed = true;
           continue;
         }

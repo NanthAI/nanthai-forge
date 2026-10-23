@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { benchmarkPlan } from '../scripts/bench-landing-shard.mjs';
@@ -78,4 +78,34 @@ test('public verification rejects invalid partitions and propagates command fail
       }),
     error => error === failure,
   );
+});
+
+test('public verification uses timing history while retaining every file, including new files', t => {
+  const path = fixture(t);
+  const files = sourceFiles();
+  const baseline = benchmarkPlan(4, {}, files, {});
+  const historyPath = join(process.env.RUNNER_TEMP, 'timings.json');
+  const known = baseline.selection.tests.slice(0, -1);
+  writeFileSync(
+    historyPath,
+    JSON.stringify({
+      version: 1,
+      runs: [],
+      files: Object.fromEntries(
+        known.map((file, index) => [
+          file,
+          { durationMs: index % 11 === 0 ? 100000 : 1000, updatedAt: '2026-01-01' },
+        ]),
+      ),
+    }),
+  );
+  process.env.FORGE_TEST_TIMINGS_HISTORY = historyPath;
+  const expected = benchmarkPlan(4, {}, files);
+  assert.notDeepEqual(expected.groups, baseline.groups);
+  assert.deepEqual(expected.groups.flat().sort(), baseline.selection.tests);
+  const calls = [];
+  for (const shard of ['0', '1', '2', '3'])
+    publicVerify(shard, '4', (command, args) => calls.push(args.slice(1)));
+  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), expected);
+  assert.deepEqual(calls.flat().sort(), baseline.selection.tests);
 });

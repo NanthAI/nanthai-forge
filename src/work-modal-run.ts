@@ -214,17 +214,6 @@ export async function launchModalRun(
             durableReplace(artifactsPath, JSON.stringify(artifacts));
           }
 
-          if (event.kind === 'timing' && plan!.selection.tests.includes(event.file)) {
-            const timingPath = join(store.directory, 'modal-durations.json');
-            let timings: Record<string, number> = {};
-            try {
-              timings = JSON.parse(readFileSync(timingPath, 'utf8'));
-            } catch {
-              /* First observation. */
-            }
-            timings[event.file] = event.seconds;
-            durableReplace(timingPath, JSON.stringify(timings));
-          }
           if (event.kind === 'execution') {
             shardLogs.register(event);
             if (run.backend!.image && run.backend!.image !== event.image)

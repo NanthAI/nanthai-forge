@@ -81,4 +81,15 @@ test('verify prints a completed failing file diagnostic while another file is st
   assert.equal(await closed, 1, output);
   assert.equal(streamedBeforeRelease, true, output);
   assert.match(output, /actual diagnostic/);
+  const reports = output
+    .split('\n')
+    .filter(line => line.startsWith('__FORGE_TESTS__'))
+    .map(line => JSON.parse(line.slice('__FORGE_TESTS__'.length)));
+  assert.deepEqual(reports.map(report => report.file).sort(), [
+    'tests/failure.test.mjs',
+    'tests/held.test.mjs',
+  ]);
+  assert.ok(
+    reports.every(report => report.complete && Number.isFinite(report.durationMs) && report.durationMs > 0),
+  );
 });

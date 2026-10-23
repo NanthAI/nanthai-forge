@@ -4,6 +4,7 @@ import { modalUsageCost } from './modal-cost.js';
 import { modalCredentialsRefSchema } from './check-runner-settings.js';
 import { checkCostSchema } from './check-cost.js';
 import type { CheckRun } from './work-types.js';
+import { partitionTests } from '../scripts/test-shards.mjs';
 
 export const modalCostUsageSchema = z.array(
   z.object({
@@ -69,15 +70,7 @@ export function checkRoute(
 /** Longest processing time first; ties are stable. No test file is split or omitted. */
 export function balanceShards(files: string[], durations: Record<string, number> = {}, full = false) {
   const count = Math.min(files.length, full ? 16 : Math.max(1, Math.ceil(files.length / 8)));
-  const groups = Array.from({ length: count }, () => ({ files: [] as string[], seconds: 0 }));
-  const duration = (file: string) =>
-    Number.isFinite(durations[file]) && durations[file]! > 0 ? durations[file]! : 1;
-  for (const file of [...new Set(files)].sort((a, b) => duration(b) - duration(a) || a.localeCompare(b))) {
-    const group = groups.reduce((a, b) => (a.seconds <= b.seconds ? a : b));
-    group.files.push(file);
-    group.seconds += duration(file);
-  }
-  return groups.map(group => group.files);
+  return count ? partitionTests(files, count, durations) : [];
 }
 export function modalMonthCost(runs: Iterable<Pick<CheckRun, 'startedAt' | 'backend'>>, now = new Date()) {
   const month = now.toISOString().slice(0, 7);

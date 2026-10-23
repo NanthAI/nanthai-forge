@@ -50,7 +50,7 @@ function runCommand(name, command, args) {
   const begin = Date.now();
   return new Promise(resolve => {
     const child = spawn(command, args, {
-      env: name === 'test' ? { ...env, FORGE_TEST_DIAGNOSTICS: '1' } : env,
+      env: name === 'test' ? { ...env, FORGE_TEST_DIAGNOSTICS: '1', FORGE_TEST_EVENTS: '1' } : env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const chunks = [],
@@ -68,7 +68,7 @@ function runCommand(name, command, args) {
       const lines = pending.split('\n');
       pending = lines.pop();
       for (const raw of lines) {
-        if (raw.startsWith('__FORGE_COVERAGE__')) {
+        if (raw.startsWith('__FORGE_COVERAGE__') || raw.startsWith('__FORGE_TESTS__')) {
           process.stdout.write(`${raw}\n`);
           continue;
         }

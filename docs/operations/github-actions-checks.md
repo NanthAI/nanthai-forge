@@ -33,6 +33,23 @@ an unstarted old-runtime plan needs a new check on the fixed runtime.
 Arbitrary commands run once in the static job. Candidate sources must include the
 Actions-aware standard check script to use standard sharding.
 
+New plans use the owner's `.forge/work/test-timings.json` history for both explicit
+and automatic shard counts. Complete per-file runner reports update a local EWMA
+(30% newest observation) when a passed or failed check receipt is reconciled;
+cancelled and interrupted checks do not train it. The store prunes files absent
+from the checked snapshot and retains at most 4,096 files and 1 MiB. A bounded run
+ledger and a durable per-check marker make completion reconciliation idempotent.
+No timing data is written to Convex or fetched over the network.
+
+The shared partitioner assigns longest files first, modelling the runner's two
+concurrent whole-file workers. Unknown files use historical p75; missing or corrupt
+history preserves sorted round-robin. Ties use portable path order and shard index.
+Membership remains in the digest-bound `modal-plan.json` and generated Actions
+recipe; an existing run always reuses that plan after timing history changes.
+`scripts/public-verify.mjs` and the landing benchmark use the same partitioner.
+They read the local history path above, or an explicitly supplied
+`FORGE_TEST_TIMINGS_HISTORY` file, and cover every selected test with either strategy.
+
 The owner exports the same immutable State used by Modal and adds a generated
 workflow and recipe to that export only. The exported commit is pushed only to
 `refs/heads/forge-check/<runId>`, using a compare-and-swap creation. A changed or

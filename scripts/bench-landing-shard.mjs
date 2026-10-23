@@ -5,12 +5,16 @@ import { runActionsCheck } from './github-actions-check.mjs';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, resolve } from 'node:path';
-export function benchmarkPlan(count, comparison = pinnedComparison(), files = sourceFiles()) {
+import { partitionTests, timingDurations } from './test-shards.mjs';
+import { readTimingHistory } from './test-timings-file.mjs';
+export function benchmarkPlan(
+  count,
+  comparison = pinnedComparison(),
+  files = sourceFiles(),
+  durations = timingDurations(readTimingHistory()),
+) {
   const selection = standardSelection({ ...comparison, files });
-  // modalPlan uses the selection order directly when checks.shards is explicit.
-  const groups = Array.from({ length: Math.min(Number(count), selection.tests.length) }, (_, shard) =>
-    selection.tests.filter((_, position) => position % Number(count) === shard),
-  );
+  const groups = partitionTests(selection.tests, Number(count), durations);
   return { standard: true, selection, groups, interaction: comparison?.interaction !== undefined };
 }
 

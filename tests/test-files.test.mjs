@@ -109,6 +109,7 @@ test('machine reports keep file attribution and nested names despite concurrent 
     .map(line => JSON.parse(line.slice('__FORGE_TESTS__'.length)));
   assert.equal(reports.length, 2);
   assert.ok(reports.every(report => report.complete));
+  assert.ok(reports.every(report => Number.isFinite(report.durationMs) && report.durationMs > 0));
   assert.ok(
     reports
       .find(report => report.file === first)

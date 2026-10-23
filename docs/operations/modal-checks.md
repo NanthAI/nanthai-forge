@@ -1,5 +1,12 @@
 # Modal checks
 
+Modal and Actions share the owner's bounded per-file timing history and deterministic
+partitioner. Complete terminal checks train the local EWMA; new plans balance whole
+files across each shard's two workers, with p75 for unknown files and round-robin
+when no history exists. Retained plans preserve their original shard membership.
+See [timing history and plan replay](github-actions-checks.md) for storage and
+public-verification details.
+
 The native owner selects the backend through project autonomy policy:
 
 ```sh

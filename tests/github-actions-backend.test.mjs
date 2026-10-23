@@ -967,44 +967,61 @@ test('benchmark one and four shard plans match the Forge Actions plan and execut
   const files = new Map(
     source.state(run.head).files.map(file => [file.path, source.object(file.blob).toString('utf8')]),
   );
-  for (const count of [1, 4]) {
-    const path = join(work.store.directory, `bench-parity-${count}`);
-    mkdirSync(path);
-    const forge = await modalPlan(work.store, run, path, count);
-    const github = benchmarkPlan(count, {}, files);
-    assert.deepEqual(github.selection, forge.selection);
-    assert.deepEqual(github.groups, forge.groups);
-    assert.equal(github.groups.length, count);
-    const filename = join(path, 'benchmark-plan.json');
-    writeFileSync(filename, JSON.stringify(github));
-    process.env.FORGE_ACTIONS_PLAN = filename;
-    for (const shard of ['static', ...github.groups.map((_, index) => String(index))]) {
-      process.env.FORGE_ACTIONS_SHARD = shard;
-      const calls = [];
-      runActionsCheck((command, args, options) => calls.push({ command, args, env: options.env }), {
-        install: false,
-      });
-      assert.ok(
-        calls.every(call => call.args[0] !== 'ci'),
-        'workflow already installed dependencies',
+  for (const observed of [false, true])
+    for (const count of [1, 4]) {
+      const durations = observed
+        ? { 'tests/z.test.mjs': 100000, 'tests/a.test.mjs': 1000, 'tests/m.test.mjs': 2000 }
+        : {};
+      writeFileSync(
+        join(work.store.directory, 'test-timings.json'),
+        JSON.stringify({
+          version: 1,
+          runs: [],
+          files: Object.fromEntries(
+            Object.entries(durations).map(([file, durationMs]) => [
+              file,
+              { durationMs, updatedAt: '2026-01-01' },
+            ]),
+          ),
+        }),
       );
-      if (shard === 'static') {
-        assert.deepEqual(calls.at(-1).args, ['scripts/verify.mjs']);
-        assert.deepEqual(JSON.parse(calls.at(-1).env.FORGE_SELECTED_TESTS).tests, []);
-      } else {
-        assert.deepEqual(
-          calls.map(call => call.args),
-          [
-            ['run', 'build:core'],
-            ['run', 'build:web'],
-            ['scripts/test-files.mjs', ...forge.groups[Number(shard)]],
-          ],
+      const path = join(work.store.directory, `bench-parity-${observed}-${count}`);
+      mkdirSync(path);
+      const forge = await modalPlan(work.store, run, path, count);
+      const github = benchmarkPlan(count, {}, files, durations);
+      assert.deepEqual(github.selection, forge.selection);
+      assert.deepEqual(github.groups, forge.groups);
+      assert.equal(github.groups.length, count);
+      const filename = join(path, 'benchmark-plan.json');
+      writeFileSync(filename, JSON.stringify(github));
+      process.env.FORGE_ACTIONS_PLAN = filename;
+      for (const shard of ['static', ...github.groups.map((_, index) => String(index))]) {
+        process.env.FORGE_ACTIONS_SHARD = shard;
+        const calls = [];
+        runActionsCheck((command, args, options) => calls.push({ command, args, env: options.env }), {
+          install: false,
+        });
+        assert.ok(
+          calls.every(call => call.args[0] !== 'ci'),
+          'workflow already installed dependencies',
         );
+        if (shard === 'static') {
+          assert.deepEqual(calls.at(-1).args, ['scripts/verify.mjs']);
+          assert.deepEqual(JSON.parse(calls.at(-1).env.FORGE_SELECTED_TESTS).tests, []);
+        } else {
+          assert.deepEqual(
+            calls.map(call => call.args),
+            [
+              ['run', 'build:core'],
+              ['run', 'build:web'],
+              ['scripts/test-files.mjs', ...forge.groups[Number(shard)]],
+            ],
+          );
+        }
+        assert.equal(calls.at(-1).env.FORGE_MAX_CONCURRENT_CHECKS, '2');
+        assert.equal(calls.at(-1).env.FORGE_TEST_WORKERS, '2');
       }
-      assert.equal(calls.at(-1).env.FORGE_MAX_CONCURRENT_CHECKS, '2');
-      assert.equal(calls.at(-1).env.FORGE_TEST_WORKERS, '2');
     }
-  }
   const docs = benchmarkPlan(1, { paths: ['docs/example.md'] }, files);
   // Full overrides remain pinned; scoped docs selection is covered without that override.
   delete process.env.FORGE_CHECK_FULL;
@@ -1013,6 +1030,72 @@ test('benchmark one and four shard plans match the Forge Actions plan and execut
   assert.equal(docs.selection.scope, 'full');
   assert.equal(scopedDocs.selection.scope, 'docs');
   assert.deepEqual(scopedDocs.groups, []);
+});
+
+test('duration-balanced Actions recipe reuses pinned shard membership after history changes', async t => {
+  const files = Object.fromEntries(
+    Array.from({ length: 16 }, (_, index) => [
+      `tests/${String(index).padStart(2, '0')}.test.mjs`,
+      '// synthetic\n',
+    ]),
+  );
+  const { work, run, path } = fixture(t, {
+    ...files,
+    'scripts/forge-check.mjs': '// synthetic\n',
+    'package-lock.json': '{}\n',
+  });
+  run.check.args = ['scripts/forge-check.mjs'];
+  run.environment.env = { FORGE_CHECK_FULL: '1' };
+  setPolicy(
+    work.store,
+    { action: 'set-policy', operationId: randomUUID(), checks: { shards: 4 } },
+    localPerson(),
+    work.store.revision(),
+  );
+  const historyPath = join(work.store.directory, 'test-timings.json');
+  const durations = Object.fromEntries(
+    Object.keys(files).map((file, index) => [
+      file,
+      { durationMs: index % 4 === 0 ? 100000 : 1000, updatedAt: '2026-01-01' },
+    ]),
+  );
+  writeFileSync(historyPath, JSON.stringify({ version: 1, runs: [], files: durations }));
+  let first;
+  for (const changed of [false, true]) {
+    if (changed) writeFileSync(historyPath, JSON.stringify({ version: 1, runs: [], files: {} }));
+    let fake;
+    await launchGithubActionsRun(
+      work.store,
+      run,
+      {
+        request: (...args) => fake.api.request(...args),
+        pages: (...args) => fake.api.pages(...args),
+        log: (...args) => fake.api.log(...args),
+        sleep: async () => {},
+      },
+      async (plan, journal, save) => {
+        if (first) assert.deepEqual(plan, first);
+        else {
+          first = structuredClone(plan);
+          assert.equal(plan.groups.length, 4);
+          assert.deepEqual(plan.groups.flat().sort(), Object.keys(files).sort());
+          assert.ok(
+            plan.groups.every(
+              group => group.filter(file => durations[file].durationMs === 100000).length === 1,
+            ),
+          );
+        }
+        assert.deepEqual(githubActionsRecipe(plan).groups, first.groups);
+        journal.commit = 'a'.repeat(40);
+        journal.pushed = true;
+        save();
+        fake = transport(plan, journal);
+      },
+      async () => {},
+    );
+    assert.equal(read(join(path, 'result.json')).status, 'passed');
+    assert.deepEqual(read(join(path, 'modal-plan.json')), first);
+  }
 });
 
 test('exhausted transient check-ref pushes end as terminal infrastructure failure', async t => {

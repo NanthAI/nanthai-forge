@@ -53,6 +53,7 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
   process.once('SIGINT', stop);
   async function runFile(file) {
     return new Promise(resolve => {
+      const started = performance.now();
       const childEnv = { ...process.env };
       delete childEnv.NODE_TEST_CONTEXT;
       let coverageDirectory = null;
@@ -115,6 +116,7 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
         process.stdout.write(`not ok - ${file}: ${error.message}\n`);
       });
       child.once('close', code => {
+        const durationMs = performance.now() - started;
         if (coverageDirectory) {
           try {
             const touched = v8Touched(coverageDirectory, coverageFiles);
@@ -145,7 +147,7 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
         }
         if (process.env.FORGE_TEST_EVENTS === '1')
           process.stdout.write(
-            `__FORGE_TESTS__${JSON.stringify({ file, results, complete: !timedOut && (code === 0 || results.some(item => !item.passed)) })}\n`,
+            `__FORGE_TESTS__${JSON.stringify({ file, results, durationMs, complete: !timedOut && (code === 0 || results.some(item => !item.passed)) })}\n`,
           );
         resolve();
       });

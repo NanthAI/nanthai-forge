@@ -10,6 +10,8 @@ import { writeCheckScope } from './work-check-scope.js';
 import { balanceShards } from './check-backend.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
+import { partitionTests, timingDurations } from '../scripts/test-shards.mjs';
+import { readTimingHistory } from '../scripts/test-timings-file.mjs';
 
 export const modalRuntime =
   'node:24.22.1-trixie-slim;git;time;python3;modal-sdk:1.6.2;cpu:2;memory:4096;static-memory:8192;static-oom-retry:16384;static-workers:2;static-heap:3072;flake-retry:1;resume:1;cost:worker-runtime-margin-1;timeout:900';
@@ -59,12 +61,7 @@ export async function modalPlan(
         env: run.environment.env,
       })
     : { scope: 'full', reason: 'Exact configured command', tests: [] as string[] };
-  let durations: Record<string, number> = {};
-  try {
-    durations = JSON.parse(readFileSync(join(store.directory, 'modal-durations.json'), 'utf8'));
-  } catch {
-    /* Equal weights until observed. */
-  }
+  const durations = timingDurations(readTimingHistory(join(store.directory, 'test-timings.json')));
   const lockfile = digest(files.get('package-lock.json') ?? '');
   const pins = {
     runId: run.id,
@@ -77,9 +74,7 @@ export async function modalPlan(
     costSafetyMargin: MODAL_COST_SAFETY_MARGIN,
     groups: standard
       ? shards
-        ? Array.from({ length: Math.min(shards, selection.tests.length) }, (_, index) =>
-            selection.tests.filter((_, position) => position % shards === index),
-          )
+        ? partitionTests(selection.tests, shards, durations)
         : balanceShards(selection.tests, durations, selection.scope === 'full')
       : [],
     standard,
