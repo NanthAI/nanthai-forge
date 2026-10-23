@@ -1321,7 +1321,7 @@ claim to save a disconnected client's unknown edits.
 Cancellation uses the separate `projectHostedChecks:cancel` API. An abandon
 receipt never means a running check or arbitrary process stopped. Main,
 acceptance receipts, source objects and saves are untouched by lifecycle changes.
-The hosted agent CLI uses these same primitives. MCP parity and site controls
+The hosted agent CLI and MCP use these same primitives. Site controls
 remain separate work.
 
 ### Hosted finish API
@@ -1395,7 +1395,7 @@ Receipt lookup and source publication are constant-size metadata transactions;
 source diff/merge stays on the worker. These API-only phases do not create a local
 native owner, transport command or site control.
 
-## Hosted agent CLI
+## Hosted agent CLI and MCP
 
 `nforge agent ROOT ACTION JSON` uses the hosted transport when JSON includes
 `url` and `projectId`, when ROOT is a hosted Lane checkout, or when a previous
@@ -1464,6 +1464,43 @@ configuration flags report presence, not live provider health. `status` and
 `version`), or `{kind,operationId}` where kind is save, compose, sync, revert or
 lifecycle. They do not start compute or install an idle observer. Source/check
 submission returns promptly; replay the original action to advance its retained
-client phases and explicitly read status for progress. The shared
-`HostedAgentTransport.dispatch` and portable command schemas are the integration
-boundary for MCP parity; source-read tools remain separate work.
+client phases and explicitly read status for progress.
+
+`nforge mcp ROOT --agent` uses this same hosted address detection and existing
+agent workflow registration. For a new client directory, select an explicit address:
+
+```sh
+nforge mcp ./edit --agent --url https://deployment.convex.cloud --project-id PROJECT_ID
+```
+
+The existing server registers `forge_task` for start/open/save/checkpoint/compose/
+sync/finish/revert/abandon/reopen, `forge_check` for check/run/observe, and
+`forge_work_overview` for status/capabilities. Actions use the CLI's exact portable
+schemas inside `{command:{action,...}}`, the same response envelope and the same
+`ROOT.forge-client/agent` journal and successful-address retention. Retrying through
+either interface preserves original UUIDs, actor and source/check pins. Unsupported
+hosted actions do not route to native tools. No person-acceptance input is exposed;
+account credentials still submit `agent:true` through the existing finish transport.
+
+`forge_current {laneId}` returns one saved Lane's source context. `forge_source
+{laneId,file,start?,end?,expected?}` reads up to 200 lines. `forge_review
+{command:{action:"show",laneId,path,expected?,force?}}` returns exact retained bytes
+with utf8/base64 encoding and the same force behavior as native show. `laneId` may
+be omitted in an opened Lane. Optional `expected:{head,version,sourceVersion}`
+fails explicitly on movement. Results retain complete Lane source context plus
+State/blob/mode pins. Reads use H04's verified object cache, select only the State
+and requested file, and recheck current authorization and the original pins before
+returning bytes. Sparse omissions stay readable without materializing them; unsaved
+local edits never replace saved source. These tools hydrate no Work/history/graph.
+Native graph tools remain registered for native source; no hosted graph is inferred.
+
+`forge_check {command:{action:"observe",runId}}` remains a finite read. An explicit
+`forge_wait {runId,timeoutSeconds?}` observes that run live until terminal, timeout
+(default 600 seconds), request cancellation or disconnect. It returns the observed
+run with `status:"terminal"|"timeout"|"cancelled"`; a terminal failed run remains
+failed. MCP progress notifications carry observations when requested with a
+progress token. Only a nonterminal active wait creates a subscription, and every
+exit unsubscribes and closes its client. Terminal and zero-duration reads allocate
+no live client. There is no idle polling, URL refresh, heartbeat, metadata hydration
+or compute wake. Observation neither cancels a run nor grants acceptance evidence.
+These paths are qualified with local fakes, not live accounts or providers.

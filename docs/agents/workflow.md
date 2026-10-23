@@ -160,7 +160,16 @@ Lifecycle. When the project policy has `lifecycle.completeOnAccept:true`, accept
 
 Select a check from `status`, or `define-check` with the local executable and args. Checks run in a fresh exact-Candidate directory, so the command must prepare its dependencies. `run` takes `viewId` or `laneId` (and optional pins) and waits by default; `observe`, `log` and `cancel` address that run. `accept` takes `viewId`; `channel` defaults to `main` and `expectedPrevious` to its current head. Invariants, releases, Playbooks, human reviews and GitHub publication keep their existing owners.
 
-For MCP source queries after start, pass the returned `laneId` on every selected call. Omission uses startup source. `nforge mcp-config ROOT --agent` emits an optional configuration fragment without editing client settings. Autonomy and reversible-action records use Work format 11; keep a capable reader for recovery. Local tools operate under your OS account, without a sandbox claim. See [milestone qualification](../status.md) for actual measurements, package/source pins and remaining acceptance.
+For hosted Lanes, the same `nforge mcp ROOT --agent` detects the hosted checkout or
+retained CLI address; `--url URL --project-id ID` selects a new hosted address.
+Task/check/overview commands reuse the hosted CLI schemas and retry journal.
+Source tools return saved Lane/State/blob pins and accept optional exact expected
+pins; local drafts are separate. `forge_check` observe is finite; only an explicit
+`forge_wait {runId,timeoutSeconds?}` subscribes live, and closes on every exit.
+Account credentials still request agent acceptance under current policy. See the
+[hosted CLI and MCP contract](../operations/source-exchange.md#hosted-agent-cli-and-mcp).
+
+For native MCP source queries after start, pass the returned `laneId` on every selected call. Omission uses startup source. `nforge mcp-config ROOT --agent` emits an optional configuration fragment without editing client settings. Autonomy and reversible-action records use Work format 11; keep a capable reader for recovery. Local tools operate under your OS account, without a sandbox claim. See [milestone qualification](../status.md) for actual measurements, package/source pins and remaining acceptance.
 
 When given a Forge prompt, run `nforge agent ROOT brief` (or `forge_brief`) for the linked situation and fresh context before working.
 

@@ -852,8 +852,8 @@ lifecycle receipts say `cancellation: not-requested`.
 Lifecycle plans, events and staged versions remain retained authoritative
 metadata. Portable source-return/export folding and authority-cutover recovery
 must include them with H14's acceptance ledger; they are not legacy owner Work
-journal events. The hosted agent CLI routes through these APIs; MCP parity and
-UI controls remain separate integration slices.
+journal events. The hosted agent CLI and MCP route through these APIs;
+UI controls remain a separate integration slice.
 
 ### Hosted Lane delta saves
 
@@ -1277,5 +1277,13 @@ source, Work or acceptance authority; current project access is checked for ever
 dispatch. Capability discovery reports the implemented protocol, authority and
 configuration presence through a constant-size authorized query. Requested status
 observations perform finite reads without wakes, subscriptions or idle polling.
-MCP parity consumes the same transport and schemas; live provisioning and provider
-qualification remain separate.
+MCP uses the existing agent workflow registration and CLI adapter with those same
+schemas, response envelopes, address retention and recovery journal. Hosted
+addressing is selected before native Work, presence or graph construction; it
+starts no local owner/listener. Source reads reuse the verified H04 object cache,
+return saved Lane/State/blob pins and recheck current authorization before returning
+bytes, without Work/history hydration or substitution of local drafts. Only an
+explicit live run wait creates a subscription; all exits and server disconnect
+close it. Finite status/observe and idle connections install no observer or timer.
+Account authentication never selects person acceptance in these tools. Live
+provisioning and provider qualification remain separate.

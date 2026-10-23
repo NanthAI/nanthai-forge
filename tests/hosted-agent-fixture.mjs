@@ -253,6 +253,7 @@ export function agentFixture(t) {
     operations,
     requests,
     exchange,
+    objects,
     transport,
     lose(name) {
       fail = name;

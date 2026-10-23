@@ -39,11 +39,11 @@ export async function hostedAgentCli(
   action: string,
   selected: Record<string, unknown>,
   address: HostedAgentAddress,
+  transport = new HostedAgentTransport(root, address),
 ) {
   const command = Object.fromEntries(
     Object.entries(selected).filter(([key]) => !['url', 'projectId', 'action'].includes(key)),
   );
-  const transport = new HostedAgentTransport(root, address);
   const result = await transport.dispatch(action, command);
   // Retain only after an authorized successful response. An invalid/incomplete
   // address never silently turns into a local owner/listener dependency.

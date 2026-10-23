@@ -272,14 +272,23 @@ async function main(args: string[]): Promise<unknown> {
     return undefined;
   }
   if (args[0] === 'mcp') {
+    const explicitHosted =
+      args.length === 7 && args[2] === '--agent' && args[3] === '--url' && args[5] === '--project-id';
     invariant(
       args[1] &&
         !args[1].startsWith('--') &&
-        (args.length === 2 || (args.length === 3 && ['--work', '--agent'].includes(args[2]!))),
+        (args.length === 2 ||
+          (args.length === 3 && ['--work', '--agent'].includes(args[2]!)) ||
+          explicitHosted),
       'BAD_ARGUMENT',
-      'Use mcp <root> [--work | --agent].',
+      'Use mcp <root> [--work | --agent [--url URL --project-id ID]].',
     );
-    await startMcp(args[1], args[2] === '--work' || args[2] === '--agent', args[2] === '--agent');
+    await startMcp(
+      args[1],
+      args[2] === '--work' || args[2] === '--agent',
+      args[2] === '--agent',
+      explicitHosted ? { url: args[4], projectId: args[6] } : {},
+    );
     return undefined;
   }
   if (args[0] === 'status' && args[1] && (args.includes('--pending') || !!nativeOwner(resolve(args[1])))) {

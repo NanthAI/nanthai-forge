@@ -13,8 +13,14 @@ import { briefInputSchema } from './agent-brief-types.js';
 import { agentBrief } from './agent-brief.js';
 import { ForgeError } from './errors.js';
 import { readPendingStatus } from './pending-status-read.js';
+import { hostedAgentAddress } from './hosted-agent-cli.js';
+import { HostedAgentTransport } from './hosted-agent-transport.js';
+import { registerHostedAgentWorkflow } from './mcp-hosted-agent.js';
 
-export function registerAgentWorkflow(server: McpServer, root: string) {
+export function registerAgentWorkflow(server: McpServer, root: string, hosted?: HostedAgentTransport) {
+  const address = hosted ? null : hostedAgentAddress(root, {});
+  if (hosted || address)
+    return registerHostedAgentWorkflow(server, hosted ?? new HostedAgentTransport(root, address!));
   const agent = new AgentWorkflow(root, true);
   registerAgentWait(server, agent.work.store);
   const notifications = overlapNotifications(server, agent.work.store);
