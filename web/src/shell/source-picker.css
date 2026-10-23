@@ -1,0 +1,28 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.fx-source { display:inline-flex; align-items:center; gap:8px; height:30px; min-width:0; max-width:min(460px, 100%); padding:0 10px; border:1px solid var(--fx-line-strong); border-radius:var(--fx-r-2); background:var(--fx-surface-2); color:var(--fx-text); font:12.5px var(--fx-font-ui); cursor:pointer; }
+.fx-source:hover { background:var(--fx-hover); }
+.fx-source:focus-visible { outline:2px solid var(--fx-focus); outline-offset:1px; }
+.fx-source-label { color:var(--fx-text-3); }
+.fx-source b { display:inline-flex; align-items:center; gap:6px; min-width:0; font-weight:600; }
+.fx-source b span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fx-source .fx-source-meta { color:var(--fx-text-3); white-space:nowrap; }
+.fx-source > svg:last-child { flex:none; color:var(--fx-text-3); }
+.fx-source b svg { flex:none; color:var(--fx-text-3); }
+.fx-source-menu { display:flex; flex-direction:column; gap:2px; width:min(420px, calc(100vw - 32px)); }
+.fx-menu .fx-source-menu button { display:grid; grid-template-columns:16px minmax(0,1fr) auto; gap:8px; }
+.fx-menu .fx-source-menu button[aria-current] { background:var(--fx-accent-bg); }
+.fx-source-menu svg { color:var(--fx-text-3); }
+.fx-source-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fx-source-menu .fx-source-meta { color:var(--fx-text-3); font-size:11.5px; white-space:nowrap; }
+.fx-source-group { display:block; padding:8px 10px 4px; color:var(--fx-text-3); font-size:11px; font-weight:600; }
+.fx-source-exact { border-top:1px solid var(--fx-line); margin-top:4px; }
+.fx-menu .fx-source-exact label { display:grid; gap:4px; padding:0 10px 8px; }
+.fx-source-exact .fx-source-group { padding:8px 0 0; }
+.fx-source-exact input { height:28px; padding:0 8px; border:1px solid var(--fx-line); border-radius:var(--fx-r-2); background:var(--fx-surface-2); color:var(--fx-text); font:12px var(--fx-font-mono); }
+.fx-source-exact input[aria-invalid] { border-color:var(--fx-failed); }
+.fx-source-error { color:var(--fx-failed); font-size:11.5px; }
+@media (max-width:720px) {
+  .fx-source { max-width:100%; }
+  .fx-source b, .fx-source .fx-source-meta { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .fx-source > svg:last-child { margin-left:auto; }
+}
