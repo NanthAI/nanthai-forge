@@ -13,6 +13,7 @@ code at the same time. Start with the guide that matches your task.
 - [Workflows](workflows.md) and [gh-compatible commands](gh-cli.md): native and Git usage.
 - [Architecture](architecture.md) and [decisions](decisions.md): how Forge is built.
 - [Operations](operations.md): hosting, source exchange and check runners.
+- [Hosted landing ownership contract](operations/hosted-landing-contract.md): shared submission/fencing rules and deferred native-owner migration gaps.
 - [Security](security.md): trust boundaries and authorization.
 - [Development](development.md): contributing and verification.
 - [Status](status.md), [roadmap](roadmap.md) and [backlog](backlog.md): public development tracking.

@@ -24,6 +24,7 @@ export const packageDocuments = [
   'docs/operations/github-project-import.md',
   'docs/operations/hosted-source-worker.md',
   'docs/operations/hosted-durability.md',
+  'docs/operations/hosted-landing-contract.md',
   'docs/operations/landing-batches.md',
   'docs/operations/optimistic-landing.md',
   'docs/operations/release.md',
