@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: Apache-2.0
+import { ForgeError } from './errors.js';
+import { hostname } from 'node:os';
+import { processIdentity } from './local-process.js';
+import { diskGuard } from './disk-guard.js';
+import { checkRoute } from './check-backend.js';
+import { checkEnvironment, checkEnvironmentDescription } from './check-environment.js';
+import { observeCheckInputs } from './work-inputs.js';
+import { readPolicy } from './work-autonomy.js';
+import { interactionEvidence } from './work-interaction.js';
+import { runCandidateFamily } from './work-run-cancellation.js';
+import type { WorkStore } from './work-store.js';
+import type { CheckRun, EvidenceCommand } from './work-types.js';
+
+type RunCommand = Extract<EvidenceCommand, { action: 'run-check' }>;
+/** Prepare exact source/input evidence and immutable run pages before the owner
+ * lock. Registration validates this pointer, definitions and Playbook ownership;
+ * no runner starts until the run record is committed. */
+export function prepareRunRegistration(store: WorkStore, command: RunCommand, sequenceId?: string) {
+  try {
+    if (!store.readRecords()) store.locked(() => store.records(), { operation: 'run migration' });
+    return store.observing(() => {
+      const tx = store.readRecords();
+      if (!tx || tx.find('runs', command.operationId)) return undefined;
+      const check = tx.find('checks', command.checkId)?.record,
+        view = tx.find('views', command.viewId)?.record;
+      if (!check || check.definition !== command.expectedDefinition || view?.head !== command.expectedHead)
+        return undefined;
+      const batches = tx.manifest.collections.landingBatches;
+      const batch = Array.from({ length: batches?.count ?? 0 }, (_, i) => tx.at('landingBatches', i)).find(
+        batch =>
+          batch.prefixes.some(
+            prefix =>
+              prefix.runId === command.operationId &&
+              prefix.viewId === command.viewId &&
+              prefix.head === command.expectedHead,
+          ),
+      );
+      const environment = batch?.environment ?? checkEnvironment();
+      if (environment.fingerprint !== command.expectedEnvironment)
+        throw new ForgeError(
+          'EVIDENCE_CHANGED',
+          'Check definition or runtime settings changed. Inspect them before starting.',
+        );
+      const warnings = diskGuard(store.root),
+        inputObservations = observeCheckInputs(store, check, command.expectedHead, environment),
+        policy = readPolicy(store).checks,
+        route = checkRoute(policy?.runner ?? 'local', check, store.native);
+      const run: CheckRun = {
+        backend: {
+          ...route,
+          ...(route.actual === 'modal' ? { credentialsRef: policy?.credentialsRef ?? null } : {}),
+        },
+        id: command.operationId,
+        viewId: view.id,
+        supersessionBaseline: runCandidateFamily(tx, view).at(-1)?.id ?? view.id,
+        head: command.expectedHead,
+        base: view.base,
+        ...(view.composedMain ? { comparisonBase: view.composedMain } : {}),
+        inputs: view.inputs,
+        ...(view.mainCheck ? { mainCheck: view.mainCheck } : {}),
+        ...(view.optimistic ? { optimistic: true } : {}),
+        ...(view.recovery ? { recovery: view.recovery } : {}),
+        dependencies: view.dependencies ?? [],
+        check,
+        environment,
+        status: 'queued',
+        queuedAt: new Date().toISOString(),
+        startedAt: new Date().toISOString(),
+        warnings,
+        runner: { ...processIdentity(), host: hostname() },
+        details:
+          checkEnvironmentDescription(check) +
+          ' Queued for machine-wide check capacity; preparing the exact committed candidate for the selected command. No evidence reuse.',
+        ...(inputObservations ? { inputObservations } : {}),
+        ...(sequenceId ? { playbookRunId: sequenceId } : {}),
+      };
+      if (command.interaction !== undefined) {
+        run.interaction = command.interaction ? interactionEvidence(store, run, command.interaction) : null;
+        tx.setSchema(15);
+      }
+      tx.append('runs', run);
+      return { tx, run };
+    });
+  } catch (error) {
+    // Busy, original-operation and requested-pin errors retain their precedence.
+    return { error };
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "fixture": "scripts/demo.mjs",
+  "source": "Original synthetic TypeScript; no Edge source",
+  "retrievalTasks": [
+    { "question": "Where is run declared?", "tool": "forge_inspect", "arguments": { "symbol": "run" }, "expectedFile": "src/main.ts", "expectedLine": 6 },
+    { "question": "Which direct files does main import?", "tool": "forge_trace", "arguments": { "file": "src/main.ts" }, "expectedTargets": ["src/greeting.ts", "src/types.ts"] },
+    { "question": "What imports greeting directly?", "tool": "forge_impact", "arguments": { "file": "src/greeting.ts" }, "expectedFrom": ["src/main.ts"] }
+  ],
+  "secondTaskTrial": {
+    "status": "not_run",
+    "task": "After an independent first session locates greet, use a fresh harness session to add an optional greeting prefix and update run while preserving the existing default greeting.",
+    "baseline": "Same clean fixture, harness/model/settings and repository instructions; normal literal source search allowed.",
+    "candidate": "Same fixture and harness, with Forge MCP available; include indexing and refresh cost.",
+    "acceptance": "Independent checks outside the agent-visible checkout validate the default greeting, explicit prefix and type compatibility.",
+    "record": ["exact commit and working digests", "model and harness versions", "correctness", "time", "human interventions", "tokens and cost", "index and query overhead", "failed attempts"],
+    "budget": "No model call authorized or performed by this manifest; declare budget before running."
+  }
+}

@@ -1,0 +1,140 @@
+import { landingWorkerSignal } from './landing-worker-context.js';
+// SPDX-License-Identifier: Apache-2.0
+import { withQueueSlot } from './landing-queue.js';
+import { batchDirectory, batchEdit, composeBatch, landingShape, selectBatch } from './landing-batch-store.js';
+import type { WorkService } from './work.js';
+import type { LandingBatch } from './landing-batch-types.js';
+import { claimLandingDriver } from './landing-driver.js';
+import { advanceLandingBatch } from './landing-batch-step.js';
+export { passingPrefix } from './landing-batch-check.js';
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+/** Give a burst a moment to arrive before the first remote check starts. */
+async function batchWindow(work: WorkService, channel: string) {
+  for (;;) {
+    const data = work.store.load();
+    if (
+      data.landingBatches?.some(
+        batch => batch.channel === channel && ['composing', 'checking'].includes(batch.status),
+      )
+    )
+      return; // Recovery adopts the recorded batch immediately.
+    const queued = (data.landingEntries ?? []).filter(
+      entry => entry.channel === channel && entry.status === 'queued',
+    );
+    const first = queued[0] && work.store.select('checks', queued[0].checkId);
+    if (!first) return;
+    const shape = landingShape(work, first),
+      oldest = Math.min(...queued.map(entry => Date.parse(entry.arrivedAt)));
+    const left = oldest + shape.windowMs - Date.now();
+    if (left <= 0 || queued.length >= shape.maxBatch) return;
+    await sleep(Math.min(50, left));
+  }
+}
+/** Finite sweep; another finish or land-ready adopts any incomplete recorded batch. On a remote
+ * runner, batches arriving while checks run are stacked on the newest one and checked at once. */
+export async function drainLandingBatches(
+  work: WorkService,
+  channel: string,
+  waitMs?: number,
+  beforeAccept?: () => Promise<void>,
+) {
+  return withQueueSlot(
+    batchDirectory(work, channel),
+    async () => {
+      const driver = await claimLandingDriver(work, channel);
+      const seen = new Set<string>(),
+        started = new Set<string>(),
+        running = new Map<string, Promise<boolean>>();
+      const observe = () => {
+        const data = work.store.load();
+        for (const entry of data.landingEntries ?? [])
+          if (entry.channel === channel && ['queued', 'checking'].includes(entry.status)) seen.add(entry.id);
+        return data;
+      };
+      let halted = false,
+        failure: { error: unknown } | undefined,
+        launched = 0;
+      observe();
+      for (;;) {
+        const observed = observe();
+        const pending = observed.landingEntries?.find(
+          entry => entry.channel === channel && entry.status === 'queued',
+        );
+        const check = pending && observed.checks.find(check => check.id === pending.checkId);
+        const shape = check && landingShape(work, check);
+        const recoverable = observed.landingBatches?.some(
+          batch =>
+            batch.channel === channel &&
+            ['composing', 'checking'].includes(batch.status) &&
+            !started.has(batch.id),
+        );
+        // A saturated runner cannot admit another batch. Polling selectBatch
+        // anyway saves unchanged Work every turn, invalidating other Lanes'
+        // prepared commits for the entire duration of the running check.
+        const canSelect = !running.size || recoverable || (shape?.remote && running.size < shape.concurrency);
+        let batch: LandingBatch | undefined;
+        // Terminal entries may leave an unfinished batch with no live entries
+        // after a crash in composition/cancellation. Adopt that batch as well.
+        if (!halted && (recoverable || launched < seen.size) && canSelect) {
+          if (!running.size) await batchWindow(work, channel);
+          batch = await batchEdit(
+            work,
+            channel,
+            data => selectBatch(work, data, channel, started),
+            driver.beforePublish,
+          );
+        }
+        if (batch) {
+          launched++;
+          started.add(batch.id);
+          const parent = batch.parentId ? running.get(batch.parentId) : undefined,
+            id = batch.id;
+          const compose =
+            batch.status === 'composing'
+              ? composeBatch(work, batch, driver.beforePublish)
+              : Promise.resolve(batch);
+          // Compose serially (a child needs its parent's prefixes), then check concurrently.
+          const composed = await compose.catch((error: unknown) => ((failure ??= { error }), undefined));
+          if (!composed) {
+            halted = true;
+            continue;
+          }
+          running.set(
+            id,
+            (async () => {
+              for (;;) {
+                const step = await advanceLandingBatch(work, id, driver, { waitMs, parent, beforeAccept });
+                if (step !== 'advanced') return step === 'settled';
+              }
+            })()
+              .then(
+                progressed => {
+                  if (!progressed) halted = true;
+                  return progressed;
+                },
+                (error: unknown) => {
+                  failure ??= { error };
+                  halted = true;
+                  return false;
+                },
+              )
+              .finally(() => {
+                // A finished parent stays gated through the recorded-main comparison.
+                running.delete(id);
+              }),
+          );
+          continue;
+        }
+        if (!running.size) break;
+        await Promise.race(landingWorkerSignal() ? [...running.values()] : [...running.values(), sleep(200)]);
+      }
+      if (failure) throw failure.error;
+    },
+    {
+      ...(waitMs === undefined ? {} : { waitMs }),
+      phase: 'checking landing batch',
+      anchor: work.store.directory,
+    },
+  );
+}

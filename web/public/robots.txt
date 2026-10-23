@@ -1,0 +1,22 @@
+# Only static public pages are crawlable: app/project traffic would consume Convex reads.
+User-agent: *
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: Claude-SearchBot
+User-agent: PerplexityBot
+User-agent: Google-Extended
+User-agent: CCBot
+Disallow: /*
+Allow: /$
+Allow: /llms.txt$
+Allow: /llms-full.txt$
+Allow: /docs/*.md$
+Allow: /robots.txt$
+Allow: /assets/
+Allow: /favicon.svg$
+Allow: /favicon-16.png$
+Allow: /favicon-32.png$
+Allow: /apple-touch-icon.png$
+Allow: /forge-badge-256.png$
+Allow: /maskable-512.png$
+Allow: /site.webmanifest$

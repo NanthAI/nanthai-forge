@@ -1,0 +1,63 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* One detail layout (Lane, Intent, Initiative): crumbs · header · next step · main | side. */
+.fx-detail { padding: 16px; }
+.fx-detail .fx-crumbs { margin-bottom: 10px; }
+.fx-detail .fx-lane-head h1 { display: block; }
+.fx-detail .fx-lane-head h1 > .fx-glyph { display: inline-block; margin-right: 8px; vertical-align: -2px; }
+.fx-detail .fx-lane-head h1 > .fx-st { margin-left: 10px; vertical-align: 3px; }
+.fx-detail .fx-next { display: flex; align-items: center; padding: 12px 14px; margin: 14px 0; }
+.fx-detail .fx-next-icon { width: 28px; height: 28px; border: 0; border-radius: var(--fx-r-2); flex: none; }
+.fx-detail .fx-next h2 { font: 650 13px/1.45 var(--fx-font-ui); }
+.fx-detail .fx-next p { margin-top: 0; }
+.fx-detail .fx-next-actions { margin-left: auto; gap: 8px; flex: none; }
+.fx-lane-grid.fx-detail-grid { grid-template-columns: minmax(0, 1fr) 340px; transition: grid-template-columns 240ms var(--fx-ease); }
+.fx-lane-grid.fx-detail-grid[data-side='closed'] { grid-template-columns: minmax(0, 1fr) 36px; }
+.fx-detail-grid[data-side='closed'] .fx-detail-side > .fx-panel { display: none; }
+.fx-detail-grid[data-side='closed'] .fx-rail-btn { display: flex; }
+.fx-detail-side .fx-panel-actions { display: flex; align-items: center; gap: 8px; }
+.fx-detail-side .fx-feed { padding: 0; }
+.fx-detail-side .fx-feed > li { grid-template-columns: 52px 16px minmax(0, 1fr); gap: 8px; padding: 9px 14px; font-size: 12.5px; border-top: 1px solid var(--fx-line); }
+.fx-detail-side .fx-feed > li:first-child { border-top: 0; }
+.fx-detail-side .fx-feed-time { min-width: 52px; font-size: 11px; text-align: left; padding-top: 2px; white-space: nowrap; }
+.fx-detail-side .fx-feed-text { font-weight: 650; }
+.fx-detail-side .fx-feed-detail { font-size: 12px; color: var(--fx-text-2); font-weight: 400; margin-top: 1px; }
+.fx-detail-side .fx-msg { border-top: 1px solid var(--fx-line); }
+.fx-detail-side .fx-msg-head { font-size: 11.5px; flex-wrap: wrap; }
+.fx-detail-side .fx-msg-head time { margin-left: 0; }
+.fx-detail-side .fx-compose { display: flex; align-items: start; flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
+.fx-detail-side .fx-compose textarea { height: 30px; min-height: 30px; flex: 1; min-width: 0; padding: 5px 10px; resize: vertical; font-size: 12.5px; }
+.fx-detail-side .fx-feedback-error { flex-basis: 100%; }
+.fx-detail-side .fx-reply-actions { margin-top: 0; }
+.fx-app:has(.fx-detail) > .fx-top { height: 48px; background: var(--fx-surface); backdrop-filter: none; }
+.fx-detail .fx-panel-h { padding: 10px 14px; }
+/* Hosted legacy heading sizes (.portal .hosted-home h1, .hosted-work h2) must not reach detail pages. */
+.fx-page.fx-detail .fx-lane-head h1 { font-size: var(--fx-t-20); }
+.fx-detail .fx-panel-h h2 { font: 700 var(--fx-t-14)/1.25 var(--fx-font-head); letter-spacing: -0.015em; margin: 0; }
+.fx-detail .fx-panel { overflow: hidden; }
+/* Record: Base · Head · Candidate, then the saves disclosure. */
+.fx-detail .fx-panel-empty { margin: 0; padding: 12px 14px; font-size: 12.5px; color: var(--fx-text-2); }
+@media (max-width: 1059px) {
+  .fx-lane-grid.fx-detail-grid, .fx-lane-grid.fx-detail-grid[data-side='closed'] { grid-template-columns: minmax(0, 1fr); }
+  .fx-detail-grid .fx-rail-btn { display: none !important; }
+  .fx-detail-grid[data-side='closed'] .fx-detail-side > .fx-panel { display: block; }
+}
+@media (max-width: 720px) {
+  .fx-detail { padding: 12px; }
+  .fx-detail .fx-next { flex-wrap: wrap; }
+  .fx-detail .fx-next > div:not(.fx-next-actions) { flex: 1; min-width: 0; }
+  .fx-detail .fx-next-actions { width: 100%; margin-left: 0; }
+  .fx-detail .fx-next-actions .fx-btn { flex: 1; justify-content: center; }
+}
+
+/* Keep both side-panel headers on the same 42 px rhythm as the main column. */
+.fx-detail-side .fx-panel-h { min-height: 42px; height: 42px; }
+.fx-detail-side .fx-collapse { height: 22px; }
+
+/* Details keep cockpit body type inside the legacy hosted project nesting. */
+.fx .fx-detail :is(.fx-intent-why, .fx-initiative-body),
+.fx .fx-detail :is(.fx-intent-why, .fx-initiative-body) p { font-size: 13px; line-height: 1.55; color: var(--fx-text-2); }
+.fx-detail :is(.fx-intent-why, .fx-initiative-body) p { margin: 0 0 10px; }
+.fx-detail :is(.fx-intent-why, .fx-initiative-body) p:last-child { margin-bottom: 0; }
+.fx-detail :is(.fx-intent-why, .fx-initiative-body) strong { color: var(--fx-text); }
+.fx-detail .planning-create textarea { height: 84px; padding: 8px 10px; resize: vertical; }
+.fx-detail .planning-create :is(input, select, textarea):focus-visible { outline: 2px solid var(--fx-focus); outline-offset: 0; }

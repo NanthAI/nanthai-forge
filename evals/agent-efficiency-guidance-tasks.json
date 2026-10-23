@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "status": "predeclared_not_dispatched",
+  "model": "gpt-6.1-sol",
+  "reasoning": "high",
+  "runtime": "Node24.19.0",
+  "harness": "codex-cli0.159.0-alpha.12.1",
+  "scope": "Separate three-small-delivery-pair guidance and robust transport followup after demonstrated v2 discovery overhead. Original v1/v2 sessions remain visible, no replacement runs.",
+  "conditions": [
+    "git",
+    "forge"
+  ],
+  "sourceBoundary": "Matched synthetic TypeScript only; same tasks, source, runtime, model, check wrapper, hidden oracles and order as v2 small deliveries. No providers/canonical writes.",
+  "metrics": [
+    "total input tokens",
+    "cached input tokens",
+    "uncached input tokens",
+    "output tokens",
+    "reasoning output tokens",
+    "command calls",
+    "command output bytes",
+    "generated command bytes",
+    "failures",
+    "dispatch wall seconds",
+    "package installation seconds",
+    "skill installation seconds",
+    "native/git bootstrap seconds",
+    "warm preparation seconds",
+    "full attributable seconds"
+  ],
+  "pairs": [
+    {
+      "id": "deliver-coupon-boundary",
+      "kind": "delivery",
+      "temperature": "cold",
+      "order": [
+        "forge",
+        "git"
+      ],
+      "task": "Fix coupon eligibility: the minimum subtotal100 must be inclusive. Preserve lower-subtotal rejection and existing discount arithmetic. Change only src/coupon.ts and an optional focused tests file. Verify and deliver the exact candidate with retained check evidence and final acceptance/commit."
+    },
+    {
+      "id": "deliver-tax-rounding",
+      "kind": "delivery",
+      "temperature": "warm",
+      "order": [
+        "git",
+        "forge"
+      ],
+      "task": "Fix taxAmount so money in integer cents rounds to nearest cent, rather than dropping fractional cents. Preserve existing API and nonnegative inputs. Change only src/tax.ts and an optional focused tests file. Verify and deliver the exact candidate with retained check evidence and final acceptance/commit."
+    },
+    {
+      "id": "deliver-empty-label",
+      "kind": "delivery",
+      "temperature": "cold",
+      "order": [
+        "forge",
+        "git"
+      ],
+      "task": "Fix displayLabel so an explicitly supplied empty string is preserved. Only null or undefined should get default label General. Change only src/label.ts and an optional focused tests file. Verify and deliver the exact candidate with retained check evidence and final acceptance/commit."
+    }
+  ],
+  "validity": "Every dispatched run remains in results, including failures. Exclude only predeclared harness invalidity (nonmatching seed or unavailable tool before dispatch), with explicit reason and retained receipt. No retries replace an earlier result. Warm preparation is separately reported and included in full attributable totals.",
+  "limitations": [
+    "Seven observations cannot prove general speed/cost advantages.",
+    "The repeated prior670 task uses minimal equivalent harness and new interface; old versus new is not an isolated causal comparison.",
+    "Same-model sequential sessions can have different server/model cache conditions; cached input is reported explicitly.",
+    "Source-only investigation and full recorded delivery are separate outcome classes."
+  ],
+  "dispatchTimeoutSeconds": 600,
+  "modeComparison": "Source identity compares file bytes and file/executable class, matching native Source modes. Native retained/materialized ordinary files are private0600; Git files may be0644. Raw permission bits are not interchangeable source identities.",
+  "priorSeedContext": "Not applicable: this followup includes only the three small delivery fixtures.",
+  "routing": "Packaged shorter skill is read for delivery. Optionalstart/finish recipe reuses supplied existing check pins; task-local ignored executable avoids login PATH reset. Existing low-level controls remain available.",
+  "configuredCheckProvision": "Forge delivery prompt supplies already-owned checkId and immutable definition. Git delivery uses the same configured check wrapper. No additional definitions are created by model or omitted setup cost.",
+  "originalResults": "All original fourteen v1 and fourteen v2 sessions, failure/first-use costs and regressions remain visible. No replacement or mixed aggregate.",
+  "wallTimeConfound": "Original study ran while separate fullverification couldcontend forCPU. Timings are descriptive; token/call/output counters remainactual. Followup dispatch startswhenrootconfirmsnoactivefullverify, but OS/modelservervariance persists.",
+  "launcher": "The same tiny executable is provisioned to each owner under ignored .forge/evaluation-tooling/nforge and pins supported Node24 plus exact installed CLI. Call from original owner cwd with ROOT=. after editing returned Lane. Actual per-owner wrapper construction seconds and SHA are recorded. Protocol change is independent of finish and cannot isolate its effect from shorter guidance/cache/stochastic variation.",
+  "reasonForAdditionalStudy": "All v2 small Forge deliveries use finish but still spend discovery calls reading package/generalhelp/actionhelp. This finite predeclared study changes guidance and command transport before fresh sessions; earlier outcomes remain fully visible."
+}
