@@ -852,8 +852,8 @@ lifecycle receipts say `cancellation: not-requested`.
 Lifecycle plans, events and staged versions remain retained authoritative
 metadata. Portable source-return/export folding and authority-cutover recovery
 must include them with H14's acceptance ledger; they are not legacy owner Work
-journal events. CLI/MCP routing and UI controls use these APIs in their separate
-integration slices.
+journal events. The hosted agent CLI routes through these APIs; MCP parity and
+UI controls remain separate integration slices.
 
 ### Hosted Lane delta saves
 
@@ -1256,4 +1256,26 @@ rules; people retain their existing unchecked acceptance capability. H15 recompo
 and rechecks on main races. Later disjoint work survives, while overlaps retain
 H08 conflict roots usable by H09 resolution. Source preparation alone never
 claims a check or acceptance, and reverting a revert selects that new acceptance's
-actual delta by the same API. CLI/agent transport is separate H18a work.
+actual delta by the same API. The shared hosted agent transport exposes this source phase.
+
+### Hosted agent transport
+
+`HostedAgentTransport` is the shared hosted CLI/agent boundary. `agent-cli` selects
+an explicit deployment/project, a verified Lane marker or a retained client
+address before constructing native owner services. All hosted actions reuse the
+canonical start, checkout, delta save, paged compose, sync/revert, check, durable
+finish and lifecycle APIs. Source bytes use the existing verified exchange and
+object transport, without a native owner or listener. Native addressing retains
+its previous workflow.
+
+The private client journal records original normalized parameters, actor, exact
+resolved source/check/main pins and compound operation UUIDs before mutation IO.
+Lost replies retain those requests; source phase replay resumes the same server
+job and preserves newer client files. Check and finish always retain agent actor
+semantics even with account authentication. The journal is recovery data, never
+source, Work or acceptance authority; current project access is checked for every
+dispatch. Capability discovery reports the implemented protocol, authority and
+configuration presence through a constant-size authorized query. Requested status
+observations perform finite reads without wakes, subscriptions or idle polling.
+MCP parity consumes the same transport and schemas; live provisioning and provider
+qualification remain separate.

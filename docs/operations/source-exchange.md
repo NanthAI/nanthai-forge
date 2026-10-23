@@ -757,8 +757,8 @@ recheck access and return their original receipt without rewinding newer edits.
 ### Hosted Lane save API
 
 `saveHostedLane(root, {operationId, message}, exchange)` saves a thin hosted Lane
-checkout through the hosted save APIs. This is a source-client API; CLI and
-browser editor wiring are separate. The operation retains its command, captured
+checkout through the hosted save APIs. The hosted agent CLI uses this same
+source-client helper; browser editor wiring is separate. The operation retains its command, captured
 bytes, full baseline and delta pages in the sibling `.forge-client/saves` cache.
 Retry the original operation after a lost upload, commit or response. Later local
 edits remain on disk; retry uploads the captured bytes. Successful reconciliation
@@ -806,8 +806,8 @@ is granted by a source upload or save.
 
 ### Hosted compose API
 
-These APIs compose saved hosted source without a local Work owner. They do not
-add CLI commands or browser controls.
+These APIs compose saved hosted source without a local Work owner. The hosted
+agent CLI stages the same exact selection pages; browser controls are separate.
 
 - `projectHostedCompose:prepare({projectId, request})`: `request` is JSON matching
   `composeRequestSchema`: original `operationId`, `intentId`, `authorityEpoch`,
@@ -1321,7 +1321,8 @@ claim to save a disconnected client's unknown edits.
 Cancellation uses the separate `projectHostedChecks:cancel` API. An abandon
 receipt never means a running check or arbitrary process stopped. Main,
 acceptance receipts, source objects and saves are untouched by lifecycle changes.
-These are API-only primitives; hosted CLI/MCP and site controls are separate work.
+The hosted agent CLI uses these same primitives. MCP parity and site controls
+remain separate work.
 
 ### Hosted finish API
 
@@ -1393,3 +1394,76 @@ ordinary actor/policy/check rules, without adding an owner-only revert rule.
 Receipt lookup and source publication are constant-size metadata transactions;
 source diff/merge stays on the worker. These API-only phases do not create a local
 native owner, transport command or site control.
+
+## Hosted agent CLI
+
+`nforge agent ROOT ACTION JSON` uses the hosted transport when JSON includes
+`url` and `projectId`, when ROOT is a hosted Lane checkout, or when a previous
+successful hosted command retained that address in ROOT's client cache. An
+incomplete explicit address fails before constructing a native owner. Existing
+native project commands retain their native workflow.
+
+```sh
+nforge agent ./edit start '{"url":"https://deployment.convex.cloud","projectId":"PROJECT_ID","outcome":"Add search"}'
+nforge agent ./edit open '{"laneId":"LANE_UUID"}'
+nforge agent ./edit save '{"message":"Search implementation"}'
+nforge agent ./edit compose '{"laneId":"LANE_UUID"}'
+nforge agent ./edit sync '{"laneId":"LANE_UUID"}'
+nforge agent ./edit check '{"candidateId":"CANDIDATE_UUID","checkId":"CHECK_UUID"}'
+nforge agent ./edit finish '{"laneId":"LANE_UUID","message":"Add search"}'
+nforge agent ./edit revert '{"target":{"kind":"receipt","receiptId":"RECEIPT_UUID"},"message":"Reverse actual acceptance"}'
+nforge agent ./edit abandon '{"laneId":"LANE_UUID","reason":"Superseded","saveFirst":true}'
+nforge agent ./edit capabilities '{}'
+nforge agent ./edit status '{"laneId":"LANE_UUID"}'
+```
+
+Start returns authoritative Lane pins; open materializes a verified full or sparse
+checkout (`paths` selects relative files/directories). Save uses the existing
+retained delta capture and missing-only upload path; `checkpoint` is its alias.
+Compose accepts `inputs:[{laneId,expected?}]`, an optional `intentId`, and ordered
+`dependencies:[{candidateId,head?}]`. Expected Lane pins include head, record,
+source and lifecycle versions. Sync selects observed main by default, or an exact
+`target:{kind:"main",head,receiptId}` / `{kind:"candidate",candidateId,head}`.
+Its successful source receipt applies through the guarded checkout installer;
+`apply:false` submits source work without installing it. Dirty or newer local
+files remain preserved. Revert returns an isolated compensating Lane for ordinary
+composition/finish; targets can also be `{kind:"submission",submissionId}`.
+
+Check (`run` alias) pins a clean Candidate, definition, runner configuration and
+environment before enqueue. Finish saves the opened Lane when applicable,
+composes saved inputs, and submits the original composition to the durable finish
+driver. Explicit `inputs` selects saved heads and leaves local drafts unsaved and
+untouched. Its optional `check:{checkId,expectedDefinition?,expectedConfiguration?,
+expectedEnvironment?}` selects a check; otherwise it selects `verify`, or the sole
+configured check. An existing `candidateId` requires its `composeOperationId`.
+`after` selects an exact parent submission. This transport always requests agent
+acceptance, including with an account credential; current backend policy and
+exact check evidence decide acceptance. A submitted/queued phase is not a landed
+receipt. Worker/provider configuration remains deployment work; this CLI never
+falls back to a local owner or runner.
+
+Abandon/reopen use the canonical lifecycle API. An opened Lane uses the existing
+dirty-draft guard and optional save-first compound request. A saved remote Lane
+can be selected by `laneId` without a checkout; this makes no claim about drafts
+on other clients. Intent targets are `{kind:"intent",intentId,version,cascade?}`;
+reopen preserves each child's independent lifecycle.
+
+Each mutation returns its operation UUID and `resolved.operationId`. The private
+`ROOT.forge-client/agent` journal retains normalized original parameters, actor,
+source/check/main pins and compound child UUIDs before mutation IO. Authentication
+material is never written there. Identical parameters with an omitted UUID reuse
+the journaled operation, including after losing stdout; a new explicit
+`operationId` identifies a new request, even with identical text. Retry the same
+request after an unknown response. Current access is rechecked on each dispatch;
+changing a retained request or actor fails explicitly. Keep the client cache to
+reconcile unknown operations across process restarts.
+
+`capabilities` is a current authorized protocol/authority/configuration read;
+configuration flags report presence, not live provider health. `status` and
+`observe` are finite reads: select one `laneId`, `runId`, `submissionId` (optional
+`version`), or `{kind,operationId}` where kind is save, compose, sync, revert or
+lifecycle. They do not start compute or install an idle observer. Source/check
+submission returns promptly; replay the original action to advance its retained
+client phases and explicitly read status for progress. The shared
+`HostedAgentTransport.dispatch` and portable command schemas are the integration
+boundary for MCP parity; source-read tools remain separate work.

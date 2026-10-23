@@ -1,3 +1,4 @@
+import { hostedAgentAddress, hostedAgentCli } from './hosted-agent-cli.js';
 import { agentWaitCli } from './agent-wait.js';
 import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -42,6 +43,15 @@ Once finish has checkpointed, resume its retained request with:
   nforge agent ROOT finish '{"operationId":"ORIGINAL_FINISH_UUID"}'
 Use the parent finish operationId, not an attempt's child operation ID.
 
+Hosted addressing: pass {url,projectId,...} on this same command surface, or use
+a hosted Lane checkout ROOT. No native owner/listener is needed. Read capabilities
+and use status/observe for finite reads. Hosted checkpoint/save and run/check are aliases.
+Hosted also supports open, save, check, revert and capabilities.
+Hosted commands retain generated UUIDs and exact pins in ROOT.forge-client/agent;
+retry identical parameters after a lost reply. A new explicit operationId starts new work.
+Hosted start returns Lane pins; open materializes it; finish saves an opened Lane,
+composes and submits durable agent landing. Pending is not accepted.
+
 Actions: integrate, wait, handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
          making-of, report, friction, friction-triage, improve.
@@ -63,6 +73,11 @@ Read the packaged agent skill: nforge docs agent.
 `;
 
 const examples: Record<string, unknown> = {
+  capabilities: { url: 'https://deployment.convex.cloud', projectId: 'PROJECT_ID' },
+  open: { laneId: 'LANE_ID', paths: ['src'] },
+  save: { message: 'Save edits' },
+  check: { candidateId: 'CANDIDATE_ID', checkId: 'CHECK_ID' },
+  revert: { target: { kind: 'receipt', receiptId: 'RECEIPT_ID' }, message: 'Revert acceptance' },
   handoff: {
     laneId: 'LANE_ID',
     summary: 'What changed and why',
@@ -194,6 +209,27 @@ function actionHelp(action: string): string {
   if (action === 'start')
     result +=
       'intentId adds a Lane to an open Intent; after declares a landing dependency. Default uses accepted main when present; channel:null explicitly selects workspace source.\n';
+  if (
+    [
+      'start',
+      'open',
+      'save',
+      'checkpoint',
+      'compose',
+      'sync',
+      'check',
+      'run',
+      'finish',
+      'revert',
+      'abandon',
+      'reopen',
+      'status',
+      'observe',
+      'capabilities',
+    ].includes(action)
+  )
+    result +=
+      'Hosted projects use the same action with url + projectId, or the address retained by a hosted checkout. See docs/operations/source-exchange.md (Hosted agent CLI) for hosted fields and finite progress reads.\n';
   return result;
 }
 /** laneId from a cwd inside `<work directory>/lane-<uuid>`. */
@@ -265,6 +301,8 @@ export async function agentCli(args: string[]): Promise<unknown> {
     'BAD_ARGUMENT',
     'Command action differs from the selected action.',
   );
+  const hosted = hostedAgentAddress(root, selected);
+  if (hosted) return hostedAgentCli(root, action, selected, hosted);
   if (action === 'wait') {
     await agentWaitCli(root, selected, textMode);
     return undefined;
