@@ -40,7 +40,7 @@ jobs:
       - run: npm run check
       - run: node scripts/check-documents.mjs
 
-  verify:
+  verify-static:
     needs: scope
     if: ${{ !cancelled() && needs.scope.outputs.scope != 'docs' }}
     runs-on: ubuntu-latest
@@ -56,8 +56,40 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: npm run verify
+      - run: node scripts/public-verify.mjs static 24
+      - run: node scripts/check-documents.mjs
+      # Preserve executable modes when sharing the exact builds with test jobs.
+      - run: tar -czf "$RUNNER_TEMP/verify-build.tgz" dist hosted-web-dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verify-build-${{ matrix.node }}
+          path: ${{ runner.temp }}/verify-build.tgz
+          if-no-files-found: error
       - run: npm run smoke:package
+
+  verify-tests:
+    needs: [scope, verify-static]
+    if: ${{ !cancelled() && needs.scope.outputs.scope != 'docs' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.23.4', '24.22.1']
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: verify-build-${{ matrix.node }}
+          path: ${{ runner.temp }}
+      - run: tar -xzf "$RUNNER_TEMP/verify-build.tgz"
+      - run: node scripts/public-verify.mjs ${{ matrix.shard }} 24
 
   native-selfhost:
     needs: scope
@@ -80,3 +112,23 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           FORGE_NATIVE_GITHUB_OIDC: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '1' || '' }}
           FORGE_NATIVE_TARGET_RELEASE: precompiled-2026-10-01-d2ca853
+
+  verify:
+    needs: [scope, foundation, verify-static, verify-tests, native-selfhost]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every selected verification job
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module <<'JS'
+          const needs = JSON.parse(process.env.NEEDS_JSON);
+          const required = needs.scope.outputs.scope === 'docs'
+            ? ['scope', 'foundation']
+            : ['scope', 'verify-static', 'verify-tests', 'native-selfhost'];
+          const failed = Object.values(needs).some(job => !['success', 'skipped'].includes(job.result))
+            || required.some(name => needs[name]?.result !== 'success');
+          console.log(Object.entries(needs).map(([name, job]) => `${name}: ${job.result}`).join('\n'));
+          process.exitCode = failed ? 1 : 0;
+          JS

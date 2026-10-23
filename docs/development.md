@@ -202,7 +202,16 @@ For recorded historical replays, `scripts/measure-test-impact.mjs` accepts expli
 
 `.github/workflows/foundation.yml` compares exact Git pins. Markdown-only changes,
 including packaged docs, run foundation and package-document checks. Other changes
-run full verify and package smoke on Node 22 and 24, plus native self-host. The verify matrix has fail-fast disabled and depends only on scope classification, so a native self-host failure leaves both verification jobs running and still fails the workflow.
+run full verification on pinned Node 22.23.4 and 24.22.1, plus native self-host.
+For each Node version, one static job runs the non-test verify stages and package
+smoke, and shares its builds with 24 parallel test shards on GitHub-hosted
+`ubuntu-latest` runners. `scripts/public-verify.mjs` reuses Forge's full selection,
+round-robin partition and Actions executor; every current test file is assigned
+once per Node version, including newly added files. Both matrices disable
+fail-fast, and native self-host is independent. The final `verify` job always runs
+and requires every selected job to succeed, including all shards; only jobs
+excluded by the docs-only scope may be skipped. Branch protection can require
+this single `verify` check.
 
 ## Code map
 

@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { runDocumentationChecks } from './check-documentation.mjs';
-export function runActionsCheck(execute = execFileSync, { install = true } = {}) {
+export function runActionsCheck(execute = execFileSync, { install = true, build = true } = {}) {
   const plan = JSON.parse(readFileSync(process.env.FORGE_ACTIONS_PLAN, 'utf8'));
   const shard = process.env.FORGE_ACTIONS_SHARD;
   const env = {
@@ -29,8 +29,10 @@ export function runActionsCheck(execute = execFileSync, { install = true } = {})
   } else {
     const index = Number(shard);
     if (!Number.isInteger(index) || !plan.groups[index]) throw new Error('Unselected Actions shard.');
-    npm('run', 'build:core');
-    npm('run', 'build:web');
+    if (build) {
+      npm('run', 'build:core');
+      npm('run', 'build:web');
+    }
     if (plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;
     run('node', ['scripts/test-files.mjs', ...plan.groups[index]]);
   }
