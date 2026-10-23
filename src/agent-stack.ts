@@ -2,7 +2,7 @@
 import { NativeSource } from './native-source.js';
 import { allRecords } from './agent-lifecycle.js';
 import type { WorkStore } from './work-store.js';
-import type { Lane, ChannelMove, WorkView } from './work-types.js';
+import type { Lane, ChannelMove } from './work-types.js';
 const currentChannelHead = (store: WorkStore, channel: string) =>
   allRecords<ChannelMove>(store, 'channelMoves')
     .filter(move => move.channel === channel && move.status === 'accepted')
@@ -14,17 +14,18 @@ export function stackLanding(store: WorkStore, lane: Lane, mainTarget?: string) 
   const stack = lane.stack;
   if (!stack || stack.detached) return undefined;
   const parent = store.select('lanes', stack.laneId);
-  const tx = store.readRecords();
-  const views =
-    tx && parent ? tx.all('views', parent.intentId, 'intentId') : allRecords<WorkView>(store, 'views');
+  const moves = allRecords<ChannelMove>(store, 'channelMoves');
   const inputs = new Map(
-    views.flatMap(view => {
-      const input = view.inputs.find(pin => pin.laneId === stack.laneId);
-      return input ? [[view.id, input] as const] : [];
+    moves.flatMap(move => {
+      if (move.channel !== stack.channel || move.status !== 'accepted') return [];
+      // A cumulative batch Candidate belongs to its last entry's Intent, but
+      // its accepted inputs can include parent Lanes from other Intents.
+      const view = store.select('views', move.viewId);
+      const input = view?.inputs.find(pin => pin.laneId === stack.laneId);
+      return input ? [[move.viewId, input] as const] : [];
     }),
   );
   if (!inputs.size) return undefined;
-  const moves = allRecords<ChannelMove>(store, 'channelMoves');
   const main =
     mainTarget ??
     moves.filter(move => move.channel === stack.channel && move.status === 'accepted').at(-1)?.head;

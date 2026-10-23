@@ -43,19 +43,17 @@ export function waitingDependencies(store: WorkStore, laneIds: string[], channel
     }
 
     if ('viewId' in after) return !moves.some(move => move.viewId === after.viewId && contains(move.head));
-    const landedViews = views.filter(
-      view =>
-        view.intentId === after.intentId &&
-        moves.some(move => move.viewId === view.id && contains(move.head)),
-    );
     const lanes = allRecords<Lane>(store, 'lanes').filter(lane => lane.intentId === after.intentId);
     return (
       !lanes.length ||
       lanes.some(
         lane =>
           !contains(lane.head) ||
-          !landedViews.some(view =>
-            view.inputs.some(pin => pin.laneId === lane.id && pin.head === lane.head),
+          // Batch Candidates can carry this Intent's inputs under another Intent.
+          !views.some(
+            view =>
+              view.inputs.some(pin => pin.laneId === lane.id && pin.head === lane.head) &&
+              moves.some(move => move.viewId === view.id && contains(move.head)),
           ),
       )
     );
