@@ -202,7 +202,7 @@ For recorded historical replays, `scripts/measure-test-impact.mjs` accepts expli
 
 `.github/workflows/foundation.yml` compares exact Git pins. Markdown-only changes,
 including packaged docs, run foundation and package-document checks. Other changes
-run full verify and package smoke on Node 22 and 24, plus native self-host.
+run full verify and package smoke on Node 22 and 24, plus native self-host. The verify matrix has fail-fast disabled and depends only on scope classification, so a native self-host failure leaves both verification jobs running and still fails the workflow.
 
 ## Code map
 

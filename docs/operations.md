@@ -388,8 +388,11 @@ Always pass `--env-file DIR/deployment.env` to every `npx convex` command so you
 
 ```sh
 npx convex env set CLERK_JWT_ISSUER_DOMAIN '' --env-file DIR/deployment.env
+npx convex env set FORGE_CLI_ISSUER '' --env-file DIR/deployment.env
 npx convex deploy --env-file DIR/deployment.env --typecheck enable --yes
 ```
+
+Convex rejects reads of unset auth-config variables even inside an optional guard. Set both issuer variables explicitly; an empty string keeps that provider disabled.
 
 Build the browser with `VITE_CLERK_PUBLISHABLE_KEY=''` and `node --env-file=DIR/deployment.env ... vite build web --mode hosted`. For private access, set the Clerk and GitHub App variables from [development](development.md) on the instance. They are not part of snapshots, so set them again on a restored instance.
 
@@ -401,7 +404,7 @@ Build the browser with `VITE_CLERK_PUBLISHABLE_KEY=''` and `node --env-file=DIR/
 
 **Storage:** the launcher accepts an optional private dotenv file as a third `start` argument. It sets native S3 storage with five buckets (`S3_STORAGE_EXPORTS_BUCKET`, `_SNAPSHOT_IMPORTS_`, `_MODULES_`, `_FILES_`, `_SEARCH_`) and `AWS_*` credentials. Changing the argument on an existing database does not move its files. Restore a snapshot into a fresh instance instead.
 
-`node scripts/selfhost-smoke.mjs` runs the repeatable check against the pinned public repo `sindresorhus/is-plain-obj`. It needs a read-only `GITHUB_TOKEN`.
+`node scripts/selfhost-smoke.mjs` runs the repeatable check against the pinned public repo `sindresorhus/is-plain-obj`. It needs a read-only `GITHUB_TOKEN`. On failure it reports the stage, a command label with private arguments withheld, exit status and a bounded, secret-redacted diagnostic tail. Raw diagnostics remain in the invocation’s private temporary directory; deployment environment contents are never printed.
 
 **Licenses:** Forge's server is AGPL-3.0-only and the launcher and client are Apache-2.0 (see [LICENSE.md](../LICENSE.md)). The downloaded Convex backend has its own FSL-1.1-Apache-2.0 terms. Inventories: [npm](dependency-licenses.md) and [native backend](native-dependency-licenses.md). The native one is partial and not an SBOM.
 

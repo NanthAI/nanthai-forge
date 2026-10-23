@@ -5,13 +5,14 @@ import { mkdtemp, readFile, writeFile, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { ConvexHttpClient } from 'convex/browser';
 import { api, internal } from '../convex/_generated/api.js';
 import { decodeHostedArtifact } from '../dist/hosted-artifact.js';
 import { releases, release, digest, main, portNumber } from './selfhost.mjs';
 import { githubOidcIssuer, verifyGithubOidc } from './selfhost-oidc.mjs';
+import { deploySmoke, smokeCommand, smokeFailure } from './selfhost-smoke-support.mjs';
 
 // ponytail: real native smoke runs one pinned public checkout; add more platforms only after this owner is measured.
 const root = await mkdtemp(join(tmpdir(), 'forge-native-smoke-')),
@@ -32,17 +33,26 @@ const keys = JSON.stringify({
   active: 'native-smoke',
   keys: { 'native-smoke': randomBytes(32).toString('base64') },
 });
+const secrets = [
+  keys,
+  ...Object.values(JSON.parse(keys).keys),
+  ...Object.entries(process.env)
+    .filter(([name]) => /TOKEN|SECRET|PASSWORD|KEY|CREDENTIAL|AUTH/i.test(name))
+    .map(([, value]) => value),
+];
 let stage = 'configuration',
   succeeded = false;
 function cli(directory, args) {
-  return execFileSync(
+  return smokeCommand(
     process.execPath,
     [resolve('node_modules/convex/bin/main.js'), ...args, '--env-file', join(directory, 'deployment.env')],
     { cwd: resolve('.'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 180_000 },
+    `convex ${args[0]}${args[0] === 'env' ? ` ${args[1]} ${args[2]} <redacted>` : ''} --env-file <private path>`,
   );
 }
 async function start(directory, s3Env) {
-  const log = await open(join(root, `backend-${processes.size}-${randomUUID()}.log`), 'wx', 0o600);
+  const backendLog = join(root, `backend-${processes.size}-${randomUUID()}.log`);
+  const log = await open(backendLog, 'wx', 0o600);
   logs.push(log);
   const child = spawn(
     process.execPath,
@@ -50,31 +60,51 @@ async function start(directory, s3Env) {
     { stdio: ['ignore', log.fd, log.fd] },
   );
   processes.set(directory, child);
-  const env = parseEnv(await readFile(join(directory, 'deployment.env'), 'utf8'));
-  const url = env.CONVEX_SELF_HOSTED_URL;
-  assert.equal(new URL(url).hostname, '127.0.0.1');
-  for (let attempt = 0; ; attempt++) {
-    assert.equal(child.exitCode, null, 'Owned native backend exited before readiness.');
-    try {
-      if ((await fetch(url + '/version', { signal: AbortSignal.timeout(1000) })).ok) break;
-    } catch {
-      /* Wait only for this new owned listener. */
+  let spawnError;
+  child.on('error', error => {
+    spawnError = error;
+  });
+  try {
+    const env = parseEnv(await readFile(join(directory, 'deployment.env'), 'utf8'));
+    secrets.push(
+      env.CONVEX_SELF_HOSTED_ADMIN_KEY,
+      JSON.parse(await readFile(join(directory, 'instance.json'), 'utf8')).secret,
+    );
+    const url = env.CONVEX_SELF_HOSTED_URL;
+    assert.equal(new URL(url).hostname, '127.0.0.1');
+    for (let attempt = 0; ; attempt++) {
+      if (spawnError) throw spawnError;
+      if (child.exitCode !== null || child.signalCode) {
+        const error = new Error('Owned native backend exited before readiness.');
+        error.exitCode = child.exitCode;
+        error.signal = child.signalCode;
+        throw error;
+      }
+      try {
+        if ((await fetch(url + '/version', { signal: AbortSignal.timeout(1000) })).ok) break;
+      } catch {
+        /* Wait only for this new owned listener. */
+      }
+      assert(attempt < 100, 'Owned native backend did not become ready.');
+      await new Promise(done => setTimeout(done, 100));
     }
-    assert(attempt < 100, 'Owned native backend did not become ready.');
-    await new Promise(done => setTimeout(done, 100));
+    const anon = new ConvexHttpClient(url, { logger: false }),
+      admin = new ConvexHttpClient(url, { logger: false }),
+      outsider = new ConvexHttpClient(url, { logger: false });
+    const identity = subject => ({ subject, issuer, tokenIdentifier: issuer + '|' + subject });
+    admin.setAdminAuth(env.CONVEX_SELF_HOSTED_ADMIN_KEY, identity(owner));
+    outsider.setAdminAuth(env.CONVEX_SELF_HOSTED_ADMIN_KEY, identity('forge_native_outsider'));
+    return { anon, admin, outsider, directory };
+  } catch (error) {
+    error.smokeCommand = 'node scripts/selfhost.mjs start <private instance>';
+    error.stderr = await readFile(backendLog, 'utf8');
+    throw error;
   }
-  const anon = new ConvexHttpClient(url, { logger: false }),
-    admin = new ConvexHttpClient(url, { logger: false }),
-    outsider = new ConvexHttpClient(url, { logger: false });
-  const identity = subject => ({ subject, issuer, tokenIdentifier: issuer + '|' + subject });
-  admin.setAdminAuth(env.CONVEX_SELF_HOSTED_ADMIN_KEY, identity(owner));
-  outsider.setAdminAuth(env.CONVEX_SELF_HOSTED_ADMIN_KEY, identity('forge_native_outsider'));
-  return { anon, admin, outsider, directory };
 }
 async function stop(directory) {
   const child = processes.get(directory);
   if (!child) return;
-  if (child.exitCode === null) {
+  if (child.pid && child.exitCode === null && child.signalCode === null) {
     const exit = once(child, 'exit');
     child.kill('SIGTERM');
     await exit;
@@ -82,17 +112,14 @@ async function stop(directory) {
   processes.delete(directory);
 }
 async function deploy(directory) {
-  cli(directory, ['env', 'set', 'CLERK_JWT_ISSUER_DOMAIN', realOidc ? githubOidcIssuer : '']);
-  cli(directory, ['env', 'set', 'GITHUB_PUBLIC_TOKEN', token]);
-  cli(directory, ['env', 'set', 'FORGE_SECRET_KEYS', keys]);
-  cli(directory, ['deploy', '--typecheck', 'enable', '--yes']);
+  deploySmoke(args => cli(directory, args), { issuer: realOidc ? githubOidcIssuer : '', token, keys });
 }
 function archiveFor(pin, platform, provided) {
   const asset = releases[pin]?.[platform];
   assert(asset, 'Choose a supported reviewed pin.');
   if (provided) return provided;
   const path = join(root, pin + '-' + asset.name);
-  execFileSync(
+  smokeCommand(
     'curl',
     [
       '--fail',
@@ -104,6 +131,7 @@ function archiveFor(pin, platform, provided) {
       `https://github.com/get-convex/convex-backend/releases/download/${pin}/${asset.name}`,
     ],
     { stdio: 'pipe', timeout: 180_000 },
+    `curl pinned backend archive ${pin}/${asset.name}`,
   );
   return path;
 }
@@ -145,6 +173,7 @@ try {
     'Provide the ephemeral GitHub read token, public repository and exact commit.',
   );
   assert(port + 20 <= 65534);
+  if (storageEnv) secrets.push(...Object.values(parseEnv(await readFile(storageEnv, 'utf8'))));
   const platform = `${process.platform}-${process.arch}`;
   const archive = archiveFor(release, platform, process.env.FORGE_NATIVE_ARCHIVE);
   const targetArchive =
@@ -153,9 +182,11 @@ try {
       : archiveFor(targetRelease, platform, process.env.FORGE_NATIVE_TARGET_ARCHIVE);
   const primaryPath = join(root, 'primary'),
     restoredPath = join(root, 'restored');
-  stage = 'fresh primary install';
+  stage = 'fresh primary initialization';
   await main(['init', primaryPath, archive, String(port)]);
+  stage = 'fresh primary backend startup';
   let primary = await start(primaryPath);
+  stage = 'fresh primary configuration and deploy';
   await deploy(primaryPath);
   stage = 'public acquisition';
   const id = await primary.anon.action(api.hosted.start, { url: `https://github.com/${repository}`, ref });
@@ -184,6 +215,7 @@ try {
   });
   const secretValue = 'native-synthetic-' + randomUUID(),
     operationId = randomUUID();
+  secrets.push(secretValue);
   const secret = await primary.admin.action(api.secretActions.create, {
     name: 'Native encrypted restore QA',
     repository,
@@ -201,9 +233,11 @@ try {
   stage = 'snapshot export';
   const backup = join(root, 'backup.zip');
   cli(primaryPath, ['export', '--include-file-storage', '--path', backup]);
-  stage = 'fresh restored install';
+  stage = 'fresh restored initialization';
   await main(['init', restoredPath, targetArchive, String(port + 10), targetRelease]);
+  stage = 'fresh restored backend startup';
   let restored = await start(restoredPath, storageEnv);
+  stage = 'snapshot import and restored deploy';
   cli(restoredPath, ['import', backup, '--yes']);
   await deploy(restoredPath); // Restore original table IDs before a newer schema allocates new tables.
   const verify = async clients => {
@@ -311,8 +345,9 @@ try {
   succeeded = true;
 } catch (error) {
   await writeFile(join(root, 'failure.log'), String(error?.stack ?? error), { mode: 0o600 });
+  console.error(smokeFailure(error, { stage, secrets }));
   console.error(
-    `Native self-host smoke failed during ${stage}. Private diagnostic data retained at ${root}; no credentials printed.`,
+    `Private diagnostic data retained at ${root}; credentials and deployment.env contents withheld.`,
   );
   process.exitCode = 1;
 } finally {
