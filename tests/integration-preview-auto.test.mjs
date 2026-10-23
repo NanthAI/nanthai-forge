@@ -8,6 +8,10 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { updateHostState } from '../dist/host-binding.js';
+import { CoordinationJournal } from '../dist/agent-coordination-journal.js';
+import { overlapNotifications } from '../dist/mcp-overlap-notifications.js';
+import { agentWait } from '../dist/agent-wait.js';
 import { integrationPreview, previewPinned } from '../dist/integration-preview.js';
 import {
   scheduleIntegrationPreview,
@@ -384,7 +388,7 @@ test('built-in Convex source validation catches a merge-only duplicate without c
   assert.equal(existsSync(join(f.a.path, 'convex/schema.ts')), true);
 });
 
-test('requests during a preview drain again; execution errors remain visible without an idle retry loop', async t => {
+test('duplicate requests during a preview do not retry execution errors or start an idle loop', async t => {
   const f = await fixture(t);
   await f.policy({ integrationPreview: { auto: true } });
   const fakeLaunch = () => ({ on() {}, unref() {} });
@@ -399,7 +403,7 @@ test('requests during a preview drain again; execution errors remain visible wit
     },
     0,
   );
-  assert.equal(runs, 2);
+  assert.equal(runs, 1, 'duplicate wake during execution does not repeat a failed tuple');
   assert.match(integrationPreviewStatus(f.store), /unavailable.*INTEGRATION_CHECK_ERROR/);
   await drainIntegrationPreviews(
     f.store,
@@ -408,5 +412,228 @@ test('requests during a preview drain again; execution errors remain visible wit
     },
     0,
   );
+  assert.equal(runs, 1);
+});
+
+test('duplicate saved heads after completion do not execute again or replace the request', async t => {
+  const f = await fixture(t);
+  await f.policy({ integrationPreview: { auto: true } });
+  const fakeLaunch = () => ({ on() {}, unref() {} });
+  scheduleIntegrationPreview(f.store, fakeLaunch);
+  await drainIntegrationPreviews(f.store, undefined, 0);
+  const request = readFileSync(join(f.store.directory, 'integration-preview-request.json'), 'utf8');
+  let launches = 0,
+    runs = 0;
+  for (let i = 0; i < 4; i++) {
+    await f.agent.dispatch({ action: 'checkpoint', laneId: f.b.laneId, message: 'Duplicate save' });
+    scheduleIntegrationPreview(f.store, () => {
+      launches++;
+      return fakeLaunch();
+    });
+  }
+  await new Promise(resolve => setImmediate(resolve));
+  await drainIntegrationPreviews(
+    f.store,
+    () => {
+      runs++;
+      throw new Error('duplicate tuple ran');
+    },
+    0,
+  );
+  assert.equal(readFileSync(join(f.store.directory, 'integration-preview-request.json'), 'utf8'), request);
+  assert.equal(launches, 0);
+  assert.equal(runs, 0);
+});
+
+test('new heads during a running preview coalesce to the latest tuple and late notices stay historical', async t => {
+  const f = await fixture(t);
+  await f.policy({ integrationPreview: { auto: true } });
+  const fakeLaunch = () => ({ on() {}, unref() {} });
+  scheduleIntegrationPreview(f.store, fakeLaunch);
+  let runs = 0;
+  const observed = [];
+  await drainIntegrationPreviews(
+    f.store,
+    async () => {
+      runs++;
+      const result = integrationPreview(f.store, {}).result;
+      observed.push(result);
+      if (runs === 1) {
+        // Two publications arrive before the controller returns the old observation.
+        await f.save(f.b, 'b.txt', '2');
+        await f.save(f.b, 'b.txt', '0');
+        assert.equal(
+          new CoordinationJournal(f.store)
+            .context(f.a.laneId)
+            .messages.filter(row => row.actor === 'Integration preview').length,
+          0,
+        );
+      }
+      return result;
+    },
+    0,
+  );
   assert.equal(runs, 2);
+  assert.equal(observed[0].status, 'clash');
+  assert.equal(observed[1].status, 'clean');
+  assert.equal(observed[1].inputs.find(pin => pin.laneId === f.b.laneId).head, f.b.head);
+  assert.equal(
+    new CoordinationJournal(f.store).context(f.a.laneId).notices[0].integration.applicability,
+    'historical',
+  );
+  assert.match(integrationPreviewStatus(f.store), /^clean/);
+});
+
+test('committed main changes wake a preview without a Lane save, reads and unrelated writes do not', async t => {
+  const f = await fixture(t);
+  await f.policy({ integrationPreview: { auto: true } });
+  scheduleIntegrationPreview(f.store, () => ({ on() {}, unref() {} }));
+  await drainIntegrationPreviews(f.store, undefined, 0);
+  const before = readFileSync(join(f.store.directory, 'integration-preview-request.json'), 'utf8');
+  f.store.load();
+  readPendingStatus(f.store);
+  await f.agent.dispatch({ action: 'handoff', laneId: f.a.laneId, summary: 'Unrelated delivery note' });
+  assert.equal(readFileSync(join(f.store.directory, 'integration-preview-request.json'), 'utf8'), before);
+  f.store.locked(() => {
+    const tx = f.store.records();
+    tx.append('channelMoves', {
+      id: randomUUID(),
+      channel: 'main',
+      viewId: randomUUID(),
+      head: f.a.head,
+      previous: tx.all('channelMoves', 'main', 'channel').at(-1).head,
+      at: new Date().toISOString(),
+      status: 'accepted',
+      provenance: 'user-declared-local',
+    });
+    f.store.commitRecords(tx);
+  });
+  assert.notEqual(readFileSync(join(f.store.directory, 'integration-preview-request.json'), 'utf8'), before);
+  await drainIntegrationPreviews(f.store, undefined, 0);
+  assert.equal(
+    JSON.parse(readFileSync(join(f.store.directory, 'integration-preview-status.json'), 'utf8')).result.main,
+    f.a.head,
+  );
+  assert.match(integrationPreviewStatus(f.store), /^failed/);
+  // Both records-v2 and whole-Work publication paths carry the same main wake.
+  f.store.locked(() => {
+    const data = f.store.load();
+    data.channelMoves.push({ ...data.channelMoves.at(-1), id: randomUUID(), head: f.b.head });
+    data.revision++;
+    f.store.save(data);
+  });
+  await drainIntegrationPreviews(f.store, undefined, 0);
+  assert.equal(
+    JSON.parse(readFileSync(join(f.store.directory, 'integration-preview-status.json'), 'utf8')).result.main,
+    f.b.head,
+  );
+});
+
+test('integration delivery uses the bilateral inbox, MCP next-call context and wait cursor without sessions', async t => {
+  const f = await fixture(t);
+  updateHostState(f.store, state => {
+    state.presence = {};
+    state.selfReports = {};
+  });
+  const sent = [];
+  const notifications = overlapNotifications(
+    {
+      server: { registerCapabilities() {} },
+      sendLoggingMessage: async row => {
+        sent.push(row);
+      },
+    },
+    f.store,
+  );
+  t.after(() => notifications.close());
+  notifications.select(f.a.laneId);
+  const result = integrationPreview(f.store, {}).result;
+  assert.equal(result.notices.length, 1);
+  assert.ok(result.notices[0].participants.every(p => p.sessions.length === 0));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].data.kind, 'integration-notice');
+  assert.equal(sent[0].data.noticeId, result.notices[0].noticeId);
+  assert.deepEqual(sent[0].data.inputs, result.inputs);
+  notifications.select(f.a.laneId);
+  assert.equal(sent.length, 1);
+  // The second Lane was absent at publication; its next call receives the same notice.
+  notifications.select(f.b.laneId);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].data.noticeId, sent[0].data.noticeId);
+  for (const lane of [f.a, f.b]) {
+    const context = new CoordinationJournal(f.store).context(lane.laneId);
+    assert.equal(context.messages.filter(row => row.actor === 'Integration preview').length, 1);
+    assert.ok(
+      agentPeers(f.store, { laneId: lane.laneId, detail: true }).notices.some(row =>
+        row.text.includes('synthetic pair clash'),
+      ),
+    );
+  }
+  const firstEvents = [];
+  const first = await agentWait(f.store, { laneIds: [f.a.laneId], timeoutSeconds: 0 }, row =>
+    firstEvents.push(row),
+  );
+  const notice = firstEvents.find(row => row.type === 'notice' && row.status === 'integration');
+  assert.equal(notice.id, result.notices[0].noticeId);
+  assert.equal(notice.historical, false);
+  const replayEvents = [];
+  const replay = await agentWait(
+    f.store,
+    { laneIds: [f.a.laneId], timeoutSeconds: 0, cursor: first.cursor },
+    row => replayEvents.push(row),
+  );
+  assert.ok(!replayEvents.some(row => row.type === 'notice'));
+  await f.save(f.b, 'b.txt', '0');
+  const changedEvents = [];
+  await agentWait(f.store, { laneIds: [f.a.laneId], timeoutSeconds: 0, cursor: replay.cursor }, row =>
+    changedEvents.push(row),
+  );
+  assert.equal(changedEvents.find(row => row.type === 'notice' && row.id === notice.id).historical, true);
+  assert.equal(sent.length, 2, 'obsolete observations do not redeliver current advice');
+});
+
+test('opt-out main and saved changes create no request, process, notice or idle timer', async t => {
+  const f = await fixture(t);
+  const before = process.getActiveResourcesInfo().filter(name => name === 'Timeout').length;
+  await f.save(f.b, 'b.txt', '2');
+  f.store.locked(() => {
+    const data = f.store.load();
+    data.channelMoves.push({ ...data.channelMoves[0], id: randomUUID(), head: f.a.head });
+    data.revision++;
+    f.store.save(data);
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(existsSync(join(f.store.directory, 'integration-preview-request.json')), false);
+  assert.equal(new CoordinationJournal(f.store).context(f.a.laneId).notices.length, 0);
+  assert.equal(process.getActiveResourcesInfo().filter(name => name === 'Timeout').length, before);
+});
+
+test('runtime drift between a wake and tuple capture finishes without an idle rerun', async t => {
+  const f = await fixture(t, { configured: false });
+  await f.policy({ integrationPreview: { auto: true } });
+  scheduleIntegrationPreview(f.store, () => ({ on() {}, unref() {} }));
+  const previous = process.env.TZ;
+  let runs = 0;
+  try {
+    await drainIntegrationPreviews(
+      f.store,
+      () => {
+        runs++;
+        process.env.TZ = 'UTC';
+        return integrationPreview(f.store, {}).result;
+      },
+      0,
+    );
+    await drainIntegrationPreviews(
+      f.store,
+      () => {
+        throw new Error('handled wake repeated');
+      },
+      0,
+    );
+    assert.equal(runs, 1);
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
 });

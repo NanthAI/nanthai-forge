@@ -705,8 +705,13 @@ incomplete and does not become evidence of independence.
 
 Enable it for an owner with
 `nforge agent ROOT set-policy '{"integrationPreview":{"auto":true}}'`
-(and disable it with `auto:false`). It is off by default. Checkpoints and syncs
-wake a finite, debounced local worker over main and saved active Lanes. Read its
+(and disable it with `auto:false`). It is off by default. Committed saved-head and main changes
+wake a finite, debounced local worker over main and saved active Lanes. Duplicate
+saves of the same exact input tuple do not rerun commands. Newer saves coalesce
+while a preview runs; the worker drains the latest tuple and exits, with no idle
+timer or polling. Integration notices use the existing bilateral Lane inbox and
+MCP logging notification adapter; without a live session they remain available
+in the next brief/peer reply or explicit `wait`, whose cursor deduplicates events. Read its
 one-line state in `peers` or pending status; `integrate` returns exact source pins
 and diagnostics. Unsaved files are excluded and no remote runner is called.
 
@@ -730,8 +735,8 @@ observed higher-order failing set, passing controls and incomplete minimization.
 These diagnostics do not add a landing gate or new exclusion rule.
 
 Repository commands can read external tools, files and declared passthrough values.
-Their previous verdicts are historical observations, so repeated previews execute
-again even when source/configuration pins match. Only built-in source-only checks
+Their previous verdicts are historical observations, so explicit repeated previews
+execute again even when source/configuration pins match. Only built-in source-only checks
 reuse an exact-tuple verdict. Each control receives independent dependency bytes.
 Results include `applicability:"historical"` if saved heads, dependencies, main or
 static configuration moved during execution; obsolete notices are not published

@@ -1,3 +1,4 @@
+import { wakeIntegrationPreview } from './integration-preview-wake.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { captureTransactionFriction } from './friction-auto.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -210,6 +211,7 @@ export class WorkStore {
     const prior = previous?.manifest.collections.lanes?.pages ?? [];
     captureTransactionFriction(transaction, previous);
     const result = transaction.commit(revision);
+    wakeIntegrationPreview(this, previous, transaction);
     wakeAutoExchange(this);
     wakeLandingWorker(this);
     try {
@@ -259,7 +261,9 @@ export class WorkStore {
       data.schema = Math.max(data.schema, 12) as WorkData['schema'];
     if (isUnifiedWork(data)) data.intents = data.intents.map(unifyIntent);
     parseWork(data);
+    const previous = this.readRecords();
     writeRecords(this.directory, data);
+    wakeIntegrationPreview(this, previous, this.readRecords());
     wakeAutoExchange(this);
     wakeLandingWorker(this);
   }

@@ -1,4 +1,4 @@
-import { previewCurrent } from './integration-preview-inputs.js';
+import { previewTuple, previewCurrent } from './integration-preview-inputs.js';
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -6,6 +6,9 @@ import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readPolicy } from './work-autonomy.js';
+import { nativeChannels } from './native-work.js';
+import { channelStatus } from './work-channel.js';
+import { workLocked } from './work-lock.js';
 import { withQueueSlot } from './landing-queue.js';
 import { integrationPreview, type PreviewResult } from './integration-preview.js';
 import type { WorkStore } from './work-store.js';
@@ -32,7 +35,23 @@ function write(path: string, value: unknown) {
 export function scheduleIntegrationPreview(store: WorkStore, launch: typeof spawn = spawn) {
   try {
     if (!readPolicy(store).integrationPreview?.auto) return;
-    write(requestPath(store), { token: randomUUID(), at: Date.now() });
+    const queued = workLocked(join(store.directory, 'integration-preview-request.lock'), () => {
+      const data = store.load(),
+        lanes = data.lanes
+          .filter(lane => lane.state === 'active' && lane.checkpoints.length)
+          .sort((a, b) => a.id.localeCompare(b.id)),
+        main = (store.native ? nativeChannels(data) : channelStatus(store, data)).find(
+          channel => channel.name === 'main',
+        )?.head;
+      if (!main || (!lanes.length && !read<Request>(requestPath(store)))) return false;
+      const token = previewTuple(store, data, lanes, main).key;
+      // A duplicate save is a wake hint, not a new execution of external commands.
+      if (read<Request>(requestPath(store))?.token === token)
+        return read<Status>(statusPath(store))?.token !== token;
+      write(requestPath(store), { token, at: Date.now() });
+      return true;
+    });
+    if (!queued) return;
     if (scheduled.has(store.directory)) return;
     scheduled.add(store.directory);
     setImmediate(() => {
@@ -63,7 +82,7 @@ export function scheduleIntegrationPreview(store: WorkStore, launch: typeof spaw
  * across CLI processes coalesce too; the preview's own lock also covers manual runs. */
 export async function drainIntegrationPreviews(
   store: WorkStore,
-  run = () => integrationPreview(store, {}).result,
+  run: () => PreviewResult | Promise<PreviewResult> = () => integrationPreview(store, {}).result,
   debounceMs = 200,
 ) {
   return withQueueSlot(
@@ -84,7 +103,13 @@ export async function drainIntegrationPreviews(
         }
         let status: Status;
         try {
-          status = { token: request.token, result: run() };
+          const result = await run();
+          // A newer publication can precede tuple capture inside run(). Mark the
+          // actual checked tuple handled rather than execute it a second time.
+          status = {
+            token: read<Request>(requestPath(store))?.token === result.key ? result.key : request.token,
+            result,
+          };
         } catch (error) {
           status = {
             token: request.token,

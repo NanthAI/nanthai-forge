@@ -1,3 +1,4 @@
+import { publishedOverlap } from './agent-coordination-events.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { join } from 'node:path';
@@ -115,7 +116,10 @@ export function previewPinned(
       // Retained verdicts are historical unless there were no external commands.
       if (cached && !checks.length && cached.status !== 'inconclusive') {
         const current = previewCurrent(store, cached);
-        if (current) journal.record(cached.notices);
+        if (current) {
+          journal.record(cached.notices);
+          if (cached.notices.length) publishedOverlap(store);
+        }
         return {
           revision: store.revision(),
           result: {
@@ -212,9 +216,14 @@ export function previewPinned(
       }
       result.durationMs = Math.round(performance.now() - started);
       result.applicability = previewCurrent(store, result) ? 'current' : 'historical';
-      if (result.applicability === 'current') journal.record(result.notices);
       // Retain advisory history only; never passing landing evidence.
       cache.write(`integration:${key}`, result);
+      // Publish after the exact observation is readable: inbox applicability uses
+      // that observation, including a later clean result for the same tuple.
+      if (result.applicability === 'current') {
+        journal.record(result.notices);
+        if (result.notices.length) publishedOverlap(store);
+      }
       return { revision: store.revision(), result: { ...result, cached: false } };
     },
     { operation: 'local integration preview' },

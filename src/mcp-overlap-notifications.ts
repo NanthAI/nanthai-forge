@@ -16,8 +16,26 @@ export function overlapNotifications(server: McpServer, store: WorkStore) {
   const publish = () => {
     if (closed) return;
     try {
-      for (const laneId of lanes)
-        for (const notice of new CoordinationJournal(store).overlaps(laneId)) {
+      const journal = new CoordinationJournal(store);
+      for (const laneId of lanes) {
+        const inbox = [
+          ...journal.overlaps(laneId).map(compactOverlapNotice),
+          ...journal.context(laneId).notices.flatMap(notice =>
+            notice.integration?.applicability === 'current'
+              ? [
+                  {
+                    noticeId: notice.noticeId,
+                    kind: 'integration-notice',
+                    main: notice.integration.main,
+                    inputs: notice.integration.inputs,
+                    lanes: notice.participants.map(participant => participant.lane),
+                    text: notice.reason,
+                  },
+                ]
+              : [],
+          ),
+        ];
+        for (const notice of inbox) {
           const key = `${laneId}:${notice.noticeId}`;
           if (seen.has(key)) continue;
           seen.add(key);
@@ -25,12 +43,13 @@ export function overlapNotifications(server: McpServer, store: WorkStore) {
             .sendLoggingMessage({
               level: 'notice',
               logger: 'forge-overlap',
-              data: { laneId, ...compactOverlapNotice(notice) },
+              data: { laneId, ...notice },
             })
             .catch(() => {
               // The durable inbox is still delivered by the next result.
             });
         }
+      }
     } catch {
       /* An incomplete journal never blocks source work. */
     }

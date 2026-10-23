@@ -230,9 +230,16 @@ export function waitObservation(store: WorkStore, kind: 'lane' | 'operation', id
         events.push({
           type: 'notice',
           id: notice.noticeId,
-          status: 'overlap',
+          status: notice.integration ? 'integration' : 'overlap',
           terminal: false,
           ok: false,
+          ...(notice.integration
+            ? {
+                main: notice.integration.main,
+                inputs: notice.integration.inputs,
+                historical: notice.integration.applicability === 'historical',
+              }
+            : {}),
           reason: notice.reason,
           participants: notice.participants.map(p => p.lane),
           paths: notice.conflicts.map(c => c.path),
