@@ -51,13 +51,13 @@ Browse packaged documentation: nforge docs
 Usage:
   nforge improve ROOT [--json]
   nforge release ROOT --command-file FILE | --resume UUID | --status UUID
-  nforge land ROOT LANE… [--message MESSAGE] [--operation-id UUID]
+  nforge land ROOT LANE… [--message MESSAGE] [--operation-id UUID] [--wait]
   nforge docs [name]
   nforge --version
   nforge pr list|candidate|create|checks|merge|diff|checkout [LANE_ID] [--repo ROOT] [--json [fields]]
   nforge repo candidate [ROOT] [--json [fields]]
   nforge queue list|cancel OPERATION|prioritize OPERATION
-  nforge github-sync ROOT [--repo OWNER/NAME] [--branch main] [--dry-run | --push] [--operation-id UUID] [--rebind]
+  nforge github-sync ROOT [--repo OWNER/NAME] [--branch main] [--dry-run | --push] [--operation-id UUID] [--rebind] [--wait-audit] [--audit-timeout-ms MS]
   nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--status | --new]
   nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination]
   nforge logout [DEPLOYMENT_URL]
@@ -384,9 +384,39 @@ async function main(args: string[]): Promise<unknown> {
 function shellQuote(value: string) {
   return "'" + value.replaceAll("'", "'\\''") + "'";
 }
+// Fail closed if a sync invocation loses its asynchronous completion. In
+// particular an unfinished request must never leave an empty stdout and exit 0.
+let syncPending = process.argv[2] === 'github-sync';
+if (syncPending) {
+  process.exitCode = 1;
+  process.once('beforeExit', () => {
+    if (syncPending)
+      process.stdout.write(
+        JSON.stringify({
+          pushed: false,
+          reason: 'GITHUB_SYNC_INCOMPLETE',
+          error: {
+            code: 'GITHUB_SYNC_INCOMPLETE',
+            message: 'Sync ended without a result. Retry the original operation to reconcile.',
+          },
+        }) + '\n',
+      );
+  });
+}
 try {
   invariant(supportedNode(), 'UNSUPPORTED_NODE', nodeRequirement);
   const output = await main(process.argv.slice(2));
+  if (syncPending) {
+    invariant(
+      output && typeof output === 'object' && 'pushed' in output,
+      'GITHUB_SYNC_INCOMPLETE',
+      'Sync did not return a publication result.',
+    );
+    // Pushed, a dry run and an up-to-date mirror are successful outcomes; every other no-push reason fails.
+    const reason = (output as { reason?: unknown }).reason;
+    process.exitCode = output.pushed === true || reason === 'dry-run' || reason === 'nothing-to-push' ? 0 : 1;
+    syncPending = false;
+  }
   if (output !== undefined) {
     process.stdout.write(
       `${JSON.stringify(output, null, process.argv[2] === 'agent' || (process.argv[2] === 'host' && process.argv.includes('--json')) ? undefined : 2)}\n`,
@@ -404,6 +434,9 @@ try {
   const known = error instanceof ForgeError;
   const root = process.argv[2] === 'agent' ? process.argv[3] : undefined;
   const failure = known ? describeFailure(error) : recordFailure(error, root ? resolve(root) : undefined);
-  process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
+  if (process.argv[2] === 'github-sync') {
+    syncPending = false;
+    process.stdout.write(`${JSON.stringify({ pushed: false, reason: failure.code, error: failure })}\n`);
+  } else process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
   process.exitCode = 1;
 }

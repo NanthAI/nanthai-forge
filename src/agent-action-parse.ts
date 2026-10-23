@@ -4,7 +4,11 @@ import { ForgeError } from './errors.js';
 
 /** Describe invalid fields without echoing supplied values or unknown keys. */
 export function parseAgentAction(input: unknown) {
-  const parsed = agentActionSchema.safeParse(input);
+  const normalized =
+    input && typeof input === 'object' && 'action' in input && input.action === 'save'
+      ? { ...input, action: 'checkpoint' }
+      : input;
+  const parsed = agentActionSchema.safeParse(normalized);
   if (parsed.success) return parsed.data;
   const issues = parsed.error.issues.map(issue => {
     const path = issue.path.join('.') || 'action';

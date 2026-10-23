@@ -1,3 +1,4 @@
+import { pendingActionsInfra, PENDING_ACTIONS_INFRA } from './github-actions-infra.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 // SPDX-License-Identifier: Apache-2.0
 import { finishChild } from './agent-finish-journal.js';
@@ -65,6 +66,8 @@ export async function landSingle(
   });
   await waitForAgentRun(store, runId, command.waitMs);
   const run = store.select('runs', runId)!;
+  if (pendingActionsInfra(run))
+    return { status: 'waiting', code: PENDING_ACTIONS_INFRA, runId, viewId: view.id };
   if (run.status !== 'passed')
     return {
       status: ['queued', 'preparing', 'running'].includes(run.status) ? 'waiting' : 'failed',

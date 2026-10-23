@@ -21,12 +21,23 @@ Omitted `operationId`, `expectedHead`, `checkId`, `expectedDefinition` and `acce
 To land a selected set of already saved Lanes, use:
 
 ```sh
-nforge land ROOT LANE_ID OTHER_LANE_ID --operation-id UUID
+nforge land ROOT LANE_ID OTHER_LANE_ID --operation-id UUID --wait
 # Optional shared message:
-nforge land ROOT LANE_ID OTHER_LANE_ID --operation-id UUID --message "Land selected changes"
+nforge land ROOT LANE_ID OTHER_LANE_ID --operation-id UUID --wait --message "Land selected changes"
 ```
 
-`land` pins each recorded head once and leaves unsaved files untouched. Inputs
+`land` pins each recorded head once and leaves unsaved files untouched.
+`--wait` drives the retained request until every selected input is terminal, prints
+a per-Lane result table to stderr (also in JSON), and exits nonzero if any input
+did not land. The agent equivalent is `land {laneIds:[...],wait:true}`. Check
+failures and conflicts are terminal and are never retried. Definite infrastructure
+interruptions retry the same entry; ambiguous Actions
+dispatches reconcile the original run without allocating a duplicate. A second
+request for the same Lane/head while the first is still in progress is refused
+with `LANDING_ALREADY_SUBMITTED` and the original operation identity; replay it.
+Once it has finished, the same head can be submitted again (e.g. after a flake). Omitted wait preserves a finite sweep;
+`wait:false` durably submits for the owner worker.
+ Inputs
 from the same Intent share a Candidate (the same grouping as `finish with`);
 compatible cross-Intent entries enter the existing landing batch before its check
 starts. Existing runner compatibility and batch sizes still apply. Dependency
@@ -416,7 +427,16 @@ audit's process group before claiming its capacity. Cancelled or interrupted
 audits retain their evidence and are requeued with a new execution identity for
 the latest main. Superseded pending requests coalesce onto that audit. Once the
 foreground queue is idle the audit runs; `github-sync --push` drains pending
-main audits before publishing, requesting a full audit of accepted main even when
+main audits before publishing. If another audit worker holds the queue, it returns
+JSON `pushed:false,reason:"WORK_BUSY"` with exit 1. Use
+`nforge github-sync ROOT --push --wait-audit` to wait up to 30 minutes for the
+retained audit and then publish fresh accepted main. `--audit-timeout-ms MS`
+changes that wait bound; progress goes to stderr. Timeout retains the audit and
+returns `GITHUB_SYNC_AUDIT_TIMEOUT` with exit 1. Sync always returns a JSON result:
+dry runs and up-to-date no-push requests have reasons `dry-run` and
+`nothing-to-push` and exit 0, as does confirmed publication/reconciliation; every
+other no-push reason exits 1.
+It requests a full audit of accepted main even when
 that acceptance did not schedule one. It uses the configured `verify` check (or
 the sole check); missing/ambiguous check configuration reports `CHECK_REQUIRED`.
 Audit failure retains the existing fix-forward handoff; push does not add a

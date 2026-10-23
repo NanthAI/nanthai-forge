@@ -30,6 +30,14 @@ export function landReceipt(store: WorkStore, command: LandCommand, journal: Lan
           submission => `${submission.laneId.slice(0, 8)}: ${submissionLine(submission)}`,
         ),
       ),
+      table: [
+        'Lane\tHead\tResult',
+        ...entries.flatMap(entry =>
+          entry.submissions.map(
+            item => `${item.laneId}\t${item.head}\t${item.state}${item.cause ? ` (${item.cause})` : ''}`,
+          ),
+        ),
+      ].join('\n'),
       counts,
       entries,
       replay: {

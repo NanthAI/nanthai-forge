@@ -15,6 +15,8 @@ import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
+import { waitForAgentRun } from '../dist/agent-run-observer.js';
+import { batchEdit } from '../dist/landing-batch-store.js';
 import { LandJournal } from '../dist/land-journal.js';
 import { trustAgents } from './autonomy-fixture.mjs';
 
@@ -314,13 +316,14 @@ test('batch failure and source conflict return per-entry outcomes and retain suc
   const bad = await f.lane('bad.txt'),
     good = await f.lane('good.txt');
   const operationId = randomUUID(),
-    result = (await f.land([a, b, bad, good], { operationId, settleAll: true })).result;
+    result = (await f.land([a, b, bad, good], { operationId, settleAll: true, wait: true, waitMs: 0 }))
+      .result;
   assert.deepEqual(result.counts, { accepted: 2, conflict: 1, failed: 1 });
   assert.equal(f.contents('same.txt'), 'one\n');
   assert.equal(f.contents('good.txt'), 'good.txt\n');
   assert.equal(f.contents('bad.txt'), undefined);
   const before = f.store.load();
-  await f.land([a, b, bad, good], { operationId });
+  await f.land([a, b, bad, good], { operationId, waitMs: 0 });
   // Detached main audits may register between these snapshots. The replay
   // guarantee concerns the original landing checks and acceptance identities.
   assert.deepEqual(
@@ -646,4 +649,131 @@ test('conflict and check failure causes are visible in receipts and pending stat
   assert.ok(status.lanes.some(lane => lane.submission?.cause === 'conflict'));
   assert.ok(status.lanes.some(lane => lane.submission?.cause === 'check-failed'));
   assert.match(result.summary.join('\n'), /terminal-failed \(conflict\)/);
+});
+
+test('explicit wait settles bounded observations and never retries a check failure or conflict', async t => {
+  const f = await fixture(t),
+    bad = await f.lane('bad.txt'),
+    good = await f.lane('good.txt');
+  const command = {
+    action: 'land',
+    operationId: randomUUID(),
+    laneIds: [bad.laneId, good.laneId],
+    wait: true,
+    waitMs: 0,
+  };
+  const result = (await f.agent.dispatch(command)).result;
+  assert.equal(result.terminal, true);
+  assert.deepEqual(result.counts, { failed: 1, accepted: 1 });
+  assert.match(result.table, /Lane\tHead\tResult/);
+  const before = f.store
+    .load()
+    .runs.filter(r => !r.mainCheck)
+    .map(r => r.id);
+  await f.agent.dispatch(command);
+  assert.deepEqual(
+    f.store
+      .load()
+      .runs.filter(r => !r.mainCheck)
+      .map(r => r.id),
+    before,
+  );
+  // Finished requests release their Lane/head: resubmitting the failed Lane is a new attempt.
+  const retry = (await f.agent.dispatch({ ...command, operationId: randomUUID(), laneIds: [bad.laneId] }))
+    .result;
+  assert.equal(retry.terminal, true);
+  assert.deepEqual(retry.counts, { failed: 1 });
+  assert.equal(f.store.load().landingEntries.length, 3);
+});
+
+test('two parent operations cannot reserve the same pending Lane/head, including non-batch work', async t => {
+  const f = await fixture(t, { batching: false }),
+    a = await f.lane('a.txt');
+  const request = { action: 'land', operationId: randomUUID(), laneIds: [a.laneId], wait: false };
+  await f.agent.dispatch(request);
+  await assert.rejects(f.agent.dispatch({ ...request, operationId: randomUUID() }), {
+    code: 'LANDING_ALREADY_SUBMITTED',
+  });
+  assert.equal(f.store.load().runs.length, 0);
+  assert.equal((await f.agent.dispatch({ ...request, wait: true })).result.complete, true);
+});
+
+for (const batching of [true, false])
+  test(`wait retries a definite infrastructure interruption (batching=${batching})`, async t => {
+    const f = await fixture(t, { batching }),
+      a = await f.lane('a.txt');
+    const dispatch = f.agent.work.dispatch.bind(f.agent.work);
+    let interrupted = false;
+    f.agent.work.dispatch = async (...args) => {
+      const response = await dispatch(...args);
+      if (args[0].action === 'run-check' && !interrupted) {
+        interrupted = true;
+        await waitForAgentRun(f.store, args[0].operationId);
+        await batchEdit(f.agent.work, 'synthetic-infra', data => {
+          const run = data.runs.find(r => r.id === args[0].operationId);
+          run.status = 'interrupted';
+          run.exitCode = null;
+          run.error = { code: 'SYNTHETIC_INFRA', message: 'Local test interruption' };
+        });
+      }
+      return response;
+    };
+    const result = (
+      await f.agent.dispatch({ action: 'land', operationId: randomUUID(), laneIds: [a.laneId], wait: true })
+    ).result;
+    assert.equal(result.complete, true);
+    const data = f.store.load();
+    if (batching) {
+      assert.equal(data.landingEntries.length, 1);
+      assert.equal(data.landingEntries[0].infrastructureRetries.length, 1);
+    }
+    assert.equal(data.runs.filter(r => !r.mainCheck).length, 2);
+    assert.equal(data.channelMoves.length, 1);
+  });
+
+test('land --wait prints a per-Lane table and exits nonzero for a real failed check', async t => {
+  const f = await fixture(t),
+    bad = await f.lane('bad.txt');
+  const child = spawnSync(process.execPath, [resolve('dist/cli.js'), 'land', f.root, bad.laneId, '--wait'], {
+    encoding: 'utf8',
+  });
+  assert.equal(child.status, 1, child.stderr);
+  assert.equal(JSON.parse(child.stdout).result.terminal, true);
+  assert.match(child.stderr, /Lane\tHead\tResult/);
+  assert.match(child.stderr, /check-failed/);
+  const command = { ...JSON.parse(child.stdout).result.replay.command, wait: true };
+  const agent = spawnSync(
+    process.execPath,
+    [resolve('dist/cli.js'), 'agent', f.root, 'land', JSON.stringify(command)],
+    { encoding: 'utf8' },
+  );
+  assert.equal(agent.status, 1, agent.stderr);
+  assert.match(agent.stderr, /Lane\tHead\tResult/);
+  assert.equal(f.store.load().runs.filter(r => !r.mainCheck).length, 1);
+});
+
+test('native save infers its Lane and checkpoint replays the identical mutation', async t => {
+  const f = await fixture(t),
+    a = await f.lane('a.txt');
+  writeFileSync(join(a.path, 'a.txt'), 'Saved through alias\n');
+  const request = JSON.stringify({ operationId: randomUUID(), message: 'Alias save' });
+  const cli = (action, command = request) =>
+    spawnSync(process.execPath, [resolve('dist/cli.js'), 'agent', f.root, action, command], {
+      cwd: a.path,
+      encoding: 'utf8',
+    });
+  const saved = cli('save');
+  assert.equal(saved.status, 0, saved.stderr);
+  const head = JSON.parse(saved.stdout).result.head;
+  assert.notEqual(head, a.head);
+  const replay = cli(
+    'checkpoint',
+    JSON.stringify({
+      ...JSON.parse(request),
+      ...JSON.parse(saved.stdout).result.resolved,
+    }),
+  );
+  assert.equal(replay.status, 0, replay.stderr);
+  assert.equal(JSON.parse(replay.stdout).result.head, head);
+  assert.equal(f.store.select('lanes', a.laneId).head, head);
 });

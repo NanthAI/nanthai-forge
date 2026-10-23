@@ -815,3 +815,18 @@ test('pending infra keeps the original batch and submission resumable without at
   assert.equal(receipt.code, 'GITHUB_ACTIONS_PENDING_INFRA');
   assert.equal(attempt.run.runId, prefix.runId);
 });
+
+test('canonical enqueue refuses a second operation for an in-progress Lane/head and allows one after it failed', async t => {
+  const f = await fixture(t, { remote: false });
+  const input = await f.candidate('bad.txt');
+  await assert.rejects(enqueueLanding(f.work, { ...input.command, operationId: randomUUID() }, input.view), {
+    code: 'LANDING_ALREADY_SUBMITTED',
+  });
+  assert.equal(f.store.load().landingEntries.length, 1);
+  await drainLandingBatches(f.work, 'main');
+  assert.equal(f.store.load().runs.filter(r => !r.mainCheck).length, 1);
+  assert.equal(f.store.load().landingEntries[0].status, 'failed');
+  // A finished (failed) entry no longer owns the Lane/head: a flaky check can be retried.
+  await enqueueLanding(f.work, { ...input.command, operationId: randomUUID() }, input.view);
+  assert.equal(f.store.load().landingEntries.length, 2);
+});

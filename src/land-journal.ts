@@ -1,3 +1,4 @@
+import { requireNewLandSelection } from './land-request-identity.js';
 import {
   previewLanding,
   previewExclusionMessage,
@@ -37,6 +38,7 @@ export type LandEntry = {
   viewId?: string;
   queued?: boolean;
   single?: { attempt: number; viewId?: string; previous: string | null };
+  infrastructureRetries?: { code: string; runId: string }[];
   result?: Record<string, unknown>;
 };
 export type LandSelection = { inputs: WorkView['inputs']; finish: FinishAction };
@@ -158,7 +160,10 @@ export class LandJournal {
       entries: orderOverlapGroups(plan, entries, entry => entry.inputs.map(pin => pin.laneId)),
       pins: pinned,
     };
-    this.save();
+    store.locked(() => {
+      requireNewLandSelection(store, command.operationId, command.channel, entries);
+      this.save();
+    });
   }
   preflight(store: WorkStore, command: LandCommand) {
     // Constructor saved these pins before any potentially long preview. Recovery

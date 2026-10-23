@@ -16,6 +16,19 @@ export const landingEntrySchema = z.object({
   environmentSnapshot: checkEnvironmentSchema.optional(),
   runtimeSnapshot: landingRuntimeSchema.optional(),
   reason: z.string().optional(),
+  infrastructureRetries: z.array(z.object({ at: z.string(), code: z.string(), runId: id })).optional(),
+  runtimeRepins: z
+    .array(
+      z.object({
+        at: z.string(),
+        fields: z.array(z.string()),
+        previousEnvironment: head,
+        environment: head,
+        previousRuntime: landingRuntimeSchema,
+        runtime: landingRuntimeSchema,
+      }),
+    )
+    .optional(),
   preview: z.literal('skip').optional(),
   previewDiagnostic: z
     .object({

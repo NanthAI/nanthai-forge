@@ -178,7 +178,7 @@ export class AgentWorkflow {
     if (['start', 'checkpoint', 'sync'].includes(identity.action))
       delete (identity as { waitMs?: number }).waitMs;
     const wait = !('wait' in identity && identity.wait === false);
-    if (identity.action === 'finish' || identity.action === 'land') delete identity.wait;
+    if (identity.action === 'finish') delete identity.wait;
     const store = this.work.store,
       { command, resolved: defaultResolved } = resolveAgentDefaults(store, identity);
     const filled = { ...retainedResolved, ...defaultResolved };

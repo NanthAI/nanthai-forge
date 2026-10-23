@@ -1,3 +1,4 @@
+import { workProgress } from './work-progress.js';
 // SPDX-License-Identifier: Apache-2.0
 import { recoverOptimisticMain, recoveryResult } from './optimistic-recovery.js';
 import { wakeGithubPush } from './github-auto-push.js';
@@ -47,11 +48,33 @@ export function wakePostAccept(store: WorkStore) {
   child.unref();
 }
 
-export async function drainPostAccept(store: WorkStore, push?: { channel: string; checkId: string }) {
+export async function drainPostAccept(
+  store: WorkStore,
+  push?: { channel: string; checkId: string },
+  options: { waitMs?: number; timeoutMs?: number; progress?: boolean } = {},
+) {
+  const end = options.timeoutMs === undefined ? Infinity : Date.now() + options.timeoutMs;
+  let reportedAt = -Infinity;
+  const observe = () => {
+    if (Date.now() >= end)
+      throw new ForgeError(
+        'GITHUB_SYNC_AUDIT_TIMEOUT',
+        'Main audit wait expired; its original run is retained. Retry github-sync --push --wait-audit.',
+      );
+    if (options.progress && Date.now() - reportedAt >= 5000) {
+      const run = store.load().runs.find(run => run.mainCheck && !run.endedAt);
+      workProgress(
+        'waiting for main audit',
+        run ? `run=${run.id} status=${run.status}` : 'Waiting for audit admission',
+      );
+      reportedAt = Date.now();
+    }
+  };
   const response = await withQueueSlot(
     join(store.directory, 'post-accept-main-queue'),
     async () => {
       for (;;) {
+        observe();
         if (runInterruption.signal.aborted)
           throw new ForgeError(
             'CANCELLED',
@@ -77,6 +100,7 @@ export async function drainPostAccept(store: WorkStore, push?: { channel: string
             // Keep the idle probe from repeatedly loading Work while an audit
             // yields its machine capacity to foreground checks.
             do {
+              observe();
               await new Promise(resolve => setTimeout(resolve, 250));
             } while (!runInterruption.signal.aborted && foregroundQueued());
             continue;
@@ -135,16 +159,25 @@ export async function drainPostAccept(store: WorkStore, push?: { channel: string
         await new Promise(resolve => setTimeout(resolve, 250));
       }
     },
-    { anchor: store.directory },
+    {
+      anchor: store.directory,
+      ...(options.waitMs === undefined ? {} : { waitMs: options.waitMs }),
+      ...(options.progress ? { observe: () => observe(), phase: 'waiting for main audit' } : {}),
+    },
   );
-  if ('waiting' in response)
+  if ('waiting' in response) {
+    observe();
     throw new ForgeError(
       'WORK_BUSY',
       'Main audit worker is still active; retry to observe its retained run before GitHub push.',
     );
+  }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  drainPostAccept(new WorkStore(process.argv[2]!)).catch(error => {
+  const push = process.argv[3]
+    ? (JSON.parse(process.argv[3]) as { channel: string; checkId: string })
+    : undefined;
+  drainPostAccept(new WorkStore(process.argv[2]!), push).catch(error => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
   });

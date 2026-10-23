@@ -72,3 +72,24 @@ test('action help explains review budgets, link selectors, run observation and p
   assert.equal((output.match(/nested check run operation ID/g) ?? []).length, 3);
   assert.match(output, /choice is accept-order, swap or split/);
 });
+
+test('save normalizes to checkpoint with identical pins and validation', async () => {
+  const command = { laneId: id, operationId: id, message: 'Saved', expectedHead: 'a'.repeat(64) };
+  assert.deepEqual(
+    parseAgentAction({ action: 'save', ...command }),
+    parseAgentAction({ action: 'checkpoint', ...command }),
+  );
+  assert.throws(() => parseAgentAction({ action: 'save', laneId: id }), /message/);
+  let output = '';
+  const write = process.stdout.write;
+  process.stdout.write = chunk => {
+    output += chunk;
+    return true;
+  };
+  try {
+    await agentCli(['unused', 'save', '--help']);
+  } finally {
+    process.stdout.write = write;
+  }
+  assert.match(output, /checkpoint/);
+});

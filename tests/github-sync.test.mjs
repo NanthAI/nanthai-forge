@@ -1,7 +1,10 @@
+import { until as untilWorker } from './landing-worker-fixture.mjs';
+import { drainPostAccept } from '../dist/post-accept-main.js';
+import { withQueueSlot } from '../dist/landing-queue.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -357,12 +360,12 @@ test('explicitly retained tracked source follows accepted capture membership, no
 test('CLI supports dry-run and rejects retargeting an existing binding', async t => {
   const f = fixture(t);
   await f.sync({ push: true });
-  const child = execFileSync(
-    process.execPath,
-    [resolve('dist/cli.js'), 'github-sync', f.owner, '--dry-run'],
-    { encoding: 'utf8' },
-  );
-  assert.equal(JSON.parse(child).commits.length, 0);
+  const child = spawnSync(process.execPath, [resolve('dist/cli.js'), 'github-sync', f.owner, '--dry-run'], {
+    encoding: 'utf8',
+  });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(JSON.parse(child.stdout).commits.length, 0);
+  assert.equal(JSON.parse(child.stdout).reason, 'dry-run');
   await assert.rejects(f.sync({ repository: 'tests/elsewhere' }), code('GITHUB_SYNC_BINDING'));
 });
 
@@ -1239,4 +1242,176 @@ test('unaccepted native content cannot satisfy containment', async t => {
     return true;
   });
   assert.equal(f.head(), outside);
+});
+
+async function heldAudit(f) {
+  let release, admitted;
+  const ready = new Promise(resolve => {
+    admitted = resolve;
+  });
+  const gate = new Promise(resolve => {
+    release = resolve;
+  });
+  const pending = withQueueSlot(
+    join(f.work.store.directory, 'post-accept-main-queue'),
+    async () => {
+      admitted();
+      await gate;
+    },
+    { anchor: f.work.store.directory },
+  );
+  await ready;
+  return async () => {
+    release();
+    await pending;
+  };
+}
+
+function syncChild(f, flags, onProgress = () => {}) {
+  const child = spawn(
+    process.execPath,
+    [resolve('dist/cli.js'), 'github-sync', f.owner, '--repo', 'tests/sync', ...flags],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  let stdout = '',
+    stderr = '';
+  child.stdout.on('data', bytes => {
+    stdout += bytes;
+  });
+  child.stderr.on('data', bytes => {
+    stderr += bytes;
+    onProgress(stderr);
+  });
+  return new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('exit', status => resolve({ status, stdout, stderr }));
+  });
+}
+
+test('busy audit and expired --wait-audit always print a JSON no-push reason and nonzero exit', async t => {
+  const f = fixture(t),
+    old = f.head(),
+    release = await heldAudit(f);
+  try {
+    for (const flags of [[], ['--wait-audit', '--audit-timeout-ms', '100']]) {
+      const child = await syncChild(f, ['--push', ...flags]);
+      assert.equal(child.status, 1, child.stderr);
+      const result = JSON.parse(child.stdout);
+      assert.equal(result.pushed, false);
+      assert.equal(result.reason, flags.length ? 'GITHUB_SYNC_AUDIT_TIMEOUT' : 'WORK_BUSY');
+      assert.equal(f.head(), old);
+    }
+  } finally {
+    await release();
+    await drainPostAccept(f.work.store);
+  }
+});
+
+test('--wait-audit observes the retained worker, prints progress, then exports fresh main and pushes', async t => {
+  const f = fixture(t),
+    release = await heldAudit(f);
+  let advanced = false;
+  try {
+    const child = await syncChild(f, ['--push', '--wait-audit'], stderr => {
+      if (!advanced && stderr.includes('waiting for main audit')) {
+        advanced = true;
+        f.accept('Main advanced while waiting', { 'latest.txt': 'Latest accepted main\n' });
+        void release();
+      }
+    });
+    assert.equal(advanced, true);
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(JSON.parse(child.stdout).pushed, true);
+    assert.match(child.stderr, /waiting for main audit/);
+    assert.equal(git(f.remote, ['show', 'main:latest.txt']), 'Latest accepted main\n');
+    assert.equal(f.work.store.load().runs.filter(r => r.mainCheck).length, 1);
+    assert.equal(f.controlState().pushes, 1);
+  } finally {
+    await release();
+  }
+});
+
+test('up-to-date --push returns an explicit no-push reason and exits 0', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const child = await syncChild(f, ['--push', '--wait-audit']);
+  assert.equal(child.status, 0, child.stderr);
+  const result = JSON.parse(child.stdout);
+  assert.equal(result.pushed, false);
+  assert.equal(result.reason, 'nothing-to-push');
+  assert.equal(f.controlState().pushes, 1);
+});
+
+test('CLI no-push validation failures return JSON on stdout and never silently succeed', async t => {
+  const f = fixture(t);
+  const child = await syncChild(f, ['--push', '--audit-timeout-ms', 'invalid']);
+  assert.equal(child.status, 1);
+  assert.equal(JSON.parse(child.stdout).reason, 'BAD_ARGUMENT');
+  assert.equal(f.controlState().pushes, undefined);
+});
+
+test('an asynchronous sync with no completion cannot produce empty stdout and exit zero', async t => {
+  const f = fixture(t);
+  const loader = join(f.temporary, 'incomplete-sync.mjs');
+  writeFileSync(
+    loader,
+    `import { registerHooks } from 'node:module';
+registerHooks({load(url, context, next) {
+ if (url.endsWith('/github-sync-cli.js')) return {format:'module',shortCircuit:true,source:'export const githubSyncCli = () => new Promise(() => {});'};
+ return next(url, context);
+}});`,
+  );
+  const child = spawnSync(
+    process.execPath,
+    ['--import', loader, resolve('dist/cli.js'), 'github-sync', f.owner, '--push'],
+    { encoding: 'utf8' },
+  );
+  assert.notEqual(child.status, 0);
+  assert.equal(JSON.parse(child.stdout).reason, 'GITHUB_SYNC_INCOMPLETE');
+});
+
+test('--wait-audit timeout exits while its newly started audit continues under the same run', async t => {
+  const { createServer } = await import('node:net');
+  const { once } = await import('node:events');
+  const f = fixture(t),
+    endpoint = join(f.temporary, 'audit-gate');
+  const sockets = new Set();
+  const server = createServer(socket => {
+    sockets.add(socket);
+  });
+  server.listen(endpoint);
+  await once(server, 'listening');
+  f.work.execute(
+    {
+      action: 'define-check',
+      checkId: f.work.store.load().checks[0].id,
+      name: 'verify',
+      executable: process.execPath,
+      args: [
+        '-e',
+        `require('net').connect(${JSON.stringify(endpoint)}).on('end',()=>process.exit(0)).resume()`,
+      ],
+    },
+    f.work.store.revision(),
+  );
+  try {
+    // Give the worker admission time independently of the observation deadline:
+    // stdout progress acknowledges that it is retained; the socket proves execution.
+    const pending = syncChild(f, ['--push', '--wait-audit', '--audit-timeout-ms', '3000']);
+    await untilWorker({ store: f.work.store }, () => sockets.size > 0, 'retained audit starts');
+    const runId = f.work.store.load().runs.find(run => run.mainCheck).id;
+    const child = await pending;
+    assert.equal(child.status, 1, child.stderr);
+    assert.equal(JSON.parse(child.stdout).reason, 'GITHUB_SYNC_AUDIT_TIMEOUT');
+    assert.equal(f.work.store.load().runs.find(run => run.id === runId).status, 'running');
+    for (const socket of sockets) socket.end();
+    await drainPostAccept(f.work.store);
+    assert.equal(f.work.store.load().runs.filter(run => run.mainCheck).length, 1);
+    assert.equal(f.work.store.load().runs.find(run => run.id === runId).status, 'passed');
+    assert.equal(f.controlState().pushes, undefined);
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    server.close();
+    await drainPostAccept(f.work.store);
+  }
 });

@@ -1,3 +1,4 @@
+import { waitPushAudit } from './push-audit-wait.js';
 // SPDX-License-Identifier: Apache-2.0
 import { workProgress } from './work-progress.js';
 import { requestPushAudit } from './pre-push-audit.js';
@@ -34,10 +35,24 @@ export async function githubSync(
     operationId?: string;
     autoPush?: boolean;
     rebind?: boolean;
+    waitAudit?: boolean;
+    auditTimeoutMs?: number;
   } = {},
 ) {
   const store = new WorkStore(input);
   invariant(store.native, 'BAD_ARGUMENT', 'github-sync requires a native Forge owner or Lane.');
+  if (options.push) {
+    const timeoutMs = options.auditTimeoutMs ?? 30 * 60_000;
+    invariant(
+      Number.isSafeInteger(timeoutMs) && timeoutMs >= 0,
+      'BAD_ARGUMENT',
+      'auditTimeoutMs must be a nonnegative safe integer.',
+    );
+    const audit = requestPushAudit(store);
+    if (options.waitAudit) await waitPushAudit(store, audit, timeoutMs);
+    else await drainPostAccept(store, audit, { waitMs: 0, timeoutMs, progress: true });
+  }
+  // Audit/recovery may move main. Export a fresh accepted snapshot after it settles.
   const source = new NativeSource(store.root),
     snapshot = store.observing(() => ({ data: store.load(), records: store.readRecords() })),
     { data } = snapshot,
@@ -80,10 +95,6 @@ export async function githubSync(
     );
     if (options.operationId)
       invariant(z.uuid().safeParse(options.operationId).success, 'BAD_ARGUMENT', 'Use a UUID operation id.');
-    if (options.push) {
-      const audit = requestPushAudit(store);
-      await drainPostAccept(store, audit);
-    }
     const remote = `https://github.com/${repository}.git`;
     // A branch that does not exist yet (an empty repository) is adopted as a root commit.
     const allowMissing = !original || (original.pushed === 0 && original.adoptedCommit === '');
@@ -192,6 +203,7 @@ export async function githubSync(
         alreadyPushed || Boolean(repeated?.length && original!.commits.indexOf(repeated.at(-1)!) < pushed),
       commits: entries.map(entry => commitPlan(root, entry)),
       pushed: false,
+      reason: !options.push ? 'dry-run' : entries.length ? 'push-pending' : 'nothing-to-push',
       ...(reconciliation ? { reconciliation } : {}),
       ...(options.rebind
         ? {
@@ -307,6 +319,11 @@ export async function githubSync(
         store.save(current);
       }
     });
-    return { ...plan, pushed: true, hostedSync: await publishGithubStatus(store) };
+    return {
+      ...plan,
+      pushed: true,
+      reason: plan.alreadyPushed ? 'already-pushed' : 'pushed',
+      hostedSync: await publishGithubStatus(store),
+    };
   });
 }

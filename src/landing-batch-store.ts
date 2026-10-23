@@ -25,6 +25,7 @@ import type { WorkService } from './work.js';
 import type { CheckRun, WorkData, WorkView } from './work-types.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { LandingBatch, LandingEntry } from './landing-batch-types.js';
+const ACTIVE_LANDING = new Set(['queued', 'checking', 'awaiting-review']);
 
 export const batchDirectory = (work: WorkService, channel: string) =>
   join(work.store.directory, 'landing-batch-drain', digest(channel));
@@ -89,6 +90,20 @@ export async function enqueueLanding(
       );
       return original;
     }
+    // Only an in-progress entry owns its Lane/head; a terminal one (failed, interrupted, conflict…) may be resubmitted.
+    const duplicate = data.landingEntries?.find(
+      entry =>
+        ACTIVE_LANDING.has(entry.status) &&
+        entry.channel === command.accept!.channel &&
+        data.views
+          .find(view => view.id === entry.viewId)
+          ?.inputs.some(old => view.inputs.some(pin => pin.laneId === old.laneId && pin.head === old.head)),
+    );
+    invariant(
+      !duplicate,
+      'LANDING_ALREADY_SUBMITTED',
+      `This Lane/head already has landing entry ${duplicate?.id} (${duplicate?.status}). Replay that request or wait for it to finish.`,
+    );
     const submitted = pins ?? landingPins();
     const environment = submitted.environment;
     const entry: LandingEntry = {
@@ -158,6 +173,17 @@ export function selectBatch(
       ),
     );
     if (active.environment && accepted) return active;
+    // An already reserved execution owns its original runtime. Observe it to
+    // completion rather than superseding it into a second physical check.
+    if (
+      active.environment &&
+      active.prefixes.some(prefix =>
+        data.runs.some(
+          run => run.id === prefix.runId && ['queued', 'preparing', 'running'].includes(run.status),
+        ),
+      )
+    )
+      return active;
     // Recorded environment variables can be replayed; the host/Node runtime
     // cannot. Also catch an in-place Node upgrade at the same executable path.
     const incompatible: string[] = active.environment
@@ -187,6 +213,33 @@ export function selectBatch(
         : ['environment fingerprint (legacy entry)'];
     if (entry.runtimeSnapshot) fields.push(...changedLandingRuntime(entry.runtimeSnapshot));
     if (definition !== entry.definition) fields.unshift('check definition');
+    if (data.views.find(view => view.id === entry.viewId)?.head !== entry.head)
+      fields.unshift('candidate head');
+    // A Node upgrade changes execution pins, never the selected source or check.
+    // Re-admit only when all other compatibility checks still pass. Keep arrival
+    // and insertion order; fresh batches get fresh run identities and evidence.
+    if (
+      fields.length &&
+      entry.environmentSnapshot &&
+      entry.runtimeSnapshot &&
+      fields.every(name => ['node', 'nodeExecutable', 'nodeBinary'].includes(name))
+    ) {
+      const runtime = landingPins().runtime;
+      (entry.runtimeRepins ??= []).push({
+        at: new Date().toISOString(),
+        fields,
+        previousEnvironment: entry.environment,
+        environment: environment.fingerprint,
+        previousRuntime: entry.runtimeSnapshot,
+        runtime,
+      });
+      entry.environment = environment.fingerprint;
+      entry.environmentSnapshot = environment;
+      entry.runtimeSnapshot = runtime;
+      delete entry.reason;
+      delete entry.terminalAt;
+      continue;
+    }
     if (fields.length) {
       entry.status = 'interrupted';
       entry.terminalAt = new Date().toISOString();

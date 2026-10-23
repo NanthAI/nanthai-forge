@@ -27,11 +27,19 @@ changes retain the full-check override.
 A queued submission retains the submitting Node version, canonical executable and
 binary digest, platform/OS/architecture, a content digest of the installed Forge JavaScript modules, packaged runtime helpers and declared dependency versions,
 check definition and clean check settings. Worker admission compares those pins.
-A changed runtime, definition or check setting (including `FORGE_CHECK_SCOPED` and
-`FORGE_CHECK_FULL`) interrupts before dispatch and names the changed fields without
-printing their values. Configure the owner service and submitter with the same
-installed build, Node and check settings, then submit a new finish/land operation.
-The original interrupted operation remains readable and retains its outcome.
+On worker admission, queued entries whose only changed fields are Node version,
+executable location or binary digest are automatically re-pinned after checking
+the original source/check definition and all other environment settings. Arrival
+order and entry identities remain unchanged. `runtimeRepins` records the event,
+changed field names and old/new execution pins; a fresh batch/run checks the new
+runtime. No previous passing evidence is transferred. Unstarted selected batches
+are superseded before re-admission. CLI content, check definition, platform/OS/
+architecture or check setting changes (including `FORGE_CHECK_SCOPED` and
+`FORGE_CHECK_FULL`) still interrupt before dispatch and name only changed fields.
+Configure the owner service and submitter with the same installed build and check
+settings, then submit a new finish/land operation. The original evidence remains
+readable. Node upgrades need a service restart to load the updated generated
+workflow; queued Node-only entries no longer require manual resubmission.
 
 Shell defaults (`PATH`, `TERM`, `LANG`, `TZ` and `LC_*`) come from the owner worker.
 Different shell defaults do not invalidate a submission, unless a check explicitly
@@ -43,13 +51,23 @@ different shell defaults may share that worker snapshot; submitting a shell path
 does not select the worker's tools.
 
 Async finish/land journals retain submission pins before returning, including when
-a dependency delays enqueueing. Restart never substitutes the worker's identity for
-those original pins. A retained batch cannot start under a different installed
-controller, Node executable bytes/location or physical host/Node version. Install builds immutably and restart the service when
+a dependency delays enqueueing. Restart retains original source/check pins. Node-only changes take the recorded
+re-admission path above; a retained batch cannot start under different CLI content
+or physical host pins. Install builds immutably and restart the service when
 upgrading. Old records remain readable: environment snapshots retain their recorded
 Node version and check settings; entries with only a legacy fingerprint require an
 exact match because their compatibility cannot be established from missing details.
 Previously selected legacy batches still recover their recorded run snapshot.
+
+Use `nforge land ROOT LANE_ID OTHER_LANE_ID --wait --operation-id UUID` for a
+complete selected wave instead of a shell resubmission loop. The JSON result
+includes a per-Lane `table`; stderr prints it too. Failures exit nonzero. Replaying
+the same operation preserves failed checks and conflicts. New parent journals
+serialize duplicate Lane/head admission, including ordinary non-batch work; batch
+enqueue also refuses duplicate pinned inputs across finish/land operations.
+Infrastructure recovery retains its entry and records `infrastructureRetries`;
+unavailable runners and budget decisions remain explicit terminal outcomes. Ambiguous dispatch recovery follows the
+original provider journal/run, without an additional submission or dispatch.
 
 ## Durable finite driver
 

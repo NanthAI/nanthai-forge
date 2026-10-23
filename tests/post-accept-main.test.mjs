@@ -50,3 +50,30 @@ for (const completed of [false, true])
     });
     assert.deepEqual(data, before);
   });
+
+test('bounded audit observation expires without replacing an active audit', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-audit-timeout-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const data = {
+    channelMoves: [],
+    runs: [{ id: 'retained', status: 'running', mainCheck: { channel: 'main' } }],
+    checks: [],
+    intents: [],
+    views: [],
+  };
+  await assert.rejects(
+    drainPostAccept(
+      {
+        directory,
+        native: false,
+        load: () => structuredClone(data),
+        locked: () => assert.fail('Expired observation must not modify Work'),
+      },
+      undefined,
+      { timeoutMs: 0 },
+    ),
+    { code: 'GITHUB_SYNC_AUDIT_TIMEOUT' },
+  );
+  assert.equal(data.runs.length, 1);
+  assert.equal(data.runs[0].id, 'retained');
+});

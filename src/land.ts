@@ -1,3 +1,5 @@
+import { waitForLand, retrySingleInfrastructure } from './land-wait.js';
+import { landingWorkerSignal } from './landing-worker-context.js';
 import { landingDiagnosis } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landReceipt } from './land-receipt.js';
@@ -22,7 +24,7 @@ import type { WorkView } from './work-types.js';
 
 const waiting = (result: Record<string, unknown>) => result.status === 'waiting';
 /** Pin saved inputs once, submit the whole eligible wave, then use the existing batch driver. */
-export async function land(
+async function landOnce(
   work: WorkService,
   command: LandCommand,
   selection?: LandSelection,
@@ -54,6 +56,15 @@ export async function land(
       if (wait === false) return admitted();
       const journal = new LandJournal(store, command, selection);
       journal.preflight(store, command);
+      for (const entry of journal.state.entries) {
+        const queued = store.select('landingEntries', entry.command.operationId);
+        if (
+          entry.result?.status === 'interrupted' &&
+          queued &&
+          ['queued', 'checking'].includes(queued.status)
+        )
+          entry.result = { status: 'waiting' };
+      }
       const pins = new Map(
         journal.state.entries.flatMap(entry => entry.inputs).map(pin => [pin.laneId, pin.head]),
       );
@@ -256,6 +267,7 @@ export async function land(
                     (selection.finish.maxRetries ?? 3),
               });
             }
+            if (wait === true && !entry.queued) retrySingleInfrastructure(work, entry);
             if (entry.result && !waiting(entry.result)) progressed = true;
             journal.save();
           } catch (error) {
@@ -274,4 +286,11 @@ export async function land(
     'WORK_BUSY',
     `Replay land operation ${command.operationId}; its driver is still running.`,
   );
+}
+
+/** Explicit wait keeps driving the retained request; omitted wait preserves a finite sweep. */
+export async function land(...args: Parameters<typeof landOnce>) {
+  const [work, command] = args;
+  if (command.wait !== true || landingWorkerSignal()) return landOnce(...args);
+  return waitForLand(work, () => landOnce(...args));
 }
