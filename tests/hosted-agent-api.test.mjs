@@ -179,3 +179,26 @@ test('remote Lane abandonment/reopening uses canonical lifecycle API without a c
   assert.equal(reopened.result.lane.state, 'active');
   assert.equal(reopened.result.lane.head, abandoned.result.lane.head);
 });
+
+test('landing cancellation reconciles a lost reply through the real API without changing Lane or check lifecycle', async t => {
+  const s = await setup(t),
+    request = s.f.request(),
+    submission = await s.f.enqueue(request),
+    before = await s.f.readLane(s.f.lane.laneId);
+  s.lose('projectHostedLanding:cancel');
+  const command = { submissionId: submission.id };
+  await assert.rejects(s.transport().dispatch('cancel', command), { code: 'HOSTED_ACTION_FAILED' });
+  const result = await s.transport().dispatch('cancel', command);
+  assert.equal(result.result.error.code, 'LANDING_CANCELLED');
+  assert.deepEqual(await s.transport().dispatch('cancel', command), result);
+  assert.deepEqual(await s.f.readLane(s.f.lane.laneId), before);
+  assert(
+    s.calls
+      .filter(c => c.name !== 'projectHostedAgent:capabilities')
+      .every(c => c.name === 'projectHostedLanding:cancel'),
+  );
+  await s.f.drain();
+  await s.f.passChecks();
+  await s.f.drain();
+  assert.equal(s.f.tables.projectHostedAcceptances.size, 0);
+});

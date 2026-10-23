@@ -17,6 +17,7 @@ for (const [action, api] of [
   ['sync', 'projectHostedSyncJobs:submit'],
   ['check', 'projectHostedChecks:enqueue'],
   ['finish', 'projectHostedLanding:enqueue'],
+  ['cancel', 'projectHostedLanding:cancel'],
   ['revert', 'projectHostedSyncJobs:submit'],
   ['abandon', 'projectHostedLifecycle:transition'],
 ])
@@ -31,6 +32,7 @@ for (const [action, api] of [
       sync: { laneId: s.lane.laneId, apply: false },
       check: { candidateId: s.candidate.id, checkId: randomUUID() },
       finish: { laneId: s.lane.laneId },
+      cancel: { submissionId: randomUUID() },
       revert: { target: { kind: 'receipt', receiptId: randomUUID() } },
       abandon: { reason: 'Superseded' },
     }[action];

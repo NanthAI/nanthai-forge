@@ -13,6 +13,7 @@ export const hostedAgentActions = [
   'sync',
   'check',
   'finish',
+  'cancel',
   'revert',
   'abandon',
   'reopen',
@@ -97,6 +98,7 @@ export const hostedAgentCommandSchemas = {
       accept: z.literal(true).optional(),
     })
     .strict(),
+  cancel: z.object({ submissionId: uuid }).strict(),
   revert: z.object({ ...message, target: revertTargetSchema }).strict(),
   abandon: z
     .object({

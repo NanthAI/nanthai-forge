@@ -8,7 +8,7 @@ import { saveHostedLane } from './hosted-save-client.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { hostedLifecycleRequestSchema } from './hosted-lifecycle.js';
 import { hostedCheckRequestSchema } from './hosted-check.js';
-import { hostedLandingRequestSchema } from './hosted-landing.js';
+import { hostedLandingRequestSchema, hostedLandingCancelSchema } from './hosted-landing.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
@@ -224,6 +224,13 @@ export async function executeHostedAgent(
       });
     });
     return session.mutation('projectHostedChecks:enqueue', { request: canonicalPayload(request) });
+  }
+  if (action === 'cancel') {
+    const command = hostedAgentCommandSchemas.cancel.parse(input);
+    const request = await session.journal.retain('cancel-request', () =>
+      hostedLandingCancelSchema.parse({ operationId, authorityEpoch: epoch, ...command }),
+    );
+    return session.mutation('projectHostedLanding:cancel', { request: canonicalPayload(request) });
   }
   invariant(action === 'finish', 'HOSTED_ACTION_UNSUPPORTED', 'Unsupported hosted action.');
   const command = hostedAgentCommandSchemas.finish.parse(input);

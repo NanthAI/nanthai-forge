@@ -182,6 +182,9 @@ function actionHelp(action: string): string {
   if (action === 'observe' || action === 'log' || action === 'cancel')
     result +=
       'operationId is the nested check run operation ID, not the finish operation ID. Resume a finish by replaying its original finish request plus resolved pins.\n';
+  if (action === 'cancel')
+    result +=
+      'Hosted cancel takes {submissionId,operationId?}: submissionId selects a landing request and operationId identifies this cancellation. An already accepted request returns its receipt; Lane lifecycle and check execution stay independent.\n';
   if (action === 'peer-ack')
     result +=
       'Use noticeId from peers detail:true. choice is accept-order, swap or split; optional text explains the advisory proposal. Reuse operationId and inputs after an unknown outcome. This records an answer; it does not resolve source conflicts.\n';
@@ -220,6 +223,7 @@ function actionHelp(action: string): string {
       'check',
       'run',
       'finish',
+      'cancel',
       'revert',
       'abandon',
       'reopen',

@@ -169,7 +169,14 @@ export function agentFixture(t) {
         phase: 'queued',
         observation: { state: 'pending' },
       }));
-    } else if (name === 'projectHostedLifecycle:transition')
+    } else if (name === 'projectHostedLanding:cancel')
+      result = once(id, () => ({
+        id: request.submissionId,
+        phase: 'terminal-failed',
+        observation: { state: 'terminal-failed', pendingReason: null, cause: 'rejected' },
+        error: { code: 'LANDING_CANCELLED', message: 'The hosted landing request was cancelled.' },
+      }));
+    else if (name === 'projectHostedLifecycle:transition')
       result = once(id, () => ({
         schema: 1,
         operationId: id,

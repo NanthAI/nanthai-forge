@@ -2,11 +2,11 @@
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
-import { accessibleProject } from './projectAuthority';
+import { activeProject, accessibleProject } from './projectAuthority';
 import { loadFinish } from './projectHostedFinishStore';
 import { acceptancePage, acceptancePlan } from './projectHostedAcceptanceStore';
 import { loadLandingAttempt } from './projectHostedLandingStore';
-import { readHostedRecord } from './projectHostedRecords';
+import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { sourceSubmission } from '../src/landing-submission-state';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
@@ -26,8 +26,13 @@ export const resume = mutation({
       const { state } = await loadLanding(ctx, input);
       const actor = await acceptanceActor(ctx, state.request.agent);
       invariant(actor.id === state.actor, 'PROJECT_UNAVAILABLE', 'Resume the original finish actor.');
+      const pending = state.phase !== 'landed' && state.phase !== 'terminal-failed';
+      // Identity is not a retained contributor grant. Check current access before
+      // even repairing a scheduler receipt; history needs access but no old epoch.
+      if (pending) await hostedWriteProject(ctx, input.projectId, actor.id, state.request.authorityEpoch);
+      else await activeProject(ctx, input.projectId, actor.id);
       const { row } = await loadFinish(ctx, input);
-      if (state.phase !== 'landed' && state.phase !== 'terminal-failed') await scheduleFinish(ctx, row);
+      if (pending) await scheduleFinish(ctx, row);
       return null;
     } catch (error) {
       return report(error);

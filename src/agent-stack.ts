@@ -3,6 +3,11 @@ import { NativeSource } from './native-source.js';
 import { allRecords } from './agent-lifecycle.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane, ChannelMove } from './work-types.js';
+
+/** Status accepts stored Lanes and the public receipts used by project pages. */
+export type StackLane = Pick<Lane, 'stack'> & ({ id: string } | { laneId: string });
+const parentId = (stack: Lane['stack']) =>
+  typeof stack?.laneId === 'string' && stack.laneId.length ? stack.laneId : undefined;
 const currentChannelHead = (store: WorkStore, channel: string) =>
   allRecords<ChannelMove>(store, 'channelMoves')
     .filter(move => move.channel === channel && move.status === 'accepted')
@@ -10,9 +15,9 @@ const currentChannelHead = (store: WorkStore, channel: string) =>
 
 /** A landing is established by a Candidate input and a receipt still on main,
  * never by coincidental source containment or the parent's lifecycle alone. */
-export function stackLanding(store: WorkStore, lane: Lane, mainTarget?: string) {
+export function stackLanding(store: WorkStore, lane: Pick<Lane, 'stack'>, mainTarget?: string) {
   const stack = lane.stack;
-  if (!stack || stack.detached) return undefined;
+  if (!stack || stack.detached || !parentId(stack)) return undefined;
   const parent = store.select('lanes', stack.laneId);
   const moves = allRecords<ChannelMove>(store, 'channelMoves');
   const inputs = new Map(
@@ -44,31 +49,50 @@ export function stackLanding(store: WorkStore, lane: Lane, mainTarget?: string) 
     );
   });
 }
-export function stackStatus(store: WorkStore, lane: Lane) {
+export function stackStatus(store: WorkStore, lane: StackLane) {
   const stack = lane.stack;
   if (!stack) return undefined;
-  const parent = store.select('lanes', stack.laneId);
+  const parent = parentId(stack) ? store.select('lanes', stack.laneId) : undefined;
   const landing = stackLanding(store, lane);
   const status = stack.detached
     ? 'main'
-    : landing
-      ? 'parent-landed'
-      : parent?.state === 'abandoned'
-        ? 'parent-abandoned'
-        : parent?.head !== stack.head
-          ? 'parent-moved'
-          : 'up-to-date';
-  const chain = [lane.id];
+    : !parentId(stack)
+      ? 'parent-unknown'
+      : landing
+        ? 'parent-landed'
+        : !parent
+          ? 'parent-missing'
+          : parent.state === 'abandoned'
+            ? 'parent-abandoned'
+            : parent.head !== stack.head
+              ? 'parent-moved'
+              : 'up-to-date';
+  const chain = ['id' in lane ? lane.id : lane.laneId];
   const seen = new Set(chain);
-  let cursor: Lane | undefined = lane;
-  while (cursor?.stack && !cursor.stack.detached && !seen.has(cursor.stack.laneId)) {
-    seen.add(cursor.stack.laneId);
-    chain.unshift(cursor.stack.laneId);
-    cursor = store.select('lanes', cursor.stack.laneId);
+  let cursor = lane.stack;
+  let chainStatus: 'parent-unknown' | 'parent-missing' | 'cycle' | undefined;
+  while (cursor && !cursor.detached) {
+    const id = parentId(cursor);
+    if (!id) {
+      chainStatus = 'parent-unknown';
+      break;
+    }
+    if (seen.has(id)) {
+      chainStatus = 'cycle';
+      break;
+    }
+    const ancestor = store.select('lanes', id);
+    if (!ancestor) {
+      chainStatus = 'parent-missing';
+      break;
+    }
+    seen.add(id);
+    chain.unshift(id);
+    cursor = ancestor.stack;
   }
   return {
     status,
-    parent: stack.laneId,
+    parent: parentId(stack) ?? null,
     savedParent: stack.head,
     parentHead: parent?.head ?? null,
     target:
@@ -79,7 +103,8 @@ export function stackStatus(store: WorkStore, lane: Lane) {
       null,
     ...(landing ? { acceptanceId: landing.id } : {}),
     depth: chain.length,
-    summary: `${chain.map(id => id.slice(0, 8)).join(' → ')} · ${status}`,
+    ...(chainStatus ? { chainStatus } : {}),
+    summary: `${chain.map(id => id.slice(0, 8)).join(' → ')} · ${status}${chainStatus && chainStatus !== status ? ` · ${chainStatus}` : ''}`,
     ...(status === 'parent-abandoned'
       ? { next: 'sync with ontoMain:true reapplies only this Lane’s delta onto main.' }
       : {}),

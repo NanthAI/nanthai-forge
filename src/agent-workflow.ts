@@ -835,7 +835,7 @@ export class AgentWorkflow {
 }
 
 /** Add merged markers to the lane items of a status page. */
-function lanePage<T extends { items: { head: string; base: string }[] }>(
+function lanePage<T extends { items: ReturnType<typeof laneReceipt>[] }>(
   store: WorkService['store'],
   section: T,
   data: Pick<WorkData, 'channelMoves'>,

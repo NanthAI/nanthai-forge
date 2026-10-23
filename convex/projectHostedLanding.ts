@@ -16,12 +16,34 @@ import { initializeFinish } from './projectHostedFinishStore';
 import { pinLandingAttempt } from './projectHostedLandingPins';
 import {
   hostedLandingRequestSchema,
+  hostedLandingCancelSchema,
   hostedLandingStateSchema,
   landingObservation,
 } from '../src/hosted-landing';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { cancelHostedLanding } from './projectHostedLandingCancel';
+
+/** Cancel a submission, independently of Lane lifecycle or check execution. */
+export const cancel = mutation({
+  args: { projectId: v.id('hostedProjects'), request: v.string() },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    try {
+      const actor = await acceptanceActor(ctx, true);
+      return canonicalPayload(
+        await cancelHostedLanding(ctx, {
+          projectId: input.projectId,
+          actor: actor.id,
+          request: hostedLandingCancelSchema.parse(JSON.parse(input.request)),
+        }),
+      );
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
 
 export const enqueue = mutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },

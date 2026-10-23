@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { existsSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostedAgentAddress } from '../dist/hosted-agent-cli.js';
@@ -42,6 +43,11 @@ test('the actual agent CLI routes explicit hosted addressing before native owner
   const file = join(s.root, '..', 'command.json');
   writeFileSync(file, JSON.stringify({ laneId: s.lane.laneId }));
   assert.equal((await agentCli([s.root, 'status', '--command-file', file])).result.head, s.lane.head);
+  const submissionId = randomUUID();
+  const cancelled = await agentCli([s.root, 'cancel', JSON.stringify({ submissionId })]);
+  assert.equal(cancelled.action, 'cancel');
+  assert.equal(cancelled.result.id, submissionId);
+  assert.equal(cancelled.result.error.code, 'LANDING_CANCELLED');
   await assert.rejects(agentCli([s.root, 'clean', '{}']), errorCode('HOSTED_ACTION_UNSUPPORTED'));
 });
 test('incomplete hosted CLI addressing fails without auth, network or a native owner', async t => {

@@ -681,7 +681,10 @@ including interruption after working files were applied.
 Stack landing detection checks Candidate inputs before traversing source ancestry,
 so unrelated acceptance history does not re-read every source tree for a new stack.
 `status`, `peers` and `pending` show the stack chain and parent movement,
-abandonment or landing in one line. Child briefs include the parent's latest
+abandonment or landing in one line. A missing parent record reports `parent-missing`;
+a stack without a parent ID reports `parent-unknown`. Chain traversal stops at
+missing parents or cycles and reports `chainStatus` instead of inventing ancestry.
+Detached stacks stop at main. Child briefs include the parent's latest
 handoff; child handoffs retain its pinned fields and `handoff-read` also returns
 the latest parent handoff. Missing handoffs are reported as absent.
 

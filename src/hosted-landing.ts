@@ -30,6 +30,10 @@ export const hostedLandingRequestSchema = z
       .optional(),
   })
   .strict();
+/** A landing request is cancelled separately from its Lane or shared check run. */
+export const hostedLandingCancelSchema = z
+  .object({ operationId: z.uuid(), authorityEpoch: checkNumber, submissionId: z.uuid() })
+  .strict();
 export const hostedLandingAttemptSchema = z
   .object({
     schema: z.literal(1),

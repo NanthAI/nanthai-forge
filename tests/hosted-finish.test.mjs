@@ -307,6 +307,147 @@ test('current project access precedes finish status and resume, including comple
   assert.equal(f.pending().length, 0);
 });
 
+for (const retainedRead of ['none', 'reader', 'public']) {
+  test(`revoked finish contributor with ${retainedRead} read access cannot repair a scheduler receipt`, async t => {
+    const f = await finishFixture(t);
+    f.patch('hostedProjects', f.projectId, { owner: 'project-owner' });
+    const grant = f.insert('projectContributors', { projectId: f.projectId, contributor: 'owner' });
+    const state = await f.enqueue(f.request());
+    // The original actor remains authenticated, but its formerly valid write
+    // grant is gone. Read access must not authorize explicit resume.
+    f.tables.projectContributors.delete(grant);
+    if (retainedRead === 'reader') f.insert('projectReaders', { projectId: f.projectId, reader: 'owner' });
+    if (retainedRead === 'public') f.patch('hostedProjects', f.projectId, { visibility: 'public' });
+    const wake = f.row(state.id).wake;
+    f.patch('_scheduled_functions', wake.taskId, { state: { kind: 'failed' } });
+    const scheduled = structuredClone(f.tables._scheduled_functions),
+      finish = structuredClone(f.row(state.id));
+    await assert.rejects(
+      f.tx('finishRevokedResume', api.resume, { projectId: f.projectId, submissionId: state.id }),
+      code('PROJECT_UNAVAILABLE'),
+    );
+    assert.deepEqual(f.tables._scheduled_functions, scheduled);
+    assert.deepEqual(f.row(state.id), finish);
+    const count = f.counts.filter(c => c.name === 'finishRevokedResume').at(-1);
+    assert(count.ranges <= 8 && count.documents <= 8, 'constant-size current authority lookup');
+    assert.equal(count.writes, 0);
+  });
+}
+
+for (const removal of ['trash', 'deleting', 'deleted']) {
+  test(`explicit finish resume refuses a project marked ${removal} before scheduling`, async t => {
+    const f = await finishFixture(t),
+      state = await f.enqueue(f.request());
+    f.patch('hostedProjects', f.projectId, { removal });
+    const scheduled = structuredClone(f.tables._scheduled_functions);
+    await assert.rejects(
+      f.tx('finishRemovedResume', api.resume, { projectId: f.projectId, submissionId: state.id }),
+      code('PROJECT_UNAVAILABLE'),
+    );
+    assert.deepEqual(f.tables._scheduled_functions, scheduled);
+    assert.equal(f.counts.filter(c => c.name === 'finishRemovedResume').at(-1).writes, 0);
+  });
+}
+
+test('explicit pending resume refuses a stale epoch while completed receipt resume keeps historical epoch', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  f.patch('hostedProjects', f.projectId, { sourceAuthority: { mode: 'server', epoch: 2 } });
+  const scheduled = structuredClone(f.tables._scheduled_functions);
+  await assert.rejects(
+    f.tx('finishStaleResume', api.resume, { projectId: f.projectId, submissionId: state.id }),
+    code('SOURCE_AUTHORITY_CHANGED'),
+  );
+  assert.deepEqual(f.tables._scheduled_functions, scheduled);
+  assert.equal(f.metrics.sourceJobs, 0);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 1);
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  f.patch('hostedProjects', f.projectId, { sourceAuthority: { mode: 'server', epoch: 1 } });
+  await complete(f);
+  const main = f.currentMain();
+  f.patch('hostedProjects', f.projectId, { sourceAuthority: { mode: 'server', epoch: 2 } });
+  await f.tx('finishHistoricalResume', api.resume, { projectId: f.projectId, submissionId: state.id });
+  assert.deepEqual(f.currentMain(), main);
+  assert.equal(f.pending().length, 0);
+  f.patch('hostedProjects', f.projectId, { owner: 'different-owner' });
+  await assert.rejects(
+    f.tx('finishHistoricalRevokedResume', api.resume, { projectId: f.projectId, submissionId: state.id }),
+    code('PROJECT_UNAVAILABLE'),
+  );
+});
+
+test('landing cancellation leaves its check and Lane intact and a delayed passing callback cannot revive finish', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f),
+    lane = await f.readLane(f.lane.laneId),
+    main = f.currentMain(),
+    run = (await f.status(state.id)).attempt.check.runId;
+  const cancelled = JSON.parse(
+    await f.tx('finishLandingCancel', landingApi.cancel, {
+      projectId: f.projectId,
+      request: JSON.stringify({ operationId: randomUUID(), submissionId: state.id, authorityEpoch: 1 }),
+    }),
+  );
+  assert.equal(cancelled.error.code, 'LANDING_CANCELLED');
+  assert.equal((await f.rawChecks.status(run)).status, 'queued');
+  assert.deepEqual(await f.readLane(f.lane.laneId), lane);
+  await complete(f);
+  assert.equal((await f.current(state.id)).submission.error.code, 'LANDING_CANCELLED');
+  assert.deepEqual(f.currentMain(), main);
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  assert.equal(f.pending().length, 0);
+});
+
+test('cancellation during metadata IO fences its delayed resume and retains pending source selection', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  f.moveMain();
+  await f.passChecks();
+  while (!(await f.current(state.id)).pendingAttempt) await f.execute();
+  const task = f.pending().find(task => task.name === 'projectHostedFinishDriver:drive');
+  f.advanceClock(task.scheduledTime - Date.now());
+  const command = JSON.parse(await f.tx('finishStep', driver.step, task.args[0]));
+  assert.equal(command.kind, 'plan');
+  const pending = (await f.current(state.id)).pendingAttempt;
+  await f.tx('finishLandingCancel', landingApi.cancel, {
+    projectId: f.projectId,
+    request: JSON.stringify({ operationId: randomUUID(), submissionId: state.id, authorityEpoch: 1 }),
+  });
+  await f.tx('finishLateIO', driver.resume, {
+    ...task.args[0],
+    command: JSON.stringify(command),
+    storageId: 'ignored-late-upload',
+  });
+  await f.drain();
+  const current = await f.current(state.id);
+  assert.equal(current.submission.error.code, 'LANDING_CANCELLED');
+  assert.deepEqual(current.pendingAttempt, pending);
+  assert.equal(f.metrics.sourceJobs, 0);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 1);
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+});
+
+test('a source completion after landing cancellation cannot install a child attempt or check', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  f.moveMain();
+  await f.passChecks();
+  while (f.pending()[0]?.name !== 'projectModalSource:dispatch') await f.execute();
+  await f.tx('finishLandingCancel', landingApi.cancel, {
+    projectId: f.projectId,
+    request: JSON.stringify({ operationId: randomUUID(), submissionId: state.id, authorityEpoch: 1 }),
+  });
+  const pending = (await f.current(state.id)).pendingAttempt;
+  await f.drain();
+  assert.equal((await f.current(state.id)).submission.error.code, 'LANDING_CANCELLED');
+  assert.deepEqual((await f.current(state.id)).pendingAttempt, pending);
+  assert.equal(f.tables.projectHostedLandingAttempts.size, 1);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 1);
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  assert.equal(f.metrics.sourceJobs, 1);
+  assert.equal(f.pending().length, 0);
+});
+
 test('a failed parent settles its dependent without an idle wake or acceptance', async t => {
   const f = await finishFixture(t),
     parent = await begin(f);

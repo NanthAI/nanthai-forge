@@ -1216,6 +1216,20 @@ Source/file/log bytes are not accepted by this API.
 partial pages do not establish absence. Immutable attempt IDs, Candidate roots,
 main receipts, policy context and run pins remain available for later review.
 
+`projectHostedLanding:cancel({projectId,request})` takes JSON
+`{operationId,authorityEpoch,submissionId}`. Current contributor/owner authority
+is checked before new cancellation or receipt replay. The operation retains its
+original outcome: a pending request becomes `terminal-failed` with
+`LANDING_CANCELLED` and the shared `rejected` cause. Its original request,
+attempts and source pins remain readable. An already terminal failure stays
+unchanged. Cancellation releases only this request's queue claim and fences its
+pending finish metadata IO; it neither abandons a Lane nor cancels a shared check
+or source execution. Late callbacks cannot revive the request. Final acceptance
+and cancellation race transactionally: acceptance first returns the actual landed
+receipt; cancellation first prevents publication. Accepted source is never undone.
+Retry the same operation and parameters after an unknown reply to get its
+retained result, including after later main or authority changes.
+
 The scheduled driver returns after metadata preparation, with phase `checking`,
 `ready` or `terminal-failed`; queued/checking/ready observations remain pending.
 A fake-provider test seam exercises H10 completion and lease recovery. `ready` is
@@ -1334,6 +1348,12 @@ existing parent submission in the same project. Its receipt resumes the dependen
 its failure remains an explicit dependent failure. No recurring observer is needed.
 Omit `finish` to retain the existing prepare-only landing behavior.
 
+Explicit `projectHostedFinish:resume` rechecks current project/contributor write
+authority and the pending request's original source-authority epoch before
+scheduling. A revoked contributor, removed project or stale pending epoch is
+refused without scheduling. Completed requests still require current project
+write access but can reconcile their historical epoch without new work.
+
 Original-operation replay returns the same submission and repairs outstanding
 scheduler receipts. A changed payload under that operation ID is rejected. A main
 head or receipt race creates an explicitly named child attempt, yields with backoff,
@@ -1411,6 +1431,7 @@ nforge agent ./edit compose '{"laneId":"LANE_UUID"}'
 nforge agent ./edit sync '{"laneId":"LANE_UUID"}'
 nforge agent ./edit check '{"candidateId":"CANDIDATE_UUID","checkId":"CHECK_UUID"}'
 nforge agent ./edit finish '{"laneId":"LANE_UUID","message":"Add search"}'
+nforge agent ./edit cancel '{"submissionId":"SUBMISSION_UUID"}'
 nforge agent ./edit revert '{"target":{"kind":"receipt","receiptId":"RECEIPT_UUID"},"message":"Reverse actual acceptance"}'
 nforge agent ./edit abandon '{"laneId":"LANE_UUID","reason":"Superseded","saveFirst":true}'
 nforge agent ./edit capabilities '{}'
@@ -1428,6 +1449,11 @@ Its successful source receipt applies through the guarded checkout installer;
 `apply:false` submits source work without installing it. Dirty or newer local
 files remain preserved. Revert returns an isolated compensating Lane for ordinary
 composition/finish; targets can also be `{kind:"submission",submissionId}`.
+
+Hosted `cancel {submissionId}` cancels a landing request through the separate
+landing API above. Its optional `operationId` identifies the cancellation,
+not the original finish/check. Accepted requests return their landed receipt;
+Lane lifecycle and check execution remain independent.
 
 Check (`run` alias) pins a clean Candidate, definition, runner configuration and
 environment before enqueue. Finish saves the opened Lane when applicable,
@@ -1474,7 +1500,7 @@ nforge mcp ./edit --agent --url https://deployment.convex.cloud --project-id PRO
 ```
 
 The existing server registers `forge_task` for start/open/save/checkpoint/compose/
-sync/finish/revert/abandon/reopen, `forge_check` for check/run/observe, and
+sync/finish/cancel/revert/abandon/reopen, `forge_check` for check/run/observe, and
 `forge_work_overview` for status/capabilities. Actions use the CLI's exact portable
 schemas inside `{command:{action,...}}`, the same response envelope and the same
 `ROOT.forge-client/agent` journal and successful-address retention. Retrying through

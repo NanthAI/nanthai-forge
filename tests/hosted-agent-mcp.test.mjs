@@ -51,6 +51,7 @@ const parameters = s => ({
   check: { candidateId: s.candidate.id, checkId: randomUUID() },
   run: { candidateId: s.candidate.id, checkId: randomUUID() },
   finish: { laneId: s.lane.laneId },
+  cancel: { submissionId: randomUUID() },
   revert: { target: { kind: 'receipt', receiptId: randomUUID() } },
   abandon: { laneId: s.lane.laneId, reason: 'Superseded' },
   reopen: { laneId: s.lane.laneId },
@@ -68,6 +69,7 @@ for (const action of [
   'check',
   'run',
   'finish',
+  'cancel',
   'revert',
   'abandon',
   'reopen',
@@ -110,6 +112,7 @@ for (const [action, api] of [
   ['start', 'projectHostedStart:start'],
   ['check', 'projectHostedChecks:enqueue'],
   ['finish', 'projectHostedLanding:enqueue'],
+  ['cancel', 'projectHostedLanding:cancel'],
 ])
   test(`MCP ${action} lost response reconciles through the actual CLI with the original UUID`, async t => {
     const s = agentFixture(t),

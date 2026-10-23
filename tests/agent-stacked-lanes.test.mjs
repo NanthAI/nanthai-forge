@@ -27,7 +27,15 @@ async function fixture(t) {
   const finish = (lane, extra = {}) =>
     call('finish', { laneId: lane.laneId, message: 'Land work', accept: true, ...extra });
   const text = (lane, file) => readFileSync(join(lane.path, file), 'utf8');
-  const status = async lane => (await call('status', { laneId: lane.laneId })).lane;
+  const status = async lane => {
+    const result = (await call('status', { laneId: lane.laneId })).lane;
+    const project = await call('status');
+    assert.deepEqual(
+      project.lanes.items.find(item => item.laneId === lane.laneId)?.stackStatus,
+      result.stackStatus,
+    );
+    return result;
+  };
   return { root, agent, store: agent.work.store, call, start, edit, save, finish, text, status };
 }
 
@@ -217,6 +225,7 @@ test('abandoned parent remains visible and explicit main retarget preserves only
   await f.call('sync', { laneId: b.laneId, ontoMain: true });
   const saved = f.store.select('lanes', b.laneId);
   assert.equal(saved.stack.detached, true);
+  assert.equal((await f.status(b)).stackStatus.status, 'main');
   assert.equal(saved.after, undefined);
   assert.equal(
     new NativeSource(f.root).state(saved.head).files.some(file => file.path === 'parent.txt'),

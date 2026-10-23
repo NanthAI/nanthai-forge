@@ -56,6 +56,7 @@ export function registerHostedAgentWorkflow(
         'compose',
         'sync',
         'finish',
+        'cancel',
         'revert',
         'abandon',
         'reopen',

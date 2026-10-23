@@ -1156,6 +1156,14 @@ records its canonical receipt and request settlement together. The queue lease a
 policy snapshot do not grant acceptance. Large included-Lane/projection work stays
 outside that boundary. See the [landing queue API](operations/source-exchange.md#hosted-landing-queue-api).
 
+Landing cancellation is its own idempotent operation over one request. Its
+transaction checks the exact acceptance receipt before settling a pending request
+as rejected, releases only its queue claim and invalidates pending finish IO.
+Acceptance and cancellation read/write the same request and queue, so concurrent
+publication resolves through OCC and the actual receipt. A committed acceptance
+is preserved; late source/check results cannot revive a cancelled request.
+Cancellation leaves Lane lifecycle and shared source/check execution independent.
+
 ### Hosted final acceptance
 
 `projectHostedAcceptance` consumes H13's prepared attempts. Preparation stages the
@@ -1232,6 +1240,10 @@ status shares the native source-relative projection: later Lane saves show
 status reads are observation only and start no compute. This API and its crash,
 contention and scale tests use local fakes; deployment and live provider qualification
 remain separate.
+
+Explicit finish resume checks current project/contributor write authority before
+scheduler repair, plus the original epoch while work is pending. Completed
+requests retain current-access checks while acknowledging historical epochs.
 
 ### Hosted compensating revert
 
