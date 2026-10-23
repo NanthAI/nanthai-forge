@@ -163,7 +163,7 @@ export async function land(
                 continue;
               }
 
-              await enqueueLanding(work, entry.command, view);
+              await enqueueLanding(work, entry.command, view, journal.state.landingPins);
               entry.queued = true;
               journal.save();
               submitted = true;

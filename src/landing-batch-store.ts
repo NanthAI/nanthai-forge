@@ -9,7 +9,14 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { retryWorkPhase } from './work-retry.js';
 import { finishChild } from './agent-finish-journal.js';
-import { checkEnvironment, changedEnvironmentFields } from './check-environment.js';
+import { checkEnvironment } from './check-environment.js';
+import {
+  landingPins,
+  changedLandingEnvironment,
+  changedLandingRuntime,
+  landingPinsChanged,
+  type LandingPins,
+} from './landing-environment.js';
 import { readPolicy, acceptancePaths } from './work-autonomy.js';
 import { reviewReason } from './autonomy-policy.js';
 import { checkRoute } from './check-backend.js';
@@ -65,7 +72,12 @@ export function batchEligible(work: WorkService, command: FinishAction, view: Wo
     !paths.every(path => /^(?:docs\/.+|[^/]+)\.md$/.test(path))
   );
 }
-export async function enqueueLanding(work: WorkService, command: FinishAction, view: WorkView) {
+export async function enqueueLanding(
+  work: WorkService,
+  command: FinishAction,
+  view: WorkView,
+  pins?: LandingPins,
+) {
   return batchEdit(work, command.operationId, data => {
     const request = digest(JSON.stringify({ command, viewId: view.id, head: view.head }));
     const original = data.landingEntries?.find(entry => entry.id === command.operationId);
@@ -77,7 +89,8 @@ export async function enqueueLanding(work: WorkService, command: FinishAction, v
       );
       return original;
     }
-    const environment = checkEnvironment();
+    const submitted = pins ?? landingPins();
+    const environment = submitted.environment;
     const entry: LandingEntry = {
       id: command.operationId,
       request,
@@ -88,7 +101,7 @@ export async function enqueueLanding(work: WorkService, command: FinishAction, v
       definition: command.expectedDefinition!,
       environment: command.expectedEnvironment ?? environment.fingerprint,
       ...(command.expectedEnvironment === undefined || command.expectedEnvironment === environment.fingerprint
-        ? { environmentSnapshot: environment }
+        ? { environmentSnapshot: environment, runtimeSnapshot: submitted.runtime }
         : {}),
       ...(command.preview ? { preview: command.preview } : {}),
       arrivedAt: new Date().toISOString(),
@@ -129,6 +142,7 @@ export function selectBatch(
   channel: string,
   started?: ReadonlySet<string>,
 ): LandingBatch | undefined {
+  const environment = checkEnvironment();
   for (const active of activeBatches(data, channel)) {
     if (started?.has(active.id)) continue;
     // Older batches did not retain a runtime snapshot. Recover it from actual
@@ -136,24 +150,46 @@ export function selectBatch(
     active.environment ??= data.runs.find(run =>
       active.prefixes.some(prefix => prefix.runId === run.id),
     )?.environment;
-    if (active.environment) return active;
+    // A lost reply may hide an already accepted prefix. Reconcile that canonical
+    // receipt even after a controller upgrade; admission never undoes acceptance.
+    const accepted = active.prefixes.some(prefix =>
+      data.channelMoves.some(
+        move => move.id === finishChild(active.id, `accept:${prefix.viewId}`) && move.status === 'accepted',
+      ),
+    );
+    if (active.environment && accepted) return active;
+    // Recorded environment variables can be replayed; the host/Node runtime
+    // cannot. Also catch an in-place Node upgrade at the same executable path.
+    const incompatible: string[] = active.environment
+      ? (['platform', 'arch', 'os', 'node'] as const).filter(
+          name => active.environment![name] !== environment[name],
+        )
+      : [];
+    incompatible.push(
+      ...active.entryIds.flatMap(id => {
+        const entry = data.landingEntries?.find(entry => entry.id === id);
+        return entry?.runtimeSnapshot ? changedLandingRuntime(entry.runtimeSnapshot) : [];
+      }),
+    );
+    if (active.environment && !incompatible.length) return active;
     active.status = 'superseded';
     for (const entry of data.landingEntries ?? [])
       if (entry.batchId === active.id && entry.status === 'checking') entry.status = 'queued';
   }
-  const environment = checkEnvironment();
   for (const entry of data.landingEntries ?? []) {
     if (entry.channel !== channel || entry.status !== 'queued') continue;
-    const definition = data.checks.find(check => check.id === entry.checkId)?.definition;
+    const check = data.checks.find(check => check.id === entry.checkId);
+    const definition = check?.definition;
     const fields = entry.environmentSnapshot
-      ? changedEnvironmentFields(entry.environmentSnapshot, environment)
+      ? changedLandingEnvironment(entry.environmentSnapshot, environment, check)
       : entry.environment === environment.fingerprint
         ? []
         : ['environment fingerprint (legacy entry)'];
+    if (entry.runtimeSnapshot) fields.push(...changedLandingRuntime(entry.runtimeSnapshot));
     if (definition !== entry.definition) fields.unshift('check definition');
     if (fields.length) {
       entry.status = 'interrupted';
-      entry.reason = `Queued landing pins changed: ${fields.join(', ')}. Submit finish again from the intended runtime.`;
+      entry.reason = landingPinsChanged(fields);
     }
   }
   const train = planLandingTrain(work.store, data, channel);
@@ -176,7 +212,7 @@ export function selectBatch(
       !lead ||
       lead.checkId !== first.checkId ||
       lead.definition !== first.definition ||
-      lead.environment !== first.environment ||
+      parent.environment?.fingerprint !== environment.fingerprint ||
       lead.keepOpen !== first.keepOpen
     )
       return;
@@ -187,7 +223,6 @@ export function selectBatch(
       selected.length === shape.maxBatch ||
       entry.checkId !== first.checkId ||
       entry.definition !== first.definition ||
-      entry.environment !== first.environment ||
       entry.keepOpen !== first.keepOpen
     )
       break;

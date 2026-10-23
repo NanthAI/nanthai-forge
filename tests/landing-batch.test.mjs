@@ -405,7 +405,7 @@ test('an overlapping main move supersedes the checked attempt without changing a
   assert.equal(f.content('same.txt'), 'main version\n');
 });
 
-test('two finish processes with different PATH eject only incompatible pins before checking', async t => {
+test('two finish processes with different PATH share the owner execution environment', async t => {
   const f = await fixture(t);
   const a = await f.candidate('path-a.txt', 'a\n', false);
   const b = await f.candidate('path-b.txt', 'b\n', false);
@@ -429,9 +429,10 @@ console.log(JSON.stringify(result.result));`;
   const data = f.store.load();
   assert.deepEqual(
     data.landingEntries.map(entry => entry.status),
-    ['accepted', 'interrupted'],
+    ['accepted', 'accepted'],
   );
-  assert.match(data.landingEntries[1].reason, /PATH/);
+  assert.equal(f.content('path-a.txt'), 'a\n');
+  assert.equal(f.content('path-b.txt'), 'b\n');
   assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
   assert.equal(data.runs.find(run => !run.mainCheck).status, 'passed');
   assert.equal(
@@ -458,19 +459,25 @@ test('a retained batch executes and accepts with its recorded runtime after driv
   assert.equal(data.landingEntries[0].status, 'accepted');
 });
 
-test('incompatible queued runtime diagnostics name node and FORGE settings without values', async t => {
+test('incompatible queued runtime diagnostics name Node, CLI and check settings without values', async t => {
   const f = await fixture(t);
   await f.candidate('changed-runtime.txt');
   await batchEdit(f.work, 'synthetic-runtime', data => {
     const entry = data.landingEntries[0];
     entry.environmentSnapshot.node = 'synthetic-node-secret';
-    entry.environmentSnapshot.env.FORGE_CHECK_FULL = 'synthetic-value-secret';
+    entry.environmentSnapshot.env.FORGE_CHECK_SCOPED = 'synthetic-value-secret';
+    entry.runtimeSnapshot.nodeExecutable = 'synthetic-executable-secret';
+    entry.runtimeSnapshot.cli = 'synthetic-cli-secret';
   });
   await drainLandingBatches(f.work, 'main');
   const entry = f.store.load().landingEntries[0];
   assert.equal(entry.status, 'interrupted');
   assert.match(entry.reason, /node/);
-  assert.match(entry.reason, /FORGE_CHECK_FULL/);
+  assert.match(entry.reason, /FORGE_CHECK_SCOPED/);
+  assert.match(entry.reason, /nodeExecutable/);
+  assert.match(entry.reason, /cli/);
+  assert.match(entry.reason, /owner service.*submitter/);
+  assert.match(entry.reason, /new finish\/land operation/);
   assert.doesNotMatch(entry.reason, /secret/);
   assert.equal(f.store.load().runs.length, 0);
 });
@@ -641,6 +648,85 @@ for (const unifiedFirst of [false, true])
     await drainLandingBatches(f.work, 'main');
     assert.equal(f.store.load().schema, 20);
   });
+
+for (const snapshot of [false, true])
+  test(`legacy queued entry ${snapshot ? 'with' : 'without'} environment snapshot stays readable`, async t => {
+    const f = await fixture(t, { remote: false });
+    await f.candidate('legacy-entry.txt');
+    await batchEdit(f.work, 'legacy-entry', data => {
+      delete data.landingEntries[0].runtimeSnapshot;
+      if (!snapshot) delete data.landingEntries[0].environmentSnapshot;
+    });
+    const path = process.env.PATH;
+    try {
+      process.env.PATH = `/legacy-shell:${path}`;
+      await drainLandingBatches(f.work, 'main');
+    } finally {
+      process.env.PATH = path;
+    }
+    const entry = f.store.load().landingEntries[0];
+    assert.equal(entry.status, snapshot ? 'accepted' : 'interrupted');
+    if (!snapshot) {
+      assert.match(entry.reason, /legacy entry/);
+      assert.equal(f.store.load().runs.length, 0);
+    }
+  });
+
+test('a changed check definition still interrupts before dispatch', async t => {
+  const f = await fixture(t, { remote: false });
+  await f.candidate('definition.txt');
+  await f.agent.dispatch({
+    action: 'define-check',
+    checkId: f.check.checkId,
+    name: 'verify',
+    executable: process.execPath,
+    args: ['-e', 'process.exit(0)'],
+  });
+  await drainLandingBatches(f.work, 'main');
+  const entry = f.store.load().landingEntries[0];
+  assert.equal(entry.status, 'interrupted');
+  assert.match(entry.reason, /check definition/);
+  assert.equal(f.store.load().runs.length, 0);
+});
+
+test('a replacement runtime cannot dispatch an unstarted retained batch', async t => {
+  const f = await fixture(t, { remote: false });
+  await f.candidate('unstarted.txt');
+  await batchEdit(f.work, 'selected', data => selectBatch(f.work, data, 'main'));
+  await batchEdit(f.work, 'different-cli', data => {
+    data.landingEntries[0].runtimeSnapshot.cli = 'synthetic-other-build';
+  });
+  await drainLandingBatches(f.work, 'main');
+  const data = f.store.load();
+  assert.equal(data.landingBatches[0].status, 'superseded');
+  assert.equal(data.landingEntries[0].status, 'interrupted');
+  assert.match(data.landingEntries[0].reason, /cli/);
+  assert.equal(data.runs.length, 0);
+});
+
+test('explicit PATH passthrough remains a check-relevant submission pin', async t => {
+  const f = await fixture(t, { remote: false });
+  await f.agent.dispatch({
+    action: 'define-check',
+    checkId: f.check.checkId,
+    name: 'verify',
+    executable: process.execPath,
+    args: ['-e', 'process.exit(0)'],
+    env: ['PATH'],
+  });
+  await f.candidate('declared-path.txt');
+  const path = process.env.PATH;
+  try {
+    process.env.PATH = `/declared-other-shell:${path}`;
+    await drainLandingBatches(f.work, 'main');
+  } finally {
+    process.env.PATH = path;
+  }
+  const data = f.store.load();
+  assert.equal(data.landingEntries[0].status, 'interrupted');
+  assert.match(data.landingEntries[0].reason, /PATH/);
+  assert.equal(data.runs.length, 0);
+});
 
 test('pending infra keeps the original batch and submission resumable without attributing source failure', async t => {
   const f = await fixture(t);

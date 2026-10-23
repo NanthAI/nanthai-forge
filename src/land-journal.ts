@@ -3,6 +3,7 @@ import {
   previewExclusionMessage,
   type LandingPreview,
 } from './integration-preview-landing.js';
+import { landingPins, type LandingPins } from './landing-environment.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { landFrictionCounts } from './friction-auto.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -42,6 +43,7 @@ export type LandSelection = { inputs: WorkView['inputs']; finish: FinishAction }
 type State = {
   schema: 1;
   request: string;
+  landingPins?: LandingPins;
   command?: LandCommand;
   selection?: LandSelection;
   entries: LandEntry[];
@@ -150,6 +152,7 @@ export class LandJournal {
     this.state = {
       schema: 1,
       request,
+      landingPins: landingPins(),
       command,
       ...(selection ? { selection } : {}),
       entries: orderOverlapGroups(plan, entries, entry => entry.inputs.map(pin => pin.laneId)),

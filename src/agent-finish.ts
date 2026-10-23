@@ -280,7 +280,7 @@ class FinishRunner {
           preview,
         });
     }
-    const batched = await finishQueuedBatch(this.work, command, attempt);
+    const batched = await finishQueuedBatch(this.work, command, attempt, journal.state.landingPins);
     if (batched) {
       if (batched.status === 'awaiting-review')
         return this.review(attempt, 'Current autonomy policy requires review of this checked batch.');

@@ -1,3 +1,4 @@
+import { landingPins, landingPinsSchema } from './landing-environment.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 // SPDX-License-Identifier: Apache-2.0
 import { mkdirBelow } from './mkdir-below.js';
@@ -39,6 +40,7 @@ const attemptSchema = z.object({
 const schema = z.object({
   schema: z.literal(1),
   request: z.string(),
+  landingPins: landingPinsSchema.optional(),
   command: fields.optional(),
   dependencyWait: z.boolean().optional(),
   submitted: z.boolean().optional(),
@@ -99,6 +101,7 @@ export class FinishJournal {
       : {
           schema: 1,
           request,
+          landingPins: landingPins(),
           command: JSON.parse(JSON.stringify(command)) as Record<string, unknown>,
           attempts: [finishAttempt(command, 0, head, command.accept?.expectedPrevious ?? null)],
           landing: [],

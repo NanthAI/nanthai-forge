@@ -22,6 +22,35 @@ entry and composition continues. Checks run outside Work, Lane and landing
 locks. The selector receives the union of candidate changed paths, so tooling
 changes retain the full-check override.
 
+## Submission and execution environments
+
+A queued submission retains the submitting Node version, canonical executable and
+binary digest, platform/OS/architecture, a content digest of the installed Forge JavaScript modules, packaged runtime helpers and declared dependency versions,
+check definition and clean check settings. Worker admission compares those pins.
+A changed runtime, definition or check setting (including `FORGE_CHECK_SCOPED` and
+`FORGE_CHECK_FULL`) interrupts before dispatch and names the changed fields without
+printing their values. Configure the owner service and submitter with the same
+installed build, Node and check settings, then submit a new finish/land operation.
+The original interrupted operation remains readable and retains its outcome.
+
+Shell defaults (`PATH`, `TERM`, `LANG`, `TZ` and `LC_*`) come from the owner worker.
+Different shell defaults do not invalidate a submission, unless a check explicitly
+names them in its environment/credential passthrough declarations. Selection records
+the worker's complete clean environment and fingerprint in the batch; its checks and
+acceptance use that exact snapshot, including `PATH`. Existing exact-check admission
+and evidence reuse still compare full fingerprints. Compatible submissions with
+different shell defaults may share that worker snapshot; submitting a shell path
+does not select the worker's tools.
+
+Async finish/land journals retain submission pins before returning, including when
+a dependency delays enqueueing. Restart never substitutes the worker's identity for
+those original pins. A retained batch cannot start under a different installed
+controller, Node executable bytes/location or physical host/Node version. Install builds immutably and restart the service when
+upgrading. Old records remain readable: environment snapshots retain their recorded
+Node version and check settings; entries with only a legacy fingerprint require an
+exact match because their compatibility cannot be established from missing details.
+Previously selected legacy batches still recover their recorded run snapshot.
+
 ## Durable finite driver
 
 The drain advances recorded batches through selection, composition, check reservation,
@@ -271,7 +300,11 @@ The lead installs the existing `serve` process using
 with absolute paths to the supported Node executable and the reviewed installed
 `dist/cli.js`; replace `__OWNER__`, `__PORT__`, `__NODE_BIN__` and `__STATE_DIR__`
 with the canonical owner, selected port, Node directory and a private log directory.
-Use XML escaping for replacements. The template contains no credentials. Preserve
+Use XML escaping for replacements. The template sets `FORGE_CHECK_SCOPED=1`, matching the installed maintainer CLI
+wrapper. Keep that setting aligned with the submitter; preserve any intentional
+`FORGE_CHECK_FULL` or other check configuration in both runtimes. The service's `PATH`
+starts with the selected Node directory and need not match agent shell ordering.
+The template contains no credentials. Preserve
 any owner-selected environment configuration in the existing service setup; do
 not embed secret values in the plist. The CLI startup URL contains a local token,
 so keep its log directory private and never copy those logs into a report.
@@ -285,6 +318,11 @@ launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.nanthai.forge
 launchctl enable "gui/$(id -u)/com.nanthai.forge-owner"
 launchctl kickstart "gui/$(id -u)/com.nanthai.forge-owner"
 ```
+
+For an existing service, boot it out before bootstrapping a replacement plist so
+launchd reloads its environment. After a build-only update, use
+`launchctl kickstart -k "gui/$(id -u)/com.nanthai.forge-owner"` to restart the loaded
+service with the reviewed build.
 
 Observe local pending status to confirm recovery. Stop driving with
 `launchctl bootout "gui/$(id -u)/com.nanthai.forge-owner"`; saved submissions

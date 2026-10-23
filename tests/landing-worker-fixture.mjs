@@ -86,7 +86,7 @@ export function until(f, read, message, signal) {
   });
 }
 
-export async function childWorker(f, { filesystem = true } = {}) {
+export async function childWorker(f, { filesystem = true, env = process.env } = {}) {
   const script = `import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
@@ -97,7 +97,7 @@ const c=new AbortController();process.on('SIGTERM',()=>c.abort());
 await watchLandingWorker(new WorkStore(process.argv[1]),c.signal);`;
   const child = spawn(process.execPath, ['--input-type=module', '-e', script, f.root], {
     stdio: ['ignore', 'ignore', 'pipe'],
-    env: process.env,
+    env,
   });
   const controller = new AbortController();
   let errors = '';

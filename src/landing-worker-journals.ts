@@ -70,7 +70,7 @@ export async function resumeLegacyLand(work: WorkService, operationId: string) {
           continue;
         }
         if (batchEligible(work, entry.command, view)) {
-          await enqueueLanding(work, entry.command, view);
+          await enqueueLanding(work, entry.command, view, retained.state.landingPins);
           entry.queued = true;
           save();
           continue;

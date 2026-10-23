@@ -157,6 +157,10 @@ for (const fastPath of [false, true])
       person.store.revision(),
       { keepOpen: true },
     );
+    // Controller upgrades must not turn an accepted operation into an interruption.
+    await batchEdit(f.work, 'old-controller', data => {
+      data.landingEntries[0].runtimeSnapshot.cli = 'synthetic-prior-controller';
+    });
     const replacement = new AgentWorkflow(f.root).work,
       replay = replacement.dispatch.bind(replacement);
     replacement.dispatch = (...args) => {

@@ -12,7 +12,10 @@
   </array>
   <key>WorkingDirectory</key><string>__OWNER__</string>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>__NODE_BIN__:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <dict>
+    <key>PATH</key><string>__NODE_BIN__:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>FORGE_CHECK_SCOPED</key><string>1</string>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>__STATE_DIR__/owner.log</string>

@@ -3,7 +3,8 @@ import { watchOwnerPresence } from '../dist/presence-worker.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -407,3 +408,77 @@ test('queue admission contention retries the same snapshot after a peer release 
     await stop();
   }
 });
+
+for (const action of ['finish', 'land'])
+  test(`${action} from an agent shell is driven by an installed worker with different shell defaults`, async t => {
+    const f = await fixture(t, { remote: false });
+    const input = await f.candidate('agent-shell.txt', 'submitted source\n', false);
+    const env = {
+      ...process.env,
+      PATH: `/worker-shell:${process.env.PATH}`,
+      TERM: 'worker-terminal',
+      LANG: 'C',
+    };
+    const worker = await childWorker(f, { env });
+    try {
+      const command =
+        action === 'finish'
+          ? {
+              action,
+              laneId: input.lane.laneId,
+              message: 'Submit from another shell',
+              accept: true,
+              wait: false,
+            }
+          : { action, laneIds: [input.lane.laneId], wait: false };
+      const script = `import { AgentWorkflow } from ${JSON.stringify(new URL('../dist/agent-workflow.js', import.meta.url).href)};
+const reply = await new AgentWorkflow(process.argv[1]).dispatch(JSON.parse(process.argv[2]));
+console.log(JSON.stringify({ durable: reply.result.durable }));`;
+      const reply = await promisify(execFile)(
+        process.execPath,
+        ['--input-type=module', '-e', script, f.root, JSON.stringify(command)],
+        {
+          env: {
+            ...process.env,
+            PATH: `/agent-shell:${process.env.PATH}`,
+            TERM: 'agent-terminal',
+            LANG: 'en_US.UTF-8',
+          },
+        },
+      );
+      assert.equal(JSON.parse(reply.stdout).durable, true);
+      await until(f, () => entries(f)[0]?.status === 'accepted', 'worker lands shell submission');
+      assert.equal(runs(f).length, 1);
+      assert.equal(runs(f)[0].status, 'passed');
+      assert.equal(runs(f)[0].environment.env.PATH === env.PATH, true);
+      assert.equal(runs(f)[0].environment.env.TERM === env.TERM, true);
+      assert.equal(f.content('agent-shell.txt'), 'submitted source\n');
+      assert.equal(f.store.load().channelMoves.length, 1);
+    } finally {
+      await worker.stop();
+    }
+  });
+
+for (const action of ['finish', 'land'])
+  test(`${action} retains check settings at async admission before the worker queues it`, async t => {
+    const f = await fixture(t, { remote: false });
+    const input = await f.candidate('scoped-setting.txt', undefined, false);
+    const command =
+      action === 'finish'
+        ? { action, laneId: input.lane.laneId, message: 'Pinned settings', accept: true, wait: false }
+        : { action, laneIds: [input.lane.laneId], wait: false };
+    await f.agent.dispatch(command);
+    const old = process.env.FORGE_CHECK_SCOPED;
+    const worker = await childWorker(f, {
+      env: { ...process.env, FORGE_CHECK_SCOPED: old === '1' ? '0' : '1' },
+    });
+    try {
+      await until(f, () => entries(f)[0]?.status === 'interrupted', 'settings mismatch retained');
+      assert.match(entries(f)[0].reason, /FORGE_CHECK_SCOPED/);
+      assert.match(entries(f)[0].reason, /owner service.*submitter/);
+      assert.equal(runs(f).length, 0);
+      assert.equal(f.store.load().channelMoves.length, 0);
+    } finally {
+      await worker.stop();
+    }
+  });

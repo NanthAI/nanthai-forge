@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { landingRuntimeSchema } from './landing-environment-schema.js';
 import { checkEnvironmentSchema } from './check-environment-schema.js';
 const id = z.uuid(),
   head = z.string().regex(/^[a-f0-9]{64}$/);
@@ -13,6 +14,7 @@ export const landingEntrySchema = z.object({
   definition: head,
   environment: head,
   environmentSnapshot: checkEnvironmentSchema.optional(),
+  runtimeSnapshot: landingRuntimeSchema.optional(),
   reason: z.string().optional(),
   preview: z.literal('skip').optional(),
   previewDiagnostic: z

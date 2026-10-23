@@ -1,6 +1,7 @@
 import { landingDiagnosis } from './landing-diagnosis.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 // SPDX-License-Identifier: Apache-2.0
+import type { LandingPins } from './landing-environment.js';
 import { prepareOptimistic } from './optimistic-landing.js';
 import { batchEligible, enqueueLanding } from './landing-batch-store.js';
 import { drainLandingBatches } from './landing-batch.js';
@@ -11,13 +12,18 @@ import type { FinishAttempt } from './agent-finish-journal.js';
 import type { WorkService } from './work.js';
 
 /** Translate durable queue outcomes into the existing finish receipt protocol. */
-export async function finishQueuedBatch(work: WorkService, command: FinishAction, attempt: FinishAttempt) {
+export async function finishQueuedBatch(
+  work: WorkService,
+  command: FinishAction,
+  attempt: FinishAttempt,
+  pins?: LandingPins,
+) {
   const store = work.store;
   const queued = store.select('landingEntries', command.operationId);
   const candidate = store.select('views', attempt.view!.viewId as string)!;
   if (!queued && prepareOptimistic(work, command, candidate)) return;
   if (!queued && !(command.accept && batchEligible(work, command, candidate))) return;
-  await enqueueLanding(work, command, candidate);
+  await enqueueLanding(work, command, candidate, pins);
   await drainLandingBatches(work, command.accept!.channel, command.waitMs);
   const entry = store.select('landingEntries', command.operationId)!;
   if (entry.runId) {
