@@ -263,3 +263,21 @@ test('legacy receipt reads remain unchanged and Modal compatibility summaries ex
   assert.equal(summary.estimatedCostUsd, 1);
   assert.equal(summary.recordedRuns, 1);
 });
+
+test('monthly history completes an adopted job observation without double counting it or deducting allowance', () => {
+  const early = actionsCost('blacksmith-4vcpu-ubuntu-2404', 0.008, [
+    job(73, 61, { status: 'in_progress', completed_at: null }),
+  ]);
+  const complete = actionsCost('blacksmith-4vcpu-ubuntu-2404', 0.008, [job(73, 61)]);
+  const summary = runnerMonthCosts(
+    [early, complete].map((cost, index) => ({
+      id: `run-${index}`,
+      startedAt: '2026-10-01',
+      backend: { actual: 'github-actions', cost },
+    })),
+  );
+  assert.equal(summary.months[0].estimatedCostUsd, 0.016);
+  assert.equal(summary.months[0].billedMinutes, 2);
+  assert.equal(summary.months[0].unknownRuns, 1);
+  assert.equal(summary.months[0].netEstimatedCostUsd, null);
+});

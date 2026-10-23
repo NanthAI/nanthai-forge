@@ -12,7 +12,9 @@ import {
   renameSync,
   writeFileSync,
 } from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
+import { finishChild } from './finish-child.js';
+export { finishChild } from './finish-child.js';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { interactionRequestSchema } from './work-types.js';
@@ -51,16 +53,6 @@ const schema = z.object({
 export type FinishAttempt = z.infer<typeof attemptSchema>;
 /** Initial child IDs preserve the existing finish protocol. Every retry has its
  * own deterministic children; a lost reply never substitutes new phase inputs. */
-export function finishChild(operationId: string, phase: string, attempt = 0) {
-  const bytes = createHash('sha256')
-    .update(`forge-agent-finish:${operationId}:${attempt ? `attempt:${attempt}:${phase}` : phase}`)
-    .digest()
-    .subarray(0, 16);
-  bytes[6] = (bytes[6]! & 15) | 80;
-  bytes[8] = (bytes[8]! & 63) | 128;
-  const hex = bytes.toString('hex');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
 export function finishAttempt(
   command: FinishAction,
   number: number,

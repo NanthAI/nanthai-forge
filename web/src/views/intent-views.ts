@@ -56,6 +56,7 @@ export function intentViews(work: CockpitWork, intentId: string): ViewRow[] {
 /** Review only current evidence on a retained candidate, never accepted or superseded history. */
 export function canReviewView(view: ViewRow): boolean {
   return (
+    (!view.queue || view.queue.state === 'review') &&
     view.status === 'clean' &&
     !view.accepted &&
     !view.supersededBy &&

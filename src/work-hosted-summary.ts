@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
+import { diagnosticCause } from './landing-observation.js';
 import type { Lane, WorkView, CheckRun } from './work-types.js';
 
 export type HostedChanges = { files: number; add?: number; del?: number };
 
 /** Disposable hosted projection format; retained source and Work formats are unchanged. */
-export const HOSTED_WORK_INDEX_FORMAT = 10;
+export const HOSTED_WORK_INDEX_FORMAT = 11;
 
-export function laneSummary(lane: Lane, main: HostedMainSummary = { head: null, included: null }) {
+export function laneSummary(
+  lane: Lane,
+  main: HostedMainSummary = { head: null, included: null },
+  submittedHeads: readonly string[] = [],
+) {
   const last = lane.checkpoints.at(-1);
   return {
     id: lane.id,
@@ -14,6 +19,7 @@ export function laneSummary(lane: Lane, main: HostedMainSummary = { head: null, 
     main,
     intentId: lane.intentId,
     ...(lane.after ? { after: lane.after } : {}),
+    ...(lane.stack ? { stack: lane.stack } : {}),
     name: lane.name,
     ...(lane.startedBy ? { startedBy: lane.startedBy } : {}),
     ...(lane.startedAt ? { startedAt: lane.startedAt } : {}),
@@ -25,6 +31,10 @@ export function laneSummary(lane: Lane, main: HostedMainSummary = { head: null, 
     ...(lane.setup ? { setup: lane.setup } : {}),
     checkpoints: [],
     checkpointCount: lane.checkpoints.length,
+    savesSinceSubmission: submittedHeads.flatMap(head => {
+      const index = lane.checkpoints.findIndex(save => save.head === head);
+      return index < 0 ? [] : [{ head, saves: lane.checkpoints.length - index - 1 }];
+    }),
     ...(last
       ? {
           lastCheckpointAt: last.at,
@@ -58,6 +68,9 @@ export function runSummary(run: CheckRun, main: HostedMainSummary = { head: null
     head: run.head,
     status: run.status,
     checkId: run.check.id,
+    cause: diagnosticCause(run),
+    ...(run.error ? { error: { code: run.error.code } } : {}),
+    ...(run.signal ? { signal: run.signal } : {}),
     checkName: `${run.check.name.slice(0, 200 - scope.length)}${scope}`,
     startedAt: run.startedAt,
     ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),

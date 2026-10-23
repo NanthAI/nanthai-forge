@@ -97,7 +97,9 @@ export function StatusPill({
   tone,
   children,
   glyph,
+  title,
 }: {
+  title?: string;
   tone: Tone;
   children?: ReactNode;
   glyph?: GlyphName;
@@ -107,6 +109,7 @@ export function StatusPill({
   const muted = freshness.behind && ['active', 'running', 'waiting'].includes(tone);
   return (
     <span
+      title={title}
       className={`fx-st fx-tone-${muted ? 'stale' : tone}`}
       aria-describedby={muted ? tooltipId : undefined}
       tabIndex={muted ? 0 : undefined}

@@ -54,6 +54,11 @@ export function AwayStrip({
             <Glyph name={fact.glyph} size={12} />
             {fact.text}
             {fact.automatic && <AutoTag />}
+            {fact.automatic && (
+              <span className="fx-undo-none" title={fact.undo}>
+                Undo
+              </span>
+            )}
             {fact.undo && (
               <InfoTip label="How to undo" inline>
                 {fact.undo}

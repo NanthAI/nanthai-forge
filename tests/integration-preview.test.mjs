@@ -1,3 +1,4 @@
+import { previewMeasurements } from '../dist/preview-accounting.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -100,6 +101,7 @@ test('two individually type-correct Lanes clash together; both receive pinned no
   const workBefore = readFileSync(join(f.store.directory, 'work.json'));
   const objectsBefore = readdirSync(join(f.store.directory, 'objects')).sort();
   const result = f.integrate();
+  assert.equal(previewMeasurements(f.store.directory).rows.length, 1);
   assert.equal(result.status, 'clash');
   assert.equal(result.cached, false);
   assert.equal(result.pairs.length, 1);
@@ -119,6 +121,7 @@ test('two individually type-correct Lanes clash together; both receive pinned no
   assert.deepEqual(readdirSync(join(f.store.directory, 'objects')).sort(), objectsBefore);
   const replay = f.integrate();
   assert.equal(replay.cached, false);
+  assert.equal(previewMeasurements(f.store.directory).rows.length, 2);
   assert.deepEqual(replay.historical, { key: result.key, status: result.status });
   assert.equal(replay.status, result.status);
   assert.equal(new CoordinationJournal(f.store).context(lanes[0].laneId).notices.length, 1);
@@ -352,4 +355,18 @@ test('main advances are composed with Lanes still based on an earlier accepted m
   assert.equal(result.status, 'clean');
   assert.equal(result.main, main);
   assert.equal(result.inputs[0].head, lane.head);
+});
+
+test('unavailable advisory accounting preserves the observed preview verdict and original Work', async t => {
+  const f = await fixture(t);
+  await f.pair();
+  const before = readFileSync(join(f.store.directory, 'work.json'));
+  t.mock.method(CoordinationJournal.prototype, 'recordPreview', () => {
+    throw new Error('synthetic write failure');
+  });
+  const result = f.integrate();
+  assert.equal(result.status, 'clash');
+  assert.equal(result.accounting.status, 'unavailable');
+  assert.equal(result.accounting.code, 'PREVIEW_COST_UNAVAILABLE');
+  assert.deepEqual(readFileSync(join(f.store.directory, 'work.json')), before);
 });

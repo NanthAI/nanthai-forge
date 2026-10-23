@@ -37,7 +37,7 @@ function fixture(t, flags = {}) {
   initNative(owner);
   const work = new WorkService(owner);
   const local = command => work.execute(command, work.store.load().revision).result;
-  const accept = (outcome, files = {}, acceptedBy) => {
+  const accept = (outcome, files = {}, acceptedBy, earlierFiles = []) => {
     const base = work.store
       .load()
       .channelMoves.filter(move => move.channel === 'main' && move.status === 'accepted')
@@ -48,7 +48,21 @@ function fixture(t, flags = {}) {
       ...(base ? { baseChannel: { name: 'main', head: base.head, acceptanceId: base.id } } : {}),
     });
     const lane = local({ action: 'lane', intentId: intent.id, name: outcome });
-    for (const [path, bytes] of Object.entries(files)) write(work.store.path(lane.id), path, bytes);
+    for (const batch of earlierFiles) {
+      for (const [path, bytes] of Object.entries(batch)) write(work.store.path(lane.id), path, bytes);
+      const state = work.status().lanes.find(item => item.id === lane.id);
+      local({
+        action: 'checkpoint',
+        laneId: lane.id,
+        expectedHead: state.head,
+        expectedTree: state.indexTree,
+        message: 'Earlier saved version',
+      });
+    }
+    for (const [path, bytes] of Object.entries(files)) {
+      if (bytes === null) rmSync(join(work.store.path(lane.id), path));
+      else write(work.store.path(lane.id), path, bytes);
+    }
     // H8 declarations are deliberately not authenticated GitHub identities.
     const data = work.store.load();
     data.lanes.find(item => item.id === lane.id).startedBy = {
@@ -146,6 +160,26 @@ process.exit(out.status??1);
     return path;
   };
   return { temporary, bare, owner, remote, work, first, accept, sync, head, change, controlState };
+}
+
+// A real checkout and bare destination keep merge/squash ancestry and trees realistic.
+function externalCommit(f, files = {}, kind = 'commit') {
+  const checkout = join(f.temporary, `external-${randomUUID()}`);
+  git(f.temporary, ['clone', '-q', '--no-hardlinks', f.remote, checkout]);
+  if (kind !== 'commit') git(checkout, ['checkout', '-qb', 'topic']);
+  for (const [path, bytes] of Object.entries(files)) {
+    if (bytes === null) rmSync(join(checkout, path));
+    else write(checkout, path, bytes);
+  }
+  git(checkout, ['add', '-A']);
+  git(checkout, ['commit', '--allow-empty', '-qm', 'External work']);
+  if (kind !== 'commit') {
+    git(checkout, ['checkout', '-q', 'main']);
+    git(checkout, ['merge', kind === 'squash' ? '--squash' : '--no-ff', 'topic', '-m', 'GitHub merge']);
+    if (kind === 'squash') git(checkout, ['commit', '--allow-empty', '-qm', 'Squashed external work']);
+  }
+  git(f.remote, ['fetch', '--no-tags', checkout, 'main:refs/heads/main']);
+  return f.head();
 }
 
 test('default dry-run prints adoption and file changes without pushing or saving Work', async t => {
@@ -249,15 +283,7 @@ test('remote edits and racing ref moves are refused without overwriting', async 
   await f.sync({ push: true });
   const synced = f.head();
   f.accept('Next native acceptance', { 'next.txt': 'Next\n' });
-  const outside = git(f.remote, [
-    'commit-tree',
-    `${synced}^{tree}`,
-    '-p',
-    synced,
-    '-m',
-    'Outside Forge',
-  ]).trim();
-  git(f.remote, ['update-ref', 'refs/heads/main', outside]);
+  const outside = externalCommit(f, { 'outside.txt': 'External only\n' });
   await assert.rejects(
     f.sync({ push: true }),
     error => error.code === 'GITHUB_SYNC_CHANGED' && error.message.includes('GitHub changed outside Forge'),
@@ -481,25 +507,15 @@ test('auto-push divergence records both heads as Needs you without replacing rem
   const original = f.head();
   const latest = f.accept('New main', { 'a.txt': 'later' });
   await green(f, latest.view);
-  const foreign = git(f.remote, [
-    '-c',
-    'user.name=Outside',
-    '-c',
-    'user.email=outside@example.test',
-    'commit-tree',
-    'main^{tree}',
-    '-p',
-    'main',
-    '-m',
-    'external change',
-  ]).trim();
-  git(f.remote, ['update-ref', 'refs/heads/main', foreign]);
+  const foreign = externalCommit(f, { 'outside.txt': 'External only\n' });
   await mirrorPolicy(f);
   await drain(f);
   const status = f.work.store.load().githubAutoPush;
   assert.equal(status.status, 'needs-you');
   assert.equal(status.expectedHead, original);
   assert.equal(status.remoteHead, foreign);
+  assert.match(status.detail, /outside\.txt/);
+  assert.match(status.detail, /nforge agent ROOT start/);
   assert.ok(status.localHead);
   assert.equal(f.head(), foreign);
   assert.equal(f.controlState().pushes, 1);
@@ -550,14 +566,46 @@ test('transient auto-push failures back off and reconcile their retained operati
   assert.ok(delays.length > 1);
 });
 
-test('automatic projection omits private tracked paths and never publishes Lane refs', async t => {
+test('automatic projection exports secret-named source and templates, omits credentials and never publishes Lane refs', async t => {
   const f = fixture(t),
     source = new NativeSource(f.owner);
   const data = f.work.store.load(),
     view = data.views.find(v => v.id === f.first.view.id);
+  const included = [
+    'src/secret-crypto.ts',
+    'convex/secrets.ts',
+    'tests/secrets.test.mjs',
+    'web/src/Secrets.tsx',
+    'src/credentials.py',
+    '.env.example',
+    '.env.sample',
+    '.env.template',
+  ];
+  const excluded = [
+    '.env.local',
+    '.env.production',
+    '.env.example.local',
+    '.env.ts',
+    '.npmrc',
+    '.netrc',
+    'credentials.json',
+    'secrets.json',
+    'tls/cert.pem',
+    'tls/private.key',
+    'tls/client.p12',
+    'tls/client.pfx',
+    'tls/client.keystore',
+    '.ssh/id_rsa',
+    '.aws/credentials',
+    'private-artifacts/secrets.ts',
+  ];
   const files = [
     ...source.state(view.head).files,
-    { path: '.env.production', blob: source.put(Buffer.from('synthetic-private')), mode: 'file' },
+    ...[...included, ...excluded].map(path => ({
+      path,
+      blob: source.put(Buffer.from(`synthetic fixture: ${path}\n`)),
+      mode: 'file',
+    })),
   ];
   const head = source.writeState(files, [view.head], 'private tracked fixture', new Date().toISOString());
   view.head = head;
@@ -565,10 +613,30 @@ test('automatic projection omits private tracked paths and never publishes Lane 
   f.work.store.save(data);
   await green(f, view);
   await mirrorPolicy(f);
+  const before = f.work.store.snapshotBytes(),
+    oldHead = f.head(),
+    dry = await f.sync({ autoPush: true });
+  assert.equal(dry.dryRun, true);
+  assert.equal(f.head(), oldHead);
+  assert.deepEqual(f.work.store.snapshotBytes(), before);
+  for (const path of included)
+    assert(
+      dry.commits[0].files.some(file => file.path === path),
+      path,
+    );
+  for (const path of excluded) assert(!dry.commits[0].files.some(file => file.path === path), path);
   await drain(f);
-  const paths = git(f.remote, ['ls-tree', '-r', '--name-only', 'main']);
-  assert.equal(paths.includes('.env.production'), false);
-  assert.ok(f.work.store.load().githubSync.commits[0].excludedPaths.includes('.env.production'));
+  const paths = git(f.remote, ['ls-tree', '-r', '--name-only', 'main']).trim().split('\n');
+  assert.deepEqual(
+    paths,
+    files
+      .map(file => file.path)
+      .filter(path => !excluded.includes(path))
+      .sort(),
+  );
+  assert.deepEqual(f.work.store.load().githubSync.commits[0].excludedPaths, [...excluded].sort());
+  for (const path of included)
+    assert.equal(git(f.remote, ['show', `main:${path}`]), `synthetic fixture: ${path}\n`);
   assert.equal(git(f.remote, ['for-each-ref', '--format=%(refname)']).trim(), 'refs/heads/main');
 });
 
@@ -807,4 +875,368 @@ test('mirror permission rejection keeps the existing error and does not retry', 
   const f = fixture(t, { permanentPush: true });
   await assert.rejects(f.sync({ push: true }), code('GITHUB_SYNC_GIT_FAILED'));
   assert.equal(f.controlState().pushes, 1);
+});
+
+test('contained squash merge adopts GitHub history and the newest accepted tree, then continues incrementally', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const recorded = f.head(),
+    beforeBinding = f.work.store.load().githubSync,
+    outside = externalCommit(f, { 'a.txt': 'Node security fix\n' }, 'squash');
+  f.accept('Same security change', { 'a.txt': 'Node security fix\n' });
+  const latest = f.accept('Additional native work', { 'more.txt': 'More\n' });
+  write(f.owner, 'a.txt', 'Unaccepted local edit');
+  const before = f.work.store.snapshotBytes(),
+    plan = await f.sync();
+  assert.equal(plan.reconciliation.status, 'contained');
+  assert.deepEqual(plan.reconciliation.commits, [outside]);
+  assert.deepEqual(plan.reconciliation.paths, ['a.txt']);
+  assert.deepEqual(plan.reconciliation.missingPaths, []);
+  assert.equal(plan.commits.length, 1);
+  assert.equal(plan.commits[0].parent, outside);
+  assert.equal(plan.commits[0].state, latest.view.head);
+  assert.match(plan.commits[0].message, /^Adopt Forge native main/);
+  assert.deepEqual(f.work.store.snapshotBytes(), before);
+  assert.equal(f.head(), outside);
+  const result = await f.sync({ push: true });
+  const adopted = f.head();
+  assert.equal(git(f.remote, ['rev-parse', `${adopted}^`]).trim(), outside);
+  assert.equal(git(f.remote, ['merge-base', recorded, adopted]).trim(), recorded);
+  assert.equal(git(f.remote, ['show', `${adopted}:a.txt`]), 'Node security fix\n');
+  assert.equal(git(f.remote, ['show', `${adopted}:more.txt`]), 'More\n');
+  assert.equal(f.controlState().pushLeases.at(-1), `--force-with-lease=refs/heads/main:${outside}`);
+  assert.equal(result.commits[0].author.email, 'configured@example.test');
+  const binding = f.work.store.load().githubSync;
+  assert.deepEqual(binding.commits.slice(0, 1), beforeBinding.commits);
+  assert.equal(binding.adoptedCommit, beforeBinding.adoptedCommit);
+  assert.equal(binding.pushed, 2);
+  assert.equal((await f.sync({ push: true })).commits.length, 0);
+  const next = f.accept('Continue after GitHub merge', { 'next.txt': 'Next\n' });
+  const incremental = await f.sync({ push: true });
+  assert.equal(incremental.commits[0].parent, adopted);
+  assert.equal(incremental.commits[0].state, next.view.head);
+});
+
+test('contained GitHub merge commits retain both parents; empty external commits need no new acceptance', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const outside = externalCommit(f, { 'merged.txt': 'Merged change\n' }, 'merge');
+  const latest = f.accept('Same merged change', { 'merged.txt': 'Merged change\n' });
+  const result = await f.sync({ push: true });
+  assert.equal(git(f.remote, ['rev-list', '--parents', '-n1', outside]).trim().split(' ').length, 3);
+  assert.equal(result.reconciliation.status, 'contained');
+  assert.equal(result.reconciliation.commits.length, 2);
+  assert.deepEqual(result.reconciliation.paths, ['merged.txt']);
+  assert.equal(result.commits[0].parent, outside);
+  assert.equal(result.commits[0].state, latest.view.head);
+  const empty = externalCommit(f);
+  const adopted = await f.sync({ push: true });
+  assert.deepEqual(adopted.reconciliation.paths, []);
+  assert.equal(adopted.commits[0].parent, empty);
+  assert.equal(adopted.commits[0].state, latest.view.head);
+});
+
+test('contained external edits adopt after Forge edits the same file further', async t => {
+  const f = fixture(t),
+    base = 'runtime: old\n\nkeep this section\n\ntest: old\n',
+    external = base.replace('runtime: old', 'runtime: secure'),
+    current = external.replace('test: old', 'test: deterministic');
+  f.accept('Shared multiline base', { 'a.txt': base });
+  await f.sync({ push: true });
+  const outside = externalCommit(f, { 'a.txt': external }, 'squash');
+  f.accept('Same runtime fix', { 'a.txt': external });
+  const latest = f.accept('Later deterministic test fix', { 'a.txt': current });
+  const before = f.work.store.snapshotBytes(),
+    plan = await f.sync();
+  assert.equal(plan.reconciliation.status, 'contained');
+  assert.deepEqual(plan.reconciliation.missingPathReasons, []);
+  assert.equal(plan.commits[0].parent, outside);
+  assert.equal(plan.commits[0].state, latest.view.head);
+  assert.deepEqual(f.work.store.snapshotBytes(), before);
+  const result = await f.sync({ push: true });
+  assert.equal(result.reconciliation.status, 'contained');
+  assert.equal(git(f.remote, ['rev-parse', 'main^']).trim(), outside);
+  assert.equal(git(f.remote, ['show', 'main:a.txt']), current);
+});
+
+test('a missing external hunk refuses only its path even when other external paths are contained', async t => {
+  const f = fixture(t),
+    base = 'runtime: old\n\nkeep this section\n\ntest: old\n';
+  f.accept('Shared multiline base', { 'a.txt': base });
+  await f.sync({ push: true });
+  const outside = externalCommit(f, {
+    'a.txt': base.replace('runtime: old', 'runtime: secure'),
+    'already-contained.txt': 'Same change\n',
+  });
+  f.accept('Later test edit without external runtime fix', {
+    'a.txt': base.replace('test: old', 'test: deterministic'),
+    'already-contained.txt': 'Same change\n',
+  });
+  const before = f.work.store.snapshotBytes();
+  for (const push of [false, true]) {
+    await assert.rejects(f.sync({ push }), error => {
+      assert.equal(error.code, 'GITHUB_SYNC_CHANGED');
+      assert.deepEqual(error.reconciliation.missingPaths, ['a.txt']);
+      assert.deepEqual(error.reconciliation.missingPathReasons, [
+        { path: 'a.txt', reason: 'merge would change Forge content' },
+      ]);
+      assert.ok(!error.message.includes('already-contained.txt'));
+      assert.match(error.message, /merge would change Forge content/);
+      return true;
+    });
+    if (!push) assert.deepEqual(f.work.store.snapshotBytes(), before);
+  }
+  assert.equal(f.head(), outside);
+  assert.equal(f.controlState().pushes, 1);
+});
+
+test('a superseded exact accepted main version proves historical containment', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const outside = externalCommit(f, { 'a.txt': 'Security fix\n' }),
+    historical = f.accept('Same external security fix', { 'a.txt': 'Security fix\n' });
+  f.accept('Later replacement after security fix', { 'a.txt': 'Further accepted edit\n' });
+  const plan = await f.sync();
+  assert.equal(plan.reconciliation.status, 'contained');
+  assert.deepEqual(plan.reconciliation.historyProofs, [
+    {
+      kind: 'accepted-main',
+      path: 'a.txt',
+      state: historical.view.head,
+      acceptanceId: historical.move.id,
+      viewId: historical.view.id,
+    },
+  ]);
+  await f.sync({ push: true });
+  assert.equal(git(f.remote, ['rev-parse', 'main^']).trim(), outside);
+  assert.equal(git(f.remote, ['show', 'main:a.txt']), 'Further accepted edit\n');
+});
+
+test('a superseded saved version of an accepted Lane proves add/add containment', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const outside = externalCommit(f, { 'new-test.txt': 'Original external test\n' }),
+    accepted = f.accept(
+      'Node fix with later deterministic test edit',
+      {
+        'new-test.txt': 'Later deterministic test\n',
+      },
+      undefined,
+      [{ 'new-test.txt': 'Original external test\n' }],
+    ),
+    before = f.work.store.snapshotBytes(),
+    plan = await f.sync(),
+    lane = f.work.store.load().lanes.find(lane => lane.id === accepted.view.inputs[0].laneId);
+  assert.equal(plan.reconciliation.status, 'contained');
+  assert.deepEqual(plan.reconciliation.historyProofs, [
+    {
+      kind: 'accepted-lane-checkpoint',
+      path: 'new-test.txt',
+      state: lane.checkpoints[0].head,
+      acceptanceId: accepted.move.id,
+      viewId: accepted.view.id,
+      laneId: lane.id,
+      checkpoint: 0,
+    },
+  ]);
+  assert.deepEqual(f.work.store.snapshotBytes(), before);
+  await f.sync({ push: true });
+  assert.equal(git(f.remote, ['rev-parse', 'main^']).trim(), outside);
+  assert.equal(git(f.remote, ['show', 'main:new-test.txt']), 'Later deterministic test\n');
+});
+
+test('conflicting external edits refuse with a per-path conflict reason', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const outside = externalCommit(f, { 'a.txt': 'External replacement\n' });
+  f.accept('Conflicting native replacement', { 'a.txt': 'Forge replacement\n' });
+  for (const push of [false, true]) {
+    await assert.rejects(f.sync({ push }), error => {
+      assert.equal(error.code, 'GITHUB_SYNC_CHANGED');
+      assert.deepEqual(error.reconciliation.missingPaths, ['a.txt']);
+      assert.deepEqual(error.reconciliation.missingPathReasons, [
+        { path: 'a.txt', reason: 'content conflicts or cannot be merged as text' },
+      ]);
+      assert.match(error.message, /content conflicts/);
+      return true;
+    });
+  }
+  assert.equal(f.head(), outside);
+  assert.equal(f.controlState().pushes, 1);
+});
+
+test('uncontained GitHub commits report paths and a contribution import route in dry-run and push', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const outside = externalCommit(f, { 'external only.txt': 'Preserve this\n' }),
+    before = f.work.store.snapshotBytes(),
+    binding = f.work.store.load().githubSync;
+  for (const push of [false, true]) {
+    await assert.rejects(f.sync({ push }), error => {
+      assert.equal(error.code, 'GITHUB_SYNC_CHANGED');
+      assert.equal(error.reconciliation.status, 'not-contained');
+      assert.deepEqual(error.reconciliation.missingPaths, ['external only.txt']);
+      assert.ok(error.message.includes(outside));
+      assert.match(error.message, /external only\.txt/);
+      assert.match(error.message, /nforge agent ROOT start/);
+      return true;
+    });
+    if (!push) assert.deepEqual(f.work.store.snapshotBytes(), before);
+  }
+  assert.equal(f.head(), outside);
+  assert.deepEqual(f.work.store.load().githubSync, binding);
+  assert.equal(f.controlState().pushes, 1);
+});
+
+test('a rewritten GitHub head is refused even when its tree equals Forge main', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const original = f.head(),
+    rewritten = git(f.remote, ['commit-tree', `${original}^{tree}`, '-m', 'Unrelated root']).trim(),
+    before = f.work.store.snapshotBytes(),
+    binding = f.work.store.load().githubSync;
+  git(f.remote, ['update-ref', 'refs/heads/main', rewritten]);
+  for (const push of [false, true]) {
+    await assert.rejects(f.sync({ push }), error => {
+      assert.equal(error.code, 'GITHUB_SYNC_CHANGED');
+      assert.equal(error.reconciliation.status, 'rewritten');
+      assert.match(error.message, /history was rewritten/);
+      return true;
+    });
+    if (!push) assert.deepEqual(f.work.store.snapshotBytes(), before);
+  }
+  assert.equal(f.head(), rewritten);
+  assert.deepEqual(f.work.store.load().githubSync, binding);
+  assert.equal(f.controlState().pushes, 1);
+});
+
+test('an adoption exact lease refuses a second GitHub move and retains the original batch', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const outside = externalCommit(f),
+    raced = git(f.remote, [
+      'commit-tree',
+      `${outside}^{tree}`,
+      '-p',
+      outside,
+      '-m',
+      'Concurrent GitHub merge',
+    ]).trim(),
+    operationId = randomUUID();
+  f.change({ raceHead: raced });
+  await assert.rejects(f.sync({ push: true, operationId }), code('GITHUB_SYNC_CHANGED'));
+  assert.equal(f.head(), raced);
+  const binding = f.work.store.load().githubSync;
+  assert.equal(binding.pushed, 1);
+  assert.equal(binding.commits.length, 2);
+  assert.equal(binding.commits[1].parent, outside);
+  assert.equal(binding.commits[1].operationId, operationId);
+  assert.equal(f.controlState().pushLeases.at(-1), `--force-with-lease=refs/heads/main:${outside}`);
+});
+
+test('lost adoption reply replays its original operation after later acceptances and syncs', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const outside = externalCommit(f, { 'a.txt': 'Contained\n' });
+  f.accept('Contained change', { 'a.txt': 'Contained\n' });
+  const operationId = randomUUID();
+  f.change({ lostReply: true });
+  await assert.rejects(f.sync({ push: true, operationId }), code('GITHUB_SYNC_GIT_FAILED'));
+  const adopted = f.head(),
+    pending = f.work.store.load().githubSync.commits[1];
+  assert.equal(pending.parent, outside);
+  assert.equal(pending.commit, adopted);
+  const next = f.accept('After lost reply', { 'after.txt': 'Later\n' });
+  assert.equal((await f.sync({ push: true, operationId })).alreadyPushed, true);
+  assert.deepEqual(f.work.store.load().githubSync.commits[1], pending);
+  assert.equal(f.controlState().pushes, 2);
+  const result = await f.sync({ push: true });
+  assert.equal(result.commits[0].state, next.view.head);
+  assert.equal(result.commits[0].parent, adopted);
+  assert.equal((await f.sync({ push: true, operationId })).alreadyPushed, true);
+  assert.equal(f.controlState().pushes, 3);
+});
+
+test('a rejected adoption retries its saved external parent without changing the operation', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const outside = externalCommit(f),
+    operationId = randomUUID();
+  f.change({ permanentPush: true });
+  await assert.rejects(f.sync({ push: true, operationId }), code('GITHUB_SYNC_GIT_FAILED'));
+  const pending = f.work.store.load().githubSync.commits[1];
+  assert.equal(f.head(), outside);
+  f.change({ permanentPush: false });
+  const result = await f.sync({ push: true, operationId });
+  assert.equal(result.commits[0].commit, pending.commit);
+  assert.equal(f.head(), pending.commit);
+  assert.deepEqual(f.work.store.load().githubSync.commits[1], pending);
+});
+
+test('auto-push resumes a paused mirror when native main contains the external merge', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const outside = externalCommit(f, { 'a.txt': 'Security fix\n' }, 'squash');
+  const missing = f.accept('Native work before import', { 'native.txt': 'Native\n' });
+  await green(f, missing.view);
+  await mirrorPolicy(f);
+  await drain(f);
+  assert.equal(f.work.store.load().githubAutoPush.status, 'needs-you');
+  const latest = f.accept('Same security fix in main', { 'a.txt': 'Security fix\n' });
+  await green(f, latest.view);
+  await drain(f);
+  await until(() => f.work.store.load().githubAutoPush.status === 'pushed');
+  assert.equal(git(f.remote, ['rev-parse', 'main^']).trim(), outside);
+  assert.equal(git(f.remote, ['show', 'main:a.txt']), 'Security fix\n');
+  assert.equal(git(f.remote, ['show', 'main:native.txt']), 'Native\n');
+  assert.equal(f.work.store.load().githubAutoPush.detail, '');
+});
+
+test('containment includes binary content, deletions and renames', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const binary = Buffer.from([0, 255, 8, 0, 1]);
+  const files = { 'binary.dat': binary, 'acceptance.txt': null, 'renamed.txt': 'First acceptance\n' };
+  const outside = externalCommit(f, files);
+  f.accept('Binary and rename from GitHub', files);
+  const result = await f.sync({ push: true });
+  assert.equal(result.reconciliation.status, 'contained');
+  assert.equal(result.commits[0].parent, outside);
+  assert.deepEqual(result.reconciliation.paths, ['acceptance.txt', 'binary.dat', 'renamed.txt']);
+  assert.equal(
+    git(f.remote, ['rev-parse', 'main:binary.dat']).trim(),
+    git(f.remote, ['rev-parse', `${outside}:binary.dat`]).trim(),
+  );
+  assert.equal(git(f.remote, ['ls-tree', 'main', 'acceptance.txt']), '');
+});
+
+test('containment refuses a mode-only change even when the bytes match', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const checkout = join(f.temporary, 'mode-checkout');
+  git(f.temporary, ['clone', '-q', f.remote, checkout]);
+  git(checkout, ['update-index', '--chmod=+x', 'a.txt']);
+  git(checkout, ['commit', '-qm', 'External executable mode']);
+  git(f.remote, ['fetch', '--no-tags', checkout, 'main:refs/heads/main']);
+  const outside = f.head();
+  await assert.rejects(f.sync({ push: true }), error => {
+    assert.equal(error.code, 'GITHUB_SYNC_CHANGED');
+    assert.deepEqual(error.reconciliation.missingPaths, ['a.txt']);
+    return true;
+  });
+  assert.equal(f.head(), outside);
+  assert.equal(f.controlState().pushes, 1);
+});
+
+test('unaccepted native content cannot satisfy containment', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const outside = externalCommit(f, { 'a.txt': 'External change\n' });
+  write(f.owner, 'a.txt', 'External change\n');
+  await assert.rejects(f.sync({ push: true }), error => {
+    assert.equal(error.code, 'GITHUB_SYNC_CHANGED');
+    assert.deepEqual(error.reconciliation.missingPaths, ['a.txt']);
+    return true;
+  });
+  assert.equal(f.head(), outside);
 });

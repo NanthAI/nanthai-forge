@@ -15,6 +15,7 @@ export type LaneFact = {
   glyph?: GlyphName;
   text: string;
   detail?: string;
+  queue?: CockpitLane['queue'];
   /** The acceptance was automatic. */
   auto?: boolean;
   /** The Intent title, only when the Lane name says something different. */
@@ -62,6 +63,21 @@ export function laneFacts(
     const intent =
       lane.intent !== 'Unknown Intent' && !sameTitle(lane.name, lane.intent) ? lane.intent : undefined;
     const base = { ...(intent ? { intent } : {}), ...(lane.lastAt ? { at: lane.lastAt } : {}) };
+    if (lane.queue && !lane.queue.historical && lane.tone !== 'conflict') {
+      const quiet = lane.queue.state === 'working' && lane.session?.tone === 'stale';
+      facts.set(lane.id, {
+        ...base,
+        open: lane.open,
+        tone: quiet ? 'stale' : lane.queue.tone,
+        label: quiet ? 'Not seen' : lane.queue.label,
+        text: lane.queue.text,
+        glyph: lane.queue.glyph,
+        queue: lane.queue,
+        ...(lane.queue.tip ? { detail: lane.queue.tip } : {}),
+        ...(lane.queue.automatic ? { auto: true } : {}),
+      });
+      continue;
+    }
     if (!lane.open) {
       const closed = record?.lifecycle?.filter(entry => entry.to === record.state).at(-1);
       if (record?.state === 'abandoned') {

@@ -24,6 +24,8 @@ export type ActionsJournal = {
   pushed?: boolean;
   pushOutcome?: 'not-sent' | 'ambiguous' | 'accepted' | 'rejected';
   pushAttempts?: ActionsAttempt[];
+  pushDiscovery?: { startedAt: string; observations: number };
+  pushFailure?: { code: string; message: string };
   dispatchAttempts?: ActionsAttempt[];
   branchEvidence?: ActionsBranchEvidence[];
   discovery?: ActionsDiscovery[];

@@ -50,6 +50,7 @@ export const generationFields = {
       v.literal(8),
       v.literal(9),
       v.literal(10),
+      v.literal(11),
     ),
   ),
   projectId: v.id('hostedProjects'),

@@ -1,7 +1,11 @@
+import { queueStatus, queueFacts } from '../cockpit/queue-model';
 import { hostedFreshness } from '../../../src/hosted-freshness';
 import { GenerationFreshness } from '../ui/generation-freshness';
 // SPDX-License-Identifier: Apache-2.0
-import { useMemo, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useReadsAsleep } from '../live-reads';
+import { AcceptedToast, type Accepted } from '../ui/signals';
+import { acceptedSince, acceptanceArrival, type MoveRecord } from '../cockpit/now-model';
 import { useQuery } from 'convex/react';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { byAttention, cockpitLanes, type CockpitWork } from '../cockpit/model';
@@ -36,8 +40,18 @@ export function hostedAttention(
   },
   now: number,
 ) {
+  const pending = queueStatus(records);
+  const queue = pending
+    ? queueFacts(
+        pending,
+        records.repairNotices,
+        new Map(
+          records.intents.flatMap(intent => intent.handoffs ?? []).map(handoff => [handoff.laneId, handoff]),
+        ),
+      )
+    : undefined;
   const lanes = byAttention(
-    withChangedFiles(withSessions(cockpitLanes(records), live.sessions, now), live.events),
+    withChangedFiles(withSessions(cockpitLanes(records, queue), live.sessions, now), live.events),
   );
   const overlaps = hostedOverlaps(live.claims, live.sessions, lanes, live.events);
   const decisions = [
@@ -47,7 +61,7 @@ export function hostedAttention(
     ...hostedDecisions(live.unacked, live.sessions, lanes, records),
     ...laneDecisions(lanes, overlapCounts(overlaps)),
   ];
-  return { lanes, overlaps, decisions };
+  return { lanes, overlaps, decisions, pending, queue, notices: records.repairNotices ?? [] };
 }
 export function HostedAttention({
   projectId,
@@ -69,6 +83,22 @@ export function HostedAttention({
   );
   // The Channel strip and Work pages read these on nearly every project page: one subscription each.
   const channelMoves = useWorkRecords<unknown>(projectId, workspace, 'channelMoves');
+  const hasLandingEntries = workspace?.counts?.landingEntries !== undefined;
+  const hasLandingBatches = workspace?.counts?.landingBatches !== undefined;
+  const landingEntries = useWorkRecords<NonNullable<CockpitWork['landingEntries']>[number]>(
+    projectId,
+    workspace,
+    'landingEntries',
+    undefined,
+    hasLandingEntries,
+  );
+  const landingBatches = useWorkRecords<NonNullable<CockpitWork['landingBatches']>[number]>(
+    projectId,
+    workspace,
+    'landingBatches',
+    undefined,
+    hasLandingBatches,
+  );
   const hostedChannels = useWorkRecords<unknown>(projectId, workspace, 'hostedChannels');
   const channels = useWorkRecords<unknown>(projectId, workspace, 'channels');
   const live = useCoordination(projectId);
@@ -76,11 +106,31 @@ export function HostedAttention({
   const value = useMemo(
     () =>
       hostedAttention(
-        { intents: intents.records, lanes: lanes.records, views: views.records, runs: runs.records },
+        {
+          revision: workspace?.revision,
+          intents: intents.records,
+          lanes: lanes.records,
+          views: views.records,
+          runs: runs.records,
+          channelMoves: channelMoves.records as NonNullable<CockpitWork['channelMoves']>,
+          ...(hasLandingEntries && landingEntries.complete && (!hasLandingBatches || landingBatches.complete)
+            ? { landingEntries: landingEntries.records, landingBatches: landingBatches.records }
+            : {}),
+          ...(workspace?.landingWorker ? { landingWorker: workspace.landingWorker } : {}),
+          ...(workspace?.repairNotices ? { repairNotices: workspace.repairNotices } : {}),
+        },
         { ...live, githubAutoPush: githubPush.records[0] },
         now,
       ),
     [
+      workspace,
+      hasLandingEntries,
+      hasLandingBatches,
+      channelMoves.records,
+      landingEntries.records,
+      landingEntries.complete,
+      landingBatches.records,
+      landingBatches.complete,
       intents.records,
       lanes.records,
       views.records,
@@ -93,9 +143,45 @@ export function HostedAttention({
       now,
     ],
   );
+  const arrivals = useMemo(
+    () =>
+      acceptedSince(
+        {
+          moves: channelMoves.records as MoveRecord[],
+          views: views.records,
+          runs: runs.records,
+          lanes: lanes.records,
+          intents: intents.records,
+        },
+        0,
+      ),
+    [channelMoves.records, views.records, runs.records, lanes.records, intents.records],
+  );
+  const settled = channelMoves.complete && views.complete && lanes.complete;
+  const asleep = useReadsAsleep();
+  const observedAcceptances = useRef<Set<string> | null>(null);
+  const liveSince = useRef(Date.now());
+  const wasQuiet = useRef(false);
+  const [arrival, setArrival] = useState<Accepted | null>(null);
+  const clearArrival = useCallback(() => setArrival(null), []);
+  useEffect(() => {
+    const quiet = asleep || document.visibilityState !== 'visible';
+    if (quiet || wasQuiet.current) liveSince.current = Date.now();
+    wasQuiet.current = quiet;
+    if (!settled) return;
+    const observed = acceptanceArrival(observedAcceptances.current, arrivals, liveSince.current, quiet);
+    observedAcceptances.current = observed.seen;
+    if (observed.arrival)
+      setArrival({
+        title: observed.arrival.title,
+        channel: 'main',
+        ...(observed.arrival.diff ? { add: observed.arrival.diff.add, del: observed.arrival.diff.del } : {}),
+      });
+  }, [arrivals, settled, asleep]);
   const counts = workspace?.counts;
   return (
     <GenerationFreshness.Provider value={workspace?.freshness ?? null}>
+      <AcceptedToast accepted={arrival} onClose={clearArrival} />
       <div className={hostedFreshness(workspace?.freshness).behind ? 'fx-hosted-behind' : undefined}>
         <WorkCountsContext.Provider
           value={{
@@ -113,7 +199,17 @@ export function HostedAttention({
             value={{
               projectId,
               generationId: workspace?.generationId ?? '',
-              collections: { intents, lanes, views, runs, channelMoves, hostedChannels, channels },
+              collections: {
+                intents,
+                lanes,
+                views,
+                runs,
+                channelMoves,
+                landingEntries,
+                landingBatches,
+                hostedChannels,
+                channels,
+              },
             }}
           >
             <CoordinationContext.Provider value={live}>

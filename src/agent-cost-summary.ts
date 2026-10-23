@@ -1,16 +1,18 @@
+import { previewMeasurements } from './preview-accounting.js';
 // SPDX-License-Identifier: Apache-2.0
 import { PeersCache } from './agent-peers-cache.js';
 import { digest } from './hash.js';
 import { modalMonthCost } from './check-backend.js';
 import { runnerMonthCosts } from './check-cost.js';
-import { pageSize } from './work-records.js';
+import { accountingContext, accountingRecords } from './accounting-records.js';
+import { trainAccounting, type CostRun } from './train-accounting.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
-import type { CheckRun } from './work-types.js';
 
-type CostRun = Pick<CheckRun, 'id' | 'startedAt' | 'backend'>;
 type Summary = {
   modalCost: ReturnType<typeof modalMonthCost>;
-  checkCosts: ReturnType<typeof runnerMonthCosts>;
+  checkCosts: ReturnType<typeof runnerMonthCosts> & {
+    train: Omit<ReturnType<typeof trainAccounting>, 'submissions'>;
+  };
 };
 
 /** Exact immutable page summaries survive CLI processes and unrelated Work
@@ -19,24 +21,28 @@ type Summary = {
 export function agentCostSummary(root: string, tx: WorkRecordTransaction, now = new Date()): Summary {
   const collection = tx.manifest.collections.runs;
   const cache = new PeersCache(root);
-  const key = `agent-cost-v1:${now.toISOString().slice(0, 7)}:${digest(JSON.stringify(collection ?? null))}`;
+  const key = `agent-cost-v4:${now.toISOString().slice(0, 7)}:${digest(JSON.stringify([previewMeasurements(tx.directory).version, collection, ...['landingBatches', 'landingEntries', 'channelMoves'].map(key => tx.manifest.collections[key])]))}`;
   const cached = cache.read<Summary>(key);
   if (cached) return cached;
-  const runs = (collection?.pages ?? []).flatMap((hash, page) => {
-    const pageKey = `agent-cost-page-v1:${hash}`;
-    const cached = cache.read<CostRun[]>(pageKey);
-    if (cached) return cached;
-    const rows = Array.from(
-      { length: Math.min(pageSize, collection!.count - page * pageSize) },
-      (_, offset) => {
-        const { id, startedAt, backend } = tx.at('runs', page * pageSize + offset);
-        return { id, startedAt, ...(backend ? { backend } : {}) };
-      },
-    );
-    cache.write(pageKey, rows);
-    return rows;
-  });
-  const result = { modalCost: modalMonthCost(runs, now), checkCosts: runnerMonthCosts(runs) };
+  const runs = accountingRecords(
+    root,
+    tx,
+    'runs',
+    ({ id, startedAt, backend, mainCheck, queuedAt, endedAt, status, viewId }): CostRun => ({
+      id,
+      startedAt,
+      ...(backend ? { backend } : {}),
+      ...(mainCheck ? { mainCheck } : {}),
+      ...(queuedAt ? { queuedAt } : {}),
+      ...(endedAt ? { endedAt } : {}),
+      status,
+      viewId,
+    }),
+  );
+  // Project status returns fixed-size totals. Per-submission rows belong to selected making-of records.
+  const { submissions, ...train } = trainAccounting(runs, accountingContext(root, tx), now);
+  void submissions;
+  const result = { modalCost: modalMonthCost(runs, now), checkCosts: { ...runnerMonthCosts(runs), train } };
   cache.write(key, result);
   return result;
 }

@@ -11,6 +11,7 @@ export function hostedHref(params: Record<string, string>): string {
     'lane',
     'session',
     'reviewView',
+    'checkRun',
     'viewId',
     'planningItem',
     'classic',

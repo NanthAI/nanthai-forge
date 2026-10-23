@@ -104,6 +104,11 @@ export async function controlActions(
       const previous = usage.get(job.id);
       usage.set(job.id, {
         id: job.id,
+        retry: Object.entries(journal.retrySources).some(
+          ([shard, source]) =>
+            source !== job.id &&
+            job.name === (Number(shard) === plan.groups.length ? 'forge-static' : `forge-shard-${shard}`),
+        ),
         status: job.status,
         started_at: job.started_at ?? previous?.started_at ?? null,
         completed_at: job.completed_at ?? previous?.completed_at ?? null,

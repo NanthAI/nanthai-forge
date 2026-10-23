@@ -1,3 +1,5 @@
+import { previewMeasurements } from './preview-accounting.js';
+import { accountingContext } from './accounting-records.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readHostState, updateHostState } from './host-binding.js';
 import { localActor } from './work-actor.js';
@@ -42,6 +44,47 @@ export function readMakingOf(store: WorkStore, intentId: string) {
     }
   }
   invariant(records, 'NOT_FOUND', 'Intent not found.');
+  const allAccounting = tx
+    ? accountingContext(store.root, tx)
+    : (() => {
+        const data = store.load();
+        return {
+          batches: data.landingBatches ?? [],
+          entries: data.landingEntries ?? [],
+          moves: data.channelMoves,
+          previews: previewMeasurements(store.directory).rows,
+        };
+      })();
+  const viewIds = new Set(records.views.map(view => view.id));
+  const entries = allAccounting.entries.filter(entry => viewIds.has(entry.viewId));
+  const entryIds = new Set(entries.map(entry => entry.id));
+  const batches = allAccounting.batches.filter(batch => batch.entryIds.some(id => entryIds.has(id)));
+  // Batch Candidates can belong to another Intent; follow exact retained run IDs.
+  const runIds = new Set(records.runs.map(run => run.id));
+  for (const batch of batches)
+    for (const prefix of batch.prefixes) {
+      if (runIds.has(prefix.runId)) continue;
+      const run = tx ? tx.find('runs', prefix.runId)?.record : store.select('runs', prefix.runId);
+      if (run) {
+        records.runs.push(run);
+        runIds.add(run.id);
+      }
+    }
+  for (const move of allAccounting.moves) {
+    if (
+      !entries.some(entry => entry.acceptanceId === move.id) ||
+      !move.postAcceptRunId ||
+      runIds.has(move.postAcceptRunId)
+    )
+      continue;
+    const run = tx
+      ? tx.find('runs', move.postAcceptRunId)?.record
+      : store.select('runs', move.postAcceptRunId);
+    if (run) {
+      records.runs.push(run);
+      runIds.add(run.id);
+    }
+  }
   const lanes = new Set(records.lanes.map(lane => lane.id)),
     host = readHostState(store),
     related = (row: { laneId: string; intentId: string }) =>
@@ -50,6 +93,12 @@ export function readMakingOf(store: WorkStore, intentId: string) {
     revision,
     result: deriveMakingOf({
       ...records,
+      accounting: {
+        entries,
+        batches,
+        moves: allAccounting.moves,
+        previews: allAccounting.previews.filter(row => row.inputs.some(pin => lanes.has(pin.laneId))),
+      },
       presence: Object.values(host.presence ?? {}).filter(row => related(row.context)),
       reports: Object.values(host.selfReports ?? {})
         .filter(related)

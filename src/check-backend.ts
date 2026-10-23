@@ -8,6 +8,7 @@ import type { CheckRun } from './work-types.js';
 export const modalCostUsageSchema = z.array(
   z.object({
     executionId: z.string(),
+    attempt: z.number().int().nonnegative().optional(),
     seconds: z.number().nonnegative().finite(),
     cpuCoreSeconds: z.number().nonnegative().finite(),
     memoryGiBSeconds: z.number().nonnegative().finite(),

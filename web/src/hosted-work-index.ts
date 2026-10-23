@@ -44,6 +44,8 @@ export const workIndex = {
   checksum: makeFunctionReference<'action', Project, string>('projectWorkIndexActions:checksum'),
 };
 export type WorkIndexWorkspace = {
+  landingWorker?: import('../../src/pending-status').PendingStatus['landingWorker'];
+  repairNotices?: import('../../src/agent-conflict-notice').ConflictNotice[];
   generationId: string;
   freshness?: import('../../src/hosted-freshness').HostedFreshness;
   revision: number;

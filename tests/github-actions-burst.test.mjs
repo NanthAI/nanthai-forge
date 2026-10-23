@@ -192,7 +192,7 @@ test('a transient check-ref rejection reports a retry, then dispatches and passe
   );
   assert.deepEqual(calls, ['ls-remote', 'push', 'ls-remote', 'push']);
   assert.equal(waits.length, 1);
-  assert.match(progress[0], /retry 2\/5/);
+  assert.ok(progress.some(line => /retry 2\/5/.test(line)));
   assert.equal(journal.pushed, true);
   const result = await controlActions(
     plan,
@@ -283,7 +283,7 @@ for (const landed of [false, true]) {
     assert.equal(journal.deleted, true);
     assert.equal(pushes, landed ? 1 : 2);
     assert.equal(waits.length, 1);
-    assert.match(progress[0], /retry 2\/5/);
+    assert.ok(progress.some(line => /retry 2\/5/.test(line)));
   });
 }
 
@@ -304,7 +304,7 @@ test('a permanent check-ref push failure keeps its error and never retries', asy
       () => commit,
       async () => assert.fail('permanent failures must not back off'),
     ),
-    error => error === failure,
+    error => error.code === 'GITHUB_ACTIONS_PUSH_REJECTED',
   );
   assert.deepEqual(calls, ['ls-remote', 'push']);
   assert.equal(journal.pushed, undefined);

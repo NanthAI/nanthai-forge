@@ -13,6 +13,7 @@ export async function cancelLandingEntry(work: WorkService, id: string) {
         data.channelMoves.some(move => move.viewId === prefix.viewId && move.status === 'accepted'),
     );
     if (accepted || entry.status === 'accepted') return { entry };
+    if (entry.status !== 'cancelled') entry.terminalAt = new Date().toISOString();
     entry.status = 'cancelled';
     const runId = batch?.prefixes.at(-1)?.runId;
     return { entry, ...(runId ? { runId } : {}) };

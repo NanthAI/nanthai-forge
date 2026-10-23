@@ -279,7 +279,11 @@ nforge github-sync ROOT --repo OWNER/NAME [--branch B] --rebind --push
 
 **Sync identity.** Sync commits (author and committer) use `FORGE_GITHUB_SYNC_NAME` / `FORGE_GITHUB_SYNC_EMAIL`, then Git config `forge.githubSync.name` / `forge.githubSync.email`, then `user.name` / `user.email`, each resolved independently. This keeps a personal address out of public history without changing your global Git identity, for manual sync and the automatic mirror alike (for example `git config --global forge.githubSync.email ID+USER@users.noreply.github.com`). Where an accepting actor name is recorded it is still the author name; only the email source changes.
 
-A push only fast-forwards the exact recorded GitHub commit. An exact ref lease protects the check/push race; ancestry is checked before sending. If the destination moved, Forge reports **GitHub changed outside Forge** and preserves both histories. It never replaces unrelated history. Branch protection/Actions remain GitHub's decision; the MVP does not open or merge PRs.
+A push only fast-forwards the exact observed GitHub commit. An exact ref lease protects the check/push race; ancestry is checked before sending. Branch protection/Actions remain GitHub's decision; the MVP does not open or merge PRs.
+
+**Merges on GitHub.** If the destination advanced from the last recorded commit, sync compares the net external changes with the current accepted main export. Containment uses a three-way merge: the recorded GitHub tree is the base, the current GitHub tree is theirs, and the accepted Forge export is ours. Every external path must merge without conflicts and leave Forge content and mode exactly unchanged. Text files use Forge’s line-level merge, so later edits in Forge to the same file can coexist with an already-contained external hunk. Additions, deletions, modes, binary files and symlinks are handled explicitly; conflicting changes remain refusals. For paths that fail this check, an exact earlier version (bytes and mode, or exact absence) can establish a shared base: sync searches recorded accepted main States after the mapped GitHub base, plus saved checkpoints ancestral to the accepted inputs of Lanes whose work is in current main. This search reads the pinned acceptance interval in pages, stops source ancestry at the mapped native base or older branches, and ignores unaccepted saves and versions before that base. An exact historical match becomes the per-path merge base; merging that same GitHub version then leaves the current Forge export unchanged. Dry-run records each match in `reconciliation.historyProofs`, including the State, acceptance, Candidate and, for a Lane save, Lane ID and checkpoint index. Other paths may contain newer Forge work. Squash merges, merge commits and empty changes all use the same check. When contained, sync writes one new `Adopt Forge native main <state>` commit with the current GitHub head as parent and the exported main tree. Earlier mappings and GitHub commits remain intact; subsequent syncs continue from this adoption. The dry-run includes `reconciliation.status: "contained"`, external commit IDs/paths and the proposed adoption commit. No Work metadata is changed until `--push`.
+
+If merging an external path would change the export or conflict, sync refuses with `GITHUB_SYNC_CHANGED`, listing the external commit IDs and only the blocking paths, with a reason for each (`missingPathReasons` in structured diagnostics). Create a contribution Lane with `nforge agent ROOT start '{"outcome":"Import external GitHub changes"}'`. In a local GitHub checkout, inspect `git diff --binary RECORDED_COMMIT GITHUB_HEAD --` using the recorded and observed heads from the refusal. Reconcile only the missing external changes in that Lane with current main, preserving later Forge edits; review and accept the change, then retry `github-sync --push`. The original external commits remain on GitHub; this Lane brings their source changes into Forge. If GitHub rewrote history (its head no longer descends from the recorded commit), sync refuses even when the trees match. Dry-run reports these refusals with the same diagnostics. Neither case drops external work or force-pushes over it.
 
 Pending commit identities and an operation UUID are saved before sending. After a lost reply, rerun `--push`: Forge reconciles an already-pushed batch through its saved mapping before preparing later acceptances. Optional `--operation-id UUID` replays a selected original batch, including after later syncs; retain the UUID printed in the plan/receipt. A failed push retains its original pending batch. Automatic publication is off unless enabled by the project policy below.
 
@@ -299,23 +303,32 @@ Only main is published. Lane refs remain unpublished.
 Acceptance queues a detached worker and returns without waiting for GitHub. The
 worker coalesces a short burst, then mirrors the newest green main. Unchecked
 human acceptances wait for an exact passing check; scoped/fast acceptances wait
-for their full post-accept main check. Each acceptance still has its own mapped
-commit. The acceptance and pending mapping survive worker interruption; a later
+for their full post-accept main check. Each acceptance normally has its own mapped
+commit; a contained external merge adopts the newest main in one commit, as above.
+The acceptance and pending mapping survive worker interruption; a later
 acceptance, check completion or local status observation resumes pending work.
 Transient failures retry the original operation with exponential backoff up to
 one minute between attempts. Disabling the policy stops future attempts; an
 already-sent Git request may still complete.
 
 Automatic projection also omits paths protected by capture's sensitive-name and
-private-directory rules even when an imported State retained them. The mapping
+private-directory rules even when an imported State retained them. It shares native
+capture's source rules: modules such as `src/secret-crypto.ts`, `convex/secrets.ts`
+and `web/src/Secrets.tsx`, and exact `.env.example`, `.env.sample` and `.env.template`
+files remain included. Dotenv values, credential/config files, key files and private
+directories remain excluded. These path rules do not scan file contents. The mapping
 records those omitted paths for exact retry. Manual sync retains its existing
 exact accepted-tree behavior. Accepted source is never changed by publication.
 
 Local Work status and hosted Settings → GitHub show progress, retry state,
-and the last successful push. A changed remote or failed exact lease becomes a
-Needs you conflict with Forge's State and Git head, the expected remote head and
-the observed GitHub head. Neither history is overwritten. Reconcile explicitly;
-manual `github-sync --push` can reconcile a retained pending operation after the
+and the last successful push. Contained external merges use the same adoption
+path automatically. An uncontained or rewritten remote, or a failed exact lease,
+becomes a Needs you conflict with Forge's State and Git head, the expected remote
+head and
+the observed GitHub head. Local/hosted Work metadata retains the refusal detail
+with the external commit IDs, paths and contribution import route. Neither history
+is overwritten. Accepting the external change into a new green main lets the
+automatic worker resume. Reconcile explicitly; manual `github-sync --push` can reconcile a retained pending operation after the
 remote history has been resolved. Published source is undone by a compensating
 Lane, never by automatically rewinding GitHub.
 

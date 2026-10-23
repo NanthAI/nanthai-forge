@@ -9,6 +9,7 @@ import { trustAgents } from './autonomy-fixture.mjs';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { initNative } from '../dist/native-work.js';
 import { readHostState } from '../dist/host-binding.js';
+import { unknownCost } from '../dist/check-cost.js';
 import { ACTIVE_IDLE_MS, activeMs, deriveMakingOf, runTiming, unionMs } from '../dist/making-of.js';
 
 const T = iso => `2026-10-17T${iso}Z`;
@@ -214,6 +215,7 @@ test('one Lane, one run and one landing: timings, actors and advisory sources', 
   );
   assert.ok(!('actor' in record.lanes[0].saves[0]));
   assert.deepEqual(record.runs[0], {
+    cost: unknownCost('local'),
     runId: 'r-1',
     viewId: 'v-1',
     check: 'verify',

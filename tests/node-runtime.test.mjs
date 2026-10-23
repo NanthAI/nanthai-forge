@@ -58,8 +58,18 @@ test('package and active remote check recipes agree on the fixed Node release', 
   const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
   assert.equal(manifest.engines.node, '^22.23.4 || >=24.22.1 <25');
   assert.equal(lock.packages[''].engines.node, manifest.engines.node);
-  for (const workflow of [githubActionsWorkflow(), githubWorkflow()]) {
-    assert.equal((workflow.match(/node-version: '24\.22\.1'/g) ?? []).length, 2);
+  // Actions exports replace the committed workflow with the policy's runner label.
+  // Compare runtime pins rather than unrelated, environment-specific workflow bytes.
+  const workflows = [['committed/exported', readFileSync('.github/workflows/forge-check.yml', 'utf8')]];
+  for (const runsOn of ['ubuntu-latest', 'blacksmith-4vcpu-ubuntu-2404']) {
+    workflows.push([`generated ${runsOn}`, githubActionsWorkflow(runsOn)]);
+    workflows.push([`benchmark ${runsOn}`, githubWorkflow({ ghRunsOn: runsOn })]);
+  }
+  for (const [recipe, workflow] of workflows) {
+    const versions = [...workflow.matchAll(/^\s*node-version:\s*(.+)$/gm)].map(([, value]) =>
+      value.trim().replace(/^(['"])(.*)\1$/, '$2'),
+    );
+    assert.deepEqual(versions, ['24.22.1', '24.22.1'], recipe);
     assert.doesNotMatch(workflow, /24\.19\.0/);
   }
   assert.equal(
@@ -69,5 +79,4 @@ test('package and active remote check recipes agree on the fixed Node release', 
   assert.match(modalRuntime, /node:24\.22\.1-trixie-slim;/);
   for (const path of ['scripts/modal-check/runner.py', 'scripts/modal-spike/runner.py'])
     assert.match(readFileSync(path, 'utf8'), /node:24\.22\.1-trixie-slim/);
-  assert.equal(readFileSync('.github/workflows/forge-check.yml', 'utf8'), githubActionsWorkflow());
 });

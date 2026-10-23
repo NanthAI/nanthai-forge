@@ -1,3 +1,4 @@
+import type { PreviewMeasurement } from './train-accounting.js';
 // SPDX-License-Identifier: Apache-2.0
 import { decorateRepair } from './agent-repair-lineage.js';
 import { landingRepairNotices } from './landing-repair-notice.js';
@@ -59,6 +60,23 @@ export class CoordinationJournal {
     const temporary = join(this.directory, `.pending-${randomUUID()}`);
     writeFileSync(temporary, JSON.stringify(value), { flag: 'wx', mode: 0o600 });
     renameSync(temporary, join(this.directory, name));
+  }
+  recordPreview(measurement: PreviewMeasurement) {
+    this.prepare();
+    workLocked(
+      join(this.directory, 'lock'),
+      () => {
+        const name = `preview-cost-${measurement.executionId}.json`;
+        const previous = this.read<PreviewMeasurement>(name);
+        invariant(
+          !previous || JSON.stringify(previous) === JSON.stringify(measurement),
+          'WORK_OPERATION_CHANGED',
+          'Preview execution measurement changed.',
+        );
+        if (!previous) this.write(name, measurement);
+      },
+      { operation: 'local preview measurement' },
+    );
   }
   record(notices: ConflictNotice[]) {
     if (!notices.length) return;

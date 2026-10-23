@@ -189,6 +189,7 @@ export function selectBatch(
     if (definition !== entry.definition) fields.unshift('check definition');
     if (fields.length) {
       entry.status = 'interrupted';
+      entry.terminalAt = new Date().toISOString();
       entry.reason = landingPinsChanged(fields);
     }
   }
@@ -254,6 +255,7 @@ export function selectBatch(
   };
   for (const entry of selected) {
     entry.status = 'checking';
+    entry.firstSelectedAt ??= new Date().toISOString();
     entry.batchId = batch.id;
   }
   (data.landingBatches ??= []).push(batch);
@@ -354,12 +356,14 @@ export async function composeBatch(work: WorkService, batch: LandingBatch, befor
       for (const [id, diagnostic] of rejected) {
         const entry = data.landingEntries!.find(entry => entry.id === id)!;
         entry.status = 'failed';
+        entry.terminalAt = new Date().toISOString();
         entry.reason = previewExclusionMessage;
         entry.previewDiagnostic = { ...diagnostic, main: preview!.main, key: preview!.key };
       }
       for (const conflict of conflicts) {
         const entry = data.landingEntries!.find(entry => entry.id === conflict.entryId)!;
         entry.status = 'conflict';
+        entry.terminalAt = new Date().toISOString();
         entry.conflictViewId = conflict.viewId;
       }
       return saved;

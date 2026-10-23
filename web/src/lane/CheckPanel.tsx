@@ -44,7 +44,9 @@ export function CheckPanel({
   mainIncluded,
   overlapCount,
   children,
+  queue,
 }: {
+  queue?: import('../cockpit/queue-model').QueueFact;
   run: RunView | null;
   /** Failure output; null when it lives only on the machine that ran the check. */
   summary?: string | null;
@@ -55,16 +57,18 @@ export function CheckPanel({
   children?: ReactNode;
 }) {
   if (!run) return null;
-  const tests = summary ? failingTests(summary) : [];
+  const neutral = queue?.state === 'not-run' || queue?.historical;
+  const state = neutral ? { tone: 'plain' as const, label: 'Not run' } : checkStatus(run.status);
+  const tests = !neutral && summary ? failingTests(summary) : [];
   return (
     <Panel
       title={
         <span className="fx-check-title">
           Check{' '}
-          <StatusPill tone={checkStatus(run.status).tone}>
+          <StatusPill tone={state.tone}>
             {run.check && <>{run.check} · </>}
             {run.checkSelection && <>{run.checkSelection.scope} · </>}
-            {checkStatus(run.status).label}
+            {state.label}
             {run.exitCode != null ? ` · exit ${run.exitCode}` : ''}
             {checkDuration(run) ? ` · ${checkDuration(run)}` : ''}
           </StatusPill>

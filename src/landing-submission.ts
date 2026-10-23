@@ -1,36 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { landingDiagnosis, diagnosticStatus, type LandingDiagnosisReport } from './landing-diagnosis.js';
-import { pendingActionsInfra } from './github-actions-infra.js';
+import { landingDiagnosis } from './landing-diagnosis.js';
+import { projectSubmission, queueObservation } from './landing-observation.js';
+export { projectSubmission, queueObservation, landingAttemptId } from './landing-observation.js';
 import { allRecords } from './agent-lifecycle.js';
-import { finishChild } from './agent-finish-journal.js';
 import type { LandingEntry } from './landing-batch-types.js';
-import type { ChannelMove, CheckRun } from './work-types.js';
+import type { ChannelMove } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
-import { submissionOutcome, sourceSubmission, type Submission } from './landing-submission-state.js';
+import { submissionOutcome, type Submission } from './landing-submission-state.js';
 export * from './landing-submission-state.js';
-export function landingAttemptId(entry: LandingEntry) {
-  return entry.batchId ? finishChild(entry.id, `landing-attempt:${entry.batchId}`) : null;
-}
-/** Shared read-only queue vocabulary for receipts and the pure pending projection. */
-export function queueObservation(
-  entry: LandingEntry,
-  run: CheckRun | undefined,
-  diagnosis: ReturnType<typeof landingDiagnosis> = {},
-) {
-  return {
-    status: entry.status,
-    queueStatus: entry.status,
-    ...diagnosis,
-    checkStatus: run ? diagnosticStatus(run) : undefined,
-    ...(run && pendingActionsInfra(run) && entry.status !== 'cancelled'
-      ? { code: run.error!.code, message: run.error!.message }
-      : {}),
-    ...(entry.reason
-      ? { ...(entry.status === 'interrupted' ? { code: 'EVIDENCE_CHANGED' } : {}), message: entry.reason }
-      : {}),
-  };
-}
 export function queuedOutcome(store: WorkStore, entry: LandingEntry) {
   const run = entry.runId ? store.select('runs', entry.runId) : undefined;
   return reviewedOutcome(
@@ -68,28 +46,6 @@ export function landingSubmission(
 ): Submission {
   const lane = store.select('lanes', pin.laneId)!;
   return projectSubmission(operationId, pin, lane, result, attemptId, attemptHead);
-}
-export function projectSubmission(
-  operationId: string,
-  pin: { laneId: string; head: string },
-  lane: { id: string; intentId: string; head: string },
-  result: Record<string, unknown>,
-  attemptId: string | null,
-  attemptHead = pin.head,
-): Submission {
-  const outcome = submissionOutcome(result);
-  return {
-    submissionId: finishChild(operationId, `submission:${lane.intentId}:${lane.id}`),
-    operationId,
-    entryOperationId: operationId,
-    laneId: lane.id,
-    intentId: lane.intentId,
-    head: pin.head,
-    attemptHead,
-    attemptId,
-    ...sourceSubmission(outcome, lane.head, attemptHead),
-    ...(result.diagnosis ? { diagnosis: result.diagnosis as LandingDiagnosisReport } : {}),
-  };
 }
 export function submissionLine(value: Submission) {
   const state = value.state === 'superseded' ? `superseded (outcome ${value.outcome})` : value.state;

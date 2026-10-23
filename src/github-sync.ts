@@ -2,7 +2,7 @@
 import { workProgress } from './work-progress.js';
 import { requestPushAudit } from './pre-push-audit.js';
 import { drainPostAccept } from './post-accept-main.js';
-import { exclusion } from './files.js';
+import { sourceExclusion } from './files.js';
 import { isGreenMain } from './github-auto-push-state.js';
 import { publishGithubStatus } from './github-sync-status.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -11,7 +11,9 @@ import { z } from 'zod';
 import { WorkStore } from './work-store.js';
 import { NativeSource } from './native-source.js';
 import { workGit } from './work-git.js';
-import { ForgeError, invariant } from './errors.js';
+import { invariant } from './errors.js';
+import { changed, githubReconciliation, reconciliationDetail } from './github-sync-reconcile.js';
+import { githubHistoryContainment } from './github-sync-history.js';
 import {
   remoteSyncHead,
   syncGit,
@@ -22,14 +24,6 @@ import {
 } from './github-sync-git.js';
 import { appendCommits, restorePending, commitPlan } from './github-sync-plan.js';
 
-const changed = (heads: { expectedHead: string; remoteHead: string; localHead?: string }) =>
-  Object.assign(
-    new ForgeError(
-      'GITHUB_SYNC_CHANGED',
-      'GitHub changed outside Forge. Both heads are retained; reconcile before retrying.',
-    ),
-    heads,
-  );
 const same = isDeepStrictEqual;
 export async function githubSync(
   input: string,
@@ -45,7 +39,8 @@ export async function githubSync(
   const store = new WorkStore(input);
   invariant(store.native, 'BAD_ARGUMENT', 'github-sync requires a native Forge owner or Lane.');
   const source = new NativeSource(store.root),
-    data = store.load(),
+    snapshot = store.observing(() => ({ data: store.load(), records: store.readRecords() })),
+    { data } = snapshot,
     stored = data.githubSync,
     // A rebind starts a fresh binding; the stored one is kept as history, never reused.
     original = options.rebind ? undefined : stored;
@@ -110,14 +105,10 @@ export async function githubSync(
       });
     const pushed = original?.pushed ?? 0,
       pending = original?.commits.slice(pushed) ?? [],
-      expected = pushed ? original!.commits[pushed - 1]!.commit : (original?.adoptedCommit ?? remoteHead);
+      recorded = pushed ? original!.commits[pushed - 1]!.commit : (original?.adoptedCommit ?? remoteHead);
+    // Retained batches pin their own parent, including an adopted external head.
+    let expected = pending[0]?.parent ?? recorded;
     const alreadyPushed = pending.length > 0 && pending.at(-1)!.commit === remoteHead;
-    if (remoteHead !== expected && !alreadyPushed)
-      throw changed({
-        expectedHead: expected,
-        remoteHead,
-        ...(original?.commits.at(-1) ? { localHead: original.commits.at(-1)!.commit } : {}),
-      });
     const repeated = options.operationId
       ? original?.commits.filter(entry => entry.operationId === options.operationId)
       : undefined;
@@ -129,26 +120,63 @@ export async function githubSync(
       'GITHUB_SYNC_PENDING',
       'Retry the pending operation id before starting another sync.',
     );
-    const entries = repeated?.length
-      ? repeated
-      : pending.length
-        ? pending
-        : appendCommits(
-            root,
-            source,
-            data,
-            original,
-            remoteHead,
-            options.operationId ?? randomUUID(),
-            await syncIdentity(root),
-            options.autoPush,
-          );
+    let reconciliation;
+    let adoption;
+    if (remoteHead !== expected && !alreadyPushed) {
+      const heads = {
+        expectedHead: expected,
+        remoteHead,
+        ...(original?.commits.at(-1) ? { localHead: original.commits.at(-1)!.commit } : {}),
+      };
+      if (pending.length || repeated?.length) throw changed(heads);
+      adoption = appendCommits(
+        root,
+        source,
+        data,
+        undefined,
+        remoteHead,
+        options.operationId ?? randomUUID(),
+        await syncIdentity(root),
+        options.autoPush,
+      );
+      const adopted = adoption[0]!;
+      reconciliation = githubReconciliation(root, recorded, remoteHead, adopted.tree, targets =>
+        githubHistoryContainment(
+          root,
+          source,
+          snapshot,
+          original?.commits[pushed - 1],
+          adopted,
+          targets,
+          options.autoPush,
+        ),
+      );
+      if (reconciliation.status !== 'contained')
+        throw Object.assign(changed(heads, reconciliationDetail(reconciliation)), { reconciliation });
+      expected = remoteHead;
+    }
+    const entries =
+      adoption ??
+      (repeated?.length
+        ? repeated
+        : pending.length
+          ? pending
+          : appendCommits(
+              root,
+              source,
+              data,
+              original,
+              remoteHead,
+              options.operationId ?? randomUUID(),
+              await syncIdentity(root),
+              options.autoPush,
+            ));
     if (options.autoPush)
       invariant(
         entries.every(entry =>
           source
             .state(entry.state)
-            .files.every(file => !exclusion(file.path) || entry.excludedPaths?.includes(file.path)),
+            .files.every(file => !sourceExclusion(file.path) || entry.excludedPaths?.includes(file.path)),
         ),
         'GITHUB_SYNC_PRIVATE_PENDING',
         'A retained manual batch includes private paths. Its mapping is preserved; automatic publication did not send it.',
@@ -164,6 +192,7 @@ export async function githubSync(
         alreadyPushed || Boolean(repeated?.length && original!.commits.indexOf(repeated.at(-1)!) < pushed),
       commits: entries.map(entry => commitPlan(root, entry)),
       pushed: false,
+      ...(reconciliation ? { reconciliation } : {}),
       ...(options.rebind
         ? {
             rebind: {
@@ -265,6 +294,7 @@ export async function githubSync(
         Object.assign(status!, {
           status: 'pushed',
           code: '',
+          detail: '',
           nextAttemptAt: '',
           at: new Date().toISOString(),
         });

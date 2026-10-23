@@ -5,7 +5,7 @@ import { SCALE_AFTER } from './scale-model';
 import { useVisibleDecisions } from '../shell/visible-decisions';
 import { Glyph, type GlyphName } from '../ui/Glyph';
 import { Avatar, Panel } from '../ui/primitives';
-import { age } from '../ui/status';
+import { age, seenAt } from '../ui/status';
 import { WorkReferenceContext, WorkText } from './WorkReferences';
 import type { DecisionItem } from './attention';
 
@@ -53,9 +53,15 @@ function MessageText({ text }: { text: string }) {
 }
 
 /** Ready-to-accept facts: glyph colour is the signal, the words are always there. */
-function Gates({ gates }: { gates: NonNullable<DecisionItem['gates']> }) {
+function Gates({ gates, now }: { now: number; gates: NonNullable<DecisionItem['gates']> }) {
   return (
     <div className="fx-gates">
+      {gates.queuedAt && (
+        <span className="fx-gate-q">
+          <Glyph name="check" size={12} />
+          in the queue since {seenAt(Date.parse(gates.queuedAt), now)}
+        </span>
+      )}
       <span className="fx-gate-ok">
         <Glyph name="passed" size={12} />
         <span>check passed</span>
@@ -126,7 +132,7 @@ export function NeedsYou({
           {link && !item.broadcast ? <a href={link}>{item.title}</a> : <WorkText text={item.title} />}
           {subtitle && <span className="fx-dec-sub"> · {subtitle}</span>}
         </div>
-        {item.gates ? <Gates gates={item.gates} /> : item.body && <MessageText text={item.body} />}
+        {item.gates ? <Gates now={now} gates={item.gates} /> : item.body && <MessageText text={item.body} />}
         {item.quote?.text && (
           <blockquote className="fx-quote">
             <MessageText text={item.quote.text} />

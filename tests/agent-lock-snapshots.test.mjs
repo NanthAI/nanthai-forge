@@ -1,3 +1,4 @@
+import { trainAccounting } from '../dist/train-accounting.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -250,7 +251,9 @@ test('exact cost summaries reuse unchanged immutable run pages across Work revis
     if (collection === 'runs') reads++;
     return at.call(this, collection, ...args);
   });
-  const expected = { modalCost: modalMonthCost(runs, now), checkCosts: runnerMonthCosts(runs) };
+  const { submissions, ...train } = trainAccounting(runs);
+  void submissions;
+  const expected = { modalCost: modalMonthCost(runs, now), checkCosts: { ...runnerMonthCosts(runs), train } };
   assert.deepEqual(agentCostSummary(root, store.readRecords(), now), expected);
   assert.equal(reads, 257);
   reads = 0;

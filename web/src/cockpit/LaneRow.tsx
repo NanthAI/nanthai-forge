@@ -1,3 +1,5 @@
+import { AutoTag } from '../ui/signals';
+import { queueHref } from './queue-model';
 import { useGenerationFreshness } from '../ui/generation-freshness';
 // SPDX-License-Identifier: Apache-2.0
 import { Glyph, type GlyphName } from '../ui/Glyph';
@@ -78,7 +80,11 @@ export function LaneRow({
     <li className={`fx-row fx-row-${tone}`}>
       <div className="fx-row-main">
         <div className="fx-row-title">
-          <StatusPill tone={tone} {...(fact?.pillGlyph ? { glyph: fact.pillGlyph } : {})}>
+          <StatusPill
+            title={lane.queue?.tip}
+            tone={tone}
+            {...(fact?.pillGlyph ? { glyph: fact.pillGlyph } : {})}
+          >
             {fact?.label ?? lane.label}
           </StatusPill>
           <a className="fx-row-lane" href={href} title={lane.name}>
@@ -97,13 +103,31 @@ export function LaneRow({
               name={
                 freshness.behind && tone === 'running'
                   ? 'stale'
-                  : (fact?.glyph ?? factGlyph[tone] ?? (lane.checkpoints ? 'file' : 'waiting'))
+                  : (fact?.glyph ??
+                    lane.queue?.glyph ??
+                    factGlyph[tone] ??
+                    (lane.checkpoints ? 'file' : 'waiting'))
               }
               size={12}
             />
             <span title={fact?.detail ?? (freshness.behind ? `${text} · ${freshness.asOf}` : text)}>
               {text}
-              {lane.laterViewId && viewHref && (
+              {lane.queue?.automatic && (
+                <>
+                  {' '}
+                  <AutoTag />{' '}
+                  <span className="fx-undo-none" title={lane.queue.undo}>
+                    Undo
+                  </span>
+                </>
+              )}
+              {lane.queue?.link && (
+                <>
+                  {' '}
+                  · <a href={queueHref(lane.queue.link)}>{lane.queue.link.label}</a>
+                </>
+              )}
+              {lane.laterViewId && !lane.queue && viewHref && (
                 <>
                   {' '}
                   · <a href={viewHref(lane.laterViewId)}>Later Candidate</a>

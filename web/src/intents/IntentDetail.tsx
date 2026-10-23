@@ -1,3 +1,4 @@
+import { queueHref } from '../cockpit/queue-model';
 import { useGenerationFreshness } from '../ui/generation-freshness';
 // SPDX-License-Identifier: Apache-2.0
 import { useState, type ReactNode } from 'react';
@@ -25,6 +26,7 @@ import '../views/views.css';
 import './intents.css';
 
 export type ViewRow = {
+  queue?: import('../cockpit/queue-model').QueueFact;
   id: string;
   number?: number;
   changes?: NonNullable<CockpitWork['views'][number]['changes']>;
@@ -109,6 +111,10 @@ export function IntentDetailView({
   canStart?: boolean;
 }) {
   const freshness = useGenerationFreshness();
+  views = views.map(view => ({
+    ...view,
+    queue: row.lanes.find(lane => lane.queue?.viewId === view.id)?.queue,
+  }));
   const [error, setError] = useState('');
   const [dismissed, setDismissed] = useState<string | null>(null);
   const run = async (action: Promise<string | null>) => {
@@ -122,7 +128,20 @@ export function IntentDetailView({
       return message;
     }
   };
-  const ready = [...views].reverse().find(canReviewView);
+  const ready = [...views]
+    .reverse()
+    .find(
+      view =>
+        canReviewView(view) &&
+        !row.lanes.some(lane => lane.queue && lane.queue.viewId === view.id && lane.queue.state !== 'review'),
+    );
+  const failed = row.open.find(lane => lane.queue?.state === 'failed');
+  const queued = row.lanes.filter(
+    lane => lane.queue && ['queued', 'checking', 'machine', 'dependency'].includes(lane.queue.state),
+  ).length;
+  const waitingForYou = row.lanes.filter(
+    lane => lane.queue?.state === 'review' || lane.queue?.state === 'failed',
+  ).length;
   const open = row.status === 'active' || row.status === 'ready';
   const checkedAt =
     ready &&
@@ -194,6 +213,8 @@ export function IntentDetailView({
                     {row.lanes.length} {row.lanes.length === 1 ? 'Lane' : 'Lanes'} ·{' '}
                     {row.lanes.filter(lane => lane.accepted).length} landed
                     {unsynced > 0 && <> · {unsynced} not yet synced</>}
+                    {queued > 0 && <> · {queued} queued</>}
+                    {waitingForYou > 0 && <> · {waitingForYou} waiting for you</>}
                   </span>
                   <span>
                     {views.length} {views.length === 1 ? 'Candidate' : 'Candidates'}
@@ -259,7 +280,38 @@ export function IntentDetailView({
       next={
         <>
           {error && <ErrorToast>{error}</ErrorToast>}
-          {open && ready && reviewHref && dismissed !== ready.id && (
+          {open && failed?.queue && (
+            <section className="fx-next fx-tone-failed" role="status">
+              <span className="fx-next-icon">
+                <Glyph name="failed" size={16} />
+              </span>
+              <div>
+                <h2>Candidate from «{failed.name}» failed its check</h2>
+                <p>{failed.queue.check}</p>
+              </div>
+              <div className="fx-next-actions">
+                {failed.queue.link && (
+                  <ButtonLink size="sm" href={queueHref(failed.queue.link)}>
+                    Open run
+                  </ButtonLink>
+                )}
+                {failed.queue.repairIntentId && (
+                  <ButtonLink
+                    size="sm"
+                    variant="ghost"
+                    href={queueHref({
+                      kind: 'repair-intent',
+                      id: failed.queue.repairIntentId,
+                      label: 'Repair in Lane',
+                    })}
+                  >
+                    Repair in Lane
+                  </ButtonLink>
+                )}
+              </div>
+            </section>
+          )}
+          {open && !failed && ready && reviewHref && dismissed !== ready.id && (
             <section className="fx-next fx-tone-passed" role="status">
               <span className="fx-next-icon">
                 <Glyph name="check" size={16} />

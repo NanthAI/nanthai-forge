@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { queueFacts, queueStatus, type QueueFact } from './queue-model';
+import type { PendingStatus } from '../../../src/pending-status';
+import type { WorkData } from '../../../src/work-types';
+import type { ConflictNotice } from '../../../src/agent-conflict-notice';
 import { checkMeaning, latestRun } from './check-meaning';
 export { latestRun } from './check-meaning';
 import type { Lane, WorkView, CheckRun } from '../../../src/work-types';
@@ -21,6 +25,7 @@ export type CockpitLane = {
   label: string;
   /** One sentence: the most important fact about this Lane right now. */
   fact: string;
+  queue?: QueueFact;
   lastAt?: string;
   viewId?: string;
   runStatus?: CheckRun['status'];
@@ -52,6 +57,13 @@ export type CockpitLane = {
 
 /** Local records and deliberately slim hosted summaries share only these cockpit fields. */
 export type CockpitWork = {
+  revision?: number;
+  pendingStatus?: PendingStatus;
+  landingEntries?: WorkData['landingEntries'];
+  landingBatches?: WorkData['landingBatches'];
+  landingWorker?: PendingStatus['landingWorker'];
+  repairNotices?: ConflictNotice[];
+
   channelMoves?: readonly { channel: string; status?: string; head?: string; viewId: string; at?: string }[];
   intents: readonly {
     id: string;
@@ -59,14 +71,19 @@ export type CockpitWork = {
     status?: string;
     createdAt?: string;
     agentStart?: { laneId: string };
+    notes?: WorkData['intents'][number]['notes'];
+    handoffs?: import('./queue-model').HandoffSummary[];
   }[];
   lanes: readonly (Pick<Lane, 'id' | 'intentId' | 'name' | 'head' | 'base' | 'state' | 'assignment'> & {
     startedBy?: Lane['startedBy'];
+    after?: Lane['after'];
+    stack?: Lane['stack'];
     checkpoints?: Lane['checkpoints'];
     lifecycle?: Lane['lifecycle'];
     pendingMerge?: Lane['pendingMerge'];
     changes?: CockpitLane['changes'] | string;
     checkpointCount?: number;
+    savesSinceSubmission?: { head: string; saves: number }[];
     lastCheckpointAt?: string;
     lastCheckpointMessage?: string;
     /** For Lanes only: whether this head is already contained in hosted main. */
@@ -83,6 +100,9 @@ export type CockpitWork = {
     endedAt?: string;
     check?: { name?: string };
     checkName?: string;
+    cause?: ReturnType<typeof import('../../../src/landing-observation').diagnosticCause>;
+    error?: { code: string };
+    signal?: string | null;
     exitCode?: number | null;
     failureSummary?: string;
     checkQuarantine?: NonNullable<CheckRun['backend']>['quarantine'];
@@ -100,7 +120,19 @@ function latest<T>(items: readonly T[], at: (item: T) => string | undefined): T 
   );
 }
 
-export function cockpitLanes(work: CockpitWork): CockpitLane[] {
+export function cockpitLanes(work: CockpitWork, queue?: ReadonlyMap<string, QueueFact>): CockpitLane[] {
+  const status = queue ? undefined : queueStatus(work);
+  const projected =
+    queue ??
+    (status
+      ? queueFacts(
+          status,
+          work.repairNotices,
+          new Map(
+            work.intents.flatMap(intent => intent.handoffs ?? []).map(handoff => [handoff.laneId, handoff]),
+          ),
+        )
+      : new Map<string, QueueFact>());
   const outcomes = new Map(work.intents.map(intent => [intent.id, intent.outcome]));
   const created = new Map(work.intents.map(intent => [intent.id, intent.createdAt]));
   const agentLanes = new Set(
@@ -117,6 +149,8 @@ export function cockpitLanes(work: CockpitWork): CockpitLane[] {
       .flatMap(view => (view.inputs ?? []).map(input => JSON.stringify([input.laneId, input.head]))),
   );
   return work.lanes.map(lane => {
+    const observedQueue = projected.get(lane.id);
+    const queue = observedQueue?.head === lane.head ? observedQueue : undefined;
     const checkpoints = lane.checkpoints ?? [];
     const view = latest(
       work.views.filter(item =>
@@ -137,7 +171,8 @@ export function cockpitLanes(work: CockpitWork): CockpitLane[] {
       (lane.main?.included === true ||
         acceptedHeads.has(lane.head) ||
         landedInputs.has(JSON.stringify([lane.id, lane.head])));
-    const open = !['completed', 'abandoned'].includes(lane.state) && !reachedMain;
+    const open =
+      (queue?.state === 'working' || !['completed', 'abandoned'].includes(lane.state)) && !reachedMain;
     // A Lane without saves is as fresh as its Intent; never call new work quiet.
     const lastAt = [
       created.get(lane.intentId),
@@ -155,6 +190,7 @@ export function cockpitLanes(work: CockpitWork): CockpitLane[] {
       tone = 'plain';
       label = lane.state === 'abandoned' ? 'Abandoned' : 'Done';
       fact = lane.state === 'abandoned' ? 'Abandoned' : 'Complete';
+      if (queue && reachedMain) ({ tone, label, text: fact } = queue);
     } else if (conflicts.length) {
       tone = 'conflict';
       label = 'Conflict';
@@ -163,6 +199,11 @@ export function cockpitLanes(work: CockpitWork): CockpitLane[] {
       tone = 'conflict';
       label = 'Conflict';
       fact = 'Its Candidate could not combine cleanly';
+    } else if (queue?.historical) {
+      tone = 'active';
+      label = 'Working';
+    } else if (queue) {
+      ({ tone, label, text: fact } = queue);
     } else if (run && ['interrupted', 'cancelled'].includes(run.status)) {
       tone = 'plain';
       label = run.status === 'cancelled' ? 'Cancelled' : 'Interrupted';
@@ -212,9 +253,10 @@ export function cockpitLanes(work: CockpitWork): CockpitLane[] {
       tone,
       label,
       fact,
+      ...(queue && !queue.historical ? { queue } : {}),
       ...(lastAt ? { lastAt } : {}),
       ...(view ? { viewId: view.id } : {}),
-      ...(run ? { runStatus: run.status } : {}),
+      ...(run ? { runStatus: queue?.historical ? ('interrupted' as const) : run.status } : {}),
       ...(meaning && 'laterViewId' in meaning ? { laterViewId: meaning.laterViewId } : {}),
       conflicts,
       ...(typeof lane.changes === 'object' ? { changes: lane.changes } : {}),

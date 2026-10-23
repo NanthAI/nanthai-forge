@@ -6,8 +6,52 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { fingerprintPrivateFile, readSource } from '../dist/files.js';
+import { exclusion, sourceExclusion, fingerprintPrivateFile, readSource } from '../dist/files.js';
 import { touchCtime } from './helpers.mjs';
+
+test('source exclusions keep secret-named modules and env templates while protecting credentials', () => {
+  for (const path of [
+    'src/secret-crypto.ts',
+    'convex/secrets.ts',
+    'tests/secrets.test.mjs',
+    'web/src/Secrets.tsx',
+    'src/credentials.py',
+    'src/secrets.rs',
+    'src/secret.java',
+    '.env.example',
+    '.env.sample',
+    '.env.template',
+  ]) {
+    assert.equal(sourceExclusion(path), null, path);
+    assert.equal(exclusion(path), 'sensitive-name', `analysis keeps its existing policy: ${path}`);
+  }
+  for (const path of [
+    '.env',
+    '.env.local',
+    '.env.production',
+    '.env.example.local',
+    '.env.sample.bak',
+    '.env.ts',
+    '.npmrc',
+    '.netrc',
+    'credentials.json',
+    'credentials.production.json',
+    'secrets.json',
+    'secret-backup.txt',
+    'tls/cert.pem',
+    'tls/private.key',
+    'tls/client.p12',
+    'tls/client.pfx',
+    'tls/client.keystore',
+    '.ssh/id_rsa',
+    '.aws/credentials',
+    'private-artifacts/secret-crypto.ts',
+    '.forge/secrets.ts',
+  ]) {
+    assert.notEqual(sourceExclusion(path), null, path);
+    assert.equal(sourceExclusion(path), exclusion(path), path);
+  }
+});
 
 test('private fingerprints reconcile stable metadata-only changes and reject changing content or authority', async t => {
   const root = fs.mkdtempSync(join(tmpdir(), 'forge-fingerprint-')),

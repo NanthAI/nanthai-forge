@@ -1,5 +1,8 @@
 import { landingWorkerSignal, assertLandingWorkerActive } from './landing-worker-context.js';
 import { candidateCommand } from './candidate-names.js';
+import { pendingStatus } from './pending-status.js';
+import { decorateRepair } from './agent-repair-lineage.js';
+import { landingRepairNotices } from './landing-repair-notice.js';
 // SPDX-License-Identifier: Apache-2.0
 import { executionBase } from './work-intent-local.js';
 import { migrateIntentWork } from './work-intent-migration.js';
@@ -235,6 +238,8 @@ export class WorkService {
       const environment = checkEnvironment();
       return {
         ...data,
+        pendingStatus: pendingStatus(data, {}, null),
+        repairNotices: landingRepairNotices(this.store).map(notice => decorateRepair(this.store, notice)),
         capabilities: {
           originalWorkHistory: false,
           invariants: true,

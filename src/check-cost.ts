@@ -4,9 +4,12 @@ import { modalUsageCost } from './modal-cost.js';
 import type { CheckRun } from './work-types.js';
 
 const quantity = z.number().nonnegative().finite().nullable();
-const itemSchema = z.object({
+export const costItemSchema = z.object({
   id: z.string(),
   seconds: quantity,
+  executingSeconds: quantity.optional(),
+  allowanceUnits: quantity.optional(),
+  retry: z.boolean().optional(),
   billedMinutes: quantity,
   estimatedCostUsd: quantity,
 });
@@ -18,10 +21,10 @@ export const checkCostSchema = z.object({
   billedMinutes: quantity,
   estimatedCostUsd: quantity,
   basis: z.string(),
-  items: z.array(itemSchema),
+  items: z.array(costItemSchema),
 });
 export type CheckCost = z.infer<typeof checkCostSchema>;
-type Item = z.infer<typeof itemSchema>;
+type Item = z.infer<typeof costItemSchema>;
 const modalCostBasis =
   'Modal Sandbox estimate (conservative): CPU $0.00003942/core-second + memory $0.00000667/GiB-second at max(request, usage); worker-runtime when recorded, legacy controller-time otherwise. Excludes startup/teardown, builds, egress, credits and billing adjustments. Includes each retained safety margin; legacy estimates are uncalibrated. Modal billing is authoritative.';
 
@@ -52,7 +55,7 @@ function itemsCost(runner: CheckCost['runner'], items: Item[], basis: string, la
 export function localCost(runId: string): CheckCost {
   return itemsCost(
     'local',
-    [{ id: runId, seconds: 0, billedMinutes: 0, estimatedCostUsd: 0 }],
+    [{ id: runId, seconds: 0, billedMinutes: 0, estimatedCostUsd: 0, retry: false }],
     'Own machine: no provider-billed seconds/minutes or Forge runner charge ($0). Hardware, electricity and operator costs are not estimated.',
   );
 }
@@ -65,6 +68,8 @@ export function modalRunCost(backend: NonNullable<CheckRun['backend']>): CheckCo
         usage.map(item => ({
           id: item.executionId,
           seconds: item.seconds,
+          executingSeconds: item.basis === 'worker-runtime' ? item.seconds : null,
+          ...(item.attempt !== undefined ? { retry: item.attempt > 0 } : {}),
           billedMinutes: item.seconds / 60,
           estimatedCostUsd: modalUsageCost(item),
         })),
@@ -95,6 +100,7 @@ export type JobUsage = {
   started_at?: string | null;
   completed_at?: string | null;
   status: string;
+  retry?: boolean;
 };
 export function actionsCost(label: string, rate: number | null, jobs: JobUsage[]): CheckCost {
   const items = [...new Map(jobs.map(job => [job.id, job])).values()].map(job => {
@@ -107,6 +113,12 @@ export function actionsCost(label: string, rate: number | null, jobs: JobUsage[]
     return {
       id: String(job.id),
       seconds: minutes === null ? null : minutes * 60,
+      executingSeconds: minutes === null ? null : (end - start) / 1000,
+      allowanceUnits:
+        /^blacksmith-(\d+)vcpu-ubuntu-\d+$/.test(label) && minutes !== null
+          ? (minutes * Number(/^blacksmith-(\d+)/.exec(label)![1])) / 2
+          : null,
+      ...(job.retry !== undefined ? { retry: job.retry } : {}),
       billedMinutes: minutes,
       estimatedCostUsd: minutes === null || rate === null ? null : minutes * rate,
     };
@@ -140,10 +152,28 @@ export function runnerMonthCosts(runs: Iterable<Pick<CheckRun, 'id' | 'startedAt
       billedMinutes: number;
       estimatedCostUsd: number;
       basis: string[];
+      netEstimatedCostUsd: null;
     }
   >();
   const seen = new Set<string>();
-  for (const run of runs) {
+  const records = [...runs];
+  const observed = new Map<string, Item>();
+  for (const run of records) {
+    const cost =
+      run.backend?.cost ??
+      (run.backend?.actual === 'modal'
+        ? modalRunCost(run.backend)
+        : unknownCost(run.backend?.actual ?? 'local'));
+    for (const item of cost.items) {
+      const key = `${cost.runner}:${item.id}`,
+        previous = observed.get(key);
+      if (!previous) observed.set(key, { ...item });
+      else
+        for (const field of ['seconds', 'billedMinutes', 'estimatedCostUsd'] as const)
+          if (previous[field] === null && item[field] !== null) previous[field] = item[field];
+    }
+  }
+  for (const run of records) {
     const backend = run.backend;
     const cost =
       backend?.cost ??
@@ -165,6 +195,7 @@ export function runnerMonthCosts(runs: Iterable<Pick<CheckRun, 'id' | 'startedAt
         billedMinutes: 0,
         estimatedCostUsd: 0,
         basis: [],
+        netEstimatedCostUsd: null,
       };
       groups.set(key, group);
     }
@@ -185,9 +216,10 @@ export function runnerMonthCosts(runs: Iterable<Pick<CheckRun, 'id' | 'startedAt
       const identity = `${cost.runner}:${item.id}`;
       if (seen.has(identity)) continue;
       seen.add(identity);
-      group.billedSeconds += item.seconds ?? 0;
-      group.billedMinutes += item.billedMinutes ?? 0;
-      group.estimatedCostUsd += item.estimatedCostUsd ?? 0;
+      const measured = observed.get(identity) ?? item;
+      group.billedSeconds += measured.seconds ?? 0;
+      group.billedMinutes += measured.billedMinutes ?? 0;
+      group.estimatedCostUsd += measured.estimatedCostUsd ?? 0;
     }
   }
   return {

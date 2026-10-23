@@ -1015,7 +1015,7 @@ test('benchmark one and four shard plans match the Forge Actions plan and execut
   assert.deepEqual(scopedDocs.groups, []);
 });
 
-test('exhausted transient check-ref pushes interrupt with the retained-run message', async t => {
+test('exhausted transient check-ref pushes end as terminal infrastructure failure', async t => {
   const { work, run, path } = fixture(t);
   let pushes = 0;
   const waits = [];
@@ -1042,9 +1042,11 @@ test('exhausted transient check-ref pushes interrupt with the retained-run messa
   );
   const receipt = read(join(path, 'result.json'));
   assert.equal(receipt.status, 'interrupted');
-  assert.match(receipt.details, /GITHUB_SYNC_GIT_FAILED/);
-  assert.match(receipt.details, /reconcile the retained run/);
-  assert.match(receipt.details, /source export, dispatch intent and job identities are retained/);
+  assert.equal(receipt.error.code, 'GITHUB_ACTIONS_PUSH_EXHAUSTED');
+  assert.match(receipt.details, /terminal infrastructure failure, not a source verdict/);
+  assert.equal(read(join(path, 'github-actions.json')).terminal, true);
+  const { strandedActionsRun } = await import('../dist/github-actions-recovery.js');
+  assert.equal(strandedActionsRun(work.store, { ...run, status: 'interrupted' }), false);
   assert.equal(pushes, 5);
   assert.equal(waits.length, 4);
   waits.forEach((ms, i) => assert.ok(ms >= 1000 * 2 ** i && ms <= 3000 * 2 ** i));
@@ -1894,3 +1896,61 @@ test('lost shard rerun reply reopens the same run under its retained route after
   assert.ok(resumed.calls.every(call => call.endpoint.startsWith('repos/synthetic/checks/')));
   assert.equal(strandedActionsRun(work.store, work.store.select('runs', run.id)), false);
 });
+
+for (const mode of ['workflow-scope', 'ambiguous-exhausted']) {
+  test(`push ${mode} publishes a terminal infrastructure receipt without dispatch or recovery`, async t => {
+    const { work, run, path } = fixture(t);
+    const { ensureActionsPush } = await import('../dist/github-actions-push.js');
+    let clock = Date.now(),
+      pushes = 0;
+    await launchGithubActionsRun(
+      work.store,
+      run,
+      {
+        request: async () => assert.fail('failed push must not dispatch'),
+        pages: async () => assert.fail('failed push must not discover executions'),
+      },
+      async (plan, journal, save) => {
+        journal.commit = 'a'.repeat(40);
+        journal.pushOutcome = 'not-sent';
+        save();
+        await ensureActionsPush(
+          plan,
+          journal,
+          save,
+          async (_, args) => {
+            if (args[0] === 'ls-remote') return '';
+            pushes++;
+            if (mode === 'workflow-scope')
+              throw new GitSyncError(
+                'remote: refusing to allow an OAuth App to create or update workflow .github/workflows/test.yml without `workflow` scope',
+                false,
+              );
+            throw new GitSyncError('RPC failed; early EOF', true);
+          },
+          async ms => {
+            clock += ms;
+          },
+          undefined,
+          () => clock,
+        );
+      },
+      async () => assert.fail('failed push must not clean an unobserved ref'),
+    );
+    const receipt = read(join(path, 'result.json'));
+    assert.equal(receipt.status, 'interrupted');
+    assert.equal(receipt.exitCode, null);
+    assert.equal(
+      receipt.error.code,
+      mode === 'workflow-scope' ? 'GITHUB_ACTIONS_PUSH_REJECTED' : 'GITHUB_ACTIONS_PUSH_EXHAUSTED',
+    );
+    assert.match(receipt.details, /terminal infrastructure failure, not a source verdict/);
+    assert.equal(pushes, mode === 'workflow-scope' ? 1 : 5);
+    if (mode === 'workflow-scope') assert.match(receipt.details, /token lacks workflow scope/);
+    assert.equal(read(join(path, 'github-actions.json')).terminal, true);
+    const { strandedActionsRun } = await import('../dist/github-actions-recovery.js');
+    assert.equal(strandedActionsRun(work.store, { ...run, status: 'interrupted' }), false);
+    recoverRuns(work.store, { runs: [run] });
+    assert.equal(run.error.code, receipt.error.code);
+  });
+}

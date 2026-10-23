@@ -347,3 +347,58 @@ An absent worker is explicit in the receipt and leaves work pending. Use the
 returned status/pending/wait selectors to observe progress; client disconnect
 does not cancel submitted work. A check-only async finish is also retained for
 worker recovery and never requests acceptance.
+
+## Cost and latency observations
+
+Existing agent status `checkCosts` retains monthly runner totals and adds fixed-size
+`train` totals. Making-of includes the selected Intent's submission timing, per-run
+costs and shared execution costs for each submission, with the same accounting categories: landing, diagnosis, retry, invalidated
+speculation, preview and full-main audit. Other checks remain explicitly unclassified.
+A shared batch execution can appear in several Intent reports; project totals
+count it once. Do not add Intent totals to estimate project spend.
+
+Physical runner/execution IDs deduplicate controller adoption and shared submissions.
+Later complete observations fill previously unknown quantities. Replacement job or
+Sandbox attempts retain their own cost; unknown legacy attempt attribution stays
+unclassified. Categories are exclusive: invalidated work takes precedence over retry,
+then the original check purpose. No reserved but unexecuted prefix is counted as a
+physical execution. Legacy aggregate costs without execution IDs cannot establish
+physical deduplication and are counted separately as unidentified coverage.
+
+Actions execution seconds and separately rounded job minutes are distinct. Blacksmith
+allowance units use the existing x64 estimator's vCPU/2 basis. Gross estimates retain
+the pinned runner rate. Remaining shared allowance and estimated net cost stay unknown;
+no provider usage API is contacted and no allowance is independently deducted per run
+or project. Unknown timing, rates and legacy quantities remain explicit. Local preview
+provider cost is zero under the existing own-machine basis; hardware, electricity and
+operator costs are not estimated.
+
+New landing entries retain first selection and terminal timestamps at their existing
+state transitions. Queue wait is arrival to first selection; end-to-end latency is
+arrival to the actual acceptance receipt or recorded terminal state. Requeue retains
+original arrival and first selection. Review waits remain pending. Legacy entries can
+report arrival to first recorded check reservation with a named legacy basis; missing
+terminal timestamps stay unknown, even when their checks have ended. A cancelled job's
+end is not a submission cancellation time.
+
+Actual local preview invocations retain duration, execution identity and saved inputs
+in the existing private coordination journal. Reusing a source-only cached observation
+adds no execution; reexecuting external commands retains another measurement. These
+local advisory measurements are separate from portable Work/check evidence. Selected
+making-of records show feedback duration coverage. Immutable Work page projections and
+preview records are cached; cold reads hydrate one page at a time, warm unchanged
+collections read no run records. Reads install no observer or idle polling.
+
+After `npm run build:core`, run `node scripts/replay-landing-train.mjs` for deterministic
+synthetic serial/train reference-planner comparisons. The replay uses the production batch selector, saved-source overlap planner,
+arrival ordering and prefix evaluation with explicit shapes (serial one entry,
+train eight entries/four speculative batches), disposable synthetic source and
+logical fake-CI durations. It covers clean bursts, paragraph conflicts, cross-file and
+higher-order interactions, non-monotone prefixes, dispatch rejection/lost replies,
+modeled controller restart boundaries, retries, cancellation/late completion and
+stale-main invalidation. The JSON reports outcome/queue percentiles, executed checks,
+job minutes, allowance units and gross cost with audits/previews separate and included
+in totals. The reference model does not prove durable-driver recovery, production overlap
+coverage, provider behavior or production throughput. Its configured fake durations
+are model inputs; outputs are synthetic measurements, never a live speedup claim.
+No cost cap, collection delay or scheduling policy is added by accounting or replay.

@@ -12,6 +12,7 @@ import {
 import { createHash } from 'node:crypto';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { ForgeError, invariant } from './errors.js';
+import { sourceLanguage } from './languages.js';
 
 export { safeRelative } from './safe-relative.js';
 import { safeRelative } from './safe-relative.js';
@@ -50,6 +51,19 @@ export function exclusion(path: string): string | null {
   )
     return 'sensitive-name';
   return null;
+}
+
+/** Source capture/publication keeps modules and exact env templates, unlike analysis. */
+export function sourceExclusion(path: string): string | null {
+  const reason = exclusion(path);
+  if (reason !== 'sensitive-name') return reason;
+  const name = path.split('/').at(-1) ?? '';
+  if (
+    (/^(credentials?|secrets?)[.-]/i.test(name) && sourceLanguage(path)) ||
+    /(?:^|\.)env\.(example|sample|template)$/i.test(name)
+  )
+    return null;
+  return reason;
 }
 
 export function readSource(

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { useAttention } from './attention-context';
 import { useGenerationFreshness } from '../ui/generation-freshness';
 import { HostedFreshnessLine } from './HostedFreshnessLine';
 import { useMemo } from 'react';
@@ -18,6 +19,7 @@ import { latestRun } from '../cockpit/model';
  */
 export function HostedStrip({ projectId }: { projectId: Id<'hostedProjects'> }) {
   const freshness = useGenerationFreshness();
+  const attention = useAttention();
   const viewer = useUser().user?.id;
   const value = useQuery(workIndex.workspace, { projectId });
   const workspace = useMemo(() => (value ? (JSON.parse(value) as WorkIndexWorkspace) : null), [value]);
@@ -47,6 +49,7 @@ export function HostedStrip({ projectId }: { projectId: Id<'hostedProjects'> }) 
   );
   return (
     <ChannelStrip
+      queue={workspace?.landingWorker ? attention?.pending : undefined}
       {...(selected ? { head: selected.head } : {})}
       {...(main ? { at: main.at } : {})}
       {...(run ? { check: run.status } : {})}

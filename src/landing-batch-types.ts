@@ -27,6 +27,8 @@ export const landingEntrySchema = z.object({
     })
     .optional(),
   arrivedAt: z.string(),
+  firstSelectedAt: z.string().optional(),
+  terminalAt: z.string().optional(),
   priority: z.enum(['urgent', 'normal']).default('normal'),
   submitter: z.string(),
   keepOpen: z.boolean(),

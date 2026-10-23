@@ -151,14 +151,17 @@ export async function advanceLandingBatch(
     )) {
       if (move && passing!.entryIds.includes(entry.id)) {
         entry.status = 'accepted';
+        entry.terminalAt = move.at;
         entry.acceptanceId = move.id;
         entry.runId = passing!.runId;
       } else if (entry.id === boundaryId) {
         entry.status = 'failed';
+        entry.terminalAt = new Date().toISOString();
         entry.runId = failing!.runId;
         entry.reason = `Observed failing prefix of ${failing!.entryIds.length} landing entries on base ${batch.base}; run ${failing!.runId}. This does not establish a standalone or minimal failing Lane.`;
       } else if (outcome?.stopped) {
         entry.status = outcome.stopped === 'cancelled' ? 'cancelled' : 'interrupted';
+        entry.terminalAt = new Date().toISOString();
         entry.runId = batch.prefixes.find(prefix =>
           data.runs.some(run => run.id === prefix.runId && diagnosticStatus(run) === outcome.stopped),
         )?.runId;

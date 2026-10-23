@@ -1,3 +1,5 @@
+import { trainAccounting } from '../dist/train-accounting.js';
+import { readMakingOf } from '../dist/making-of-read.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,6 +39,24 @@ test('four ready entries land with one exact combined check and one Channel move
   assert.equal(data.channelMoves.length, 1);
   assert.equal(data.views.find(view => view.id === f.main().viewId).inputs.length, 4);
   assert.ok(data.landingEntries.every(entry => entry.status === 'accepted'));
+  assert.ok(
+    data.landingEntries.every(
+      entry =>
+        Date.parse(entry.firstSelectedAt) >= Date.parse(entry.arrivedAt) && entry.terminalAt === f.main().at,
+    ),
+  );
+  const accounting = trainAccounting(data.runs, {
+    entries: data.landingEntries,
+    batches: data.landingBatches,
+    moves: data.channelMoves,
+  });
+  assert.equal(accounting.latency.endToEnd.observed, 4);
+  assert.ok(accounting.submissions.every(row => row.queueBasis === 'submission-state'));
+  const first = data.lanes[0];
+  const makingOf = readMakingOf(f.store, first.intentId).result.accounting;
+  assert.equal(makingOf.submissions.length, 1);
+  assert.equal(makingOf.submissions[0].costs.shared, true);
+  assert.equal(makingOf.submissions[0].costs.categories.landing.executions, 1);
   assert.equal(f.main().postAccept.reason, 'batch');
   for (let i = 0; i < 4; i++) assert.equal(f.content(`${i}.txt`), `${i}.txt\n`);
   await drainPostAccept(f.store);
@@ -51,6 +71,7 @@ test('compose conflict ejects only its entry and retains the conflict View', asy
   await drainLandingBatches(f.work, 'main');
   const entry = f.store.select('landingEntries', conflict.command.operationId);
   assert.equal(entry.status, 'conflict');
+  assert.ok(Number.isFinite(Date.parse(entry.terminalAt)));
   assert.equal(f.store.select('views', entry.conflictViewId).status, 'conflict');
   assert.equal(f.content('same.txt'), 'first\n');
   assert.equal(f.content('later.txt'), 'later.txt\n');
@@ -224,6 +245,10 @@ test('queued cancellation retains and checks the prefix before that entry', asyn
     data.landingEntries.map(entry => entry.status),
     ['accepted', 'cancelled', 'accepted'],
   );
+  const cancelledAt = data.landingEntries[1].terminalAt;
+  assert.ok(Number.isFinite(Date.parse(cancelledAt)));
+  await cancelLandingEntry(f.work, f.pending[1]);
+  assert.equal(f.store.select('landingEntries', f.pending[1]).terminalAt, cancelledAt);
   assert.equal(f.content('cancel.txt'), undefined);
   const first = data.channelMoves[0];
   assert.ok(

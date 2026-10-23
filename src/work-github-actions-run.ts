@@ -19,7 +19,7 @@ import { CheckQueue } from './check-queue.js';
 import { workProgress } from './work-progress.js';
 import { createRunReceipt } from './work-run-receipt.js';
 import { invariant } from './errors.js';
-import { ActionsPushUnknown, PENDING_ACTIONS_INFRA } from './github-actions-infra.js';
+import { ActionsPushFailed, ActionsPushUnknown, PENDING_ACTIONS_INFRA } from './github-actions-infra.js';
 import { GitSyncError } from './github-sync-git.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
@@ -192,7 +192,7 @@ export async function launchGithubActionsRun(
       run.backend!.cost = unknownCost('github-actions');
       delete run.backend!.estimatedCostUsd;
     }
-    pendingInfra &&= !run.cancelRequested;
+    pendingInfra &&= !run.cancelRequested && !(error instanceof ActionsPushFailed);
     // Never serialize raw transport errors or stacks. Git's stderr is kept only after redaction.
     const dispatchRejected = error instanceof ActionsDispatchRejected;
     const pendingMessage =
@@ -201,17 +201,23 @@ export async function launchGithubActionsRun(
         : `pending-infra: original provider operation requires discovery (${errorKind(error)}).`;
     const receipt = createRunReceipt({
       status: dispatchRejected ? 'failed' : 'interrupted',
-      ...(pendingInfra ? { error: { code: PENDING_ACTIONS_INFRA, message: pendingMessage } } : {}),
+      ...(pendingInfra
+        ? { error: { code: PENDING_ACTIONS_INFRA, message: pendingMessage } }
+        : error instanceof ActionsPushFailed
+          ? { error: { code: error.code, message: error.message } }
+          : {}),
       cancellation: run.cancellation,
       backend: run.backend,
       endedAt: new Date().toISOString(),
       exitCode: dispatchRejected ? 1 : null,
       signal: null,
       details: pendingInfra
-        ? `${pendingMessage} Source export, attempt outcomes, rejection classes, branch visibility and discovery windows are retained in github-actions.json. Reconcile this same operation to adopt the original execution; no ambiguous push, dispatch or shard rerun is repeated. This interruption adds no source verdict; earlier job evidence remains retained.`
-        : dispatchRejected
-          ? `${error.code}: ${error.message} Source export and dispatch rejections are retained.`
-          : `GitHub Actions controller interrupted (${errorKind(error)}${error instanceof GitSyncError && error.detail ? `: git said "${error.detail}"` : ''}); source export, dispatch intent and job identities are retained. Check gh access and workflow registration, then reconcile the retained run. Retained dispatch outcomes govern recovery; ambiguous reruns are never repeated.`,
+        ? `${pendingMessage} Source export, attempt outcomes, rejection classes, branch visibility and discovery windows are retained in github-actions.json. Reconcile this same operation to adopt the original execution; push recovery uses the identical commit and create-only ref lease within its retained attempt bound; no ambiguous dispatch or shard rerun is repeated. This interruption adds no source verdict; earlier job evidence remains retained.`
+        : error instanceof ActionsPushFailed
+          ? `${error.code}: ${error.message} Push attempts and redacted Git diagnostics remain retained; this is a terminal infrastructure failure, not a source verdict.`
+          : dispatchRejected
+            ? `${error.code}: ${error.message} Source export and dispatch rejections are retained.`
+            : `GitHub Actions controller interrupted (${errorKind(error)}${error instanceof GitSyncError && error.detail ? `: git said "${error.detail}"` : ''}); source export, dispatch intent and job identities are retained. Check gh access and workflow registration, then reconcile the retained run. Retained dispatch outcomes govern recovery; ambiguous reruns are never repeated.`,
     });
     progress(receipt.details);
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
@@ -227,6 +233,7 @@ export async function launchGithubActionsRun(
 function errorKind(error: unknown) {
   if (
     error instanceof ActionsApiError ||
+    error instanceof ActionsPushFailed ||
     error instanceof ActionsDispatchUnknown ||
     error instanceof ActionsPushUnknown
   )

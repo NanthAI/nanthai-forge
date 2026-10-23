@@ -22,6 +22,9 @@ export function mapViews(views: readonly ViewRow[]) {
 
 export function candidateState(view: ViewRow, unsynced = false) {
   if (view.accepted) return 'Accepted';
+  if (view.queue?.state === 'not-run') return 'Not run';
+  if (view.queue?.state === 'later') return 'Superseded';
+  if (view.queue?.state === 'queued') return 'Queued';
   if (view.supersededBy) return 'Superseded';
   if (view.check === 'failed') return 'Check failed';
   if (view.status === 'conflict') return 'Conflict';
@@ -43,7 +46,7 @@ export function WorkMap({
   now = Date.now(),
 }: {
   lanes: readonly (Pick<CockpitLane, 'id' | 'name' | 'checkpoints' | 'accepted'> &
-    Partial<Pick<CockpitLane, 'head' | 'label'>>)[];
+    Partial<Pick<CockpitLane, 'head' | 'label' | 'queue'>>)[];
   views: readonly ViewRow[];
   laneHref: (id: string) => string;
   viewHref?: (id: string) => string;
@@ -54,6 +57,10 @@ export function WorkMap({
   now?: number;
 }) {
   const freshness = useGenerationFreshness();
+  views = views.map(view => ({
+    ...view,
+    queue: view.queue ?? lanes.find(lane => lane.queue?.viewId === view.id)?.queue,
+  }));
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(1000);
   useEffect(() => {
@@ -85,11 +92,13 @@ export function WorkMap({
   const tone = (view: ViewRow) =>
     view.accepted
       ? 'accepted'
-      : view.supersededBy
+      : view.queue?.state === 'not-run' || view.queue?.state === 'later'
         ? 'old'
-        : view.check === 'failed' || view.status === 'conflict'
-          ? 'failed'
-          : 'current';
+        : view.supersededBy
+          ? 'old'
+          : view.check === 'failed' || view.status === 'conflict'
+            ? 'failed'
+            : 'current';
   if (compact) {
     const canvasWidth = Math.max(600, width);
     const canvasHeight = Math.max(112, lanes.length * 38 + 36);
@@ -139,13 +148,15 @@ export function WorkMap({
               const x = pointX(index),
                 inputs = (view.inputs ?? []).filter(input => lanes.some(lane => lane.id === input.laneId));
               const colour =
-                view.accepted || view.check === 'passed'
-                  ? 'var(--fx-passed)'
-                  : view.supersededBy
-                    ? 'var(--fx-text-3)'
-                    : view.check === 'failed' || view.status === 'conflict'
-                      ? 'var(--fx-failed)'
-                      : 'var(--fx-active)';
+                view.queue?.state === 'not-run' || view.queue?.state === 'later'
+                  ? 'var(--fx-text-3)'
+                  : view.accepted || view.check === 'passed'
+                    ? 'var(--fx-passed)'
+                    : view.supersededBy
+                      ? 'var(--fx-text-3)'
+                      : view.check === 'failed' || view.status === 'conflict'
+                        ? 'var(--fx-failed)'
+                        : 'var(--fx-active)';
               return (
                 <g key={view.id}>
                   {inputs.map(input => {
@@ -285,13 +296,15 @@ export function WorkMap({
                       <span className="fx-map-node" aria-hidden="true">
                         {view.accepted
                           ? '✓'
-                          : view.supersededBy
-                            ? '◇'
-                            : state === 'Check failed' || state === 'Conflict'
-                              ? '!'
-                              : state === 'Checking'
-                                ? '◷'
-                                : '◆'}
+                          : view.queue?.state === 'not-run' || view.queue?.state === 'later'
+                            ? 'old'
+                            : view.supersededBy
+                              ? '◇'
+                              : state === 'Check failed' || state === 'Conflict'
+                                ? '!'
+                                : state === 'Checking'
+                                  ? '◷'
+                                  : '◆'}
                       </span>
                       <span className="fx-map-state">{label}</span>
                     </a>

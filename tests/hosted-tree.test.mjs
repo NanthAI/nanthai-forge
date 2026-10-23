@@ -258,6 +258,34 @@ test('hosted frame shares summary and coordination pages across strip and Now', 
   assert.equal(calls.get('projectCoordination:recent'), 1);
 });
 
+for (const [label, counts] of [
+  ['unavailable workspace', null],
+  ['legacy workspace without counts', undefined],
+  ['legacy workspace without landing collections', {}],
+  ['landing entries without batches', { landingEntries: 0 }],
+  ['landing collections', { landingEntries: 0, landingBatches: 0 }],
+])
+  test(`hosted shell renders with ${label} and subscribes only to available landing collections`, async () => {
+    const calls = new Map();
+    const html = await render(`?surface=projects&project=${PROJECT}&projectTab=overview`, tree => {
+      const workspace = tree.queries['projectWorkIndex:workspace'];
+      tree.queries['projectWorkIndex:workspace'] = () =>
+        counts === null ? null : JSON.stringify({ ...JSON.parse(workspace()), counts });
+      const records = tree.pages['projectWorkIndex:records'];
+      tree.pages['projectWorkIndex:records'] = args => {
+        calls.set(args.collection, (calls.get(args.collection) ?? 0) + 1);
+        return records(args);
+      };
+    });
+    assert.match(html, /class="fx fx-app"/);
+    if (counts === null) assert.match(html, /role="status">Loading project Work…/);
+    else assert.match(html, /class="fx-now2"/);
+    for (const collection of ['landingEntries', 'landingBatches'])
+      assert.equal(calls.get(collection) ?? 0, counts?.[collection] === undefined ? 0 : 1, collection);
+    if (counts !== null) assert.match(html, /Check failed/, 'legacy check evidence still renders');
+    assert.doesNotMatch(html, /owner not seen|queue · /, 'missing worker data adds no strip placeholder');
+  });
+
 test('account settings retain the existing Clerk account management entry', async () => {
   const html = await render('?surface=account&settings=account');
   assert.match(html, /Manage account/);

@@ -39,5 +39,7 @@ def compute_estimate(executions, safety_margin=1):
                               memoryGiBSeconds=max(128, item.get('memory', 4096)) / 1024 * seconds,
                               basis='worker-runtime' if measured else 'controller-time',
                               safetyMargin=safety_margin))
+        if 'attempt' in item:
+            estimates[-1]['attempt'] = item['attempt']
     return dict(estimatedCostUsd=sum(costs),
                 costUsage=estimates)

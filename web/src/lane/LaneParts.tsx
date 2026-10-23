@@ -8,13 +8,24 @@ import { Avatar, DiffStat, Dot, StatusPill } from '../ui/primitives';
 import { Rail } from '../ui/Rail';
 import { age, type Tone } from '../ui/status';
 
-export type Step = { tone: Tone; glyph: GlyphName; title: string; body: string; nobody?: true };
+export type Step = { tone: Tone; glyph: GlyphName; title: string; body: string; nobody?: true; queue?: true };
 
 /**
  * One sentence about what happens next and whether the viewer is needed.
  * `since` (e.g. `last save 3 h ago`) marks the page as able to tell that nobody holds an open Lane.
  */
 export function nextStep(lane: CockpitLane, since?: string): Step {
+  if (lane.queue?.step && lane.tone !== 'conflict')
+    return lane.queue.state === 'review' && !lane.queue.step.body
+      ? {
+          ...lane.queue.step,
+          body:
+            lane.session?.name ??
+            (lane.startedBy?.name !== 'Agent workflow' ? (lane.startedBy?.name ?? '') : ''),
+        }
+      : lane.queue.step;
+  if (lane.queue && ['later', 'not-run', 'working'].includes(lane.queue.state))
+    return { tone: 'plain', glyph: 'plain', title: '', body: '' };
   if (!lane.open)
     return {
       tone: 'plain',
@@ -90,7 +101,7 @@ export function nextStep(lane: CockpitLane, since?: string): Step {
 export function NextStep({ step, actions }: { step: Step; actions?: ReactNode }) {
   const freshness = useGenerationFreshness();
   if (freshness.behind && step.tone === 'running') return null;
-  if (step.tone === 'active' || step.tone === 'plain' || step.tone === 'failed') return null;
+  if (step.tone === 'active' || step.tone === 'plain' || (step.tone === 'failed' && !step.queue)) return null;
   return (
     <section className={`fx-next fx-tone-${step.tone}`} aria-label="What happens next" role="status">
       <span className="fx-next-icon">
@@ -125,7 +136,9 @@ export function LaneHeader({
         <h1>
           <Glyph name="lane" size={18} />
           {displayLaneName(lane.name, lane.intent)}
-          <StatusPill tone={lane.tone}>{lane.label}</StatusPill>
+          <StatusPill title={lane.queue?.tip} tone={lane.tone}>
+            {lane.label}
+          </StatusPill>
         </h1>
         <div className="fx-lane-meta">
           {actor ? (
@@ -150,7 +163,8 @@ export function LaneHeader({
               {lane.changes.files} {lane.changes.files === 1 ? 'file' : 'files'}
             </span>
           )}
-          {lane.open && !lane.runStatus && <span className="fx-faint">No check yet</span>}
+          {lane.queue?.meta && <span>{lane.queue.meta}</span>}
+          {lane.open && !lane.queue && !lane.runStatus && <span className="fx-faint">No check yet</span>}
           <span className={!lane.open ? 'fx-lane-progress-complete' : undefined}>
             <Rail lane={lane} dim={lane.session?.tone === 'stale' || !lane.open} />
           </span>

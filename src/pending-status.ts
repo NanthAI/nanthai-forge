@@ -1,4 +1,4 @@
-import { batchDiagnosis } from './landing-diagnosis.js';
+import { batchDiagnosis, diagnosticCause } from './landing-observation.js';
 import type { LandingWorkerStatus } from './landing-worker-status.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
@@ -6,7 +6,7 @@ import {
   projectSubmission,
   queueObservation,
   type Submission,
-} from './landing-submission.js';
+} from './landing-observation.js';
 import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
 import type { OverlapPlan } from './agent-overlap-plan.js';
 import type { WorkData } from './work-types.js';
@@ -50,7 +50,8 @@ export type PendingObservations = {
   deployment?: { head: string; observedAt: string | null; state: string | null } | null;
 };
 const active = (status: string) => ['queued', 'preparing', 'running'].includes(status);
-const age = (at: string | null | undefined, now: string) => {
+const age = (at: string | null | undefined, now: string | null) => {
+  if (now === null) return null;
   const delta = Date.parse(now) - Date.parse(at ?? '');
   return Number.isFinite(delta) && delta >= 0 ? delta : null;
 };
@@ -58,11 +59,12 @@ const comparison = (local: string | null, observed: string | null | undefined) =
   local && observed ? (local === observed ? 'matching' : 'different') : 'unknown';
 
 /** Pure projection of one pinned local observation. No heartbeat implies nothing
- * about owner liveness, source publication, deployment or evidence coverage. */
+ * about owner liveness, source publication, deployment or evidence coverage.
+ * Pass null for a clock-free Work projection; only timed observations report ages. */
 export function pendingStatus(
   data: PendingData,
   observed: PendingObservations = {},
-  now = new Date().toISOString(),
+  now: string | null = new Date().toISOString(),
 ) {
   const moves = data.channelMoves.filter(move => move.channel === 'main' && move.status === 'accepted');
   const main = moves.at(-1);
@@ -92,7 +94,13 @@ export function pendingStatus(
       kind: run.mainCheck ? 'audit' : 'candidate',
     }));
   const lanes = data.lanes
-    .filter(lane => !['completed', 'abandoned'].includes(lane.state))
+    .filter(
+      lane =>
+        !['completed', 'abandoned'].includes(lane.state) ||
+        (data.landingEntries ?? []).some(entry =>
+          views.get(entry.viewId)?.inputs.some(pin => pin.laneId === lane.id),
+        ),
+    )
     .map(lane => {
       const candidates = data.views.filter(view =>
         view.inputs.some(pin => pin.laneId === lane.id && pin.head === lane.head),
@@ -197,7 +205,51 @@ export function pendingStatus(
         name: lane.name,
         head: lane.head,
         status,
-        submission,
+        submission:
+          submission?.state === 'pending' && dependencyWaiting && submission.pendingReason === 'queued'
+            ? { ...submission, pendingReason: 'waiting-for-dependency' as const }
+            : submission,
+        intentId: lane.intentId,
+        checkpoints: lane.checkpoints ?? [],
+        savesSinceSubmission: (
+          lane as typeof lane & { savesSinceSubmission?: { head: string; saves: number }[] }
+        ).savesSinceSubmission,
+        checkpointCount:
+          (lane as typeof lane & { checkpointCount?: number }).checkpointCount ??
+          lane.checkpoints?.length ??
+          0,
+        lastCheckpointAt:
+          (lane as typeof lane & { lastCheckpointAt?: string }).lastCheckpointAt ??
+          lane.checkpoints?.at(-1)?.at,
+        stackParent: parent ? { laneId: parent.id, name: parent.name } : null,
+        entries: (data.landingEntries ?? [])
+          .filter(item => views.get(item.viewId)?.inputs.some(pin => pin.laneId === lane.id))
+          .map(item => {
+            const run = data.runs.find(run => run.id === item.runId);
+            const move = item.acceptanceId
+              ? moves.find(move => move.id === item.acceptanceId)
+              : moves.filter(move => move.viewId === (run?.viewId ?? item.viewId)).at(-1);
+            return {
+              id: item.id,
+              status: item.status,
+              arrivedAt: item.arrivedAt,
+              viewId: item.viewId,
+              run: run
+                ? {
+                    id: run.id,
+                    intentId: views.get(run.viewId)?.intentId ?? lane.intentId,
+                    viewId: run.viewId,
+                    status: run.status,
+                    startedAt: run.startedAt,
+                    endedAt: run.endedAt,
+                    exitCode: run.exitCode,
+                    check: { name: run.check?.name ?? 'Check' },
+                    cause: diagnosticCause(run),
+                  }
+                : null,
+              move: move ? { id: move.id, at: move.at, head: move.head, automatic: move.automatic } : null,
+            };
+          }),
         submissions: submissionList,
         after: after ?? null,
         ...(lane.stack

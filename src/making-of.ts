@@ -1,3 +1,4 @@
+import { runCost, intentAccounting, type AccountingContext } from './train-accounting.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { PRESENCE } from './presence.js';
@@ -36,6 +37,7 @@ export type MakingOfInput = {
   moves: ChannelMove[];
   presence: PresenceObservation[];
   reports: SelfReport[];
+  accounting?: AccountingContext;
 };
 
 /** Gaps longer than this between recorded events are idle, matching the presence working window. */
@@ -194,6 +196,7 @@ export function deriveMakingOf(input: MakingOfInput) {
         startedAt: run.startedAt,
         ...(run.endedAt ? { endedAt: run.endedAt } : {}),
         ...timing,
+        cost: runCost(run),
       };
     });
 
@@ -253,6 +256,11 @@ export function deriveMakingOf(input: MakingOfInput) {
   const first = events.length ? Math.min(...events) : undefined,
     last = events.length ? Math.max(...events) : undefined;
 
+  const detailedAccounting =
+    input.runs.length || input.accounting?.entries?.length || input.accounting?.previews?.length
+      ? intentAccounting(input.runs, input.accounting, input.views)
+      : undefined;
+
   return {
     intentId: intent.id,
     outcome: intent.outcome,
@@ -269,6 +277,7 @@ export function deriveMakingOf(input: MakingOfInput) {
       ? { activeTime: { ms: activeMs(events), idleThresholdMs: ACTIVE_IDLE_MS, events: events.length } }
       : {}),
     ...(runs.length ? { checks: { runs: runs.length, finished: finished.length, ...checkTotals } } : {}),
+    ...(detailedAccounting ? { accounting: detailedAccounting } : {}),
     actors: [...actors.values()].map(row => ({
       name: row.name,
       ...(row.kind ? { kind: row.kind } : {}),

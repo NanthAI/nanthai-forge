@@ -192,8 +192,25 @@ export function awayFacts(
 ): AwayFact[] {
   const facts: AwayFact[] = [];
   const recent = accepted.filter(row => Date.parse(row.at) >= since);
-  const auto = recent.filter(row => row.automatic);
-  const manual = recent.length - auto.length;
+  const events = [
+    ...new Map(lanes.flatMap(lane => lane.queue?.events ?? []).map(event => [event.id, event])).values(),
+  ].filter(event => Date.parse(String(event.at)) >= since);
+  const landed = events.filter(event => event.id.startsWith('move:'));
+  const failed = events.filter(event => event.id.startsWith('run:') && event.tone === 'failed');
+  if (landed.length)
+    facts.push({
+      id: 'queue-landed',
+      glyph: 'passed',
+      text: `${landed.length} landed from the queue`,
+      ...(landed.some(event => event.automatic)
+        ? { automatic: true, undo: landed.find(event => event.automatic)?.automatic?.undo }
+        : {}),
+    });
+  if (failed.length)
+    facts.push({ id: 'queue-failed', glyph: 'waiting', text: `${failed.length} stopped: check failed` });
+  const ordinary = recent.filter(row => !events.some(event => event.id === `move:${row.id}`));
+  const auto = ordinary.filter(row => row.automatic);
+  const manual = ordinary.length - auto.length;
   if (auto.length)
     facts.push({
       id: 'auto-accepted',
@@ -286,5 +303,21 @@ export function workingFacts(
     subagents: fresh.filter(session => session.kind === 'subagent').length,
     people,
     peopleCount: people.length,
+  };
+}
+
+/** First reads and catch-up while away establish a baseline, never an arrival toast. */
+export function acceptanceArrival(
+  previous: ReadonlySet<string> | null,
+  rows: readonly AcceptedRow[],
+  liveSince: number,
+  quiet = false,
+) {
+  return {
+    seen: new Set(rows.map(row => row.id)),
+    arrival:
+      !previous || quiet
+        ? undefined
+        : rows.find(row => !previous.has(row.id) && Date.parse(row.at) >= liveSince),
   };
 }

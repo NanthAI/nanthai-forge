@@ -2,6 +2,7 @@ import { planningVersionLabel } from '../../../src/work-planning-lifecycle';
 import { usePlanningActors } from '../planning/usePlanningActors';
 import type { AttributedPlanningItem } from '../planning/attribution';
 import { usePageCritical } from '../ui/page-critical';
+import { useAttention } from '../shell/attention-context';
 // SPDX-License-Identifier: Apache-2.0
 import type { ReactNode } from 'react';
 import { useOwnerLifecycle, type LifecycleParts } from '../lane/OwnerLifecycle';
@@ -294,14 +295,15 @@ export function HostedIntentsView({
   addLane?: (intentId: string, name: string) => Promise<string | null>;
   combine?: (intentId: string, inputs: { laneId: string; head: string }[]) => Promise<string | null>;
 }) {
+  const attention = useAttention();
   const rows = useMemo(
     () =>
       intentBoardFacts(
-        intentRows(records.intents, withSessions(cockpitLanes(records), sessions, now)),
+        intentRows(records.intents, withSessions(cockpitLanes(records, attention?.queue), sessions, now)),
         records,
         sessions,
       ),
-    [records, sessions, now],
+    [records, sessions, now, attention?.queue],
   );
   const awaitCreated = useCreatedIntent(records.intents, openDelegate);
   const body = () => {

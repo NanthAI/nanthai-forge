@@ -121,6 +121,7 @@ export async function drainGithubPush(
               await update({
                 status: 'pushed',
                 code: '',
+                detail: '',
                 worker: undefined,
                 ...(last ? { state: last.state, acceptanceId: last.acceptanceId } : {}),
               });
@@ -138,6 +139,7 @@ export async function drainGithubPush(
                   status: 'needs-you',
                   worker: undefined,
                   code,
+                  detail: (error as Error).message,
                   expectedHead: heads.expectedHead,
                   remoteHead: heads.remoteHead,
                   localHead: heads.localHead,

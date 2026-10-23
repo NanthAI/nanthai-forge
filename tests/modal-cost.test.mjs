@@ -26,11 +26,13 @@ function estimate(executions, margin = MODAL_COST_SAFETY_MARGIN) {
 test('model uses reserved resources, worker time, fractional seconds and one margin across bridge and reports', () => {
   const executions = [
     { id: 'first', started: 0, ended: 7200, seconds: 30.5, cpu: 2, memory: 4096 },
-    { id: 'retry', started: 7200, stopped: 7300, seconds: 10, cpu: 2, memory: 16384 },
+    { id: 'retry', attempt: 1, started: 7200, stopped: 7300, seconds: 10, cpu: 2, memory: 16384 },
     { id: 'cancelled', started: 0, stopped: 20, seconds: 20, cpu: 2, memory: 8192 },
   ];
   const result = estimate([...executions, executions[0]]);
   assert.equal(result.costUsage.length, 3);
+  assert.equal(result.costUsage[1].attempt, 1);
+  assert.equal(modalRunCost({ costUsage: result.costUsage }).items[1].retry, true);
   assert.deepEqual(
     result.costUsage.map(item => item.cpuCoreSeconds),
     [61, 20, 40],

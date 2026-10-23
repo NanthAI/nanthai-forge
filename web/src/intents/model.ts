@@ -51,11 +51,17 @@ export function intentRows(intents: readonly IntentInput[], lanes: readonly Cock
     const planned = intentProgress(intent.status, own.length) === 'Planned';
     const open = own.filter(lane => lane.open);
     const worst = [...open].sort((a, b) => attentionRank[a.tone] - attentionRank[b.tone])[0];
-    const [tone, label]: [Tone, string] = planned
-      ? ['plain', 'Planned']
-      : intent.status === 'active' && worst
-        ? [worst.tone, worst.tone === 'stale' ? 'Stale' : toneLabel[worst.tone]]
-        : statusTone[intent.status];
+    const queued =
+      open.some(
+        lane => lane.queue && ['queued', 'checking', 'machine', 'dependency'].includes(lane.queue.state),
+      ) && !open.some(lane => lane.tone === 'failed' || lane.tone === 'passed' || lane.tone === 'conflict');
+    const [tone, label]: [Tone, string] = queued
+      ? ['waiting', 'Waiting']
+      : planned
+        ? ['plain', 'Planned']
+        : intent.status === 'active' && worst
+          ? [worst.tone, worst.tone === 'stale' ? 'Stale' : toneLabel[worst.tone]]
+          : statusTone[intent.status];
     const times = [
       intent.createdAt,
       ...own.map(lane => lane.lastAt),

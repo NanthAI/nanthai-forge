@@ -11,6 +11,7 @@ export type RailStops = {
 /** What the rail needs to know about a Lane. `runStatus` is the check on the Lane's exact current head. */
 export type RailInput = {
   tone: Tone;
+  queue?: import('../cockpit/queue-model').QueueFact;
   checkpoints: number;
   runStatus?: string;
   laterViewId?: string;
@@ -40,6 +41,8 @@ export function railStops(lane: RailInput): RailStops {
       segments: ['on', 'on', 'off', 'off'],
       title: 'edited, saved; check superseded by a later Candidate',
     };
+  if (lane.queue?.state === 'not-run' || lane.queue?.historical)
+    return { segments: ['on', 'on', 'off', 'off'], title: 'edited, saved; check not run' };
   if (lane.runStatus && FAILED.has(lane.runStatus))
     return {
       segments: ['on', 'on', 'bad', 'off'],

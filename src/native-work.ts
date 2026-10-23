@@ -1,6 +1,9 @@
 import { optimisticLanding } from './autonomy-policy.js';
 import { ownerRootNotice, updateOwnerRoot } from './owner-root.js';
 import { readHostState } from './host-binding.js';
+import { pendingStatus } from './pending-status.js';
+import { decorateRepair } from './agent-repair-lineage.js';
+import { landingRepairNotices } from './landing-repair-notice.js';
 // SPDX-License-Identifier: Apache-2.0
 import { composeOwnerAcceptance } from './owner-acceptance.js';
 import { finishChild } from './agent-finish-journal.js';
@@ -178,6 +181,8 @@ export function nativeStatus(store: WorkStore, data: WorkData, options: { compac
   });
   return {
     ...data,
+    pendingStatus: pendingStatus(data, {}, null),
+    repairNotices: landingRepairNotices(store).map(notice => decorateRepair(store, notice)),
     ownerRoot: ownerRootNotice(store),
     hostedProjectUrl: readHostState(store).binding?.projectUrl,
     intents,

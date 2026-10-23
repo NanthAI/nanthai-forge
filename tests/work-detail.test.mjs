@@ -113,6 +113,7 @@ for (const native of [false, true])
       compact = f.w.status({ compact: true });
     assert.equal(compact.revision, revision);
     assert.equal(full.lanes[0].detailDeferred, undefined);
+    assert.deepEqual(compact.pendingStatus, full.pendingStatus);
     assert.ok(full.lanes[0].diff);
     assert.ok(full.views[0].details);
     assert.equal(compact.lanes[0].diff, '');

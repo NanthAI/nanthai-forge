@@ -38,18 +38,33 @@ workflow and recipe to that export only. The exported commit is pushed only to
 `refs/heads/forge-check/<runId>`, using a compare-and-swap creation. A changed or
 colliding ref is never overwritten. Before pushing, Forge saves an ambiguous intent;
 only a successful reply or observation of the exact commit establishes publication.
-A transport error (HTTP 5xx, RPC/EOF, timeout or lost reply) keeps that intent pending.
-Forge observes the same run-owned ref across later discovery windows and adopts it
-when visible. One empty listing, or even an exhausted window, never proves that
-the push did not execute and never authorizes another push.
+A transport error (HTTP 5xx, RPC/EOF, timeout or lost reply) retains that intent for
+bounded discovery. If the exact commit becomes visible, Forge adopts it without
+another push. After at least sixty seconds and five empty Git observations, Forge
+can push the **identical commit to the same run-owned ref** again, using the same
+expected-absent lease. Empty listings do not prove non-execution; the lease makes
+the repeated ref creation safe even if the original push arrives later. A different
+commit is never overwritten, including a race after the final observation.
+
+Push attempts are capped at five across restarts, including definitively rejected
+transient attempts. Each ambiguous attempt retains its discovery start time and
+observation count; resuming a controller continues that window rather than
+restarting it. Historical journals use retained branch-observation time and count
+an unrecorded original attempt toward the bound. Exhaustion ends with terminal
+infrastructure error `GITHUB_ACTIONS_PUSH_EXHAUSTED`, without a source verdict or
+another pending discovery loop. Source and diagnostics remain available for a new
+check after the underlying access or transport problem is resolved.
 
 Explicit Git receive-pack rejections retain a `ref-rejected` class. Authentication,
-permission and missing-repository rejections retain `access-rejected`. Only a
-known-rejected transient check-ref creation uses the existing five-attempt retry
-adapter, with exponential backoff and jitter (up to 45 seconds of total backoff).
-Each retry checks the exact ref and keeps its create-only lease. Permanent failures
-remain immediate errors. Cleanup and the GitHub mirror retain their existing retry
-helper and exact lease/ancestry checks. The source State, Candidate, definition, runtime,
+permission and missing-repository rejections retain `access-rejected`. Workflow
+OAuth scope, protected-ref/repository rules and invalid ref names have specific
+classes and actionable `GITHUB_ACTIONS_PUSH_REJECTED` errors. They end discovery
+immediately. Classification uses the original stderr before diagnostic truncation;
+only redacted, bounded Git diagnostics are retained in attempts and progress.
+Known-rejected transient creations use exponential backoff and jitter (up to
+45 seconds in total), checking the exact ref before every retry. Cleanup and the
+GitHub mirror retain their existing retry helper and exact lease/ancestry checks.
+The source State, Candidate, definition, runtime,
 selection and shard membership stay digest-bound. The journal also retains the
 target repository and runner label so policy changes cannot redirect adoption.
 Git-backed checks and declared environment/credential inputs keep existing local
@@ -80,14 +95,17 @@ execution. An acknowledged but undiscovered execution remains adoptable.
 
 This is an evidence policy, not an exactly-once provider guarantee: Forge cannot
 prove that an ambiguous POST or push did not execute. Only a retained definitive
-rejection permits another dispatch or push, under the existing retry settings.
+rejection permits another dispatch. Push creation can also be repeated after its
+bounded discovery window because its identical SHA and create-only lease preserve
+the same ref effect.
 Dispatch attempts retain sanitized response fields and `not-found`/`unprocessable`
 rejection classes; branch evidence retains the observed commit or absence and
-whether it came from Git or REST. Push attempts retain their outcome and definitive
-rejection class without raw transport text. The journal retains discovery windows
+whether it came from Git or REST. Push attempts retain their timestamp, outcome, definitive
+rejection class and redacted diagnostic without raw transport text. The journal retains discovery windows
 and original attempts after adoption; they are not rewritten as successful replies.
 
-When a discovery window ends, the legacy check-run status is `interrupted` with
+When dispatch discovery remains unresolved or push observation is interrupted
+before its persisted window completes, the legacy check-run status is `interrupted` with
 structured error code `GITHUB_ACTIONS_PENDING_INFRA`. Finish and submission receipts
 report `pending-infra`, `terminal:false`, `complete:false`, and retain the original
 source/attempt identity. This is incomplete infrastructure evidence, not a source

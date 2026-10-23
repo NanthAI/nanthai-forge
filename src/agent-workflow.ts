@@ -1,3 +1,5 @@
+import { previewMeasurements } from './preview-accounting.js';
+import { trainAccounting } from './train-accounting.js';
 import { scheduleIntegrationPreview } from './integration-preview-auto.js';
 import { retainedFinishCommand } from './agent-finish-journal.js';
 import { recordHandoff, readHandoff } from './agent-handoff.js';
@@ -461,7 +463,16 @@ export class AgentWorkflow {
         result: {
           ...(lane ? { lane } : {}),
           modalCost: modalMonthCost(data.runs),
-          checkCosts: runnerMonthCosts(data.runs),
+          checkCosts: (() => {
+            const { submissions, ...train } = trainAccounting(data.runs, {
+              batches: data.landingBatches ?? [],
+              entries: data.landingEntries ?? [],
+              moves: data.channelMoves,
+              previews: previewMeasurements(store.directory).rows,
+            });
+            void submissions;
+            return { ...runnerMonthCosts(data.runs), train };
+          })(),
           autonomyPolicy: readPolicy(store),
           checkRunner: { runner: 'local', ...readPolicy(store).checks },
           automaticActions: page(data.automaticActions ?? []),

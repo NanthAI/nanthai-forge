@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { localCost } from './check-cost.js';
+import { retainPreviewMeasurement } from './preview-accounting.js';
 import { publishedOverlap } from './agent-coordination-events.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
@@ -50,6 +53,7 @@ export type PreviewResult = {
   pairs: Pair[];
   notices: ConflictNotice[];
   durationMs: number;
+  accounting?: { status: 'recorded' | 'unavailable'; executionId: string; code?: string };
 };
 
 /** Explicit local speculation: no Candidate, check run, Channel move or remote call.
@@ -76,7 +80,8 @@ export function previewPinned(
   return workLocked(
     join(store.directory, 'integration-preview.lock'),
     () => {
-      const started = performance.now();
+      const started = performance.now(),
+        startedAt = new Date().toISOString();
       const data = store.load(),
         selected = data.lanes
           .filter(
@@ -217,6 +222,22 @@ export function previewPinned(
         }
       }
       result.durationMs = Math.round(performance.now() - started);
+      if (result.observations.length) {
+        const executionId = randomUUID();
+        try {
+          retainPreviewMeasurement(store, {
+            executionId,
+            startedAt,
+            durationMs: result.durationMs,
+            inputs,
+            cost: localCost(executionId),
+          });
+          result.accounting = { status: 'recorded', executionId };
+        } catch {
+          // Missing advisory accounting must never become an integration/landing gate.
+          result.accounting = { status: 'unavailable', executionId, code: 'PREVIEW_COST_UNAVAILABLE' };
+        }
+      }
       result.applicability = previewCurrent(store, result) ? 'current' : 'historical';
       // Retain advisory history only; never passing landing evidence.
       cache.write(`integration:${key}`, result);

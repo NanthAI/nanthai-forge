@@ -1,3 +1,4 @@
+import { AutoTag } from '../ui/signals';
 // SPDX-License-Identifier: Apache-2.0
 import { useState } from 'react';
 import { Glyph } from '../ui/Glyph';
@@ -75,6 +76,15 @@ export function Activity({
       </span>
       <div>
         {item.laneId ? <a href={laneHref(item.laneId)}>{item.text}</a> : item.text}
+        {item.automatic && (
+          <>
+            {' '}
+            <AutoTag />{' '}
+            <span className="fx-undo-none" title={item.automatic.undo}>
+              {item.undone ? item.automatic.undo : 'Undo'}
+            </span>
+          </>
+        )}
         {item.detail?.replace(/\b[0-9a-f]{7,64}\b\s*[·:]?\s*/gi, '').trim() && (
           <small>{item.detail.replace(/\b[0-9a-f]{7,64}\b\s*[·:]?\s*/gi, '').trim()}</small>
         )}

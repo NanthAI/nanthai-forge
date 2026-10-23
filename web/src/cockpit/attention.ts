@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { queueFacts, type QueueFact } from './queue-model';
 import { displayLaneName } from '../../../src/lane-name';
 import type { CockpitWork } from './model';
 import type { CockpitLane } from './model';
@@ -8,6 +9,7 @@ import { checkMeaning } from './check-meaning';
 export type DecisionItem = {
   id: string;
   githubMirror?: boolean;
+  queue?: QueueFact;
   kind: 'review' | 'conflict' | 'handoff' | 'message' | 'failed';
   title: string;
   /** Recorded sender and audience belong in the item metadata, outside its body. */
@@ -33,7 +35,7 @@ export type DecisionItem = {
   /** Quiet context after the title, e.g. "merged-detection, claude-3". */
   subtitle?: string;
   /** Ready-to-accept facts: check on this head, whether main is included, overlapping Lanes. */
-  gates?: { main?: boolean; overlaps: number };
+  gates?: { main?: boolean; overlaps: number; queuedAt?: string };
   /** Small fact beside the answers, e.g. "6 files · +212 −38". */
   hint?: string;
   /** The person or agent best placed to take it next. */
@@ -47,7 +49,11 @@ export type DecisionItem = {
 export type FeedItem = {
   id: string;
   at: string | number;
-  tone: 'passed' | 'failed' | 'conflict' | 'waiting' | 'active' | 'plain';
+  automatic?: { summary: string; undo: string };
+  historical?: boolean;
+  undone?: boolean;
+  links?: { href: string; label: string }[];
+  tone: 'passed' | 'failed' | 'conflict' | 'waiting' | 'active' | 'plain' | 'stale';
   glyph:
     | 'passed'
     | 'failed'
@@ -59,7 +65,8 @@ export type FeedItem = {
     | 'file'
     | 'sync'
     | 'check'
-    | 'waiting';
+    | 'waiting'
+    | 'stale';
   text: string;
   detail?: string;
   laneId?: string;
@@ -78,7 +85,12 @@ export function laneDecisions(
   overlaps: ReadonlyMap<string, number> = new Map(),
 ): DecisionItem[] {
   return lanes
-    .filter(lane => lane.open && (lane.tone === 'passed' || lane.tone === 'conflict'))
+    .filter(
+      lane =>
+        lane.open &&
+        (lane.tone === 'conflict' ||
+          (lane.queue ? ['review', 'failed'].includes(lane.queue.state) : lane.tone === 'passed')),
+    )
     .map(lane => {
       const owner = ownerOf(lane);
       const continues = lane.session
@@ -96,11 +108,23 @@ export function laneDecisions(
           : undefined;
       const base = {
         laneId: lane.id,
+        ...(lane.queue ? { queue: lane.queue } : {}),
         subject: { tone: lane.tone, label: lane.label, lane: lane.name, intent: lane.intent },
         ...(lane.lastAt ? { at: lane.lastAt } : {}),
         ...(owner ? { owner } : {}),
         ...(continues ? { continues } : {}),
       };
+      if (lane.queue?.state === 'failed')
+        return {
+          ...base,
+          id: `failed:${lane.id}`,
+          kind: 'failed' as const,
+          title: lane.name,
+          subtitle: lane.queue.decisionSubtitle ?? lane.queue.text,
+          runId: lane.queue.runId,
+          viewId: lane.queue.viewId,
+          hint: 'Retained output stays with this Candidate.',
+        };
       if (lane.tone === 'passed') {
         const changes = lane.changes;
         return {
@@ -108,9 +132,11 @@ export function laneDecisions(
           id: `review:${lane.id}`,
           kind: 'review' as const,
           title: lane.intent,
-          subtitle: [lane.name !== lane.intent && lane.name, owner].filter(Boolean).join(', '),
+          subtitle:
+            lane.queue?.handoff ?? [lane.name !== lane.intent && lane.name, owner].filter(Boolean).join(', '),
           gates: {
             overlaps: overlaps.get(lane.id) ?? 0,
+            ...(lane.queue?.since ? { queuedAt: lane.queue.since } : {}),
             ...(lane.mainIncluded !== undefined ? { main: lane.mainIncluded } : {}),
           },
           ...(changes?.add !== undefined
@@ -135,6 +161,9 @@ export function laneDecisions(
 }
 
 type LocalRecords = {
+  pendingStatus?: CockpitWork['pendingStatus'];
+  landingEntries?: CockpitWork['landingEntries'];
+  landingBatches?: CockpitWork['landingBatches'];
   intents?: readonly { id: string; outcome: string }[];
   lanes: readonly {
     id: string;
@@ -213,6 +242,19 @@ export function localFeed(work: LocalRecords, since: number, limit = 8): FeedIte
         text: `${laneId ? (laneName.get(laneId) ?? 'A Candidate') : 'A Candidate'} · accepted into ${move.channel}`,
         detail: move.head.slice(0, 7),
         ...(laneId ? { laneId } : {}),
+      });
+    }
+  const queue = work.pendingStatus ? queueFacts(work.pendingStatus) : undefined;
+  for (const fact of queue?.values() ?? [])
+    for (const event of fact.events) {
+      const index = items.findIndex(item => item.id === event.id);
+      if (index >= 0) items.splice(index, 1);
+      const lane = work.lanes.find(lane => lane.id === fact.laneId);
+      items.push({
+        ...event,
+        detail: [lane?.name, work.intents?.find(intent => intent.id === lane?.intentId)?.outcome]
+          .filter(Boolean)
+          .join(' · '),
       });
     }
   return items

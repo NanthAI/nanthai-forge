@@ -63,6 +63,31 @@ test('equal source with newer Work remains pending; capture age uses capture, no
   assert.equal(status.hosted.captureAgeMs, 600_000);
   assert.equal(status.hosted.pendingAgeMs, null);
 });
+test('clock-free Work projections retain event times without inventing observation times or ages', () => {
+  const worker = { status: 'idle', workers: 1, observedAt: at, code: null };
+  const records = data({
+    githubSync: { commits: [{ state: head, commit: 'commit' }], pushed: 1, pushedAt: at },
+  });
+  const observations = {
+    recovery: capture,
+    landingWorker: worker,
+    deployment: { head, observedAt: at, state: 'ready' },
+  };
+  const status = pendingStatus(records, observations, null);
+  assert.equal(status.snapshot.observedAt, null);
+  assert.equal(status.hosted.captureAgeMs, null);
+  assert.equal(status.github.ageMs, null);
+  assert.equal(status.deployment.ageMs, null);
+  assert.equal(status.github.pushedAt, at);
+  assert.equal(status.deployment.observedAt, at);
+  assert.equal(status.landingWorker.observedAt, at);
+  assert.deepEqual(pendingStatus(records, observations, null), status);
+  const timed = pendingStatus(records, observations, now);
+  assert.equal(timed.snapshot.observedAt, now);
+  assert.equal(timed.hosted.captureAgeMs, 600_000);
+  assert.equal(timed.github.ageMs, 600_000);
+  assert.equal(timed.deployment.ageMs, 600_000);
+});
 test('new logs after capture and later run completion remain pending independently of source', () => {
   for (const observations of [{ evidenceChangedAt: '2026-01-01T12:05:00Z' }, {}]) {
     const status = pendingStatus(

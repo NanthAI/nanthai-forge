@@ -1,3 +1,4 @@
+import { queueHref } from '../cockpit/queue-model';
 // SPDX-License-Identifier: Apache-2.0
 import { Fragment, type MouseEvent, type ReactNode } from 'react';
 import { Glyph, type GlyphName } from './Glyph';
@@ -73,7 +74,20 @@ export function LaneFactLine({ fact, showIntent = true }: { fact: LaneFact; show
     <span className="fx-wr-what">
       {fact.glyph && <Glyph name={fact.glyph} size={12} className={`fx-wr-g-${fact.tone}`} />}
       <span title={fact.detail}>{fact.text}</span>
-      {fact.auto && <span className="fx-wr-auto">auto</span>}
+      {fact.queue?.link && (
+        <>
+          {' '}
+          · <a href={queueHref(fact.queue.link)}>{fact.queue.link.label}</a>
+        </>
+      )}
+      {fact.auto && (
+        <>
+          <span className="fx-wr-auto">auto</span>{' '}
+          <span className="fx-undo-none" title={fact.queue?.undo}>
+            Undo
+          </span>
+        </>
+      )}
     </span>,
   );
   return (

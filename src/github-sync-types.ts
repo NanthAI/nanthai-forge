@@ -48,6 +48,7 @@ export const githubAutoPushSchema = z.object({
   at: z.string(),
   nextAttemptAt: z.string().optional(),
   code: z.string().optional(),
+  detail: z.string().optional(),
   expectedHead: z.string().optional(),
   remoteHead: z.string().optional(),
   localHead: z.string().optional(),

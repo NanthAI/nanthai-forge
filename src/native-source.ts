@@ -16,8 +16,13 @@ import ignore from 'ignore';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { digest } from './hash.js';
-import { exclusion, readSource, safeRelative, sourceRealpath as realpathSync } from './files.js';
-import { sourceLanguage } from './languages.js';
+import {
+  exclusion,
+  sourceExclusion,
+  readSource,
+  safeRelative,
+  sourceRealpath as realpathSync,
+} from './files.js';
 import { invariant } from './errors.js';
 import {
   mergeNativeFiles,
@@ -121,11 +126,7 @@ export function nativePaths(
       const stat = lstatSync(join(root, path));
       // Analysis name heuristics must not drop source modules such as secrets.ts.
       // Real credential/config names and explicit ignore rules stay excluded.
-      const sourceName =
-        !stat.isDirectory() && /^(credentials?|secrets?)[.-]/i.test(name) && sourceLanguage(path);
-      const envExample = !stat.isDirectory() && /(?:^|\.)env\.(example|sample|template)$/i.test(name);
-      const reason =
-        (sourceName || envExample) && exclusion(path) === 'sensitive-name' ? null : exclusion(path);
+      const reason = stat.isDirectory() ? exclusion(path) : sourceExclusion(path);
       if (reason && !selected && !descendant) {
         excluded?.push({ path, reason });
         continue;

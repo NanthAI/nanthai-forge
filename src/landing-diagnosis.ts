@@ -1,30 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
-import { pendingActionsInfra } from './github-actions-infra.js';
+import { diagnosticCause, batchDiagnosis } from './landing-observation.js';
+export { diagnosticCause, diagnosticStatus, batchDiagnosis } from './landing-observation.js';
 import { batchEdit } from './landing-batch-store.js';
 import type { BatchPrefix, LandingBatch, LandingEntry } from './landing-batch-types.js';
 import type { LandingDriver } from './landing-driver.js';
 import type { CheckRun } from './work-types.js';
 import type { WorkService } from './work.js';
 import type { WorkStore } from './work-store.js';
-
-/** A runner/preparation failure is not a failed source combination. Signal/OOM
- * outcomes retain their failed-check status; they do not establish transient infra. */
-export function diagnosticCause(run: CheckRun) {
-  if (pendingActionsInfra(run)) return 'pending-infra' as const;
-  if (run.status === 'failed') {
-    if (run.error && run.backend?.actual === 'local') return 'infra' as const;
-    if (run.exitCode === null && !run.signal) return 'unknown-outcome' as const;
-    return 'check-failed' as const;
-  }
-  if (run.status === 'cancelled') return 'cancelled' as const;
-  if (['interrupted', 'runner-unavailable', 'runner-budget-exhausted'].includes(run.status))
-    return 'infra' as const;
-  return undefined;
-}
-export function diagnosticStatus(run: CheckRun): CheckRun['status'] {
-  return run.status === 'failed' && diagnosticCause(run) !== 'check-failed' ? 'interrupted' : run.status;
-}
 
 /** Recovery may reuse only the original exact composition/definition/runtime. */
 export function validatePrefixRun(
@@ -128,34 +111,4 @@ export async function retainDiagnosisNode(
 export function landingDiagnosis(store: WorkStore, entry: LandingEntry) {
   return batchDiagnosis(entry.batchId ? store.select('landingBatches', entry.batchId) : undefined);
 }
-export function batchDiagnosis(batch: LandingBatch | undefined) {
-  if (!batch?.diagnosis) return {};
-  const failed = batch.diagnosis.nodes.filter(
-    node => node.status === 'failed' && node.cause === 'check-failed',
-  );
-  const observedFailingSets = failed.map(node => ({
-    nodeId: node.id,
-    entryIds: node.entryIds,
-    inputs: node.inputs,
-    viewId: node.viewId,
-    head: node.head,
-    runId: node.runId,
-  }));
-  return {
-    diagnosis: {
-      batchId: batch.id,
-      ...batch.diagnosis,
-      applicability:
-        batch.status === 'superseded'
-          ? 'historical'
-          : batch.status === 'completed'
-            ? 'settled'
-            : 'provisional',
-      observedFailingSets,
-      smallestObservedFailingSet:
-        [...observedFailingSets].sort((a, b) => a.entryIds.length - b.entryIds.length)[0] ?? null,
-    },
-  };
-}
-
 export type LandingDiagnosisReport = NonNullable<ReturnType<typeof landingDiagnosis>['diagnosis']>;

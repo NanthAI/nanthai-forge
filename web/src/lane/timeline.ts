@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { queueStatus, queueFacts, queueHref, type QueueFact } from '../cockpit/queue-model';
+import type { ConflictNotice } from '../../../src/agent-conflict-notice';
 import { checkMeaning } from '../cockpit/check-meaning';
 import type { FeedItem } from '../cockpit/attention';
 import type { CockpitWork } from '../cockpit/model';
@@ -10,6 +12,8 @@ export function laneTimeline(
   laneId: string,
   events: readonly FeedItem[] = [],
   includeMilestones = false,
+  notices: readonly ConflictNotice[] = records.repairNotices ?? [],
+  queue?: ReadonlyMap<string, QueueFact>,
 ): TimelineEvent[] {
   const lane = records.lanes.find(lane => lane.id === laneId);
   if (!lane) return [];
@@ -33,8 +37,61 @@ export function laneTimeline(
       text: 'Saved',
       detail: lane.lastCheckpointMessage,
     });
+  const status = queue ? undefined : queueStatus(records);
+  const fact = (queue ?? (status ? queueFacts(status, notices) : undefined))?.get(laneId);
+  const submissionEvents = fact?.events ?? [];
+  const repairs: FeedItem[] = notices
+    .filter(notice => notice.participants.some(pin => pin.lane === laneId))
+    .flatMap(notice => {
+      const check = notice.evidence?.find(item => item.kind === 'check');
+      if (!check || check.kind !== 'check') return [];
+      const run = records.runs.find(run => run.id === check.runId);
+      const historical = notice.applicability === 'historical';
+      return [
+        {
+          id: `notice:${notice.noticeId}`,
+          at: run?.endedAt ?? run?.startedAt ?? '',
+          tone: historical
+            ? 'stale'
+            : check.cause === 'check-failed' || (!check.cause && check.status === 'failed')
+              ? 'failed'
+              : 'plain',
+          glyph: historical ? 'stale' : 'check',
+          historical,
+          text: `Repair notice · ${run?.checkName ?? run?.check?.name ?? 'Check'} ${check.status} on Candidate ${check.viewId.slice(0, 8)}`,
+          links: historical
+            ? []
+            : [
+                {
+                  href: queueHref({
+                    kind: 'run',
+                    id: check.runId,
+                    viewId: check.viewId,
+                    intentId: records.views.find(view => view.id === check.viewId)?.intentId,
+                    label: 'Open run',
+                  }),
+                  label: 'Open run',
+                },
+                ...(notice.applicability === 'current' && notice.repairIntentId
+                  ? [
+                      {
+                        href: queueHref({
+                          kind: 'repair-intent',
+                          id: notice.repairIntentId,
+                          label: 'Repair in Lane',
+                        }),
+                        label: 'Repair in Lane',
+                      },
+                    ]
+                  : []),
+              ],
+        },
+      ];
+    });
   return [
-    ...saves,
+    ...submissionEvents,
+    ...(includeMilestones ? repairs : []),
+    ...saves.filter(save => !submissionEvents.some(event => event.glyph === 'sync' && event.at === save.at)),
     ...(includeMilestones && lane.lifecycle?.[0]?.at
       ? [
           {
@@ -57,7 +114,13 @@ export function laneTimeline(
         text: 'Candidate composed',
       })),
     ...(includeMilestones ? (records.channelMoves ?? []) : [])
-      .filter(move => views.has(move.viewId) && move.status === 'accepted' && move.at)
+      .filter(
+        move =>
+          !submissionEvents.some(event => event.id === `move:${'id' in move ? move.id : ''}`) &&
+          views.has(move.viewId) &&
+          move.status === 'accepted' &&
+          move.at,
+      )
       .map(move => ({
         id: `accepted:${move.viewId}:${move.at}`,
         at: move.at!,
@@ -87,7 +150,7 @@ export function laneTimeline(
           ],
     ),
     ...records.runs
-      .filter(run => views.has(run.viewId))
+      .filter(run => views.has(run.viewId) && !submissionEvents.some(event => event.id === `run:${run.id}`))
       .map((run): FeedItem => {
         const state = checkMeaning(records, run.viewId, run.status);
         return {

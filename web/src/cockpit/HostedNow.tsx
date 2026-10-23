@@ -157,7 +157,11 @@ export function HostedNowView({
         loading={live.eventsLoading ?? false}
         loadMore={live.loadMoreEvents}
         items={activityItems(
-          records,
+          {
+            ...records,
+            ...(attention.pending ? { pendingStatus: attention.pending } : {}),
+            repairNotices: attention.notices,
+          },
           accepted(0),
           decisions,
           hostedFeed(live.events, live.sessions, records.lanes, live.events.length),

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
 import { sourceTreeEntries } from './source-tree-index.js';
 import { stateParentEntries } from './source-state-parent-index.js';
 import { viewReadModels } from './view-read-model.js';
@@ -63,6 +64,12 @@ export function intentHeader(intent: WorkData['intents'][number]) {
     ...(baseChannel ? { baseChannel } : {}),
     ...(hostedBase ? { hostedBase } : {}),
     notes: [],
+    handoffs: [...new Set(intent.notes.flatMap(note => (note.handoff ? [note.handoff.laneId] : [])))].flatMap(
+      laneId => {
+        const summary = handoffSummary(latestHandoff(intent.notes, laneId));
+        return summary ? [summary] : [];
+      },
+    ),
     noteCount: intent.notes.length,
     ...(intent.lifecycle ? { lifecycle: [], lifecycleCount: intent.lifecycle.length } : {}),
   };
@@ -293,7 +300,18 @@ export function* workIndexRows(
     data.lanes,
     v => v.id,
     v => v.intentId,
-    v => laneSummary(v, ancestry.lane(v.head, mainHead)),
+    v =>
+      laneSummary(
+        v,
+        ancestry.lane(v.head, mainHead),
+        (data.landingEntries ?? []).flatMap(
+          entry =>
+            data.views
+              .find(view => view.id === entry.viewId)
+              ?.inputs.filter(pin => pin.laneId === v.id)
+              .map(pin => pin.head) ?? [],
+        ),
+      ),
   );
   const viewModels = new Map(viewReadModels(data).map(view => [view.viewId, view]));
   yield* add(

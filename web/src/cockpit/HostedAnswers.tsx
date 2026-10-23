@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { queueHref } from './queue-model';
 import { settingsHref } from '../settings/SettingsLayout';
 import { useState } from 'react';
 import { hostedHref } from './hosted-links';
@@ -30,6 +31,29 @@ export function HostedAnswers({
   notNow: () => void;
 }) {
   const [acknowledging, setAcknowledging] = useState(false);
+  if (item.queue?.state === 'failed')
+    return (
+      <>
+        {item.queue.link && (
+          <ButtonLink size="sm" href={queueHref(item.queue.link)}>
+            Open run
+          </ButtonLink>
+        )}
+        {item.queue.repairIntentId && (
+          <ButtonLink
+            size="sm"
+            variant="ghost"
+            href={queueHref({
+              kind: 'repair-intent',
+              id: item.queue.repairIntentId,
+              label: 'Repair in Lane',
+            })}
+          >
+            Repair in Lane
+          </ButtonLink>
+        )}
+      </>
+    );
   if (item.githubMirror)
     return (
       <ButtonLink size="sm" variant="rec" href={settingsHref('github')}>

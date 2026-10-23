@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { ForgeError, invariant } from './errors.js';
 import { workGit } from './work-git.js';
 import type { GithubSyncCommit } from './github-sync-types.js';
+import { gitPushRejectionClass } from './github-sync-classification.js';
+export { gitPushRejectionClass } from './github-sync-classification.js';
 
 /** Git's stderr, kept for diagnosis: redacted (credentials, tokens, Authorization) and bounded. */
 export function redactGitStderr(text: string, limit = 600) {
@@ -26,6 +28,7 @@ export class GitSyncError extends ForgeError {
   constructor(
     readonly detail: string,
     readonly transient: boolean,
+    readonly rejectionClass = gitPushRejectionClass(detail),
   ) {
     super(
       'GITHUB_SYNC_GIT_FAILED',
@@ -43,6 +46,9 @@ const transientGit =
 export function transientGitFailure(detail: string) {
   return (
     !permanentGit.test(detail) &&
+    !['workflow-scope', 'ref-policy', 'ref-name', 'access-rejected'].includes(
+      gitPushRejectionClass(detail) ?? '',
+    ) &&
     (!forbiddenGit.test(detail) || rateLimitedGit.test(detail)) &&
     (transientGit.test(detail) || rateLimitedGit.test(detail))
   );
@@ -106,6 +112,7 @@ export function syncGit(root: string, args: string[]): Promise<string> {
             transientGitFailure(
               detail + (error.killed && error.signal === 'SIGTERM' ? '\nOperation timed out' : ''),
             ),
+            gitPushRejectionClass(detail),
           ),
         );
       },

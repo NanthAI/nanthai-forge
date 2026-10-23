@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { exclusion } from './files.js';
+import { sourceExclusion } from './files.js';
 import { invariant } from './errors.js';
 import { NativeSource } from './native-source.js';
 import { treeForGit } from './native-git.js';
@@ -94,11 +94,11 @@ export function appendCommits(
       viewId: move.viewId,
       parent,
       ...(excludePrivate
-        ? { excludedPaths: state.files.filter(file => exclusion(file.path)).map(file => file.path) }
+        ? { excludedPaths: state.files.filter(file => sourceExclusion(file.path)).map(file => file.path) }
         : {}),
       tree: treeForGit(
         root,
-        state.files.filter(file => !excludePrivate || !exclusion(file.path)),
+        state.files.filter(file => !excludePrivate || !sourceExclusion(file.path)),
         source,
       ),
       message,

@@ -1,3 +1,5 @@
+import type { PendingStatus } from '../../../src/pending-status';
+import { serviceLastSeen } from '../cockpit/queue-model';
 import { ConnectionToast } from '../ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -51,7 +53,9 @@ export function ChannelStrip({
   live,
   stale,
   freshness,
+  queue,
 }: {
+  queue?: PendingStatus;
   stale?: string | undefined;
   freshness?: ReactNode;
   channel?: string;
@@ -66,6 +70,7 @@ export function ChannelStrip({
 }) {
   const now = useNow();
   const state = checkWord(check);
+  const landing = queue ? serviceLastSeen(queue, now) : null;
   return (
     <div className="fx-strip">
       <span className="fx-strip-chan" title={head ? `${channel} at ${shortHash(head, 12)}` : undefined}>
@@ -96,6 +101,15 @@ export function ChannelStrip({
           >
             <Glyph name={stale && state.tone === 'running' ? 'stale' : (state.glyph as 'passed')} size={12} />
             {state.word}
+          </span>
+        </>
+      )}
+      {landing && (
+        <>
+          <span className="fx-sub-sep" aria-hidden="true" />
+          <span className="fx-strip-check" title={landing.tip}>
+            <span className={`fx-dot fx-dot-${landing.tone === 'plain' ? 'waiting' : 'stale'}`} />
+            {landing.text}
           </span>
         </>
       )}

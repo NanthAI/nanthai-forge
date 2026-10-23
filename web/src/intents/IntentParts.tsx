@@ -197,21 +197,29 @@ export function Conversation({
 }
 
 const viewTone = (view: ViewRow): [Tone, string] =>
-  view.supersededBy && !view.accepted
+  view.queue?.state === 'later'
     ? ['stale', 'Superseded']
-    : view.accepted
-      ? ['passed', 'Accepted']
-      : view.status === 'conflict'
-        ? ['conflict', 'Conflict']
-        : view.check === 'passed'
-          ? ['passed', 'Check passed']
-          : view.check === 'failed'
-            ? ['failed', 'Check failed']
-            : view.check === 'cancelled' || view.check === 'interrupted'
-              ? ['stale', view.check === 'cancelled' ? 'Cancelled' : 'Interrupted']
-              : view.check
-                ? ['running', `Check ${view.check}`]
-                : ['plain', 'Not checked'];
+    : view.queue?.state === 'queued'
+      ? ['waiting', 'Queued']
+      : view.queue?.state === 'not-run'
+        ? ['plain', 'Not run']
+        : view.check === 'unknown-outcome'
+          ? ['plain', 'Not run']
+          : view.supersededBy && !view.accepted
+            ? ['stale', 'Superseded']
+            : view.accepted
+              ? ['passed', 'Accepted']
+              : view.status === 'conflict'
+                ? ['conflict', 'Conflict']
+                : view.check === 'passed'
+                  ? ['passed', 'Check passed']
+                  : view.check === 'failed'
+                    ? ['failed', 'Check failed']
+                    : view.check === 'cancelled' || view.check === 'interrupted'
+                      ? ['stale', view.check === 'cancelled' ? 'Cancelled' : 'Interrupted']
+                      : view.check
+                        ? ['running', `Check ${view.check}`]
+                        : ['plain', 'Not checked'];
 
 export function Candidates({
   row,
@@ -245,9 +253,13 @@ export function Candidates({
                 .reverse()
                 .slice(0, allViews ? undefined : 5)
                 .map(view => {
-                  const [tone, label] = candidateCheckUnsynced(view, row.lanes, freshness.value)
-                    ? ['plain' as const, 'Check result not synced']
-                    : viewTone(view);
+                  const queue = row.lanes.find(lane => lane.queue?.viewId === view.id)?.queue;
+                  const [tone, label] =
+                    queue?.state === 'not-run'
+                      ? ['plain' as const, 'Not run']
+                      : candidateCheckUnsynced(view, row.lanes, freshness.value)
+                        ? ['plain' as const, 'Check result not synced']
+                        : viewTone(view);
                   const href = (viewHref ?? reviewHref)?.(view.id);
                   const landing = records?.channelMoves?.find(
                     move => move.viewId === view.id && move.status === 'accepted',
@@ -292,7 +304,14 @@ export function Candidates({
                             size={12}
                           />
                           {view.accepted && acceptedBy ? `accepted by ${acceptedBy} · ` : ''}
-                          {view.checkName} {view.check ?? label}
+                          {queue?.state === 'not-run' ? (
+                            'Not run'
+                          ) : (
+                            <>
+                              {view.checkName} {view.check ?? label}
+                            </>
+                          )}
+                          {queue?.candidateMeta && <span> · {queue.candidateMeta}</span>}
                           {view.changes && (
                             <>
                               <span>
@@ -305,7 +324,7 @@ export function Candidates({
                           )}
                         </div>
                       </div>
-                      {canReviewView(view) && reviewHref ? (
+                      {canReviewView(view) && (!queue || queue.state === 'review') && reviewHref ? (
                         <ButtonLink variant="secondary" size="sm" href={reviewHref(view.id)}>
                           Review &amp; accept
                         </ButtonLink>
