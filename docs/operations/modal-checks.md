@@ -36,10 +36,14 @@ selection, lockfile hash and runtime recipe. It materializes only that immutable
 State, excluding owner metadata, dependencies and credentials. Both the owner and
 remote image verify source bytes against the digest-verified State. Dependency
 image layers use only package/lockfile bytes and `npm ci --ignore-scripts`; source
-is added and verified afterward. Runtime is Node 24.19.0 on Debian trixie with Git,
+is added and verified afterward. Runtime is Node 24.22.1 on Debian trixie with Git,
 GNU time and Python 3 (for bridge contract tests), two CPUs and 4 GiB per test or arbitrary-command sandbox, with a fifteen-minute lifetime. Arbitrary commands use their recorded
 arguments; owner Node paths map to this recorded remote Node runtime. Commands
 requiring other owner-specific executables must use local policy.
+
+The bridge refuses new image builds and sandbox launches whose retained Node
+runtime differs from the fixed image. Existing executions can still be collected
+or cancelled under their original identity; old-runtime retries need a new check.
 
 The standard `scripts/forge-check.mjs` definition uses the installed impact
 selector on immutable source. Full checks balance whole files across sixteen

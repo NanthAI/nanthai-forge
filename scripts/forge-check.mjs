@@ -2,11 +2,14 @@
 // The standard Forge check: install locked dependencies and select pinned verification
 // with the Node that runs this script. Define it once and reuse it for every View:
 //   nforge agent ROOT define-check '{"name":"verify","executable":"/abs/node","args":["scripts/forge-check.mjs"]}'
+import { supportedNode, nodeRequirement } from './node-runtime.mjs';
 import { execFileSync } from 'node:child_process';
 import { runDocumentationChecks } from './check-documentation.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+
+if (!supportedNode()) throw Object.assign(new Error(nodeRequirement), { code: 'UNSUPPORTED_NODE' });
 
 function findNpmCli() {
   const candidates = [

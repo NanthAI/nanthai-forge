@@ -26,7 +26,10 @@ the same scoped selection as local and Modal checks; explicit full scope and
 post-accept main audits retain full verification. Test matrices use fail-fast
 disabled. Both call `node scripts/forge-check.mjs`; the Actions plan
 selects static verification or `scripts/test-files.mjs` with Modal's selection and
-worker environment. Node is 24.19.0. Each job installs with `npm ci --ignore-scripts`.
+worker environment. Node is 24.22.1. Each job installs with `npm ci --ignore-scripts`.
+Retained pre-upgrade Node 24.19.0 executions remain observable and cancellable,
+with their original runtime identity. They cannot dispatch new work or retry shards;
+an unstarted old-runtime plan needs a new check on the fixed runtime.
 Arbitrary commands run once in the static job. Candidate sources must include the
 Actions-aware standard check script to use standard sharding.
 

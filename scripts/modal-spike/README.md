@@ -27,7 +27,7 @@ python scripts/modal-spike/runner.py --source NEW_DIRECTORY --manifest NEW_MANIF
 An optional `--tests-file FILE` accepts a retained local selection (a JSON array of
 test paths) for exact selected-suite parity. The full experiments omit it.
 
-Each run builds/reuses a Node 24.19.0 Debian trixie image with Git 2.47.3 and
+Each run builds/reuses a Node 24.22.1 Debian trixie image with Git 2.47.3 and
 GNU time, dependencies keyed by the exact package and lockfile bytes, and the
 compiled native source snapshot.
 Each test shard requests two physical cores and 4 GiB; two test files run at once.

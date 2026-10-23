@@ -16,7 +16,7 @@ For offline Git adoption through first acceptance: `nforge docs quickstart`
 
 ## Try it
 
-Node 22.12+ or 24:
+Node 22.23.4+ (22.x) or 24.22.1+ (24.x):
 
 ```sh
 npm ci --ignore-scripts

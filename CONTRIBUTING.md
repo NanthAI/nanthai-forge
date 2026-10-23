@@ -2,7 +2,7 @@
 
 Read [AGENTS.md](AGENTS.md) first, then [development](docs/development.md).
 
-Use Node 22.12 or 24 and Git. Run `npm ci --ignore-scripts`, then `npm run verify` before opening a pull request. `npm run format` fixes formatting.
+Use Node 22.23.4+ (22.x) or 24.22.1+ (24.x) and Git. Run `npm ci --ignore-scripts`, then `npm run verify` before opening a pull request. `npm run format` fixes formatting.
 
 Use `feat/<scope>`, `fix/<scope>` or `docs/<scope>` branches. In the pull request, describe the problem, the new behavior, how you verified it and what it does not cover. Keep unrelated refactors separate. Include consumers and compatibility tests when you change a shared contract. A benchmark report must include failed attempts. Private repositories never become public fixtures, so use synthetic fixtures.
 

@@ -60,12 +60,18 @@ export async function launchGithubActionsRun(
     const repo = retained?.repo ?? policy?.repo,
       runsOn = retained?.runsOn ?? policy?.runsOn ?? 'ubuntu-latest';
     invariant(repo, 'BAD_ARGUMENT', 'GitHub Actions runner requires checks.repo (owner/name).');
-    const runtime = `github-actions;repo:${repo};node:24.19.0;runs-on:${runsOn};unfinished-retry:1`;
+    const runtime = `github-actions;repo:${repo};node:24.22.1;runs-on:${runsOn};unfinished-retry:1`;
     let plan: ModalPlan;
+    let executionAllowed = true;
     if (existsSync(join(path, 'modal-plan.json'))) {
       plan = JSON.parse(readFileSync(join(path, 'modal-plan.json'), 'utf8'));
       validateModalPlan(plan, run);
-      invariant(plan.runtime === runtime, 'EVIDENCE_CHANGED', 'Retained Actions route changed.');
+      executionAllowed = plan.runtime === runtime;
+      invariant(
+        executionAllowed || (retained && plan.runtime === runtime.replace('node:24.22.1;', 'node:24.19.0;')),
+        'EVIDENCE_CHANGED',
+        'Retained Actions route changed.',
+      );
     } else {
       const created = await modalPlan(store, run, path, policy?.shards, runtime);
       if (!created) {
@@ -125,9 +131,13 @@ export async function launchGithubActionsRun(
     progress(
       `Pinned ${run.head}; ${plan.selection.scope}; ${plan.groups.length} test shards plus static checks; ${journal.repo} (${journal.runsOn})`,
     );
-    if (!cancelled() || journal.dispatching)
+    if (executionAllowed && (!cancelled() || journal.dispatching))
       await exportSnapshot(plan, journal, save, undefined, undefined, ms => api.sleep(ms), progress);
-    const outcome = await controlActions(plan, journal, save, api, cancelled, progress);
+    if (!executionAllowed)
+      progress(
+        'Retained vulnerable Node runtime: observing existing execution only; no dispatch or shard retry.',
+      );
+    const outcome = await controlActions(plan, journal, save, api, cancelled, progress, executionAllowed);
     const jobStatusSummary = 'jobStatusSummary' in outcome ? outcome.jobStatusSummary : '';
     run.backend.executionIds = journal.runId ? [String(journal.runId)] : [];
     run.backend.billableMinutes = outcome.billableMinutes;

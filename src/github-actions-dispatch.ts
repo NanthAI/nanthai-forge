@@ -93,6 +93,7 @@ export async function ensureActionsDispatch(
   api: ActionsApi,
   cancelled: () => boolean,
   progress: (message: string) => void,
+  executionAllowed = true,
 ) {
   if (journal.runId) return;
   const branch = `forge-check/${plan.runId}`,
@@ -154,6 +155,7 @@ export async function ensureActionsDispatch(
     unknown();
   }
 
+  invariant(executionAllowed, 'UNSUPPORTED_NODE', 'Retained Actions runtime cannot start a new execution.');
   if ((journal.dispatchRejections ?? 0) >= 5) throw rejected(journal);
   while (!cancelled()) {
     // Revalidate visibility even after a definitive 404/422 rejection.

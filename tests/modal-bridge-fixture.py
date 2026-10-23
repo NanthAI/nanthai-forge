@@ -117,7 +117,7 @@ class BridgeTests(unittest.TestCase):
         self.plan = dict(source=str(self.source), output=str(self.output), pin='pin-fixture',
             head=hashlib.sha256(state).hexdigest(), definition='definition-fixture',
             lockfile=hashlib.sha256(b'').hexdigest(), groups=[], standard=False, interaction=False,
-            runtime='fixture;static-memory:8192;static-oom-retry:16384;',
+            runtime='node:24.22.1-trixie-slim;static-memory:8192;static-oom-retry:16384;',
             selection={'scope': 'full', 'tests': []}, command=['node', '-e', 'console.log(1)'])
         self.plan_file = self.output / 'modal-plan.json'
         self.plan_file.write_text(json.dumps(self.plan))
@@ -144,6 +144,38 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(Sandbox.created, 1)
         self.assertEqual(Sandbox.observed, 1)
         self.assertEqual(events[-1]['estimatedCostUsd'], cost)
+
+    def test_vulnerable_runtime_never_builds_or_starts_new_sandboxes(self):
+        self.plan['runtime'] = 'node:24.19.0-trixie-slim;resume:1;'
+        self.plan_file.write_text(json.dumps(self.plan))
+        original = sdk.Image.from_registry
+        def unexpected_image(*args):
+            self.fail('A mismatched runtime must not build an image')
+        sdk.Image.from_registry = unexpected_image
+        try: events = self.run_bridge()
+        finally: sdk.Image.from_registry = original
+        self.assertEqual(events[-1]['kind'], 'error')
+        self.assertFalse(events[-1]['safeFallback'])
+        self.assertEqual(Sandbox.created, 0)
+
+    def test_retained_vulnerable_runtime_can_collect_but_cannot_retry(self):
+        self.standard([['synthetic']])
+        self.plan['runtime'] += 'flake-retry:1;resume:1;'
+        self.plan_file.write_text(json.dumps(self.plan))
+        self.run_bridge()
+        self.plan['runtime'] = self.plan['runtime'].replace('24.22.1', '24.19.0')
+        self.plan_file.write_text(json.dumps(self.plan))
+        events = self.run_bridge()
+        self.assertEqual(events[-1]['kind'], 'result')
+        self.assertEqual(events[-1]['exitCode'], 0)
+        journal_file = self.output / 'modal-executions.json'
+        journal = json.loads(journal_file.read_text())
+        journal['executions'][0]['exitCode'] = 1
+        journal_file.write_text(json.dumps(journal))
+        events = self.run_bridge()
+        self.assertEqual(Sandbox.created, 2)
+        self.assertEqual(events[-1]['kind'], 'error')
+        self.assertFalse(events[-1]['safeFallback'])
 
     def test_app_lifetime_covers_all_shards_and_preserves_process_failure(self):
         self.plan['groups'] = [['synthetic-a'], ['synthetic-b']]
@@ -299,7 +331,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_old_runtime_keeps_pinned_allocation_without_new_retry(self):
         self.standard()
-        self.plan['runtime'] = 'fixture;memory:4096;timeout:900'
+        self.plan['runtime'] = 'node:24.22.1-trixie-slim;memory:4096;timeout:900'
         self.plan_file.write_text(json.dumps(self.plan))
         Sandbox.exit_code = 137
         events = self.run_bridge()

@@ -104,7 +104,7 @@ def main():
     with modal.enable_output(), app.run():
         start = time.monotonic()
         lock_hash = hashlib.sha256((source/'package-lock.json').read_bytes()).hexdigest()
-        image = (modal.Image.from_registry('node:24.19.0-trixie-slim')
+        image = (modal.Image.from_registry('node:24.22.1-trixie-slim')
                  .apt_install('git', 'ca-certificates', 'procps')
                  .run_commands('node --version && git --version && git --no-lazy-fetch --version')
                  .workdir('/repo')

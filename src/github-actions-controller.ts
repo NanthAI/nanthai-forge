@@ -25,6 +25,7 @@ export async function controlActions(
   api: ActionsApi,
   cancelled: () => boolean,
   progress: (message: string) => void,
+  executionAllowed = true,
 ) {
   const cost = () =>
     actionsCost(
@@ -37,7 +38,7 @@ export async function controlActions(
   const base = `repos/${journal.repo}/actions`;
   if (cancelled() && !journal.dispatching && !journal.runId)
     return { status: 'cancelled' as const, exitCode: null, billableMinutes: [], cost: cost() };
-  await ensureActionsDispatch(plan, journal, save, api, cancelled, progress);
+  await ensureActionsDispatch(plan, journal, save, api, cancelled, progress, executionAllowed);
   if (!journal.runId)
     return { status: 'cancelled' as const, exitCode: null, billableMinutes: [], cost: cost() };
   const logs = new ModalShardLogs(plan.output, plan.groups.length);
@@ -176,7 +177,7 @@ export async function controlActions(
     );
     // No retries for observed test failures. Independent unfinished jobs get one replacement.
     const retry = unfinished.filter(([index]) => !journal.retrying.includes(index));
-    if (!cancelled() && run.conclusion !== 'cancelled' && retry.length) {
+    if (executionAllowed && !cancelled() && run.conclusion !== 'cancelled' && retry.length) {
       for (const [index, job] of retry.slice(0, 1)) {
         journal.retrying.push(index);
         journal.retrySources[index] = job.id;

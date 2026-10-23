@@ -2,7 +2,9 @@
 
 ## Setup and checks
 
-Requirements: Node 22.12 up to 24 (Node 24 is the tested package runtime), npm, and Git 2.38 or later for Git-backed Work. `tar` and `gzip` are needed for backups.
+Requirements: Node 22.23.4+ (22.x) or 24.22.1+ (24.x), npm, and Git 2.38 or later for Git-backed Work. `tar` and `gzip` are needed for backups.
+
+The CLI and standard check refuse other Node versions with `UNSUPPORTED_NODE`. These minimums include the October 2026 Node security fixes; package engines use `^22.23.4 || >=24.22.1 <25`.
 
 ```sh
 npm ci --ignore-scripts      # locked install, no lifecycle scripts
