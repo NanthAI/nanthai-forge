@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { readFile, open } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { earlyPurgeBackup } from './lib/r2-purge-backup.mjs';
+import { dirname, resolve } from 'node:path';
+import { syncDirectory } from '../dist/native-durability.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { deploymentOptions } from './hosted-durability.mjs';
@@ -16,6 +19,8 @@ export function parseMaintenance(args) {
       project: { type: 'string' },
       verification: { type: 'string' },
       apply: { type: 'boolean' },
+      'early-owner-approved': { type: 'string' },
+      'backup-state-dir': { type: 'string' },
     },
   });
   if (
@@ -24,7 +29,10 @@ export function parseMaintenance(args) {
     !values.deployment ||
     !values.project ||
     (positionals[0] === 'purge' && !values.verification) ||
-    (positionals[0] === 'sweep' && values.verification)
+    (positionals[0] === 'sweep' &&
+      (values.verification || values['early-owner-approved'] || values['backup-state-dir'])) ||
+    (values['early-owner-approved'] !== undefined && !values['early-owner-approved'].trim()) ||
+    !!values['early-owner-approved'] !== !!values['backup-state-dir']
   )
     throw failure('ARGUMENT_INVALID');
   deploymentOptions(values.deployment, {});
@@ -33,6 +41,8 @@ export function parseMaintenance(args) {
     deployment: values.deployment,
     projectId: values.project,
     verification: values.verification,
+    earlyOwnerApproved: values['early-owner-approved'],
+    backupStateDirectory: values['backup-state-dir'],
     dryRun: !values.apply,
   };
 }
@@ -70,6 +80,15 @@ export function verificationReceipt(state, command) {
     verificationRevision,
     verifiedAt,
     safeToPurgeAfter,
+    ...(state.fullDigest === true
+      ? {
+          fullDigest: true,
+          count: state.count,
+          digestChecks: state.digestChecks,
+          kind: state.kind,
+          failureCount: state.failures.length,
+        }
+      : {}),
   };
 }
 async function runInternal(deployment, name, args) {
@@ -94,12 +113,42 @@ async function runInternal(deployment, name, args) {
     throw failure('R2_MAINTENANCE_FAILED');
   }
 }
+async function journal(path, value) {
+  const file = await open(path, 'a', 0o600);
+  try {
+    await file.writeFile(JSON.stringify(value) + '\n');
+    await file.sync();
+  } finally {
+    await file.close();
+  }
+  syncDirectory(dirname(resolve(path)));
+}
 /** Re-running starts stable project pages at null. Row markers/key rotation make unknown outcomes retry-safe. */
-export async function executeMaintenance(command, run = runInternal) {
+export async function executeMaintenance(command, run = runInternal, options = {}) {
   const pass =
     command.operation === 'purge'
       ? verificationReceipt(JSON.parse(await readFile(command.verification, 'utf8')), command)
       : null;
+  if (command.earlyOwnerApproved !== undefined) {
+    const now = options.now ?? Date.now(),
+      at = Date.parse(pass?.verifiedAt);
+    if (
+      !command.earlyOwnerApproved.trim() ||
+      !command.backupStateDirectory ||
+      pass?.fullDigest !== true ||
+      !Number.isSafeInteger(pass.count) ||
+      pass.count < 0 ||
+      pass.digestChecks !== pass.count ||
+      !Number.isFinite(at) ||
+      at > now ||
+      now - at > 86400_000
+    )
+      throw failure('R2_EARLY_VERIFICATION_REQUIRED');
+    pass.early = {
+      ownerApproval: command.earlyOwnerApproved,
+      backup: await earlyPurgeBackup(command, options),
+    };
+  }
   const total = {
     operation: command.operation,
     dryRun: command.dryRun,
@@ -108,7 +157,18 @@ export async function executeMaintenance(command, run = runInternal) {
     eligible: 0,
     deleted: 0,
     skipped: 0,
+    ...(pass?.early
+      ? {
+          operationId: randomUUID(),
+          deployment: command.deployment,
+          projectId: command.projectId,
+          verification: pass,
+          journal: command.verification + '.purge.jsonl',
+        }
+      : {}),
   };
+  // Retain explicit approval and exact evidence before the first possible delete, including unknown replies.
+  if (total.journal) await journal(total.journal, { ...total, status: 'started' });
   for (const kind of command.operation === 'purge'
     ? ['objects', 'backups', 'proposals', 'archives']
     : [null]) {
@@ -125,11 +185,13 @@ export async function executeMaintenance(command, run = runInternal) {
         if (!Number.isSafeInteger(page[key]) || page[key] < 0) throw failure('R2_MAINTENANCE_FAILED');
         total[key] += page[key];
       }
+      if (total.journal) await journal(total.journal, { ...total, status: 'page', kind, cursor });
       if (page.isDone) break;
       if (typeof page.cursor !== 'string' || page.cursor === cursor) throw failure('R2_MAINTENANCE_FAILED');
       cursor = page.cursor;
     } while (true);
   }
+  if (total.journal) await journal(total.journal, { ...total, status: 'complete' });
   return total;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

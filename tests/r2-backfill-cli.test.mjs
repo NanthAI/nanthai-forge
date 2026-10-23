@@ -9,11 +9,19 @@ test('the maintenance CLI exposes dry-run, resume and verify usage without conta
     encoding: 'utf8',
   });
   assert.equal(result.status, 0);
-  for (const text of ['--dry-run', '--resume', '--verify', '--state', 'No Convex files are deleted'])
+  for (const text of [
+    '--dry-run',
+    '--resume',
+    '--verify',
+    '--full-digest',
+    '--state',
+    'No Convex files are deleted',
+  ])
     assert.ok(result.stdout.includes(text));
 });
 for (const args of [
   ['other'],
+  ['r2-backfill', 'synthetic', 'project', '--full-digest'],
   ['r2-backfill', '--unknown'],
   ['r2-backfill', 'https://example.convex.cloud', 'synthetic', '--dry-run', '--verify'],
   ['r2-backfill', 'https://example.convex.cloud', 'synthetic', '--state'],

@@ -123,3 +123,15 @@ test('backup HEAD and digest request unsigned identity; missing HEAD length is a
   assert.equal((await client.head('key')).size, 4);
   assert.deepEqual(await client.digest('key'), { size: 4, sha256: hash('data') });
 });
+
+test('backup manifest reader parses format-1 JSON and rejects malformed or oversized provider content', async () => {
+  const manifest = { format: 1, operationId: 'synthetic', includeFileStorage: true };
+  assert.deepEqual(
+    await r2Client(fakeEnv, async () => new Response(JSON.stringify(manifest))).manifest('manifest.json'),
+    manifest,
+  );
+  for (const body of ['not json', 'x'.repeat(65537)])
+    await assert.rejects(r2Client(fakeEnv, async () => new Response(body)).manifest('manifest.json'), {
+      code: 'BACKUP_STATE_INVALID',
+    });
+});

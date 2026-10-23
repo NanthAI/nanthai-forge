@@ -476,3 +476,112 @@ test('transfer failures report fixed messages without echoing signed URLs', asyn
   ])
     await assert.rejects(run(), error => error.code && !error.message.includes('synthetic-sensitive-link'));
 });
+
+test('full digest mode downloads every row across pages and all four kinds with bounded concurrency', async t => {
+  const h = await harness(t);
+  await seed(
+    h,
+    Array.from({ length: 105 }, (_, i) => `full ${i}`),
+  );
+  for (const [kind, table] of [
+    ['backups', 'projectBackups'],
+    ['proposals', 'projectProposals'],
+    ['archives', 'projectBackups'],
+  ]) {
+    const bytes = Buffer.from(kind),
+      storageId = await h.s.ctx.storage.store(new Blob([bytes]));
+    const source = { storageId, digest: digest(bytes), size: bytes.length };
+    h.s.tables[table].set(kind, {
+      _id: kind,
+      _creationTime: 1,
+      projectId: 'project',
+      status: 'stored',
+      ...(kind === 'archives' ? { archiveReceipt: source } : source),
+    });
+  }
+  await runR2Backfill(h.transport, h.options);
+  const before = requests(h, 'GET').length,
+    original = globalThis.fetch;
+  let active = 0,
+    max = 0;
+  globalThis.fetch = async (...args) => {
+    if (args[1]?.method === 'HEAD') return original(...args);
+    max = Math.max(max, ++active);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1));
+      return await original(...args);
+    } finally {
+      active--;
+    }
+  };
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+  const result = await runR2Backfill(h.transport, {
+    ...h.options,
+    verify: true,
+    fullDigest: true,
+    statePath: join(h.dir, 'full.json'),
+  });
+  assert.equal(result.fullDigest, true);
+  assert.equal(result.count, 108);
+  assert.equal(result.digestChecks, 108);
+  assert.equal(requests(h, 'GET').length - before, 108);
+  assert.equal(result.kind, 4);
+  assert.deepEqual(result.failures, []);
+  assert.ok(result.verifiedAt);
+  assert.ok(max > 1 && max <= 8);
+  assert.equal(h.s.deleted.length, 0);
+});
+
+test('full digest failure on an unsampled row resumes the original page and rejects mode changes', async t => {
+  const h = await harness(t);
+  await seed(
+    h,
+    Array.from({ length: 102 }, (_, i) => `resume digest ${i}`),
+  );
+  await runR2Backfill(h.transport, h.options);
+  const secondPageRow = allRows(h.s)[101],
+    key = h.fake.key(`v1/p/project/o/${secondPageRow.digest}`);
+  h.fake.corrupt.add(key);
+  const options = { ...h.options, verify: true, fullDigest: true, statePath: join(h.dir, 'full.json') };
+  await assert.rejects(runR2Backfill(h.transport, options), e => e.code === 'BACKFILL_ROWS_FAILED');
+  const saved = JSON.parse(readFileSync(options.statePath, 'utf8'));
+  assert.equal(saved.count, 100);
+  assert.equal(saved.digestChecks, 100);
+  assert.equal(saved.complete, false);
+  assert.equal(saved.verifiedAt, undefined);
+  assert.equal(saved.failures[0].id, secondPageRow._id);
+  await assert.rejects(
+    runR2Backfill(h.transport, { ...options, resume: true, fullDigest: false }),
+    e => e.code === 'BACKFILL_STATE_CHANGED',
+  );
+  h.fake.corrupt.clear();
+  const before = requests(h, 'GET').length;
+  const result = await runR2Backfill(h.transport, { ...options, resume: true });
+  assert.equal(result.operationId, saved.operationId);
+  assert.equal(result.digestChecks, 102);
+  assert.equal(requests(h, 'GET').length - before, 2);
+  assert.deepEqual(result.failures, []);
+});
+
+test('full digest verification rejects a body of the wrong size even with a matching HEAD', async t => {
+  const h = await harness(t);
+  await seed(h, ['size bound']);
+  await runR2Backfill(h.transport, h.options);
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, init) =>
+    init?.method === 'HEAD' ? original(url, init) : Promise.resolve(new Response('oversized corrupt body'));
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+  await assert.rejects(
+    runR2Backfill(h.transport, {
+      ...h.options,
+      verify: true,
+      fullDigest: true,
+      statePath: join(h.dir, 'size.json'),
+    }),
+    e => e.code === 'BACKFILL_ROWS_FAILED',
+  );
+});

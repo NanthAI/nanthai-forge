@@ -8,11 +8,12 @@ import { requireHostedBinding } from './host-binding.js';
 import { invariant } from './errors.js';
 import { runR2Backfill } from './r2-backfill.js';
 import type { BackfillCheck, BackfillPage, BackfillTarget, BackfillTransport } from './r2-backfill-types.js';
-export const MAINTENANCE_HELP = `nforge maintenance r2-backfill ROOT [--dry-run|--verify] [--resume] [--state FILE]
-nforge maintenance r2-backfill DEPLOYMENT PROJECT_ID [--dry-run|--verify] [--resume] [--state FILE]
+export const MAINTENANCE_HELP = `nforge maintenance r2-backfill ROOT [--dry-run|--verify [--full-digest]] [--resume] [--state FILE]
+nforge maintenance r2-backfill DEPLOYMENT PROJECT_ID [--dry-run|--verify [--full-digest]] [--resume] [--state FILE]
 Run with the existing owner login or FORGE_AUTH_TOKEN. Enable projectObjectCommit:setR2Writes first.
 Dry-run reads counts/bytes only. Run streams through private local files; resume uses the original state file.
 Verify HEAD-checks every backfilled row and downloads a SHA-256 sample (first, then every 100th row).
+Add --full-digest to download and verify every migrated object, with the same paged resume state.
 No Convex files are deleted. A full verified pass reports a date 14 days later; purge is separate.
 `;
 export async function maintenanceCli(args: string[]) {
@@ -25,11 +26,13 @@ export async function maintenanceCli(args: string[]) {
   let statePath: string | undefined;
   let dryRun = false,
     verify = false,
+    fullDigest = false,
     resume = false;
   for (let i = 0; i < args.length; i++) {
     const option = args[i]!;
     if (option === '--dry-run') dryRun = true;
     else if (option === '--verify') verify = true;
+    else if (option === '--full-digest') fullDigest = true;
     else if (option === '--resume') resume = true;
     else if (option === '--state') {
       statePath = args[++i];
@@ -40,7 +43,10 @@ export async function maintenanceCli(args: string[]) {
     }
   }
   invariant(
-    positional.length >= 1 && positional.length <= 2 && !(dryRun && (verify || resume)),
+    positional.length >= 1 &&
+      positional.length <= 2 &&
+      !(dryRun && (verify || resume)) &&
+      (!fullDigest || verify),
     'BAD_ARGUMENT',
     MAINTENANCE_HELP,
   );
@@ -73,13 +79,14 @@ export async function maintenanceCli(args: string[]) {
   };
   const project = JSON.stringify([deployment, projectId]);
   statePath ??= resolve(
-    `forge-r2-${createHash('sha256').update(project).digest('hex').slice(0, 16)}-${verify ? 'verify' : 'backfill'}.json`,
+    `forge-r2-${createHash('sha256').update(project).digest('hex').slice(0, 16)}-${fullDigest ? 'full-digest' : verify ? 'verify' : 'backfill'}.json`,
   );
   return runR2Backfill(transport, {
     project,
     statePath,
     dryRun,
     verify,
+    fullDigest,
     resume,
     progress: line => process.stderr.write(line + '\n'),
   });

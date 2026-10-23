@@ -55,6 +55,21 @@ export function r2Client(env = process.env, fetcher = fetch) {
         r && { size: Number(r.headers.get('content-length')), sha256: r.headers.get('x-amz-meta-sha256') }
       );
     },
+    async manifest(key) {
+      try {
+        const response = await request('GET', key);
+        const chunks = [];
+        let size = 0;
+        for await (const bytes of response.body) {
+          size += bytes.length;
+          if (size > 65536) throw failure('BACKUP_STATE_INVALID');
+          chunks.push(bytes);
+        }
+        return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      } catch {
+        throw failure('BACKUP_STATE_INVALID');
+      }
+    },
     async digest(key) {
       const response = await request('GET', key);
       const hash = createHash('sha256');

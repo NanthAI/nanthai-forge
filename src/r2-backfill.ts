@@ -44,9 +44,11 @@ export async function runR2Backfill(
     dryRun?: boolean;
     resume?: boolean;
     verify?: boolean;
+    fullDigest?: boolean;
     progress?: (line: string) => void;
   },
 ) {
+  invariant(!options.fullDigest || options.verify, 'BAD_ARGUMENT', 'Full digest requires verify mode.');
   const inventory = await backfillInventory(transport),
     log = options.progress ?? (() => undefined);
   log(
@@ -62,7 +64,10 @@ export async function runR2Backfill(
     invariant(existsSync(statePath), 'BACKFILL_STATE_MISSING', 'Use the original state file to resume.');
     state = JSON.parse(readFileSync(statePath, 'utf8')) as BackfillState;
     invariant(
-      state.schema === 1 && state.project === options.project && state.mode === mode,
+      state.schema === 1 &&
+        state.project === options.project &&
+        state.mode === mode &&
+        !!state.fullDigest === !!options.fullDigest,
       'BACKFILL_STATE_CHANGED',
       'Resume the same project and mode with its original state file.',
     );
@@ -84,6 +89,7 @@ export async function runR2Backfill(
       count: 0,
       bytes: 0,
       samples: 0,
+      ...(options.fullDigest ? { fullDigest: true, digestChecks: 0 } : {}),
       failures: [],
       complete: false,
     };
@@ -98,6 +104,7 @@ export async function runR2Backfill(
     state.count = 0;
     state.bytes = 0;
     state.samples = 0;
+    if (state.fullDigest) state.digestChecks = 0;
     state.failures = [];
     log('Backfill changed since this verification started; restarting the full pass.');
   }
@@ -133,7 +140,7 @@ export async function runR2Backfill(
             'R2_VERIFY_FAILED',
             'A row is not verified in R2.',
           );
-          if ((state.count + index) % 100 === 0) {
+          if (options.fullDigest || (state.count + index) % 100 === 0) {
             await sampleBackfill(result.url, pin);
             samples++;
           }
@@ -198,6 +205,7 @@ export async function runR2Backfill(
     state.count += verified.size;
     state.bytes += page.page.filter(pin => verified.has(pin.id)).reduce((sum, pin) => sum + pin.size, 0);
     state.samples += samples;
+    if (state.fullDigest) state.digestChecks = (state.digestChecks ?? 0) + samples;
     if (page.isDone) {
       state.kind++;
       state.cursor = null;
@@ -231,6 +239,7 @@ export async function runR2Backfill(
       state.count = 0;
       state.bytes = 0;
       state.samples = 0;
+      if (state.fullDigest) state.digestChecks = 0;
       save();
     }
     throw new ForgeError(
@@ -242,7 +251,7 @@ export async function runR2Backfill(
     state.verifiedAt = new Date().toISOString();
     state.safeToPurgeAfter = new Date(Date.parse(state.verifiedAt) + 14 * 86400_000).toISOString();
     log(
-      `Full verified pass: ${state.count} HEAD checks, ${state.samples} downloaded SHA-256 samples. Safe to purge after ${state.safeToPurgeAfter}; purge is a separate command.`,
+      `Full verified pass: ${state.count} HEAD checks, ${state.samples} downloaded SHA-256 ${state.fullDigest ? 'full digests' : 'samples'}. Safe to purge after ${state.safeToPurgeAfter}; purge is a separate command.`,
     );
   }
   state.complete = true;

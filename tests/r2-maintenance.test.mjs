@@ -443,3 +443,141 @@ for (const failure of ['disabled', 'list', 'delete'])
     assert.equal(x.fake.objects.size, 1);
     assert.ok(x.fake.objects.has(x.fake.key('v1/p/other/o/keep')));
   });
+
+const earlyPass = x => {
+  const now = Date.now();
+  return {
+    ...x.pass,
+    fullDigest: true,
+    kind: 4,
+    failureCount: 0,
+    count: 1,
+    digestChecks: 1,
+    verifiedAt: new Date(now - 3600_000).toISOString(),
+    safeToPurgeAfter: new Date(now + windowMs).toISOString(),
+    early: {
+      ownerApproval: 'Owner approved after current-data verification',
+      backup: {
+        complete: true,
+        includeFileStorage: true,
+        operationId: 'backup',
+        deployment: 'synthetic',
+        time: new Date(now - 86400_000).toISOString(),
+        manifestKey: 'hosted-backups/dev/run/manifest.json',
+        size: 10,
+        sha256: 'a'.repeat(64),
+      },
+    },
+  };
+};
+for (const [label, change] of [
+  [
+    'no full digest',
+    pass => {
+      delete pass.fullDigest;
+    },
+  ],
+  [
+    'failures',
+    pass => {
+      pass.failureCount = 1;
+    },
+  ],
+  [
+    'stale pass',
+    pass => {
+      pass.verifiedAt = new Date(Date.now() - 86400_001).toISOString();
+    },
+  ],
+  [
+    'future pass',
+    pass => {
+      pass.verifiedAt = new Date(Date.now() + 86400_000).toISOString();
+    },
+  ],
+  [
+    'incomplete kinds',
+    pass => {
+      pass.kind = 3;
+    },
+  ],
+  [
+    'incomplete digests',
+    pass => {
+      pass.digestChecks = 0;
+    },
+  ],
+  [
+    'changed revision',
+    pass => {
+      pass.verificationRevision = 1;
+    },
+  ],
+  [
+    'no backup',
+    pass => {
+      delete pass.early.backup;
+    },
+  ],
+  [
+    'database-only backup',
+    pass => {
+      pass.early.backup.includeFileStorage = false;
+    },
+  ],
+  [
+    'stale backup',
+    pass => {
+      pass.early.backup.time = new Date(Date.now() - 8 * 86400_000).toISOString();
+    },
+  ],
+  [
+    'no flag',
+    pass => {
+      delete pass.early;
+    },
+  ],
+  [
+    'blank approval',
+    pass => {
+      pass.early.ownerApproval = ' ';
+    },
+  ],
+])
+  test(`early purge refuses ${label}`, async t => {
+    const x = await fixture(t);
+    x.pass = earlyPass(x);
+    const row = await x.row();
+    await x.s.ctx.db.patch(row._id, { _creationTime: Date.parse(x.pass.verifiedAt) - 1000 });
+    change(x.pass);
+    await assert.rejects(x.purge({ dryRun: false }));
+    assert.equal(x.s.deleted.length, 0);
+  });
+
+test('approved early purge re-HEADs, dry-run deletes nothing, and rows created after verification are excluded', async t => {
+  const x = await fixture(t);
+  x.pass = earlyPass(x);
+  const old = await x.row('eligible'),
+    fresh = await x.row('created after');
+  await x.s.ctx.db.patch(old._id, { _creationTime: Date.parse(x.pass.verifiedAt) - 1000 });
+  assert.equal((await x.purge()).eligible, 1);
+  assert.equal(x.s.deleted.length, 0);
+  assert.equal((await x.purge({ dryRun: false })).deleted, 1);
+  assert.deepEqual(x.s.deleted, [old.storageId]);
+  assert.equal((await x.s.ctx.db.get(fresh._id)).r2ConvexPurged, undefined);
+});
+
+test('early purge mutation rechecks receipt age after HEAD', async t => {
+  const x = await fixture(t);
+  x.pass = earlyPass(x);
+  const row = await x.row();
+  await x.s.ctx.db.patch(row._id, { _creationTime: 1 });
+  const run = x.s.ctx.runMutation;
+  x.s.ctx.runMutation = (ref, args) => {
+    if (getFunctionName(ref) === 'projectR2Purge:removeCopies')
+      args.pass.verifiedAt = new Date(Date.now() - 86400_001).toISOString();
+    return run(ref, args);
+  };
+  await assert.rejects(x.purge({ dryRun: false }));
+  assert.equal(x.s.deleted.length, 0);
+});

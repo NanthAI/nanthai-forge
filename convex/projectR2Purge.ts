@@ -26,7 +26,7 @@ export const page = internalQuery({
       pins: result.page.flatMap(row => {
         const source = selected(row, kind),
           pin = pinFor(row, kind);
-        return source && pin && purgeable(source, projectId, pass) ? [pin] : [];
+        return source && pin && purgeable(source, projectId, pass, row._creationTime) ? [pin] : [];
       }),
       scanned: result.page.length,
       cursor: result.continueCursor,
@@ -47,7 +47,7 @@ export const removeCopies = internalMutation({
       skipped = 0;
     for (const pin of pins) {
       const { row, source, matches } = await current(ctx, projectId, pin);
-      if (!matches || !row || !source || !purgeable(source, projectId, pass)) {
+      if (!matches || !row || !source || !purgeable(source, projectId, pass, row._creationTime)) {
         skipped++;
         continue;
       }

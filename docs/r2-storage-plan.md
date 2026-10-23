@@ -38,7 +38,7 @@ Principle: R2 holds every blob. No database function receives or returns file by
 | R7 | Prefix purge, abandoned-upload sweep, scheduled database-only export, optional bucket lock | Done; awaiting landing, local purge/sweep and database-only backup fixtures; live operator run remains |
 | R8 | Optional public Worker with edge cache on a custom subdomain | Later |
 
-Order: R0, R1, R2, then R3a and R4 in parallel, R3b, R6, R5, R7. R0 to R2 alone remove egress for pulls and new pushes. During dual read every reader dispatches on the row's location, so old and new paths coexist. Rollback: unset the flag and new writes return to the old storage; rows already in R2 stay readable; nothing in old storage is deleted until 14 days after a full digest verification.
+Order: R0, R1, R2, then R3a and R4 in parallel, R3b, R6, R5, R7. R0 to R2 alone remove egress for pulls and new pushes. During dual read every reader dispatches on the row's location, so old and new paths coexist. Rollback: unset the flag and new writes return to the old storage; rows already in R2 stay readable; old storage stays for 14 days after verification unless the owner explicitly approves the guarded early-purge procedure below.
 
 ## R1 write path
 
@@ -313,7 +313,7 @@ These commands are lead-only live qualification, not local fixture results.
 CLI spool files, resumes by page, and flips rows only after R2 HEAD verification
 and a location/storage-id CAS. Convex copies remain intact. `--dry-run` reads
 metadata only; `--verify` checks every backfilled object and downloads a digest
-sample, then reports a date 14 days after the full pass. See the
+sample; `--verify --full-digest` downloads every migrated object and verifies its size and SHA-256. Both modes report the normal 14-day date. See the
 [operator runbook](operations/r2-backfill.md) for opt-in, commands, recovery, cost
 and verification details. No real deployment run is implied by local tests.
 
@@ -336,13 +336,25 @@ The verification input is the completed R6 `--verify` state, with zero failures,
 all four kinds visited, `verificationRevision`, `verifiedAt` and
 `safeToPurgeAfter`. It binds the deployment and project. This is a lead-supplied
 local receipt, not a server-signed proof. Only deployment-admin internal functions
-accept it. R6 currently HEAD-checks all migrated rows and downloads SHA-256
-samples; it does not download every object during the final verification pass.
+accept it. R6 HEAD-checks all migrated rows; `--full-digest` additionally streams
+every migrated object through size and SHA-256 verification, eight at a time.
+The receipt records `fullDigest: true`, `count`, `digestChecks`, failures and `verifiedAt`.
 The original migration checks every transferred file's digest. Purge never
 manufactures a verification receipt.
 
-Purge refuses until at least 14 days after the verified pass and its recorded
-safe date, or if the backfill revision changed. Only committed R2 rows migrated
+Purge normally refuses until at least 14 days after the verified pass and its recorded
+safe date. An explicitly owner-approved early purge requires a completed zero-failure
+`fullDigest` receipt covering all four kinds, matching digest/row counts and the
+current backfill revision, verified no more than 24 hours ago. It also requires a
+completed file-inclusive hosted backup within the existing seven-day backup cadence.
+`--backup-state-dir` points to the weekly backup's existing `last-run.json`; the
+command reads the matching format-1 R2 manifest and HEAD-checks its snapshot.
+Database-only backups do not qualify. The explicit `--early-owner-approved "<note>"`
+flag records the owner's decision in the returned receipt and an fsynced append-only
+`VERIFICATION.purge.jsonl` journal before the first page. This remains lead-supplied
+admin evidence. Missing evidence preserves the normal 14-day rule; the backfill
+revision must match on either path. Early purge excludes rows created after
+`verifiedAt`, even if their migration timestamp is older. Only committed R2 rows migrated
 before that pass qualify. Each 100-row page re-HEADs every eligible object and
 requires its size and checksum to match before any deletion in that page. The
 mutation rechecks the pass, original row pins and other storage references.

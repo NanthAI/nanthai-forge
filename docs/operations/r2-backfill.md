@@ -17,6 +17,8 @@ nforge maintenance r2-backfill ROOT --state /private/path/backfill.json
 nforge maintenance r2-backfill ROOT --resume --state /private/path/backfill.json
 nforge maintenance r2-backfill ROOT --verify --state /private/path/verification.json
 nforge maintenance r2-backfill ROOT --verify --resume --state /private/path/verification.json
+nforge maintenance r2-backfill ROOT --verify --full-digest --state /private/path/full-verification.json
+nforge maintenance r2-backfill ROOT --verify --full-digest --resume --state /private/path/full-verification.json
 ```
 
 Before the real run, the lead configures the existing R2 environment settings
@@ -64,7 +66,14 @@ throughput is assumed before rows complete.
 Verify scans every backfilled row, HEAD-checks its R2 size and checksum, and
 streams the first then every 100th selected row through SHA-256 verification.
 Unflipped Convex rows, missing objects, metadata mismatches or a failed sample
-prevent a successful pass. A completed verification records `verifiedAt` and
+prevent a successful pass. Add `--full-digest` to download **every** migrated R2
+object, checking its complete SHA-256 and size with at most eight concurrent
+streaming downloads. It uses the same 100-row pages and durable cursor; a failed
+page replays on resume. The receipt adds `fullDigest: true` and `digestChecks`
+(equal to `count` on success). Resume must retain the same digest mode.
+Full-digest verification reads metadata from Convex; object bytes come from R2,
+with no Convex file downloads. It adds no Convex calls beyond sampled verification.
+A completed verification records `verifiedAt` and
 `safeToPurgeAfter` (14 days later) in its local receipt and prints the date. This
 is evidence for the lead's later R7 purge, not permission or an automatic purge.
 If another backfill flips rows during verification, the command resets the pass and reports the change; resume then checks the full current set. A new verification needs a new state file; `--resume` on a completed receipt
@@ -75,3 +84,34 @@ There is no measured time estimate for a deployment. With eight transfers and
 12–48 minutes before batched metadata calls, archives and retries. Network speed,
 object sizes, server latency and disk throughput determine the actual duration;
 use the observed progress ETA during the run.
+
+## Owner-approved early purge
+
+The normal purge retains Convex copies for 14 days. The owner may approve an
+earlier purge only after the full-digest pass above completes without failures,
+covers all four row kinds and matches the current backfill revision. Its
+`verifiedAt` must be within 24 hours at each purge page and deletion mutation.
+A completed file-inclusive hosted backup must also exist within the current
+seven-day backup cadence. Use the existing weekly backup state directory from
+[hosted durability](hosted-durability.md); `last-run.json` identifies the completed
+receipt and the published format-1 manifest under its existing prefix. The
+command verifies manifest/deployment/digest pins and snapshot presence. Pending,
+missing and database-only backups do not qualify.
+
+After a fresh full verification, use the same receipt, backup state directory
+and explicit owner decision note for dry-run and apply:
+
+```sh
+node scripts/r2-maintenance.mjs purge --deployment NAME --project PROJECT_ID --verification /private/path/full-verification.json --backup-state-dir /private/backup-state --early-owner-approved "Owner approved early purge after current-data verification"
+node scripts/r2-maintenance.mjs purge --deployment NAME --project PROJECT_ID --verification /private/path/full-verification.json --backup-state-dir /private/backup-state --early-owner-approved "Owner approved early purge after current-data verification" --apply
+```
+
+Dry-run remains the default and deletes nothing. The approval note and exact
+verification/backup evidence are retained before any page call in
+`full-verification.json.purge.jsonl` and in the returned purge receipt. Unknown
+outcomes leave a started/page journal entry; rerunning uses existing row markers
+and rechecks current evidence. Each eligible R2 object is still re-HEADed before
+deleting its Convex copy; current row pins and other references are rechecked.
+Rows created or migrated after `verifiedAt` are excluded. Early purge removes
+the Convex fallback copy; recovery then uses the verified R2 copy or the hosted
+backup. Without early approval, existing 14-day commands and checks are unchanged.

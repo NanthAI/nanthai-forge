@@ -41,6 +41,8 @@ export type BackfillState = {
   count: number;
   bytes: number;
   samples: number;
+  fullDigest?: boolean;
+  digestChecks?: number;
   failures: { id: string; code: string }[];
   complete: boolean;
   verificationRevision?: number;
