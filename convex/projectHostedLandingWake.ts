@@ -2,7 +2,12 @@
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { ensureLandingQueue, landingQueue, type LandingChannel } from './projectHostedLandingStore';
+import {
+  ensureLandingQueue,
+  landingQueue,
+  recordLandingObservation,
+  type LandingChannel,
+} from './projectHostedLandingStore';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 
@@ -120,6 +125,7 @@ export async function wakeLandingCheck(
     state.phase = 'queued';
     state.version++;
     // Keep the checking observation until the original run is evaluated.
+    await recordLandingObservation(ctx, state, null);
     await ctx.db.patch(row._id, { phase: 'queued', runnable: true, value: canonicalPayload(state) });
   }
   if (page.page.length) await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });

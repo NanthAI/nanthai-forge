@@ -4,8 +4,9 @@ import { z } from 'zod';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { hostedAgentCli } from './hosted-agent-cli.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
-import { observeHostedRun, hostedRunWaitSchema, type HostedRunSubscription } from './hosted-agent-observe.js';
-import { ForgeError } from './errors.js';
+import { observeHostedRun, hostedWaitSchema, type HostedRunSubscription } from './hosted-agent-observe.js';
+import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
+import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
 import {
   hostedSourceSelectionSchema,
@@ -68,7 +69,7 @@ export function registerHostedAgentWorkflow(
       name: 'forge_check',
       actions: ['check', 'run', 'observe'],
       description:
-        'Check a pinned hosted Candidate or observe one run/source operation/submission. run aliases check. Observation is one finite authorized read; it starts no compute or subscription. Use forge_wait for explicitly requested live run observation.',
+        'Check a pinned hosted Candidate or observe one run/source operation/submission. run aliases check. Observation is one finite authorized read; it starts no compute or subscription. Use forge_wait for explicitly requested live run or submission observation.',
     },
     {
       name: 'forge_work_overview',
@@ -131,8 +132,8 @@ export function registerHostedAgentWorkflow(
     'forge_wait',
     {
       description:
-        'Explicitly observe one hosted run live until terminal, timeout or cancellation. Only this active call opens a subscription; it closes on every exit/disconnect. Progress notifications carry run observations when a progressToken is supplied. No polling, metadata hydration or check/worker wake.',
-      inputSchema: hostedRunWaitSchema.shape,
+        'Explicitly observe one hosted run or several hosted landing operationIds until terminal, timeout or cancellation. Submission events carry a reconnect cursor scoped to the project, actor and operation selection. Only this active call opens a subscription; it closes on every exit/disconnect. Progress notifications carry run observations when a progressToken is supplied. No polling, metadata hydration or check/worker wake.',
+      inputSchema: hostedWaitSchema.shape,
       annotations: read,
     },
     async (input, extra) => {
@@ -144,8 +145,13 @@ export function registerHostedAgentWorkflow(
       let notifications = Promise.resolve();
       let progress = 0;
       try {
+        invariant(
+          Boolean(input.runId) !== Boolean(input.operationIds?.length),
+          'BAD_ARGUMENT',
+          'Choose one run or hosted landing operationIds.',
+        );
         const response = await result(() =>
-          observeHostedRun(
+          (input.runId ? observeHostedRun : observeHostedSubmissions)(
             transport,
             input,
             controller.signal,

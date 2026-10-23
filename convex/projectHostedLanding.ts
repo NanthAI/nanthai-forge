@@ -10,6 +10,9 @@ import {
   loadLanding,
   loadLandingAttempt,
   insertLandingAttempt,
+  recordLandingObservation,
+  retainLandingProgress,
+  landingAttemptProgress,
 } from './projectHostedLandingStore';
 import { wakeLandingQueue, notifyLandingCheck } from './projectHostedLandingWake';
 import { initializeFinish } from './projectHostedFinishStore';
@@ -142,6 +145,8 @@ export const enqueue = mutation({
       await ctx.db.patch(queue._id, { sequence });
       await wakeLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
       await initializeFinish(ctx, state);
+      await retainLandingProgress(ctx, state);
+      await recordLandingObservation(ctx, state);
       return canonicalPayload(state);
     } catch (error) {
       return report(error);
@@ -244,10 +249,9 @@ export const attempts = query({
         version: state.version,
         page: page.page.map(row => ({
           ...JSON.parse(row.value),
-          observation:
-            row.attemptId === state.attemptId
-              ? state.observation
-              : { state: 'superseded', pendingReason: null, cause: null },
+          progress: landingAttemptProgress(row, state),
+          observation: landingAttemptProgress(row, state)?.observation ?? null,
+          superseded: row.attemptId !== state.attemptId,
         })),
       });
     } catch (error) {

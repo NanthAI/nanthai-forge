@@ -114,3 +114,13 @@ export async function observeHostedRun(
     }
   }
 }
+
+export const hostedWaitSchema = z
+  .object({
+    runId: z.uuid().optional(),
+    operationIds: z.array(z.uuid()).optional(),
+    cursor: z.string().nullable().optional(),
+    until: z.enum(['terminal', 'any-change']).optional(),
+    timeoutSeconds: z.number().nonnegative().finite().optional(),
+  })
+  .strict();

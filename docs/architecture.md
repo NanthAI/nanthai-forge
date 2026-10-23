@@ -1295,7 +1295,7 @@ addressing is selected before native Work, presence or graph construction; it
 starts no local owner/listener. Source reads reuse the verified H04 object cache,
 return saved Lane/State/blob pins and recheck current authorization before returning
 bytes, without Work/history hydration or substitution of local drafts. Only an
-explicit live run wait creates a subscription; all exits and server disconnect
-close it. Finite status/observe and idle connections install no observer or timer.
+explicit live run or submission wait creates subscriptions; every exit and server
+disconnect closes them. Finite status/observe and idle connections install no observer or timer.
 Account authentication never selects person acceptance in these tools. Live
 provisioning and provider qualification remain separate.

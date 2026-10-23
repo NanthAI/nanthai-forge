@@ -103,6 +103,18 @@ export const hostedLandingStateSchema = z
       .nullable(),
   })
   .strict();
+export const hostedLandingProgressSchema = hostedLandingStateSchema
+  .pick({
+    observation: true,
+    phase: true,
+    error: true,
+    version: true,
+  })
+  .extend({
+    acceptance: hostedLandingStateSchema.shape.acceptance.unwrap().nullable(),
+    settled: z.boolean(),
+  })
+  .strict();
 export type HostedLandingRequest = z.infer<typeof hostedLandingRequestSchema>;
 export type HostedLandingAttempt = z.infer<typeof hostedLandingAttemptSchema>;
 export type HostedLandingState = z.infer<typeof hostedLandingStateSchema>;

@@ -110,8 +110,29 @@ test('disjoint main movement during check recomposes and rechecks with named IDs
       cursor: null,
     }),
   );
-  assert.equal(history.page[0].observation.state, 'superseded');
+  assert.equal(history.page[0].superseded, true);
+  assert.equal(history.page[0].observation.state, 'terminal-failed');
+  assert.equal(history.page[0].observation.cause, 'stale-head');
+  assert.equal(history.page[0].progress.error.code, 'CHANNEL_CHANGED');
   assert.equal(history.page[1].observation.state, 'landed');
+  assert.equal(history.page[0].progress.acceptance, null);
+  assert.equal(
+    history.page[1].progress.acceptance.receiptId,
+    checked.submission.acceptance?.receiptId ?? (await f.current(state.id)).submission.acceptance.receiptId,
+  );
+  const oldInputs = JSON.parse(
+    await f.tx('finishOldInputs', api.inputs, {
+      projectId: f.projectId,
+      submissionId: state.id,
+      attemptId: initial.id,
+      index: 0,
+    }),
+  );
+  assert.equal(oldInputs.entries[0].state, 'superseded');
+  assert.equal(oldInputs.entries[0].outcome, 'terminal-failed');
+  assert.equal(oldInputs.entries[0].cause, 'stale-head');
+  assert.equal(oldInputs.entries[0].error.code, 'CHANNEL_CHANGED');
+  assert.equal(oldInputs.entries[0].acceptance, null);
 });
 
 test('overlapping main movement retains the new conflicted Candidate and H09 resolution root without accepting old passing evidence', async t => {

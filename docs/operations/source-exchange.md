@@ -1529,4 +1529,31 @@ progress token. Only a nonterminal active wait creates a subscription, and every
 exit unsubscribes and closes its client. Terminal and zero-duration reads allocate
 no live client. There is no idle polling, URL refresh, heartbeat, metadata hydration
 or compute wake. Observation neither cancels a run nor grants acceptance evidence.
+Hosted landing waits use `forge_wait {operationIds:[FINISH_OPERATION_ID,...],
+cursor?,until?,timeoutSeconds?}` or `nforge agent ROOT wait` with the same selection.
+One call follows all selected submissions, including named pending recomposes,
+until all are terminal; `until:"any-change"` returns after the first change beyond
+the initial snapshot. Each progress event and result carries a reconnect cursor.
+Keep the cursor with the same deployment, project, actor and operation selection;
+reconnecting rechecks current access and replays committed submission versions
+without repeating delivered versions. Each server page reads at most twenty
+version rows by exact indexes, independent of project/history size. A deployment
+with older, unjournaled state explicitly resnapshots the current record; missing
+historical evidence is not invented. Authority changes trigger a fresh authorized
+snapshot while retaining immutable version identities for deduplication.
+
+Only the active call subscribes. Registration is followed by an authoritative
+reread to close missed wakeups; timeout, cancellation, errors and disconnect close
+every subscription without waking or cancelling landing work. Staged input pages
+also observe later saved Lane heads using the shared source-relative submission
+projection. Unstaged input pages remain explicitly unstaged. A pending child
+recompose never settles from its predecessor's stale input result.
+
+Attempt history returns each attempt's own `observation` and `progress` (phase,
+error, acceptance and settlement), separately from its `superseded` attempt flag.
+A newer child or accepted submission never rewrites its predecessor's outcome.
+Input pages use the selected attempt's retained evidence before projecting later
+Lane saves as superseded. Old attempts predating retained progress return null
+historical evidence rather than borrowing the current attempt's result.
+
 These paths are qualified with local fakes, not live accounts or providers.

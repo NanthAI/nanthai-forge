@@ -9,6 +9,8 @@ import {
 import {
   hostedLandingAttemptSchema,
   hostedLandingStateSchema,
+  hostedLandingProgressSchema,
+  landingObservation,
   type HostedLandingState,
   type HostedLandingAttempt,
 } from '../src/hosted-landing';
@@ -164,6 +166,9 @@ export async function writeLanding(
     'WORK_OPERATION_CHANGED',
     'The selected attempt must belong to this original request.',
   );
+  if (previous.attemptId !== state.attemptId) await retainLandingProgress(ctx, previous, true);
+  await retainLandingProgress(ctx, state);
+  await recordLandingObservation(ctx, state);
   await ctx.db.patch(row._id, {
     attemptId: state.attemptId,
     runId: attempt.check?.runId ?? null,
@@ -203,4 +208,69 @@ export async function settleLandingOperation(ctx: MutationCtx, state: HostedLand
   const operation = completeHostedOperation(hostedOperationSchema.parse(JSON.parse(row.value)), receipt);
   if (canonicalPayload(operation) !== row.value)
     await ctx.db.patch(row._id, { value: canonicalPayload(operation) });
+}
+
+/** Mutable evidence is separate from immutable attempt/source/operation pins. A
+ * replaced attempt is frozen before the request starts its next source phase. */
+export async function retainLandingProgress(ctx: MutationCtx, state: HostedLandingState, replaced = false) {
+  const row = await landingAttemptRow(ctx, {
+    projectId: state.projectId as Id<'hostedProjects'>,
+    attemptId: state.attemptId,
+  });
+  invariant(row, 'SOURCE_UNAVAILABLE', 'The original attempt is unavailable.');
+  if (row.progress && hostedLandingProgressSchema.parse(JSON.parse(row.progress)).settled) return;
+  await ctx.db.patch(row._id, {
+    progress: canonicalPayload({
+      observation: replaced ? landingObservation('failed', 'CHANNEL_CHANGED') : state.observation,
+      phase: replaced ? 'terminal-failed' : state.phase,
+      error: replaced
+        ? {
+            code: 'CHANNEL_CHANGED',
+            message: 'Main changed; a named child recomposes the original selection.',
+          }
+        : state.error,
+      acceptance: state.acceptance ?? null,
+      settled: replaced || state.phase === 'landed' || state.phase === 'terminal-failed',
+      version: state.version,
+    }),
+  });
+}
+export function landingAttemptProgress(row: Doc<'projectHostedLandingAttempts'>, state: HostedLandingState) {
+  if (row.progress) return hostedLandingProgressSchema.parse(JSON.parse(row.progress));
+  // Old rows have no reconstructible evidence. Never borrow a newer attempt's result.
+  return row.attemptId === state.attemptId
+    ? {
+        observation: state.observation,
+        phase: state.phase,
+        error: state.error,
+        acceptance: state.acceptance ?? null,
+        settled: state.phase === 'landed' || state.phase === 'terminal-failed',
+        version: state.version,
+      }
+    : null;
+}
+/** One retained version per committed state; no observer drives or schedules work. */
+export async function recordLandingObservation(
+  ctx: MutationCtx,
+  state: HostedLandingState,
+  pendingAttempt?: unknown,
+) {
+  const finish =
+    pendingAttempt === undefined
+      ? await ctx.db
+          .query('projectHostedFinishes')
+          .withIndex('by_project_and_submission', q =>
+            q.eq('projectId', state.projectId as Id<'hostedProjects'>).eq('submissionId', state.id),
+          )
+          .unique()
+      : null;
+  await ctx.db.insert('projectHostedLandingObservations', {
+    projectId: state.projectId as Id<'hostedProjects'>,
+    submissionId: state.id,
+    version: state.version,
+    value: canonicalPayload({
+      submission: state,
+      pendingAttempt: pendingAttempt ?? (finish ? JSON.parse(finish.value).pending : null),
+    }),
+  });
 }

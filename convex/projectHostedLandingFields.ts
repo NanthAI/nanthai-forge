@@ -16,6 +16,12 @@ const lease = v.object({
   attemptId: v.string(),
 });
 export const hostedLandingTables = {
+  projectHostedLandingObservations: defineTable({
+    projectId: v.id('hostedProjects'),
+    submissionId: v.string(),
+    version: v.number(),
+    value: v.string(),
+  }).index('by_project_and_submission_and_version', ['projectId', 'submissionId', 'version']),
   projectHostedLandingCheckWakes: defineTable({
     projectId: v.id('hostedProjects'),
     runId: v.string(),
@@ -46,6 +52,7 @@ export const hostedLandingTables = {
     value: v.string(),
   })
     .index('by_project_and_submission', ['projectId', 'submissionId'])
+    .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
     .index('by_project_and_channel_and_runnable_and_sequence', [
       'projectId',
@@ -61,6 +68,7 @@ export const hostedLandingTables = {
     submissionId: v.string(),
     attemptId: v.string(),
     number: v.number(),
+    progress: v.optional(v.string()),
     value: v.string(),
   })
     .index('by_project_and_attempt', ['projectId', 'attemptId'])

@@ -5,6 +5,8 @@ import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { durableReplace } from './native-durability.js';
+import { observeHostedRun, hostedWaitSchema } from './hosted-agent-observe.js';
+import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
 import { invariant } from './errors.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 /** Address selection precedes construction of native WorkStore/owner services. */
@@ -44,6 +46,32 @@ export async function hostedAgentCli(
   const command = Object.fromEntries(
     Object.entries(selected).filter(([key]) => !['url', 'projectId', 'action'].includes(key)),
   );
+  if (action === 'wait') {
+    const selectedWait = hostedWaitSchema.parse(command);
+    invariant(
+      Boolean(selectedWait.runId) !== Boolean(selectedWait.operationIds?.length),
+      'BAD_ARGUMENT',
+      'Choose one run or hosted landing operationIds.',
+    );
+    const controller = new AbortController(),
+      stop = () => controller.abort();
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+    try {
+      const response = await (selectedWait.runId ? observeHostedRun : observeHostedSubmissions)(
+        transport,
+        command,
+        controller.signal,
+        event => process.stdout.write(`${JSON.stringify(event)}\n`),
+      );
+      process.exitCode =
+        response.result.status === 'timeout' ? 2 : response.result.status === 'cancelled' ? 130 : 0;
+      return response;
+    } finally {
+      process.removeListener('SIGINT', stop);
+      process.removeListener('SIGTERM', stop);
+    }
+  }
   const result = await transport.dispatch(action, command);
   // Retain only after an authorized successful response. An invalid/incomplete
   // address never silently turns into a local owner/listener dependency.

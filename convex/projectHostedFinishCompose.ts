@@ -10,6 +10,7 @@ import {
   loadLandingAttempt,
   insertLandingAttempt,
   writeLanding,
+  retainLandingProgress,
   type LandingIdentity,
 } from './projectHostedLandingStore';
 import { pinLandingAttempt } from './projectHostedLandingPins';
@@ -41,6 +42,7 @@ export async function reserveFinishRetry(
     main: { head: main.head, receiptId: main.receipt.id },
     operations: { compose: crypto.randomUUID(), check: crypto.randomUUID(), accept: crypto.randomUUID() },
   };
+  await retainLandingProgress(ctx, state, true);
   await writeFinish(ctx, row, { ...value, pending });
   await writeLanding(
     ctx,

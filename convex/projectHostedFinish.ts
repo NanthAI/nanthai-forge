@@ -5,7 +5,7 @@ import { acceptanceActor } from './projectAutonomy';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { loadFinish } from './projectHostedFinishStore';
 import { acceptancePage, acceptancePlan } from './projectHostedAcceptanceStore';
-import { loadLandingAttempt } from './projectHostedLandingStore';
+import { loadLandingAttempt, landingAttemptRow, landingAttemptProgress } from './projectHostedLandingStore';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { sourceSubmission } from '../src/landing-submission-state';
@@ -85,6 +85,8 @@ export const inputs = query({
       const identity = { projectId: input.projectId, receiptId: attempt.operations.accept };
       const plan = await acceptancePlan(ctx, identity);
       const page = await acceptancePage(ctx, { ...identity, kind: 'inputs', index: input.index });
+      const attemptRow = (await landingAttemptRow(ctx, input))!;
+      const progress = landingAttemptProgress(attemptRow, state);
       const entries = [];
       for (const item of page ? validateComposePage(JSON.parse(page.value)).entries : []) {
         const pin = composeLaneSchema.parse(item);
@@ -96,7 +98,8 @@ export const inputs = query({
         });
         invariant(row, 'SOURCE_UNAVAILABLE', 'Included Lane is unavailable.');
         const lane = hostedLaneSchema.parse(JSON.parse(row.value));
-        const observation = state.observation;
+        const observation = progress?.observation;
+        invariant(observation, 'SOURCE_UNAVAILABLE', 'Historical attempt evidence is unavailable.');
         invariant(
           observation.state !== 'superseded',
           'SOURCE_UNAVAILABLE',
@@ -110,6 +113,8 @@ export const inputs = query({
           head: pin.head,
           attemptHead: pin.head,
           attemptId: attempt.id,
+          error: progress?.error ?? null,
+          acceptance: progress?.acceptance ?? null,
           ...sourceSubmission({ ...observation, state: observation.state }, lane.head, pin.head),
         });
       }
