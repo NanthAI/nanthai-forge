@@ -9,19 +9,22 @@ import { fixture } from './landing-batch-fixture.mjs';
 import { gatedFixture } from './landing-worker-fixture.mjs';
 import { agentWait } from '../dist/agent-wait.js';
 import { watchLandingWorker } from '../dist/landing-worker.js';
+import { landingWorkerStates } from '../dist/landing-worker-status.js';
 import { FinishJournal } from '../dist/agent-finish-journal.js';
 import { checkEnvironment } from '../dist/check-environment.js';
 import { waitObservation } from '../dist/agent-wait-observation.js';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(read) {
+async function until(read, diagnostic = () => 'Expected synthetic worker progress') {
   const end = Date.now() + 15000;
-  while (Date.now() < end) {
+  for (;;) {
     const value = read();
     if (value) return value;
+    // A delayed timer can resume after both completion and the deadline. Read
+    // durable progress at that boundary before declaring the worker stalled.
+    if (Date.now() >= end) assert.fail(diagnostic());
     await delay(20);
   }
-  assert.fail('Expected synthetic worker progress');
 }
 function worker(f) {
   const controller = new AbortController();
@@ -158,29 +161,76 @@ test('one wait follows multiple operations across owner worker shutdown and rest
   const a = await f.candidate('restart-a.txt'),
     b = await f.candidate('restart-b.txt');
   const events = [];
-  const wait = agentWait(
-    f.store,
-    { operationIds: [a.command.operationId, b.command.operationId], timeoutSeconds: 15 },
-    e => events.push(e),
-  );
-  // Attach rejection handling immediately; cleanup must also settle this observer
-  // if worker startup or one of the restart assertions fails.
-  void wait.catch(() => {});
+  const controller = new AbortController();
   const stop = worker(f);
-  let restart;
+  let restart, wait, result, waitError;
+  const diagnostic = phase => () => {
+    const data = f.store.load();
+    return JSON.stringify({
+      phase,
+      summary: result,
+      workers: landingWorkerStates(f.store).map(({ id, status, code }) => ({ id, status, code })),
+      entries: data.landingEntries.map(({ id, status, batchId, runId }) => ({ id, status, batchId, runId })),
+      batches: data.landingBatches?.map(({ id, status, prefixes }) => ({ id, status, prefixes })),
+      runs: data.runs.map(({ id, status, cancellation }) => ({ id, status, cancellation })),
+      events: events.map(({ type, id, status, runId }) => ({ type, id, status, runId })),
+    });
+  };
   try {
-    await until(() => f.started);
+    await until(() => f.started, diagnostic('gated command started'));
     const run = f.store.load().runs.find(r => !r.mainCheck && r.status === 'running');
     assert.ok(run, 'the gated command is running before shutdown');
+    const originalWorker = landingWorkerStates(f.store).find(s => s.status !== 'stopped');
+    assert.ok(originalWorker);
+    // Observe the gated run before stopping its controller. Preparation and
+    // recovery have separate progress bounds, not one end-to-end API deadline.
+    // The single observer remains live through every phase; cleanup aborts it.
+    wait = agentWait(
+      f.store,
+      { operationIds: [a.command.operationId, b.command.operationId] },
+      e => events.push(e),
+      controller.signal,
+    ).then(
+      value => {
+        result = value;
+        return value;
+      },
+      error => {
+        waitError = error;
+      },
+    );
+    assert.ok(events.some(e => e.type === 'check' && e.id === run.id && e.status === 'running'));
+    for (const c of [a, b])
+      assert.ok(
+        events.some(e => e.type === 'operation' && e.id === c.command.operationId && e.status === 'checking'),
+      );
     await stop();
     assert.equal(f.store.select('runs', run.id).status, 'running');
     assert.equal(f.store.select('runs', run.id).cancellation, undefined);
+    assert.equal(result, undefined, 'the same observer is pending while the worker is stopped');
+    assert.equal(waitError, undefined);
     restart = worker(f);
+    await until(
+      () => landingWorkerStates(f.store).find(s => s.id !== originalWorker.id && s.status === 'idle'),
+      diagnostic('replacement worker reconciled'),
+    );
+    assert.equal(f.store.select('runs', run.id).status, 'running');
+    assert.equal(f.store.select('runs', run.id).cancellation, undefined);
+    assert.equal(f.store.load().runs.filter(r => !r.mainCheck).length, 1, 'restart adopts the original run');
+    assert.equal(result, undefined, 'recovery does not settle the still-gated check');
     f.release();
-    const result = await wait;
-    assert.equal(result.successful, true);
+    await until(() => {
+      if (waitError) throw waitError;
+      return result;
+    }, diagnostic('single observer settled after release'));
+    assert.equal(result.successful, true, JSON.stringify(result));
     assert.equal(result.targets.length, 2);
-    assert.ok(f.store.select('runs', run.id));
+    assert.equal(f.store.select('runs', run.id).status, 'passed');
+    for (const c of [a, b]) {
+      const entry = f.store.select('landingEntries', c.command.operationId);
+      assert.equal(entry.status, 'accepted');
+      assert.equal(entry.runId, run.id);
+    }
     assert.equal(
       new Set(events.filter(e => e.type === 'submission' && e.status === 'landed').map(e => e.id)).size,
       2,
@@ -191,9 +241,10 @@ test('one wait follows multiple operations across owner worker shutdown and rest
     assert.equal(new Set(keys).size, keys.length);
   } finally {
     f.release();
+    controller.abort();
     await stop();
     await restart?.();
-    await wait.catch(() => {});
+    await wait;
   }
 });
 

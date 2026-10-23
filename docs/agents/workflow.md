@@ -589,6 +589,10 @@ Submission events retain S01's `submissionId`, `attemptId`, immutable `head`,
 retain `conflict`, `check-failed`, `infra`, `stale-head` or `rejected`. Failed and
 interrupted runs include their original run and log pins, even before the driver
 publishes its final receipt. Multiple selected operations settle independently.
+While a batch is checking, wait follows its recorded cumulative and diagnostic
+prefix runs, including shared runs whose entries do not yet have settled run IDs.
+A failed combination emits its check outcome while its submissions remain pending
+until diagnosis and settlement determine which inputs land or fail.
 
 Every JSON event and summary includes an opaque `cursor`. Retain the last received
 cursor and pass it back as `cursor:"…"` with the same owner and target selection

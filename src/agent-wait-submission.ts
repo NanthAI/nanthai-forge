@@ -49,6 +49,21 @@ export function waitSubmissions(
   }
   return submissions.map(original => {
     const entry = store.select('landingEntries', original.entryOperationId);
+    const batch = entry?.batchId ? store.select('landingBatches', entry.batchId) : undefined;
+    // Entries receive their settled runId only after batch diagnosis. Follow
+    // the recorded probes in the meantime, including a shared cumulative run.
+    const probes =
+      entry?.status === 'checking' && batch?.status === 'checking'
+        ? (batch.diagnosis?.nodes ?? batch.prefixes)
+            .filter(prefix => prefix.entryIds.includes(entry.id))
+            .flatMap(prefix => {
+              const run = store.select('runs', prefix.runId);
+              return run && run.viewId === prefix.viewId && run.head === prefix.head ? [run] : [];
+            })
+        : [];
+    const observedProbes = probes.map(check);
+    const liveProbe =
+      probes.filter((_, index) => activeCheck(observedProbes[index]!.status)).at(-1) ?? probes.at(-1);
     const finish = waitJson(store, `agent-finish/${original.operationId}.json`) as Journal | undefined;
     const child = entries.find(e => e.command.operationId === original.entryOperationId);
     const matchingRun = [...runIds]
@@ -58,6 +73,7 @@ export function waitSubmissions(
       )
       .at(-1);
     const runId =
+      liveProbe?.id ??
       entry?.runId ??
       child?.result?.runId ??
       (child?.single
@@ -91,6 +107,9 @@ export function waitSubmissions(
     if (
       original.outcome === 'pending' &&
       original.pendingReason !== 'waiting-for-review' &&
+      // A failing combination can still yield a passing shorter prefix. Only
+      // the driver's settlement attributes that outcome to an individual entry.
+      !liveProbe &&
       observed?.terminal &&
       !observed.ok
     ) {
