@@ -1,3 +1,4 @@
+import { pendingActionsInfra } from './github-actions-infra.js';
 // SPDX-License-Identifier: Apache-2.0
 import { prepareOptimistic } from './optimistic-landing.js';
 import { batchEligible, enqueueLanding } from './landing-batch-store.js';
@@ -27,10 +28,19 @@ export async function finishQueuedBatch(work: WorkService, command: FinishAction
   if (entry.acceptanceId)
     attempt.acceptance = acceptanceReceipt(store.select('channelMoves', entry.acceptanceId)!);
   if (entry.conflictViewId) attempt.view = viewReceipt(store.select('views', entry.conflictViewId)!);
-  const pending = ['queued', 'checking', 'awaiting-review'].includes(entry.status);
+  const infraRun = entry.runId ? store.select('runs', entry.runId) : undefined;
+  const infra = infraRun && pendingActionsInfra(infraRun) && entry.status !== 'cancelled';
+  const pending = !!infra || ['queued', 'checking', 'awaiting-review'].includes(entry.status);
   return {
     phase: entry.status === 'conflict' ? 'compose' : entry.status === 'accepted' ? 'accept' : 'check',
-    status: entry.status === 'awaiting-review' ? entry.status : pending ? 'waiting to land' : entry.status,
+    status: infra
+      ? 'pending-infra'
+      : entry.status === 'awaiting-review'
+        ? entry.status
+        : pending
+          ? 'waiting to land'
+          : entry.status,
+    ...(infra ? { code: 'GITHUB_ACTIONS_PENDING_INFRA', message: attempt.run!.diagnostic } : {}),
     terminal: !pending,
     complete: entry.status === 'accepted',
     batchId: entry.batchId,

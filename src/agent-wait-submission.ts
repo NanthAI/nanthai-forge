@@ -68,6 +68,19 @@ export function waitSubmissions(
     const observed = run ? check(run) : undefined;
     let submission: Submission = original;
     if (
+      observed?.status === 'pending-infra' &&
+      (original.outcome === 'pending' || original.cause === 'infra')
+    )
+      submission = {
+        ...original,
+        state: original.state === 'superseded' ? 'superseded' : 'pending',
+        outcome: 'pending',
+        pendingReason: 'pending-infra',
+        cause: null,
+        terminal: original.state === 'superseded',
+        complete: false,
+      };
+    if (
       original.state === 'pending' &&
       original.pendingReason === 'queued' &&
       observed &&

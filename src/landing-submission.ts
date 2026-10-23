@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { pendingActionsInfra } from './github-actions-infra.js';
 import { allRecords } from './agent-lifecycle.js';
 import { finishChild } from './agent-finish-journal.js';
 import type { LandingEntry } from './landing-batch-types.js';
@@ -18,6 +19,9 @@ export function queuedOutcome(store: WorkStore, entry: LandingEntry) {
       status: entry.status,
       queueStatus: entry.status,
       checkStatus: run?.status,
+      ...(run && pendingActionsInfra(run) && entry.status !== 'cancelled'
+        ? { code: run.error!.code, message: run.error!.message }
+        : {}),
       ...(entry.reason ? { code: 'EVIDENCE_CHANGED', message: entry.reason } : {}),
     },
     run?.viewId ?? entry.viewId,

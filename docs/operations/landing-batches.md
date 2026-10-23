@@ -56,6 +56,29 @@ Candidates, runs and Channel receipts remain in Work. There is no new writer-upg
 requirement. The same finite drain is used by finish, `land-ready` and the managed
 owner worker below.
 
+## Overlap planning and observation
+
+The durable selector consumes the existing saved-region overlap plan, including its
+ready/smaller/earlier-start order and connected groups. Within that order, disjoint
+entries can share a compatible batch. A high-overlap successor waits for its
+submitted predecessor to settle, then composes on actual accepted main before
+checking; it is never speculatively checked across that overlap edge. Predictions
+and bilateral notices remain advisory and require no acknowledgement. Existing
+priority, submitter fairness, runner shapes, dependency and acceptance rules remain.
+
+`wait` emits `train` events for channels containing the selected Lanes' submissions.
+Each snapshot names the submitted entry order, exact input heads, overlap groups,
+coverage and predecessor entry IDs (`waits`). An empty queue reports `idle`. These
+are the same derived predictions used by selection, not a guarantee of a future
+batch or evidence of semantic compatibility. Incomplete analysis remains explicit.
+
+The stream also delivers the overlap slice's durable `notice` records to either
+participant, with original heads, paths and proposed order. A notice is marked
+`historical` when a participant has a different saved head. New saves are analysed
+for new submissions; an already queued request retains its original heads and
+predictions. Wait cursors deduplicate both notices and unchanged train snapshots.
+Observation starts no checks or driver and writes no Work or coordination records.
+
 ## Stacked Lanes
 
 After a stack parent lands, single and batch landing reapply the saved child's

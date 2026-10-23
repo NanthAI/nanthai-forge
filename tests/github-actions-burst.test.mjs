@@ -29,7 +29,7 @@ function fakeRemote({ limit = 2, flaky = true } = {}) {
     try {
       await new Promise(resolve => setTimeout(resolve, 5));
       if (active > limit || (flaky && pushes.get(ref) === 1 && Number.parseInt(commit[0], 16) % 2 === 0))
-        throw new GitSyncError('remote: cannot lock ref; Authorization: Bearer ghs_synthetic', true);
+        throw new GitSyncError('! [remote rejected] a -> forge-check/run (cannot lock ref)', true);
       refs.set(ref, commit);
       return '';
     } finally {
@@ -217,11 +217,12 @@ test('a transient lost push reply reconciles the exact commit without another pu
       if (args[0] === 'ls-remote') return remote;
       pushes++;
       remote = `${commit}\trefs/heads/forge-check/${plan.runId}`;
-      throw rejectedPush();
+      throw new GitSyncError('RPC failed; early EOF', true);
     },
     () => commit,
     async () => {},
   );
+  assert.equal(journal.pushOutcome, 'ambiguous');
   assert.equal(journal.pushed, true);
   assert.equal(pushes, 1);
 });

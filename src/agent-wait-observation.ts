@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { waitTrainEvents } from './agent-wait-train.js';
 import { waitSubmissions, submissionTarget } from './agent-wait-submission.js';
 import { invariant } from './errors.js';
 import { finishChild } from './agent-finish-journal.js';
@@ -237,6 +238,7 @@ export function waitObservation(store: WorkStore, kind: 'lane' | 'operation', id
           paths: notice.conflicts.map(c => c.path),
           proposedOrder: notice.proposedOrder,
         });
+    events.push(...waitTrainEvents(store, laneIds));
     return { target, events, runIds: [...runIds] };
   });
 }

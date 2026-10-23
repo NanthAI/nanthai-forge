@@ -1,3 +1,4 @@
+import { pendingActionsInfra } from './github-actions-infra.js';
 // SPDX-License-Identifier: Apache-2.0
 import { waitForAgentRun } from './agent-run-observer.js';
 import { retryWorkPhase } from './work-retry.js';
@@ -99,6 +100,24 @@ export async function evaluateBatch(
       return run.status;
     },
   );
+  const infraRun = batch.prefixes
+    .map(prefix => work.store.select('runs', prefix.runId))
+    .find(run => run && pendingActionsInfra(run));
+  if (outcome.stopped === 'interrupted' && infraRun) {
+    // Keep the batch resumable. An observation window ending is no evidence against source.
+    await batchEdit(
+      work,
+      batch.id,
+      data => {
+        for (const entry of data.landingEntries!.filter(
+          entry => entry.batchId === batch.id && entry.status === 'checking',
+        ))
+          entry.runId = infraRun.id;
+      },
+      driver.beforePublish,
+    );
+    return false;
+  }
   const stopped = outcome.stopped;
   if (stopped === 'queued' || stopped === 'preparing' || stopped === 'running') return false;
   await batchEdit(

@@ -71,7 +71,9 @@ export const hostedLandingAttemptSchema = z
 export const landingObservationSchema = z
   .object({
     state: z.enum(['pending', 'terminal-failed', 'landed', 'superseded']),
-    pendingReason: z.enum(['queued', 'checking', 'waiting-for-review', 'waiting-for-dependency']).nullable(),
+    pendingReason: z
+      .enum(['queued', 'checking', 'waiting-for-review', 'waiting-for-dependency', 'pending-infra'])
+      .nullable(),
     cause: z.enum(['conflict', 'check-failed', 'infra', 'stale-head', 'rejected']).nullable(),
   })
   .strict();

@@ -11,7 +11,7 @@ import { enqueueLanding } from '../dist/landing-batch-store.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { trustAgents } from './autonomy-fixture.mjs';
 
-export async function fixture(t, { remote = true, delay = 25 } = {}) {
+export async function fixture(t, { remote = true, delay = 25, files = { 'same.txt': 'original\n' } } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-batch-'));
   const credentialRoot = mkdtempSync(join(tmpdir(), 'forge-batch-credentials-'));
   const credentialsRef = { kind: 'file', path: join(credentialRoot, 'modal.json') };
@@ -20,7 +20,7 @@ export async function fixture(t, { remote = true, delay = 25 } = {}) {
     JSON.stringify({ tokenId: 'synthetic-project-id', tokenSecret: 'synthetic-project-secret' }),
     { mode: 0o600 },
   );
-  writeFileSync(join(root, 'same.txt'), 'original\n');
+  for (const [path, text] of Object.entries(files)) writeFileSync(join(root, path), text);
   initNative(root);
   trustAgents(root);
   const agent = new AgentWorkflow(root),

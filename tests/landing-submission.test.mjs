@@ -104,3 +104,29 @@ test('review settlement observes the submitted destination Channel', () => {
   data.channelMoves = [{ ...move, channel: 'other' }];
   assert.equal(pendingStatus(data).lanes[0].submission.pendingReason, 'waiting-for-review');
 });
+
+test('pending-infra preserves submission identity and never turns an empty discovery window into a terminal failure', () => {
+  const lane = { id: randomUUID(), intentId: randomUUID(), head },
+    operationId = randomUUID(),
+    attemptId = randomUUID();
+  const result = { status: 'interrupted', code: 'GITHUB_ACTIONS_PENDING_INFRA' };
+  assert.deepEqual(submissionOutcome(result), {
+    state: 'pending',
+    pendingReason: 'pending-infra',
+    cause: null,
+  });
+  assert.deepEqual(submissionOutcome({ status: 'pending-infra' }), submissionOutcome(result));
+  const submission = projectSubmission(operationId, { laneId: lane.id, head }, lane, result, attemptId);
+  assert.equal(submission.terminal, false);
+  assert.equal(submission.complete, false);
+  const landed = projectSubmission(
+    operationId,
+    { laneId: lane.id, head },
+    lane,
+    { status: 'accepted' },
+    attemptId,
+  );
+  assert.equal(landed.submissionId, submission.submissionId);
+  assert.equal(landed.attemptId, submission.attemptId);
+  assert.equal(submissionOutcome({ ...result, status: 'cancelled' }).state, 'terminal-failed');
+});

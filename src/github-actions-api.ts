@@ -59,6 +59,7 @@ export function actionsFailureText(failure?: ActionsFailure) {
 export class ActionsApiError extends ForgeError {
   readonly outcome: 'rejected' | 'ambiguous';
   readonly response: ActionsFailure;
+  readonly rejectionClass: 'not-found' | 'unprocessable' | 'rate-limited' | undefined;
   constructor(
     readonly httpStatus?: number,
     body?: unknown,
@@ -70,6 +71,13 @@ export class ActionsApiError extends ForgeError {
       rateLimited ? RATE_LIMITED : 'GITHUB_ACTIONS_API',
       `GitHub Actions request ${outcome}${httpStatus === undefined ? '' : ` (HTTP ${httpStatus})`}; retained operation requires reconciliation.${actionsFailureText(response)}`,
     );
+    this.rejectionClass = rateLimited
+      ? 'rate-limited'
+      : httpStatus === 404
+        ? 'not-found'
+        : httpStatus === 422
+          ? 'unprocessable'
+          : undefined;
     this.outcome = outcome;
     this.response = response;
   }

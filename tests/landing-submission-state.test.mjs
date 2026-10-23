@@ -6,17 +6,20 @@ import { submissionOutcome } from '../dist/landing-submission-state.js';
 import { submissionOutcome as nativeOutcome, projectSubmission } from '../dist/landing-submission.js';
 import { landingObservation } from '../dist/hosted-landing.js';
 
-test('native and hosted landing share the exact S01 observation function and vocabulary', () => {
+test('native and hosted landing share the exact S01 observation function and vocabulary', async () => {
   assert.equal(nativeOutcome, submissionOutcome);
   for (const [status, reason] of [
     ['queued', 'queued'],
     ['checking', 'checking'],
+    ['pending-infra', 'pending-infra'],
     ['review-needed', 'waiting-for-review'],
     ['waiting-for-dependency', 'waiting-for-dependency'],
   ]) {
     const observation = landingObservation(status);
     assert.deepEqual(observation, { state: 'pending', pendingReason: reason, cause: null });
     assert.deepEqual(observation, submissionOutcome({ status }));
+    const { landingObservationSchema } = await import('../dist/hosted-landing.js');
+    assert.deepEqual(landingObservationSchema.parse(observation), observation);
   }
   for (const [status, cause] of [
     ['conflict', 'conflict'],

@@ -1,3 +1,4 @@
+import { pendingActionsInfra } from './github-actions-infra.js';
 import { admitFinish } from './landing-admission.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -311,11 +312,12 @@ class FinishRunner {
     if (run.status !== 'passed' || !command.accept)
       return this.stop(attempt, {
         phase: 'check',
-        status: run.status,
+        status: pendingActionsInfra(run) ? 'pending-infra' : run.status,
+        ...(pendingActionsInfra(run) ? { code: run.error!.code, message: run.error!.message } : {}),
         ...(['runner-unavailable', 'runner-budget-exhausted'].includes(run.status)
           ? { retryable: true, message: run.details }
           : {}),
-        terminal: !['queued', 'preparing', 'running'].includes(run.status),
+        terminal: !pendingActionsInfra(run) && !['queued', 'preparing', 'running'].includes(run.status),
         complete: run.status === 'passed',
       });
     return undefined;

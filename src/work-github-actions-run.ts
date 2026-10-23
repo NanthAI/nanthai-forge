@@ -18,6 +18,7 @@ import { CheckQueue } from './check-queue.js';
 import { workProgress } from './work-progress.js';
 import { createRunReceipt } from './work-run-receipt.js';
 import { invariant } from './errors.js';
+import { ActionsPushUnknown, PENDING_ACTIONS_INFRA } from './github-actions-infra.js';
 import { GitSyncError } from './github-sync-git.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
@@ -87,6 +88,7 @@ export async function launchGithubActionsRun(
     }
     run.backend = { ...run.backend!, pin: plan.pin, lockfile: plan.lockfile, runtime: plan.runtime };
     run.status = 'running';
+    if (run.error?.code === PENDING_ACTIONS_INFRA) delete run.error;
     updateModalRun(store, run);
     const { journal, save } = actionsJournal(path, plan, repo, runsOn);
     api = recordActionsFailures(api, error => {
@@ -151,12 +153,19 @@ export async function launchGithubActionsRun(
     await cleanupActionsResult(plan, journal, save, api, progress, deleteRef);
     await sweepActionsRefs(store, repo, api, progress, deleteRef);
   } catch (error) {
+    let pendingInfra = error instanceof ActionsDispatchUnknown || error instanceof ActionsPushUnknown;
     try {
       const journalFile = join(path, 'github-actions.json');
       if (existsSync(journalFile)) {
         const journal = JSON.parse(
           readFileSync(journalFile, 'utf8'),
         ) as import('./github-actions-export.js').ActionsJournal;
+        if (
+          !journal.runId &&
+          (error as { code?: string })?.code !== 'EVIDENCE_CHANGED' &&
+          (journal.dispatching || journal.pushOutcome === 'ambiguous')
+        )
+          pendingInfra = true;
         run.backend!.cost = actionsCost(
           journal.runsOn,
           journal.rateUsdPerMinute === undefined ? actionsRate(journal.runsOn) : journal.rateUsdPerMinute,
@@ -172,16 +181,23 @@ export async function launchGithubActionsRun(
     }
     // Never serialize raw transport errors or stacks. Git's stderr is kept only after redaction.
     const dispatchRejected = error instanceof ActionsDispatchRejected;
+    const pendingMessage =
+      error instanceof ActionsDispatchUnknown || error instanceof ActionsPushUnknown
+        ? error.message
+        : `pending-infra: original provider operation requires discovery (${errorKind(error)}).`;
     const receipt = createRunReceipt({
       status: dispatchRejected ? 'failed' : 'interrupted',
+      ...(pendingInfra ? { error: { code: PENDING_ACTIONS_INFRA, message: pendingMessage } } : {}),
       cancellation: run.cancellation,
       backend: run.backend,
       endedAt: new Date().toISOString(),
       exitCode: dispatchRejected ? 1 : null,
       signal: null,
-      details: dispatchRejected
-        ? `${error.code}: ${error.message} Source export and dispatch rejections are retained.`
-        : `GitHub Actions controller interrupted (${errorKind(error)}${error instanceof GitSyncError && error.detail ? `: git said "${error.detail}"` : ''}); source export, dispatch intent and job identities are retained. Check gh access and workflow registration, then reconcile the retained run. Retained dispatch outcomes govern recovery; ambiguous reruns are never repeated.`,
+      details: pendingInfra
+        ? `${pendingMessage} Source export, attempt outcomes, rejection classes, branch visibility and discovery windows are retained in github-actions.json. Reconcile this same operation to adopt the original execution; no ambiguous push or dispatch is repeated. No source failure is established.`
+        : dispatchRejected
+          ? `${error.code}: ${error.message} Source export and dispatch rejections are retained.`
+          : `GitHub Actions controller interrupted (${errorKind(error)}${error instanceof GitSyncError && error.detail ? `: git said "${error.detail}"` : ''}); source export, dispatch intent and job identities are retained. Check gh access and workflow registration, then reconcile the retained run. Retained dispatch outcomes govern recovery; ambiguous reruns are never repeated.`,
     });
     progress(receipt.details);
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
@@ -194,7 +210,11 @@ export async function launchGithubActionsRun(
 
 // Only a stable code or error class: transport messages can contain credentials.
 function errorKind(error: unknown) {
-  if (error instanceof ActionsApiError || error instanceof ActionsDispatchUnknown)
+  if (
+    error instanceof ActionsApiError ||
+    error instanceof ActionsDispatchUnknown ||
+    error instanceof ActionsPushUnknown
+  )
     return `${error.code}: ${error.message}`;
   const code = (error as { code?: unknown })?.code;
   if (typeof code === 'string' && /^[A-Z_]{3,64}$/.test(code)) return code;

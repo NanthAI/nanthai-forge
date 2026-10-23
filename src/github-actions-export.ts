@@ -10,6 +10,8 @@ import { githubActionsRecipe, githubActionsWorkflow } from './github-actions-wor
 import type { JobUsage } from './check-cost.js';
 import type { ModalPlan } from './modal-plan.js';
 import type { ActionsFailure } from './github-actions-api.js';
+import { ensureActionsPush } from './github-actions-push.js';
+import type { ActionsAttempt, ActionsBranchEvidence, ActionsDiscovery } from './github-actions-infra.js';
 import type { ActionsJobLogEvidence } from './github-actions-job-evidence.js';
 
 export type ActionsJournal = {
@@ -20,6 +22,11 @@ export type ActionsJournal = {
   jobUsage?: JobUsage[];
   commit?: string;
   pushed?: boolean;
+  pushOutcome?: 'not-sent' | 'ambiguous' | 'accepted' | 'rejected';
+  pushAttempts?: ActionsAttempt[];
+  dispatchAttempts?: ActionsAttempt[];
+  branchEvidence?: ActionsBranchEvidence[];
+  discovery?: ActionsDiscovery[];
   dispatching?: boolean;
   dispatchOutcome?: 'accepted' | 'rejected' | 'ambiguous';
   dispatchStatus?: number;
@@ -46,25 +53,6 @@ export function actionsJournal(path: string, plan: ModalPlan, repo: string, runs
   invariant(journal.pin === plan.pin, 'EVIDENCE_CHANGED', 'Retained Actions plan changed.');
   return { journal, save: () => durableReplace(filename, JSON.stringify(journal)) };
 }
-// At most two pushes per check repo at once inside this process.
-const pushGates = new Map<string, Promise<void>[]>();
-async function gated<T>(repo: string, use: () => Promise<T>) {
-  const active = pushGates.get(repo) ?? [];
-  pushGates.set(repo, active);
-  while (active.length >= 2) await Promise.race(active);
-  const turn = use();
-  const slot = turn.then(
-    () => undefined,
-    () => undefined,
-  );
-  active.push(slot);
-  try {
-    return await turn;
-  } finally {
-    active.splice(active.indexOf(slot), 1);
-    if (!active.length) pushGates.delete(repo);
-  }
-}
 export async function exportActionsSnapshot(
   plan: ModalPlan,
   journal: ActionsJournal,
@@ -74,8 +62,7 @@ export async function exportActionsSnapshot(
   sleep = syncGitSleep,
   progress?: (message: string) => void,
 ) {
-  const root = plan.source,
-    ref = `refs/heads/forge-check/${plan.runId}`;
+  const root = plan.source;
   if (!journal.commit) {
     for (const directory of ['.github', '.github/workflows']) {
       const path = join(root, directory);
@@ -100,30 +87,10 @@ export async function exportActionsSnapshot(
       writeFileSync(path, text!, { mode: 0o600 });
     }
     journal.commit = commit(plan, generated);
+    journal.pushOutcome = 'not-sent';
     save();
   }
-  const remote = `https://github.com/${journal.repo}.git`;
-  // A lost push response is reconciled by observing this exact run-owned ref.
-  await retrySyncGit(
-    async () => {
-      const observed = (await git(root, ['ls-remote', '--refs', remote, ref])).trim();
-      if (observed) {
-        invariant(
-          observed === `${journal.commit}\t${ref}`,
-          'EVIDENCE_CHANGED',
-          'Actions run ref already names different source.',
-        );
-      } else {
-        await gated(journal.repo, () =>
-          git(root, ['push', `--force-with-lease=${ref}:`, remote, `${journal.commit}:${ref}`]),
-        );
-      }
-    },
-    sleep,
-    progress,
-  );
-  journal.pushed = true;
-  save();
+  await ensureActionsPush(plan, journal, save, git, sleep, progress);
 }
 export async function deleteActionsRef(
   plan: ModalPlan,

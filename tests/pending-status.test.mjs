@@ -359,3 +359,25 @@ test('journals newer than the pinned Work snapshot cannot introduce unavailable 
   assert.deepEqual(status.lanes, []);
   assert.deepEqual(readFileSync(join(store.directory, 'work.json')), before);
 });
+
+test('an unresolved provider outcome stays pending-infra in the local submission projection', () => {
+  const lane = { id: randomUUID(), intentId: randomUUID(), head, state: 'active', name: 'Synthetic' };
+  const view = { id: randomUUID(), inputs: [{ laneId: lane.id, head }] };
+  const run = {
+    id: randomUUID(),
+    viewId: view.id,
+    status: 'interrupted',
+    error: { code: 'GITHUB_ACTIONS_PENDING_INFRA' },
+  };
+  const observation = pendingStatus(
+    data({
+      lanes: [lane],
+      views: [view],
+      runs: [run],
+      channelMoves: [],
+      landingEntries: [{ id: randomUUID(), viewId: view.id, runId: run.id, status: 'checking' }],
+    }),
+  ).lanes[0].submission;
+  assert.equal(observation.pendingReason, 'pending-infra');
+  assert.equal(observation.terminal, false);
+});

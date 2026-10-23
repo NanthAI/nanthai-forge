@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 export type SubmissionState = 'pending' | 'terminal-failed' | 'landed' | 'superseded';
-export type PendingReason = 'queued' | 'checking' | 'waiting-for-review' | 'waiting-for-dependency';
+export type PendingReason =
+  'queued' | 'checking' | 'waiting-for-review' | 'waiting-for-dependency' | 'pending-infra';
 export type SubmissionCause = 'conflict' | 'check-failed' | 'infra' | 'stale-head' | 'rejected';
 export type Submission = {
   submissionId: string;
@@ -28,6 +29,11 @@ export function submissionOutcome(result: Record<string, unknown> = {}): {
   const status = String(result.status ?? 'queued');
   if (['accepted', 'already-accepted', 'landed'].includes(status))
     return { state: 'landed', pendingReason: null, cause: null };
+  if (
+    status === 'pending-infra' ||
+    (status !== 'cancelled' && result.code === 'GITHUB_ACTIONS_PENDING_INFRA')
+  )
+    return { state: 'pending', pendingReason: 'pending-infra', cause: null };
   if (['review-needed', 'awaiting-review', 'waiting-for-review'].includes(status))
     return { state: 'pending', pendingReason: 'waiting-for-review', cause: null };
   if (status === 'waiting-for-dependency' || result.dependencies)

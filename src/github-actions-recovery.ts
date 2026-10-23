@@ -8,21 +8,24 @@ import type { WorkRecordTransaction } from './work-record-transaction.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
-/** Only an interrupted, unresolved dispatch can reopen the original check operation. */
+/** Reopen only unresolved provider operations; recovery observes the original identity. */
 export function strandedActionsRun(store: WorkStore, run: CheckRun | undefined): boolean {
   if (run?.status !== 'interrupted' || run.backend?.actual !== 'github-actions' || run.cancelRequested)
     return false;
   try {
     const path = join(store.directory, `check-${run.id}`);
     const journal = JSON.parse(readFileSync(join(path, 'github-actions.json'), 'utf8')) as ActionsJournal;
+    const unresolvedPush = journal.pushOutcome === 'ambiguous' || journal.pushOutcome === 'accepted';
+    const unresolvedDispatch =
+      journal.pushed &&
+      journal.dispatching &&
+      (journal.dispatchOutcome === undefined || ['ambiguous', 'accepted'].includes(journal.dispatchOutcome));
     if (
       !run.backend.pin ||
       journal.pin !== run.backend.pin ||
-      !journal.pushed ||
       !journal.commit ||
-      !journal.dispatching ||
       journal.runId ||
-      (journal.dispatchOutcome !== undefined && journal.dispatchOutcome !== 'ambiguous')
+      (!unresolvedPush && !unresolvedDispatch)
     )
       return false;
     const result = join(path, 'result.json');

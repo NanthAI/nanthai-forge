@@ -1,3 +1,4 @@
+import { pendingActionsInfra } from './github-actions-infra.js';
 import type { LandingWorkerStatus } from './landing-worker-status.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landingAttemptId, projectSubmission, type Submission } from './landing-submission.js';
@@ -105,6 +106,7 @@ export function pendingStatus(
         const previous = [...submissions.values()].find(
           item => item.entryOperationId === queued.id && item.laneId === lane.id,
         );
+        const queuedRun = data.runs.find(run => run.id === queued.runId);
         const submission = projectSubmission(
           previous?.operationId ?? queued.id,
           previous ? { ...pin, head: previous.head } : pin,
@@ -120,7 +122,10 @@ export function pendingStatus(
               )
                 ? 'accepted'
                 : queued.status,
-            checkStatus: data.runs.find(run => run.id === queued.runId)?.status,
+            checkStatus: queuedRun?.status,
+            ...(queuedRun && pendingActionsInfra(queuedRun) && queued.status !== 'cancelled'
+              ? { code: queuedRun.error!.code }
+              : {}),
             ...(queued.reason ? { code: 'EVIDENCE_CHANGED' } : {}),
           },
           landingAttemptId(queued),

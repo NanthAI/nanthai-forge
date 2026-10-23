@@ -105,9 +105,17 @@ test('two definitive 422 dispatch rejections retry and adopt exactly one run', a
   assert.equal(f.journal.runId, 10);
   assert.equal(f.journal.dispatchOutcome, 'accepted');
   assert.equal(f.journal.dispatchRejections, 2);
+  assert.deepEqual(
+    f.journal.dispatchAttempts.map(attempt => attempt.rejectionClass),
+    ['unprocessable', 'unprocessable', undefined],
+  );
+  assert.deepEqual(
+    f.journal.dispatchAttempts.map(attempt => attempt.outcome),
+    ['rejected', 'rejected', 'accepted'],
+  );
   assert.deepEqual(f.waits, [5_000, 10_000]);
   const rejected = f.saves.filter(save => save.dispatchOutcome === 'rejected');
-  assert.equal(rejected.length, 2);
+  assert.equal(f.journal.dispatchAttempts.filter(attempt => attempt.outcome === 'rejected').length, 2);
   assert.ok(rejected.every(save => save.dispatching === false && save.dispatchStatus === 422));
 });
 
@@ -137,45 +145,28 @@ test('ambiguous timeout observes an eventually visible run without another dispa
 });
 
 for (const legacy of [false, true]) {
-  test(`zero runs permits one recovery dispatch only on a later retry (legacy=${legacy})`, async () => {
-    const f = fixture({ reject: [new ActionsApiError(503), new Error('timeout')], runs: () => [] });
+  test(`empty discovery windows never authorize another POST (legacy=${legacy})`, async () => {
+    const f = fixture({ reject: [new ActionsApiError(503)], runs: () => [] });
     if (legacy) f.journal.dispatching = true;
-    else {
-      await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
-      assert.equal(f.journal.dispatchOutcome, 'ambiguous');
+    for (let window = 0; window < 3; window++) {
+      await assert.rejects(
+        f.control(),
+        error => error.code === 'GITHUB_ACTIONS_UNKNOWN' && error.state === 'pending-infra',
+      );
       assert.equal(f.journal.dispatchLookupExhausted, true);
-      assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
+      assert.equal(f.journal.dispatchRecoveryUsed, undefined);
+      assert.equal(f.calls.filter(call => call.method === 'POST').length, legacy ? 0 : 1);
+      assert.equal(f.journal.discovery.length, window + 1);
       f.reload();
     }
-    const before = f.calls.length;
-    await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
-    assert.equal(f.journal.dispatchRecoveryUsed, true);
-    const newCalls = f.calls.slice(before);
-    const post = newCalls.findIndex(call => call.method === 'POST');
-    assert.equal(
-      newCalls.slice(0, post).filter(call => call.lookup).length,
-      13,
-      'window plus fresh empty lookup precede recovery',
-    );
-    const dispatches = f.calls.filter(call => call.method === 'POST').length;
-    f.reload();
-    await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
-    assert.equal(f.calls.filter(call => call.method === 'POST').length, dispatches);
   });
 }
 
-test('a stranded legacy operation recovers successfully with the same run identity', async () => {
-  const f = fixture();
+test('a stranded legacy operation adopts a run discovered beyond its first window', async () => {
+  const f = fixture({ runs: ({ lookups, run }) => (lookups >= 13 ? [run] : []) });
   f.journal.dispatching = true;
-  await f.control();
-  assert.equal(f.journal.runId, 10);
-  assert.equal(f.journal.dispatchRecoveryUsed, true);
-  assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
-});
-
-test('a run appearing at the fresh recovery lookup is adopted without dispatch', async () => {
-  const f = fixture({ runs: ({ lookups, run }) => (lookups === 13 ? [run] : []) });
-  f.journal.dispatching = true;
+  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
+  f.reload();
   await f.control();
   assert.equal(f.journal.runId, 10);
   assert.equal(f.journal.dispatchRecoveryUsed, undefined);
@@ -330,12 +321,23 @@ test('same-op recovery excludes completed outcomes, cancellation and changed dis
     { pushed: false },
     { dispatching: false },
     { runId: 10 },
-    { dispatchOutcome: 'accepted' },
     { dispatchOutcome: 'rejected' },
   ]) {
     set(changes);
     assert.equal(strandedActionsRun(store, run), false, JSON.stringify(changes));
   }
+  set({ dispatchOutcome: 'accepted' });
+  assert.equal(
+    strandedActionsRun(store, run),
+    true,
+    'acknowledged but undiscovered execution remains adoptable',
+  );
+  set({ pushed: false, dispatching: false, pushOutcome: 'ambiguous' });
+  assert.equal(
+    strandedActionsRun(store, run),
+    true,
+    'lost push replies reopen observation of the original ref',
+  );
   set({ dispatchRecoveryUsed: true });
   assert.equal(
     strandedActionsRun(store, run),
@@ -346,58 +348,35 @@ test('same-op recovery excludes completed outcomes, cancellation and changed dis
   assert.equal(strandedActionsRun(store, run), false, 'a newer passed receipt cannot be replaced');
 });
 
-for (const appear of ['after-recovery', 'during-window', 'fresh-lookup']) {
-  test(`HTTP 400 recovers in the same check, with one dispatch when a run appears ${appear}`, async () => {
+for (const status of [400, 503, undefined]) {
+  test(`ambiguous response ${status} adopts original success in a later discovery window`, async () => {
     const f = fixture({
-      reject: [
-        new ActionsApiError(400, {
-          message: 'Invalid request body',
-          documentation_url: 'https://docs.github.com/rest/actions/workflows',
-        }),
-      ],
-      runs: ({ lookups, dispatches, run }) =>
-        (appear === 'during-window' && lookups === 3) ||
-        (appear === 'fresh-lookup' && lookups === 14) ||
-        dispatches === 2
-          ? [run]
-          : [],
+      reject: [new ActionsApiError(status, { message: 'Synthetic ambiguous response' })],
+      runs: ({ lookups, run }) => (lookups >= 27 ? [run] : []),
     });
+    for (let window = 0; window < 2; window++) {
+      await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
+      f.reload();
+    }
     await f.control();
     assert.equal(f.journal.runId, 10);
-    assert.equal(f.calls.filter(call => call.method === 'POST').length, appear === 'after-recovery' ? 2 : 1);
-    assert.equal(
-      f.waits.reduce((sum, ms) => sum + ms, 0),
-      appear === 'during-window' ? 20_000 : 120_000,
-    );
-    assert.ok(f.saves.some(save => save.dispatchError?.message === 'Invalid request body'));
-    assert.match(f.progress.join('\n'), /Invalid request body.*https:\/\/docs.github.com/);
+    assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
+    assert.equal(f.journal.dispatchAttempts.length, 1);
+    assert.equal(f.journal.dispatchAttempts[0].outcome, 'ambiguous');
+    assert.equal(f.journal.dispatchRecoveryUsed, undefined);
+    assert.equal(f.journal.branchEvidence.at(-1).commit, f.journal.commit);
   });
 }
 
-test('HTTP 400 recovery is durable, one-shot, and still rejects multiple or unrelated runs', async () => {
-  for (const mode of ['empty', 'multiple', 'unrelated']) {
-    const f = fixture({
-      reject: [new ActionsApiError(400), new ActionsApiError(400)],
-      runs: ({ run, lookups }) =>
-        mode === 'multiple'
-          ? [run, { ...run, id: 11 }]
-          : mode === 'unrelated' && lookups === 14
-            ? [{ ...run, display_title: 'other' }]
-            : [],
-    });
-    await assert.rejects(
-      f.control(),
-      error => error.code === (mode === 'multiple' ? 'EVIDENCE_CHANGED' : 'GITHUB_ACTIONS_UNKNOWN'),
-    );
-    const posts = f.calls.filter(call => call.method === 'POST').length;
-    if (mode === 'empty') {
-      assert.equal(posts, 2);
-      assert.equal(f.journal.dispatchRecoveryUsed, true);
-      f.reload();
-      await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
-      assert.equal(f.calls.filter(call => call.method === 'POST').length, posts);
-    } else assert.equal(posts, 1);
+test('an HTTP 400 with persistently empty listings stays pending across restarts', async () => {
+  const f = fixture({ reject: [new ActionsApiError(400)], runs: () => [] });
+  for (let window = 0; window < 3; window++) {
+    await assert.rejects(f.control(), error => error.state === 'pending-infra');
+    f.reload();
   }
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
+  assert.equal(f.journal.dispatchRecoveryUsed, undefined);
+  assert.equal(f.journal.dispatchStatus, 400);
 });
 
 test('cancellation after the HTTP 400 lookup window prevents its recovery dispatch', async () => {
@@ -448,14 +427,18 @@ let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{
   );
 });
 
-test('a rejected HTTP 400 recovery never licenses a third dispatch', async () => {
-  const f = fixture({ reject: [new ActionsApiError(400), new ActionsApiError(422)], runs: () => [] });
-  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
-  assert.equal(f.journal.dispatchRecoveryUsed, true);
-  assert.equal(f.journal.dispatchOutcome, 'ambiguous');
+test('historical consumed recovery preserves the original ambiguity even with a rejection status', async () => {
+  const f = fixture({ runs: () => [] });
+  Object.assign(f.journal, {
+    dispatching: true,
+    dispatchOutcome: 'ambiguous',
+    dispatchRecoveryUsed: true,
+    dispatchStatus: 422,
+  });
+  await assert.rejects(f.control(), error => error.state === 'pending-infra');
   f.reload();
-  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
-  assert.equal(f.calls.filter(call => call.method === 'POST').length, 2);
+  await assert.rejects(f.control(), error => error.state === 'pending-infra');
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 0);
 });
 
 test('structured diagnostics redact account identifiers and keep documentation anchors', async () => {
@@ -473,4 +456,11 @@ test('structured diagnostics redact account identifiers and keep documentation a
   );
   assert.match(failure.documentation_url, /#create-a-workflow-dispatch-event$/);
   assert.doesNotMatch(JSON.stringify(failure), /12345|octo-private|person@example|ghp_synthetic/);
+});
+
+test('a rejection marker with an ambiguous HTTP class cannot authorize a dispatch', async () => {
+  const f = fixture({ runs: () => [] });
+  Object.assign(f.journal, { dispatchOutcome: 'rejected', dispatchStatus: 400 });
+  await assert.rejects(f.control(), error => error.state === 'pending-infra');
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 0);
 });

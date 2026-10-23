@@ -33,17 +33,20 @@ Actions-aware standard check script to use standard sharding.
 The owner exports the same immutable State used by Modal and adds a generated
 workflow and recipe to that export only. The exported commit is pushed only to
 `refs/heads/forge-check/<runId>`, using a compare-and-swap creation. A changed or
-colliding ref is never overwritten. Check-ref creation and cleanup retry recognized
-transient Git failures with at most five attempts, using exponential backoff and jitter
-(up to 45 seconds of total backoff). Each attempt observes the exact remote ref:
-an already-completed push succeeds without another push; different source is an
-error. Progress reports each retry. Transient failures include GitHub's remote
-`(failed)` or `(internal server error)` rejection, HTTP 5xx, RPC/EOF and connection
-failures, and rate limits. Authentication, permission, protected-ref, stale-lease,
-non-fast-forward and missing-repository failures stay immediate errors. Exhausted
-creation retries interrupt the retained run for reconciliation. The GitHub mirror
-uses the same retry helper while keeping its original exact lease and ancestry
-check. The source State, Candidate, definition, runtime,
+colliding ref is never overwritten. Before pushing, Forge saves an ambiguous intent;
+only a successful reply or observation of the exact commit establishes publication.
+A transport error (HTTP 5xx, RPC/EOF, timeout or lost reply) keeps that intent pending.
+Forge observes the same run-owned ref across later discovery windows and adopts it
+when visible. One empty listing, or even an exhausted window, never proves that
+the push did not execute and never authorizes another push.
+
+Explicit Git receive-pack rejections retain a `ref-rejected` class. Authentication,
+permission and missing-repository rejections retain `access-rejected`. Only a
+known-rejected transient check-ref creation uses the existing five-attempt retry
+adapter, with exponential backoff and jitter (up to 45 seconds of total backoff).
+Each retry checks the exact ref and keeps its create-only lease. Permanent failures
+remain immediate errors. Cleanup and the GitHub mirror retain their existing retry
+helper and exact lease/ancestry checks. The source State, Candidate, definition, runtime,
 selection and shard membership stay digest-bound. The journal also retains the
 target repository and runner label so policy changes cannot redirect adoption.
 Git-backed checks and declared environment/credential inputs keep existing local
@@ -62,26 +65,37 @@ and retries up to five attempts with seventy-five seconds of total backoff.
 Exhaustion records a failed check with `GITHUB_ACTIONS_DISPATCH_REJECTED` and its
 HTTP status, rather than an interrupted check.
 
-An ambiguous HTTP 400 dispatch gets a two-minute lookup window (thirteen reads,
-ten seconds apart). If it stays empty, the same check verifies branch visibility
-and makes one fresh complete branch query before reserving its single recovery
-dispatch. A run appearing at either lookup is adopted without another dispatch;
-any other run on the branch prevents recovery. The recovery allowance is saved
-before sending and survives process restarts. A rejected recovery does not settle
-the original ambiguous request and never authorizes another recovery.
+Ambiguous dispatch responses, including HTTP 400, transport failure, HTTP 5xx and
+unknown status, preserve the original POST outcome. HTTP 400 uses a two-minute
+lookup window (thirteen reads, ten seconds apart); other unknown or acknowledged
+responses use the longer existing window. Later reconciliation opens another
+discovery window for the same repository, branch, commit and run title. An exact
+matching execution is adopted; duplicate matches remain an evidence error. Empty
+listings never license a recovery dispatch. Historical journals, including those
+with a consumed recovery allowance, also only observe their unresolved original
+execution. An acknowledged but undiscovered execution remains adoptable.
 
-Other ambiguous dispatch responses (transport failure, HTTP 5xx or unknown status)
-keep the longer lookup window. If that window ends without a run,
-a later retry of the same operation may send one recovery dispatch, only after
-another lookup window and a fresh complete branch query confirm zero runs.
-Historical stranded dispatch journals use the same recovery. Retrying the original
-`run-check` or interrupted `finish` operation reopens only this unresolved-dispatch
-case, preserving its source, run ID and landing-batch pins. The previous interrupted
-receipt is retained beside `result.json` with an `interrupted-<id>` suffix.
-The journal records
-the recovery allowance before sending; further ambiguous retries only observe.
-An acknowledged dispatch is never sent again, and duplicate matching runs remain
-an evidence error. Unknown rerun outcomes are never repeated.
+This is an evidence policy, not an exactly-once provider guarantee: Forge cannot
+prove that an ambiguous POST or push did not execute. Only a retained definitive
+rejection permits another dispatch or push, under the existing retry settings.
+Dispatch attempts retain sanitized response fields and `not-found`/`unprocessable`
+rejection classes; branch evidence retains the observed commit or absence and
+whether it came from Git or REST. Push attempts retain their outcome and definitive
+rejection class without raw transport text. The journal retains discovery windows
+and original attempts after adoption; they are not rewritten as successful replies.
+
+When a discovery window ends, the legacy check-run status is `interrupted` with
+structured error code `GITHUB_ACTIONS_PENDING_INFRA`. Finish and submission receipts
+report `pending-infra`, `terminal:false`, `complete:false`, and retain the original
+source/attempt identity. This is incomplete infrastructure evidence, not a source
+failure. The landing batch stays resumable without splitting or blaming a Lane.
+The owner driver or a replay of the same operation continues discovery. Retrying
+the original `run-check` or interrupted `finish` reopens only unresolved provider
+operations, including lost push replies, preserving source, run ID and landing-batch
+pins. The previous interrupted receipt is retained beside `result.json` with an
+`interrupted-<id>` suffix. Explicit cancellation does not authorize a replacement.
+Unknown rerun outcomes are never repeated; shard replacement remains governed by
+the existing adapter.
 Read-only API calls back off up to sixty seconds between attempts; job polling
 uses ten seconds. A GitHub rate-limit rejection never interrupts a check: the
 controller waits until the reported `x-ratelimit-reset` (at least a minute, at most

@@ -624,3 +624,66 @@ for (const unifiedFirst of [false, true])
     await drainLandingBatches(f.work, 'main');
     assert.equal(f.store.load().schema, 20);
   });
+
+test('pending infra keeps the original batch and submission resumable without attributing source failure', async t => {
+  const f = await fixture(t);
+  const candidate = await f.candidate('pending.txt');
+  const batch = await batchEdit(f.work, 'select', data => selectBatch(f.work, data, 'main'));
+  await composeBatch(f.work, batch);
+  const saved = f.store.select('landingBatches', batch.id),
+    prefix = saved.prefixes.at(-1);
+  const view = f.store.select('views', prefix.viewId);
+  const run = {
+    id: prefix.runId,
+    viewId: view.id,
+    head: view.head,
+    base: view.base,
+    inputs: view.inputs,
+    dependencies: view.dependencies,
+    check: f.store.load().checks[0],
+    environment: checkEnvironment(),
+    status: 'interrupted',
+    startedAt: new Date().toISOString(),
+    runner: { pid: process.pid, host: 'synthetic' },
+    details: 'pending-infra: retained ambiguous dispatch',
+    error: { code: 'GITHUB_ACTIONS_PENDING_INFRA', message: 'retained original execution' },
+    backend: { requested: 'github-actions', actual: 'github-actions' },
+  };
+  f.store.locked(() => {
+    const tx = f.store.records();
+    tx.append('runs', run);
+    f.store.commitRecords(tx);
+  });
+  t.mock.method(f.work, 'dispatch', async command => {
+    assert.equal(command.action, 'run-check');
+    assert.equal(command.operationId, prefix.runId);
+    return { result: run };
+  });
+  const { evaluateBatch } = await import('../dist/landing-batch-check.js');
+  assert.equal(await evaluateBatch(f.work, saved, { beforePublish: () => {} }, 0), false);
+  const retained = f.store.select('landingBatches', batch.id);
+  assert.equal(retained.status, 'checking');
+  assert.equal(retained.settlement, undefined);
+  assert.deepEqual(retained.prefixes, saved.prefixes);
+  assert.equal(f.store.load().channelMoves.length, 0);
+  const { queuedOutcome, landingSubmission } = await import('../dist/landing-submission.js');
+  const entry = f.store.load().landingEntries[0];
+  assert.equal(entry.status, 'checking');
+  const submission = landingSubmission(
+    f.store,
+    entry.id,
+    view.inputs[0],
+    queuedOutcome(f.store, entry),
+    'same-attempt',
+  );
+  assert.equal(submission.pendingReason, 'pending-infra');
+  assert.equal(submission.terminal, false);
+  const { finishQueuedBatch } = await import('../dist/agent-finish-batch.js');
+  const attempt = { view: { viewId: candidate.view.id }, operations: {} };
+  const receipt = await finishQueuedBatch(f.work, candidate.command, attempt);
+  assert.equal(receipt.status, 'pending-infra');
+  assert.equal(receipt.terminal, false);
+  assert.equal(receipt.complete, false);
+  assert.equal(receipt.code, 'GITHUB_ACTIONS_PENDING_INFRA');
+  assert.equal(attempt.run.runId, prefix.runId);
+});

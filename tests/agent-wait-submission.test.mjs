@@ -343,3 +343,62 @@ test('selected finish review receipt follows later human acceptance without repl
   assert.equal(result.targets[0].submissions[0].attemptId, journal.state.attempts[0].operationId);
   assert.equal(f.store.load().runs.length, 0);
 });
+
+test('an ambiguous dispatch receipt stays pending-infra before and after Work publication without recovery writes', async t => {
+  const f = await fixture(t, { remote: false });
+  const c = await f.candidate('pending-infra.txt');
+  const runId = randomUUID();
+  const backend = { requested: 'github-actions', actual: 'github-actions', pin: 'a'.repeat(64) };
+  const error = { code: 'GITHUB_ACTIONS_PENDING_INFRA', message: 'original dispatch still undiscovered' };
+  update(f, data => {
+    data.runs.push({
+      id: runId,
+      viewId: c.view.id,
+      head: c.view.head,
+      base: c.view.base,
+      inputs: c.view.inputs,
+      dependencies: [],
+      check: data.checks[0],
+      environment: checkEnvironment(),
+      status: 'running',
+      startedAt: new Date().toISOString(),
+      runner: { pid: process.pid, host: hostname() },
+      backend,
+      details: 'Synthetic Actions run',
+    });
+    data.landingEntries[0].runId = runId;
+    data.landingEntries[0].status = 'checking';
+  });
+  const path = join(f.store.directory, `check-${runId}`);
+  mkdirSync(path);
+  writeFileSync(
+    join(path, 'result.json'),
+    JSON.stringify({
+      status: 'interrupted',
+      backend,
+      error,
+      endedAt: new Date().toISOString(),
+      details: error.message,
+    }),
+  );
+  for (const published of [false, true]) {
+    if (published)
+      update(f, data => {
+        Object.assign(data.runs[0], { status: 'interrupted', error });
+      });
+    const before = f.store.pointer();
+    const result = await agentWait(f.store, {
+      operationIds: [c.command.operationId, runId],
+      timeoutSeconds: 0,
+    });
+    assert.equal(result.status, 'timeout');
+    assert.ok(result.targets.every(target => !target.terminal));
+    assert.ok(result.targets.every(target => target.status === 'pending-infra'));
+    const submission = result.targets[0].submissions[0];
+    assert.equal(submission.pendingReason, 'pending-infra');
+    assert.equal(submission.cause, null);
+    assert.equal(submission.runId, runId);
+    assert.equal(submission.logPath, join(path, 'stdout.log'));
+    assert.deepEqual(f.store.pointer(), before);
+  }
+});

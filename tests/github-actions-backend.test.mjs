@@ -1353,6 +1353,8 @@ for (const via of ['run-check', 'finish', 'observation']) {
     );
     assert.equal(recoverRuns(work.store, { runs: [run] }), true);
     assert.equal(run.status, 'interrupted');
+    assert.equal(run.error.code, 'GITHUB_ACTIONS_PENDING_INFRA');
+    assert.match(run.error.message, /pending-infra/);
     // Model an old stranded journal as well as the new ambiguous journal.
     const retained = read(join(path, 'github-actions.json'));
     if (via === 'observation') {
@@ -1388,8 +1390,9 @@ for (const via of ['run-check', 'finish', 'observation']) {
       if (args[0].endsWith('/dispatches')) dispatches++;
       return fake.api.request(...args);
     });
+    let discoveryReads = 0;
     t.mock.method(actionsApi, 'pages', async (...args) => {
-      if (args[0].includes('/runs?') && !dispatches && via !== 'observation') return [];
+      if (args[0].includes('/runs?') && ++discoveryReads <= 2 && via !== 'observation') return [];
       return fake.api.pages(...args);
     });
     t.mock.method(actionsApi, 'log', (...args) => fake.api.log(...args));
@@ -1449,10 +1452,13 @@ for (const via of ['run-check', 'finish', 'observation']) {
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     await new Promise(resolve => setImmediate(resolve));
-    assert.equal(dispatches, via === 'observation' ? 0 : 1);
+    assert.equal(dispatches, 0);
     assert.equal(work.store.select('runs', run.id).status, 'passed');
     assert.equal(work.store.load().runs.length, 1);
-    assert.equal(read(join(path, 'github-actions.json')).dispatchRecoveryUsed, true);
+    assert.equal(
+      read(join(path, 'github-actions.json')).dispatchRecoveryUsed,
+      via === 'observation' ? true : undefined,
+    );
     const { readdirSync } = await import('node:fs');
     const previous = readdirSync(path).find(file => file.startsWith('result.json.interrupted-'));
     assert.ok(previous, 'old interrupted receipt remains available');
@@ -1495,10 +1501,11 @@ for (const conclusion of ['success', 'failure', 'cancelled']) {
   });
 }
 
-test('HTTP 400 recovers within the same controller and retains response diagnostics', async t => {
+test('HTTP 400 stays pending, then adopts the original execution and retains diagnostics', async t => {
   const { work, run, path } = fixture(t);
   let api,
-    dispatches = 0;
+    dispatches = 0,
+    reads = 0;
   const proxy = {
     request: (...args) => api.request(...args),
     pages: (...args) => api.pages(...args),
@@ -1517,22 +1524,40 @@ test('HTTP 400 recovers within the same controller and retains response diagnost
       const request = api.request,
         pages = api.pages;
       api.request = async (...args) => {
-        if (args[0].endsWith('/dispatches') && ++dispatches === 1)
+        if (args[0].endsWith('/dispatches')) {
+          dispatches++;
           throw new ActionsApiError(400, {
             message: 'Invalid request body',
             documentation_url: 'https://docs.github.com/rest/actions/workflows',
           });
+        }
         return request(...args);
       };
-      api.pages = (...args) => (args[0].includes('/runs?') && dispatches < 2 ? [] : pages(...args));
+      api.pages = (...args) => (args[0].includes('/runs?') && ++reads < 16 ? [] : pages(...args));
     },
+    async () => assert.fail('unresolved execution must keep its ref'),
+  );
+  const pending = read(join(path, 'result.json'));
+  assert.equal(pending.status, 'interrupted');
+  assert.equal(pending.error.code, 'GITHUB_ACTIONS_PENDING_INFRA');
+  assert.match(pending.details, /pending-infra.*HTTP 400/);
+  recoverRuns(work.store, { runs: [run] });
+  assert.equal(run.error.code, 'GITHUB_ACTIONS_PENDING_INFRA');
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    proxy,
+    async () => {},
     async () => {},
   );
-  assert.equal(read(join(path, 'result.json')).status, 'passed');
+  const result = read(join(path, 'result.json'));
+  assert.equal(result.status, 'passed');
+  assert.equal(result.error, undefined);
   const journal = read(join(path, 'github-actions.json'));
-  assert.equal(journal.dispatchRecoveryUsed, true);
-  assert.equal(dispatches, 2);
+  assert.equal(journal.dispatchRecoveryUsed, undefined);
+  assert.equal(dispatches, 1);
   assert.equal(journal.apiFailures[0].message, 'Invalid request body');
+  assert.equal(journal.dispatchAttempts[0].outcome, 'ambiguous');
   assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /Invalid request body/);
 });
 

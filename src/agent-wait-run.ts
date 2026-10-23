@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { pendingActionsInfra } from './github-actions-infra.js';
 import { runWork } from './work-run.js';
 import { ForgeError } from './errors.js';
 import { hostname } from 'node:os';
@@ -12,7 +13,7 @@ import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
 export type WaitEvent = {
-  type: 'lane' | 'operation' | 'check' | 'shard' | 'notice' | 'progress' | 'submission';
+  type: 'lane' | 'operation' | 'check' | 'shard' | 'notice' | 'progress' | 'submission' | 'train';
   id: string;
   status: string;
   terminal: boolean;
@@ -122,17 +123,20 @@ export function waitRun(store: WorkStore, original: CheckRun): { event: WaitEven
   } catch (error) {
     if (!(error instanceof ForgeError && error.code === 'NOT_FOUND')) throw error;
   }
-  const failureClass = infrastructure(run.status)
-    ? 'infrastructure'
-    : run.status === 'failed'
-      ? 'check'
-      : null;
+  const pendingInfra = pendingActionsInfra(run);
+  const failureClass = pendingInfra
+    ? null
+    : infrastructure(run.status)
+      ? 'infrastructure'
+      : run.status === 'failed'
+        ? 'check'
+        : null;
   return {
     event: {
       type: 'check',
       id: run.id,
-      status: run.status,
-      terminal: !activeCheck(run.status),
+      status: pendingInfra ? 'pending-infra' : run.status,
+      terminal: !pendingInfra && !activeCheck(run.status),
       ok: run.status === 'passed',
       failureClass,
       reason: run.error?.message ?? run.details,

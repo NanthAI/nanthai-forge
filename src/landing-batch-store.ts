@@ -2,9 +2,8 @@ import { previewLanding, previewExclusionMessage } from './integration-preview-l
 import { assertLandingWorkerActive } from './landing-worker-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landingConflictPeers } from './landing-conflict-peers.js';
-import { landingOverlap } from './landing-overlap.js';
+import { planLandingTrain } from './landing-train-plan.js';
 import { composeLandingSource } from './landing-compose-source.js';
-import { orderLandingEntries } from './landing-batch-order.js';
 import { join } from 'node:path';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
@@ -157,14 +156,8 @@ export function selectBatch(
       entry.reason = `Queued landing pins changed: ${fields.join(', ')}. Submit finish again from the intended runtime.`;
     }
   }
-  const queued = orderLandingEntries(
-    (data.landingEntries ?? []).filter(entry => entry.channel === channel && entry.status === 'queued'),
-  );
-  const activeEntries = (data.landingEntries ?? []).filter(
-    entry => entry.channel === channel && entry.status === 'checking',
-  );
-  const overlap = landingOverlap(work.store, data, [...queued, ...activeEntries]);
-  const pending = overlap.ordered.filter(entry => queued.includes(entry));
+  const train = planLandingTrain(work.store, data, channel);
+  const pending = train.pending;
   // Original insertion order breaks equal timestamp ties and survives requeue/restart.
   const first = pending[0];
   if (!first) return;
@@ -189,7 +182,7 @@ export function selectBatch(
       return;
   }
   const selected: LandingEntry[] = [];
-  for (const [index, entry] of pending.entries()) {
+  for (const entry of pending) {
     if (
       selected.length === shape.maxBatch ||
       entry.checkId !== first.checkId ||
@@ -198,12 +191,7 @@ export function selectBatch(
       entry.keepOpen !== first.keepOpen
     )
       break;
-    if (
-      pending.slice(0, index).some(earlier => overlap.overlaps(earlier, entry)) ||
-      activeEntries.some(active => overlap.overlaps(active, entry)) ||
-      selected.some(other => overlap.overlaps(other, entry))
-    )
-      continue;
+    if (train.waits.some(wait => wait.entryId === entry.id)) continue;
     selected.push(entry);
   }
   if (!selected.length) return;
