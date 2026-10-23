@@ -59,13 +59,17 @@ export function agentUndoSync(store: WorkStore, command: UndoSync) {
               'Retry the pending undo-sync with its original values.',
             );
           else {
-            const sync = tx.fieldFind(
+            const recordedSync = tx.fieldFind(
               'lanes',
               lane.id,
               'checkpoints',
               command.syncOperationId,
               'operation',
             ) as Lane['checkpoints'][number] | undefined;
+            const sync =
+              recordedSync ??
+              (tx.fieldFind('lanes', lane.id, 'checkpoints', command.syncOperationId, 'syncOperation') as
+                Lane['checkpoints'][number] | undefined);
             const conflict =
               lane.pendingMerge?.operation.id === command.syncOperationId ? lane.pendingMerge : undefined;
             invariant(sync?.sync || conflict, 'NOT_FOUND', 'Select a retained sync operation.');
@@ -117,6 +121,14 @@ export function agentUndoSync(store: WorkStore, command: UndoSync) {
               target,
               syncOperationId: command.syncOperationId,
               forced: command.force,
+              syncDetails: conflict
+                ? { parent: lane.head, head: lane.head, target: conflict.parent, status: 'conflict' as const }
+                : {
+                    parent: sync!.parent,
+                    head: sync!.head,
+                    target: sync!.sync!.target,
+                    status: sync!.sync!.status ?? ('merged' as const),
+                  },
             };
             tx.setSchema(11);
             tx.patchFields('lanes', lane.id, { head: from, pendingUndo: pending, pendingMerge: undefined });
@@ -140,14 +152,19 @@ export function agentUndoSync(store: WorkStore, command: UndoSync) {
             at: new Date().toISOString(),
             operation: pending.operation,
             undoSync: pending.syncOperationId,
+            ...(pending.syncDetails ? { undoSyncDetails: pending.syncDetails } : {}),
           });
-          const originalSync = tx.fieldFind(
+          const savedSync = tx.fieldFind(
             'lanes',
             lane.id,
             'checkpoints',
             command.syncOperationId,
             'operation',
           ) as Lane['checkpoints'][number] | undefined;
+          const originalSync =
+            savedSync ??
+            (tx.fieldFind('lanes', lane.id, 'checkpoints', command.syncOperationId, 'syncOperation') as
+              Lane['checkpoints'][number] | undefined);
           const stack = originalSync?.sync?.stack;
           tx.patchFields('lanes', lane.id, {
             head: pending.target,

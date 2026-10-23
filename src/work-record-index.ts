@@ -146,13 +146,18 @@ export function recordKeys(value: unknown): string[] {
   if (typeof row.parent === 'string' && typeof row.head === 'string') keys.push(lookupKey('head', row.head));
   const operation = row.operation as { id?: string } | undefined;
   if (operation?.id) keys.push(lookupKey('operation', operation.id));
+  const sync = row.sync as { operation?: { id?: string } } | undefined;
+  if (sync?.operation?.id) keys.push(lookupKey('syncOperation', sync.operation.id));
   const start = row.agentStart as { id?: string } | undefined,
     pending = row.pending as { operation?: { id?: string } } | undefined;
   if (start?.id) keys.push(lookupKey('agentOperation', start.id));
   if (pending) keys.push(lookupKey('pending', 'yes'));
   if (pending?.operation?.id) keys.push(lookupKey('agentOperation', pending.operation.id));
   if (Array.isArray(row.checkpoints))
-    for (const checkpoint of row.checkpoints)
+    for (const checkpoint of row.checkpoints) {
       if (checkpoint?.operation?.id) keys.push(lookupKey('agentOperation', checkpoint.operation.id));
+      if (checkpoint?.sync?.operation?.id)
+        keys.push(lookupKey('agentOperation', checkpoint.sync.operation.id));
+    }
   return [...new Set(keys)];
 }

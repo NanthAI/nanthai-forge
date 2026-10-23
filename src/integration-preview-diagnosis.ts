@@ -42,6 +42,30 @@ export function diagnosePreview(
     result.notices.push({
       noticeId,
       kind: 'conflict-notice',
+      evidence: [
+        {
+          kind: 'combined-static',
+          source: 'integration-preview',
+          main: result.main,
+          inputs: group.map(lane => ({ laneId: lane.id, head: lane.head })),
+          head: observed.head,
+          configuration: result.configuration,
+          environment: result.environment,
+          checks: result.checks.map(check => ({
+            name: check.name,
+            executable: check.executable,
+            args: check.args,
+            id: check.id,
+            definition: check.definition,
+          })),
+          errors: observed.errors,
+          minimization: 'incomplete',
+          controls: [
+            { inputs: [], ...result.baseline! },
+            ...group.map(lane => ({ inputs: [{ laneId: lane.id, head: lane.head }], ...evaluate([lane]) })),
+          ],
+        },
+      ],
       granularity: 'symbol',
       participants: group.map(lane => noticeParticipant(store, source, lane)),
       proposedOrder: [],

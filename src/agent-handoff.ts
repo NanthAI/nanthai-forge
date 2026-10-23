@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { CoordinationJournal } from './agent-coordination-journal.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { localActor } from './work-actor.js';
@@ -22,6 +23,14 @@ export function recordHandoff(store: WorkStore, command: Command) {
       if (prior) {
         invariant(prior.request === request, 'WORK_OPERATION_CHANGED', 'Replay the original handoff inputs.');
         return { revision: tx.revision, result: { status: 'recorded', handoff: prior } };
+      }
+      if (command.repairs?.length) {
+        const notices = new CoordinationJournal(store).context().notices;
+        invariant(
+          command.repairs.every(id => notices.some(notice => notice.noticeId === id)),
+          'NOT_FOUND',
+          'Select retained conflict notice IDs from the ownership/brief context.',
+        );
       }
       const views = tx
         .all('views', lane.intentId, 'intentId')

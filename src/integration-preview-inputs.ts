@@ -107,7 +107,7 @@ export function previewTuple(store: WorkStore, data: WorkData, lanes: Lane[], ma
     .map(lane => lane.id)
     .sort();
   const key = digest(
-    JSON.stringify(['integration-v3', main, inputs, dependencies, configuration, availableLaneIds]),
+    JSON.stringify(['integration-v4', main, inputs, dependencies, configuration, availableLaneIds]),
   );
   return { key, main, inputs, dependencies, configuration, source, checks, environment };
 }

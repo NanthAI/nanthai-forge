@@ -241,6 +241,11 @@ export function waitObservation(store: WorkStore, kind: 'lane' | 'operation', id
               }
             : {}),
           reason: notice.reason,
+          historical: notice.applicability === 'historical',
+          ...(notice.evidence ? { evidence: notice.evidence } : {}),
+          ...(notice.resolutions ? { resolutions: notice.resolutions } : {}),
+          ...(notice.syncs ? { syncs: notice.syncs } : {}),
+          ...(notice.repairIntentId ? { repairIntentId: notice.repairIntentId } : {}),
           participants: notice.participants.map(p => p.lane),
           paths: notice.conflicts.map(c => c.path),
           proposedOrder: notice.proposedOrder,

@@ -4,6 +4,7 @@ const id = z.string().uuid();
 const head = z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/);
 const count = z.number().int().nonnegative().safe();
 export const handoffFields = {
+  repairs: z.array(z.string().regex(/^[a-f0-9]{64}$/)).optional(),
   summary: z.string().trim().min(1).max(4000),
   changes: z.array(z.string()).optional(),
   tests: z.array(z.object({ command: z.string(), passed: count, failed: count, skipped: count })).optional(),

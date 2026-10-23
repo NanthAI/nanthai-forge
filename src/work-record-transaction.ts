@@ -331,9 +331,10 @@ export class WorkRecordTransaction {
       this.setHash(conversation, conversation.count, putRecord(this.io, entry));
     }
     if (field === 'checkpoints') {
-      const operation = (entry as { operation?: { id: string } })?.operation;
-      if (operation)
-        this.keys(this.index(collection), position, [], [lookupKey('agentOperation', operation.id)]);
+      const checkpoint = entry as { operation?: { id: string }; sync?: { operation?: { id: string } } };
+      for (const operation of [checkpoint.operation, checkpoint.sync?.operation])
+        if (operation)
+          this.keys(this.index(collection), position, [], [lookupKey('agentOperation', operation.id)]);
     }
     this.setHash(this.index(collection), position, this.io.put(header));
     return position;
@@ -365,7 +366,7 @@ export class WorkRecordTransaction {
       'Lane source changed; original source remains available.',
     );
     const operations = [
-      ...lane.checkpoints.map(item => item.operation?.id),
+      ...lane.checkpoints.flatMap(item => [item.operation?.id, item.sync?.operation?.id]),
       lane.pending?.operation?.id,
       lane.pendingSync?.operation?.id,
       lane.pendingMerge?.operation.id,

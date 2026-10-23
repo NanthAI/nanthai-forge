@@ -12,7 +12,7 @@ import type { WorkStore } from './work-store.js';
 import type { Check, CheckEnvironment, Lane } from './work-types.js';
 
 export type PreviewCheck = Pick<Check, 'name' | 'executable' | 'args'> &
-  Partial<Pick<Check, 'env' | 'credentials'>>;
+  Partial<Pick<Check, 'id' | 'definition' | 'env' | 'credentials'>>;
 export type PreviewObservation = {
   status: 'passed' | 'failed' | 'text-conflict' | 'inconclusive';
   errors: string[];

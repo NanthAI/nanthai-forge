@@ -132,6 +132,23 @@ export function conflictPlan(
     conflicts: conflicts.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
   };
 }
+/** Preserve the original conflict operation when its resolution is saved. */
+export function resolvedSyncCheckpoint(source: NativeSource, lane: Lane, files: NativeFile[]) {
+  const pending = lane.pendingMerge;
+  if (!pending) return {};
+  return {
+    sync: {
+      operation: pending.operation,
+      channel: pending.channel,
+      target: pending.parent,
+      changedPaths: changedPaths(source.state(lane.head).files, files),
+      status: 'conflict' as const,
+      conflicts: pending.conflicts,
+      ...(pending.stack ? { stack: pending.stack } : {}),
+    },
+  };
+}
+
 /** Bring a Channel head into a native Lane, like `git pull`. Clean merges become a
  * two-parent Lane checkpoint; conflicts leave markers and a pending merge parent. */
 export function agentSync(
@@ -188,6 +205,25 @@ export function agentSync(
       const changed = (message: string) => invariant(false, 'WORK_OPERATION_CHANGED', message) as never;
       const original = tx.fieldFind('lanes', lane.id, 'checkpoints', command.operationId, 'operation') as
         Lane['checkpoints'][number] | undefined;
+      const resolved =
+        original ??
+        (tx.fieldFind('lanes', lane.id, 'checkpoints', command.operationId, 'syncOperation') as
+          Lane['checkpoints'][number] | undefined);
+      if (resolved?.sync?.operation?.id === command.operationId) {
+        if (resolved.sync.operation.request !== hash)
+          changed('Sync operation inputs changed. Original source remains.');
+        return {
+          revision: tx.revision,
+          result: receipt({
+            status: 'conflict',
+            head: resolved.parent,
+            target: resolved.sync.target,
+            conflicts: resolved.sync.conflicts ?? [],
+            resolvedHead: resolved.head,
+            undo: `Run undo-sync with laneId ${lane.id} and syncOperationId ${command.operationId}.`,
+          }),
+        };
+      }
       if (original) {
         if (original.operation?.request !== hash)
           changed('Sync operation inputs changed. Original source remains.');

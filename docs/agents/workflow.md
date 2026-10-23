@@ -120,6 +120,34 @@ Autonomy still applies on every attempt. `laneUpdates:"ask"` stops at `sync-requ
 
 ### Local peers and conflict notices
 
+Conflict notices carry optional typed `evidence`: native `text` source conflicts,
+`contract` diagnostics, `combined-static` preview failures with their observed
+passing controls, and recorded `check` failures. Static/semantic failures have no
+text markers. Check evidence links the exact Candidate, run, definition, runtime,
+selection and stdout/stderr log operation; a prefix failure does not establish
+standalone or minimal blame. Retained landing diagnosis and existing Fix-main
+Intents appear in Lane ownership/brief context even after a lost notification.
+
+An optional `repairs:["NOTICE_ID"]` on the existing `handoff` command declares
+which retained notices the saved repair addresses. This retains the repair
+Lane/head and handoff identity in the Intent note; it starts no resolver or check.
+Notice `resolutions` link subsequent exact-input Candidates, their recorded runs
+and actual acceptance receipts with compensation guidance. A declaration is not
+proof of a successful repair. Later saves make the old repair head historical;
+a changed Candidate must obtain its own check evidence. Existing Fix-main Intents
+link their repair Lanes through the same context without creating another task.
+
+Notice `syncs` link guarded sync results, original/target heads, structured
+`undo-sync` commands and completed undo operations, including the checkpoint that
+preserves edits before a forced undo. Saving a conflict resolution retains the
+original sync operation identity for replay and undo, separately from the new
+checkpoint operation. Reading context changes no source. Automatic
+updates still obey `laneUpdates`, saved-head and dirty-work guards; `ask` remains
+an explicit sync decision. Ordinary undo refuses newer dirty work. An explicitly
+forced undo retains those bytes before restoring the working copy. Original
+base/left/right objects and old check evidence remain available as history.
+
+
 Start, checkpoint, sync, finish and Lane-specific status include an advisory local `peers` digest. `scope.paths` declares relevance for the call; start also retains planned path claims until the Lane closes. Use `peers {"laneId":"…","detail":true}` or `forge_peers` for detailed observations. A clean checkpoint returns its unchanged retained head, including after an up-to-date sync. Save edits before sync; the sync receipt itself identifies the resulting saved head.
 
 `peers.predictive` compares this Lane's live changed regions against peer checkpoints. Explicit `peers` reads compare every open peer's latest saved checkpoint. Each entry names the peer Lane, checkpoint head, Intent outcome, file, base ranges and suggested first Lane (`first`, with `orderReason`: ready, smaller change, then earlier start). Ranges are one-based `{start,lines}`; zero lines denotes an insertion before `start`. Overlapping ranges, ranges within three lines, shared changed exported contracts and structural path changes are high risk. Exact renames appear as deletion at the old path and addition at the destination. Same-file disjoint changes are low risk and appear only with `detail:true`. Changed base blobs are aligned before comparison; `alignedPeer` gives peer ranges in this Lane's base coordinates. Unsupported text or expensive alignment is explicitly unknown and makes coverage incomplete. Contract scanning retains its syntactic limitations described above; implementation-only shared exports may be missed.

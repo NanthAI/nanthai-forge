@@ -33,7 +33,7 @@ import type { CheckpointAction, StartAction } from './agent-workflow-schema.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 import type { Lane, WorkData } from './work-types.js';
 import { laneReceipt } from './agent-receipts.js';
-import { assertMergeResolved } from './agent-sync.js';
+import { assertMergeResolved, resolvedSyncCheckpoint } from './agent-sync.js';
 const request = (command: unknown) => digest(JSON.stringify(command));
 function materialize(store: WorkStore, lane: Lane) {
   const path = store.path(lane.id);
@@ -465,6 +465,9 @@ export function agentCheckpoint(
               if (!unchanged) workGit(path, ['update-ref', `refs/forge/checkpoints/${head}`, head]);
             }
             const checkpoint = {
+              ...(store.native && lane.pendingMerge && !options.preserveMerge
+                ? resolvedSyncCheckpoint(new NativeSource(store.root), lane, candidate!.capture.files)
+                : {}),
               actor: options.actor ?? localActor('agent'),
               ...(captureCoverage ? { captureCoverage } : {}),
               head,

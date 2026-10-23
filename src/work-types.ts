@@ -139,6 +139,12 @@ export const stackSyncSchema = z.object({
   before: stackSchema,
   after: stackSchema,
 });
+const undoSyncDetailsSchema = z.object({
+  parent: oid,
+  head: oid,
+  target: oid,
+  status: z.enum(['merged', 'conflict']),
+});
 const checkpointSchema = z.object({
   actor: workActorSchema.optional(),
   head: oid,
@@ -152,12 +158,15 @@ const checkpointSchema = z.object({
     .object({
       channel: z.string(),
       target: oid,
+      operation: agentOperationSchema.optional(),
+      conflicts: z.array(z.object({ path: z.string(), kind: z.enum(['text', 'binary']) })).optional(),
       changedPaths: z.array(z.string()),
       stack: stackSyncSchema.optional(),
       status: z.enum(['merged', 'conflict']).optional(),
     })
     .optional(),
   undoSync: z.string().uuid().optional(),
+  undoSyncDetails: undoSyncDetailsSchema.optional(),
 });
 export const afterSchema = z.union([z.object({ intentId: id }).strict(), z.object({ viewId: id }).strict()]);
 export const laneSchema = z.object({
@@ -201,6 +210,7 @@ export const laneSchema = z.object({
       from: oid,
       target: oid,
       syncOperationId: id,
+      syncDetails: undoSyncDetailsSchema.optional(),
       forced: z.boolean(),
       branchFrom: oid.optional(),
     })

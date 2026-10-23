@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { ConflictEvidence, RepairResolution, SyncLineage } from './agent-repair-types.js';
 import { digest } from './hash.js';
 import { markNativeTextConflicts, attributionLines, attributionEdits } from './native-text-merge.js';
 import { readHostState } from './host-binding.js';
@@ -22,6 +23,11 @@ export type NoticeParticipant = {
   startedAt: string;
 };
 export type ConflictNotice = {
+  evidence?: ConflictEvidence[];
+  resolutions?: RepairResolution[];
+  syncs?: SyncLineage[];
+  repairIntentId?: string;
+  applicability?: 'current' | 'historical';
   integration?: {
     applicability?: 'current' | 'historical';
     main: string;
@@ -127,6 +133,14 @@ export function conflictNotice(
   return {
     noticeId: digest(JSON.stringify([pins, conflicts, pathConflicts])),
     kind: 'conflict-notice',
+    evidence: [
+      {
+        kind: 'text',
+        source: 'native-merge',
+        inputs: participants.map(p => ({ laneId: p.lane, head: p.head })),
+        errors: [...conflicts.map(c => c.path), ...pathConflicts],
+      },
+    ],
     granularity: 'file',
     participants,
     proposedOrder: ordered.map(item => item.p.lane),

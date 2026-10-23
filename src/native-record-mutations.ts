@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { NativeSource, nativeOwner } from './native-source.js';
 import { nativeChanges } from './native-diff.js';
 import { invariant } from './errors.js';
-import { assertMergeResolved } from './agent-sync.js';
+import { assertMergeResolved, resolvedSyncCheckpoint } from './agent-sync.js';
 import type { WorkStore } from './work-store.js';
 import type { LocalWorkCommand, Lane } from './work-types.js';
 import { executionBase } from './work-intent-local.js';
@@ -162,6 +162,7 @@ function recordNativeLaneLocked(
       );
       tx.setSchema(12);
       tx.appendField('lanes', id, 'checkpoints', {
+        ...resolvedSyncCheckpoint(source, lane, files),
         actor,
         head,
         parent: lane.head,

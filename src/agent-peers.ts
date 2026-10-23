@@ -126,9 +126,23 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, re
         ?.notes.filter(note => note.text.startsWith('Automatic compensating revert '))
         .map(note => ({ text: note.text })) ?? [];
     // Retained integration results name saved pins; later saves/main clear current advice.
-    const integrationNotices = new CoordinationJournal(store)
-      .context(lane.id)
-      .notices.filter(n => n.integration);
+    const retainedNotices = new CoordinationJournal(store).context(lane.id).notices;
+    const integrationNotices = retainedNotices.filter(n => n.integration);
+    result.conflicts!.push(
+      ...retainedNotices.filter(
+        n =>
+          (n.integration || n.evidence?.some(e => e.kind === 'check') || n.resolutions?.length) &&
+          (command.detail || n.applicability !== 'historical'),
+      ),
+    );
+    notices.push(
+      ...retainedNotices
+        .filter(
+          n =>
+            !n.integration && n.evidence?.some(e => e.kind === 'check') && n.applicability !== 'historical',
+        )
+        .map(n => ({ text: n.reason })),
+    );
     const previewMain = integrationNotices.length
       ? store.native
         ? (tx ? tx.all('channelMoves', 'main', 'channel') : legacy!.channelMoves)
@@ -182,11 +196,13 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, re
           ...(result.handoff ? { handoff: result.handoff } : {}),
           ...(result.notices ? { notices: result.notices } : {}),
           ...(result.inbox ? { inbox: result.inbox } : {}),
+          ...(result.conflicts?.length ? { conflicts: result.conflicts } : {}),
         },
         command.detail,
       );
     if (!scope.length)
-      return result.notices?.length ||
+      return result.conflicts?.length ||
+        result.notices?.length ||
         result.inbox?.length ||
         result.handoff ||
         result.integration ||
@@ -472,7 +488,9 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, re
     result.coverage = 'local-incomplete';
     result.next = 'Some local peer source is unavailable; retry peers for a fresh observation.';
   }
-  if (!result.conflicts?.length) delete result.conflicts;
+  if (result.conflicts?.length)
+    result.conflicts = [...new Map(result.conflicts.map(notice => [notice.noticeId, notice])).values()];
+  else delete result.conflicts;
   if (
     result.coverage === 'local' &&
     !result.overlaps!.length &&

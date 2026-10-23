@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { decorateRepair } from './agent-repair-lineage.js';
+import { landingRepairNotices } from './landing-repair-notice.js';
 import { previewAdviceCurrent } from './integration-preview-inputs.js';
 import { latestHandoff } from './agent-handoff-types.js';
 import { publishedOverlap } from './agent-coordination-events.js';
@@ -109,10 +111,10 @@ export class CoordinationJournal {
   decorate(notice: ConflictNotice, laneId: string): ConflictNotice {
     let names: string[];
     try {
-      if (lstatSync(this.directory).isSymbolicLink()) return notice;
+      if (lstatSync(this.directory).isSymbolicLink()) return decorateRepair(this.store, notice);
       names = readdirSync(this.directory);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return notice;
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return decorateRepair(this.store, notice);
       throw error;
     }
     const answers = names
@@ -128,7 +130,7 @@ export class CoordinationJournal {
       // Swap means this participant proposes going first, independent of receipt orientation.
       if (command.choice === 'swap') order = [command.laneId, ...order.filter(id => id !== command.laneId)];
     }
-    return {
+    return decorateRepair(this.store, {
       ...notice,
       proposedOrder: order,
       ...(answers.length
@@ -142,7 +144,7 @@ export class CoordinationJournal {
           }
         : {}),
       ...(order[0] !== laneId ? { after: order[0] } : {}),
-    };
+    });
   }
   replay(command: Ack) {
     const prior = this.read<{ command: Ack; sequence: number }>(`ack-${command.operationId}.json`);
@@ -238,9 +240,8 @@ export class CoordinationJournal {
       );
       names = readdirSync(this.directory).sort();
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-        return { handovers: [], handoffs, notices: [], messages: deliveryMessages };
-      throw error;
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') names = [];
+      else throw error;
     }
     const handovers = names
       .filter(name => /^handover-[a-f0-9-]+\.json$/.test(name))
@@ -249,21 +250,41 @@ export class CoordinationJournal {
         return row && (!laneId || row.laneId === laneId) ? [row] : [];
       })
       .sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''));
-    const notices = names
-      .filter(name => /^notice-[a-f0-9]+\.json$/.test(name))
-      .flatMap(name => {
-        const row = this.read<ConflictNotice>(name);
-        if (!row || (laneId && !row.participants.some(p => p.lane === laneId))) return [];
-        const notice = this.decorate(row, laneId ?? '');
-        if (notice.integration)
-          notice.integration = {
-            ...notice.integration,
-            applicability: previewAdviceCurrent(this.store, notice.integration, notice.noticeId)
-              ? 'current'
-              : 'historical',
-          };
-        return [notice];
-      });
+    const retainedNotices = [
+      ...landingRepairNotices(this.store)
+        .map(row => this.decorate(row, laneId ?? ''))
+        .filter(
+          row =>
+            !laneId ||
+            row.participants.some(p => p.lane === laneId) ||
+            row.resolutions?.some(r => r.laneId === laneId),
+        ),
+      ...names
+        .filter(name => /^notice-[a-f0-9]+\.json$/.test(name))
+        .flatMap(name => {
+          const row = this.read<ConflictNotice>(name);
+          if (!row) return [];
+          const notice = this.decorate(row, laneId ?? '');
+          if (
+            laneId &&
+            !notice.participants.some(p => p.lane === laneId) &&
+            !notice.resolutions?.some(r => r.laneId === laneId)
+          )
+            return [];
+          if (notice.integration)
+            notice.integration = {
+              ...notice.integration,
+              applicability: previewAdviceCurrent(this.store, notice.integration, notice.noticeId)
+                ? 'current'
+                : 'historical',
+            };
+          return [decorateRepair(this.store, notice)];
+        }),
+    ];
+    const uniqueNotices = new Map<string, ConflictNotice>();
+    for (const notice of retainedNotices)
+      if (!uniqueNotices.has(notice.noticeId)) uniqueNotices.set(notice.noticeId, notice);
+    const notices = [...uniqueNotices.values()];
     const overlapMessages: BriefEvent[] = this.overlaps(laneId).map(row => ({
       id: row.noticeId,
       actor: 'Forge coordination',
@@ -283,11 +304,14 @@ export class CoordinationJournal {
       paths: [],
     }));
     for (const notice of notices) {
-      if (notice.integration && notice.integration.applicability !== 'historical')
+      if (
+        (notice.integration || notice.evidence?.some(e => e.kind === 'check')) &&
+        notice.applicability !== 'historical'
+      )
         for (const participant of notice.participants.filter(p => !laneId || p.lane === laneId))
           messages.push({
             id: notice.noticeId,
-            actor: 'Integration preview',
+            actor: notice.integration ? 'Integration preview' : 'Landing check',
             kind: 'message',
             text: notice.reason,
             head: participant.head,

@@ -28,6 +28,7 @@ export type PreviewResult = {
   inputs: { laneId: string; head: string }[];
   checks: PreviewCheck[];
   configuration: string;
+  environment: string;
   dependencies: { laneId: string; heads: string[]; errors: string[]; pins: string[] }[];
   applicability: 'current' | 'historical';
   coverage: { omittedLaneIds: string[]; gaps: string[] };
@@ -135,6 +136,7 @@ export function previewPinned(
         inputs,
         checks,
         configuration,
+        environment: environment.fingerprint,
         dependencies,
         applicability: 'current',
         coverage: {

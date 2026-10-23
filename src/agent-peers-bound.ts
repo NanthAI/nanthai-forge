@@ -64,7 +64,12 @@ export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
     // Full, exact source is available through peers detail:true. Drop hunks first,
     // then rich context; retain a direct retrieval instruction in compact receipts.
     for (const notice of value.conflicts) {
-      notice.detail = 'peers {laneId,detail:true} returns exact hunks, intents, messages and owner sessions';
+      notice.detail = 'peers {laneId,detail:true} returns exact hunks, evidence, repair and sync lineage';
+      if (size(value) > PEERS_MAX_BYTES) {
+        delete notice.evidence;
+        delete notice.resolutions;
+        delete notice.syncs;
+      }
       for (const conflict of notice.conflicts) {
         if (conflict.hunk && conflict.hunk.split('\n').length > 30) delete conflict.hunk;
       }
