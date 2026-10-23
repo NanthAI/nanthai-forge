@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { convexSchemaErrors } from './integration-preview-schema.js';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkEnvironment, checkProcessEnvironment } from './check-environment.js';
@@ -9,11 +9,16 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import type { NativeSource } from './native-source.js';
 import type { WorkStore } from './work-store.js';
-import type { Check, Lane } from './work-types.js';
+import type { Check, CheckEnvironment, Lane } from './work-types.js';
 
 export type PreviewCheck = Pick<Check, 'name' | 'executable' | 'args'> &
   Partial<Pick<Check, 'env' | 'credentials'>>;
-export type PreviewObservation = { status: 'passed' | 'failed' | 'text-conflict'; errors: string[] };
+export type PreviewObservation = {
+  status: 'passed' | 'failed' | 'text-conflict' | 'inconclusive';
+  errors: string[];
+  head?: string;
+  code?: string;
+};
 
 /** Explicitly marked definitions win. Package static scripts are the repository's
  * existing fast-check convention; never invoke verify, install or a remote backend. */
@@ -41,6 +46,7 @@ export class PreviewChecks {
     private readonly source: NativeSource,
     private readonly lanes: Lane[],
     private readonly checks: PreviewCheck[],
+    private readonly environment: CheckEnvironment = checkEnvironment(),
   ) {}
   run(head: string): PreviewObservation {
     const run = mkdtempSync(join(this.directory, 'run-')),
@@ -52,7 +58,7 @@ export class PreviewChecks {
       if (errors.length) return { status: 'failed', errors };
       if (this.checks.length) this.prepareDependencies(workspace);
       for (const check of this.checks) {
-        const environment = checkProcessEnvironment(check as Check, checkEnvironment(), run);
+        const environment = checkProcessEnvironment(check as Check, this.environment, run);
         environment.prepare();
         const result = spawnSync(check.executable, check.args, {
           cwd: workspace,
@@ -75,6 +81,12 @@ export class PreviewChecks {
           };
       }
       return { status: 'passed', errors: [] };
+    } catch (error) {
+      return {
+        status: 'inconclusive',
+        code: (error as { code?: string }).code ?? 'INTEGRATION_CHECK_ERROR',
+        errors: ['Static execution could not complete; no source-failure conclusion is available.'],
+      };
     } finally {
       rmSync(run, { recursive: true, force: true });
     }
@@ -104,8 +116,11 @@ export class PreviewChecks {
       cpSync(join(candidate, 'node_modules'), path, { recursive: true, verbatimSymlinks: true });
       this.dependencies = { signature: selected, path };
     }
-    // Shared only inside this disposable preview, never linked to a retained Lane.
-    symlinkSync(this.dependencies.path, join(workspace, 'node_modules'), 'dir');
+    // A command may mutate dependencies: each control starts with independent bytes.
+    cpSync(this.dependencies.path, join(workspace, 'node_modules'), {
+      recursive: true,
+      verbatimSymlinks: true,
+    });
   }
   dispose() {
     rmSync(this.directory, { recursive: true, force: true });

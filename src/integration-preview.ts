@@ -2,16 +2,15 @@
 import { z } from 'zod';
 import { join } from 'node:path';
 import { CoordinationJournal } from './agent-coordination-journal.js';
-import { noticeParticipant, type ConflictNotice } from './agent-conflict-notice.js';
-import { PeersSource } from './agent-peers-source.js';
+import { type ConflictNotice } from './agent-conflict-notice.js';
 import { PeersCache } from './agent-peers-cache.js';
-import { checkEnvironment } from './check-environment.js';
+import { previewTuple, previewCurrent } from './integration-preview-inputs.js';
+import { diagnosePreview } from './integration-preview-diagnosis.js';
 import { nativeChannels } from './native-work.js';
 import { channelStatus } from './work-channel.js';
 import { workLocked } from './work-lock.js';
-import { digest } from './hash.js';
 import { invariant } from './errors.js';
-import { PreviewChecks, previewChecks, type PreviewObservation } from './integration-preview-checks.js';
+import { PreviewChecks, type PreviewObservation, type PreviewCheck } from './integration-preview-checks.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 
@@ -26,8 +25,23 @@ export type PreviewResult = {
   key: string;
   main: string;
   inputs: { laneId: string; head: string }[];
-  checks: { name: string; executable: string; args: string[] }[];
-  status: 'clean' | 'clash' | 'failed' | 'baseline-failed' | 'text-conflict' | 'no-lanes' | 'not-configured';
+  checks: PreviewCheck[];
+  configuration: string;
+  dependencies: { laneId: string; heads: string[]; errors: string[]; pins: string[] }[];
+  applicability: 'current' | 'historical';
+  coverage: { omittedLaneIds: string[]; gaps: string[] };
+  historical?: { key: string; status: string };
+  observations: { laneIds: string[]; result: PreviewObservation }[];
+  interactions: (Pair & { minimization: 'incomplete' })[];
+  status:
+    | 'clean'
+    | 'clash'
+    | 'failed'
+    | 'baseline-failed'
+    | 'text-conflict'
+    | 'no-lanes'
+    | 'not-configured'
+    | 'inconclusive';
   combined?: PreviewObservation;
   baseline?: PreviewObservation;
   individual?: { laneId: string; result: PreviewObservation }[];
@@ -88,104 +102,118 @@ export function previewPinned(
           channel => channel.name === 'main',
         )?.head;
       invariant(main, 'INTEGRATION_MAIN_UNAVAILABLE', 'Integration preview needs an accepted main Channel.');
-      const source = new PeersSource(store, ''),
-        checks = previewChecks(source, main, data.checks),
-        inputs = lanes.map(lane => ({ laneId: lane.id, head: lane.head })),
-        key = digest(
-          JSON.stringify(['integration-v2', main, inputs, checks, checkEnvironment().fingerprint]),
+      const { source, checks, inputs, key, configuration, dependencies, environment } = previewTuple(
+          store,
+          data,
+          lanes,
+          main,
         ),
         cache = new PeersCache(store.root),
         cached = cache.read<PreviewResult>(`integration:${key}`),
         journal = new CoordinationJournal(store);
-      if (cached) {
-        journal.record(cached.notices);
-        return { revision: store.revision(), result: { ...cached, cached: true } };
+      // Repository commands can read external files/tools and passthrough values.
+      // Retained verdicts are historical unless there were no external commands.
+      if (cached && !checks.length && cached.status !== 'inconclusive') {
+        const current = previewCurrent(store, cached);
+        if (current) journal.record(cached.notices);
+        return {
+          revision: store.revision(),
+          result: {
+            ...cached,
+            applicability: current ? ('current' as const) : ('historical' as const),
+            cached: true,
+          },
+        };
       }
       const result: PreviewResult = {
         key,
         main,
         inputs,
         checks,
+        configuration,
+        dependencies,
+        applicability: 'current',
+        coverage: {
+          omittedLaneIds: data.lanes
+            .filter(lane => lane.state === 'active' && lane.checkpoints.length)
+            .filter(lane => !lanes.some(item => item.id === lane.id))
+            .map(lane => lane.id),
+          gaps: ['Only saved source is checked; unsaved files and runtime behavior are excluded.'],
+        },
+        ...(cached ? { historical: { key: cached.key, status: cached.status } } : {}),
+        observations: [],
+        interactions: [],
         status: lanes.length ? 'not-configured' : 'no-lanes',
         pairs: [],
         notices: [],
         durationMs: 0,
       };
-      if (
-        lanes.length &&
-        (checks.length ||
-          source.state(main).files.some(file => file.path === 'convex/schema.ts') ||
-          lanes.some(lane => source.state(lane.head).files.some(file => file.path === 'convex/schema.ts')))
-      ) {
-        const runner = new PreviewChecks(store, source, lanes, checks);
+      const hasStaticInput = () => {
+        if (checks.length || dependencies.some(item => item.errors.length)) return true;
+        try {
+          return [main, ...dependencies.flatMap(item => item.heads)].some(head =>
+            source.state(head).files.some(file => file.path === 'convex/schema.ts'),
+          );
+        } catch {
+          return true;
+        }
+      };
+      if (lanes.length && hasStaticInput()) {
+        const runner = new PreviewChecks(store, source, lanes, checks, environment);
         try {
           const observations = new Map<string, PreviewObservation>();
           const evaluate = (selected: Lane[]): PreviewObservation => {
             const id = selected.map(lane => lane.id).join(',');
             const known = observations.get(id);
             if (known) return known;
-            let head = main;
-            for (const lane of selected) {
-              const merged = source.compose(head, lane.head, 'Integration preview', '');
-              if (!merged.head) {
-                const conflict: PreviewObservation = { status: 'text-conflict', errors: merged.conflicts };
-                observations.set(id, conflict);
-                return conflict;
-              }
-              head = merged.head;
+            const closures = selected.map(lane => dependencies.find(item => item.laneId === lane.id)!);
+            const errors = closures.flatMap(item => item.errors);
+            if (errors.length) {
+              const unavailable: PreviewObservation = {
+                status: 'inconclusive',
+                errors,
+                code: 'INTEGRATION_DEPENDENCY_UNAVAILABLE',
+              };
+              observations.set(id, unavailable);
+              return unavailable;
             }
-            const observed = runner.run(head);
+            let head = main;
+            try {
+              for (const dependency of [...new Set(closures.flatMap(item => item.heads))]) {
+                const merged = source.compose(head, dependency, 'Integration preview', '');
+                if (!merged.head) {
+                  const conflict: PreviewObservation = { status: 'text-conflict', errors: merged.conflicts };
+                  observations.set(id, conflict);
+                  return conflict;
+                }
+                head = merged.head;
+              }
+            } catch {
+              const unavailable: PreviewObservation = {
+                status: 'inconclusive',
+                errors: ['Pinned source unavailable.'],
+                code: 'INTEGRATION_SOURCE_UNAVAILABLE',
+              };
+              observations.set(id, unavailable);
+              return unavailable;
+            }
+            const observed = { ...runner.run(head), head };
             observations.set(id, observed);
             return observed;
           };
-          result.combined = evaluate(lanes);
-          result.status =
-            result.combined.status === 'passed'
-              ? 'clean'
-              : result.combined.status === 'text-conflict'
-                ? 'text-conflict'
-                : 'failed';
-          if (result.combined.status === 'failed') {
-            result.baseline = evaluate([]);
-            if (result.baseline.status !== 'passed') result.status = 'baseline-failed';
-            else {
-              result.individual = lanes.map(lane => ({ laneId: lane.id, result: evaluate([lane]) }));
-              const passing = lanes.filter(lane => evaluate([lane]).status === 'passed');
-              for (let i = 0; i < passing.length; i++)
-                for (const right of passing.slice(i + 1)) {
-                  const left = passing[i]!,
-                    pair = [left, right],
-                    observed = evaluate(pair);
-                  if (observed.status !== 'failed') continue;
-                  const noticeId = digest(JSON.stringify([key, left.id, right.id]));
-                  result.pairs.push({
-                    laneIds: pair.map(l => l.id),
-                    heads: pair.map(l => l.head),
-                    errors: observed.errors,
-                    noticeId,
-                  });
-                  result.notices.push({
-                    noticeId,
-                    kind: 'conflict-notice',
-                    granularity: 'symbol',
-                    participants: pair.map(lane => noticeParticipant(store, source, lane)),
-                    proposedOrder: [],
-                    choices: [],
-                    conflicts: [],
-                    reason: `Integration preview: Lanes ${left.id} and ${right.id} pass alone on main ${main} but fail together. ${observed.errors.join('\n')}`,
-                    integration: { main, key, errors: observed.errors },
-                  });
-                }
-              if (result.pairs.length) result.status = 'clash';
-            }
-          }
+          diagnosePreview(result, lanes, evaluate, store, source);
+          result.observations = [...observations].map(([id, result]) => ({
+            laneIds: id ? id.split(',') : [],
+            result,
+          }));
         } finally {
           runner.dispose();
         }
       }
       result.durationMs = Math.round(performance.now() - started);
-      journal.record(result.notices);
-      // Advisory cache includes source, definitions, runtime; never passing landing evidence.
+      result.applicability = previewCurrent(store, result) ? 'current' : 'historical';
+      if (result.applicability === 'current') journal.record(result.notices);
+      // Retain advisory history only; never passing landing evidence.
       cache.write(`integration:${key}`, result);
       return { revision: store.revision(), result: { ...result, cached: false } };
     },

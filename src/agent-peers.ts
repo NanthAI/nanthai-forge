@@ -141,6 +141,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, re
         .filter(
           n =>
             n.integration!.main === previewMain &&
+            n.integration!.applicability === 'current' &&
             n.participants.every(
               p =>
                 (tx?.fields('lanes', p.lane)?.record.head ??

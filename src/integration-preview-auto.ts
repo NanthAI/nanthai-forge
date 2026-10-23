@@ -1,3 +1,4 @@
+import { previewCurrent } from './integration-preview-inputs.js';
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -107,11 +108,7 @@ export function integrationPreviewStatus(store: WorkStore): string | undefined {
   if (status.error) return `unavailable (${status.error})`;
   const result = status.result;
   if (!result) return;
-  const current = result.inputs.every(pin => store.select('lanes', pin.laneId)?.head === pin.head);
-  const main = [...(store.readRecords()?.all('channelMoves', 'main', 'channel') ?? store.load().channelMoves)]
-    .filter(move => move.channel === 'main' && move.status === 'accepted')
-    .at(-1)?.head;
-  return current && main === result.main
+  return previewCurrent(store, result)
     ? `${result.status} · ${result.inputs.length} saved Lanes${result.pairs.length ? ` · ${result.pairs.length} failing pair(s)` : ''}`
     : 'stale (saved inputs changed)';
 }

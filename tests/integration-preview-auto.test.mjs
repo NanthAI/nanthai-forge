@@ -167,7 +167,7 @@ test('a burst coalesces into one run and finite drain leaves no idle timer', asy
   assert.equal(runs, 1);
   assert.equal(process.getActiveResourcesInfo().filter(name => name === 'Timeout').length, timersBefore);
   assert.match(integrationPreviewStatus(f.store), /^clash/);
-  assert.equal(integrationPreview(f.store, {}).result.cached, true);
+  assert.equal(integrationPreview(f.store, {}).result.cached, false);
 });
 
 test('checkpoint replies before background check and both Lanes receive notices; worker exits', async t => {
@@ -218,7 +218,7 @@ test('successful sync schedules a preview and input changes invalidate current s
   await until(() => integrationPreviewStatus(f.store)?.startsWith('clean'));
 });
 
-test('preflight uses pinned inputs after live heads change, cache hits, and skip never excludes', async t => {
+test('preflight uses pinned inputs after live heads change, historical evidence, and skip never excludes', async t => {
   const f = await fixture(t);
   await f.policy({ integrationPreview: { auto: true } });
   const pins = [f.a, f.b].map(lane => ({ laneId: lane.laneId, head: lane.head }));
@@ -228,7 +228,7 @@ test('preflight uses pinned inputs after live heads change, cache hits, and skip
     [f.b.laneId],
   );
   assert.match(preview.excluded[0].errors.join('\n'), /synthetic pair clash/);
-  assert.equal(previewPinned(f.store, undefined, pins).result.cached, true);
+  assert.equal(previewPinned(f.store, undefined, pins).result.cached, false);
   const command = {
     action: 'land',
     operationId: randomUUID(),

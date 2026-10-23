@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { previewAdviceCurrent } from './integration-preview-inputs.js';
 import { latestHandoff } from './agent-handoff-types.js';
 import { publishedOverlap } from './agent-coordination-events.js';
 import { mkdirBelow } from './mkdir-below.js';
@@ -252,9 +253,16 @@ export class CoordinationJournal {
       .filter(name => /^notice-[a-f0-9]+\.json$/.test(name))
       .flatMap(name => {
         const row = this.read<ConflictNotice>(name);
-        return row && (!laneId || row.participants.some(p => p.lane === laneId))
-          ? [this.decorate(row, laneId ?? '')]
-          : [];
+        if (!row || (laneId && !row.participants.some(p => p.lane === laneId))) return [];
+        const notice = this.decorate(row, laneId ?? '');
+        if (notice.integration)
+          notice.integration = {
+            ...notice.integration,
+            applicability: previewAdviceCurrent(this.store, notice.integration, notice.noticeId)
+              ? 'current'
+              : 'historical',
+          };
+        return [notice];
       });
     const overlapMessages: BriefEvent[] = this.overlaps(laneId).map(row => ({
       id: row.noticeId,
@@ -275,7 +283,7 @@ export class CoordinationJournal {
       paths: [],
     }));
     for (const notice of notices) {
-      if (notice.integration)
+      if (notice.integration && notice.integration.applicability !== 'historical')
         for (const participant of notice.participants.filter(p => !laneId || p.lane === laneId))
           messages.push({
             id: notice.noticeId,

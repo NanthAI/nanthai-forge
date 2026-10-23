@@ -22,7 +22,13 @@ export type NoticeParticipant = {
   startedAt: string;
 };
 export type ConflictNotice = {
-  integration?: { main: string; key: string; errors: string[] };
+  integration?: {
+    applicability?: 'current' | 'historical';
+    main: string;
+    key: string;
+    errors: string[];
+    inputs?: { laneId: string; head: string }[];
+  };
   noticeId: string;
   kind: 'conflict-notice';
   granularity: 'file' | 'symbol';

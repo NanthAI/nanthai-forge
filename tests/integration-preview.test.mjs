@@ -94,7 +94,7 @@ async function fixture(t, { check = true, baselineBad = false, packageScript = f
   };
 }
 
-test('two individually type-correct Lanes clash together; both receive pinned notices and cache replay', async t => {
+test('two individually type-correct Lanes clash together; both receive pinned notices and historical replay', async t => {
   const f = await fixture(t),
     lanes = await f.pair();
   const workBefore = readFileSync(join(f.store.directory, 'work.json'));
@@ -117,7 +117,10 @@ test('two individually type-correct Lanes clash together; both receive pinned no
   }
   assert.deepEqual(readFileSync(join(f.store.directory, 'work.json')), workBefore);
   assert.deepEqual(readdirSync(join(f.store.directory, 'objects')).sort(), objectsBefore);
-  assert.deepEqual(f.integrate(), { ...result, cached: true });
+  const replay = f.integrate();
+  assert.equal(replay.cached, false);
+  assert.deepEqual(replay.historical, { key: result.key, status: result.status });
+  assert.equal(replay.status, result.status);
   assert.equal(new CoordinationJournal(f.store).context(lanes[0].laneId).notices.length, 1);
   await f.save(lanes[1], 'consumer.ts', 'import {value} from "./types";\nexport const result = value();\n');
   const changed = f.integrate();
@@ -219,7 +222,7 @@ test('missing configuration, empty selection and invalid Lane IDs are explicit',
   assert.throws(() => f.integrate({ laneIds: [randomUUID()] }), { code: 'INTEGRATION_LANE_UNAVAILABLE' });
 });
 
-test('a check launch error is structured, is not cached and emits no notices', async t => {
+test('a check launch error is inconclusive, is not reused and emits no notices', async t => {
   const f = await fixture(t, { check: false });
   await f.pair();
   await f.agent.dispatch({
@@ -229,7 +232,12 @@ test('a check launch error is structured, is not cached and emits no notices', a
     executable: join(f.root, 'missing-compiler'),
     args: [],
   });
-  for (let i = 0; i < 2; i++) assert.throws(() => f.integrate(), { code: 'INTEGRATION_CHECK_ERROR' });
+  for (let i = 0; i < 2; i++) {
+    const result = f.integrate();
+    assert.equal(result.status, 'inconclusive');
+    assert.equal(result.combined.code, 'INTEGRATION_CHECK_ERROR');
+    assert.equal(result.cached, false);
+  }
   assert.equal(new CoordinationJournal(f.store).context().notices.length, 0);
 });
 

@@ -697,7 +697,7 @@ Enable it for an owner with
 `nforge agent ROOT set-policy '{"integrationPreview":{"auto":true}}'`
 (and disable it with `auto:false`). It is off by default. Checkpoints and syncs
 wake a finite, debounced local worker over main and saved active Lanes. Read its
-one-line state in `peers` or pending status; `integrate` returns exact cached pins
+one-line state in `peers` or pending status; `integrate` returns exact source pins
 and diagnostics. Unsaved files are excluded and no remote runner is called.
 
 Use `define-check` with `static:true` to mark each existing fast local command
@@ -706,6 +706,26 @@ replace the fallback `package.json` `typecheck`/`lint` scripts. A built-in stati
 check also detects duplicate literal index names per table in `convex/schema.ts`
 without loading the schema or calling Convex. Static commands still run with OS
 rights in the normal private check environment.
+
+A preview freezes main, ordered saved Lane heads, transitive Intent/Candidate and
+stack dependency heads, static definitions and the clean runtime fingerprint.
+Explicit selections name omitted saved Lanes; unsaved source and runtime behavior
+remain outside coverage. Controls compose each Lane with its dependency closure
+against the same main. A failed combined static check is an interaction only when
+base and participating standalone controls pass. A broken base is
+`baseline-failed`; standalone failures remain `failed`. Missing dependency pins,
+unavailable dependencies and interrupted/unlaunchable commands are `inconclusive`.
+Passing pairs do not disprove a three-way interaction: `interactions` retains the
+observed higher-order failing set, passing controls and incomplete minimization.
+These diagnostics do not add a landing gate or new exclusion rule.
+
+Repository commands can read external tools, files and declared passthrough values.
+Their previous verdicts are historical observations, so repeated previews execute
+again even when source/configuration pins match. Only built-in source-only checks
+reuse an exact-tuple verdict. Each control receives independent dependency bytes.
+Results include `applicability:"historical"` if saved heads, dependencies, main or
+static configuration moved during execution; obsolete notices are not published
+as current advice. Retained notice history remains available.
 
 When enabled, landing previews exclude failing individuals and one member of a
 failing pair before the normal landing check. Results identify the exact saved
