@@ -60,20 +60,13 @@ export function setup(t, options = {}) {
     process.env.PATH = pathBefore;
   });
   writeFileSync(
-    join(bin, 'git'),
+    join(bin, 'git-interceptor.mjs'),
     `#!${process.execPath}
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 ${writeState.toString()}
 const stateFile = ${JSON.stringify(stateFile)};
 const args = process.argv.slice(2).map(a => a === 'https://github.com/tests/example.git' ? ${JSON.stringify(remote)} : a);
-// Batch protocols answer requests before EOF; never buffer their duplex pipes.
-if (args.includes('--stdin-paths') || (args.includes('mktree') && args.includes('--batch'))) {
-  const child = spawn(${JSON.stringify(realGit)}, args, { stdio: 'inherit' });
-  child.on('error', () => process.exit(1));
-  const code = await new Promise(resolve => child.on('close', resolve));
-  process.exit(code ?? 1);
-}
 try {
   const before = JSON.parse(readFileSync(stateFile, 'utf8'));
   if (args.includes('push') && before.mirrorRace) {
@@ -89,6 +82,27 @@ try {
   }
   process.stdout.write(out);
 } catch (e) { if (e.stdout) process.stdout.write(e.stdout); process.exit(e.status || 1); }
+`,
+    { mode: 0o755 },
+  );
+  // Most commands need no fault injection. Exec real Git directly, including duplex batch protocols,
+  // instead of booting a Node wrapper and another child for every local object/ref operation.
+  const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+  writeFileSync(
+    join(bin, 'git'),
+    `#!/bin/sh
+remaining=$#
+while [ "$remaining" -gt 0 ]; do
+  argument=$1
+  shift
+  if [ "$argument" = 'https://github.com/tests/example.git' ]; then argument=${quote(remote)}; fi
+  set -- "$@" "$argument"
+  remaining=$((remaining - 1))
+done
+case " $* " in
+  *" push "*|*" ls-remote "*) exec ${quote(process.execPath)} ${quote(join(bin, 'git-interceptor.mjs'))} "$@" ;;
+  *) exec ${quote(realGit)} "$@" ;;
+esac
 `,
     { mode: 0o755 },
   );

@@ -1,10 +1,11 @@
+import { cleanupOwner, waitForOwnerChildren } from './owner-cleanup.mjs';
 import { processAlive } from '../dist/local-process.js';
 import { trustAgents } from './autonomy-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -168,7 +169,7 @@ for (const native of [true, false])
       assert.deepEqual(originalPeers, { clear: true });
       assert.equal(peers.landed[0].head, cp.head); // Advisory peers refresh; canonical operation pins replay.
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupOwner(root);
     }
   });
 for (const native of [true, false])
@@ -216,7 +217,7 @@ for (const native of [true, false])
       assert.equal(acceptance.status, 'accepted');
       assert.deepEqual(canonicalReceipt((await agent.dispatch(request)).result), canonicalReceipt(receipt));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupOwner(root);
     }
   });
 test('finish without explicit acceptance preserves capability and native operation needs no Git or index', async () => {
@@ -237,7 +238,7 @@ test('finish without explicit acceptance preserves capability and native operati
     assert.equal(existsSync(join(root, '.forge/index')), false);
   } finally {
     process.env.PATH = previous;
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 test('finish binds check, acceptance, environment and checkpoint inputs before writes', async () => {
@@ -274,7 +275,7 @@ test('finish binds check, acceptance, environment and checkpoint inputs before w
     );
     assert.deepEqual(canonicalReceipt((await agent.dispatch(command)).result), canonicalReceipt(receipt));
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 for (const native of [true, false])
@@ -310,7 +311,7 @@ for (const native of [true, false])
           canonicalReceipt(receipt),
         );
       } finally {
-        rmSync(root, { recursive: true, force: true });
+        await cleanupOwner(root);
       }
     });
 test('finish reconciles unknown checkpoint reply and preserves full request binding', async () => {
@@ -336,7 +337,7 @@ test('finish reconciles unknown checkpoint reply and preserves full request bind
     assert.equal(agent.work.store.load().lanes[0].checkpoints.length, 1);
     assert.equal(receipt.run.status, 'passed');
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 for (const native of [true, false])
@@ -353,7 +354,7 @@ for (const native of [true, false])
       assert.deepEqual(readWorkBytes(join(agent.work.store.directory, 'work.json')), before);
       assert.equal(agent.work.store.load().runs.length, 0);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupOwner(root);
     }
   });
 test('terminal observe reads original run while another Work lock is live and leaves unrelated run untouched', async () => {
@@ -385,7 +386,7 @@ test('terminal observe reads original run while another Work lock is live and le
       unlinkSync(lock);
     }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 test('finish bounded busy reconciliation keeps original phase IDs and never retries changed pins', async () => {
@@ -409,7 +410,7 @@ test('finish bounded busy reconciliation keeps original phase IDs and never retr
     const cp = agent.work.store.load().lanes[0].checkpoints[0];
     assert.equal(cp.operation.id, command.operationId);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 for (const native of [true, false])
@@ -479,7 +480,7 @@ for (const native of [true, false])
       assert.deepEqual(canonicalReceipt(replay), canonicalReceipt(receipt));
       assert.equal(readFileSync(join(lane.path, 'file.txt'), 'utf8'), 'changed\n');
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupOwner(root);
     }
   });
 for (const native of [true, false])
@@ -509,7 +510,7 @@ for (const native of [true, false])
       );
       assert.equal(agent.work.store.load().runs.length, 1);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupOwner(root);
     }
   });
 test('finish reconciles a phase under a real concurrent lock; a terminal parent replays without dispatching children', async () => {
@@ -543,7 +544,7 @@ test('finish reconciles a phase under a real concurrent lock; a terminal parent 
     assert.equal(agent.work.store.load().views.length, 1);
     assert.equal(agent.work.store.load().runs.length, 1);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 async function dependency(agent, native) {
@@ -611,7 +612,7 @@ for (const native of [true, false])
       );
       assert.deepEqual(readWorkBytes(join(agent.work.store.directory, 'work.json')), before);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupOwner(root);
     }
   });
 for (const native of [true, false])
@@ -639,7 +640,7 @@ for (const native of [true, false])
         canonicalReceipt(receipt),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupOwner(root);
     }
   });
 test('finish checkpoint reconciles original parents and bounds fresh-operation contention', async () => {
@@ -667,7 +668,7 @@ test('finish checkpoint reconciles original parents and bounds fresh-operation c
       unlinkSync(lock);
     }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -715,7 +716,7 @@ test('finish actual CLI and SDK MCP share original canonical receipts and discov
     assert.equal(readFileSync(join(lane.path, 'file.txt'), 'utf8'), 'later dirty bytes\n');
   } finally {
     await client.close();
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -761,6 +762,9 @@ for (const native of [true, false])
       } catch (e) {
         if (e.code !== 'ESRCH') throw e;
       }
+      // The detached owner can still hold this finish lock while reconciling the dead runner.
+      // Join it before this fixture explicitly restarts the workflow with zero lock patience.
+      await waitForOwnerChildren(root);
       const receipt = (await new AgentWorkflow(root).dispatch(request)).result;
       assert.equal(receipt.status, 'interrupted');
       assert.equal(receipt.terminal, true);
@@ -781,7 +785,7 @@ for (const native of [true, false])
           else process.kill(-run.childPid, 'SIGKILL');
         } catch {}
       }
-      rmSync(root, { recursive: true, force: true });
+      await cleanupOwner(root);
     }
   });
 for (const native of [true, false])
@@ -809,7 +813,7 @@ for (const native of [true, false])
         assert.equal(agent.work.store.load().views.length, 1);
         assert.equal(agent.work.store.load().runs.length, 1);
       } finally {
-        rmSync(root, { recursive: true, force: true });
+        await cleanupOwner(root);
       }
     });
 for (const native of [true, false])
@@ -836,7 +840,7 @@ for (const native of [true, false])
       assert.equal(agent.work.store.load().views.length, 1);
       assert.equal(agent.work.store.load().runs.length, 0);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupOwner(root);
     }
   });
 test('runner readiness poll retries only genuine SOURCE_CHANGED observations', () => {
@@ -869,7 +873,7 @@ test('runner readiness poll retries only genuine SOURCE_CHANGED observations', (
 
 test('finish reconciles a Work publication race before registering its exact check', async t => {
   const { root, agent, command } = await setup(true);
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  t.after(() => cleanupOwner(root));
   const original = agent.work.dispatch.bind(agent.work);
   const registrations = [];
   const { workProgressIdentity } = await import('../dist/work-progress.js');
@@ -903,7 +907,7 @@ test('finish reconciles a Work publication race before registering its exact che
 
 test('finish returns a resumable result for a changed check observation and replays the pinned run', async t => {
   const { root, agent, command } = await setup(true);
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  t.after(() => cleanupOwner(root));
   const store = agent.work.store,
     original = store.select.bind(store);
   let changed = false;
@@ -932,7 +936,7 @@ test('finish returns a resumable result for a changed check observation and repl
 
 test('finish submission remains stable through new saves and reports the original landed head as superseded', async t => {
   const { root, agent, lane, command } = await setup(true);
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => cleanupOwner(root));
   const request = { ...command, keepOpen: true, accept: { expectedPrevious: null } };
   const landed = (await agent.dispatch(request)).result;
   const submission = landed.submissions[0];

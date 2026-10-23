@@ -1,3 +1,4 @@
+import { cleanupOwner } from './owner-cleanup.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -69,11 +70,11 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
     process.env.FORGE_MODAL_PYTHON = mock;
     process.env.FORGE_CHECK_QUEUE_DIR = join(store.directory, 'fixture-queue');
     await drainPostAccept(store);
+    await cleanupOwner(root);
     for (const [name, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
-    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
     rmSync(credentialRoot, { recursive: true, force: true });
   });
   const pending = [];

@@ -8,6 +8,7 @@ const workflow = readFileSync('.github/workflows/foundation.yml', 'utf8');
 const job = name => workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [a-z][\w-]*:\n/)[0];
 
 test('verification matrix is independent of native selfhost and preserves every failure', () => {
+  assert.doesNotMatch(workflow, /22\.23\.4/);
   for (const name of ['verify-static', 'native-selfhost']) {
     const text = job(name);
     assert.match(text, /^    needs: scope$/m);
@@ -16,7 +17,7 @@ test('verification matrix is independent of native selfhost and preserves every 
   }
   for (const name of ['verify-static', 'verify-tests']) {
     assert.match(job(name), /strategy:\n      fail-fast: false\n      matrix:/);
-    assert.match(job(name), /node: \['22\.23\.4', '24\.22\.1'\]/);
+    assert.match(job(name), /node: \['24\.22\.1'\]/);
     assert.match(job(name), /runs-on: ubuntu-latest/);
     assert.match(job(name), /timeout-minutes: 20/);
     assert.doesNotMatch(job(name), /continue-on-error/);
@@ -25,7 +26,7 @@ test('verification matrix is independent of native selfhost and preserves every 
   assert.match(job('native-selfhost'), /node scripts\/selfhost-smoke\.mjs/);
 });
 
-test('public shards share per-version builds and package smoke runs only in the static matrix', () => {
+test('public shards share the Node 24 build and package smoke runs only in the static matrix', () => {
   const staticJob = job('verify-static'),
     tests = job('verify-tests');
   assert.match(tests, /needs: \[scope, verify-static\]/);

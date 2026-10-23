@@ -1,8 +1,9 @@
+import { cleanupOwner } from './owner-cleanup.mjs';
 import { trustAgents } from './autonomy-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -98,7 +99,7 @@ test('concurrent finishes keep both accepted changes: B auto-syncs before accept
     assert.equal(after.runs.length, before.runs.length);
     assert.equal(after.channelMoves.length, before.channelMoves.length);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -133,7 +134,7 @@ test('accepting a View that lacks the current Channel head is refused', async ()
     await rejects(agent.dispatch({ action: 'accept', viewId: view.viewId }), 'CHANNEL_DIVERGED');
     assert.equal(mainHead(store), a1);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -168,7 +169,7 @@ test('sync merges non-overlapping edits to the same file', async () => {
     const done = (await agent.dispatch({ action: 'sync', laneId: b.laneId })).result;
     assert.equal(done.status, 'up-to-date');
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -215,7 +216,7 @@ test('overlapping edits stop finish at sync with markers until resolved', async 
     assert.equal(fileAt(root, head, 'f.txt'), lines(10, { 5: 'five from A and B' }));
     assert.equal(store.load().lanes.find(l => l.id === b.laneId).pendingMerge, undefined);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -251,7 +252,7 @@ test('Git-backed acceptance of a divergent View is refused', async () => {
     assert.equal(git(root, ['show', `${accepted.acceptance.head}:b.txt`]), 'b again');
     assert.equal((await agent.dispatch({ action: 'sync', laneId: b.laneId })).result.status, 'up-to-date');
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -291,7 +292,7 @@ test('short-form finish resolves pins; retry with them reconciles without rerunn
     const next = (await agent.dispatch({ action: 'finish', laneId: lane.laneId, message: 'Again' })).result;
     assert.equal(next.run.checkId, check.id);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -312,7 +313,7 @@ test('sync reports up-to-date and refuses uncheckpointed edits', async () => {
     await rejects(agent.dispatch({ action: 'sync', laneId: d.laneId }), 'LANE_DIRTY');
     assert.equal(readFileSync(join(d.path, 'b.txt'), 'utf8'), 'uncheckpointed\n');
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -336,7 +337,7 @@ test('CLI infers laneId from a Lane working directory and shows short forms', as
     assert.match(help, /"accept":true/);
     assert.match(execFileSync(process.execPath, [cli, 'agent', '--help'], { encoding: 'utf8' }), /sync/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -392,7 +393,7 @@ test('sync crash before or after writing files never records a head the workspac
       );
       assert.equal((await agent.dispatch(request)).result.head, synced.head);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupOwner(root);
     }
   }
 });
@@ -414,7 +415,7 @@ test('after a sync crash an ordinary finish still keeps main changes', async () 
     assert.equal(fileAt(root, head, 'f.txt'), lines(10, { 1: 'top from A', 10: 'bottom from B' }));
     assert.equal(fileAt(root, head, 'g.txt'), 'more B work\n');
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -431,7 +432,7 @@ test('a partly written sync resumes; unrelated edits are still LANE_DIRTY', asyn
     assert.equal(readFileSync(join(b.path, 'b.txt'), 'utf8'), 'b from A\n');
     assert.equal(laneOf(store, b.laneId).head, synced.head);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
   const other = await diverged(
     { 'a.txt': 'a\n', 'c.txt': 'c\n' },
@@ -442,7 +443,7 @@ test('a partly written sync resumes; unrelated edits are still LANE_DIRTY', asyn
     edit(other.b, 'a.txt', 'someone else\n');
     await rejects(other.agent.dispatch({ action: 'sync', laneId: other.b.laneId }), 'LANE_DIRTY');
   } finally {
-    rmSync(other.root, { recursive: true, force: true });
+    await cleanupOwner(other.root);
   }
 });
 
@@ -468,7 +469,7 @@ test('conflicted sync crash records the pending merge only after markers exist',
       'CONFLICT_MARKERS',
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -501,7 +502,7 @@ test('Git guard still applies when the previous acceptance is recorded but pendi
     );
     assert.equal(git(root, ['rev-parse', 'refs/forge/channels/main']), a1);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });
 
@@ -528,6 +529,6 @@ test('finish reuses the Lane head when nothing changed since sync', async () => 
       synced.head,
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupOwner(root);
   }
 });

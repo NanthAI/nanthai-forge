@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Optional release acceptance: installs and exercises the actual local npm archive.
 import assert from 'node:assert/strict';
+import { cleanupOwner } from '../tests/owner-cleanup.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -49,6 +50,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const originalPath = process.env.PATH;
 let server,
+  serverClosed,
   client,
   success = false;
 const run = (executable, argv, options = {}) => {
@@ -77,6 +79,10 @@ try {
     }),
   )[0];
   const names = packed.files.map(file => file.path);
+  const runtimeScripts = JSON.parse(readFileSync(join(root, 'package.json'))).files.filter(file =>
+    file.startsWith('scripts/'),
+  );
+  for (const file of runtimeScripts) assert.ok(names.includes(file), `Missing package runtime: ${file}`);
   const componentRoot = 'docs/vendor-notices/native-components';
   const componentManifestBytes = readFileSync(join(root, componentRoot, 'manifest.json'));
   assert.equal(
@@ -109,7 +115,10 @@ try {
   for (const file of notices) assert.ok(names.includes(file), `Missing package notice/document: ${file}`);
   for (const file of names)
     assert.ok(
-      notices.includes(file) || file.startsWith('node_modules/') || /^dist\/[^/]+\.(?:js|d\.ts)$/.test(file),
+      notices.includes(file) ||
+        runtimeScripts.includes(file) ||
+        file.startsWith('node_modules/') ||
+        /^dist\/[^/]+\.(?:js|d\.ts)$/.test(file),
       `Unexpected package file: ${file}`,
     );
   assert.ok(names.includes('dist/cli.js'));
@@ -134,7 +143,7 @@ try {
   assert.equal(realpathSync(join(prefix, 'node_modules', '.bin', 'nforge')), realpathSync(cli));
   assert.ok(statSync(cli).mode & 0o111, 'Installed CLI must be executable.');
   const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'));
-  for (const notice of notices.filter(
+  for (const notice of [...notices, ...runtimeScripts].filter(
     file => !['package.json', 'forge-package-lock.json', 'THIRD_PARTY_NOTICES.txt'].includes(file),
   ))
     assert.equal(
@@ -209,7 +218,7 @@ try {
   }
   assert.equal(manifest.private, true);
   assert.equal(manifest.license, 'Apache-2.0');
-  assert.equal(manifest.engines.node, '^22.23.4 || >=24.22.1 <25');
+  assert.equal(manifest.engines.node, '>=24.22.1 <25');
   const bin = join(directory, 'no-git');
   mkdirSync(bin);
   const gitCalled = join(directory, 'git-called');
@@ -345,6 +354,20 @@ try {
   assert.equal(pluginStatus.result.lanes.total, 1);
   await client.close();
   client = undefined;
+  const installedAgent = (action, input) => command('agent', owner, action, JSON.stringify(input)).result;
+  const installedCheck = installedAgent('define-check', {
+    name: 'Installed Candidate check',
+    executable: process.execPath,
+    args: ['-e', "if(!require('fs').readFileSync('a.ts','utf8').includes('= 2;'))process.exit(1)"],
+  });
+  const installedRun = installedAgent('run', {
+    operationId: randomUUID(),
+    viewId: view.id,
+    expectedHead: view.head,
+    checkId: installedCheck.checkId,
+    expectedDefinition: installedCheck.definition,
+  });
+  assert.equal(installedRun.status, 'passed');
   const acceptance = act({
     action: 'accept-channel',
     operationId: randomUUID(),
@@ -372,7 +395,7 @@ try {
     name: 'Installed source contribution',
   });
   const contributed = command('work', owner);
-  assert.equal(contributed.schema, 4);
+  assert.equal(contributed.schema, original.schema);
   assert.equal(contributed.channels[0].head, original.channels[0].head);
   assert.equal(contributed.runs.length, original.runs.length);
   assert.equal(contributed.lanes.find(item => item.id === incoming.id).head, view.head);
@@ -381,7 +404,7 @@ try {
   const restored = join(directory, 'restored');
   command('restore-native', backup.archive.path, restored);
   const restoredWork = command('work', restored);
-  assert.equal(restoredWork.schema, 4);
+  assert.equal(restoredWork.schema, original.schema);
   assert.equal(restoredWork.nativeContributionReceipts[0].archiveSha256, proposal.archive.sha256);
   assert.equal(restoredWork.nativeHead, initial.head);
   assert.equal(restoredWork.channels[0].head, view.head);
@@ -469,7 +492,7 @@ try {
   assert.equal(finished.acceptance.acceptanceId, finished.acceptance.operationId);
   assert.deepEqual(agent('finish', finishRequest), finished);
   const agentWork = command('work', agentOwner, '--compact');
-  assert.equal(agentWork.schema, 7);
+  assert.equal(agentWork.schema, 12);
   assert.equal(agentWork.runs.length, 2);
   const agentBackup = command(
     'work',
@@ -480,7 +503,7 @@ try {
   const agentRestored = join(directory, 'agent-restored');
   command('restore-native', agentBackup.archive.path, agentRestored);
   const agentRecovered = command('work', agentRestored, '--compact');
-  assert.equal(agentRecovered.schema, 7);
+  assert.equal(agentRecovered.schema, agentWork.schema);
   assert.equal(
     command('agent', agentRestored, 'start', JSON.stringify(startRequest)).result.laneId,
     task.laneId,
@@ -501,6 +524,7 @@ try {
     detached: true,
     stdio: ['ignore', out, err],
   });
+  serverClosed = new Promise(resolve => server.once('close', resolve));
   closeSync(out);
   closeSync(err);
   server.unref();
@@ -562,7 +586,7 @@ try {
       skill: 'installed byte-identical',
       cli: 'passed without SDK scripts or indexing',
       originalRunReplay: 'passed',
-      schema7Recovery: 'passed',
+      recordedWorkRecovery: 'passed',
       finish: {
         status: finished.status,
         replay: 'passed',
@@ -595,11 +619,13 @@ try {
   delete process.env.FORGE_PACKAGE_GIT_CALLED;
   await client?.close();
   if (server && (!success || !sessionPath)) {
+    server.ref();
     try {
       process.kill(server.pid, 'SIGTERM');
     } catch {
       /* Already exited. */
     }
+    await serverClosed;
   }
-  if (!kept) rmSync(directory, { recursive: true, force: true });
+  if (!kept) await cleanupOwner(directory, join(directory, 'installed/node_modules/@nanthai/forge/dist'));
 }

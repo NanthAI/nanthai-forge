@@ -2,9 +2,9 @@
 
 ## Setup and checks
 
-Requirements: Node 22.23.4+ (22.x) or 24.22.1+ (24.x), npm, and Git 2.38 or later for Git-backed Work. `tar` and `gzip` are needed for backups.
+Requirements: Node 24.22.1+ (24.x), npm, and Git 2.38 or later for Git-backed Work. `tar` and `gzip` are needed for backups.
 
-The CLI and standard check refuse other Node versions with `UNSUPPORTED_NODE`. These minimums include the October 2026 Node security fixes; package engines use `^22.23.4 || >=24.22.1 <25`.
+The CLI and standard check refuse other Node versions with `UNSUPPORTED_NODE`. This minimum includes the October 2026 Node security fixes; package engines use `>=24.22.1 <25`.
 
 ```sh
 npm ci --ignore-scripts      # locked install, no lifecycle scripts
@@ -202,7 +202,7 @@ For recorded historical replays, `scripts/measure-test-impact.mjs` accepts expli
 
 `.github/workflows/foundation.yml` compares exact Git pins. Markdown-only changes,
 including packaged docs, run foundation and package-document checks. Other changes
-run full verification on pinned Node 22.23.4 and 24.22.1, plus native self-host.
+run full verification on pinned Node 24.22.1, plus native self-host.
 For each Node version, one static job runs the non-test verify stages and package
 smoke, and shares its builds with 24 parallel test shards on GitHub-hosted
 `ubuntu-latest` runners. `scripts/public-verify.mjs` reuses Forge's full selection,

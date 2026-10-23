@@ -1,7 +1,8 @@
+import { cleanupOwner } from './owner-cleanup.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -86,7 +87,7 @@ test('Markdown resolution keeps both sides deterministically, main first', () =>
 
 async function setup(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-docmerge-'));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 5 }));
+  t.after(() => cleanupOwner(root));
   for (const dir of ['docs', 'src', 'tests']) mkdirSync(join(root, dir));
   writeFileSync(join(root, 'docs/status.md'), text(items));
   writeFileSync(join(root, 'src/left.ts'), 'export const left = 1;\n');

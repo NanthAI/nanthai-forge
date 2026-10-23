@@ -15,6 +15,10 @@ test('Node release floors reject vulnerable and unsupported lines and accept pat
     'v20.99.0',
     '22.12.0',
     '22.23.3',
+    'v22.23.4',
+    '22.23.5',
+    '22.24.0',
+    '22.99.0',
     'v23.99.0',
     '24.19.0',
     'v24.22.0',
@@ -25,14 +29,14 @@ test('Node release floors reject vulnerable and unsupported lines and accept pat
     'invalid',
   ])
     assert.equal(supportedNode(version), false, version);
-  for (const version of ['v22.23.4', '22.23.5', '22.24.0', 'v24.22.1', '24.22.2', '24.23.0'])
+  for (const version of ['v24.22.1', '24.22.2', '24.23.0'])
     assert.equal(supportedNode(version), true, version);
   assert.equal(supportedNode(), true);
 });
 
 test('CLI and standard check reject vulnerable runtime identities before command or npm execution', () => {
   for (const path of ['dist/cli.js', 'scripts/forge-check.mjs']) {
-    for (const version of ['v22.23.3', 'v24.22.0']) {
+    for (const version of ['v22.23.4', 'v22.24.0', 'v24.22.0']) {
       const result = spawnSync(
         process.execPath,
         [
@@ -46,7 +50,7 @@ test('CLI and standard check reject vulnerable runtime identities before command
       );
       assert.equal(result.status, 1, result.stderr);
       assert.match(result.stderr, /UNSUPPORTED_NODE/);
-      assert.match(result.stderr, /22\.23\.4.*24\.22\.1/);
+      assert.match(result.stderr, /requires Node 24\.22\.1/);
       assert.equal(result.stdout, '');
       if (path === 'dist/cli.js') assert.equal(JSON.parse(result.stderr).error.code, 'UNSUPPORTED_NODE');
     }
@@ -56,7 +60,7 @@ test('CLI and standard check reject vulnerable runtime identities before command
 test('package and active remote check recipes agree on the fixed Node release', () => {
   const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
   const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
-  assert.equal(manifest.engines.node, '^22.23.4 || >=24.22.1 <25');
+  assert.equal(manifest.engines.node, '>=24.22.1 <25');
   assert.equal(lock.packages[''].engines.node, manifest.engines.node);
   // Actions exports replace the committed workflow with the policy's runner label.
   // Compare runtime pins rather than unrelated, environment-specific workflow bytes.

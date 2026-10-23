@@ -20,7 +20,7 @@ Mac. No deployment or schedule is configured by these scripts.
 
 ## Snapshot and backup
 
-Use the accepted Forge source and lockfile, Node 22.23.4+ (22.x) or 24.22.1+ (24.x), installed dependencies
+Use the accepted Forge source and lockfile, Node 24.22.1+ (24.x), installed dependencies
 (`npm ci --ignore-scripts`), and Python 3 for read-only ZIP streaming. The script
 invokes the project's pinned Convex CLI directly. Use an existing Convex login or
 supply the selected deployment's credential through the process environment;

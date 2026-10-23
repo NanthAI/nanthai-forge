@@ -1,3 +1,4 @@
+import { cleanupOwner } from './owner-cleanup.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import { callTool, mcpTestEnvironment, requestOptions } from './mcp-runtime.mjs';
@@ -14,16 +15,21 @@ import { pluginConfig } from '../dist/plugin-config.js';
 
 function fixture(t) {
   const base = mkdtempSync(join(tmpdir(), 'forge-plugin-'));
-  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const clients = [];
+  t.after(async () => {
+    await Promise.all(clients.map(client => client.close()));
+    await cleanupOwner(root);
+    await cleanupOwner(base);
+  });
   const root = join(base, 'source with spaces'),
     directory = join(base, 'local plugins');
   mkdirSync(root);
   writeFileSync(join(root, 'answer.ts'), 'export const answer = 1;\n');
   initNative(root);
-  return { base, root, directory };
+  return { base, root, directory, clients };
 }
 test('generated plugin connects the selected owner and completes a real recorded check', async t => {
-  const { base, root, directory } = fixture(t);
+  const { root, directory, clients } = fixture(t);
   const generated = spawnSync(process.execPath, [resolve('dist/cli.js'), 'plugin-config', root, directory], {
     encoding: 'utf8',
     env: { ...process.env, FORGE_AUTH_TOKEN: 'synthetic-must-not-be-copied' },
@@ -45,6 +51,7 @@ test('generated plugin connects the selected owner and completes a real recorded
   const doc = skill.match(/\[source exchange\]\(([^)]+)\)/)[1];
   assert.ok(readFileSync(new URL(doc)).length > 0);
   const client = new Client({ name: 'plugin-proof', version: '1' });
+  clients.push(client);
   await client.connect(
     new StdioClientTransport({
       command: config.command,
@@ -54,7 +61,6 @@ test('generated plugin connects the selected owner and completes a real recorded
     }),
     requestOptions('connect'),
   );
-  t.after(() => client.close());
   const tools = (await client.listTools(undefined, requestOptions('listTools'))).tools.map(tool => tool.name);
   for (const name of ['forge_task', 'forge_check', 'forge_review', 'forge_work_overview', 'forge_source'])
     assert.ok(tools.includes(name));

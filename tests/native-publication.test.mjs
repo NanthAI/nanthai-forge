@@ -135,66 +135,69 @@ test(
     assert.deepEqual(readFileSync(join(root, 'a.ts')), original);
     assert.equal(existsSync(join(root, '.git')), false);
     const server = await serveRepository(work.store.path(lane.id), 0);
-    t.after(() => server.close());
-    const url = new URL(server.url),
-      token = new URLSearchParams(url.hash.slice(1)).get('token');
-    assert.equal(
-      (
-        await fetch(url.origin + '/api/work', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ command, revision: 0 }),
-        })
-      ).status,
-      401,
-    );
-    const retry = await fetch(url.origin + '/api/work', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ command, revision: 0 }),
-    });
-    assert.equal(retry.status, 200);
-    assert.equal((await retry.json()).result.projection.head, projected);
-    const bin = join(root, '.forge/no-git'),
-      called = join(bin, 'called');
-    mkdirSync(bin);
-    writeFileSync(join(bin, 'git'), `#!/bin/sh\n/usr/bin/touch '${called}'\nexit 91\n`, { mode: 0o700 });
-    for (const tool of ['tar', 'gzip']) symlinkSync(`/usr/bin/${tool}`, join(bin, tool));
-    const previous = process.env.PATH;
-    process.env.PATH = bin;
     try {
-      local({
-        action: 'accept-channel',
-        operationId: randomUUID(),
-        channel: 'main',
-        viewId: view.id,
-        expectedHead: view.head,
-        expectedPrevious: null,
-      });
-      const archive = (
-        await work.dispatch({ action: 'export-work', archive: true }, work.store.load().revision)
-      ).result;
-      const saved = work.store.load(),
-        projection = structuredClone(saved.publications[0].projection);
-      saved.publications[0].projection.state = '0'.repeat(64);
-      work.store.save(saved);
-      await assert.rejects(
-        work.dispatch({ action: 'export-work', archive: true }, saved.revision),
-        code('INVALID_NATIVE_GIT'),
+      const url = new URL(server.url),
+        token = new URLSearchParams(url.hash.slice(1)).get('token');
+      assert.equal(
+        (
+          await fetch(url.origin + '/api/work', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command, revision: 0 }),
+          })
+        ).status,
+        401,
       );
-      saved.publications[0].projection = projection;
-      work.store.save(saved);
-      const destination = join(root, '.forge/restored');
-      await restoreNativeWork(archive.archive.path, destination);
-      const restored = new WorkService(destination).status();
-      assert.equal(restored.channels[0].head, view.head);
-      assert.equal(restored.publications[0].projection.head, projected);
-      assert.equal(restored.githubChecks[0].checks[0].head_sha, projected);
-      assert.equal(restored.publications[0].checks[0].bundle, observed.bundle);
-      assert.equal(restored.intents[0].notes.length, 1);
-      assert.equal(existsSync(called), false);
+      const retry = await fetch(url.origin + '/api/work', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ command, revision: 0 }),
+      });
+      assert.equal(retry.status, 200);
+      assert.equal((await retry.json()).result.projection.head, projected);
+      const bin = join(root, '.forge/no-git'),
+        called = join(bin, 'called');
+      mkdirSync(bin);
+      writeFileSync(join(bin, 'git'), `#!/bin/sh\n/usr/bin/touch '${called}'\nexit 91\n`, { mode: 0o700 });
+      for (const tool of ['tar', 'gzip']) symlinkSync(`/usr/bin/${tool}`, join(bin, tool));
+      const previous = process.env.PATH;
+      process.env.PATH = bin;
+      try {
+        local({
+          action: 'accept-channel',
+          operationId: randomUUID(),
+          channel: 'main',
+          viewId: view.id,
+          expectedHead: view.head,
+          expectedPrevious: null,
+        });
+        const archive = (
+          await work.dispatch({ action: 'export-work', archive: true }, work.store.load().revision)
+        ).result;
+        const saved = work.store.load(),
+          projection = structuredClone(saved.publications[0].projection);
+        saved.publications[0].projection.state = '0'.repeat(64);
+        work.store.save(saved);
+        await assert.rejects(
+          work.dispatch({ action: 'export-work', archive: true }, saved.revision),
+          code('INVALID_NATIVE_GIT'),
+        );
+        saved.publications[0].projection = projection;
+        work.store.save(saved);
+        const destination = join(root, '.forge/restored');
+        await restoreNativeWork(archive.archive.path, destination);
+        const restored = new WorkService(destination).status();
+        assert.equal(restored.channels[0].head, view.head);
+        assert.equal(restored.publications[0].projection.head, projected);
+        assert.equal(restored.githubChecks[0].checks[0].head_sha, projected);
+        assert.equal(restored.publications[0].checks[0].bundle, observed.bundle);
+        assert.equal(restored.intents[0].notes.length, 1);
+        assert.equal(existsSync(called), false);
+      } finally {
+        process.env.PATH = previous;
+      }
     } finally {
-      process.env.PATH = previous;
+      await server.close();
     }
   },
 );

@@ -1,12 +1,13 @@
+import { cleanupOwner, waitForOwnerChildren } from './owner-cleanup.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs, { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import fs, { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import childProcess, { spawn, execFileSync } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { WorkService } from '../dist/work.js';
@@ -71,43 +72,21 @@ async function fixture(t, native = true) {
   const saved = { queue: process.env.FORGE_CHECK_QUEUE_DIR, limit: process.env.FORGE_MAX_CONCURRENT_CHECKS };
   process.env.FORGE_CHECK_QUEUE_DIR = join(store.directory, 'test-check-queue');
   process.env.FORGE_MAX_CONCURRENT_CHECKS = '4';
-  const children = new Map();
-  const originalSpawn = childProcess.spawn;
-  childProcess.spawn = (...args) => {
-    const child = originalSpawn(...args);
-    children.set(
-      child,
-      new Promise(resolve => {
-        child.once('close', resolve);
-        child.once('error', resolve);
-      }),
-    );
-    return child;
-  };
-  syncBuiltinESMExports();
   async function background() {
     await drainPostAccept(store);
-    // Draining may spawn another check. Detached helpers unref themselves, so
-    // retain them while joining their close events, including on test failure.
-    for (let observed = -1; observed !== children.size;) {
-      observed = children.size;
-      for (const child of children.keys()) child.ref();
-      await Promise.all(children.values());
-    }
+    await waitForOwnerChildren(root);
   }
   t.after(async () => {
     try {
       await background();
     } finally {
-      childProcess.spawn = originalSpawn;
-      syncBuiltinESMExports();
       for (const [key, value] of [
         ['FORGE_CHECK_QUEUE_DIR', saved.queue],
         ['FORGE_MAX_CONCURRENT_CHECKS', saved.limit],
       ])
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
-      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+      await cleanupOwner(root);
     }
   });
   await agent.dispatch({
@@ -560,7 +539,8 @@ test('native concurrent finishes fast-path a disjoint main race without a second
   assert.ok(new NativeSource(f.root).contains(main, results[0].view.head));
   assert.ok(new NativeSource(f.root).contains(main, results[1].view.head));
   assert.deepEqual((await peer.dispatch(rb)).result, results[1]);
-  await until(() => mainCheckPassed(f.root));
+  await f.background();
+  assert.equal(mainCheckPassed(f.root), true);
   assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 2);
 });
 
@@ -592,7 +572,8 @@ test('finish reuses an already checked unchanged input after disjoint main moves
   assert.equal(landed.run.runId, checked.run.runId);
   assert.equal(landed.acceptance.fastPath.runId, checked.run.runId);
   assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, before);
-  await until(() => mainCheckPassed(f.root));
+  await f.background();
+  assert.equal(mainCheckPassed(f.root), true);
 });
 
 test('overlapping paths on a prior passing View use normal re-check even when text composes', async t => {

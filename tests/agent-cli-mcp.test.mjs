@@ -1,9 +1,10 @@
+import { cleanupOwner } from './owner-cleanup.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import { callTool, mcpTestEnvironment, requestOptions } from './mcp-runtime.mjs';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -13,11 +14,15 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const cli = resolve('dist/cli.js');
 function native(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-agent-interface-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const clients = [];
+  t.after(async () => {
+    await Promise.all(clients.map(client => client.close()));
+    await cleanupOwner(root);
+  });
   writeFileSync(join(root, 'a.ts'), 'export const answer = 1;\n');
   command('init-native', root);
   command('set-policy', root, JSON.stringify({ operationId: randomUUID(), preset: 'trusted' }));
-  return root;
+  return { root, clients };
 }
 function invoke(...args) {
   return spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
@@ -28,7 +33,7 @@ function command(...args) {
   return JSON.parse(result.stdout);
 }
 test('agent CLI completes and replays native delivery without indexing or SDK glue', t => {
-  const root = native(t),
+  const { root } = native(t),
     startId = randomUUID();
   const agent = (action, input = {}) => command('agent', root, action, JSON.stringify(input));
   const start = agent('start', { operationId: startId, outcome: 'Change answer' }).result;
@@ -96,9 +101,10 @@ test('agent CLI completes and replays native delivery without indexing or SDK gl
   assert.equal(overview.lanes.items[0].laneId, start.laneId);
 });
 test('agent MCP profile awaits graph readiness, preserves selectors and legacy tool discovery', async t => {
-  const root = native(t);
+  const { root, clients } = native(t);
   const connect = async flag => {
     const client = new Client({ name: 'agent-interface-test', version: '1' });
+    clients.push(client);
     await client.connect(
       new StdioClientTransport({
         command: process.execPath,
@@ -108,7 +114,6 @@ test('agent MCP profile awaits graph readiness, preserves selectors and legacy t
       }),
       requestOptions('connect'),
     );
-    t.after(() => client.close());
     return client;
   };
   const client = await connect('--agent'),

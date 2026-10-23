@@ -16,7 +16,7 @@ credential values into request JSON or the report. Local bindings and parent
 finish-driver retry files are not part of the portable backup. Recovery restores
 saved data; it does not resume the old parent command or any check process.
 
-Use Node 22.23.4+ (22.x) or 24.22.1+ (24.x) and a fresh owner destination with an existing parent
+Use Node 24.22.1+ (24.x) and a fresh owner destination with an existing parent
 directory. `OWNER` is the recovered directory, `DEPLOYMENT_URL` the surviving or
 restored Forge backend, `PROJECT_ID` the existing project, and `SOURCE` the matching
 Forge source/package directory. Keep the source deployment and original owner.
