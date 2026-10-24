@@ -1,0 +1,23 @@
+{
+  "description": "Anonymised retained execution shapes: IDs replaced, times relative to creation; resource requests and controller intervals retained. Worker measurements were absent.",
+  "executions": [
+    {
+      "id": "sample-0",
+      "started": 0,
+      "ended": 111.25777316093445,
+      "memory": 4096
+    },
+    {
+      "id": "sample-1",
+      "started": 0,
+      "ended": 77.60520195960999,
+      "memory": 4096
+    },
+    {
+      "id": "sample-2",
+      "started": 0,
+      "ended": 77.23715281486511,
+      "memory": 4096
+    }
+  ]
+}

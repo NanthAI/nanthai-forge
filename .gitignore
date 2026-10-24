@@ -1,0 +1,30 @@
+node_modules/
+dist/
+build/
+coverage/
+.next/
+.netlify/
+.turbo/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+*.tsbuildinfo
+.forge/
+.nforge/cache/
+.nforge/private/
+private-artifacts/
+evals/private/
+*.pem
+*.key
+web-dist/
+hosted-web-dist/
+
+# Local visual evidence may contain private source and account state.
+.impeccable/review/
+.impeccable/questions/
+.impeccable/critique/
+
+# Generated Impeccable hook/session state.
+.impeccable/hook.cache.json

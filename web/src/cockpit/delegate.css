@@ -1,0 +1,253 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Sheet (from the right, full screen on phones) and the "Hand this to an agent" content. */
+
+.fx-sheet-root {
+  background: transparent;
+}
+.fx-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--fx-scrim);
+}
+.fx-sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 61;
+  display: flex;
+  flex-direction: column;
+  width: var(--fx-sheet-w, 600px);
+  max-width: 100%;
+  background: var(--fx-surface);
+  border-left: 1px solid var(--fx-line);
+  box-shadow: var(--fx-shadow);
+  animation: fx-sheet-in var(--fx-d-base) var(--fx-ease);
+}
+@keyframes fx-sheet-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+.fx-sheet-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--fx-line);
+}
+.fx-sheet-h > .fx-glyph {
+  flex: none;
+  color: var(--fx-text-2);
+}
+.fx-sheet-title {
+  flex: 1;
+  min-width: 0;
+}
+.fx-sheet-title h2 {
+  font-size: var(--fx-t-16);
+}
+.fx-sheet-ctx {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--fx-text-2);
+}
+.fx-sheet-x {
+  flex: none;
+}
+.fx-sheet-b {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px 20px 24px;
+}
+
+/* Delegate */
+.fx-dg-goal {
+  font: 700 15px/1.35 var(--fx-font-head);
+  overflow-wrap: anywhere;
+}
+.fx-dg-goal small {
+  display: block;
+  margin-top: 4px;
+  font: 400 12.5px/1.45 var(--fx-font-ui);
+  color: var(--fx-text-2);
+}
+.fx-dg-agents button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fx-dg-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.fx-dg-knows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--fx-line);
+  border-radius: var(--fx-r-2);
+  overflow: hidden;
+}
+.fx-dg-knows > li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--fx-line);
+  font-size: 12.5px;
+}
+.fx-dg-knows > li:first-child {
+  border-top: 0;
+}
+.fx-dg-knows > li:focus-visible {
+  outline: 2px solid var(--fx-focus);
+  outline-offset: -2px;
+}
+.fx-dg-knows > li > .fx-glyph {
+  color: var(--fx-passed);
+}
+.fx-dg-knows b {
+  font-weight: 650;
+}
+.fx-dg-off {
+  color: var(--fx-text-2);
+}
+.fx-dg-off > .fx-glyph {
+  color: var(--fx-text-3) !important;
+}
+.fx-dg-src {
+  font-size: 11px;
+  color: var(--fx-text-3);
+  opacity: 0;
+  transition: opacity var(--fx-d-fast) var(--fx-ease);
+}
+.fx-dg-knows > li:hover .fx-dg-src,
+.fx-dg-knows > li:focus-within .fx-dg-src,
+.fx-dg-knows > li:focus .fx-dg-src {
+  opacity: 1;
+}
+.fx-dg-prompt {
+  border: 1px solid var(--fx-line);
+  border-radius: var(--fx-r-2);
+  overflow: hidden;
+}
+.fx-dg-prompt summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--fx-surface-2);
+  font-size: 12px;
+  color: var(--fx-text-2);
+  cursor: pointer;
+  list-style: none;
+}
+.fx-dg-prompt summary::-webkit-details-marker {
+  display: none;
+}
+.fx-dg-len {
+  margin-left: auto;
+  font: 11px var(--fx-font-mono);
+  color: var(--fx-text-3);
+}
+.fx-dg-prompt pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px;
+  font: 12px/1.55 var(--fx-font-mono);
+  color: var(--fx-text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.fx-dg-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.fx-dg-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--fx-text-2);
+}
+.fx-dg-opt input {
+  accent-color: var(--fx-brand);
+}
+.fx .fx-btn-copied,
+.fx .fx-btn-copied:hover:not(:disabled) {
+  background: var(--fx-passed-bg);
+  border-color: color-mix(in srgb, var(--fx-passed) 40%, transparent);
+  color: var(--fx-passed);
+}
+.fx-dg-copied {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--fx-r-2);
+  border: 1px solid color-mix(in srgb, var(--fx-passed) 35%, transparent);
+  background: var(--fx-passed-bg);
+  font-size: 12.5px;
+}
+.fx-dg-copied > .fx-glyph {
+  flex: none;
+  margin-top: 2px;
+  color: var(--fx-passed);
+}
+@media (max-width: 720px) {
+  .fx-sheet {
+    width: 100%;
+    border-left: 0;
+  }
+  .fx-sheet-h {
+    padding: 12px 14px;
+  }
+  .fx-sheet-b {
+    padding: 14px;
+  }
+  .fx-dg-agents {
+    flex-wrap: wrap;
+  }
+  .fx-dg-agents button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .fx-dg-cta .fx-btn-lg {
+    width: 100%;
+  }
+}
+
+/* Short session messages use the same keyboard/focus behavior in a content-sized dialog. */
+.fx-sheet.fx-dialog {
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  width: min(var(--fx-sheet-w), calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  border: 1px solid var(--fx-line);
+  border-radius: 8px;
+  animation: none;
+}
+.fx-dialog .fx-sheet-h { border-bottom: 0; }
+.fx-dialog .fx-sheet-b { flex: initial; padding-top: 0; }
+.fx-dialog .fx-compose { border-top: 0; padding: 0; }
+.fx-dialog .fx-compose > .fx-btn { justify-self: start; }
