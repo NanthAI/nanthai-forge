@@ -177,12 +177,13 @@ claim of full saved-history coverage. Recovery capture age is unknown unless
 supported by the separately retained capture receipt; connection time is not RPO.
 
 Reconfigure executable/credential references for this machine using existing
-check settings. Deliberately run a harmless synthetic check, with `SAVED_LANE_ID`
-from the inventory, and observe its exact run. This starts a new check; it does
-not resume the restored one. No acceptance is needed:
+check settings. Deliberately run a harmless synthetic check on a restored
+Candidate and observe its exact run. A saved Lane without a clean Candidate
+returns `NOT_FOUND`, so use the `viewId` of a restored run from `status`. This
+starts a new check; it does not resume the restored one. No acceptance is needed:
 
 ```sh
-export NODE_EXECUTABLE SAVED_LANE_ID
+export NODE_EXECUTABLE VIEW_ID
 node --input-type=module <<'JS' > drill-check.json
 console.log(JSON.stringify({name:'recovery-drill',executable:process.env.NODE_EXECUTABLE,
   args:['-e','console.log("recovery drill passed")'],environmentLabel:'Recovered machine'}));
@@ -190,7 +191,7 @@ JS
 nforge agent "$OWNER" define-check --command-file drill-check.json
 export DRILL_CHECK_ID
 node --input-type=module <<'JS' > drill-run.json
-console.log(JSON.stringify({laneId:process.env.SAVED_LANE_ID,checkId:process.env.DRILL_CHECK_ID}));
+console.log(JSON.stringify({viewId:process.env.VIEW_ID,checkId:process.env.DRILL_CHECK_ID}));
 JS
 nforge agent "$OWNER" run --command-file drill-run.json
 # If pending, retain its operationId and observe it; do not start another run.

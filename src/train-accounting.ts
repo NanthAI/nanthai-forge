@@ -4,7 +4,7 @@ import type { CheckRun, ChannelMove, WorkView } from './work-types.js';
 import type { LandingBatch, LandingEntry } from './landing-batch-types.js';
 
 export type CostRun = Pick<CheckRun, 'id' | 'startedAt' | 'backend'> &
-  Partial<Pick<CheckRun, 'queuedAt' | 'endedAt' | 'status' | 'viewId' | 'mainCheck'>>;
+  Partial<Pick<CheckRun, 'queuedAt' | 'endedAt' | 'status' | 'viewId' | 'mainCheck' | 'reusedFrom'>>;
 export const costCategories = [
   'landing',
   'diagnosis',
@@ -136,7 +136,7 @@ export function trainAccounting(runs: CostRun[], context: AccountingContext = {}
       } else physical.set(key, { category: selected, item: { ...item } });
     }
   };
-  for (const run of runs)
+  for (const run of runs.filter(run => !run.reusedFrom))
     record(
       runCost(run),
       run.mainCheck ? 'audit' : (purpose.get(run.id) ?? 'other'),

@@ -1,3 +1,5 @@
+import { WorkService } from './work.js';
+import { reuseMainCheck } from './landing-check-reuse.js';
 import { workProgress } from './work-progress.js';
 // SPDX-License-Identifier: Apache-2.0
 import { recoverOptimisticMain, recoveryResult } from './optimistic-recovery.js';
@@ -140,6 +142,7 @@ export async function drainPostAccept(
             continue;
           }
           const { view, runId, checkId, check, revision } = selected;
+          if (await reuseMainCheck(new WorkService(store.root), view, runId, check)) continue;
           runWork(
             store,
             {

@@ -377,79 +377,91 @@ export const interactionEvidenceSchema = interactionRequestSchema.extend({
   mainPaths: z.array(z.string()),
   overlap: z.array(z.string()),
 });
-export const checkRunSchema = z.object({
-  supersessionBaseline: id.optional(),
-  optimistic: z.boolean().optional(),
-  recovery: recoveryCheckSchema.optional(),
-  backend: checkBackendSchema.optional(),
-  id,
-  failureSummary: z.string().max(4096).optional(),
-  mainCheck: z.object({ channel: z.string() }).optional(),
-  viewId: id,
-  head: oid,
-  base: oid,
-  inputs: viewSchema.shape.inputs,
-  dependencies: z.array(dependencySchema),
-  check: checkSchema,
-  environment: checkEnvironmentSchema,
-  inputObservations: z.array(inputObservationSchema).optional(),
-  comparisonBase: oid.optional(),
-  interaction: interactionEvidenceSchema.nullable().optional(),
-  checkSelection: z
-    .object({
-      scope: z.enum(['docs', 'interaction', 'scoped', 'full']),
-      reason: z.string(),
-      tests: z.array(z.string()),
-      coverage: z
-        .object({
-          mode: z.literal('shadow'),
-          head: oid.optional(),
-          age: z.number().int().nonnegative().optional(),
-          currentCount: z.number().int().nonnegative(),
-          coverageCount: z.number().int().nonnegative(),
-          tests: z.array(z.string()),
-          fallback: z.string().nullable(),
-        })
-        .optional(),
-    })
-    .optional(),
-  status: z.enum([
-    'queued',
-    'preparing',
-    'running',
-    'passed',
-    'failed',
-    'cancelled',
-    'interrupted',
-    'runner-unavailable',
-    'runner-budget-exhausted',
-  ]),
-  startedAt: z.string(),
-  endedAt: z.string().optional(),
-  runner: z.object({ pid: z.number().int().positive(), host: z.string(), startTime: z.string().optional() }),
-  childPid: z.number().int().positive().optional(),
-  childStartTime: z.string().optional(),
-  queuedAt: z.string().optional(),
-  warnings: z.array(z.string()).optional(),
-  error: z.object({ code: z.string(), message: z.string() }).optional(),
-  cancellation: z
-    .object({
-      reason: z.enum(['command', 'superseded', 'signal', 'queue']),
-      at: z.string(),
-      actor: z.union([workActorSchema, z.object({ kind: z.literal('system'), name: z.string() })]).optional(),
-      details: z.string().optional(),
-      signal: z.string().optional(),
-      supersededBy: id.optional(),
-    })
-    .optional(),
-  cancelRequested: z.boolean().optional(),
-  exitCode: z.number().int().nullable().optional(),
-  signal: z.string().nullable().optional(),
-  details: z.string(),
-  playbookRunId: id.optional(),
-  artifacts: z.array(artifactSchema).optional(),
-  resourceUsage: resourceUsageSchema.optional(),
-});
+export const checkRunSchema = z
+  .object({
+    reusedFrom: z.object({ runId: id, endedAt: z.string(), evidence: oid }).optional(),
+    supersessionBaseline: id.optional(),
+    optimistic: z.boolean().optional(),
+    recovery: recoveryCheckSchema.optional(),
+    backend: checkBackendSchema.optional(),
+    id,
+    failureSummary: z.string().max(4096).optional(),
+    mainCheck: z.object({ channel: z.string() }).optional(),
+    viewId: id,
+    head: oid,
+    base: oid,
+    inputs: viewSchema.shape.inputs,
+    dependencies: z.array(dependencySchema),
+    check: checkSchema,
+    environment: checkEnvironmentSchema,
+    inputObservations: z.array(inputObservationSchema).optional(),
+    comparisonBase: oid.optional(),
+    interaction: interactionEvidenceSchema.nullable().optional(),
+    checkSelection: z
+      .object({
+        scope: z.enum(['docs', 'interaction', 'scoped', 'full']),
+        reason: z.string(),
+        tests: z.array(z.string()),
+        coverage: z
+          .object({
+            mode: z.literal('shadow'),
+            head: oid.optional(),
+            age: z.number().int().nonnegative().optional(),
+            currentCount: z.number().int().nonnegative(),
+            coverageCount: z.number().int().nonnegative(),
+            tests: z.array(z.string()),
+            fallback: z.string().nullable(),
+          })
+          .optional(),
+      })
+      .optional(),
+    status: z.enum([
+      'queued',
+      'preparing',
+      'running',
+      'passed',
+      'failed',
+      'cancelled',
+      'interrupted',
+      'runner-unavailable',
+      'runner-budget-exhausted',
+    ]),
+    startedAt: z.string(),
+    endedAt: z.string().optional(),
+    // A virtual reuse receipt has no process. Older readers reject PID 0 rather
+    // than stripping reusedFrom and treating it as an independently executed pass.
+    runner: z
+      .object({ pid: z.number().int().nonnegative(), host: z.string(), startTime: z.string().optional() })
+      .refine(runner => runner.pid > 0 || runner.host === 'retained-check'),
+    childPid: z.number().int().positive().optional(),
+    childStartTime: z.string().optional(),
+    queuedAt: z.string().optional(),
+    warnings: z.array(z.string()).optional(),
+    error: z.object({ code: z.string(), message: z.string() }).optional(),
+    cancellation: z
+      .object({
+        reason: z.enum(['command', 'superseded', 'signal', 'queue']),
+        at: z.string(),
+        actor: z
+          .union([workActorSchema, z.object({ kind: z.literal('system'), name: z.string() })])
+          .optional(),
+        details: z.string().optional(),
+        signal: z.string().optional(),
+        supersededBy: id.optional(),
+      })
+      .optional(),
+    cancelRequested: z.boolean().optional(),
+    exitCode: z.number().int().nullable().optional(),
+    signal: z.string().nullable().optional(),
+    details: z.string(),
+    playbookRunId: id.optional(),
+    artifacts: z.array(artifactSchema).optional(),
+    resourceUsage: resourceUsageSchema.optional(),
+  })
+  .refine(run => (run.runner.pid === 0) === Boolean(run.reusedFrom), {
+    message:
+      'A virtual check must retain its source run; executed checks must retain their process identity.',
+  });
 export const playbookSchema = z.object({
   id,
   name: z.string().trim().min(1),

@@ -69,6 +69,7 @@ export function queueObservation(
     ...diagnosis,
     checkStatus: run ? diagnosticStatus(run) : undefined,
     ...(entry.error ? { code: entry.error.code, message: entry.error.message } : {}),
+    ...(run?.reusedFrom ? { checkReuse: run.reusedFrom, message: run.details } : {}),
     ...(run && pendingActionsInfra(run) && entry.status !== 'cancelled'
       ? { code: run.error!.code, message: run.error!.message }
       : {}),

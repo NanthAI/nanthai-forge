@@ -63,7 +63,7 @@ test('runtime identity follows executable bytes for CLI and canonical location f
 });
 
 for (const changed of ['cli', 'nodeExecutable'])
-  test(`installed worker ${changed === 'cli' ? 'refuses changed controller contents' : 're-pins a Node location change'}`, async t => {
+  test(`installed worker ${changed === 'cli' ? 'accepts a different submitting CLI' : 're-pins a Node location change'}`, async t => {
     const f = await fixture(t, { remote: false });
     const input = await f.candidate('other-runtime.txt', undefined, false);
     const root = mkdtempSync(join(tmpdir(), 'forge-other-controller-'));
@@ -99,7 +99,7 @@ for (const changed of ['cli', 'nodeExecutable'])
         f.root,
         JSON.stringify(command),
       ]);
-      const expected = changed === 'cli' ? 'interrupted' : 'accepted';
+      const expected = 'accepted';
       await until(f, () => f.store.load().landingEntries?.[0]?.status === expected, 'runtime admission');
       const data = f.store.load();
       if (changed === 'nodeExecutable') {
@@ -108,10 +108,8 @@ for (const changed of ['cli', 'nodeExecutable'])
         assert.equal(data.channelMoves.length, 1);
         return;
       }
-      assert.match(data.landingEntries[0].reason, new RegExp(changed));
-      assert.match(data.landingEntries[0].reason, /new finish\/land operation/);
-      assert.equal(data.runs.length, 0);
-      assert.equal(data.channelMoves.length, 0);
+      assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
+      assert.equal(data.channelMoves.length, 1);
     } finally {
       await worker.stop();
     }

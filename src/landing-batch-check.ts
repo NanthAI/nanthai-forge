@@ -1,8 +1,8 @@
+import { admitLandingCheck } from './landing-check-admission.js';
 import { retainDiagnosisNode, validatePrefixRun, diagnosticStatus } from './landing-diagnosis.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 // SPDX-License-Identifier: Apache-2.0
 import { waitForAgentRun } from './agent-run-observer.js';
-import { retryWorkPhase } from './work-retry.js';
 import { batchEdit } from './landing-batch-store.js';
 import type { WorkService } from './work.js';
 import type { CheckRun } from './work-types.js';
@@ -80,29 +80,10 @@ export async function evaluateBatch(
     cancelledAt < 0 ? batch.prefixes : batch.prefixes.slice(0, cancelledAt),
     () => batch.mode,
     async (prefix, parent) => {
-      await retainDiagnosisNode(work, batch, prefix, parent, driver);
-      const first = work.store.select('landingEntries', batch.entryIds[0]!)!;
-      const recorded = work.store.select('runs', prefix.runId);
-      if (recorded) validatePrefixRun(work, batch, prefix, recorded);
-      // Completed exact-plan evidence needs no dispatch or controller replay.
-      if (!recorded || ['queued', 'preparing', 'running', 'interrupted'].includes(recorded.status)) {
-        await retryWorkPhase(prefix.runId, () =>
-          work.dispatch(
-            {
-              action: 'run-check',
-              operationId: prefix.runId,
-              viewId: prefix.viewId,
-              expectedHead: prefix.head,
-              checkId: first.checkId,
-              expectedDefinition: first.definition,
-              expectedEnvironment: batch.environment?.fingerprint ?? first.environment,
-            },
-            work.store.revision(),
-            { beforePublish: driver.beforePublish },
-          ),
-        );
+      if (!(await admitLandingCheck(work, batch, prefix, driver, waitMs, parent))) return 'queued';
+      const recorded = work.store.select('runs', prefix.runId)!;
+      if (['queued', 'preparing', 'running', 'interrupted'].includes(recorded.status))
         await waitForAgentRun(work.store, prefix.runId, waitMs);
-      }
       const run = work.store.select('runs', prefix.runId)!;
       validatePrefixRun(work, batch, prefix, run);
       await retainDiagnosisNode(work, batch, prefix, parent, driver, run);

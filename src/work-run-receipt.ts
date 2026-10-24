@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { z } from 'zod';
 import { localCost, unknownCost } from './check-cost.js';
 import { checkRunSchema } from './work-types.js';
-export const receiptSchema = checkRunSchema
+// Completion files contain outcome fields, not the run's process/source identity.
+export const receiptSchema = z
+  .object(checkRunSchema.shape)
   .pick({
     status: true,
     cancellation: true,

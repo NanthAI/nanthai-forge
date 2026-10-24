@@ -2,7 +2,7 @@
 
 What we are doing, in what order, and why. Six phases. Phases 1–3 are done. Phase 4 is in progress. Phase 5 is private alpha; Phase 6 is public beta. Open work items live in the [backlog](backlog.md); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
 
-Last updated: 2026-10-21.
+Last updated: 2026-10-24.
 
 ## Direction
 
@@ -60,21 +60,31 @@ Started on 2026-10-21. Work in order:
 
 1. **R3 metadata-only publication and return — done**, except the big-backlog measurement. Routine push fell from 95 minutes to about 3 minutes; push #21 took 186 seconds. See the [R2 storage plan](r2-storage-plan.md#r3-owner-derived-publication-and-source-return-done).
 2. **Carried-over fixes — done**: P03, P04, P12, P15 and P27; hosted-unsynced state; incremental deploy export; the Modal estimate.
-3. **Hosted Lanes**: start, save, compose, land, revert and abandon from the site with all Macs offline. Use a server-side landing queue with compare-and-swap main.
-4. **The lead's routine in the product**: batch landing and the routine deploy and push workflow.
-5. **Off-machine recovery**: recover the project without the owner's Mac.
-6. **Predictive overlap warnings**: show likely overlap while agents work.
-7. **Last: the agent-coordination benchmark**. Run forge-bench R3 with Forge coordination on, Forge coordination off and GitHub PRs. Use a real-history track on NanthAI Edge OSS and a synthetic track. Run a no-model preflight of every arm before the benchmark.
+3. **Hosted Lanes — built** (H01–H18b, H22a and H22b): start, save, compose, land, revert and abandon from the site with all Macs offline, through a server-side landing queue with compare-and-swap main. Checks run on the project's own GitHub Actions or Blacksmith runners. The H22b live smoke with a registered GitHub App moves into Phase 5 Bet 1, where the hosted path becomes the only accept path.
+4. **The lead's routine in the product — done**: `nforge land` batch landing with `--wait` progress, the landing train (S01–S17), automatic exchange, the release command and GitHub sync.
+5. **Off-machine recovery — done**: inventory, restore and reconnect, and weekly backups. The recovery drill passed on 2026-10-24 (recover in 9 seconds; see the [recovery drill](operations/recovery-drill.md)).
+6. **Predictive overlap warnings — done**: overlap alerts on save, and overlap-aware landing order.
+7. **CI speed — added 2026-10-23**: native TypeScript (typecheck 76 s → 34 s), timing-balanced shards, smarter test selection, fake timers in the slowest tests, reuse of a passed check, oxlint and oxfmt, and a landing that never stalls on one lost run.
+8. **Closure fixes — added 2026-10-24**: automatic Lane snapshots after file changes, read-only commands that never write, no-op landings that finish themselves without empty GitHub commits.
 
-## Phase 5: private alpha (planned)
+Moved to Phase 5: the agent-coordination benchmark (forge-bench R3), which now runs after overlap at first write exists (Bet 3), and the big-backlog push measurement.
 
-Goal: a few invited developers can use Forge on their own projects.
+## Phase 5: one authority, three bets, then private alpha (planned)
 
-- Trial with outside users.
-- A polished first project through GitHub import.
-- A self-hosted check worker (`nforge worker`) using the project's own compute, with contributor first-click approval.
-- Per-project usage counters.
-- Newcomer docs.
+Goal: Forge runs itself for the Forge team, with numbers to show it, before outside users arrive. The full plan with slices, acceptance criteria, metrics and the week-by-week critical path is in the [Phase 5 plan](phase5-plan.md). Reads that never write and automatic Lane snapshots are Phase 4 prerequisites.
+
+1. **Week 1: self-metrics and decision records.** Forge records eight numbers about itself, including operator interventions per landing, and owner decisions become records shown in Now, briefs and the making-of.
+2. **Bet 1: one authority, now, then delete (critical path, starts day one).** Prerequisites first: the authority switch with writer fencing, finish through the hosted landing queue, a one-time hosted seed, browser accept on the hosted path, a pull-based Mac runner and recovery that folds hosted-only work. Then cutover: hosted main is the only accept path, the Mac is a runner and a cache, and about 13,000–16,000 lines of dual-master code are deleted.
+3. **Storage spike, both ways.** A native store on R2 against Git-native objects, on the same criteria; the winner is decided after. Either way, Lanes become APFS reflink clones with snapshots.
+4. **Landing without an operator.** Land is a desired state driven by a server controller; no-op entries finish themselves; a stall alarm; check reuse keyed on content, so restarts, sleep and Wi-Fi loss re-run nothing and strand nothing.
+5. **Bet 2: per-Intent contract checks**, with the full suite continuous on `main`, flake-aware culprit finding, and trust earned per path per actor (owner approves defaults first).
+6. **Experiments E1–E3**, published next to the 2.36× landing figure whichever way they go.
+7. **Bet 3: coordination that bites.** Overlap at first write through a pre-edit hook for Claude Code and Codex, semantic conflicts from contract tests, and deterministic merge of edits to different declarations. The R3 coordination benchmark runs only after the hook lands.
+8. **After cutover: vocabulary consolidation.** Candidates first-class, Lanes as workspaces, about 37 actions down to start, save and land plus reads, and a CLI generated from the MCP surface.
+
+**Frozen until E1 and E3 have numbers and Bet 1 is cut over:** browser editing (H19a), two-way GitHub sync (H23 and H24), H19b, H20 and H21, hosted landing gaps not needed by Bet 1, CI adapters, the landing timeline UI and CI insights.
+
+**After the bets:** a trial with outside users, a polished first project through GitHub import, and newcomer docs.
 
 ## Phase 6: public beta (planned)
 

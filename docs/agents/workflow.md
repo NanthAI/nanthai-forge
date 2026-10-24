@@ -410,6 +410,33 @@ and composes cleanly before the acceptance CAS. File/directory collisions count 
 overlap, even when two additions have identical bytes. Missing provenance, stale evidence, overlaps or conflicts use the ordinary
 sync/compose/re-check path in finish. Checks never hold Work, Lane or landing locks.
 
+Native batch landings reuse retained passed checks across resubmissions when the
+composed file paths, bytes and modes, check definition, environment and observed
+declared inputs agree. Scoped and custom checks also require the original
+base/comparison source, ordered Lane inputs and dependencies. Full standard checks
+can reuse identical source after acceptance or a main audit changes composition
+metadata. Main audits consult the same full-plan evidence before requesting a new
+controller. Concurrent requests with the same exact execution inputs adopt one
+reserved run and its Candidate before dispatch; its detached controller executes
+once, and both requests observe the same result, including failure. Cancelling
+one request leaves a check needed by another request running.
+Remote reuse also compares the retained runner recipe, lockfile, selected scope/tests
+and shard count with a freshly prepared plan. It adopts the original validated shard
+placement despite advisory timing-history changes; selection explanations and shadow
+coverage diagnostics and billing safety margins do not change execution. Local reuse requires admitted
+Node binary bytes and matching scope/selection; unobserved external executables,
+passthrough values and external claims fall back to a normal run. Missing or corrupt
+completion/plan evidence, failed and cancelled runs are never reused.
+
+A reused run records `reusedFrom.runId` and the original completion time. Progress
+and queue status say `reused check <run> from <time>`; the original run owns logs
+and compute costs. Virtual receipts have no process (`runner.pid:0`), so older
+readers reject them instead of silently dropping reuse provenance. Submitting CLI builds and temporary run/View identities do not
+change check inputs. Node/OS, environment and actual runner recipe changes still
+prevent reuse. Check-only commands and `assess-check-inputs` retain their existing
+behavior.
+
+
 The acceptance receipt's structured `fastPath` records the policy, checked
 Candidate/head/run, definition, runtime, previous and composed main, both path sets and
 the required full post-accept check. The accepted Candidate pins the resulting source;

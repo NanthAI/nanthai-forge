@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { validateReusedCheck } from './check-reuse-evidence.js';
 import { invariant } from './errors.js';
 import { diagnosticCause, batchDiagnosis } from './landing-observation.js';
 export { diagnosticCause, diagnosticStatus, batchDiagnosis } from './landing-observation.js';
@@ -38,6 +39,7 @@ export function validatePassingPrefix(work: WorkService, batch: LandingBatch, pr
   const run = work.store.select('runs', prefix.runId);
   invariant(run, 'CHECK_REQUIRED', 'The passing prefix needs its original recorded check.');
   validatePrefixRun(work, batch, prefix, run);
+  validateReusedCheck(work.store, run);
   invariant(
     run.status === 'passed' &&
       !!run.endedAt &&

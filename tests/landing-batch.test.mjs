@@ -503,7 +503,7 @@ test('a retained batch executes and accepts with its recorded runtime after driv
   assert.equal(data.landingEntries[0].status, 'accepted');
 });
 
-test('incompatible queued runtime diagnostics name Node, CLI and check settings without values', async t => {
+test('incompatible queued runtime diagnostics name Node and check settings without values', async t => {
   const f = await fixture(t);
   await f.candidate('changed-runtime.txt');
   await batchEdit(f.work, 'synthetic-runtime', data => {
@@ -519,7 +519,7 @@ test('incompatible queued runtime diagnostics name Node, CLI and check settings 
   assert.match(entry.reason, /node/);
   assert.match(entry.reason, /FORGE_CHECK_SCOPED/);
   assert.match(entry.reason, /nodeExecutable/);
-  assert.match(entry.reason, /cli/);
+  assert.doesNotMatch(entry.reason, /cli/);
   assert.match(entry.reason, /owner service.*submitter/);
   assert.match(entry.reason, /new finish\/land operation/);
   assert.doesNotMatch(entry.reason, /secret/);
@@ -733,7 +733,7 @@ test('a changed check definition still interrupts before dispatch', async t => {
   assert.equal(f.store.load().runs.length, 0);
 });
 
-test('a replacement runtime cannot dispatch an unstarted retained batch', async t => {
+test('a replacement CLI preserves an unstarted retained batch', async t => {
   const f = await fixture(t, { remote: false });
   await f.candidate('unstarted.txt');
   await batchEdit(f.work, 'selected', data => selectBatch(f.work, data, 'main'));
@@ -742,10 +742,9 @@ test('a replacement runtime cannot dispatch an unstarted retained batch', async 
   });
   await drainLandingBatches(f.work, 'main');
   const data = f.store.load();
-  assert.equal(data.landingBatches[0].status, 'superseded');
-  assert.equal(data.landingEntries[0].status, 'interrupted');
-  assert.match(data.landingEntries[0].reason, /cli/);
-  assert.equal(data.runs.length, 0);
+  assert.equal(data.landingBatches[0].status, 'completed');
+  assert.equal(data.landingEntries[0].status, 'accepted');
+  assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
 });
 
 test('explicit PATH passthrough remains a check-relevant submission pin', async t => {

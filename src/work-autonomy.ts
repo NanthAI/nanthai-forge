@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { validateReusedCheck } from './check-reuse-evidence.js';
 import { userInfo } from 'node:os';
 import { NativeSource } from './native-source.js';
 import { reviewPaths } from './native-source-review.js';
@@ -123,6 +124,7 @@ export function enforceAcceptance(
     'CHECK_REQUIRED',
     'Automatic acceptance requires a passing check on this exact Candidate with its recorded check definition.',
   );
+  validateReusedCheck(store, run);
   return {
     actor: actor.id,
     runId: run.id,

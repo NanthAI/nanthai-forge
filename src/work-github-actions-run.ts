@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { actionsCheckRuntime } from './check-backend.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { retainCheckCoverage } from './check-coverage.js';
 import { actionsCost, actionsRate, unknownCost } from './check-cost.js';
@@ -60,7 +61,7 @@ export async function launchGithubActionsRun(
     const repo = retained?.repo ?? policy?.repo,
       runsOn = retained?.runsOn ?? policy?.runsOn ?? 'ubuntu-latest';
     invariant(repo, 'BAD_ARGUMENT', 'GitHub Actions runner requires checks.repo (owner/name).');
-    const runtime = `github-actions;repo:${repo};node:24.22.1;runs-on:${runsOn};unfinished-retry:1`;
+    const runtime = actionsCheckRuntime(repo, runsOn);
     let plan: ModalPlan;
     let executionAllowed = true;
     if (existsSync(join(path, 'modal-plan.json'))) {

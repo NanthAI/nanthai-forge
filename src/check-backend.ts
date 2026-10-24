@@ -48,6 +48,10 @@ export const checkBackendSchema = z.object({
   costUsage: modalCostUsageSchema.optional(),
   estimatedCostUsd: z.number().nonnegative().finite().optional(),
 });
+/** Shared by dispatch and retained-evidence comparison. */
+export const actionsCheckRuntime = (repo: string | undefined, runsOn = 'ubuntu-latest') =>
+  `github-actions;repo:${repo};node:24.22.1;runs-on:${runsOn};unfinished-retry:1`;
+
 export function checkRoute(
   runner: 'local' | 'modal' | 'github-actions',
   check: CheckRun['check'],

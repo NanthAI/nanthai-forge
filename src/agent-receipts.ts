@@ -51,7 +51,8 @@ export const runReceipt = (run: CheckRun) => ({
   cancelRequested: run.cancelRequested ?? false,
   ...(run.cancellation ? { cancellation: run.cancellation } : {}),
   coverage: 'Selected command outcome; external inputs and review coverage remain unknown.',
-  reuse: 'disabled',
+  reuse: run.reusedFrom ? 'reused' : 'disabled',
+  ...(run.reusedFrom ? { reusedFrom: run.reusedFrom, diagnostic: run.details } : {}),
   humanReview: 'separate',
   ...(run.status === 'failed' ||
   run.status === 'interrupted' ||
@@ -59,7 +60,11 @@ export const runReceipt = (run: CheckRun) => ({
   run.status === 'runner-budget-exhausted'
     ? { diagnostic: run.details.slice(0, 500), diagnosticTruncated: run.details.length > 500 }
     : {}),
-  logs: { stdout: { offset: 0 }, stderr: { offset: 0 } },
+  logs: {
+    ...(run.reusedFrom ? { runId: run.reusedFrom.runId } : {}),
+    stdout: { offset: 0 },
+    stderr: { offset: 0 },
+  },
 });
 export const acceptanceReceipt = (move: WorkData['channelMoves'][number]) => ({
   operationId: move.id,

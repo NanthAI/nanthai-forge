@@ -80,4 +80,4 @@ export function changedLandingEnvironment(before: CheckEnvironment, after: Check
   );
 }
 export const landingPinsChanged = (fields: string[]) =>
-  `Queued landing pins changed: ${fields.join(', ')}. Configure the owner service and submitter with the same installed CLI, Node runtime and check settings, then submit a new finish/land operation.`;
+  `Queued landing pins changed: ${fields.join(', ')}. Configure the owner service and submitter with compatible Node runtime and check settings, then submit a new finish/land operation.`;

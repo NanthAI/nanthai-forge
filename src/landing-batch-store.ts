@@ -160,6 +160,8 @@ export function selectBatch(
 ): LandingBatch | undefined {
   interruptStaleLandingInputs(data, channel, new NativeSource(work.store.root));
   const environment = checkEnvironment();
+  // The submitting CLI does not execute the check. The owner uses the pinned
+  // definition/environment and runner recipe; its CLI build is not an input.
   for (const active of activeBatches(data, channel)) {
     if (started?.has(active.id)) continue;
     // Older batches did not retain a runtime snapshot. Recover it from actual
@@ -196,7 +198,9 @@ export function selectBatch(
     incompatible.push(
       ...active.entryIds.flatMap(id => {
         const entry = data.landingEntries?.find(entry => entry.id === id);
-        return entry?.runtimeSnapshot ? changedLandingRuntime(entry.runtimeSnapshot) : [];
+        return entry?.runtimeSnapshot
+          ? changedLandingRuntime(entry.runtimeSnapshot).filter(name => name !== 'cli')
+          : [];
       }),
     );
     if (active.environment && !incompatible.length) return active;
@@ -213,7 +217,8 @@ export function selectBatch(
       : entry.environment === environment.fingerprint
         ? []
         : ['environment fingerprint (legacy entry)'];
-    if (entry.runtimeSnapshot) fields.push(...changedLandingRuntime(entry.runtimeSnapshot));
+    if (entry.runtimeSnapshot)
+      fields.push(...changedLandingRuntime(entry.runtimeSnapshot).filter(name => name !== 'cli'));
     if (definition !== entry.definition) fields.unshift('check definition');
     if (data.views.find(view => view.id === entry.viewId)?.head !== entry.head)
       fields.unshift('candidate head');

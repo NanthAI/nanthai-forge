@@ -45,7 +45,8 @@ const shardSchema = z.array(
 /** Observe completion bytes and local death without recovery writes or remote adoption. */
 export function waitRun(store: WorkStore, original: CheckRun): { event: WaitEvent; children: WaitEvent[] } {
   const run = structuredClone(original),
-    path = `check-${run.id}`;
+    outputId = run.reusedFrom?.runId ?? run.id,
+    path = `check-${outputId}`;
   if (activeCheck(run.status)) {
     const receipt = receiptSchema.safeParse(waitJson(store, `${path}/result.json`));
     if (
@@ -99,7 +100,7 @@ export function waitRun(store: WorkStore, original: CheckRun): { event: WaitEven
       store,
       {
         action: 'read-check-output',
-        operationId: run.id,
+        operationId: outputId,
         stream: 'stdout',
         offset: 0,
         bytes: 65536,
@@ -140,6 +141,7 @@ export function waitRun(store: WorkStore, original: CheckRun): { event: WaitEven
       ok: run.status === 'passed',
       failureClass,
       reason: run.error?.message ?? run.details,
+      ...(run.reusedFrom ? { reusedFrom: run.reusedFrom } : {}),
       failureSummary: run.failureSummary ?? null,
       logPath: join(store.directory, path, 'stdout.log'),
       stderrPath: join(store.directory, path, 'stderr.log'),
