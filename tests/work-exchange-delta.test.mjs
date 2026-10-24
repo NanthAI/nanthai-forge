@@ -236,6 +236,7 @@ test('only post-accept check links inherit validated receipt dependencies; alter
   const after = structuredClone(before);
   after.revision++;
   after.channelMoves[0].postAcceptRunId = randomUUID();
+  after.channelMoves[0].postAcceptAuditRunId = randomUUID();
   let p = pair(before, after);
   assert.deepEqual(
     [...(await channelMetadataChanges(p.a.root, p.b.root, p.delta.changes, p.read))],

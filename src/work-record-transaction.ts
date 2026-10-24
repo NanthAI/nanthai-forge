@@ -29,6 +29,7 @@ export type WorkRecord<K extends WorkCollection> = NonNullable<WorkData[K]> exte
 export class WorkRecordTransaction {
   private readonly io;
   private readonly original: string;
+  private readonly initial: string;
 
   constructor(
     readonly directory: string,
@@ -38,6 +39,7 @@ export class WorkRecordTransaction {
     assertWorkFormat(manifest.fields);
     this.io = recordIO(directory, false);
     this.original = digest(bytes);
+    this.initial = JSON.stringify(manifest);
   }
   get revision() {
     return this.manifest.fields.revision as number;
@@ -167,6 +169,7 @@ export class WorkRecordTransaction {
     );
     const record = this.validate(collection, { ...extensions, ...(value as object) }),
       index = this.index(collection);
+    if (isDeepStrictEqual(before, record)) return record;
     const header = readFragment(this.directory, this.hash(collection, position)),
       fields: Record<string, unknown> = Object.create(null),
       arrays: Record<string, RecordCollection> = Object.create(null);
@@ -287,6 +290,7 @@ export class WorkRecordTransaction {
         header.keys.map(key => [key, Object.hasOwn(header.arrays, key) ? [] : header.fields[key]]),
       ),
     );
+    if (isDeepStrictEqual(jsonValue(before), jsonValue(header.fields))) return position;
     this.keys(this.index(collection), position, recordKeys(before), recordKeys(header.fields));
     this.setHash(this.index(collection), position, this.io.put(header));
     return position;
@@ -413,16 +417,18 @@ export class WorkRecordTransaction {
       'Work changed. Refresh before retrying; nothing was overwritten.',
     );
   }
-  commit(revision = this.revision + 1) {
+  commit(revision?: number) {
+    const nextRevision = revision ?? this.revision + 1;
     assertWorkFormat(this.manifest.fields);
     invariant(
-      Number.isSafeInteger(revision) && revision >= this.revision,
+      Number.isSafeInteger(nextRevision) && nextRevision >= this.revision,
       'BAD_ARGUMENT',
       'Work revision is invalid.',
     );
     this.assertCurrent();
-    this.manifest.fields.revision = revision;
+    if (revision === undefined && JSON.stringify(this.manifest) === this.initial) return this.revision;
+    this.manifest.fields.revision = nextRevision;
     publishRecords(this.directory, this.manifest);
-    return revision;
+    return nextRevision;
   }
 }

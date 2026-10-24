@@ -1,3 +1,4 @@
+import { postAcceptMoves } from './post-accept-coverage.js';
 import { previewMeasurements } from './preview-accounting.js';
 import { accountingContext } from './accounting-records.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -51,7 +52,7 @@ export function readMakingOf(store: WorkStore, intentId: string) {
         return {
           batches: data.landingBatches ?? [],
           entries: data.landingEntries ?? [],
-          moves: data.channelMoves,
+          moves: postAcceptMoves(data.channelMoves),
           previews: previewMeasurements(store.directory).rows,
         };
       })();

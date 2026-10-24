@@ -47,13 +47,15 @@ export function testImportGraph(files, scriptsChanged = []) {
           item => item.link || /^(?:file:|workspace:|\.|\/)/.test(item.resolved ?? ''),
         )
       )
-        return { error: 'Local or workspace package dependency cannot be classified as external' };
+        return {
+          error: 'Local or workspace package dependency cannot be classified as external: package-lock.json',
+        };
       for (const path of Object.keys(locked)) {
         const name = path.split('node_modules/').pop();
         if (name) packages.add(name);
       }
     } catch {
-      return { error: 'Cannot classify locked external imports' };
+      return { error: 'Cannot classify locked external imports: package-lock.json' };
     }
   }
   const external = value =>

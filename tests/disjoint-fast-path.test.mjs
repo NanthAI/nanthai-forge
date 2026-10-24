@@ -1,3 +1,4 @@
+import { postAcceptMoves } from '../dist/post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import { latestWorkFormat } from '../dist/work-format.js';
@@ -316,7 +317,14 @@ test('burst post-accept requests coalesce to newest main, force full, and reconc
   assert.equal(runs[0].status, 'passed');
   assert.equal(runs[0].head, last.head);
   assert.equal(runs[0].environment.env.FORGE_CHECK_FULL, '1');
-  assert.equal(new Set(d.channelMoves.filter(m => m.postAccept).map(m => m.postAcceptRunId)).size, 1);
+  assert.equal(
+    new Set(
+      postAcceptMoves(d.channelMoves)
+        .filter(m => m.postAccept)
+        .map(m => m.postAcceptRunId),
+    ).size,
+    1,
+  );
 });
 
 test('red post-accept main keeps accepted source and retains failing run', async t => {

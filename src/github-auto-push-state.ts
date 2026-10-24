@@ -1,8 +1,11 @@
+import { postAcceptMoves } from './post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
 import { effectivePolicy } from './autonomy-policy.js';
 import type { WorkData } from './work-types.js';
 export const latestMain = (data: WorkData) =>
-  data.channelMoves.filter(move => move.channel === 'main' && move.status === 'accepted').at(-1);
+  postAcceptMoves(data.channelMoves)
+    .filter(move => move.channel === 'main' && move.status === 'accepted')
+    .at(-1);
 /** A fast/scoped acceptance waits for its full post-accept check. */
 export function isGreenMain(data: WorkData) {
   const move = latestMain(data);

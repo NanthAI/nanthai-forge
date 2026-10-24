@@ -1,3 +1,4 @@
+import { postAcceptMoves } from './post-accept-coverage.js';
 import { optimisticLanding } from './autonomy-policy.js';
 import { ownerRootNotice, updateOwnerRoot } from './owner-root.js';
 import { readHostState } from './host-binding.js';
@@ -181,6 +182,7 @@ export function nativeStatus(store: WorkStore, data: WorkData, options: { compac
   });
   return {
     ...data,
+    channelMoves: postAcceptMoves(data.channelMoves),
     pendingStatus: pendingStatus(data, {}, null),
     repairNotices: landingRepairNotices(store).map(notice => decorateRepair(store, notice)),
     ownerRoot: ownerRootNotice(store),

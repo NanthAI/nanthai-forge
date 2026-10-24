@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { postAcceptMoves } from './post-accept-coverage.js';
 import { WorkService } from './work.js';
 import { reuseMainCheck } from './landing-check-reuse.js';
 import { checkServiceEnv } from './worker-environment.js';
@@ -24,7 +25,7 @@ export function wakePostAccept(store: WorkStore) {
     WorkStore['load']
   >['channelMoves'];
   if (
-    !moves.some(move => {
+    !postAcceptMoves(moves).some(move => {
       if (!move.postAccept) return false;
       const run = move.postAcceptRunId && store.select('runs', move.postAcceptRunId);
       return (

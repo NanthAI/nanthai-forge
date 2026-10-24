@@ -1,3 +1,4 @@
+import { postAcceptMoves } from './post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
 import { modalRunCost, unknownCost, type CheckCost } from './check-cost.js';
 import type { CheckRun, ChannelMove, WorkView } from './work-types.js';
@@ -28,7 +29,8 @@ export type AccountingBatch = Pick<LandingBatch, 'id' | 'status' | 'entryIds' | 
 export type AccountingContext = {
   batches?: AccountingBatch[];
   entries?: LandingEntry[];
-  moves?: Pick<ChannelMove, 'id' | 'status' | 'at' | 'postAcceptRunId'>[];
+  moves?: (Pick<ChannelMove, 'id' | 'status' | 'at' | 'postAcceptRunId'> &
+    Partial<Pick<ChannelMove, 'channel' | 'postAccept' | 'postAcceptAuditRunId'>>)[];
   previews?: PreviewMeasurement[];
 };
 export function runCost(run: CostRun): CheckCost {
@@ -156,6 +158,7 @@ export function trainAccounting(runs: CostRun[], context: AccountingContext = {}
     group.unknownAllowanceExecutions += Number(item.allowanceUnits == null);
     group.unknownRetryExecutions += Number(item.retry == null);
   }
+  const moves = postAcceptMoves(context.moves ?? []);
   const runById = new Map(runs.map(run => [run.id, run]));
   const submissions = (context.entries ?? []).map(entry => {
     const related = (context.batches ?? []).filter(batch => batch.entryIds.includes(entry.id));
@@ -165,7 +168,7 @@ export function trainAccounting(runs: CostRun[], context: AccountingContext = {}
     const first = entry.firstSelectedAt
       ? ms(entry.firstSelectedAt)
       : Math.min(...attempts.map(run => ms(run.queuedAt ?? run.startedAt)).filter(Number.isFinite));
-    const receipt = context.moves?.find(move => move.id === entry.acceptanceId && move.status === 'accepted');
+    const receipt = moves.find(move => move.id === entry.acceptanceId && move.status === 'accepted');
     const terminal = ['accepted', 'conflict', 'failed', 'cancelled', 'interrupted'].includes(entry.status);
     // A run ending is not an acceptance/cancellation timestamp. Legacy terminal timestamps stay unknown.
     const ended = receipt ? ms(receipt.at) : terminal ? ms(entry.terminalAt) : NaN;

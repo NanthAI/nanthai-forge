@@ -1,3 +1,4 @@
+import { postAcceptMoves } from './post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
 import { previewMeasurements } from './preview-accounting.js';
 import { PeersCache } from './agent-peers-cache.js';
@@ -15,7 +16,7 @@ export function accountingRecords<K extends WorkCollection, T>(
   const cache = new PeersCache(root),
     index = tx.manifest.collections[collection];
   return (index?.pages ?? []).flatMap((hash, page) => {
-    const key = `accounting-page-v3:${collection}:${hash}`,
+    const key = `accounting-page-v4:${collection}:${hash}`,
       cached = cache.read<T[]>(key);
     if (cached) return cached;
     const rows = Array.from({ length: Math.min(pageSize, index!.count - page * pageSize) }, (_, offset) =>
@@ -49,12 +50,22 @@ export function accountingContext(root: string, tx: WorkRecordTransaction) {
       }),
     ),
     entries: accountingRecords(root, tx, 'landingEntries', row => row),
-    moves: accountingRecords(root, tx, 'channelMoves', ({ id, status, at, postAcceptRunId }) => ({
-      id,
-      status,
-      at,
-      ...(postAcceptRunId ? { postAcceptRunId } : {}),
-    })),
+    moves: postAcceptMoves(
+      accountingRecords(
+        root,
+        tx,
+        'channelMoves',
+        ({ id, status, at, channel, postAccept, postAcceptRunId, postAcceptAuditRunId }) => ({
+          id,
+          status,
+          at,
+          channel,
+          ...(postAccept ? { postAccept } : {}),
+          ...(postAcceptRunId ? { postAcceptRunId } : {}),
+          ...(postAcceptAuditRunId ? { postAcceptAuditRunId } : {}),
+        }),
+      ),
+    ),
     previews: previewMeasurements(tx.directory).rows,
   };
 }

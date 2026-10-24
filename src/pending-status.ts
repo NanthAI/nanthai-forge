@@ -1,3 +1,4 @@
+import { postAcceptMoves } from './post-accept-coverage.js';
 import { batchDiagnosis, diagnosticCause } from './landing-observation.js';
 import type { LandingWorkerStatus } from './landing-worker-status.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -300,7 +301,7 @@ export function pendingStatus(
         : 'incomplete';
   const github = data.githubSync;
   const pushed = github?.commits[(github?.pushed ?? 0) - 1];
-  const audits = moves
+  const audits = postAcceptMoves(moves)
     .filter(move => move.postAccept)
     .map(move => {
       const run = data.runs.find(item => item.id === move.postAcceptRunId);

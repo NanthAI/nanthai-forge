@@ -191,8 +191,10 @@ export async function channelMetadataChanges(
         readRecord(old.get(id)!.record, read, change.collection),
         readRecord(next.get(id)!.record, read, change.collection),
       ]);
-      const { postAcceptRunId: _oldRun, ...a } = prior;
-      const { postAcceptRunId: _newRun, ...b } = current;
+      const { postAcceptRunId: _oldRun, postAcceptAuditRunId: _oldAudit, ...a } = prior;
+      const { postAcceptRunId: _newRun, postAcceptAuditRunId: _newAudit, ...b } = current;
+      void _oldAudit;
+      void _newAudit;
       void _oldRun;
       void _newRun;
       if (JSON.stringify(a) === JSON.stringify(b)) metadataOnly.add(id);

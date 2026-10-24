@@ -1,3 +1,4 @@
+import { postAcceptMoves } from './post-accept-coverage.js';
 import { landingWorkerSignal, assertLandingWorkerActive } from './landing-worker-context.js';
 import { withDetachedChecks } from './check-execution-context.js';
 import { candidateCommand } from './candidate-names.js';
@@ -240,6 +241,7 @@ export class WorkService {
       const environment = checkEnvironment();
       return {
         ...data,
+        channelMoves: postAcceptMoves(data.channelMoves),
         pendingStatus: pendingStatus(data, {}, null),
         repairNotices: landingRepairNotices(this.store).map(notice => decorateRepair(this.store, notice)),
         capabilities: {

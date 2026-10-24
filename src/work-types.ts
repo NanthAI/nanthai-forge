@@ -753,6 +753,7 @@ export const channelMoveSchema = z.object({
   fastPath: fastPathEvidenceSchema.optional(),
   acceptanceRequest: oid.optional(),
   postAcceptRunId: id.optional(),
+  postAcceptAuditRunId: id.optional(),
   optimisticRecovery: z
     .object({
       auditRunId: id,

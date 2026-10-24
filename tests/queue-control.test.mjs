@@ -1,3 +1,4 @@
+import { postAcceptMoves } from '../dist/post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -165,7 +166,7 @@ test('audits coalesce to latest main and retry pre-empted work with a distinct r
   const data = auditData();
   const selected = selectMainAudit(data);
   assert.equal(selected.view.head, 'latest');
-  assert.ok(data.channelMoves.every(move => move.postAcceptRunId === selected.runId));
+  assert.ok(postAcceptMoves(data.channelMoves).every(move => move.postAcceptRunId === selected.runId));
   data.runs.push({
     id: selected.runId,
     head: 'latest',

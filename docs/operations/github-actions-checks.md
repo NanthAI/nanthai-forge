@@ -33,6 +33,16 @@ an unstarted old-runtime plan needs a new check on the fixed runtime.
 Arbitrary commands run once in the static job. Candidate sources must include the
 Actions-aware standard check script to use standard sharding.
 
+The owner plans remote test selection with its installed selector, reading the
+pinned Candidate as data. It does not execute the Candidate's selector to plan a
+run. The merge-queue benchmark instead runs the selector shipped in its checked
+tree. Comparing their selections therefore requires the same selector version,
+as well as the same changed paths and source bytes. Updating repository selector
+code alone does not update an already installed owner runtime. Retained
+`changes.json`, `selection.json` and the digest-bound plan distinguish comparison
+paths from conservative selection; lockfile graph fallbacks name
+`package-lock.json` in the recorded reason.
+
 New plans use the owner's `.forge/work/test-timings.json` history for both explicit
 and automatic shard counts. Complete per-file runner reports update a local EWMA
 (30% newest observation) when a passed or failed check receipt is reconciled;

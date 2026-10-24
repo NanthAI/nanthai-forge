@@ -442,6 +442,8 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
               id,
               reason: 'No longer eligible or not found; it changed since the dry run.',
             });
+      // An empty automatic sweep has no action or replayable effect to journal.
+      if (automatic && !chosen.length && !replay) return { items: chosen, skipped: current.skipped };
       // Children first: a Lane directory removal covers its deps entries.
       const tx = automatic ? store.records() : undefined;
       if (tx && automatic) {
@@ -453,9 +455,7 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
             at: new Date().toISOString(),
             action: {
               actor: automatic.actor,
-              summary: chosen.length
-                ? `Clean regenerable copies: ${chosen.map(i => i.path).join(', ')}`
-                : 'No eligible regenerable copies to clean',
+              summary: `Clean regenerable copies: ${chosen.map(i => i.path).join(', ')}`,
               undo: 'Run reopen with the Lane id to re-materialize its retained head. Checks reconstruct workspaces when run again. Restore Lane dependencies with npm ci --ignore-scripts and rerun the build; retained source, log tails and artifacts remain. Seven-day retention removes older copies and log prefixes; those prefixes cannot be reconstructed. Expired closed-Lane auto-snapshot pointers and caches cannot be restored; object collection can later reclaim their otherwise unreachable unsaved source.',
             },
           });
@@ -512,7 +512,9 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
   return {
     revision: store.revision(),
     result: automatic
-      ? (JSON.parse(store.select('automaticActions', automatic.id)!.result!) as typeof result)
+      ? (JSON.parse(
+          store.select('automaticActions', automatic.id)?.result ?? JSON.stringify(result),
+        ) as typeof result)
       : {
           ...result,
           ...(!command.apply && kinds.includes('auto-snapshots')

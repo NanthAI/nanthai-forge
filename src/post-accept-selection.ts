@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { postAcceptMoves } from './post-accept-coverage.js';
 import { recoveryAllowed } from './optimistic-recovery.js';
 import { finishChild } from './agent-finish-journal.js';
 import type { WorkData } from './work-types.js';
@@ -6,7 +7,7 @@ import type { WorkData } from './work-types.js';
 /** Called under the owner lock. Superseded requests point at the newest audit;
  * cancelled/interrupted audits retain evidence and get a new execution identity. */
 export function selectMainAudit(data: WorkData, push?: { channel: string; checkId: string }) {
-  const requested = data.channelMoves
+  const requested = postAcceptMoves(data.channelMoves)
     .filter(move => move.postAccept)
     .map(move => ({ move, checkId: move.postAccept!.checkId }));
   if (push) {
@@ -74,8 +75,9 @@ export function selectMainAudit(data: WorkData, push?: { channel: string; checkI
     at: new Date().toISOString(),
   };
   if (!existing) data.views.push(view);
-  for (const item of requested.filter(item => item.move.channel === newest.move.channel))
-    item.move.postAcceptRunId = runId;
+  main.postAcceptAuditRunId = runId;
+  // Preserve the direct pointer for the newest request (including explicit push).
+  if (requested.some(item => item.move.id === main.id)) main.postAcceptRunId = runId;
   data.schema = Math.max(data.schema, 13) as WorkData['schema'];
   return { view, runId, checkId: newest.checkId };
 }

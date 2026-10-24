@@ -1,3 +1,4 @@
+import { postAcceptMoves } from './post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -68,7 +69,7 @@ export function latestCheckCoverage(store: WorkStore, main: string): CoverageInp
   try {
     const tx = store.readRecords(),
       data = tx ? tx.data() : store.load();
-    const moves = (tx ? tx.all('channelMoves', 'main', 'channel') : data.channelMoves).filter(
+    const moves = postAcceptMoves(tx ? tx.all('channelMoves', 'main', 'channel') : data.channelMoves).filter(
       move => move.channel === 'main' && move.status === 'accepted',
     );
     const reverseIndex = moves

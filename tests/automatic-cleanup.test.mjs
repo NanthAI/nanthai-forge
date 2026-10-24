@@ -325,10 +325,10 @@ test('terminal check with changed source keeps workspace and records why', async
   const saved = allRecords(p.store, 'runs')[0],
     directory = join(p.store.directory, `check-${saved.id}`);
   assert.equal(readFileSync(join(directory, 'workspace', 'file.txt'), 'utf8'), 'changed');
-  const skipped = allRecords(p.store, 'automaticActions').flatMap(item =>
-    item.result ? JSON.parse(item.result).skipped : [],
-  );
-  assert.match(skipped.find(item => item.runId === saved.id).reason, /[Ss]ource differs/);
+  const before = p.store.revision();
+  const cleanup = automaticCleanup(p.store, randomUUID(), 'test', { runId: saved.id });
+  assert.match(cleanup.skipped.find(item => item.runId === saved.id).reason, /[Ss]ource differs/);
+  assert.equal(p.store.revision(), before, 'a skipped-only sweep retains no new action');
 });
 
 test('running check survives automatic cleanup, then is cleaned after durable terminal evidence', async t => {

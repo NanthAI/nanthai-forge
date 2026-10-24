@@ -3,7 +3,15 @@ import './check-runtime.mjs';
 import test from 'node:test';
 import { mockProcessCoverage } from './cleanup-process-fixture.mjs';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, existsSync } from 'node:fs';
+import {
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  mkdirSync,
+  existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -21,6 +29,7 @@ import { serveRepository } from '../dist/http.js';
 import { execFileSync } from 'node:child_process';
 import { localAgent } from '../dist/work-autonomy.js';
 import { agentClean } from '../dist/agent-clean.js';
+import { allRecords } from '../dist/agent-lifecycle.js';
 import { git } from './helpers.mjs';
 async function project(t, native = true) {
   const root = mkdtempSync(join(tmpdir(), 'forge-autonomy-'));
@@ -268,18 +277,36 @@ test('autonomous cleanup only touches eligible copies and records regeneration i
   assert.equal(done.status, 'accepted');
   assert.equal(existsSync(join(lane.path, 'node_modules')), false);
   assert.equal(existsSync(lane.path), false);
-  const action = p.store.select('automaticActions', done.acceptance.acceptanceId);
+  const cleanup = done.acceptance.completed.cleanup.find(item => item.laneId === lane.laneId).cleanup,
+    action = allRecords(p.store, 'automaticActions').find(
+      item =>
+        item.result &&
+        (JSON.parse(item.result).removed ?? [])
+          .flatMap(group => group.items)
+          .some(item => item.laneId === lane.laneId),
+    );
+  assert.ok(action, 'the Lane completion cleanup retains its automatic-action record');
+  assert.deepEqual(action.action, cleanup.automatic);
   assert.match(action.action.undo, /reopen/);
+  assert.match(action.action.undo, /npm ci --ignore-scripts/);
+  assert.equal(done.acceptance.cleanup.totals.count, 0);
+  assert.equal(p.store.select('automaticActions', done.acceptance.acceptanceId), undefined);
   await p.agent.dispatch({ action: 'reopen', laneId: lane.laneId });
   mkdirSync(join(lane.path, 'node_modules'));
   writeFileSync(join(lane.path, 'node_modules', 'generated'), 'copy');
   p.edit(lane, 'a.txt', 'uncaptured\n');
   await p.agent.dispatch({ action: 'complete', laneId: lane.laneId });
-  agentClean(
-    p.store,
-    { action: 'clean', apply: true, kinds: ['lane-deps'] },
-    { id: randomUUID(), actor: localAgent().id },
-  );
+  const automatic = { id: randomUUID(), actor: localAgent().id },
+    revision = p.store.revision(),
+    pointer = readFileSync(join(p.store.directory, 'work.json')),
+    records = readdirSync(join(p.store.directory, 'records'));
+  const skipped = agentClean(p.store, { action: 'clean', apply: true, kinds: ['lane-deps'] }, automatic);
+  assert.equal(skipped.result.totals.count, 0);
+  assert.match(skipped.result.skipped.find(item => item.laneId === lane.laneId).reason, /[Uu]ncaptured/);
+  assert.equal(p.store.select('automaticActions', automatic.id), undefined);
+  assert.equal(p.store.revision(), revision);
+  assert.deepEqual(readFileSync(join(p.store.directory, 'work.json')), pointer);
+  assert.deepEqual(readdirSync(join(p.store.directory, 'records')), records);
   assert.ok(existsSync(join(lane.path, 'node_modules')));
   assert.equal(readFileSync(join(lane.path, 'a.txt'), 'utf8'), 'uncaptured\n');
 });
