@@ -22,6 +22,14 @@ const schema = z.object({
   observedAt: z.string(),
   endpoint: z.string(),
   code: z.string().optional(),
+  affected: z
+    .object({
+      operationId: z.uuid().optional(),
+      laneIds: z.array(z.uuid()),
+      channel: z.string().optional(),
+      runId: z.uuid().optional(),
+    })
+    .optional(),
 });
 export type LandingWorkerState = z.infer<typeof schema>;
 export function landingWorkerStates(store: WorkStore) {
@@ -62,6 +70,7 @@ export function readLandingWorkerStatus(store: WorkStore) {
     workers: live.length,
     observedAt: selected?.observedAt ?? null,
     code: selected?.code ?? null,
+    ...(selected?.affected ? { affected: selected.affected } : {}),
   };
 }
 export type LandingWorkerStatus = ReturnType<typeof readLandingWorkerStatus>;

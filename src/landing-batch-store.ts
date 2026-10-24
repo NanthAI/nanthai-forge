@@ -1,5 +1,6 @@
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 import { assertLandingWorkerActive } from './landing-worker-context.js';
+import { interruptStaleLandingInputs } from './landing-stale.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landingConflictPeers } from './landing-conflict-peers.js';
 import { planLandingTrain } from './landing-train-plan.js';
@@ -157,6 +158,7 @@ export function selectBatch(
   channel: string,
   started?: ReadonlySet<string>,
 ): LandingBatch | undefined {
+  interruptStaleLandingInputs(data, channel, new NativeSource(work.store.root));
   const environment = checkEnvironment();
   for (const active of activeBatches(data, channel)) {
     if (started?.has(active.id)) continue;
@@ -400,6 +402,9 @@ export async function composeBatch(work: WorkService, batch: LandingBatch, befor
     work,
     batch.id,
     data => {
+      // Revalidate retained input availability after unlocked composition.
+      // A newer Lane save alone does not invalidate this pinned Candidate.
+      interruptStaleLandingInputs(data, batch.channel, source);
       const saved = data.landingBatches!.find(item => item.id === batch.id)!;
       if (saved.status !== 'composing') return saved;
       for (const view of views) if (!data.views.some(item => item.id === view.id)) data.views.push(view);

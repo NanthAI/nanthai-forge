@@ -68,11 +68,15 @@ export function queueObservation(
     queueStatus: entry.status,
     ...diagnosis,
     checkStatus: run ? diagnosticStatus(run) : undefined,
+    ...(entry.error ? { code: entry.error.code, message: entry.error.message } : {}),
     ...(run && pendingActionsInfra(run) && entry.status !== 'cancelled'
       ? { code: run.error!.code, message: run.error!.message }
       : {}),
     ...(entry.reason
-      ? { ...(entry.status === 'interrupted' ? { code: 'EVIDENCE_CHANGED' } : {}), message: entry.reason }
+      ? {
+          ...(entry.status === 'interrupted' && !entry.error ? { code: 'EVIDENCE_CHANGED' } : {}),
+          message: entry.reason,
+        }
       : {}),
   };
 }

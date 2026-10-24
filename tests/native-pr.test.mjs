@@ -2,7 +2,8 @@
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -555,15 +556,41 @@ test(
       await call({ action: 'compose', intentId: f.intent.id, inputs: [], dependencies: [pin(checked)] })
     ).result;
     assert.equal(view.status, 'clean');
-    const detail = await call({
-      action: 'read-work-detail',
-      kind: 'external',
-      id: incoming.id,
-      observation: 0,
-      expectedHead: f.head,
-      expectedBase: f.base,
-    });
-    assert.match(detail.result.details, /a = 2/);
+    // Keep a real peer in writer admission while MCP reads immutable review
+    // pins. The read must return its original result shape, never WORK_BUSY.
+    const holder = spawn(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+import { readSync } from 'node:fs';
+import { WorkStore } from ${JSON.stringify(new URL('../dist/work-store.js', import.meta.url).href)};
+new WorkStore(process.argv[1]).locked(() => {
+  process.stdout.write('held\\n');
+  readSync(0, Buffer.alloc(1), 0, 1, null);
+});`,
+        f.root,
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    const closed = once(holder, 'close');
+    try {
+      await once(holder.stdout, 'data');
+      const detail = await call({
+        action: 'read-work-detail',
+        kind: 'external',
+        id: incoming.id,
+        observation: 0,
+        expectedHead: f.head,
+        expectedBase: f.base,
+      });
+      assert.equal(detail.error, undefined, JSON.stringify(detail.error));
+      assert.match(detail.result.details, /a = 2/);
+    } finally {
+      holder.stdin.end('release');
+      assert.equal((await closed)[0], 0);
+    }
     f.change({ deniedRead: true });
     const bytes = readWorkBytes(join(f.work.store.directory, 'work.json'));
     assert.equal(

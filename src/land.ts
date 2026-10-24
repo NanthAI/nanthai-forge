@@ -1,5 +1,6 @@
 import { waitForLand, retrySingleInfrastructure } from './land-wait.js';
 import { landingWorkerSignal } from './landing-worker-context.js';
+import { staleLandingResult } from './landing-stale.js';
 import { landingDiagnosis } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landReceipt } from './land-receipt.js';
@@ -98,15 +99,18 @@ async function landOnce(
       };
       const recordError = (entry: LandEntry, error: unknown) => {
         if (!(error instanceof ForgeError) || error.code === 'LANDING_WORKER_STOPPED') throw error;
-        entry.result = {
-          status: ['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)
-            ? 'waiting'
-            : error.code === 'REVIEW_REQUIRED'
-              ? 'review-needed'
-              : 'failed',
-          code: error.code,
-          message: error.message,
-        };
+        const stale = staleLandingResult(error);
+        entry.result = stale
+          ? { ...stale, status: 'failed' }
+          : {
+              status: ['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)
+                ? 'waiting'
+                : error.code === 'REVIEW_REQUIRED'
+                  ? 'review-needed'
+                  : 'failed',
+              code: error.code,
+              message: error.message,
+            };
         journal.save();
       };
       // Dependencies can become ready as another wave lands; never drain after just one submission.
@@ -247,6 +251,7 @@ async function landOnce(
                 ...landingDiagnosis(store, queued),
                 runId: queued.runId,
                 acceptanceId: queued.acceptanceId,
+                ...(queued.error ? { code: queued.error.code, message: queued.error.message } : {}),
                 viewId: queued.conflictViewId ?? queued.viewId,
                 ...(queued.previewDiagnostic
                   ? { code: 'INTEGRATION_PREVIEW_EXCLUDED', preview: queued.previewDiagnostic }

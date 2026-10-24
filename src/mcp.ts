@@ -1,7 +1,6 @@
 import { candidateActionSchema } from './candidate-names.js';
 import { hostedAgentAddress } from './hosted-agent-cli.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
-import { startOwnerPresence } from './presence-worker-start.js';
 import { queueAgentSync } from './agent-hosted-sync.js';
 import { policyWriteSchema } from './autonomy-policy.js';
 import { localAgent } from './work-autonomy.js';
@@ -53,15 +52,9 @@ export async function startMcp(
   const address = agentMode ? hostedAgentAddress(root, addressing) : null;
   const hosted = address ? new HostedAgentTransport(root, address) : undefined;
   const workspace = hosted ? undefined : new Workspace(root);
-  const work = workEnabled && !hosted ? new WorkService(root, localAgent()) : undefined;
-  let stopPresence: (() => Promise<void>) | undefined;
-  if (work) {
-    try {
-      stopPresence = startOwnerPresence(work.store);
-    } catch {
-      /* Advisory observation never blocks MCP startup. */
-    }
-  }
+  // An agent transport is not an owner service. Opening/closing an MCP client
+  // must never adopt unrelated landing work into that client's process.
+  const work = workEnabled && !hosted ? new WorkService(root, localAgent(), true) : undefined;
   const sources = workspace ? new McpSourceRouting(workspace, work?.store) : undefined;
   const server = new McpServer(
     { name: 'nanthai-forge', version: '0.2.0' },
@@ -284,7 +277,6 @@ export async function startMcp(
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
     stopOverlap?.();
-    await stopPresence?.();
     await sources?.close();
   };
   server.close = () =>

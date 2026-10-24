@@ -11,13 +11,14 @@ import { unfinishedFinishes } from './agent-finish-journal.js';
 import { pendingLands } from './land-journal.js';
 import { openAutoExchangeNotifications } from './auto-exchange-notify.js';
 import { waitingDependencies } from './agent-dependencies.js';
-import { processIdentity } from './local-process.js';
+import { processIdentity, processAlive } from './local-process.js';
+import { recoverRecordRuns } from './work-record-runs.js';
 import { ForgeError } from './errors.js';
 import { withLandingWorker, assertLandingWorkerActive } from './landing-worker-context.js';
 import { saveLandingWorkerState, type LandingWorkerState } from './landing-worker-status.js';
 import type { WorkStore } from './work-store.js';
 
-/** Owner serve/MCP/detached-worker lifecycle owns this driver, never a reader.
+/** Owner service/detached-worker lifecycle owns this driver, never a reader.
  * Subscribe before the startup scan; sequence invalidation closes snapshot/wait races.
  * Work and exact-run receipts are durable; notifications carry no queue authority. */
 export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) {
@@ -51,6 +52,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
   });
   watcher.on('error', wake);
   signal.addEventListener('abort', wake, { once: true });
+  let affected: LandingWorkerState['affected'];
   const publish = (status: LandingWorkerState['status'], code?: string) =>
     saveLandingWorkerState(store, {
       schema: 1,
@@ -60,6 +62,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
       status,
       observedAt: new Date().toISOString(),
       ...(code ? { code } : {}),
+      ...(code && affected ? { affected } : {}),
     });
   let agent: AgentWorkflow | undefined;
   let last = '';
@@ -92,11 +95,12 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
         const receipts = data.runs
           .filter(run => ['queued', 'preparing', 'running'].includes(run.status))
           .map(run => {
+            const alive = processAlive(run.runner);
             try {
               const s = statSync(join(store.directory, `check-${run.id}`, 'result.json'));
-              return [run.id, s.ino, s.mtimeMs, s.size];
+              return [run.id, alive, s.ino, s.mtimeMs, s.size];
             } catch {
-              return [run.id];
+              return [run.id, alive];
             }
           });
         const key = JSON.stringify([
@@ -108,6 +112,22 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
         if (key !== last) {
           last = key;
           try {
+            let failed = false;
+            const attempt = async (task: () => Promise<unknown>) => {
+              try {
+                await task();
+              } catch (error) {
+                if (signal.aborted) throw error;
+                failed = true;
+                last = '';
+                publish('error', error instanceof ForgeError ? error.code : 'LANDING_WORKER_FAILED');
+              }
+            };
+            affected = undefined;
+            // Recovery precedes journal replay, even when that journal fails.
+            // Remote controllers adopt original IDs; dead local commands end.
+            // Idle/terminal-only observations must not compete with Lane writes.
+            if (receipts.length) store.locked(() => recoverRecordRuns(store, store.records()));
             const channels = new Set([
               ...(data.landingEntries ?? [])
                 .filter(e => ['queued', 'checking'].includes(e.status))
@@ -119,28 +139,62 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
             if (channels.size || finishes.length || lands.length) publish('driving');
             for (const channel of channels) {
               assertLandingWorkerActive();
-              try {
-                const drained = await drainLandingBatches(agent!.work, channel, 0);
-                // A peer may still be choosing its bakery ticket. No holding
-                // ticket or Work revision need change when that peer releases it.
-                if ('waiting' in drained) last = '';
-              } finally {
-                // Releasing a drain slot need not publish Work. Notify peers
-                // explicitly: native filesystem events may be delayed or lost.
-                // Exclude ourselves so contention cannot create a wake loop.
-                wakeLandingWorker(store, id);
-              }
+              const entry = data.landingEntries?.find(
+                e => e.channel === channel && ['queued', 'checking'].includes(e.status),
+              );
+              affected = {
+                channel,
+                ...(entry ? { operationId: entry.id } : {}),
+                laneIds: entry
+                  ? (data.views.find(view => view.id === entry.viewId)?.inputs.map(pin => pin.laneId) ?? [])
+                  : [],
+                ...(entry?.runId ? { runId: entry.runId } : {}),
+              };
+              await attempt(async () => {
+                try {
+                  const drained = await drainLandingBatches(agent!.work, channel, 0, undefined, batch => {
+                    const prefix = batch.prefixes.at(-1);
+                    affected = {
+                      channel,
+                      operationId: batch.id,
+                      laneIds: [
+                        ...new Set(
+                          batch.entryIds.flatMap(id => {
+                            const entry = store.select('landingEntries', id);
+                            return entry
+                              ? (store.select('views', entry.viewId)?.inputs.map(pin => pin.laneId) ?? [])
+                              : [];
+                          }),
+                        ),
+                      ],
+                      ...(prefix ? { runId: prefix.runId } : {}),
+                    };
+                  });
+                  // A peer may still be choosing its bakery ticket. No holding
+                  // ticket or Work revision need change when that peer releases it.
+                  if ('waiting' in drained) last = '';
+                } finally {
+                  // Releasing a drain slot need not publish Work. Notify peers
+                  // explicitly: native filesystem events may be delayed or lost.
+                  // Exclude ourselves so contention cannot create a wake loop.
+                  wakeLandingWorker(store, id);
+                }
+              });
             }
             for (const retained of lands) {
               assertLandingWorkerActive();
+              affected = {
+                operationId: retained.operationId,
+                laneIds: retained.state.entries.flatMap(entry => entry.inputs.map(pin => pin.laneId)),
+              };
               if (!retained.command) {
-                await resumeLegacyLand(agent!.work, retained.operationId);
+                await attempt(() => resumeLegacyLand(agent!.work, retained.operationId));
                 continue;
               }
               // A blocked request remains quiet until a durable dependency change.
               if (waitingDependencies(store, retained.command.laneIds, retained.command.channel).length)
                 continue;
-              await land(agent!.work, retained.command, retained.selection);
+              await attempt(() => land(agent!.work, retained.command!, retained.selection));
             }
             for (const command of finishes) {
               assertLandingWorkerActive();
@@ -148,19 +202,20 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
                 (v): v is string => typeof v === 'string',
               );
               const channel = (command.accept as { channel?: string } | undefined)?.channel;
+              affected = {
+                operationId: command.operationId as string,
+                laneIds,
+                ...(channel ? { channel } : {}),
+              };
               if (waitingDependencies(store, laneIds, channel).length) continue;
-              await agent!.dispatch(command);
+              await attempt(() => agent!.dispatch(command));
             }
-            publish('idle');
+            if (!failed) publish('idle');
           } catch (error) {
             if (signal.aborted) break;
             // A failed observation is not a handled revision. A queue release
             // or explicit wake can make it retryable without a Work mutation.
-            if (
-              error instanceof ForgeError &&
-              ['SOURCE_CHANGED', 'WORK_BUSY', 'WORK_STALE', 'LANDING_DRIVER_STALE'].includes(error.code)
-            )
-              last = '';
+            last = '';
             publish('error', error instanceof ForgeError ? error.code : 'LANDING_WORKER_FAILED');
           }
         }

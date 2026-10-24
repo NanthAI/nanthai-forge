@@ -421,3 +421,25 @@ test('one missing native Lane remains an unavailable full-status record and cann
   assert.equal(full.intents[0].id, f.intent.id);
   await assert.rejects(f.detail(full.lanes[1]), code('LANE_UNAVAILABLE'));
 });
+
+test('pinned native detail remains readable while another writer owns admission', async t => {
+  const f = setup(t, true);
+  f.edit('export const a=2;\n');
+  f.checkpoint();
+  const view = f.compose();
+  t.mock.method(f.w.store, 'locked', () => {
+    throw Error('Read-only detail acquired writer lock');
+  });
+  const result = await f.w.dispatch(
+    {
+      action: 'read-work-detail',
+      kind: 'view',
+      id: view.id,
+      expectedHead: view.head,
+      expectedBase: view.base,
+      expectedStatus: view.status,
+    },
+    0,
+  );
+  assert.match(result.result.view.details, /a=2/);
+});

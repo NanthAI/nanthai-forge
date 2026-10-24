@@ -14,7 +14,13 @@ import { trustAgents } from './autonomy-fixture.mjs';
 
 export async function fixture(
   t,
-  { remote = true, delay = 25, failWhen = "exists('bad.txt')", files = { 'same.txt': 'original\n' } } = {},
+  {
+    remote = true,
+    delay = 25,
+    failWhen = "exists('bad.txt')",
+    files = { 'same.txt': 'original\n' },
+    stopChecks = false,
+  } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'forge-batch-'));
   const credentialRoot = mkdtempSync(join(tmpdir(), 'forge-batch-credentials-'));
@@ -70,7 +76,7 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
     process.env.FORGE_MODAL_PYTHON = mock;
     process.env.FORGE_CHECK_QUEUE_DIR = join(store.directory, 'fixture-queue');
     await drainPostAccept(store);
-    await cleanupOwner(root);
+    await cleanupOwner(root, undefined, { stopChecks });
     for (const [name, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;

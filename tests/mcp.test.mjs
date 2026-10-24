@@ -468,5 +468,11 @@ test('opt-in real stdio workflow MCP shares local work, pins exact source and le
   assert.equal((await call('forge_current')).gitHead, original);
   assert.equal((await call('forge_source', { file: 'a.ts' })).results[0].text, 'export const value = 1;\n');
   await client.close();
-  assert.equal(stderr, '');
+  // Detached check controllers write concurrently with MCP commands. Existing
+  // lock/progress diagnostics are valid stderr; protocol errors are not.
+  for (const line of stderr.split('\n').filter(Boolean))
+    assert.match(
+      line,
+      /^(?:waiting for lock|queued for check|preparing check|running check): .* elapsed=\d+s totalAge=\d+s$/,
+    );
 });

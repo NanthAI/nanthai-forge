@@ -128,7 +128,7 @@ export function laneReview(store: WorkStore, lane: Lane, compact = false) {
 export function readWorkDetail(store: WorkStore, input: unknown) {
   const parsed = detailCommandSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Select a retained review and its original source pins.');
-  return store.locked(() => {
+  return store.observing(() => {
     const data = store.load(),
       command = parsed.data;
     if (command.kind === 'lane') {

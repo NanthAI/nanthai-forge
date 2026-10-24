@@ -48,6 +48,7 @@ export async function finishQueuedBatch(
           ? 'waiting to land'
           : entry.status,
     ...(infra ? { code: 'GITHUB_ACTIONS_PENDING_INFRA', message: attempt.run!.diagnostic } : {}),
+    ...(entry.error ? { code: entry.error.code, message: entry.error.message } : {}),
     terminal: !pending,
     complete: entry.status === 'accepted',
     batchId: entry.batchId,
@@ -59,7 +60,7 @@ export async function finishQueuedBatch(
       ? {
           ...(entry.previewDiagnostic
             ? { code: 'INTEGRATION_PREVIEW_EXCLUDED' }
-            : entry.status === 'interrupted'
+            : entry.status === 'interrupted' && !entry.error
               ? { code: 'EVIDENCE_CHANGED' }
               : {}),
           message: entry.reason,

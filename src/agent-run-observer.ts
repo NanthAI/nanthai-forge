@@ -13,7 +13,12 @@ import type { WorkStore } from './work-store.js';
 const active = (run: CheckRun) =>
   run.status === 'queued' || run.status === 'preparing' || run.status === 'running';
 
-export async function waitForAgentRun(store: WorkStore, operationId: string, waitMs?: number): Promise<void> {
+export async function waitForAgentRun(
+  store: WorkStore,
+  operationId: string,
+  waitMs?: number,
+  progress = true,
+): Promise<void> {
   assertLandingWorkerActive();
   waitMs = landingWaitMs(waitMs);
   const end = waitMs === undefined ? Infinity : Date.now() + waitMs,
@@ -31,24 +36,26 @@ export async function waitForAgentRun(store: WorkStore, operationId: string, wai
       continue;
     }
     if (!active(run)) return;
-    const queue =
-      run.backend?.actual === 'modal'
-        ? CheckQueue.observe(
-            run.id,
-            join(
-              process.env.FORGE_CHECK_QUEUE_DIR ?? join(homedir(), '.forge'),
-              run.mainCheck ? 'modal-audit-queue' : 'modal-check-queue',
-            ),
-          )
-        : CheckQueue.observe(run.id);
-    workProgress(
-      run.status === 'queued'
-        ? 'queued for check'
-        : run.status === 'preparing'
-          ? 'preparing check'
-          : 'running check',
-      `${workProgressIdentity().runId === run.id ? '' : `run=${run.id} `}queue position=${queue?.position ?? 0} holder=${queueHolder(run.status === 'queued' ? queue?.holder : { pid: run.runner.pid, phase: run.status })}`,
-    );
+    if (progress) {
+      const queue =
+        run.backend?.actual === 'modal'
+          ? CheckQueue.observe(
+              run.id,
+              join(
+                process.env.FORGE_CHECK_QUEUE_DIR ?? join(homedir(), '.forge'),
+                run.mainCheck ? 'modal-audit-queue' : 'modal-check-queue',
+              ),
+            )
+          : CheckQueue.observe(run.id);
+      workProgress(
+        run.status === 'queued'
+          ? 'queued for check'
+          : run.status === 'preparing'
+            ? 'preparing check'
+            : 'running check',
+        `${workProgressIdentity().runId === run.id ? '' : `run=${run.id} `}queue position=${queue?.position ?? 0} holder=${queueHolder(run.status === 'queued' ? queue?.holder : { pid: run.runner.pid, phase: run.status })}`,
+      );
+    }
     // The existing recovery rules inspect a durable receipt or established local runner death.
     // A copy prevents an observation outside the lock from changing retained metadata.
     if (recoverRuns(store, { runs: [structuredClone(run)] })) {

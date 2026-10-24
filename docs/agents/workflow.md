@@ -643,6 +643,33 @@ wake the observer; a two-second local fallback covers missed signals and local r
 death. Durable completion receipts can be observed before Work metadata catches up;
 remote controller loss stays pending for the existing recovery owner to resolve.
 
+The native landing worker reconciles active check runs before replaying retained
+landing journals. A dead local runner ends as interrupted; a dead Modal or Actions
+controller is adopted with the original run and provider pins. If adoption itself
+fails, the original run gets an interrupted `CHECK_RECOVERY_FAILED` receipt rather
+than retaining a live controller PID with no execution.
+
+CLI and MCP check requests launch a detached controller holding the original
+run's exclusive execution lease. The controller keeps its event loop alive until
+the durable result, independently of the submitting process or MCP connection.
+A queued local handoff whose submitter exits before claim repairs the same wake;
+an already started local command is never repeated. Opening an MCP connection does
+not register a landing worker or drive unrelated queued landings. The owner service
+or the existing detached owner process drives those; commands wake an existing
+worker instead of spawning another when one is live.
+
+Saved queued Candidates keep their original submitted inputs after a new Lane
+save; the existing composer retargets those saved inputs without landing the
+newer save. A new save supersedes live observations, not that retained landing.
+Unstarted entries whose changed Lane inputs can no longer be resolved end
+individually as interrupted with `LANE_STALE` (submission cause `stale-head`) and
+“Resubmit at current head.”
+Stale composition inputs in retained finish/land journals settle that request too;
+other requests continue. Started checks keep their immutable pins and existing
+recovery protocol. Worker errors in pending status include the affected operation
+and Lane IDs, plus a run ID when known. An error observation remains retryable on
+the next durable change or explicit lifecycle wake.
+
 ## Handoffs
 
 Record an optional delivery handoff before stopping so the lead or next agent can

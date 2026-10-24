@@ -5,7 +5,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { cleanupOwner } from './owner-cleanup.mjs';
+import { cleanupOwner, registerOwnerPresence, stopOwnerCheckControllers } from './owner-cleanup.mjs';
 import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { processAlive, processIdentity } from '../dist/local-process.js';
@@ -68,6 +68,7 @@ test('cleanup stops a detached CLI presence owner before removing its records', 
     ),
   );
   const identity = processIdentity(pid);
+  registerOwnerPresence(root, identity);
   const other = mkdtempSync(join(tmpdir(), 'forge-cleanup-other-'));
   initNative(other);
   await new AgentWorkflow(other).dispatch({ action: 'start', outcome: 'Unrelated owner stays active' });
@@ -82,6 +83,57 @@ test('cleanup stops a detached CLI presence owner before removing its records', 
     assert.equal(processAlive(identity), false);
     assert.equal(existsSync(root), false);
     assert.equal(processAlive(peerIdentity), true, 'Other owners are outside this teardown');
+  } finally {
+    await cleanupOwner(other);
+  }
+});
+
+test('failed-replay teardown stops only a leased controller in its synthetic owner', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-cleanup-controller-'));
+  writeFileSync(join(root, 'a.txt'), 'synthetic\n');
+  initNative(root);
+  const ready = join(root, 'ready');
+  const child = spawn(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `
+    import { writeFileSync } from 'node:fs';
+    import { join } from 'node:path';
+    import { WorkStore } from ${JSON.stringify(new URL('../dist/work-store.js', import.meta.url).href)};
+    import { withQueueSlot } from ${JSON.stringify(new URL('../dist/landing-queue.js', import.meta.url).href)};
+    const store = new WorkStore(process.argv[1]);
+    setInterval(()=>{},60000);
+    await withQueueSlot(join(store.directory,'check-controllers','synthetic'),async()=>{
+      writeFileSync(${JSON.stringify(ready)}, 'ready');
+      await new Promise(()=>{});
+    },{anchor:store.directory});
+  `,
+      root,
+    ],
+    { detached: true, stdio: 'ignore', cwd: root },
+  );
+  child.unref();
+  t.after(async () => {
+    if (existsSync(root)) await cleanupOwner(root, undefined, { stopChecks: true });
+  });
+  const deadline = Date.now() + 20_000;
+  while (!existsSync(ready)) {
+    assert.ok(Date.now() < deadline, 'synthetic controller acquired its lease');
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  const identity = processIdentity(child.pid);
+  const other = mkdtempSync(join(tmpdir(), 'forge-cleanup-unrelated-'));
+  initNative(other);
+  try {
+    const lane = (await new AgentWorkflow(other).dispatch({ action: 'start', outcome: 'Synthetic guard' }))
+      .result;
+    await assert.rejects(stopOwnerCheckControllers(lane.path), /limited to synthetic/);
+    await cleanupOwner(root, undefined, { stopChecks: true });
+    assert.equal(processAlive(identity), false);
+    assert.equal(existsSync(root), false);
+    assert.equal(existsSync(other), true, 'unrelated owners are untouched');
   } finally {
     await cleanupOwner(other);
   }

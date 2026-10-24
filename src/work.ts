@@ -1,4 +1,5 @@
 import { landingWorkerSignal, assertLandingWorkerActive } from './landing-worker-context.js';
+import { withDetachedChecks } from './check-execution-context.js';
 import { candidateCommand } from './candidate-names.js';
 import { pendingStatus } from './pending-status.js';
 import { decorateRepair } from './agent-repair-lineage.js';
@@ -90,6 +91,7 @@ export class WorkService {
   constructor(
     root: string,
     readonly actor: AcceptanceActor = localPerson(),
+    private readonly detachedChecks = false,
   ) {
     this.store = new WorkStore(root);
   }
@@ -393,7 +395,9 @@ export class WorkService {
     }
     input = candidateCommand(input);
     const operation = input && typeof input === 'object' && 'action' in input ? String(input.action) : 'work';
-    return withWorkLockOptions({ operation }, () => this.dispatchAction(input, expectedRevision, options));
+    const dispatch = () =>
+      withWorkLockOptions({ operation }, () => this.dispatchAction(input, expectedRevision, options));
+    return this.detachedChecks ? withDetachedChecks(dispatch) : dispatch();
   }
   private async dispatchAction(
     input: unknown,

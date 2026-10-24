@@ -7,7 +7,8 @@ import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 
 /** Prepare immutable record pages before admission. Retry metadata CAS conflicts
- * without rerunning the caller's source capture, merge or materialization. */
+ * and transient admission contention without rerunning the caller's source
+ * capture, merge or materialization. */
 export function preparedRecordCommit<T>(
   store: WorkStore,
   operation: string,
@@ -39,7 +40,9 @@ export function preparedRecordCommit<T>(
         { operation },
       );
     } catch (error) {
-      if (!(error instanceof ForgeError && ['WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)))
+      if (!(
+        error instanceof ForgeError && ['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)
+      ))
         throw error;
       end ??= Date.now() + (workLockWaitMs() || 1000);
       if (Date.now() >= end) {

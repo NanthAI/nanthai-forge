@@ -1,4 +1,5 @@
 import { pendingActionsInfra } from './github-actions-infra.js';
+import { staleLandingResult } from './landing-stale.js';
 import { admitFinish } from './landing-admission.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -326,6 +327,8 @@ class FinishRunner {
     try {
       return await this.drive();
     } catch (error) {
+      const stale = staleLandingResult(error);
+      if (stale) return this.stop(this.journal.state.attempts.at(-1)!, { phase: 'compose', ...stale });
       if (error instanceof ForgeError && error.code === 'CANCELLED')
         return this.stop(this.journal.state.attempts.at(-1)!, { phase: 'check', status: 'cancelled' });
       if (!(error instanceof ForgeError && error.code === 'SOURCE_CHANGED')) throw error;

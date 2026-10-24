@@ -84,7 +84,7 @@ export class AgentWorkflow {
     root: string,
     private readonly liveMcp = false,
   ) {
-    this.work = new WorkService(root, localAgent());
+    this.work = new WorkService(root, localAgent(), liveMcp);
   }
   async dispatch(input: unknown) {
     let selected = candidateCommand(input);

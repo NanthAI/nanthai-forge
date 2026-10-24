@@ -1,4 +1,9 @@
 import { prepareRunRegistration } from './work-run-preparation.js';
+import { retryWorkPhase } from './work-retry.js';
+import { launchDetachedCheck, hasDetachedCheckRequest } from './check-controller.js';
+import { detachedChecksRequired } from './check-execution-context.js';
+import { durableReplace } from './native-durability.js';
+import { wakeLandingWorker } from './landing-worker-wake.js';
 import { localActor } from './work-actor.js';
 import {
   strandedActionsRun,
@@ -100,6 +105,17 @@ export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>): boo
       /* Ambiguous output never manufactures a successful result. */
     }
     if (run.runner.host !== hostname()) continue;
+    if (
+      run.status === 'queued' &&
+      !run.childPid &&
+      !processAlive(run.runner) &&
+      hasDetachedCheckRequest(store, run)
+    ) {
+      // A submitting CLI may exit before its detached controller claims the
+      // committed reservation. No local command has started; repair its wake.
+      void executeOwnedRun(store, run, launchDetachedCheck);
+      continue;
+    }
     if (['modal', 'github-actions'].includes(run.backend?.actual ?? '') && !processAlive(run.runner)) {
       const key = `${store.root}:${run.id}`;
       if (!adoptingModalRuns.has(key)) {
@@ -129,7 +145,8 @@ export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>): boo
 export async function adoptModalRun(
   store: WorkStore,
   id: string,
-  start: (store: WorkStore, run: CheckRun) => Promise<unknown> = launch,
+  start: (store: WorkStore, run: CheckRun) => Promise<unknown> = async (store, run) =>
+    launchDetachedCheck(store, run),
 ): Promise<void> {
   let claimed: CheckRun | undefined;
   try {
@@ -157,7 +174,59 @@ export async function adoptModalRun(
     }
     throw error;
   }
-  if (claimed) await start(store, claimed);
+  if (claimed) await executeOwnedRun(store, claimed, start);
+}
+
+/** A physical controller owns completion even when its submitting transport ends. */
+export async function executeOwnedRun(
+  store: WorkStore,
+  claimed: CheckRun,
+  start: (store: WorkStore, run: CheckRun) => Promise<unknown> = launch,
+  complete?: (error?: unknown) => void,
+) {
+  try {
+    await start(store, claimed);
+  } catch {
+    // Claiming ownership must not leave a live PID attached to an execution
+    // whose controller failed to start. Keep any already-written receipt;
+    // never serialize a transport error or repeat a local command here.
+    const path = directory(store, claimed.id);
+    mkdirBelow(store.directory, path);
+    await retryWorkPhase(claimed.id, () =>
+      store.locked(() => {
+        const current = store.select('runs', claimed.id);
+        if (
+          !current ||
+          !active(current) ||
+          current.runner.pid !== claimed.runner.pid ||
+          current.runner.startTime !== claimed.runner.startTime ||
+          current.runner.host !== claimed.runner.host
+        )
+          return;
+        if (!existsSync(join(path, 'result.json')))
+          durableReplace(
+            join(path, 'result.json'),
+            JSON.stringify(
+              createRunReceipt({
+                status: 'interrupted',
+                backend: claimed.backend,
+                endedAt: new Date().toISOString(),
+                exitCode: null,
+                signal: null,
+                error: {
+                  code: 'CHECK_RECOVERY_FAILED',
+                  message: 'The check controller could not start or resume.',
+                },
+                details:
+                  'Controller startup or recovery failed. Original run, source pins and output are retained; inspect the run before submitting new work.',
+              }),
+            ),
+          );
+      }),
+    );
+    saveCompletion(store, claimed.id, complete);
+    wakeLandingWorker(store);
+  }
 }
 function saveCompletion(store: WorkStore, id: string, complete?: (error?: unknown) => void) {
   try {
@@ -802,7 +871,22 @@ export function runWork(
   });
   if (started) {
     // A cancelled finish must not prevent its runner from publishing the terminal receipt.
-    void withWorkLockOptions({ cancelled: () => false }, () => launch(store, started!, sequence?.complete));
+    if (detachedChecksRequired()) {
+      void executeOwnedRun(store, started, launchDetachedCheck);
+      if (sequence) {
+        void import('./agent-run-observer.js')
+          .then(({ waitForAgentRun }) => waitForAgentRun(store, started!.id, undefined, false))
+          .then(() => sequence.complete(), sequence.complete);
+      }
+    } else
+      void withWorkLockOptions({ cancelled: () => false }, () =>
+        executeOwnedRun(
+          store,
+          started!,
+          (store, run) => launch(store, run, sequence?.complete),
+          sequence?.complete,
+        ),
+      );
     return { revision: store.revision(), result: store.select('runs', started.id)! };
   }
   return result;

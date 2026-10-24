@@ -199,11 +199,16 @@ test('queued saved Candidate retargets in composer and replays the same prefix a
     },
     view,
   );
-  await f.call('sync', { laneId: child.laneId });
   const batch = await batchEdit(f.agent.work, randomUUID(), data => selectBatch(f.agent.work, data, 'main'));
+  assert.ok(batch);
   const first = await composeBatch(f.agent.work, batch);
   assert.equal(first.conflicts.length, 0);
   assert.equal(first.prefixes.length, 1);
+  // A reserved run keeps its immutable pins across later Lane syncs.
+  const prefix = first.prefixes[0];
+  const run = await f.call('run', { operationId: prefix.runId, viewId: prefix.viewId, wait: true });
+  assert.equal(run.status, 'passed');
+  await f.call('sync', { laneId: child.laneId });
   const replay = await composeBatch(f.agent.work, batch);
   assert.equal(replay.prefixes[0].head, first.prefixes[0].head);
   await drainLandingBatches(f.agent.work, 'main');

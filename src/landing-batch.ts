@@ -38,6 +38,7 @@ export async function drainLandingBatches(
   channel: string,
   waitMs?: number,
   beforeAccept?: () => Promise<void>,
+  onFailure?: (batch: LandingBatch) => void,
 ) {
   return withQueueSlot(
     batchDirectory(work, channel),
@@ -53,7 +54,7 @@ export async function drainLandingBatches(
         return data;
       };
       let halted = false,
-        failure: { error: unknown } | undefined,
+        failure: { error: unknown; batch: LandingBatch } | undefined,
         launched = 0;
       observe();
       for (;;) {
@@ -95,7 +96,10 @@ export async function drainLandingBatches(
               ? composeBatch(work, batch, driver.beforePublish)
               : Promise.resolve(batch);
           // Compose serially (a child needs its parent's prefixes), then check concurrently.
-          const composed = await compose.catch((error: unknown) => ((failure ??= { error }), undefined));
+          const selected = batch;
+          const composed = await compose.catch(
+            (error: unknown) => ((failure ??= { error, batch: selected }), undefined),
+          );
           if (!composed) {
             halted = true;
             continue;
@@ -114,7 +118,7 @@ export async function drainLandingBatches(
                   return progressed;
                 },
                 (error: unknown) => {
-                  failure ??= { error };
+                  failure ??= { error, batch: selected };
                   halted = true;
                   return false;
                 },
@@ -129,7 +133,10 @@ export async function drainLandingBatches(
         if (!running.size) break;
         await Promise.race(landingWorkerSignal() ? [...running.values()] : [...running.values(), sleep(200)]);
       }
-      if (failure) throw failure.error;
+      if (failure) {
+        onFailure?.(work.store.select('landingBatches', failure.batch.id) ?? failure.batch);
+        throw failure.error;
+      }
     },
     {
       ...(waitMs === undefined ? {} : { waitMs }),

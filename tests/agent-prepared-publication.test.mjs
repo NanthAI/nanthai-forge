@@ -15,6 +15,7 @@ import { NativeSource } from '../dist/native-source.js';
 import { initNative } from '../dist/native-work.js';
 import { nativeObjects } from '../dist/native-objects.js';
 import { WorkStore } from '../dist/work-store.js';
+import { ForgeError } from '../dist/errors.js';
 import { trustAgents } from './autonomy-fixture.mjs';
 
 const git = (root, ...args) =>
@@ -370,4 +371,25 @@ test('finish composition can observe current metadata while direct commands keep
   assert.equal(result.result.head, lane.head);
   assert.equal(store.select('lanes', lane.laneId).concurrentExtension, 'retained');
   assert.equal(store.load().views.length, 1);
+});
+
+test('start reconciles a transient controller admission ticket without duplicating its Lane', async t => {
+  const { agent, store } = await fixture(t);
+  const locked = store.locked.bind(store),
+    operationId = randomUUID();
+  let blocked = false;
+  t.mock.method(store, 'locked', (run, options) => {
+    if (!blocked && options?.operation === 'start reservation') {
+      blocked = true;
+      throw new ForgeError('WORK_BUSY', 'Controller is publishing its original completion.');
+    }
+    return locked(run, options);
+  });
+  const command = { action: 'start', operationId, outcome: 'Concurrent controller completion' };
+  const first = (await agent.dispatch(command)).result;
+  assert.ok(blocked);
+  const replay = (await agent.dispatch(command)).result;
+  assert.equal(replay.laneId, first.laneId);
+  assert.equal(store.load().lanes.filter(lane => lane.intentId === first.intentId).length, 1);
+  assert.equal(store.select('lanes', first.laneId).state, 'active');
 });

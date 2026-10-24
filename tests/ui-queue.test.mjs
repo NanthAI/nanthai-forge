@@ -90,7 +90,9 @@ test('state table distinguishes waiting, review, infrastructure, unknown outcome
     assert.equal(nextStep(lanes.find(lane => lane.id === id)).tone, 'plain');
 });
 
-test('owner last event changes only the existing strip and never marks a Lane failed', () => {
+test('owner last event changes only the existing strip and never marks a Lane failed', t => {
+  // ChannelStrip reads the clock itself; pin it to the fixture time so the strip stays fresh.
+  t.mock.timers.enable({ apis: ['Date'], now });
   const { status, facts } = fixture();
   assert.match(serviceLastSeen(status, now).text, /^queue · /);
   for (const worker of [

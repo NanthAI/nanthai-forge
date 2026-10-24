@@ -482,3 +482,20 @@ for (const action of ['finish', 'land'])
       await worker.stop();
     }
   });
+
+test('an idle owner worker observes metadata without taking the Work writer lock', async t => {
+  const f = await fixture(t, { remote: false });
+  let locks = 0;
+  t.mock.method(f.store, 'locked', () => {
+    locks++;
+    throw Error('Idle worker acquired writer lock');
+  });
+  const stop = worker(f);
+  try {
+    await until(f, () => readLandingWorkerStatus(f.store).status === 'idle', 'idle without writer admission');
+    assert.equal(locks, 0);
+  } finally {
+    await stop();
+    t.mock.restoreAll();
+  }
+});
