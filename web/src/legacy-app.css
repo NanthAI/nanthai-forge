@@ -1,0 +1,5 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Legacy styles join the `legacy` cascade layer (see legacy.css). */
+@import './work.css' layer(legacy);
+@import './upstream-request.css' layer(legacy);
+@import './refinement.css' layer(legacy);

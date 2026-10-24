@@ -1,0 +1,399 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/* Lane rows */
+.fx-lanes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fx-lane {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px 92px 52px;
+  gap: 4px 14px;
+  align-items: center;
+  padding: 11px 14px 11px 18px;
+  border-top: 1px solid var(--fx-line);
+}
+.fx-lane:first-child {
+  border-top: 0;
+}
+.fx-lane:hover {
+  background: var(--fx-hover);
+}
+.fx-lane-main {
+  min-width: 0;
+}
+.fx-lane-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.fx-lane-title a {
+  font-weight: 650;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-lane-intent {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--fx-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-lane-intent .fx-glyph {
+  color: var(--fx-text-3);
+}
+.fx-lane-owner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+.fx-lane-owner > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-lane-who {
+  display: grid;
+  min-width: 0;
+  line-height: 1.3;
+}
+.fx-lane-who small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--fx-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fx-lane-who .fx-dot {
+  width: 6px;
+  height: 6px;
+}
+.fx-lane-diff {
+  min-width: 0;
+}
+.fx-lanes-nodiff .fx-lane {
+  grid-template-columns: minmax(0, 1fr) 170px 52px;
+}
+.fx-lanes-nodiff .fx-lane-diff {
+  display: none;
+}
+.fx-lane-when {
+  text-align: right;
+  font-size: 11.5px;
+  color: var(--fx-text-3);
+}
+.fx-lane-fact {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fx-text-2);
+}
+.fx-lane-fact > .fx-glyph {
+  color: var(--fx-text-3);
+}
+.fx-fact-conflict > .fx-glyph {
+  color: var(--fx-conflict);
+}
+.fx-fact-failed > .fx-glyph {
+  color: var(--fx-failed);
+}
+.fx-fact-passed > .fx-glyph {
+  color: var(--fx-passed);
+}
+.fx-fact-running > .fx-glyph {
+  color: var(--fx-active);
+}
+@media (max-width: 760px) {
+  .fx-lane {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .fx-lane-owner {
+    grid-row: 3;
+    grid-column: 1;
+  }
+  .fx-lane-when {
+    grid-row: 1;
+    grid-column: 2;
+  }
+  .fx-lane-diff {
+    grid-row: 3;
+    grid-column: 2;
+    text-align: right;
+  }
+  .fx-lane-fact {
+    grid-row: 2;
+  }
+}
+
+/* Folded groups */
+.fx-fold {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border-top: 1px solid var(--fx-line);
+  font-size: 12px;
+  color: var(--fx-text-2);
+  cursor: pointer;
+}
+.fx-fold:hover {
+  background: var(--fx-hover);
+  color: var(--fx-text);
+}
+.fx-fold:focus-visible {
+  outline: 2px solid var(--fx-focus);
+  outline-offset: -2px;
+}
+.fx-fold-static {
+  cursor: default;
+}
+.fx-fold-static:hover {
+  background: none;
+  color: var(--fx-text-2);
+}
+.fx-c-passed {
+  color: var(--fx-passed);
+}
+.fx-loading {
+  padding: 16px 14px;
+  color: var(--fx-text-3);
+}
+.fx-lane-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fx-text-2);
+}
+.fx-lane-agent .fx-glyph {
+  color: var(--fx-text-3);
+}
+
+/* Needs you */
+.fx-decisions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fx-quote {
+  margin: 8px 0 0;
+  padding: 7px 10px;
+  border-left: 2px solid var(--fx-line-strong);
+  border-radius: 0 var(--fx-r-2) var(--fx-r-2) 0;
+  background: var(--fx-surface-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.fx-quote-from {
+  margin-bottom: 3px;
+  font-size: 11px;
+  color: var(--fx-text-3);
+}
+.fx-panel-note {
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--fx-line);
+  font-size: 11.5px;
+  color: var(--fx-text-3);
+}
+
+/* Overlaps */
+
+/* Feed */
+.fx-feed {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+.fx-feed > li {
+  display: grid;
+  grid-template-columns: 40px 14px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 12px;
+  align-items: start;
+}
+.fx-feed-time {
+  text-align: right;
+  color: var(--fx-text-3);
+}
+.fx-feed-glyph {
+  display: flex;
+  justify-content: center;
+  margin-top: 2px;
+}
+.fx-feed-glyph.fx-fact-plain {
+  color: var(--fx-text-3);
+}
+.fx-feed-glyph.fx-fact-passed {
+  color: var(--fx-passed);
+}
+.fx-feed-glyph.fx-fact-failed {
+  color: var(--fx-failed);
+}
+.fx-feed-glyph.fx-fact-conflict {
+  color: var(--fx-conflict);
+}
+.fx-feed-glyph.fx-fact-waiting {
+  color: var(--fx-waiting);
+}
+.fx-feed-glyph.fx-fact-active {
+  color: var(--fx-active);
+}
+.fx-feed-text {
+  min-width: 0;
+  color: var(--fx-text);
+  overflow-wrap: anywhere;
+}
+.fx-feed-detail {
+  display: block;
+  color: var(--fx-text-3);
+  font-size: 11.5px;
+}
+
+/* Three-column hosted Now: people · work · decisions */
+
+/* Sessions */
+.fx-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--fx-line);
+  font-size: 11px;
+  color: var(--fx-text-3);
+}
+.fx-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.fx-inline-error {
+  padding: 8px 12px;
+  border-radius: var(--fx-r-2);
+  background: var(--fx-failed-bg);
+  color: var(--fx-failed);
+  font-size: 12px;
+}
+
+/* Single column: decisions first, then people and work, then history. */
+@media (max-width: 760px) {
+  .fx-lanes .fx-lane,
+  .fx-lanes-nodiff .fx-lane {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+.fx-lane-files {
+  font-size: 12px;
+  color: var(--fx-text-2);
+}
+.fx-reply {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+.fx-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--fx-line-strong);
+  border-radius: var(--fx-r-2);
+  background: var(--fx-surface-2);
+  color: var(--fx-text);
+  font: 400 12.5px/1.5 var(--fx-font-ui);
+  resize: vertical;
+}
+.fx-input:focus-visible {
+  outline: 2px solid var(--fx-focus);
+  outline-offset: 0;
+}
+.fx-reply-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+}
+.fx-reply-actions > span {
+  margin-right: auto;
+}
+
+/* Copy prompt: a quiet secondary action with a small anchored popover */
+.fx-prompt {
+  position: relative;
+  display: inline-flex;
+}
+.fx-prompt-pop {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(440px, calc(100vw - 32px));
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--fx-line-strong);
+  border-radius: var(--fx-r-3);
+  background: var(--fx-surface);
+  box-shadow: var(--fx-shadow);
+}
+.fx-prompt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fx-prompt-title {
+  font-weight: 650;
+  font-size: 13px;
+}
+.fx-prompt-text {
+  font: 11.5px/1.55 var(--fx-font-mono);
+  resize: none;
+}
+.fx-prompt-setup {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  color: var(--fx-text-2);
+}
+.fx-prompt-setup .fx-glyph {
+  margin-top: 2px;
+  color: var(--fx-text-3);
+}
+.fx-prompt-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+}
+.fx-prompt-foot > span {
+  margin-right: auto;
+}
+@media (max-width: 760px) {
+  .fx-prompt-pop {
+    position: fixed;
+    inset: auto 12px 76px 12px;
+    width: auto;
+  }
+}

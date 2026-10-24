@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "border-accent-on-rounded",
+        "value": "*",
+        "files": [
+          "web/src/style.css"
+        ],
+        "createdAt": "2026-10-02T07:20:55.805Z",
+        "reason": "Agent review: line 47 explicitly sets border-radius:0; the four-pixel bottom border is the existing active-tab underline, unchanged since foundation commit ddfc567e."
+      }
+    ]
+  }
+}

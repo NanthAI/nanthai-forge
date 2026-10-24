@@ -1,0 +1,21 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.fx-change-map { min-width:0; width:100%; }
+.fx-change-map .code-graph-node.change-unchanged rect { fill:var(--fx-surface-2); }
+.fx-change-map .code-graph-node.change-unchanged text { fill:var(--fx-text-2); }
+.fx-change-map .code-graph-node.change-added rect { stroke:var(--fx-passed); fill:var(--fx-passed-bg); }
+.fx-change-map .code-graph-node.change-modified rect { stroke:var(--fx-active); fill:var(--fx-active-bg); }
+.fx-change-map .code-graph-node.change-deleted rect { stroke:var(--fx-failed); fill:var(--fx-failed-bg); stroke-dasharray:4 2; }
+.fx-change-map .code-graph-node.selected rect, .fx-change-map .code-graph-node:focus-visible rect { stroke:var(--fx-focus); stroke-width:2; }
+.code-graph-marker { fill:var(--fx-waiting); stroke:var(--fx-surface); stroke-width:1; }
+.fx-map-legend { display:flex; gap:12px; flex-wrap:wrap; padding:12px 14px; color:var(--fx-text-2); font-size:12px; }
+.fx-map-added { color:var(--fx-passed); }.fx-map-modified { color:var(--fx-active); }.fx-map-deleted { color:var(--fx-failed); }
+.fx-change-map .code-graph-canvas { min-height:240px; max-height:560px; }
+.fx-map-loading { min-height:240px; margin:0; padding:14px; color:var(--fx-text-3); }
+.fx-changes[data-files='open']:has(.fx-change-map:not([hidden])) { grid-template-columns:minmax(0,1fr); }
+@media(prefers-reduced-motion:reduce) { .fx-change-map * { animation:none; transition:none; scroll-behavior:auto; } }
+
+.fx-map-browser { min-width:0; }
+.fx-changes[data-files='open']:has(.fx-change-map:not([hidden])) > .fx-map-browser { grid-column:1/-1; }
+.fx-map-browser [hidden] { display:none; }
+
+.fx-map-peer-dot { color:var(--fx-waiting); }
