@@ -412,6 +412,49 @@ static checks and select transitive test importers plus smoke coverage. Set
 is captured in the environment fingerprint. Missing runner comparison inputs
 fall back to full. Pinned main-audit Candidates (`mainCheck.channel`) always run full, including manual reruns without an environment override. See [development](../development.md#scope-aware-standard-check).
 
+### Landing wait progress
+
+`nforge land ROOT LANE… --wait` and agent/MCP `land` with `wait:true` report
+one compact stderr line per Lane when its phase, queue position or progress
+changes. Lines use ordinary newlines, including when redirected; elapsed time
+and ETA drift do not repeat unchanged lines. The existing wait callbacks supply
+observations; this adds no provider reads or polling timer.
+
+The shared `phases` object appears on each land result entry and its submissions,
+on live status submissions, and on an in-flight Lane's `status.lane.landing`.
+It contains `current`, `timeline`,
+optional `queue`, job/shard/test-file `progress`, and optional `eta`. Stages are
+`queued`, `composing`, `dispatching`, `ci-running`, `recording-accepting`, and
+`accepted`. Queue positions count retained submissions on the same Channel,
+using the existing priority/fairness order. A recorded check waiting for capacity
+says `waiting on: runner`. Live lines identify the run's recorded phase and physical
+check controller's exclusive execution lease; the submitting CLI/MCP connection and
+landing worker do not own that execution. Before lease handoff, ownership remains
+pending. A remote controller preparing/exporting source remains `dispatching` until
+a provider execution is recorded. Worker errors include the affected Lane IDs,
+operation ID and run ID when retained. These live ownership/error observations do
+not change replayed receipts. Test-file counts appear only when retained
+`__FORGE_TESTS__` completion markers are available, and count selected files once
+per latest shard attempt. Provider logs may arrive only after a job finishes.
+
+Phase boundaries use retained queue selection, run reservation, provider job,
+check-result and acceptance timestamps. Missing boundaries and durations say
+`unknown`; observation time and file modification time never substitute for a
+missing event. Re-admitted attempts keep composition start unknown when only the
+original selection timestamp survives. The final JSON and stderr table include each phase's duration.
+ETA is labelled an estimate: per-phase medians from the last 20 completed owner
+landings on that Channel, with CI scaled by remaining test shards (or the larger
+unfinished-job fraction while static checks remain). Missing
+history for any remaining phase omits ETA. It is not a completion guarantee.
+
+When recorded for the acceptance, `main-audit` and `github-mirror-push` appear as
+trailing phases in live status and wait observations. Land completes at acceptance;
+receipt entry and submission phases stop there, so later audit/mirror timings cannot
+change a replayed result. Live status still shows pending follow-up work without
+waiting for it. A push start is unknown when only the
+mirror's latest update timestamp exists. Status is a read-only observation and
+starts no audit or push.
+
 ## Disjoint fast-path landing
 
 Candidates record `composedMain` separately from the Intent's original `base`.

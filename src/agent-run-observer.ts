@@ -1,9 +1,10 @@
+import { readLandCheckController } from './land-check-progress.js';
 import { landingWaitMs, assertLandingWorkerActive } from './landing-worker-context.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 // SPDX-License-Identifier: Apache-2.0
 import { CheckQueue, queueHolder } from './check-queue.js';
-import { workProgress, workProgressIdentity } from './work-progress.js';
+import { workProgress, workProgressIdentity, observeWorkProgress } from './work-progress.js';
 import { ForgeError, invariant } from './errors.js';
 import type { CheckRun } from './work-types.js';
 import { SelectedRunObserver } from './work-run-observation.js';
@@ -35,6 +36,7 @@ export async function waitForAgentRun(
       await new Promise(resolve => setTimeout(resolve, Math.min(250, end - Date.now())));
       continue;
     }
+    observeWorkProgress();
     if (!active(run)) return;
     if (progress) {
       const queue =
@@ -47,13 +49,23 @@ export async function waitForAgentRun(
               ),
             )
           : CheckQueue.observe(run.id);
+      const control = readLandCheckController(store, run);
+      const holder = control?.holder
+        ? {
+            ...control.holder,
+            actor: `${control.holder.lease ? 'check controller' : 'runner'} pid ${control.holder.pid}`,
+            phase: control.phase,
+          }
+        : undefined;
+      const capacity =
+        run.status === 'queued' && queue?.holder ? ` capacity holder=${queueHolder(queue.holder)}` : '';
       workProgress(
         run.status === 'queued'
           ? 'queued for check'
           : run.status === 'preparing'
             ? 'preparing check'
             : 'running check',
-        `${workProgressIdentity().runId === run.id ? '' : `run=${run.id} `}queue position=${queue?.position ?? 0} holder=${queueHolder(run.status === 'queued' ? queue?.holder : { pid: run.runner.pid, phase: run.status })}`,
+        `${workProgressIdentity().runId === run.id ? '' : `run=${run.id} `}queue position=${queue?.position ?? 0}${capacity} holder=${queueHolder(holder)}${control?.holder?.lease ? ` lease=${control.holder.lease}` : ''}`,
       );
     }
     // The existing recovery rules inspect a durable receipt or established local runner death.

@@ -119,6 +119,32 @@ for (const selected of [false, true, 'composed'])
     await f.agent.dispatch({ action: 'land', operationId, laneIds: [a.lane.laneId], wait: false });
     const childId = read(journalPath(f, 'land', operationId)).entries[0].command.operationId;
     await drive(f, async () => {
+      // Retiring A, landing its valid peer, checking B and publishing B are
+      // separate controller transitions. Keep the existing bound on each;
+      // a single end-to-end deadline also counts unrelated source preparation.
+      await until(
+        f,
+        () => f.store.select('landingEntries', a.command.operationId)?.status === 'interrupted',
+        'A retires',
+      );
+      if (peer)
+        await until(
+          f,
+          () => f.store.select('landingEntries', peer.command.operationId)?.status === 'accepted',
+          'peer lands',
+        );
+      await until(
+        f,
+        () => {
+          const entry = f.store.select('landingEntries', childId);
+          const batch = entry?.batchId && f.store.select('landingBatches', entry.batchId);
+          const runId = entry?.runId ?? batch?.prefixes.at(-1)?.runId;
+          return (
+            entry?.status === 'accepted' || (runId && f.store.select('runs', runId)?.status === 'passed')
+          );
+        },
+        'B exact check passes',
+      );
       await until(f, () => f.store.select('landingEntries', childId)?.status === 'accepted', 'B lands');
       const stale = f.store.select('landingEntries', a.command.operationId);
       assert.equal(stale.status, 'interrupted');

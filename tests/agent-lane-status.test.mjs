@@ -277,3 +277,70 @@ for (const native of [true, false]) {
     assert.equal(work.store.select('lanes', lane.id).startedAt, lane.startedAt);
   });
 }
+
+test('Lane status retains auto-snapshot notices alongside landing progress without history ETA', async t => {
+  const { LandJournal } = await import('../dist/land-journal.js');
+  const { landSchema } = await import('../dist/land-schema.js');
+  const { snapshotLane } = await import('../dist/lane-auto-snapshot.js');
+  const agent = fixture(t, true),
+    lane = await start(agent);
+  await agent.dispatch({
+    action: 'define-check',
+    name: 'verify',
+    executable: process.execPath,
+    args: ['-e', '0'],
+  });
+  const journal = new LandJournal(
+    agent.work.store,
+    landSchema.parse({ action: 'land', operationId: randomUUID(), laneIds: [lane.laneId] }),
+  );
+  writeFileSync(join(lane.path, 'file.txt'), 'unsaved edit\n');
+  const snapshot = snapshotLane(agent.work.store, lane.laneId);
+  assert.equal(snapshot.status, 'snapshot');
+  const status = (await agent.dispatch({ action: 'status', laneId: lane.laneId })).result.lane;
+  assert.equal(status.autoSnapshot.state, snapshot.state);
+  assert.equal(status.autoSnapshot.parent, lane.head);
+  assert.deepEqual(status.autoSnapshot.paths, ['file.txt']);
+  assert.match(status.autoSnapshot.notice, /Unsaved edits recovered from auto-snapshot at /);
+  assert.equal(status.head, lane.head);
+  assert.equal(status.landing.operationId, journal.state.entries[0].command.operationId);
+  assert.equal(status.landing.phases.current, 'queued');
+  assert.equal(status.landing.phases.eta, undefined);
+  assert.equal(status.landing.phases.timeline[0].startedAt, 'unknown');
+  assert.deepEqual(status.submissions[0].phases, status.landing.phases);
+});
+
+test('Lane status exposes an estimate from completed owner landing history', async t => {
+  const { LandJournal } = await import('../dist/land-journal.js');
+  const { landSchema } = await import('../dist/land-schema.js');
+  const { trustAgents } = await import('./autonomy-fixture.mjs');
+  const { drainPostAccept } = await import('../dist/post-accept-main.js');
+  const agent = fixture(t, true);
+  trustAgents(agent.work.store.root);
+  await agent.dispatch({
+    action: 'define-check',
+    name: 'verify',
+    executable: process.execPath,
+    args: ['-e', '0'],
+  });
+  await agent.dispatch({ action: 'set-policy', operationId: randomUUID(), checks: { runner: 'local' } });
+  const old = await start(agent);
+  writeFileSync(join(old.path, 'file.txt'), 'history change\n');
+  await agent.dispatch({ action: 'checkpoint', laneId: old.laneId, message: 'History fixture' });
+  const landed = (
+    await agent.dispatch({ action: 'land', operationId: randomUUID(), laneIds: [old.laneId], wait: true })
+  ).result;
+  assert.equal(landed.complete, true);
+  // Join the prior landing's audit writer before the fixture's zero-wait mutations.
+  await drainPostAccept(agent.work.store);
+  const next = await start(agent);
+  new LandJournal(
+    agent.work.store,
+    landSchema.parse({ action: 'land', operationId: randomUUID(), laneIds: [next.laneId] }),
+  );
+  const status = (await agent.dispatch({ action: 'status', laneId: next.laneId })).result.lane;
+  assert.equal(status.landing.phases.current, 'queued');
+  assert.equal(status.landing.phases.eta.label, 'estimate');
+  assert.equal(status.landing.phases.eta.samples, 1);
+  assert.equal(status.landing.phases.eta.historyLimit, 20);
+});

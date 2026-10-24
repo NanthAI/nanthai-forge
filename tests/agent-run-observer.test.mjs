@@ -10,6 +10,7 @@ import { WorkStore } from '../dist/work-store.js';
 import { checkEnvironment } from '../dist/work-run.js';
 import { SelectedRunObserver } from '../dist/work-run-observation.js';
 import { waitForAgentRun } from '../dist/agent-run-observer.js';
+import { withQueueSlot } from '../dist/landing-queue.js';
 import { ForgeError } from '../dist/errors.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 
@@ -294,3 +295,27 @@ for (const failure of ['SOURCE_CHANGED', 'INVALID_WORK_STORE', 'unexpected'])
         }
     }
   });
+
+test('selected-run waiting identifies the physical check controller and its execution lease', async t => {
+  const { store, run } = fixture(t);
+  const output = [];
+  t.mock.method(process.stderr, 'write', line => {
+    output.push(String(line));
+    return true;
+  });
+  const lease = `check-controllers/${run.id}`;
+  await withQueueSlot(
+    join(store.directory, lease),
+    async () => {
+      await waitForAgentRun(store, run.id, 0);
+    },
+    { anchor: store.directory, waitMs: 0 },
+  );
+  assert.ok(
+    output.some(
+      line =>
+        line.includes(`run=${run.id}`) &&
+        line.includes(`holder=check controller pid ${process.pid} phase=running lease=${lease}`),
+    ),
+  );
+});

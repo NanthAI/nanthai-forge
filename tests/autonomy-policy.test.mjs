@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { readLaneSubmissions } from '../dist/landing-submission-read.js';
+import { readLandingProgress } from '../dist/land-progress.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
@@ -65,7 +66,13 @@ for (const native of [true, false])
     const submission = result.submissions[0];
     assert.equal(submission.state, 'pending');
     assert.equal(submission.pendingReason, 'waiting-for-review');
-    assert.deepEqual(readLaneSubmissions(p.store, lane.laneId), result.submissions);
+    assert.deepEqual(
+      readLaneSubmissions(p.store, lane.laneId),
+      result.submissions.map(item => ({
+        ...item,
+        phases: readLandingProgress(p.store, item.entryOperationId),
+      })),
+    );
     assert.equal(result.message, 'Waiting for review by a person; not in main yet');
     assert.equal(p.store.select('intents', lane.intentId).status, 'ready');
     assert.equal(currentChannelHead(p.store, 'main'), null);

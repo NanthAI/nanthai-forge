@@ -666,6 +666,13 @@ test('explicit wait settles bounded observations and never retries a check failu
   assert.equal(result.terminal, true);
   assert.deepEqual(result.counts, { failed: 1, accepted: 1 });
   assert.match(result.table, /Lane\tHead\tResult/);
+  assert.match(result.table, /Phase durations/);
+  for (const entry of result.entries) {
+    assert.equal(entry.phases.timeline.length >= 6, true);
+    assert.deepEqual(entry.phases, entry.submissions[0].phases);
+    assert.ok(entry.phases.timeline.every(phase => phase.durationMs === 'unknown' || phase.durationMs >= 0));
+  }
+
   const before = f.store
     .load()
     .runs.filter(r => !r.mainCheck)
@@ -741,6 +748,10 @@ test('land --wait prints a per-Lane table and exits nonzero for a real failed ch
   assert.equal(JSON.parse(child.stdout).result.terminal, true);
   assert.match(child.stderr, /Lane\tHead\tResult/);
   assert.match(child.stderr, /check-failed/);
+  assert.match(child.stderr, /: (queued|composing|dispatching|ci-running|recording-accepting)/);
+  assert.match(child.stderr, /queued=(?:unknown|\d+s)/);
+  assert.ok(JSON.parse(child.stdout).result.entries[0].phases);
+
   const command = { ...JSON.parse(child.stdout).result.replay.command, wait: true };
   const agent = spawnSync(
     process.execPath,

@@ -1,3 +1,5 @@
+import { withWorkProgressReporter } from './work-progress.js';
+import { landProgressReporter } from './land-progress-live.js';
 import { currentChannelHead } from './agent-defaults.js';
 import type { LandEntry } from './land-journal.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -73,33 +75,55 @@ export async function recoverLandInfrastructure(work: WorkService, ids: string[]
 export async function waitForLand(
   work: WorkService,
   drive: () => ReturnType<typeof landReceipt> | Promise<ReturnType<typeof landReceipt>>,
+  operationId: string,
 ) {
-  for (;;) {
-    let response: ReturnType<typeof landReceipt>;
-    try {
-      response = await drive();
-    } catch (error) {
-      if (
-        !(error instanceof ForgeError) ||
-        !['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)
-      )
-        throw error;
-      workProgress('waiting for land', `${error.code}: replaying the retained request`);
-      await new Promise(resolve => setTimeout(resolve, 250));
-      continue;
-    }
-    const result = response.result;
-    if (
-      await recoverLandInfrastructure(
-        work,
-        result.entries.map(entry => entry.operationId),
-      )
-    )
-      continue;
-    if (result.terminal) return response;
-    workProgress('waiting for land', result.summary.join('; '));
-    await new Promise(resolve => setTimeout(resolve, 250));
-  }
+  const report = landProgressReporter(work.store, operationId);
+  return withWorkProgressReporter(
+    phase => {
+      const observed = report();
+      return (
+        observed &&
+        [
+          'waiting for land',
+          'queued for check',
+          'preparing check',
+          'running check',
+          'waiting for lock',
+          'checking landing batch',
+          'landing selected Lanes',
+        ].includes(phase)
+      );
+    },
+    async () => {
+      for (;;) {
+        let response: ReturnType<typeof landReceipt>;
+        try {
+          response = await drive();
+        } catch (error) {
+          if (
+            !(error instanceof ForgeError) ||
+            !['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)
+          )
+            throw error;
+          workProgress('waiting for land', `${error.code}: replaying the retained request`);
+          await new Promise(resolve => setTimeout(resolve, 250));
+          continue;
+        }
+        report();
+        const result = response.result;
+        if (
+          await recoverLandInfrastructure(
+            work,
+            result.entries.map(entry => entry.operationId),
+          )
+        )
+          continue;
+        if (result.terminal) return response;
+        report();
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+    },
+  );
 }
 
 /** The ordinary exact-check path uses the same failure classification. */

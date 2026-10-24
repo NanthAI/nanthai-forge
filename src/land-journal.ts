@@ -1,3 +1,4 @@
+import { observeWorkProgress } from './work-progress.js';
 import { requireNewLandSelection } from './land-request-identity.js';
 import {
   previewLanding,
@@ -215,6 +216,7 @@ export class LandJournal {
   }
   save() {
     saveLandJournal(this.store, this.path, this.state);
+    observeWorkProgress();
   }
 }
 

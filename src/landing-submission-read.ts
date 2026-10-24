@@ -1,3 +1,4 @@
+import { readLandingProgress } from './land-progress.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -32,6 +33,8 @@ export function landSubmissions(store: WorkStore, entry: LandEntry) {
       : entry.viewId
         ? finishChild(entry.command.operationId, 'land-compose')
         : null;
+  // Receipt phases end at acceptance; later audit/mirror timings belong to live status.
+  const phases = readLandingProgress(store, entry.command.operationId, entry, undefined, false);
   return entry.inputs.map(pin => ({
     ...landingSubmission(
       store,
@@ -41,11 +44,13 @@ export function landSubmissions(store: WorkStore, entry: LandEntry) {
       attemptId,
     ),
     entryOperationId: entry.command.operationId,
+    phases,
   }));
 }
 /** Read-only local driver adapters. Work remains the authority for queued outcomes. */
 export function readLaneSubmissions(store: WorkStore, laneId?: string, operationId?: string): Submission[] {
   const submissions = new Map<string, Submission>();
+  const journals = new Map<string, LandEntry>();
   const operationIds = new Set(operationId ? [operationId] : []);
   const add = (submission: Submission) => submissions.set(submission.submissionId, submission);
   const directory = join(store.directory, 'agent-land');
@@ -57,6 +62,7 @@ export function readLaneSubmissions(store: WorkStore, laneId?: string, operation
     )) {
       const state = JSON.parse(readFileSync(join(directory, name), 'utf8')) as { entries: LandEntry[] };
       for (const entry of state.entries) {
+        journals.set(entry.command.operationId, entry);
         operationIds.add(entry.command.operationId);
         if (
           (!laneId || entry.inputs.some(pin => pin.laneId === laneId)) &&
@@ -132,7 +138,14 @@ export function readLaneSubmissions(store: WorkStore, laneId?: string, operation
         add({ ...submission, entryOperationId: entry.id });
       }
   }
-  return [...submissions.values()];
+  return [...submissions.values()].map(submission => ({
+    ...submission,
+    phases: readLandingProgress(
+      store,
+      submission.entryOperationId,
+      journals.get(submission.entryOperationId),
+    ),
+  }));
 }
 
 export function finishSubmissions(

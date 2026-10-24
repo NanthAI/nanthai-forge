@@ -151,7 +151,11 @@ export function pendingStatus(
           landingAttemptId(queued),
           pin.head,
         );
-        submissions.set(submission.submissionId, { ...submission, entryOperationId: queued.id });
+        submissions.set(submission.submissionId, {
+          ...submission,
+          entryOperationId: queued.id,
+          ...(previous?.phases ? { phases: previous.phases } : {}),
+        });
       }
       const submissionList = [...submissions.values()];
       const submission =

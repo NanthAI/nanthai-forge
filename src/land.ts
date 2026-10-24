@@ -297,5 +297,5 @@ async function landOnce(
 export async function land(...args: Parameters<typeof landOnce>) {
   const [work, command] = args;
   if (command.wait !== true || landingWorkerSignal()) return landOnce(...args);
-  return waitForLand(work, () => landOnce(...args));
+  return waitForLand(work, () => landOnce(...args), command.operationId);
 }

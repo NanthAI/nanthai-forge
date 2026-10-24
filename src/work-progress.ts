@@ -8,6 +8,14 @@ type Progress = Identity & {
   currentPhase?: string;
   last: Map<string, { key: string; at: number }>;
 };
+const reporter = new AsyncLocalStorage<(phase: string) => boolean | void>();
+/** Observe existing wait-loop callbacks without creating another poller. */
+export function withWorkProgressReporter<T>(report: (phase: string) => boolean | void, run: () => T): T {
+  return reporter.run(report, run);
+}
+export function observeWorkProgress() {
+  reporter.getStore()?.('observation');
+}
 const context = new AsyncLocalStorage<Progress>();
 export function withWorkProgress<T>(identity: Identity, run: () => T): T {
   const previous = context.getStore();
@@ -40,6 +48,7 @@ export const workProgressIdentity = (): Identity => {
 /** Call from polling loops, including synchronous lock admission. No timer can
  * report while an Atomics.wait loop owns the JS thread. */
 export function workProgress(phase: string, details: string, key = phase) {
+  if (reporter.getStore()?.(phase)) return;
   const scope = context.getStore(),
     now = Date.now(),
     // A fresh retry run must announce itself; lock-holder diagnostics stay once per lock.

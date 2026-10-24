@@ -73,10 +73,18 @@ export function agentLaneStatus(
   }
   const end = command.offset + command.limit;
   const autoSnapshot = store.native ? autoSnapshotNotice(store, lane) : undefined;
+  const submissions = readLaneSubmissions(store, lane.id);
+  const landing = [...submissions]
+    .reverse()
+    .find(
+      item => !item.terminal || ['main-audit', 'github-mirror-push'].includes(item.phases?.current ?? ''),
+    );
+
   return {
     ...laneReceipt(lane, store.path(lane.id)),
     ...(autoSnapshot ? { autoSnapshot } : {}),
-    submissions: readLaneSubmissions(store, lane.id),
+    submissions,
+    ...(landing ? { landing: { operationId: landing.operationId, phases: landing.phases } } : {}),
     ...(lane.stack ? { stackStatus: stackStatus(store, lane) } : {}),
     handoff: handoffSummary(
       latestHandoff(

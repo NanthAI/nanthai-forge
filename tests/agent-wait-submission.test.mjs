@@ -221,10 +221,21 @@ test('one wait follows multiple operations across owner worker shutdown and rest
     assert.equal(f.store.load().runs.filter(r => !r.mainCheck).length, 1, 'restart adopts the original run');
     assert.equal(result, undefined, 'recovery does not settle the still-gated check');
     f.release();
+    // Command completion, acceptance publication and observer delivery have
+    // independent progress bounds. A loaded owner can spend the whole delivery
+    // window preparing acceptance; begin that window at its durable boundary.
+    await until(
+      () => f.store.select('runs', run.id).status === 'passed',
+      diagnostic('gated command completed'),
+    );
+    await until(
+      () => [a, b].every(c => f.store.select('landingEntries', c.command.operationId).status === 'accepted'),
+      diagnostic('replacement worker published acceptance'),
+    );
     await until(() => {
       if (waitError) throw waitError;
       return result;
-    }, diagnostic('single observer settled after release'));
+    }, diagnostic('single observer settled after acceptance'));
     assert.equal(result.successful, true, JSON.stringify(result));
     assert.equal(result.targets.length, 2);
     assert.equal(f.store.select('runs', run.id).status, 'passed');

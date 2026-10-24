@@ -1,3 +1,4 @@
+import { observeWorkProgress } from './work-progress.js';
 import { landingWorkerSignal } from './landing-worker-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import { withQueueSlot } from './landing-queue.js';
@@ -87,6 +88,7 @@ export async function drainLandingBatches(
           );
         }
         if (batch) {
+          observeWorkProgress();
           launched++;
           started.add(batch.id);
           const parent = batch.parentId ? running.get(batch.parentId) : undefined,
@@ -100,6 +102,7 @@ export async function drainLandingBatches(
           const composed = await compose.catch(
             (error: unknown) => ((failure ??= { error, batch: selected }), undefined),
           );
+          observeWorkProgress();
           if (!composed) {
             halted = true;
             continue;

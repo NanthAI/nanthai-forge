@@ -51,3 +51,30 @@ test('a retry run reports running immediately even when its details match the pr
   assert.match(output[0], /run=first /);
   assert.match(output[1], /run=retry /);
 });
+
+test('scoped reporters observe existing callbacks and suppress handled lines without timers', async t => {
+  const { withWorkProgressReporter, observeWorkProgress } = await import('../dist/work-progress.js');
+  const observed = [],
+    output = [];
+  t.mock.method(process.stderr, 'write', line => {
+    output.push(line);
+    return true;
+  });
+  await withWorkProgressReporter(
+    phase => {
+      observed.push(phase);
+      return phase === 'running check';
+    },
+    async () => {
+      workProgress('running check', 'one');
+      await Promise.resolve();
+      workProgress('running check', 'one');
+      observeWorkProgress();
+      workProgress('other', 'retained diagnostic');
+    },
+  );
+  workProgress('outside', 'normal');
+  assert.deepEqual(observed, ['running check', 'running check', 'observation', 'other']);
+  assert.equal(output.length, 2);
+  assert.match(output[0], /retained diagnostic/);
+});

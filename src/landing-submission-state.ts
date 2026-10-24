@@ -20,6 +20,7 @@ export type Submission = {
   terminal: boolean;
   complete: boolean;
   diagnosis?: LandingDiagnosisReport;
+  phases?: ReturnType<typeof import('./land-progress.js').readLandingProgress>;
 };
 const busy = ['queued', 'preparing', 'running', 'checking', 'waiting', 'waiting to land', 'source-changed'];
 /** Additive vocabulary over existing receipts; it neither drives nor authorizes landing. */

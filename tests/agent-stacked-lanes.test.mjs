@@ -9,6 +9,7 @@ import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { localBrief } from '../dist/agent-brief-local.js';
+import { readLandingProgress } from '../dist/land-progress.js';
 import { trustAgents } from './autonomy-fixture.mjs';
 
 async function fixture(t) {
@@ -108,7 +109,13 @@ test('child finish waits and a reverse-order depth-three chain lands through lan
   assert.equal(waiting.terminal, false);
   assert.equal(waiting.submissions[0].state, 'pending');
   assert.equal(waiting.submissions[0].pendingReason, 'waiting-for-dependency');
-  assert.deepEqual((await f.status(c)).submissions, waiting.submissions);
+  assert.deepEqual(
+    (await f.status(c)).submissions,
+    waiting.submissions.map(item => ({
+      ...item,
+      phases: readLandingProgress(f.store, item.entryOperationId),
+    })),
+  );
   assert.equal((await f.finish(b)).status, 'waiting-for-dependency');
   assert.equal(f.store.load().channelMoves.length, 0);
   assert.equal((await f.finish(a)).status, 'accepted');
