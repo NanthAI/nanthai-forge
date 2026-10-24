@@ -14,6 +14,7 @@ import { evidenceApplicability, runApplicability } from './work-evidence.js';
 import { laneReceipt, viewReceipt, runReceipt } from './agent-receipts.js';
 import { annotateLanes } from './agent-lifecycle.js';
 import { invariant } from './errors.js';
+import { autoSnapshotNotices } from './lane-auto-snapshot.js';
 export function recordApplicability(store: WorkStore, run: CheckRun, tx = store.readRecords()) {
   if (!tx) return runApplicability(store.load(), run, checkEnvironment());
   const data = tx.data(),
@@ -81,10 +82,12 @@ export function agentRecordStatus(
   const submissions = readLaneSubmissions(store);
   // Channel receipts are a global namespace; only this collection is needed to reconcile refs.
   data.channelMoves = positions('channelMoves').map(position => tx.at('channelMoves', position));
+  const unsavedEdits = command.laneId ? [] : autoSnapshotNotices(store);
   return {
     revision: tx.revision,
     result: {
       ...(lane ? { lane } : {}),
+      ...(unsavedEdits.length ? { unsavedEdits } : {}),
       ...agentCostSummary(store.root, tx),
       autonomyPolicy: readPolicy(store),
       checkRunner: { runner: 'local', ...readPolicy(store).checks },

@@ -50,6 +50,8 @@ export const autonomyPolicySchema = z.object({
     .optional(),
   integrationPreview: z.object({ auto: z.boolean() }).optional(),
   ownerRootUpdates: z.boolean().optional(),
+  /** Debounced local snapshots of open native Lanes; absent means on. */
+  autoSnapshot: z.boolean().optional(),
   laneUpdates: z.enum(['auto', 'ask']),
   lifecycle: z.object({ completeOnAccept: z.boolean(), cleanRegenerableCopies: z.boolean() }),
   notify: z.object({ awaySummary: z.boolean() }),
@@ -99,6 +101,7 @@ export const policyWriteSchema = z
     checks: autonomyPolicySchema.shape.checks.unwrap().partial().optional(),
     integrationPreview: autonomyPolicySchema.shape.integrationPreview,
     ownerRootUpdates: autonomyPolicySchema.shape.ownerRootUpdates,
+    autoSnapshot: autonomyPolicySchema.shape.autoSnapshot,
     laneUpdates: autonomyPolicySchema.shape.laneUpdates.optional(),
     lifecycle: autonomyPolicySchema.shape.lifecycle.partial().optional(),
     notify: autonomyPolicySchema.shape.notify.partial().optional(),
@@ -127,6 +130,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     command.checks ||
     command.acceptance ||
     command.ownerRootUpdates !== undefined ||
+    command.autoSnapshot !== undefined ||
     command.laneUpdates ||
     command.lifecycle ||
     command.notify ||
@@ -143,6 +147,9 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     acceptance: { ...base.acceptance, ...command.acceptance },
     integrationPreview: command.integrationPreview ?? base.integrationPreview ?? { auto: false },
     ownerRootUpdates: command.ownerRootUpdates ?? base.ownerRootUpdates,
+    ...((command.autoSnapshot ?? previous.autoSnapshot) !== undefined
+      ? { autoSnapshot: command.autoSnapshot ?? previous.autoSnapshot }
+      : {}),
     laneUpdates: command.laneUpdates ?? base.laneUpdates,
     lifecycle: { ...base.lifecycle, ...command.lifecycle },
     notify: { ...base.notify, ...command.notify },

@@ -7,6 +7,7 @@ import { NativeSource } from './native-source.js';
 import { changedPaths } from './agent-sync.js';
 import { workGit } from './work-git.js';
 import { laneReceipt } from './agent-receipts.js';
+import { autoSnapshotNotice } from './lane-auto-snapshot.js';
 import type { AgentAction } from './agent-workflow-schema.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
@@ -71,8 +72,10 @@ export function agentLaneStatus(
     changedPathsError = { code: error.code, message: error.message };
   }
   const end = command.offset + command.limit;
+  const autoSnapshot = store.native ? autoSnapshotNotice(store, lane) : undefined;
   return {
     ...laneReceipt(lane, store.path(lane.id)),
+    ...(autoSnapshot ? { autoSnapshot } : {}),
     submissions: readLaneSubmissions(store, lane.id),
     ...(lane.stack ? { stackStatus: stackStatus(store, lane) } : {}),
     handoff: handoffSummary(

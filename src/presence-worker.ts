@@ -13,6 +13,7 @@ import { changedPaths } from './agent-sync.js';
 import { readHostState } from './host-binding.js';
 import { guardOwnerWorker } from './presence-worker-guard.js';
 import { allRecords } from './agent-lifecycle.js';
+import { laneAutoSnapshots } from './lane-auto-snapshot.js';
 import type { CheckRun, Lane } from './work-types.js';
 
 /** Timer period for presence observation; the env override exists so tests can make timers certain to fire. */
@@ -36,6 +37,12 @@ export async function watchLanePresence(
     () =>
       new Promise<void>(resolve => {
         let edited = false;
+        // Debounced recovery snapshots ride on the same edit observations; no extra polling.
+        const snapshots = laneAutoSnapshots(store, laneId, !!signal);
+        const edit = () => {
+          snapshots.edited();
+          onEdit?.(laneId);
+        };
         const metadata = observePresenceFiles(store.path(laneId));
         const observeFiles = process.platform === 'darwin' ? metadata : undefined;
         if (observeFiles) {
@@ -53,6 +60,7 @@ export async function watchLanePresence(
         }
         if (!existsSync(store.path(laneId)) && existsSync(store.directory)) {
           ownerDying = true;
+          snapshots.close();
           return;
         }
         const watcher = watchLocal(
@@ -65,7 +73,7 @@ export async function watchLanePresence(
               // once native watching is installed, including after recovery.
               if (metadata()) {
                 edited = true;
-                onEdit?.(laneId);
+                edit();
               }
             },
           },
@@ -73,7 +81,7 @@ export async function watchLanePresence(
             if (!existsSync(store.directory)) return close();
             if (filename && !exclusion(filename.replaceAll('\\', '/'))) {
               if (!observeFiles) edited = true;
-              onEdit?.(laneId);
+              edit();
             }
           },
         );
@@ -82,6 +90,7 @@ export async function watchLanePresence(
           if (closed) return;
           closed = true;
           clearInterval(timer);
+          snapshots.close();
           signal?.removeEventListener('abort', close);
           void watcher.close().then(resolve);
         };
@@ -116,7 +125,7 @@ export async function watchLanePresence(
             }
             if (reconcileFiles?.()) {
               edited = true;
-              onEdit?.(laneId);
+              edit();
             }
             const sessions = collapseSessions(Object.values(readHostState(store).presence ?? {})).filter(
               session => session.context.laneId === laneId,
@@ -157,6 +166,9 @@ export async function watchLanePresence(
           }
         };
         const timer = setInterval(touch, touchMs());
+        // A restarted observer snapshots edits a dead process left unsaved. Only macOS
+        // compared the live source with the head above; elsewhere one cached capture decides.
+        if (edited || !observeFiles) snapshots.edited();
         if (edited) touch();
         if (signal) timer.unref?.();
         signal?.addEventListener('abort', close, { once: true });

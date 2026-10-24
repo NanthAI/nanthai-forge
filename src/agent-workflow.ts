@@ -18,6 +18,7 @@ import { runnerMonthCosts } from './check-cost.js';
 import { candidateCommand } from './candidate-names.js';
 import { agentTake } from './agent-take.js';
 import { duplicateStartWarnings } from './agent-ownership.js';
+import { autoSnapshotNotices } from './lane-auto-snapshot.js';
 import { parseAgentAction } from './agent-action-parse.js';
 import { undoOptimisticRevert } from './optimistic-undo.js';
 import { indexPeerSource } from './agent-peers-index.js';
@@ -299,6 +300,15 @@ export class AgentWorkflow {
       } catch {
         Object.assign(result, { ownershipCoverage: 'local-incomplete' });
       }
+      // A restarted agent learns that its earlier open Lane holds recovered unsaved edits.
+      const recovered = command.actor
+        ? autoSnapshotNotices(store, command.actor).filter(item => item.laneId !== result.laneId)
+        : [];
+      if (recovered.length)
+        result.warnings = [
+          ...(result.warnings ?? []),
+          ...recovered.map(item => `Lane ${item.laneId} (${item.path}): ${item.notice}`),
+        ];
     }
     if (peers) {
       if (overlapCoverage === 'local-incomplete') {
