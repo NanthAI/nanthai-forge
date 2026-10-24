@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 import { WorkService } from './work.js';
 import { reuseMainCheck } from './landing-check-reuse.js';
+import { checkServiceEnv } from './worker-environment.js';
+import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { workProgress } from './work-progress.js';
-// SPDX-License-Identifier: Apache-2.0
 import { recoverOptimisticMain, recoveryResult } from './optimistic-recovery.js';
 import { wakeGithubPush } from './github-auto-push.js';
 import { spawn } from 'node:child_process';
@@ -39,10 +41,16 @@ export function wakePostAccept(store: WorkStore) {
     })
   )
     return;
+  // FORGE_AUTH_TOKEN authenticates hosted metadata emitted by this owner driver.
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), store.root], {
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, FORGE_CHECK_FULL: '1' },
+    env: checkServiceEnv(
+      store.page('checks', 0, Number.MAX_SAFE_INTEGER).records,
+      childPolicy(store.readRecords()?.data() ?? store.load()),
+      ['FORGE_AUTH_TOKEN'],
+      { FORGE_CHECK_FULL: '1' },
+    ),
   });
   child.on('error', () => {
     /* Durable acceptance remains queued for the next owner observation. */

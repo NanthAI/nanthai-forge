@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { nativeOwner, nativePaths } from './native-source.js';
 import { ForgeError, invariant } from './errors.js';
 
 function run(root: string, args: string[], input?: string, acceptNoMatch = false): string {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  const env = childEnv();
   try {
     return execFileSync(
       'git',

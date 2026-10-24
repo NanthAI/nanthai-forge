@@ -21,6 +21,12 @@ import { packWorkArchive, withWorkArchive, validateArchiveEntrySizes } from '../
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const invalid = error => error.code === 'INVALID_WORK_BACKUP';
 function fixture(t) {
+  const previousSecret = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'fake-test-secret';
+  t.after(() => {
+    if (previousSecret === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousSecret;
+  });
   const root = mkdtempSync(join(tmpdir(), 'forge-archive-extraction-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
@@ -32,7 +38,7 @@ function listingProbe(root) {
   mkdirSync(bin);
   writeFileSync(
     join(bin, 'tar'),
-    `#!${process.execPath}\nimport {appendFileSync} from 'node:fs';\nimport {spawnSync} from 'node:child_process';\nappendFileSync(${JSON.stringify(log)},JSON.stringify(process.argv.slice(2))+'\\n');\nconst result=spawnSync(${JSON.stringify(actual)},process.argv.slice(2),{stdio:'inherit'});process.exit(result.status??1);\n`,
+    `#!${process.execPath}\nimport {appendFileSync} from 'node:fs';\nimport {spawnSync} from 'node:child_process';\nif(process.env.OPENAI_API_KEY)process.exit(93);\nappendFileSync(${JSON.stringify(log)},JSON.stringify(process.argv.slice(2))+'\\n');\nconst result=spawnSync(${JSON.stringify(actual)},process.argv.slice(2),{stdio:'inherit'});process.exit(result.status??1);\n`,
     { mode: 0o700 },
   );
   return {

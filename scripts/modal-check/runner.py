@@ -132,7 +132,8 @@ def main():
             image = image.run_commands('node -e ' + shlex.quote(verify) + ' ' + shlex.quote(plan['head']))
             if plan['standard'] and plan['selection']['scope'] != 'docs':
                 image = image.run_commands('npm run build:core && npm run build:web')
-            image = image.add_local_file(Path(__file__).with_name('worker.mjs'), '/tmp/forge-worker.mjs', copy=True)
+            image = (image.add_local_file(Path(__file__).with_name('worker.mjs'), '/tmp/modal-check/worker.mjs', copy=True)
+                     .add_local_file(Path(__file__).parent.parent / 'child-env.mjs', '/tmp/child-env.mjs', copy=True))
             image.build(app)
             journal['image'] = image.object_id
             save(journal_path, journal)
@@ -162,7 +163,7 @@ def main():
             if plan['standard'] and files is not None and plan['selection']['scope'] == 'full':
                 env['FORGE_TEST_COVERAGE_HEAD'] = plan['head']
             env['FORGE_MODAL_COMMAND'] = json.dumps({'command': command, 'artifacts': plan.get('artifacts', []) if files is None else []})
-            command = ['node', '/tmp/forge-worker.mjs']
+            command = ['node', '/tmp/modal-check/worker.mjs']
             journal['creating'] = True
             save(journal_path, journal)
             while True:

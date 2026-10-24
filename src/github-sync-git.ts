@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { githubEnvNames } from './worker-environment.js';
+import { childEnv } from '../scripts/child-env.mjs';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -95,7 +97,7 @@ export function syncGit(root: string, args: string[]): Promise<string> {
       ],
       {
         env: {
-          ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
+          ...childEnv({ allow: githubEnvNames }),
           GIT_TERMINAL_PROMPT: '0',
           GH_PROMPT_DISABLED: '1',
         },
@@ -186,7 +188,7 @@ export async function defaultSyncRepository(input: string): Promise<string> {
       execFile(
         'gh',
         ['repo', 'view', '--json', 'nameWithOwner'],
-        { cwd: input, encoding: 'utf8', timeout: 20_000 },
+        { cwd: input, env: childEnv({ allow: githubEnvNames }), encoding: 'utf8', timeout: 20_000 },
         (error, stdout) => (error ? reject(error) : resolve(stdout)),
       );
     });

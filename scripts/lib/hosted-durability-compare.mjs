@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../child-env.mjs';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -120,7 +121,7 @@ export async function readSnapshot(path, options = {}) {
   const child = spawn(
     'python3',
     [fileURLToPath(new URL('./hosted-durability-zip.py', import.meta.url)), path],
-    { stdio: ['ignore', 'pipe', 'ignore'] },
+    { env: childEnv(), stdio: ['ignore', 'pipe', 'ignore'] },
   );
   const completion = new Promise(resolve => {
     child.once('error', () => resolve(false));

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
 import { spawn } from 'node:child_process';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -17,7 +18,7 @@ export async function streamGit(
     receive = url.search === '?service=git-receive-pack' || endpoint === 'git-receive-pack';
   const service = receive ? 'git-receive-pack' : 'git-upload-pack';
   const env = {
-    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
+    ...childEnv(),
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
     GIT_TERMINAL_PROMPT: '0',

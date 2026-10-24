@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
 import { authStatus } from './auth-status.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -42,12 +43,28 @@ async function request(origin: string, operation: string, input: unknown) {
     throw new ForgeError('AUTH_RESPONSE_INVALID', 'Forge returned an invalid login response.');
   }
 }
-function openBrowser(url: string) {
+export function openBrowser(url: string) {
   const command =
     process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'rundll32' : 'xdg-open';
   const args = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url];
   try {
-    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: 'ignore',
+      env: childEnv({
+        allow: [
+          'DISPLAY',
+          'WAYLAND_DISPLAY',
+          'XAUTHORITY',
+          'DBUS_SESSION_BUS_ADDRESS',
+          'XDG_RUNTIME_DIR',
+          'XDG_CURRENT_DESKTOP',
+          'XDG_CONFIG_HOME',
+          'XDG_DATA_DIRS',
+          'BROWSER',
+        ],
+      }),
+    });
     child.on('error', () => {});
     child.unref();
   } catch {

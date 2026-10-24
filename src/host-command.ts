@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { deleteHostedProject, parseDeleteProjectOptions } from './host-delete.js';
+import { checkServiceEnv } from './worker-environment.js';
+import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { readRecoveryInventory } from './recovery-inventory.js';
 import { readAutoExchangeStatus } from './auto-exchange-status.js';
 import { consumeOwnerRequests, startOwnerAcceptanceListener } from './owner-acceptance-consumer.js';
@@ -12,7 +14,7 @@ import { readHostState, updateHostState } from './host-binding.js';
 import { hostProject, HOST_HELP, type HostOptions } from './host-cli.js';
 import { formatHostProgress } from './host-progress.js';
 import { ForgeError, invariant } from './errors.js';
-export async function hostCli(args: string[]) {
+export async function hostCli(args: string[], host: typeof hostProject = hostProject) {
   if (!args.length || args.includes('--help')) {
     process.stdout.write(HOST_HELP);
     return;
@@ -144,7 +146,7 @@ export async function hostCli(args: string[]) {
       }
     } else invariant(false, 'BAD_ARGUMENT', HOST_HELP);
   }
-  const result = await hostProject(root, options).catch(error => {
+  const result = await host(root, options).catch(error => {
     // A detached worker can fail before transport starts (for example expired
     // login). Preserve a safe code for --status, never the provider's text.
     if (backfill)
@@ -156,10 +158,20 @@ export async function hostCli(args: string[]) {
   });
   await consumeOwnerRequests(new WorkStore(root)).catch(() => {});
   if ('historyBackfilling' in result && result.historyBackfilling) {
+    const store = new WorkStore(root);
+    // FORGE_AUTH_TOKEN authenticates this worker's hosted source/metadata requests.
     const child = spawn(
       process.execPath,
       [fileURLToPath(new URL('./cli.js', import.meta.url)), 'host', root, '--backfill'],
-      { detached: true, stdio: 'ignore', env: process.env },
+      {
+        detached: true,
+        stdio: 'ignore',
+        env: checkServiceEnv(
+          store.page('checks', 0, Number.MAX_SAFE_INTEGER).records,
+          childPolicy(store.readRecords()?.data() ?? store.load()),
+          ['FORGE_AUTH_TOKEN', 'FORGE_DEPLOYMENT_URL'],
+        ),
+      },
     );
     child.once('error', () =>
       updateHostState(new WorkStore(root), state => {

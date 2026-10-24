@@ -1333,3 +1333,16 @@ explicit live run or submission wait creates subscriptions; every exit and serve
 disconnect closes them. Finite status/observe and idle connections install no observer or timer.
 Account authentication never selects person acceptance in these tools. Live
 provisioning and provider qualification remain separate.
+
+### Child process environments
+
+Forge background workers and native helpers construct child environments with
+`childEnv` from ordinary OS settings and explicit per-operation names. Unknown
+variables, including unrelated credentials and ambient `NODE_OPTIONS`, are not
+inherited. Git helpers retain their explicit Git identity/configuration and CGI
+settings. GitHub, hosted synchronization and Modal controllers receive only their
+selected provider credential names; check controllers preserve the check's declared
+environment and credential inputs. Project commands continue to use their private
+check runtime directories and declared passthrough. The self-host backend receives
+its explicitly selected S3 file settings. These are environment boundaries, not
+OS sandboxes or protection from credentials in files accessible to the account.

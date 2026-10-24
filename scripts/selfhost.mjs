@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from './child-env.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { chmod, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -86,6 +87,7 @@ async function initialize(directory, archivePath, port, pinnedRelease) {
   await mkdir(directory, { mode: 0o700 });
   execFileSync('unzip', ['-q', resolve(archivePath), 'convex-local-backend', '-d', directory], {
     stdio: 'ignore',
+    env: childEnv(),
   });
   const binary = join(directory, 'convex-local-backend');
   await chmod(binary, 0o700);
@@ -103,7 +105,7 @@ async function initialize(directory, archivePath, port, pinnedRelease) {
   const key = execFileSync(
     binary,
     ['keygen', 'admin-key', '--instance-name', config.instance, '--instance-secret', config.secret],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: childEnv() },
   ).trim();
   if (!key || /[\r\n']/.test(key)) throw new Error('Backend key generation failed.');
   await writeFile(
@@ -157,7 +159,14 @@ async function start(directory, storageEnv) {
       ...(storageEnv ? ['--s3-storage'] : ['--local-storage', join(directory, 'files')]),
       join(directory, 'database.sqlite3'),
     ],
-    { cwd: directory, stdio: 'inherit', env: { ...process.env, ...storage, SENTRY_DSN: '' } },
+    {
+      cwd: directory,
+      stdio: 'inherit', // Native storage consumes only the explicitly selected storage-file settings.
+      env: childEnv({
+        extra: { ...storage, SENTRY_DSN: '' },
+        allow: ['RUST_LOG', 'RUST_BACKTRACE', 'SSL_CERT_FILE', 'SSL_CERT_DIR'],
+      }),
+    },
   );
   const stop = signal => child.kill(signal);
   const interrupt = () => stop('SIGINT'),

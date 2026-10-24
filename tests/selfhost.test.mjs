@@ -72,7 +72,13 @@ test('self-host launch preserves existing data and refuses corrupt or exposed in
   }
 });
 
-test('optional private S3 launch uses native storage and preserves the local default and original instance', async () => {
+test('optional private S3 launch uses native storage and preserves the local default and original instance', async t => {
+  const previousSecret = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'fake-test-secret';
+  t.after(() => {
+    if (previousSecret === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousSecret;
+  });
   const directory = await mkdtemp(join(tmpdir(), 'forge-selfhost-s3-'));
   try {
     // The extensionless mock must not inherit the check owner's ESM package scope.
@@ -82,7 +88,7 @@ test('optional private S3 launch uses native storage and preserves the local def
       storageEnv = join(directory, 's3.env');
     await writeFile(
       binary,
-      `#!${process.execPath}\nrequire('node:fs').writeFileSync('capture.json', JSON.stringify({args:process.argv.slice(2),region:process.env.AWS_REGION,key:process.env.AWS_SECRET_ACCESS_KEY,sentry:process.env.SENTRY_DSN}),{mode:0o600});\n`,
+      `#!${process.execPath}\nrequire('node:fs').writeFileSync('capture.json', JSON.stringify({args:process.argv.slice(2),region:process.env.AWS_REGION,key:process.env.AWS_SECRET_ACCESS_KEY,sentry:process.env.SENTRY_DSN,leaked:process.env.OPENAI_API_KEY!==undefined}),{mode:0o600});\n`,
       { mode: 0o700 },
     );
     const config = {
@@ -99,6 +105,7 @@ test('optional private S3 launch uses native storage and preserves the local def
     await writeFile(database, 'original database', { mode: 0o600 });
     await main(['start', directory]);
     const local = JSON.parse(await readFile(capture, 'utf8'));
+    assert.equal(local.leaked, false);
     assert(local.args.includes('--local-storage'));
     assert(!local.args.includes('--s3-storage'));
     await writeFile(
@@ -111,6 +118,7 @@ test('optional private S3 launch uses native storage and preserves the local def
       dbDigest = await digest(database);
     await main(['start', directory, storageEnv]);
     const s3 = JSON.parse(await readFile(capture, 'utf8'));
+    assert.equal(s3.leaked, false);
     assert(s3.args.includes('--s3-storage'));
     assert(!s3.args.includes('--local-storage'));
     assert.equal(s3.region, 'qa-region');

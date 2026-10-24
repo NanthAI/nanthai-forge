@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
 import {
   chmodSync,
   closeSync,
@@ -98,7 +99,7 @@ function cloneFile(source: string, destination: string, requireClone: boolean): 
       const path = join(temporary, 'file');
       let copied = false;
       try {
-        execFileSync('/bin/cp', ['-c', source, path], { stdio: 'pipe' });
+        execFileSync('/bin/cp', ['-c', source, path], { stdio: 'pipe', env: childEnv() });
         copied = true;
       } catch {
         if (requireClone) return false;

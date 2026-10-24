@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from './child-env.mjs';
 // Shared executor for exported Forge snapshots and benchmark Git checkouts.
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -7,7 +8,23 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
   const plan = JSON.parse(readFileSync(process.env.FORGE_ACTIONS_PLAN, 'utf8'));
   const shard = process.env.FORGE_ACTIONS_SHARD;
   const env = {
-    ...process.env,
+    ...childEnv({
+      allow: [
+        'CI',
+        'FORGE_ACTIONS_PLAN',
+        'FORGE_ACTIONS_SHARD',
+        'FORGE_SELECTED_TESTS',
+        'FORGE_TEST_COVERAGE_HEAD',
+        'FORGE_TEST_TIMINGS',
+        'FORGE_TEST_TIMINGS_HISTORY',
+        'npm_config_cache',
+        'npm_config_userconfig',
+        'npm_config_globalconfig',
+        'XDG_CONFIG_HOME',
+        'XDG_CACHE_HOME',
+        'XDG_DATA_HOME',
+      ],
+    }),
     FORGE_TEST_WORKERS: '2',
     FORGE_MAX_CONCURRENT_CHECKS: '2',
     FORGE_TEST_EVENTS: '1',

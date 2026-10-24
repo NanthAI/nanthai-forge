@@ -79,6 +79,8 @@
   },
   "files": [
     "skills/forge-agent/SKILL.md",
+    "scripts/child-env.mjs",
+    "scripts/child-env.d.mts",
     "scripts/node-runtime.mjs",
     "scripts/check-quarantine.mjs",
     "scripts/check-documentation.mjs",

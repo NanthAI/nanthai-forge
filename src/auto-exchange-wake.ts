@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
+import { ownerEnvNames } from './worker-environment.js';
 import { autoDriverStalled } from './push-progress-state.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -43,13 +45,17 @@ export function wakeAutoExchange(store: WorkStore, afterDrain = false, launch: t
         state.handledSequence === queued?.sequence
       )
         return;
+      // FORGE_AUTH_TOKEN authenticates this worker's hosted source/metadata requests.
       const child = launch(
         process.execPath,
         [fileURLToPath(new URL('./auto-exchange.js', import.meta.url)), store.root],
         {
           detached: true,
           stdio: 'ignore',
-          env: { ...process.env, FORGE_AUTO_EXCHANGE_WORKER: '1' },
+          env: childEnv({
+            allow: [...ownerEnvNames, 'FORGE_AUTH_TOKEN'],
+            extra: { FORGE_AUTO_EXCHANGE_WORKER: '1' },
+          }),
         },
       );
       child.on('error', () => {

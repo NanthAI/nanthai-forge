@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
 import { ForgeError } from './errors.js';
 import { scrubText } from './client-error-text.js';
 
@@ -27,7 +28,7 @@ export function gitCommand(root: string, args: string[]) {
       ...args,
     ],
     env: {
-      ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
+      ...childEnv(),
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
       GIT_TERMINAL_PROMPT: '0',

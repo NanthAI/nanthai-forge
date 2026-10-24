@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { githubEnvNames } from './worker-environment.js';
+import { childEnv } from '../scripts/child-env.mjs';
 import { execFile } from 'node:child_process';
 import { cpSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -12,7 +14,7 @@ import type { WorkStore } from './work-store.js';
 
 function run(file: string, args: string[], cwd: string, input?: unknown): Promise<string> {
   const env = {
-    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
+    ...childEnv({ allow: githubEnvNames }),
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
     GIT_TERMINAL_PROMPT: '0',

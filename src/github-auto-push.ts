@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkServiceEnv } from './worker-environment.js';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +30,17 @@ export function wakeGithubPush(store: WorkStore) {
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url), store.root], {
       detached: true,
       stdio: 'ignore',
-      env: process.env,
+      // GitHub tokens authenticate Git/gh; FORGE_AUTH_TOKEN publishes hosted mirror status.
+      env: checkServiceEnv(
+        (data.checks ?? []).filter(
+          check =>
+            check.id === latestMain(data)?.postAccept?.checkId ||
+            check.name.trim().toLowerCase() === 'verify' ||
+            data.checks.length === 1,
+        ),
+        effectivePolicy(data),
+        ['FORGE_AUTH_TOKEN'],
+      ),
     });
     child.on('error', () => {
       /* Retry on the next owner observation. */

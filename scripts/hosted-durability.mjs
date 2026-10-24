@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from './child-env.mjs';
 import { spawn } from 'node:child_process';
 import { chmod, link, mkdtemp, rm, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -128,7 +129,11 @@ export function deploymentOptions(deployment, env = process.env) {
   return {
     args,
     env: {
-      ...env,
+      ...childEnv({
+        source: env,
+        allow: ['XDG_CONFIG_HOME', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'NODE_EXTRA_CA_CERTS'],
+      }),
+      // CONVEX_DEPLOY_KEY authenticates only the selected Convex CLI.
       CI: '1',
       CONVEX_DEPLOY_KEY: key,
       CONVEX_DEPLOYMENT: name,

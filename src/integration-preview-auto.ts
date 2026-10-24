@@ -1,5 +1,6 @@
-import { previewTuple, previewCurrent } from './integration-preview-inputs.js';
 // SPDX-License-Identifier: Apache-2.0
+import { checkWorkerEnv } from './worker-environment.js';
+import { previewTuple, previewCurrent } from './integration-preview-inputs.js';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -63,6 +64,9 @@ export function scheduleIntegrationPreview(store: WorkStore, launch: typeof spaw
           {
             detached: true,
             stdio: 'ignore',
+            env: checkWorkerEnv(
+              store.page('checks', 0, Number.MAX_SAFE_INTEGER).records.filter(check => check.static),
+            ),
           },
         );
         child.on('error', () => {

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkWorkerEnv, githubEnvNames, syncEnvNames } from './worker-environment.js';
 import { spawn } from 'node:child_process';
+import { effectivePolicy } from './autonomy-policy.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
@@ -63,10 +65,23 @@ export async function launchDetachedCheck(store: WorkStore, run: CheckRun): Prom
     }),
   );
   starting.add(key);
+  const policy = effectivePolicy(store.readRecords()?.data() ?? store.load());
   const child = spawn(
     process.execPath,
     [fileURLToPath(new URL('./check-controller-worker.js', import.meta.url)), store.root, run.id],
-    { detached: true, stdio: 'ignore', env: process.env },
+    {
+      detached: true,
+      stdio: 'ignore',
+      env: checkWorkerEnv([run.check], run.backend?.credentialsRef, [
+        // Completed checks may wake the configured mirror and hosted metadata sync.
+        'FORGE_AUTH_TOKEN',
+        ...(policy.githubMirror?.autoPush
+          ? syncEnvNames
+          : run.backend?.actual === 'github-actions'
+            ? githubEnvNames
+            : []),
+      ]),
+    },
   );
   child.once('exit', code => {
     starting.delete(key);

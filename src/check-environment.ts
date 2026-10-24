@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { localeEnvNames } from '../scripts/child-env.mjs';
 import { mkdirSync } from 'node:fs';
 import { homedir, release } from 'node:os';
 import { join } from 'node:path';
@@ -32,7 +33,7 @@ export function checkEnvironment(): CheckEnvironment {
       .sort(([a], [b]) => a.localeCompare(b))
       .filter(
         (entry): entry is [string, string] =>
-          entry[1] !== undefined && (runtimeNames.has(entry[0]) || /^LC_[A-Z_]+$/.test(entry[0])),
+          entry[1] !== undefined && (runtimeNames.has(entry[0]) || localeEnvNames.includes(entry[0])),
       ),
   );
   env.CI = 'true';

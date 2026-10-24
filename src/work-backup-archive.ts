@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
 import { execFileSync, spawn } from 'node:child_process';
 import {
   chmodSync,
@@ -18,12 +19,7 @@ import { ForgeError, invariant } from './errors.js';
 import { artifactArchivePlan, materializeArtifactAliases } from './native-artifact-alias.js';
 
 const code = 'INVALID_WORK_BACKUP';
-const env = () =>
-  Object.fromEntries(
-    Object.entries(process.env)
-      .filter(([key]) => key !== 'TAR_OPTIONS')
-      .concat([['LC_ALL', 'C']]),
-  );
+const env = () => childEnv({ extra: { LC_ALL: 'C' } });
 function tar(args: string[], cwd: string): Buffer {
   try {
     return execFileSync('tar', args, {

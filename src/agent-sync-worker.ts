@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { CheckQueue, queueEntries } from './check-queue.js';
 import { processStartTime } from './local-process.js';
 import { readHostState } from './host-binding.js';
+import { checkServiceEnv } from './worker-environment.js';
+import { effectivePolicy } from './autonomy-policy.js';
 import type { WorkStore } from './work-store.js';
 
 /** Reserve before spawning, then keep the reservation while the detached child lives. */
@@ -27,7 +29,17 @@ export function startAgentSyncWorker(store: WorkStore) {
     const child = spawn(
       process.execPath,
       [fileURLToPath(new URL('./cli.js', import.meta.url)), 'host', store.root, '--sync-agent'],
-      { detached: true, stdio: 'ignore', env: process.env },
+      {
+        detached: true,
+        stdio: 'ignore',
+        // host --sync-agent publishes metadata and consumes owner requests,
+        // which can queue checks using the owner's selected backend and inputs.
+        env: checkServiceEnv(
+          store.page('checks', 0, Number.MAX_SAFE_INTEGER).records,
+          effectivePolicy(store.readRecords()?.data() ?? store.load()),
+          ['FORGE_AUTH_TOKEN', 'FORGE_DEPLOYMENT_URL'],
+        ),
+      },
     );
     child.once('error', () => {});
     if (child.pid) admission.child(child.pid, processStartTime(child.pid));

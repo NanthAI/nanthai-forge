@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { ForgeError } from './errors.js';
@@ -7,7 +8,7 @@ let ownStartTime: string | undefined;
 const options: ExecFileSyncOptionsWithStringEncoding = {
   encoding: 'utf8',
   timeout: 5000,
-  env: { ...process.env, LC_ALL: 'C', LANG: 'C', TZ: 'UTC' },
+  env: childEnv({ extra: { LC_ALL: 'C', LANG: 'C', TZ: 'UTC' } }),
   stdio: ['ignore', 'pipe', 'ignore'],
 };
 function inspect(pid: number): { startTime: string; zombie: boolean } | undefined {

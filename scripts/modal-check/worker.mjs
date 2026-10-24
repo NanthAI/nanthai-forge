@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../child-env.mjs';
 // Installed controller helper, outside the candidate snapshot. Streams selected
 // outputs after the command without loading whole artifacts into controller memory.
 import { spawn } from 'node:child_process';
@@ -8,7 +9,24 @@ import { resolve, join } from 'node:path';
 const started = performance.now();
 const plan = JSON.parse(process.env.FORGE_MODAL_COMMAND);
 delete process.env.FORGE_MODAL_COMMAND;
-const child = spawn(plan.command[0], plan.command.slice(1), { stdio: 'inherit' });
+const child = spawn(plan.command[0], plan.command.slice(1), {
+  env: childEnv({
+    allow: [
+      'XDG_CONFIG_HOME',
+      'CI',
+      'FORGE_TEST_WORKERS',
+      'FORGE_MAX_CONCURRENT_CHECKS',
+      'FORGE_TEST_EVENTS',
+      'FORGE_GIT_TIMEOUT_MS',
+      'FORGE_TEST_TIMINGS',
+      'FORGE_STATIC_WORKERS',
+      'FORGE_SELECTED_TESTS',
+      'FORGE_TEST_COVERAGE_HEAD',
+    ],
+    extra: { NODE_OPTIONS: process.env.NODE_OPTIONS ? '--max-old-space-size=3072' : undefined },
+  }),
+  stdio: 'inherit',
+});
 const code = await new Promise(resolve => {
   child.once('error', () => resolve(1));
   child.once('close', (code, signal) => resolve(signal === 'SIGKILL' ? 137 : (code ?? 1)));

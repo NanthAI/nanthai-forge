@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkServiceEnv } from './worker-environment.js';
+import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -19,10 +21,28 @@ export function startPresenceWorker(store: WorkStore) {
   }
   store.revision();
   started.add(key);
+  // FORGE_AUTH_TOKEN authenticates hosted metadata emitted by this owner driver.
   const child = spawn(
     process.execPath,
     [fileURLToPath(new URL('./presence-worker.js', import.meta.url)), store.root],
-    { detached: true, stdio: 'ignore', env: process.env },
+    {
+      detached: true,
+      stdio: 'ignore',
+      env: checkServiceEnv(
+        store.page('checks', 0, Number.MAX_SAFE_INTEGER).records,
+        childPolicy(store.readRecords()?.data() ?? store.load()),
+        [
+          'FORGE_AUTH_TOKEN',
+          'FORGE_PRESENCE_TOUCH_MS',
+          'FORGE_PRESENCE_IDLE_MS',
+          'FORGE_PRESENCE_GUARD_MS',
+          'FORGE_PRESENCE_DEBUG_FILE',
+          'FORGE_AUTO_SNAPSHOT_DEBOUNCE_MS',
+          'FORGE_AUTO_SNAPSHOT_INTERVAL_MS',
+          'FORGE_AUTO_SNAPSHOT_MAX_WAIT_MS',
+        ],
+      ),
+    },
   );
   child.once('error', () => started.delete(key));
   child.once('exit', () => started.delete(key));

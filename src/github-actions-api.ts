@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { githubEnvNames } from './worker-environment.js';
+import { childEnv } from '../scripts/child-env.mjs';
 import { execFile } from 'node:child_process';
 import { ForgeError } from './errors.js';
 import { redactGitStderr } from './github-sync-git.js';
@@ -90,7 +92,7 @@ function gh(args: string[], input?: string): Promise<string> {
       'gh',
       args,
       {
-        env: { ...process.env, GH_PROMPT_DISABLED: '1' },
+        env: childEnv({ allow: githubEnvNames, extra: { GH_PROMPT_DISABLED: '1' } }),
         encoding: 'utf8',
         timeout: 120_000,
         maxBuffer: 32 * 1024 * 1024,

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -22,7 +23,14 @@ export class ReleaseChildFailure extends Error {
     super('Release child failed.');
   }
 }
-export function releaseCommand(command: string, args: string[], cwd: string, env = process.env) {
+export function releaseCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+  env = childEnv({
+    allow: ['npm_execpath', 'npm_config_cache', 'npm_config_userconfig', 'npm_config_globalconfig'],
+  }),
+) {
   const result = spawnSync(command, args, { cwd, env, stdio: ['ignore', 'inherit', 'inherit'] });
   if (result.status !== 0 || result.error) throw new ReleaseChildFailure(result.status, result.signal);
 }
@@ -70,9 +78,23 @@ export async function executeReleaseStage(
       join(journal.request.configurationDirectory, '.netlify', 'state.json'),
       join(build, '.netlify', 'state.json'),
     );
-    Object.assign(process.env, parseEnv(readFileSync(join(build, '.env.local'), 'utf8')));
+    const configuration = parseEnv(readFileSync(join(build, '.env.local'), 'utf8'));
     npm(['ci', '--ignore-scripts'], build);
-    npm(['run', 'build'], build);
+    run(
+      journal.node,
+      [journal.request.npmCli, 'run', 'build'],
+      build,
+      childEnv({
+        source: configuration,
+        extra: childEnv(),
+        allow: [
+          'VITE_CONVEX_URL',
+          'VITE_CLERK_PUBLISHABLE_KEY',
+          'VITE_FORGE_DEMO_REPOSITORY',
+          'VITE_FORGE_PERF',
+        ],
+      }),
+    );
     return {
       path: build,
       version: String((releaseJson(join(build, 'package.json')) as { version: string }).version),
@@ -81,14 +103,42 @@ export async function executeReleaseStage(
   }
   const build = releaseResult(journal, 'build').path!;
   if (name === 'backend' || name === 'web') {
-    Object.assign(process.env, parseEnv(readFileSync(join(build, '.env.local'), 'utf8')));
-    if (name === 'backend') npm(['exec', '--', 'convex', 'dev', '--once'], build);
-    else run(journal.node, ['scripts/deploy-forge-preview.mjs', '--prod'], build);
+    const configuration = parseEnv(readFileSync(join(build, '.env.local'), 'utf8'));
+    // Only the selected Convex/Netlify CLIs consume these deployment credentials.
+    const environment = childEnv({
+      source: configuration,
+      extra: childEnv(),
+      allow: [
+        'CONVEX_DEPLOY_KEY',
+        'CONVEX_DEPLOYMENT',
+        'CONVEX_SELF_HOSTED_URL',
+        'CONVEX_SELF_HOSTED_ADMIN_KEY',
+        'NETLIFY_AUTH_TOKEN',
+        'VITE_CONVEX_URL',
+        'VITE_CLERK_PUBLISHABLE_KEY',
+        'VITE_FORGE_DEMO_REPOSITORY',
+      ],
+    });
+    if (name === 'backend')
+      run(
+        journal.node,
+        [journal.request.npmCli, 'exec', '--', 'convex', 'dev', '--once'],
+        build,
+        environment,
+      );
+    else run(journal.node, ['scripts/deploy-forge-preview.mjs', '--prod'], build, environment);
     return { head: journal.head, source: build, mode: name === 'backend' ? 'dev' : 'production-site' };
   }
   if (name === 'package') {
-    process.env.npm_execpath = journal.request.npmCli;
-    run(journal.node, ['scripts/package-local.mjs', '--out', directory], build);
+    run(
+      journal.node,
+      ['scripts/package-local.mjs', '--out', directory],
+      build,
+      childEnv({
+        extra: { npm_execpath: journal.request.npmCli },
+        allow: ['npm_config_cache', 'npm_config_userconfig', 'npm_config_globalconfig'],
+      }),
+    );
     const archives = readdirSync(directory).filter(path => path.endsWith('.tgz'));
     invariant(archives.length === 1, 'INVALID_RELEASE_PACKAGE', 'Expected exactly one packaged CLI.');
     const path = join(directory, archives[0]!);

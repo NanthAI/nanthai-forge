@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readlinkSync, statSync } from 'node:fs';
 /** Observe local working directories once per cleanup. Unknown coverage retains copies. */
@@ -23,6 +24,7 @@ export function workingProcesses(): { paths: string[]; unknown: boolean } {
         '/usr/sbin/lsof',
         ['-a', '-u', String(process.getuid!()), '-d', 'cwd', '-Fn'],
         {
+          env: childEnv(),
           encoding: 'utf8',
           timeout: 5000,
           maxBuffer: 16 * 1024 * 1024,

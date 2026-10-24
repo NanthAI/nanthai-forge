@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from './child-env.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
@@ -11,6 +12,16 @@ let key = '',
 try {
   const backend = args =>
     execFileSync('npx', ['convex', ...args], {
+      // The Convex CLI uses this selected deployment credential.
+      env: childEnv({
+        allow: [
+          'CONVEX_DEPLOY_KEY',
+          'CONVEX_DEPLOYMENT',
+          'CONVEX_SELF_HOSTED_URL',
+          'CONVEX_SELF_HOSTED_ADMIN_KEY',
+          'XDG_CONFIG_HOME',
+        ],
+      }),
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
@@ -42,7 +53,21 @@ try {
       `GITHUB_PUBLIC_TOKEN=${token}`,
       '--json',
     ],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+    // Netlify authenticates deployment and Vite reads only public build settings.
+    {
+      env: childEnv({
+        allow: [
+          'NETLIFY_AUTH_TOKEN',
+          'XDG_CONFIG_HOME',
+          'VITE_CONVEX_URL',
+          'VITE_CLERK_PUBLISHABLE_KEY',
+          'VITE_FORGE_DEMO_REPOSITORY',
+          'VITE_FORGE_PERF',
+        ],
+      }),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
   );
   const result = JSON.parse(output);
   const url = new URL(result.deploy_url);

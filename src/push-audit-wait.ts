@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkServiceEnv } from './worker-environment.js';
+import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { ForgeError } from './errors.js';
@@ -13,6 +15,7 @@ export async function waitPushAudit(
   audit: { channel: string; checkId: string } | undefined,
   timeoutMs: number,
 ) {
+  // FORGE_AUTH_TOKEN authenticates hosted metadata emitted by this owner driver.
   const child = spawn(
     process.execPath,
     [
@@ -20,7 +23,15 @@ export async function waitPushAudit(
       store.root,
       ...(audit ? [JSON.stringify(audit)] : []),
     ],
-    { detached: true, stdio: 'ignore', env: process.env },
+    {
+      detached: true,
+      stdio: 'ignore',
+      env: checkServiceEnv(
+        store.page('checks', 0, Number.MAX_SAFE_INTEGER).records,
+        childPolicy(store.readRecords()?.data() ?? store.load()),
+        ['FORGE_AUTH_TOKEN'],
+      ),
+    },
   );
   let failed = false;
   child.on('error', () => {

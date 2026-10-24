@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { rmSync } from 'node:fs';
@@ -18,6 +19,7 @@ export const watcherRuntime = {
   createWorker() {
     const child = fork(fileURLToPath(new URL('./local-watcher-worker.js', import.meta.url)), [], {
       execArgv: [],
+      env: childEnv(),
       stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     });
     const unref = child.unref.bind(child);

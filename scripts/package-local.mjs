@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from './child-env.mjs';
+const packageEnv = () =>
+  childEnv({
+    allow: ['npm_execpath', 'npm_config_cache', 'npm_config_userconfig', 'npm_config_globalconfig'],
+  });
 // Bundle the existing locked production dependencies only in disposable staging.
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -31,12 +36,13 @@ try {
   const install = spawnSync(
     process.execPath,
     [npm, 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'],
-    { cwd: stage, encoding: 'utf8' },
+    { cwd: stage, env: packageEnv(), encoding: 'utf8' },
   );
   if (install.status !== 0) throw new Error(install.stderr || 'Locked production staging install failed.');
   // npm can omit installed optional peers from bundling; select its actual packed dependency inventory.
   const inventory = spawnSync(process.execPath, [npm, 'pack', '--dry-run', '--ignore-scripts', '--json'], {
     cwd: stage,
+    env: packageEnv(),
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
   });
@@ -47,14 +53,14 @@ try {
   const notices = spawnSync(
     process.execPath,
     [join(root, 'scripts', 'package-notices.mjs'), '--root', stage, '--inventory', inventoryPath],
-    { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+    { env: packageEnv(), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
   );
   if (notices.status !== 0)
     throw new Error(notices.stderr || notices.error?.message || 'Staged upstream notices are incomplete.');
   const result = spawnSync(
     process.execPath,
     [npm, 'pack', '--ignore-scripts', '--json', '--pack-destination', output],
-    { cwd: stage, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+    { cwd: stage, env: packageEnv(), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
   );
   if (result.status !== 0)
     throw new Error(result.stderr || result.error?.message || 'Local package staging failed.');

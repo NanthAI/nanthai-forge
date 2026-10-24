@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { childEnv } from '../scripts/child-env.mjs';
 import { spawnSync } from 'node:child_process';
 import { closeSync, existsSync, openSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,6 +16,7 @@ export function resourceCommand(check: Check, directory: string) {
     args = ['-lp'];
   } else if (process.platform === 'linux') {
     const version = spawnSync('/usr/bin/time', ['--version'], {
+      env: childEnv(),
       encoding: 'utf8',
       timeout: 2000,
       maxBuffer: 16384,

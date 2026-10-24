@@ -309,9 +309,18 @@ test('child failure and signal preserve actual exit status', t => {
 });
 
 test('worker with fake provider records failure privately and caller can recover its terminal receipt', t => {
+  const previousSecret = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'fake-test-secret';
+  t.after(() => {
+    if (previousSecret === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousSecret;
+  });
   const f = prepareStage(t, 'backend');
   writeFileSync(join(f.dir, '.env.local'), 'SYNTHETIC_RELEASE_VALUE=fixture-only\n');
-  writeFileSync(f.request.npmCli, 'process.stderr.write("fixture-only"); process.exit(31);');
+  writeFileSync(
+    f.request.npmCli,
+    'if(process.env.OPENAI_API_KEY) process.exit(99); process.stderr.write("fixture-only"); process.exit(31);',
+  );
   const attempt = f.journal.stages.find(stage => stage.name === 'backend').attempts.at(-1);
   delete attempt.receipt;
   const result = releaseChild(f.journal, 'backend', attempt.directory);
@@ -404,9 +413,10 @@ test('packaging uses the existing tool and requires exactly one archive', async 
   const calls = [];
   const dependencies = {
     exportSource: async () => assert.fail('no export'),
-    run(command, args, cwd) {
+    run(command, args, cwd, environment) {
       calls.push([command, args, cwd]);
-      assert.equal(process.env.npm_execpath, f.request.npmCli);
+      assert.equal(environment.npm_execpath, f.request.npmCli);
+      assert.equal(process.env.npm_execpath, before);
       writeFileSync(join(args.at(-1), 'forge.tgz'), 'synthetic-package');
     },
   };
@@ -426,7 +436,7 @@ test('web deploy tool supports production and preview with entirely fake provide
   const inventory = join(f.dir, 'calls.jsonl');
   const fake = `#!${process.execPath}\nconst fs = require('node:fs');
 const args = process.argv.slice(2);
-fs.appendFileSync(process.env.FAKE_CALLS, JSON.stringify(args)+'\\n');
+fs.appendFileSync(${JSON.stringify(inventory)}, JSON.stringify(args)+'\\n');
 if (args.includes('netlify-cli@27.10.2')) console.log(JSON.stringify({deploy_url:'https://synthetic.netlify.app',site_id:'synthetic-site',deploy_id:'synthetic-deploy'}));
 else if (args.includes('get')) console.log(args.includes('FORGE_WORKER_KEY') ? 'fixture-key' : 'fixture-token');\n`;
   writeFileSync(join(bin, 'npx'), fake, { mode: 0o755 });
