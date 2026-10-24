@@ -65,6 +65,18 @@ includes a per-Lane `table`; stderr prints it too. Failures exit nonzero. Replay
 the same operation preserves failed checks and conflicts. New parent journals
 serialize duplicate Lane/head admission, including ordinary non-batch work; batch
 enqueue also refuses duplicate pinned inputs across finish/land operations.
+An entry whose composed files and modes are already on main ends as `accepted`
+with `alreadyOnMain` (the containing main head), no check, no acceptance and no Channel move or
+post-accept audit; its Lanes complete under the usual completion policy. Different
+State metadata or merge parents do not require another check. The retained entry
+establishes landing of its exact Candidate and Lane/head inputs for dependencies,
+including stacked children; unlanded siblings and newer saves still wait.
+A queued entry whose input saves all predate their Lanes' completion never runs:
+it lands this way when main contains it, otherwise it ends `cancelled` with a
+reason (reopen the Lane and
+finish again to land it). Saves made after completion use the ordinary landing
+path even if lifecycle metadata still says completed. Retained duplicate entries
+for the same Lane/head are selected one at a time; later copies then end already on main.
 Infrastructure recovery retains its entry and records `infrastructureRetries`;
 unavailable runners and budget decisions remain explicit terminal outcomes. Ambiguous dispatch recovery follows the
 original provider journal/run, without an additional submission or dispatch.

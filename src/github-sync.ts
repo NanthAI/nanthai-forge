@@ -24,6 +24,7 @@ import {
   defaultSyncRepository,
 } from './github-sync-git.js';
 import { appendCommits, restorePending, commitPlan } from './github-sync-plan.js';
+import type { GithubSyncBinding } from './github-sync-types.js';
 
 const same = isDeepStrictEqual;
 export async function githubSync(
@@ -150,7 +151,7 @@ export async function githubSync(
         options.operationId ?? randomUUID(),
         await syncIdentity(root),
         options.autoPush,
-      );
+      ).entries;
       const adopted = adoption[0]!;
       reconciliation = githubReconciliation(root, recorded, remoteHead, adopted.tree, targets =>
         githubHistoryContainment(
@@ -167,22 +168,21 @@ export async function githubSync(
         throw Object.assign(changed(heads, reconciliationDetail(reconciliation)), { reconciliation });
       expected = remoteHead;
     }
-    const entries =
-      adoption ??
-      (repeated?.length
-        ? repeated
-        : pending.length
-          ? pending
-          : appendCommits(
-              root,
-              source,
-              data,
-              original,
-              remoteHead,
-              options.operationId ?? randomUUID(),
-              await syncIdentity(root),
-              options.autoPush,
-            ));
+    const appended =
+      adoption || repeated?.length || pending.length
+        ? undefined
+        : appendCommits(
+            root,
+            source,
+            data,
+            original,
+            remoteHead,
+            options.operationId ?? randomUUID(),
+            await syncIdentity(root),
+            options.autoPush,
+          );
+    const entries = adoption ?? (repeated?.length ? repeated : pending.length ? pending : appended!.entries);
+    const cursor = appended?.cursor;
     if (options.autoPush)
       invariant(
         entries.every(entry =>
@@ -203,6 +203,7 @@ export async function githubSync(
       alreadyPushed:
         alreadyPushed || Boolean(repeated?.length && original!.commits.indexOf(repeated.at(-1)!) < pushed),
       commits: entries.map(entry => commitPlan(root, entry)),
+      ...(appended?.skipped.length ? { skipped: appended.skipped } : {}),
       pushed: false,
       reason: !options.push ? 'dry-run' : entries.length ? 'push-pending' : 'nothing-to-push',
       ...(reconciliation ? { reconciliation } : {}),
@@ -222,12 +223,41 @@ export async function githubSync(
         : {}),
     };
     if (!options.push) return plan;
-    if (!entries.length) return { ...plan, hostedSync: await publishGithubStatus(store) };
-    const binding = original
+    if (!entries.length) {
+      // Only unchanged moves remain: advance the cursor so no empty commit is ever published.
+      if (original && cursor && !same(original.cursor, cursor))
+        store.locked(() => {
+          const current = store.load();
+          invariant(
+            same(current.githubSync, stored),
+            'WORK_STALE',
+            'Another sync changed the binding. Retry to reconcile.',
+          );
+          current.githubSync = { ...original, cursor };
+          const status = current.githubAutoPush;
+          if (
+            status?.repository.toLowerCase() === repository.toLowerCase() &&
+            status.acceptanceId === cursor.acceptanceId
+          )
+            Object.assign(status, {
+              status: 'pushed',
+              code: '',
+              detail: '',
+              nextAttemptAt: '',
+              at: new Date().toISOString(),
+            });
+          current.revision++;
+          store.save(current);
+        });
+      return { ...plan, hostedSync: await publishGithubStatus(store) };
+    }
+    const binding: GithubSyncBinding = original
       ? structuredClone(original)
       : { repository, branch, adoptedCommit: remoteHead, commits: [], pushed: 0 };
     if (!pending.length && !repeated?.length) {
       binding.commits.push(...entries);
+      if (cursor) binding.cursor = cursor;
+      else delete binding.cursor;
       store.locked(() => {
         const current = store.load();
         invariant(
@@ -302,7 +332,7 @@ export async function githubSync(
       const status = current.githubAutoPush;
       const completed =
         status?.repository.toLowerCase() === repository.toLowerCase() &&
-        entries.at(-1)?.acceptanceId === status.acceptanceId;
+        [entries.at(-1)?.acceptanceId, saved.cursor?.acceptanceId].includes(status.acceptanceId);
       if (completed)
         Object.assign(status!, {
           status: 'pushed',

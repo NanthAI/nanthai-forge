@@ -60,6 +60,8 @@ export const landingEntrySchema = z.object({
   runId: id.optional(),
   conflictViewId: id.optional(),
   acceptanceId: id.optional(),
+  /** Accepted main head that already contained this entry; no acceptance was recorded. */
+  alreadyOnMain: head.optional(),
 });
 export const batchPrefixSchema = z.object({
   entryIds: z.array(id).min(1),

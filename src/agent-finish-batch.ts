@@ -46,7 +46,9 @@ export async function finishQueuedBatch(
         ? entry.status
         : pending
           ? 'waiting to land'
-          : entry.status,
+          : entry.alreadyOnMain
+            ? 'already-accepted'
+            : entry.status,
     ...(infra ? { code: 'GITHUB_ACTIONS_PENDING_INFRA', message: attempt.run!.diagnostic } : {}),
     ...(entry.error ? { code: entry.error.code, message: entry.error.message } : {}),
     terminal: !pending,

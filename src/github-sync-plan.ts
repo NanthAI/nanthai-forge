@@ -63,10 +63,24 @@ export function appendCommits(
       'GITHUB_SYNC_HISTORY',
       'The last synced acceptance is unavailable. Existing mapping is preserved.',
     );
-    selected = moves.slice(index + 1);
+    // Moves already passed over as unchanged need not be compared again.
+    const cursor = binding.cursor
+      ? moves.findIndex(
+          move => move.id === binding.cursor!.acceptanceId && move.head === binding.cursor!.state,
+        )
+      : -1;
+    selected = moves.slice(Math.max(index, cursor) + 1);
   } else selected = [latest];
-  let parent = binding?.commits.at(-1)!.commit ?? remoteHead;
-  return selected.map(move => {
+  let parent = binding?.commits.at(-1)!.commit ?? remoteHead,
+    previous = binding?.commits.at(-1);
+  const skipped: { acceptanceId: string; state: string }[] = [];
+  const entries: GithubSyncCommit[] = selected.flatMap(move => {
+    // A move that changes no published source (head == previous, or an equal tree)
+    // never becomes an empty GitHub commit; the cursor passes over it instead.
+    if (previous && move.head === previous.state) {
+      skipped.push({ acceptanceId: move.id, state: move.head });
+      return [];
+    }
     // Capture already decided membership, including explicitly retained tracked paths.
     const state = source.state(move.head);
     const view = data.views.find(
@@ -107,10 +121,21 @@ export function appendCommits(
       seconds: Math.floor(Date.parse(move.at) / 1000),
     };
     invariant(Number.isSafeInteger(entry.seconds), 'GITHUB_SYNC_HISTORY', 'Acceptance time is invalid.');
+    if (previous && entry.tree === previous.tree) {
+      skipped.push({ acceptanceId: move.id, state: move.head });
+      return [];
+    }
     const commit = writeSyncCommit(root, entry);
     parent = commit;
-    return { ...entry, commit };
+    previous = { ...entry, commit };
+    return [previous];
   });
+  const last = selected.at(-1);
+  return {
+    entries,
+    skipped,
+    ...(binding && last ? { cursor: { acceptanceId: last.id, state: last.head } } : {}),
+  };
 }
 export function restorePending(root: string, source: NativeSource, entries: GithubSyncCommit[]) {
   for (const entry of entries) {

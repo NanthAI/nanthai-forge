@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { NativeSource } from './native-source.js';
 import { allRecords } from './agent-lifecycle.js';
+import { noopLandingViews } from './agent-landed-views.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane, ChannelMove } from './work-types.js';
 
@@ -20,16 +21,27 @@ export function stackLanding(store: WorkStore, lane: Pick<Lane, 'stack'>, mainTa
   if (!stack || stack.detached || !parentId(stack)) return undefined;
   const parent = store.select('lanes', stack.laneId);
   const moves = allRecords<ChannelMove>(store, 'channelMoves');
-  const inputs = new Map(
+  // A no-op receipt also needs an accepted Channel head; before the first
+  // acceptance there is no landing evidence to inspect.
+  if (!moves.some(move => move.channel === stack.channel && move.status === 'accepted')) return undefined;
+  const inputs = new Map<string, { laneId: string; head: string }[]>(
     moves.flatMap(move => {
       if (move.channel !== stack.channel || move.status !== 'accepted') return [];
       // A cumulative batch Candidate belongs to its last entry's Intent, but
       // its accepted inputs can include parent Lanes from other Intents.
       const view = store.select('views', move.viewId);
       const input = view?.inputs.find(pin => pin.laneId === stack.laneId);
-      return input ? [[move.viewId, input] as const] : [];
+      return input ? [[move.viewId, [input]]] : [];
     }),
   );
+  for (const { view, main } of noopLandingViews(store, stack.channel)) {
+    const input = view.inputs.find(pin => pin.laneId === stack.laneId);
+    if (!input) continue;
+    for (const move of moves) {
+      if (move.channel !== stack.channel || move.status !== 'accepted' || move.head !== main) continue;
+      inputs.set(move.viewId, [...(inputs.get(move.viewId) ?? []), input]);
+    }
+  }
   if (!inputs.size) return undefined;
   const main =
     mainTarget ??
@@ -44,8 +56,8 @@ export function stackLanding(store: WorkStore, lane: Pick<Lane, 'stack'>, mainTa
     if (!input || !ancestry.contains(main, move.head)) return false;
     // A parent can have been restacked itself; its saved checkpoint history is
     // retained even when its new State no longer has the old head as an ancestor.
-    return (
-      input.head === stack.head || input.head === parent?.head || ancestry.contains(input.head, stack.head)
+    return input.some(
+      pin => pin.head === stack.head || pin.head === parent?.head || ancestry.contains(pin.head, stack.head),
     );
   });
 }

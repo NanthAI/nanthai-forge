@@ -31,6 +31,8 @@ export function pendingGithubPush(data: WorkData) {
   const binding = data.githubSync;
   return (
     binding?.repository.toLowerCase() !== policy.repo.toLowerCase() ||
-    binding.commits[binding.pushed - 1]?.acceptanceId !== move.id
+    (binding.commits[binding.pushed - 1]?.acceptanceId !== move.id &&
+      // A move with no source change advances the cursor without a commit.
+      !(binding.pushed === binding.commits.length && binding.cursor?.acceptanceId === move.id))
   );
 }

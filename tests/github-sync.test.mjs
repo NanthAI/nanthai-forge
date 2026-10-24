@@ -14,6 +14,7 @@ import { NativeSource } from '../dist/native-source.js';
 import { WorkService } from '../dist/work.js';
 import { githubSync } from '../dist/github-sync.js';
 import { drainGithubPush } from '../dist/github-auto-push.js';
+import { pendingGithubPush } from '../dist/github-auto-push-state.js';
 import { checkEnvironment } from '../dist/work-run.js';
 import { githubSyncCli } from '../dist/github-sync-cli.js';
 import { git, write, code } from './helpers.mjs';
@@ -1473,3 +1474,73 @@ test('--wait-audit timeout exits while its newly started audit continues under t
     await drainPostAccept(f.work.store);
   }
 });
+
+// Incident 2026-10-24: re-landed old entries made accepted moves with head == previous,
+// and each one became a 0-file GitHub commit titled after the old Lane.
+test('accepted moves with no source change advance the cursor and never push an empty commit', async t => {
+  const f = fixture(t);
+  await f.sync({ push: true });
+  const adopted = f.head(),
+    pushes = f.controlState().pushes;
+  const noop = () =>
+    f.work.execute(
+      {
+        action: 'accept-channel',
+        operationId: randomUUID(),
+        channel: 'main',
+        viewId: f.first.view.id,
+        expectedHead: f.first.view.head,
+        expectedPrevious: f.first.view.head,
+      },
+      f.work.store.revision(),
+    ).result;
+  const repeats = [noop(), noop(), noop()];
+  // A different head with the same published tree is no change either.
+  const sameTree = f.accept('Edit then revert', { 'a.txt': 'Accepted source\n' }, undefined, [
+    { 'a.txt': 'Temporary\n' },
+  ]);
+  assert.notEqual(sameTree.move.head, f.first.view.head);
+  const dry = await f.sync();
+  assert.equal(dry.commits.length, 0);
+  assert.deepEqual(
+    dry.skipped.map(item => item.acceptanceId),
+    [...repeats.map(move => move.id), sameTree.move.id],
+  );
+  assert.equal(f.work.store.load().githubSync.cursor, undefined);
+  const pushed = await f.sync({ push: true });
+  assert.equal(pushed.commits.length, 0);
+  assert.equal(f.head(), adopted);
+  assert.equal(f.controlState().pushes, pushes);
+  const binding = f.work.store.load().githubSync;
+  assert.equal(binding.commits.length, 1);
+  assert.deepEqual(binding.cursor, { acceptanceId: sameTree.move.id, state: sameTree.move.head });
+  // Nothing pending: the auto-push worker neither loops nor pushes.
+  await green(f, sameTree.view);
+  await mirrorPolicy(f);
+  assert.equal(pendingGithubPush(f.work.store.load()), false);
+  await drain(f);
+  assert.equal(f.controlState().pushes, pushes);
+  // A real change after skipped moves parents on the last published commit.
+  const real = f.accept('Real change after no-ops', { 'b.txt': 'Real\n' });
+  noop2(f, real);
+  const next = await f.sync({ push: true });
+  assert.equal(next.commits.length, 1);
+  assert.equal(next.commits[0].parent, adopted);
+  assert.equal(next.commits[0].acceptanceId, real.move.id);
+  assert.ok(next.commits[0].filesChanged > 0);
+  assert.equal(next.skipped.length, 1);
+  assert.equal(f.work.store.load().githubSync.cursor.acceptanceId, next.skipped[0].acceptanceId);
+});
+function noop2(f, accepted) {
+  return f.work.execute(
+    {
+      action: 'accept-channel',
+      operationId: randomUUID(),
+      channel: 'main',
+      viewId: accepted.view.id,
+      expectedHead: accepted.view.head,
+      expectedPrevious: accepted.view.head,
+    },
+    f.work.store.revision(),
+  ).result;
+}

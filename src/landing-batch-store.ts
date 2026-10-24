@@ -26,6 +26,7 @@ import type { WorkService } from './work.js';
 import type { CheckRun, WorkData, WorkView } from './work-types.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { LandingBatch, LandingEntry } from './landing-batch-types.js';
+import { entryPins, markAlreadyOnMain, settleCompletedLanes, sameLandingTree } from './landing-noop.js';
 const ACTIVE_LANDING = new Set(['queued', 'checking', 'awaiting-review']);
 
 export const batchDirectory = (work: WorkService, channel: string) =>
@@ -158,7 +159,9 @@ export function selectBatch(
   channel: string,
   started?: ReadonlySet<string>,
 ): LandingBatch | undefined {
-  interruptStaleLandingInputs(data, channel, new NativeSource(work.store.root));
+  const source = new NativeSource(work.store.root);
+  interruptStaleLandingInputs(data, channel, source);
+  settleCompletedLanes(work, data, channel, acceptedHead(data, channel), source);
   const environment = checkEnvironment();
   // The submitting CLI does not execute the check. The owner uses the pinned
   // definition/environment and runner recipe; its CLI build is not an input.
@@ -279,7 +282,16 @@ export function selectBatch(
       return;
   }
   const selected: LandingEntry[] = [];
+  // One Lane/head lands once: a duplicate waits for the earlier entry, then is already on main.
+  const claimed = new Set(
+    (data.landingEntries ?? [])
+      .filter(entry => entry.channel === channel && ['checking', 'awaiting-review'].includes(entry.status))
+      .map(entry => entryPins(data, entry)),
+  );
   for (const entry of pending) {
+    const pins = entryPins(data, entry);
+    if (claimed.has(pins)) continue;
+    claimed.add(pins);
     if (
       selected.length === shape.maxBatch ||
       entry.checkId !== first.checkId ||
@@ -350,7 +362,8 @@ export async function composeBatch(work: WorkService, batch: LandingBatch, befor
   let head = batch.base;
   const prefixes: LandingBatch['prefixes'] = [],
     conflicts: LandingBatch['conflicts'] = [];
-  const views: WorkView[] = [];
+  const views: WorkView[] = [],
+    contained: string[] = [];
   for (const entryId of batch.entryIds) {
     if (rejected.has(entryId)) continue;
     const entry = work.store.select('landingEntries', entryId)!;
@@ -367,6 +380,17 @@ export async function composeBatch(work: WorkService, batch: LandingBatch, befor
       batch.arrivedAt,
     );
     const id = finishChild(batch.id, `prefix:${entryId}`);
+    // Composing onto accepted main changed nothing: the content is already on main.
+    if (
+      result.head &&
+      sameLandingTree(source, result.head, head) &&
+      head === batch.base &&
+      batch.previous === batch.base &&
+      !batch.parentId
+    ) {
+      contained.push(entryId);
+      continue;
+    }
     if (!result.head) {
       const peers = landingConflictPeers(work.store, head, candidate.inputs, result.conflicts);
       views.push({
@@ -423,6 +447,12 @@ export async function composeBatch(work: WorkService, batch: LandingBatch, befor
         entry.reason = previewExclusionMessage;
         entry.previewDiagnostic = { ...diagnostic, main: preview!.main, key: preview!.key };
       }
+      // Main may have moved since composition; a moved main re-queues the entry at settlement.
+      if (acceptedHead(data, batch.channel) === batch.base)
+        for (const entryId of contained) {
+          const entry = data.landingEntries!.find(entry => entry.id === entryId)!;
+          if (entry.status === 'checking') markAlreadyOnMain(entry, batch.base);
+        }
       for (const conflict of conflicts) {
         const entry = data.landingEntries!.find(entry => entry.id === conflict.entryId)!;
         entry.status = 'conflict';

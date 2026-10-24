@@ -631,7 +631,7 @@ for (const failed of [false, true, 'cancelled-request'])
     }
   });
 
-test('re-evaluating the same full Candidate after acceptance and audit reuses its original execution', async t => {
+test('resubmitting the same full Candidate after acceptance and audit needs no further check or acceptance', async t => {
   const previous = process.env.FORGE_CHECK_FULL;
   process.env.FORGE_CHECK_FULL = '1';
   t.after(() => {
@@ -650,19 +650,29 @@ test('re-evaluating the same full Candidate after acceptance and audit reuses it
       .runs.filter(run => !run.reusedFrom)
       .map(run => run.id),
   );
+  const before = f.store.load();
   const dispatch = f.work.dispatch.bind(f.work);
   f.work.dispatch = (...args) => {
     assert.notEqual(args[0].action, 'run-check', 'accepted source must not execute again');
     return dispatch(...args);
   };
   for (let i = 0; i < 7; i++) {
-    const { batch, prefix } = await f.resubmit();
-    assert.equal(await withDetachedChecks(() => evaluateBatch(f.work, batch, driver)), true);
-    assert.ok(executions.has(f.store.select('runs', prefix.runId).reusedFrom.runId));
-    await advanceLandingBatch(f.work, batch.id, driver);
-    assert.equal(f.store.select('landingBatches', batch.id).status, 'completed');
+    const command = { ...f.input.command, operationId: randomUUID() };
+    await enqueueLanding(f.work, command, f.input.view);
+    await batchEdit(f.work, 'different-submitting-cli', data => {
+      data.landingEntries.at(-1).runtimeSnapshot.cli = 'a-different-submitting-cli';
+    });
+    const { drainLandingBatches } = await import('../dist/landing-batch.js');
+    await withDetachedChecks(() => drainLandingBatches(f.work, 'main'));
+    const entry = f.store.select('landingEntries', command.operationId);
+    assert.equal(entry.status, 'accepted');
+    assert.equal(entry.alreadyOnMain, f.main().head);
+    assert.equal(entry.acceptanceId, undefined);
+    assert.equal(entry.runId, undefined);
     await drainPostAccept(f.store);
   }
+  assert.equal(f.store.load().runs.length, before.runs.length);
+  assert.equal(f.store.load().channelMoves.length, before.channelMoves.length);
   assert.equal(f.store.load().runs.filter(run => !run.reusedFrom).length, executions.size);
 });
 

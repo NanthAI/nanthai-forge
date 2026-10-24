@@ -26,6 +26,8 @@ export const githubSyncSchema = z
     commits: z.array(githubSyncCommitSchema).min(1),
     pushed: z.number().int().nonnegative(),
     pushedAt: z.string().datetime().optional(),
+    /** Last accepted main move already covered: a commit, or a move with no source change. */
+    cursor: z.object({ acceptanceId: z.uuid(), state: z.string().regex(/^[0-9a-f]{64}$/) }).optional(),
   })
   .refine(value => value.pushed <= value.commits.length);
 export const githubSyncHistorySchema = z.object({

@@ -7,6 +7,7 @@ import type { WorkService } from './work.js';
 import type { LandingBatch } from './landing-batch-types.js';
 import { claimLandingDriver } from './landing-driver.js';
 import { advanceLandingBatch } from './landing-batch-step.js';
+import { completeAlreadyOnMain } from './landing-noop.js';
 export { passingPrefix } from './landing-batch-check.js';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -45,6 +46,8 @@ export async function drainLandingBatches(
     batchDirectory(work, channel),
     async () => {
       const driver = await claimLandingDriver(work, channel);
+      // Recover Lane completion of entries found already on main before a restart.
+      await completeAlreadyOnMain(work, channel);
       const seen = new Set<string>(),
         started = new Set<string>(),
         running = new Map<string, Promise<boolean>>();
@@ -107,6 +110,7 @@ export async function drainLandingBatches(
             halted = true;
             continue;
           }
+          await completeAlreadyOnMain(work, channel);
           running.set(
             id,
             (async () => {

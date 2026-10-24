@@ -137,23 +137,33 @@ test('retained landing diagnosis links a separate repair Lane and new exact-Cand
   const landed = journal.context(broken.lane.laneId).notices.find(n => n.noticeId === notice.noticeId);
   assert.equal(landed.resolutions[0].candidates[0].acceptances[0].head, accepted.head);
   assert.match(landed.resolutions[0].candidates[0].acceptances[0].undo, /compensating/);
-  // A cumulative Candidate belongs to the last entry's Intent, while retaining
-  // this repair's exact saved input. Queue recomposition must keep live edits.
+  // An accepted repair needs no second acceptance. A still-unlanded repair must
+  // retain its exact input in a cumulative Candidate under another Intent.
   writeFileSync(join(repair.lane.path, 'dirty.txt'), 'unsaved during recomposition');
   await enqueueLanding(f.work, repair.command, repair.view);
+  const pendingRepair = await f.candidate('also-fixed.txt', 'repair\n', false);
+  await f.agent.dispatch({ ...handoff, operationId: randomUUID(), laneId: pendingRepair.lane.laneId });
+  await enqueueLanding(f.work, pendingRepair.command, pendingRepair.view);
   const sibling = await f.candidate('sibling.txt');
   await drainLandingBatches(f.work, 'main');
   const combined = f.main();
   const combinedView = f.store.select('views', combined.viewId);
   assert.equal(combinedView.intentId, sibling.lane.intentId);
   assert.notEqual(combinedView.intentId, repair.lane.intentId);
+  const noop = f.store.select('landingEntries', repair.command.operationId);
+  assert.equal(noop.alreadyOnMain, accepted.head);
+  assert.equal(noop.acceptanceId, undefined);
+  assert.ok(!combinedView.inputs.some(pin => pin.laneId === repair.lane.laneId));
   const composedRepair = journal
     .context(broken.lane.laneId)
     .notices.find(n => n.noticeId === notice.noticeId);
   assert.ok(
-    composedRepair.resolutions[0].candidates.some(
-      c => c.viewId === combined.viewId && c.acceptances.some(a => a.id === combined.id),
-    ),
+    composedRepair.resolutions
+      .find(r => r.laneId === pendingRepair.lane.laneId)
+      .candidates.some(c => c.viewId === combined.viewId && c.acceptances.some(a => a.id === combined.id)),
+  );
+  assert.ok(
+    composedRepair.resolutions[0].candidates.some(c => c.acceptances.some(a => a.head === accepted.head)),
   );
   assert.equal(readFileSync(join(repair.lane.path, 'dirty.txt'), 'utf8'), 'unsaved during recomposition');
   writeFileSync(join(repair.lane.path, 'later.txt'), 'new save');

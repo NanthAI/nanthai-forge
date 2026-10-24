@@ -2,11 +2,10 @@
 import { stackLanding } from './agent-stack.js';
 import { invariant } from './errors.js';
 import { allRecords } from './agent-lifecycle.js';
-import { NativeSource } from './native-source.js';
-import { gitIsAncestor } from './work-git.js';
+import { landedViews } from './agent-landed-views.js';
 import { currentChannelHead } from './agent-defaults.js';
 import type { WorkStore } from './work-store.js';
-import type { Lane, WorkData, WorkView } from './work-types.js';
+import type { Lane, WorkView } from './work-types.js';
 
 type After = NonNullable<Lane['after']>;
 export function validateAfter(store: WorkStore, after: After, intentId?: string) {
@@ -26,14 +25,8 @@ export function waitingDependencies(store: WorkStore, laneIds: string[], channel
       : [];
   });
   if (!dependencies.length) return [];
-  const moves = allRecords<WorkData['channelMoves'][number]>(store, 'channelMoves').filter(
-    move => move.channel === channel && move.status === 'accepted',
-  );
   const head = currentChannelHead(store, channel);
-  const ancestry = head && store.native ? new NativeSource(store.root).ancestry() : undefined;
-  const contains = (candidate: string) =>
-    !!head && (ancestry ? ancestry.contains(head, candidate) : gitIsAncestor(store.root, candidate, head));
-  const views = allRecords<WorkView>(store, 'views');
+  const landed = head ? landedViews(store, channel, head) : undefined;
   return dependencies.filter(({ laneId, after }) => {
     const lane = store.select('lanes', laneId)!;
     if (lane.stack && !lane.stack.detached) {
@@ -42,18 +35,17 @@ export function waitingDependencies(store: WorkStore, laneIds: string[], channel
       if ('intentId' in after && after.intentId === parent?.intentId) return false;
     }
 
-    if ('viewId' in after) return !moves.some(move => move.viewId === after.viewId && contains(move.head));
+    if ('viewId' in after) return !landed?.results.some(({ view }) => view.id === after.viewId);
     const lanes = allRecords<Lane>(store, 'lanes').filter(lane => lane.intentId === after.intentId);
     return (
       !lanes.length ||
       lanes.some(
         lane =>
-          !contains(lane.head) ||
           // Batch Candidates can carry this Intent's inputs under another Intent.
-          !views.some(
-            view =>
+          !landed?.results.some(
+            ({ view, alreadyOnMain }) =>
               view.inputs.some(pin => pin.laneId === lane.id && pin.head === lane.head) &&
-              moves.some(move => move.viewId === view.id && contains(move.head)),
+              (alreadyOnMain || landed.contains(lane.head)),
           ),
       )
     );
@@ -62,18 +54,10 @@ export function waitingDependencies(store: WorkStore, laneIds: string[], channel
 
 /** Source containment alone cannot establish that a Lane participated in a landing. */
 export function acceptedInputs(store: WorkStore, inputs: WorkView['inputs'], channel: string, head: string) {
-  const ancestry = store.native ? new NativeSource(store.root).ancestry() : undefined;
-  const moves = allRecords<WorkData['channelMoves'][number]>(store, 'channelMoves').filter(
-    move =>
-      move.channel === channel &&
-      move.status === 'accepted' &&
-      (ancestry ? ancestry.contains(head, move.head) : gitIsAncestor(store.root, move.head, head)),
-  );
-  const views = moves.flatMap(move => {
-    const view = store.select('views', move.viewId);
-    return view ? [view] : [];
-  });
+  const { results } = landedViews(store, channel, head);
   return inputs.every(input =>
-    views.some(view => view.inputs.some(pin => pin.laneId === input.laneId && pin.head === input.head)),
+    results.some(({ view }) =>
+      view.inputs.some(pin => pin.laneId === input.laneId && pin.head === input.head),
+    ),
   );
 }
