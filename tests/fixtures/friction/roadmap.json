@@ -1,0 +1,65 @@
+[
+  {
+    "operationId": "5587eb6e-2cdc-5d34-9078-ea419e6f773b",
+    "title": "Pending sync diagnostic omits conflicts",
+    "area": "sync",
+    "detail": "Repeating sync on a Lane with a pending merge returns `MERGE_PENDING` without listing its conflicting paths. Include the pending sync target and conflicting paths in that diagnostic so a merge agent can resume from the receipt.",
+    "evidence": [
+      "docs/roadmap.md#workflow-friction"
+    ]
+  },
+  {
+    "operationId": "699a1fdd-1455-5a10-9b06-98095d55bc6d",
+    "title": "Task validation selects broad lifecycle suites",
+    "area": "validation",
+    "detail": "Core finish/publication edits select 217 of 349 test files, including hosted and UI suites. Finite implementation agents need a phase-focused validation selection alongside the conservative landing selection; the broad local run competes with concurrent Lanes for check capacity and disk writes.",
+    "evidence": [
+      "docs/roadmap.md#workflow-friction"
+    ]
+  },
+  {
+    "operationId": "371a715b-faf5-5a83-bd22-abc3c6ffb62b",
+    "title": "Launchd template test impact is unclassified",
+    "area": "validation",
+    "detail": "A launchd `.plist` template selects the full test suite as an unclassified path. Finite agents forbidden from full verification must use affected backup/signer tests instead; the selector needs explicit template ownership.",
+    "evidence": [
+      "docs/roadmap.md#workflow-friction"
+    ]
+  },
+  {
+    "operationId": "3312bec8-de76-5945-a0ae-0a18351285a9",
+    "title": "Task validation selects broad lifecycle suites",
+    "area": "validation",
+    "detail": "Central agent lifecycle edits produce a broad local scoped selection: predictive-overlap work selected 210 files, and a two-worker run was interrupted after 49.5 minutes with unrelated synthetic Git setup timeouts. Local task validation needs a focused selection distinct from the combined remote landing selection; it must retain coverage and report any unrun files rather than silently treating the broad selection as passed.",
+    "evidence": [
+      "docs/roadmap.md#workflow-friction"
+    ]
+  },
+  {
+    "operationId": "892bda7e-d774-5113-b379-917dc2ac3850",
+    "title": "Endpoint validation selects whole backend",
+    "area": "validation",
+    "detail": "Browser byte work touching one Convex endpoint selects the whole backend namespace and shared native parser consumers (311 test files). This scoped selection is nearly a full suite for a finite implementation Lane. Expose narrower endpoint dependencies while retaining broad combined landing validation.",
+    "evidence": [
+      "docs/roadmap.md#workflow-friction"
+    ]
+  },
+  {
+    "operationId": "e6ff1330-b29c-5cd6-8c56-df598771ffd9",
+    "title": "Runner script test impact is unclassified",
+    "area": "validation",
+    "detail": "Modal cost-model edits to `scripts/modal-check/cost.py` and analysis-worker edits to `netlify/functions/analyze-background.mts` select the full test suite as unclassified paths. Finite agents forbidden from running full verification cannot run the returned selection; the selector needs explicit mappings to the Modal bridge, cost-model and analysis-worker artifact tests.",
+    "evidence": [
+      "docs/roadmap.md#workflow-friction"
+    ]
+  },
+  {
+    "operationId": "babdc856-6414-509e-bd07-a699f5cf9801",
+    "title": "Test selection compares unsynced Lane with latest main",
+    "area": "validation",
+    "detail": "`agent tests` compares a saved Lane against the latest main. Concurrent accepted additions can appear as deletions in an unsynced Lane and force a full-suite fallback for unrelated work. Expose a pinned comparison for task-scoped validation without requiring a sync; the existing comparison remains useful for landing validation.",
+    "evidence": [
+      "docs/roadmap.md#workflow-friction"
+    ]
+  }
+]

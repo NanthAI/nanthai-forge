@@ -1,0 +1,23 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.fx-handle-form {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: 16px;
+}
+.fx-handle-field {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 360px);
+}
+.fx-handle-field input {
+  width: 100%;
+}
+.fx-handle-form p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+#handle-preview {
+  font-family: var(--fx-font-mono);
+}
