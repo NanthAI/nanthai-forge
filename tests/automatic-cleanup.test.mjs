@@ -258,6 +258,34 @@ test('policy-off terminal cleanup preserves Work format and immutable run eviden
   assert.ok(existsSync(lane.path));
 });
 
+test('terminal handling immediately cleans remote source copies only when lifecycle cleanup is enabled', async t => {
+  const script = `const fs=require('fs');
+    for(const leaf of ['modal-source','github-actions-source']) {
+      fs.mkdirSync('../'+leaf);fs.writeFileSync('../'+leaf+'/input.txt','disposable input');
+    }
+    console.log('retained remote-controller output');`;
+  for (const enabled of [false, true]) {
+    const p = await fixture(t, enabled, script),
+      lane = await p.start();
+    await run(p.agent, 'finish', { laneId: lane.laneId, message: 'Synthetic remote staging' });
+    const saved = allRecords(p.store, 'runs')[0],
+      directory = join(p.store.directory, `check-${saved.id}`);
+    assert.equal(saved.status, 'passed');
+    for (const leaf of ['modal-source', 'github-actions-source'])
+      assert.equal(existsSync(join(directory, leaf)), !enabled, `${leaf}, cleanup=${enabled}`);
+    assert.equal(JSON.parse(readFileSync(join(directory, 'result.json'))).status, 'passed');
+    assert.match(readFileSync(join(directory, 'stdout.log'), 'utf8'), /retained remote-controller output/);
+    if (enabled) {
+      const actions = allRecords(p.store, 'automaticActions').filter(action => action.result);
+      const removed = actions.flatMap(action =>
+        JSON.parse(action.result).removed.flatMap(group => group.items),
+      );
+      for (const leaf of ['modal-source', 'github-actions-source'])
+        assert.ok(removed.some(item => item.path === join(directory, leaf)));
+    }
+  }
+});
+
 test('policy-enabled cleanup retains DISK_LOW workspace and runtime through terminal handling and later sweeps', async t => {
   const p = await fixture(t, true, 'throw new Error("Must not execute")'),
     lane = await p.start(),
@@ -487,4 +515,34 @@ test('excluded local settings and arbitrary ignored files keep a closed Lane rec
   assert.equal(ignored.totals.count, 0);
   assert.match(ignored.skipped[0].reason, /not retained in State/);
   assert.equal(readFileSync(join(lane.path, 'local-only.txt'), 'utf8'), 'uncaptured ignored bytes');
+});
+
+test('a resumed run gets cleanup for its new terminal receipt; replay of that completion stays idempotent', async t => {
+  const p = await fixture(t),
+    lane = await p.start();
+  await run(p.agent, 'finish', { laneId: lane.laneId, message: 'Original terminal attempt' });
+  const saved = allRecords(p.store, 'runs')[0],
+    directory = join(p.store.directory, `check-${saved.id}`);
+  const event = `check:${saved.id}`,
+    scope = { runId: saved.id };
+  const before = automaticCleanup(p.store, event, 'check runner', scope);
+  const receiptPath = join(directory, 'result.json');
+  const receipt = JSON.parse(readFileSync(receiptPath));
+  const endedAt = new Date(Date.parse(saved.endedAt) + 1).toISOString();
+  p.store.locked(() => {
+    const tx = p.store.records(),
+      current = tx.find('runs', saved.id);
+    tx.replace('runs', current.position, { ...current.record, endedAt });
+    p.store.commitRecords(tx);
+  });
+  writeFileSync(receiptPath, JSON.stringify({ ...receipt, endedAt }));
+  mkdirSync(join(directory, 'modal-source'));
+  writeFileSync(join(directory, 'modal-source', 'input.txt'), 'resumed input');
+  const after = automaticCleanup(p.store, event, 'check runner', scope);
+  assert.ok(
+    after.removed.flatMap(group => group.items).some(item => item.path === join(directory, 'modal-source')),
+  );
+  assert.notDeepEqual(after, before);
+  assert.deepEqual(automaticCleanup(p.store, event, 'check runner', scope), after);
+  assert.equal(JSON.parse(readFileSync(receiptPath)).endedAt, endedAt);
 });

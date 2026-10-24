@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { agentClean } from './agent-clean.js';
 import { readPolicy } from './work-autonomy.js';
 import type { WorkStore } from './work-store.js';
-/** Stable per lifecycle event; replay cannot clean a subsequently reopened Lane. */
+/** Stable per lifecycle event and terminal attempt; a resumed run can finish
+ * again, while replay cannot clean a subsequently reopened Lane. */
 export function automaticCleanup(
   store: WorkStore,
   event: string,
@@ -12,7 +13,11 @@ export function automaticCleanup(
 ) {
   if (!store.native) return undefined;
   if (!readPolicy(store).lifecycle.cleanRegenerableCopies) return undefined;
-  const bytes = createHash('sha256').update(`forge-clean:${event}`).digest().subarray(0, 16);
+  const endedAt = scope.runId ? store.select('runs', scope.runId)?.endedAt : undefined;
+  const bytes = createHash('sha256')
+    .update(`forge-clean:${event}${endedAt ? `:terminal:${endedAt}` : ''}`)
+    .digest()
+    .subarray(0, 16);
   bytes[6] = (bytes[6]! & 15) | 80;
   bytes[8] = (bytes[8]! & 63) | 128;
   const hex = bytes.toString('hex'),

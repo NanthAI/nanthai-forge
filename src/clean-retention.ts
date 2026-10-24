@@ -17,7 +17,7 @@ import { processBlocker, type workingProcesses } from './clean-processes.js';
 import { processGroupAlive } from './local-process.js';
 import { durableReplace } from './native-durability.js';
 import { retentionPins, references } from './clean-retention-pins.js';
-import { receiptSchema } from './work-run-receipt.js';
+import { terminalReceipt, remoteExecutionBlocker } from './clean-terminal-receipt.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
@@ -25,7 +25,7 @@ export const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const LOG_TAIL_BYTES = 64 * 1024;
 export type RetentionItem = {
   id: string;
-  kind: 'check-retention' | 'exchange-staging';
+  kind: 'check-workspaces' | 'check-retention' | 'exchange-staging';
   path: string;
   bytes: number;
   reason: string;
@@ -56,7 +56,7 @@ export function retentionPlan(
 ) {
   const items: RetentionItem[] = [],
     skipped: Skipped[] = [];
-  if (!kinds.some(kind => kind === 'check-retention' || kind === 'exchange-staging'))
+  if (!kinds.some(kind => ['check-workspaces', 'check-retention', 'exchange-staging'].includes(kind)))
     return { items, skipped };
   const runs = allRecords<CheckRun>(store, 'runs');
   const { refs, baselines, unknown } = retentionPins(store, runs);
@@ -126,10 +126,16 @@ export function retentionPlan(
       changed = true;
     }
   } while (changed);
-  if (!kinds.includes('check-retention')) return { items, skipped };
+  if (!kinds.some(kind => ['check-workspaces', 'check-retention'].includes(kind))) return { items, skipped };
   for (const run of runs) {
-    const directory = join(store.directory, `check-${run.id}`);
+    const directory = join(store.directory, `check-${run.id}`),
+      kind = kinds.includes('check-workspaces') ? 'check-workspaces' : 'check-retention';
     if (!plain(directory)) continue;
+    if (
+      !kinds.includes('check-retention') &&
+      !['modal-source', 'github-actions-source'].some(name => plain(join(directory, name)))
+    )
+      continue;
     const blocked = ['queued', 'preparing', 'running'].includes(run.status)
       ? `Run is recorded as ${run.status}.`
       : referenceUnknown
@@ -142,32 +148,43 @@ export function retentionPlan(
               ? 'Run process group is still alive.'
               : processBlocker(directory, processes);
     if (blocked) {
-      skipped.push({ kind: 'check-retention', id: directory, runId: run.id, reason: blocked });
+      skipped.push({ kind, id: directory, runId: run.id, reason: blocked });
       continue;
     }
-    if (!run.endedAt || !old(Date.parse(run.endedAt))) continue;
+    const receipt = terminalReceipt(store, run, directory),
+      blocker = receipt.blocker ?? remoteExecutionBlocker(directory);
+    if (blocker) {
+      skipped.push({ kind, id: directory, runId: run.id, reason: blocker });
+      continue;
+    }
+    if (receipt.sourceOnly) skipped.push({ kind, id: directory, runId: run.id, reason: receipt.reason! });
     try {
-      const receipt = receiptSchema.parse(JSON.parse(readFileSync(join(directory, 'result.json'), 'utf8')));
-      if (receipt.status !== run.status || receipt.endedAt !== run.endedAt) throw Error();
-      const journalPath = join(directory, 'modal-executions.json');
-      try {
-        const journal = JSON.parse(readFileSync(journalPath, 'utf8'));
-        if (
-          journal.creating ||
-          journal.executions.some(
-            (e: { exitCode?: number; stopped?: number }) =>
-              e.exitCode === undefined && e.stopped === undefined,
-          )
-        )
-          throw Error();
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
       for (const name of readdirSync(directory)) {
         const path = join(directory, name),
           info = lstatSync(path);
-        if (!old(info.mtimeMs) || info.isSymbolicLink() || (name !== 'shards' && pinnedPath(path))) continue;
-        if (['workspace', 'runtime', 'modal-source', 'github-actions-source'].includes(name) && plain(path))
+        if (info.isSymbolicLink() || (name !== 'shards' && pinnedPath(path))) continue;
+        if (['modal-source', 'github-actions-source'].includes(name) && plain(path)) {
+          items.push({
+            id: path,
+            path,
+            kind,
+            bytes: size(path),
+            runId: run.id,
+            reason:
+              receipt.reason ??
+              'Terminal remote source copy; result, logs, selection, plans and artifacts stay. Rerunning the check reconstructs source.',
+          });
+          continue;
+        }
+        if (
+          receipt.sourceOnly ||
+          !kinds.includes('check-retention') ||
+          !run.endedAt ||
+          !old(Date.parse(run.endedAt)) ||
+          !old(info.mtimeMs)
+        )
+          continue;
+        if (['workspace', 'runtime'].includes(name) && plain(path))
           items.push({
             id: path,
             path,
@@ -185,7 +202,7 @@ export function retentionPlan(
         kind: 'check-retention',
         id: directory,
         runId: run.id,
-        reason: 'Terminal receipt or retained directory is unavailable or inconsistent.',
+        reason: 'Retained directory is unreadable or changed during cleanup planning.',
       });
     }
   }

@@ -85,14 +85,14 @@ async function fixture(t) {
   return p;
 }
 
-test('strict seven-day boundary uses terminal time and each copy/log age', async t => {
+test('seven-day boundary applies to shard work and logs; remote source copies expire immediately', async t => {
   const p = await fixture(t);
   const plan = time => retentionPlan(p.store, ['check-retention'], { paths: [], unknown: false }, time);
-  assert.equal(plan(now - 1000).items.length, 0, 'exactly seven days stays');
-  assert.equal(plan(now - 1001).items.length, 0, 'younger stays');
+  assert.equal(plan(now - 1000).items.length, 1, 'only remote source at exactly seven days');
+  assert.equal(plan(now - 1001).items.length, 1, 'only remote source when younger');
   assert.equal(plan(now).items.length, 5, JSON.stringify(plan(now)));
   age(join(p.directory, 'modal-source'), now);
-  assert.equal(plan(now).items.length, 4, 'recent source copy stays even after old terminal receipt');
+  assert.equal(plan(now).items.length, 5, 'recent remote source copy also expires');
 });
 
 test('dry-run is read-only; apply keeps receipts, summaries, small evidence and log tails, then is idempotent', async t => {
@@ -239,7 +239,8 @@ test('existing cleanup policy controls automatic seven-day sweeps and replay', a
   assert.equal(automaticCleanup(p.store, 'disabled', 'test'), undefined);
   await p.agent.dispatch({ action: 'set-policy', operationId: randomUUID(), preset: 'autonomous' });
   const result = automaticCleanup(p.store, 'retention-event', 'test', { runId: randomUUID() });
-  assert.equal(result.removed.find(g => g.kind === 'check-retention').count, 5);
+  assert.equal(result.removed.find(g => g.kind === 'check-retention').count, 4);
+  assert.equal(result.removed.find(g => g.kind === 'check-workspaces').count, 1);
   assert.equal(existsSync(join(p.directory, 'modal-source')), false);
   assert.deepEqual(automaticCleanup(p.store, 'retention-event', 'test', { runId: randomUUID() }), result);
 });
