@@ -169,7 +169,7 @@ test('20-Lane digest enforces byte/item/path caps with counts and full detail re
   assert.equal(all.overlaps.length, 20);
   assert.ok(Buffer.byteLength(JSON.stringify(digest)) <= PEERS_MAX_BYTES);
   assert.equal(digest.more + (digest.overlaps?.length ?? 0), 20);
-  assert.ok((digest.overlaps?.length ?? 0) <= 5);
+  assert.ok((digest.overlaps?.length ?? 0) === 10);
   assert.ok(digest.overlaps?.every(item => item.paths.length <= 3 && item.more === 2));
   for (let run = 1; run <= 3; run++) {
     const beforeStart = performance.now();
@@ -325,7 +325,7 @@ test('caps landed entries and long escaped paths within the byte budget', () => 
   const huge = boundPeers({
     v: 1,
     coverage: 'local',
-    landed: [{ head: 'a'.repeat(64), paths: ['界'.repeat(2000)], sync: 'conflict' }],
+    landed: [{ head: 'a'.repeat(64), paths: ['界'.repeat(6000)], sync: 'conflict' }],
   });
   assert.ok(Buffer.byteLength(JSON.stringify(huge)) <= PEERS_MAX_BYTES);
   assert.equal(huge.more, 1);

@@ -2,6 +2,7 @@
 import { PeersCache } from './agent-peers-cache.js';
 import { PeersSource } from './agent-peers-source.js';
 import { regionSummary } from './agent-region-summary.js';
+import type { SavedPeerPaths } from './agent-peer-ranking.js';
 import { pageHashes, pageSize } from './work-records.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
@@ -38,9 +39,15 @@ export function indexPeerSource(store: WorkStore, laneId: string) {
   const source = new PeersSource(store, lane.base);
   source.state(lane.base);
   source.state(lane.head);
-  regionSummary(source, new PeersCache(store.root), lane.base, lane.head, () => [
+  const cache = new PeersCache(store.root);
+  const summary = regionSummary(source, cache, lane.base, lane.head, () => [
     source.state(lane.base).files,
     source.state(lane.head).files,
   ]);
+  const paths: SavedPeerPaths = {
+    paths: summary.files.map(file => file.path),
+    at: source.state(lane.head).at,
+  };
+  cache.write(`peer-paths-v1:${lane.base}:${lane.head}`, paths);
   source.live(lane);
 }

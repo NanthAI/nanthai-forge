@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { OverlapAlert } from './agent-overlap-alerts.js';
 import type { PeersDigest } from './agent-peers.js';
-export const PEERS_MAX_BYTES = 1500;
+export const PEERS_MAX_BYTES = 12_000;
+export const PEERS_DISPLAY_LIMIT = 10;
 const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 
 /** Compact advice keeps exact file identity; only the human text uses a preview. */
@@ -11,15 +12,22 @@ export function compactOverlapNotice({
   lanes,
   file,
   proposedOrder,
-}: Pick<OverlapAlert, 'noticeId' | 'kind' | 'lanes' | 'file' | 'proposedOrder'>) {
+  participants,
+}: Pick<OverlapAlert, 'noticeId' | 'kind' | 'lanes' | 'file' | 'proposedOrder' | 'participants'>) {
   const display = file.length > 120 ? `…${file.slice(-119)}` : file;
+  const people = participants?.map(p => ({
+    ...p,
+    ...(p.actor ? { actor: p.actor.slice(0, 80) } : {}),
+    intent: p.intent.slice(0, 160),
+  }));
   return {
     noticeId,
     kind,
     lanes,
     file,
     proposedOrder,
-    text: `High overlap: ${display}; proposed region owner ${proposedOrder[0]?.slice(0, 8)}; land ${proposedOrder.map(id => id.slice(0, 8)).join(' → ')}; sync after ${proposedOrder[0]?.slice(0, 8)} lands.`,
+    ...(people ? { participants: people } : {}),
+    text: `High overlap: ${display}; ${people?.map(p => `${p.lane.slice(0, 8)} (${p.actor ?? 'unknown actor'}; ${p.intent})`).join(' / ') ?? lanes.map(id => id.slice(0, 8)).join(' / ')}; proposed region owner ${proposedOrder[0]?.slice(0, 8)}; land ${proposedOrder.map(id => id.slice(0, 8)).join(' → ')}; sync after ${proposedOrder[0]?.slice(0, 8)} lands.`,
   };
 }
 
@@ -39,12 +47,28 @@ export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
   }
   let more = value.more ?? 0;
   if (value.inbox) {
-    more += Math.max(0, value.inbox.length - 3);
-    value.inbox = value.inbox.slice(-3).map(compactOverlapNotice);
+    // One recent example per Lane pair: several regions/files for one peer
+    // must not hide another peer or masquerade as additional omitted Lanes.
+    const latest = [...value.inbox].reverse();
+    const pairs = new Set<string>();
+    const first = latest.filter(item => {
+      const key = [...item.lanes].sort().join(':');
+      if (pairs.has(key)) return false;
+      pairs.add(key);
+      return true;
+    });
+    const ranks = new Map(value.overlaps?.map((item, index) => [item.lane, index]));
+    const rank = (item: (typeof first)[number]) =>
+      Math.min(...item.lanes.map(id => ranks.get(id) ?? Infinity));
+    first.sort((a, b) => rank(a) - rank(b));
+    const selected = first.slice(0, PEERS_DISPLAY_LIMIT);
+    more += first.length - selected.length;
+    value.inbox = selected.map(compactOverlapNotice);
   }
   if (value.predictive) {
-    more += Math.max(0, value.predictive.length - 3);
-    value.predictive.splice(3);
+    value.predictive = [...new Map(value.predictive.map(item => [item.lane, item])).values()];
+    more += Math.max(0, value.predictive.length - PEERS_DISPLAY_LIMIT);
+    value.predictive.splice(PEERS_DISPLAY_LIMIT);
     for (const item of value.predictive) {
       const extra =
         Math.max(0, (item.mine?.length ?? 0) - 2) +
@@ -94,8 +118,9 @@ export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
       delete value[key];
       continue;
     }
-    more += Math.max(0, items.length - 5);
-    items.splice(5);
+    const limit = key === 'overlaps' ? PEERS_DISPLAY_LIMIT : 5;
+    more += Math.max(0, items.length - limit);
+    items.splice(limit);
     for (const item of items) {
       const extra = Math.max(0, item.paths.length - 3);
       item.paths = item.paths.slice(0, 3);
@@ -128,19 +153,19 @@ export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
   while (size(value) > PEERS_MAX_BYTES) {
     const items = value.landed?.length
       ? value.landed
-      : value.overlaps?.length
-        ? value.overlaps
-        : value.stalled?.length
-          ? value.stalled
-          : value.dependents?.length
-            ? value.dependents
-            : value.contracts?.length
-              ? value.contracts
-              : value.predictive?.length
-                ? value.predictive
-                : value.inbox && value.inbox.length > 1
-                  ? value.inbox
-                  : value.conflicts;
+      : value.stalled?.length
+        ? value.stalled
+        : value.dependents?.length
+          ? value.dependents
+          : value.contracts?.length
+            ? value.contracts
+            : value.predictive?.length
+              ? value.predictive
+              : value.inbox && value.inbox.length > 1
+                ? value.inbox
+                : value.conflicts?.length
+                  ? value.conflicts
+                  : value.overlaps;
     if (!items?.length) {
       if (value.inbox?.length) {
         value.inbox.shift();

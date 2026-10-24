@@ -44,7 +44,7 @@ function fixture(t) {
   return { root, agent, store, start, save };
 }
 
-test('25 overlapping peers bound lifecycle prediction and full-source reads, retain notices and output budgets', async t => {
+test('25 overlapping peers all receive notices while full live reads and display stay bounded', async t => {
   const f = fixture(t),
     peers = [];
   for (let i = 0; i < 25; i++) {
@@ -87,15 +87,15 @@ test('25 overlapping peers bound lifecycle prediction and full-source reads, ret
     }),
   );
   assert.equal(saved.result.head, f.store.select('lanes', mine.laneId).head);
-  assert.ok(summaries.size <= RECEIPT_PEER_LIMIT + 2, `summaries=${summaries.size}`);
+  assert.ok(summaries.size <= 27, `summaries=${summaries.size}`);
   assert.ok(fullReads.size <= RECEIPT_PEER_LIMIT, `fullReads=${fullReads.size}`);
   assert.equal(saved.result.peers.coverage, 'local-incomplete');
   assert.ok(saved.result.peers.more >= 25 - RECEIPT_PEER_LIMIT);
-  assert.match(saved.result.peers.next, /peers/);
+  assert.equal(saved.result.peers.overlaps.length, 10);
   assert.ok(Buffer.byteLength(JSON.stringify(saved.result.peers)) <= PEERS_MAX_BYTES);
   // A durable high-risk notice keeps its ordering even when rich advice is deferred.
   const inbox = new CoordinationJournal(f.store).overlaps(mine.laneId);
-  assert.equal(inbox.length, RECEIPT_PEER_LIMIT);
+  assert.equal(inbox.length, 25);
   assert.ok(inbox.every(n => n.proposedOrder.length === 2 && /sync after/.test(n.text)));
   assert.ok(saved.result.peers.inbox?.length || saved.result.peers.conflicts?.length);
   liveMock.mock.restore();

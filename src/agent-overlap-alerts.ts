@@ -5,6 +5,9 @@ import { digest } from './hash.js';
 import { allRecords } from './agent-lifecycle.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { savedOverlapPlan } from './agent-overlap-plan.js';
+import { rankPeerLanes } from './agent-peer-ranking.js';
+import { PeersCache } from './agent-peers-cache.js';
+import { changedPaths } from './agent-sync.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 import { regionsNear, type PredictiveOverlap } from './agent-predictive-overlap.js';
@@ -18,6 +21,7 @@ export type OverlapAlert = {
   regions: PredictiveOverlap['mine'][];
   symbols?: string[];
   proposedOrder: string[];
+  participants?: { lane: string; actor?: string; intent: string }[];
   text: string;
 };
 /** Connected overlapping ranges are independently deduplicated within a file. */
@@ -67,20 +71,34 @@ export function recordOverlapAlerts(store: WorkStore, laneId: string, maxPeers =
     .filter(lane => ['active', 'paused', 'ready'].includes(lane.state))
     .sort((a, b) => a.id.localeCompare(b.id));
   const focus = open.find(lane => lane.id === laneId);
-  const peers = open.filter(lane => lane.id !== laneId);
-  const selected = [...(focus ? [focus] : []), ...peers.slice(0, maxPeers)];
-  const source = store.native
-    ? new PeersSource(store, focus?.base ?? '', Number.isFinite(maxPeers) ? RECEIPT_ANCESTRY_READS : Infinity)
-    : undefined;
-  const recent = source?.ancestry(),
-    ancestry = source?.ancestry('');
-  let incomplete = peers.length > maxPeers;
+  const source = new PeersSource(
+    store,
+    focus?.base ?? '',
+    Number.isFinite(maxPeers) ? RECEIPT_ANCESTRY_READS : Infinity,
+  );
+  if (!focus) return 'local-incomplete';
+  const scope = [
+    ...(focus.scope?.paths ?? []),
+    ...changedPaths(source.state(focus.base).files, source.state(focus.head).files),
+  ];
+  const ranking = rankPeerLanes(
+    source,
+    new PeersCache(store.root),
+    scope,
+    open.filter(lane => lane.id !== laneId),
+  );
+  // Analysis is complete for path candidates; maxPeers bounds ancestry, never
+  // lets an unrelated Lane displace an overlapping one or drops a bilateral alert.
+  const selected = [focus, ...ranking.ranked.filter(peer => ranking.shared.has(peer.id))];
+  const recent = source.ancestry(),
+    ancestry = source.ancestry('');
+  let incomplete = ranking.incomplete;
   const lanes = selected.filter(lane => {
     try {
       // A verified descendant of main cannot already be contained by main.
       // Prove that short direction first; older/unrelated heads still use full ancestry.
-      if (main && lane.head !== main && recent?.contains(lane.head, main)) return true;
-      return !(main && ancestry?.contains(main, lane.head));
+      if (main && lane.head !== main && recent.contains(lane.head, main)) return true;
+      return !(main && ancestry.contains(main, lane.head));
     } catch {
       incomplete = true;
       return false;
@@ -88,6 +106,24 @@ export function recordOverlapAlerts(store: WorkStore, laneId: string, maxPeers =
   });
   const plan = savedOverlapPlan(store, lanes, laneId);
   if (incomplete) plan.coverage = 'local-incomplete';
+  const participants = new Map<string, NonNullable<OverlapAlert['participants']>[number]>();
+  const participant = (id: string) => {
+    let known = participants.get(id);
+    if (known) return known;
+    const lane = lanes.find(lane => lane.id === id)!;
+    const actor = lane.owner?.actor ?? lane.startedBy?.name;
+    known = {
+      lane: id,
+      ...(actor ? { actor } : {}),
+      intent:
+        (
+          tx?.fields('intents', lane.intentId)?.record ??
+          (!tx ? store.select('intents', lane.intentId) : undefined)
+        )?.outcome ?? lane.name,
+    };
+    participants.set(id, known);
+    return known;
+  };
   const alerts = plan.pairs
     .filter(pair => pair.lanes.includes(laneId))
     .flatMap(pair =>
@@ -106,6 +142,7 @@ export function recordOverlapAlerts(store: WorkStore, laneId: string, maxPeers =
           regions,
           ...(item.symbols ? { symbols: item.symbols } : {}),
           proposedOrder: [item.first, ...pair.lanes.filter(id => id !== item.first)],
+          participants: canonical.map(participant),
           text: `High overlap: ${item.file}; proposed region owner ${owner.id.slice(0, 8)} (${owner.name}). Land ${item.first.slice(0, 8)} first (${item.orderReason}); sync after ${item.first.slice(0, 8)} lands.`,
         };
       }),

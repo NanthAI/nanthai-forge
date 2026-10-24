@@ -19,6 +19,8 @@ import { PeersCache } from './agent-peers-cache.js';
 import { pageHashes, pageSize } from './work-records.js';
 import { PeersSource, RECEIPT_ANCESTRY_READS } from './agent-peers-source.js';
 import { regionSummary } from './agent-region-summary.js';
+import { rankPeerLanes } from './agent-peer-ranking.js';
+import { landingConflictPeers } from './landing-conflict-peers.js';
 import { predictiveOverlaps, type PredictiveOverlap } from './agent-predictive-overlap.js';
 import {
   moveDelta,
@@ -71,7 +73,10 @@ export type PeersDigest = {
   coverage?: 'local' | 'local-incomplete';
   notices?: { text: string }[];
   conflicts?: ConflictNotice[];
-  inbox?: Pick<OverlapAlert, 'noticeId' | 'kind' | 'lanes' | 'file' | 'proposedOrder' | 'text'>[];
+  inbox?: Pick<
+    OverlapAlert,
+    'noticeId' | 'kind' | 'lanes' | 'file' | 'proposedOrder' | 'text' | 'participants'
+  >[];
   overlaps?: Overlap[];
   /** My live regions versus selected in-flight peer checkpoints; coverage names gaps. */
   predictive?: PredictiveOverlap[];
@@ -89,8 +94,8 @@ export type PeersDigest = {
 };
 export { PEERS_MAX_BYTES, boundPeers } from './agent-peers-bound.js';
 import { boundPeers } from './agent-peers-bound.js';
-// Lifecycle receipts reserve expensive prediction/dependency work for a few peers.
-// Explicit peers reads retain complete observation; this is not a source limit.
+// Lifecycle receipts bound full live dependency reads and unrelated advice.
+// Saved path candidates are all analyzed; this is not an overlap/source limit.
 export const RECEIPT_PEER_LIMIT = 3;
 const clip = (value: string) => value.slice(0, 200);
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -115,6 +120,11 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, re
     const lane =
       tx?.fields('lanes', command.laneId)?.record ?? legacy?.lanes.find(item => item.id === command.laneId);
     invariant(lane, 'NOT_FOUND', 'Peers Lane not found.');
+    // Read the bilateral inbox before source analysis: an unavailable/deferred
+    // tree must not hide alerts raised by another agent's last save.
+    const journal = new CoordinationJournal(store);
+    const inbox = journal.overlaps(lane.id);
+    if (inbox.length) result.inbox = inbox;
     if (lane.stack) result.stack = stackStatus(store, lane);
     const integration = integrationPreviewStatus(store);
     if (integration) result.integration = integration;
@@ -167,10 +177,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, re
     if (notices.length) result.notices = notices;
     const source = new PeersSource(store, lane.base, receipt ? RECEIPT_ANCESTRY_READS : Infinity),
       base = source.state(lane.base).files;
-    const journal = new CoordinationJournal(store),
-      cache = new PeersCache(store.root);
-    const inbox = journal.overlaps(lane.id);
-    if (inbox.length) result.inbox = inbox;
+    const cache = new PeersCache(store.root);
     let participant: NoticeParticipant | undefined;
     const self = () => (participant ??= noticeParticipant(store, source, lane));
     const addNotice = (notice: ConflictNotice | undefined) => {
@@ -263,38 +270,47 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, re
           const sync =
             merged.conflicts.length || overlappingPaths(merged.files).length ? 'conflict' : 'clean';
           for (const item of result.landed!) item.sync = sync;
-          const move = [...moves].reverse().find(item => item.head === main && item.status === 'accepted');
-          const view =
-            move && (tx?.find('views', move.viewId)?.record ?? legacy?.views.find(v => v.id === move.viewId));
-          const acceptedLaneId = view?.inputs[0]?.laneId;
-          const acceptedLane =
-            acceptedLaneId &&
-            (tx?.fields('lanes', acceptedLaneId)?.record ?? legacy?.lanes.find(l => l.id === acceptedLaneId));
-          const accepted = acceptedLane ? noticeParticipant(store, source, acceptedLane) : undefined;
-          addNotice(
-            conflictNotice(
-              source,
-              [
-                self(),
-                {
-                  ...accepted,
-                  lane: 'main',
-                  head: main,
-                  intentId: accepted?.intentId ?? view?.intentId ?? '',
-                  intent: accepted?.intent ?? 'Accepted main',
-                  owner: move?.acceptedBy ?? accepted?.owner ?? null,
-                  sessions: accepted?.sessions ?? [],
-                  message: source.state(main).message,
-                  state: 'ready',
-                  startedAt: move?.at ?? '',
-                },
-              ],
-              liveHead,
-              main,
-              merged.conflicts,
-              overlappingPaths(merged.files),
-            ),
+          const conflictPaths = [
+            ...merged.conflicts.map(item => item.path),
+            ...overlappingPaths(merged.files),
+          ];
+          const acceptedIds = landingConflictPeers(
+            store,
+            main,
+            [{ laneId: lane.id, head: lane.head }],
+            conflictPaths,
           );
+          const acceptedLanes = acceptedIds.flatMap(id => {
+            const accepted = tx?.fields('lanes', id)?.record ?? legacy?.lanes.find(l => l.id === id);
+            return accepted ? [accepted] : [];
+          });
+          for (const acceptedLane of acceptedLanes.length ? acceptedLanes : [undefined]) {
+            const accepted = acceptedLane ? noticeParticipant(store, source, acceptedLane) : undefined;
+            addNotice(
+              conflictNotice(
+                source,
+                [
+                  self(),
+                  {
+                    ...accepted,
+                    lane: accepted?.lane ?? 'main',
+                    head: main,
+                    intentId: accepted?.intentId ?? '',
+                    intent: accepted?.intent ?? 'Accepted main',
+                    owner: accepted?.owner ?? null,
+                    sessions: accepted?.sessions ?? [],
+                    message: source.state(main).message,
+                    state: 'ready',
+                    startedAt: accepted?.startedAt ?? '',
+                  },
+                ],
+                liveHead,
+                main,
+                merged.conflicts,
+                overlappingPaths(merged.files),
+              ),
+            );
+          }
           result.next = `sync: ${result.landed!.length} landed changes touch your paths (${sync})`;
         }
       }
@@ -337,12 +353,15 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, re
       if (peer.id !== lane.id && ['active', 'paused', 'ready'].includes(peer.state)) peers.push(peer);
     }
     let composed = 0;
-    peers.sort((a, b) => compare(a.id, b.id));
-    const advicePeers = receipt ? peers.slice(0, RECEIPT_PEER_LIMIT) : peers;
+    const ranking = rankPeerLanes(source, cache, scope, peers);
+    peers.splice(0, peers.length, ...ranking.ranked);
+    if (ranking.incomplete) result.coverage = 'local-incomplete';
+    const advicePeers = receipt
+      ? peers.filter((peer, index) => ranking.shared.has(peer.id) || index < RECEIPT_PEER_LIMIT)
+      : peers;
     const deferred = peers.length - advicePeers.length;
     if (deferred) {
       result.coverage = 'local-incomplete';
-      result.more = deferred;
       result.next = 'Additional peer analysis deferred; peers {laneId,detail:true} returns full advice.';
     }
     // Contracts I changed that other open Lanes use: told again when I land.
@@ -375,7 +394,7 @@ function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, re
     }
     if (command.detail && own.length) result.changes = own;
     if (own.length)
-      for (const peer of advicePeers.slice(0, 20)) {
+      for (const peer of advicePeers.slice(0, receipt ? RECEIPT_PEER_LIMIT : 20)) {
         try {
           if (lane.head !== lane.base && ancestry.contains(peer.head, lane.head)) continue;
           // Dirty bytes count: an unsaved edit that imports a changed export already depends on it.

@@ -319,7 +319,7 @@ test('50 peer predictions stay within compact receipt and human output budgets; 
 });
 
 test('compact receipts omit detail-only contract deltas and detailed reads retain them', () => {
-  const changes = Array.from({ length: 50 }, (_, i) => ({
+  const changes = Array.from({ length: 500 }, (_, i) => ({
     file: 'src/example.ts',
     export: `example${i}`,
     kind: 'changed',
