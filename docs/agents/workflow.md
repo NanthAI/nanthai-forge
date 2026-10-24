@@ -333,8 +333,21 @@ A local owner bound by `nforge host` queues agent activity and incremental cockp
 metadata on `start`, `checkpoint`, `sync`, `finish`, `accept`, `complete`, `abandon`, `reopen`
 and `complete-merged`, plus `run`/`observe`/`cancel`. A detached sender uses the saved login (or
 `FORGE_AUTH_TOKEN`); network/authentication failures never fail the local command.
-Pending original operation IDs and payloads remain beside Work and retry on the
-next lifecycle command, or `nforge host ROOT --sync-agent`. One detached observer per owner watches Lane directories and coalesces native filesystem notifications into at most one edited-files signal per minute. On macOS it also reconciles file metadata on that minute tick, so delayed or missing FSEvents notifications do not hide edits. On attachment it compares live source with the saved Lane head once, including edits made before observation started. Subsequent ticks walk included paths and compare metadata without reading source contents or hashing files; other platforms keep native notifications only. Generated/protected directories are ignored, and metadata reconciliation never follows symlinks. It observes queued/preparing/running check records once a minute and reports working until the check ends. A process queue prevents duplicate owner observers; completion stops the Lane watcher. `host --status` reports `pendingAgentSync`. That observer exits on its own when its owner directory is deleted or replaced, its installed runtime is deleted, or nothing has changed for 2 hours (`FORGE_PRESENCE_IDLE_MS` overrides); the next lifecycle command starts it again.
+Pending original operation IDs and payloads remain beside Work in
+`hosted-agent-sync.json`; the next queue update or drain migrates older binding queues.
+Unsent metadata snapshots coalesce to the highest revision per session; newer
+presence-only observations remain separately until a metadata snapshot supersedes
+them, and expire after 15 minutes. The queue retains at most 100 entries and 512 KiB
+of payloads, evicting oldest presence first; status records the discarded count.
+Rejected application entries are discarded with the latest 20 error diagnostics,
+then later entries continue. Network, timeout, rate-limit, server and authentication
+failures retain exact payloads and back off from one second up to five minutes.
+The next lifecycle command or presence signal retries after backoff; an explicit
+`nforge host ROOT --sync-agent` observes the same backoff. A process reservation
+prevents duplicate sender starts, and drain admission is nonblocking. One detached observer per owner watches Lane directories and coalesces native filesystem notifications into at most one edited-files signal per minute. On macOS it also reconciles file metadata on that minute tick, so delayed or missing FSEvents notifications do not hide edits. On attachment it compares live source with the saved Lane head once, including edits made before observation started. Subsequent ticks walk included paths and compare metadata without reading source contents or hashing files; other platforms keep native notifications only. Generated/protected directories are ignored, and metadata reconciliation never follows symlinks. It observes queued/preparing/running check records once a minute and reports working until the check ends. A process queue prevents duplicate owner observers; completion stops the Lane watcher. `host --status` reports `pendingAgentSync`, `agentSyncError` (code, message,
+sequence, time and attempts), `agentSyncNextAttemptAt`, `rejectedAgentSync` and
+`discardedAgentSync`. Owner status exposes the same failure and retry time in its
+hosted metadata section. That observer exits on its own when its owner directory is deleted or replaced, its installed runtime is deleted, or nothing has changed for 2 hours (`FORGE_PRESENCE_IDLE_MS` overrides); the next lifecycle command starts it again.
 
 Each Lane and actor has a distinct session. `actor:"gpt-u4"` overrides
 `FORGE_AGENT_NAME`, then `FORGE_ACTOR`, then the Lane starter. Activity includes
@@ -346,7 +359,7 @@ local main acceptance promptly. They do not upload source, run logs or check
 artifacts, and cannot create hosted acceptance/check evidence. Source reads for a
 new local head remain unavailable until an explicit `nforge exchange ROOT push`.
 The endpoint requires the bound project's current owner login; coordination-only
-credentials can publish activity but leave metadata pending. Hosted Intent titles,
+credentials can publish activity; rejected metadata is reported locally. Hosted Intent titles,
 notes and unrelated fields are preserved by lifecycle updates.
 
 Automatic metadata and presence are enabled by default on bindings, including

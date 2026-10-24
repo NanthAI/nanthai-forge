@@ -13,6 +13,7 @@ import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { readHostState, updateHostState } from '../dist/host-binding.js';
 import { queueAgentSync, flushAgentSync } from '../dist/agent-hosted-sync.js';
+import { CheckQueue } from '../dist/check-queue.js';
 import { hostCli } from '../dist/host-cli.js';
 import { coordinationRequestSchema } from '../dist/coordination-types.js';
 import { state } from './hosted-fixture.mjs';
@@ -29,6 +30,13 @@ function setup(t) {
   writeFileSync(join(root, 'hello.txt'), 'one\n');
   initNative(root);
   const workflow = new AgentWorkflow(root);
+  // Keep detached transport out of synthetic-client tests; explicit flushes own delivery.
+  const sender = new CheckQueue(join(workflow.work.store.directory, 'hosted-agent-sync-spawn'), {
+    limit: 1,
+    anchor: workflow.work.store.directory,
+  });
+  assert.equal(sender.tryAcquire(), true);
+  t.after(() => sender.release());
   const oldConfig = process.env.XDG_CONFIG_HOME,
     oldToken = process.env.FORGE_AUTH_TOKEN,
     oldName = process.env.FORGE_AGENT_NAME;
@@ -117,7 +125,13 @@ test('bound lifecycle publishes named sessions and incremental metadata; offline
   await flushAgentSync(store, client);
   assert.equal(readHostState(store).agentSync.pending[0].operationId, first.operationId);
   offline = false;
+  updateHostState(store, state => {
+    state.agentSync.nextAttemptAt = 0;
+  });
   await flushAgentSync(store, client); // server committed the activity but reply was lost
+  updateHostState(store, state => {
+    state.agentSync.nextAttemptAt = 0;
+  });
   await flushAgentSync(store, client);
   assert.equal(readHostState(store).agentSync.pending.length, 0);
   assert.equal(s.tables.projectCoordinationEvents.size, 1);
@@ -267,6 +281,9 @@ test('fake Convex HTTP endpoint receives queued metadata and presence with saved
   });
   // The spawned worker inherited no credential; the explicit replay uses a synthetic login.
   process.env.FORGE_AUTH_TOKEN = 'synthetic-owner-jwt';
+  updateHostState(store, state => {
+    state.agentSync.nextAttemptAt = 0;
+  });
   await flushAgentSync(store);
   assert.deepEqual(
     calls.map(call => call.path),
@@ -336,9 +353,7 @@ test('finish queues working during checks; separate accept publishes main and co
   };
   await flushAgentSync(store, client);
   assert.equal(readHostState(store).agentSync.pending.length, 0);
-  assert.ok(
-    activities.some(activity => activity.status === 'working' && activity.activityKind === 'check queued'),
-  );
+  assert.equal(activities.length, 1); // Unsent snapshots for this session coalesce to acceptance.
   assert.equal(activities.at(-1).status, 'completed');
   assert.equal(rows(s, 'channels')[0].head, accepted.head);
   assert.equal(rows(s, 'channelMoves')[0].id, accepted.acceptanceId);
@@ -348,7 +363,7 @@ test('finish queues working during checks; separate accept publishes main and co
   assert.equal(s.tables.projectWorkEvents.size, 0);
 });
 
-test('metadata failure retains its queue but does not prevent newer presence observations', async t => {
+test('metadata transport failure retains the newest session snapshot with backoff', async t => {
   const { workflow, store } = setup(t);
   bind(store);
   const lane = (await workflow.dispatch({ action: 'start', outcome: 'Metadata offline' })).result;
@@ -362,7 +377,8 @@ test('metadata failure retains its queue but does not prevent newer presence obs
     },
   });
   assert.equal(activity.at(-1).status, 'completed');
-  assert.equal(readHostState(store).agentSync.pending.length, 2);
+  assert.equal(readHostState(store).agentSync.pending.length, 1);
+  assert.ok(readHostState(store).agentSync.nextAttemptAt > Date.now());
 });
 
 test('delayed delivery preserves real activity time and heartbeat does not turn an old edit into new work', async t => {
@@ -398,7 +414,8 @@ test('delayed delivery preserves real activity time and heartbeat does not turn 
   assert.equal(readHostState(store).agentSync.pending.length, queued);
   t.mock.timers.tick(60_000);
   queueAgentSync(store, { action: 'checkpoint', laneId: lane.laneId }, {}, false, 'edited files');
-  assert.equal(readHostState(store).agentSync.pending.length, queued + 1);
+  assert.equal(readHostState(store).agentSync.pending.length, queued);
+  assert.equal(readHostState(store).agentSync.pending.at(-1).activity.activityAt, Date.now());
 });
 
 test('abandon queues closed Lane/Intent metadata and completes presence; opt-out remains authoritative', async t => {

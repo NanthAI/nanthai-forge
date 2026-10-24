@@ -3,8 +3,6 @@ import { hostedPaths, hostedText } from './hosted-paths.js';
 import { PRESENCE } from './presence.js';
 import { startPresenceWorker } from './presence-worker-start.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import { ConvexHttpClient } from 'convex/browser';
@@ -22,6 +20,9 @@ import { ForgeError, invariant } from './errors.js';
 import { activitySnapshot } from './agent-activity-snapshot.js';
 import { readWorkFile } from './work-records.js';
 import { workLockWaitMs } from './work-lock.js';
+import { startAgentSyncWorker } from './agent-sync-worker.js';
+import { agentSyncError } from './agent-sync-error.js';
+import { syncSequence } from './agent-sync-state.js';
 
 function sessionId(binding: string, lane: string, actor: string) {
   const bytes = createHash('sha256')
@@ -189,7 +190,6 @@ export function queueAgentSync(
             )
               continue;
             if (!signal && previous?.fingerprint === fingerprint) continue;
-            if (queue) (queue.observations ??= {})[session] = fingerprint;
             const summary = signal ? (previous?.summary ?? intent.outcome) : intent.outcome.slice(0, 2000);
             (state.presence ??= {})[session] = {
               sessionId: session,
@@ -243,13 +243,7 @@ export function queueAgentSync(
       }
     }
     if (!readHostState(store).binding || readHostState(store).binding?.autoSync === false) return undefined;
-    const child = spawn(
-      process.execPath,
-      [fileURLToPath(new URL('./cli.js', import.meta.url)), 'host', store.root, '--sync-agent'],
-      { detached: true, stdio: 'ignore', env: process.env },
-    );
-    child.once('error', () => {});
-    child.unref();
+    startAgentSyncWorker(store);
     return { status: 'queued', sourcePush: 'explicit', undo: 'nforge host ROOT --no-auto-sync' };
   } catch {
     // Local presence also uses the owner lock. Its failure is not a hosted-sync
@@ -263,14 +257,18 @@ export async function flushAgentSync(store: WorkStore, supplied?: Pick<ConvexHtt
   return withQueueSlot(
     join(store.directory, 'hosted-agent-sync-queue'),
     async () => {
+      updateHostState(store, () => {}); // One-time legacy queue compaction/migration.
       const attempted = new Set<string>();
       for (;;) {
         const state = readHostState(store),
           pending = state.agentSync?.pending.find(item => !attempted.has(item.operationId));
-        if (!pending || state.binding?.autoSync === false)
+        if (
+          !pending ||
+          state.binding?.autoSync === false ||
+          (state.agentSync?.nextAttemptAt ?? 0) > Date.now()
+        )
           return { pending: state.agentSync?.pending.length ?? 0 };
         attempted.add(pending.operationId);
-        let activityPublished = false;
         try {
           let client = supplied;
           if (!client) {
@@ -289,27 +287,50 @@ export async function flushAgentSync(store: WorkStore, supplied?: Pick<ConvexHtt
             operationId: pending.operationId,
             command: pending.activity,
           });
-          activityPublished = true;
           await client.mutation(makeFunctionReference<'mutation'>('projectOwnerSync:publish'), {
             projectId: pending.projectId,
             operationId: pending.operationId,
             metadata: pending.metadata,
           });
           updateHostState(store, current => {
-            if (current.agentSync)
+            if (current.agentSync) {
               current.agentSync.pending = current.agentSync.pending.filter(
                 item => item.operationId !== pending.operationId,
               );
+              if (current.agentSync.headError?.operationId === pending.operationId) {
+                delete current.agentSync.headError;
+                delete current.agentSync.nextAttemptAt;
+              }
+            }
           });
         } catch (error) {
-          if (activityPublished) continue;
-          return {
-            pending: readHostState(store).agentSync?.pending.length ?? 0,
-            code: error instanceof ForgeError ? error.code : 'HOSTED_SYNC_PENDING',
-          };
+          const failure = agentSyncError(error);
+          updateHostState(store, current => {
+            const queue = current.agentSync;
+            if (!queue) return;
+            const attempts =
+              queue.headError?.operationId === pending.operationId ? queue.headError.attempts + 1 : 1;
+            queue.headError = {
+              code: failure.code,
+              message: failure.message,
+              seq: syncSequence(pending),
+              at: Date.now(),
+              attempts,
+              operationId: pending.operationId,
+            };
+            if (failure.transient)
+              queue.nextAttemptAt = Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(attempts - 1, 9));
+            else {
+              (queue.rejected ??= []).push(queue.headError);
+              queue.pending = queue.pending.filter(item => item.operationId !== pending.operationId);
+              delete queue.nextAttemptAt;
+            }
+          });
+          if (failure.transient)
+            return { pending: readHostState(store).agentSync?.pending.length ?? 0, code: failure.code };
         }
       }
     },
-    { waitMs: 15_000, anchor: store.directory },
+    { waitMs: 0, anchor: store.directory },
   );
 }

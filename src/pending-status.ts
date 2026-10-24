@@ -10,6 +10,7 @@ import {
 import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
 import type { OverlapPlan } from './agent-overlap-plan.js';
 import type { WorkData } from './work-types.js';
+import type { AgentSyncState } from './agent-sync-state.js';
 import type { AutoExchangeStatus } from './auto-exchange-status.js';
 
 /** R1 integration contract: only successfully published captures belong here.
@@ -45,6 +46,9 @@ export type PendingObservations = {
   recovery?: RecoveryCaptureObservation | null;
   pendingPushes?: { operationId: string; revision: number }[];
   metadataPending?: number;
+  metadataError?: AgentSyncState['headError'] | null;
+  metadataNextAttemptAt?: number | null;
+  metadataRejected?: number;
   waitingLaneIds?: string[];
   evidenceChangedAt?: string | null;
   deployment?: { head: string; observedAt: string | null; state: string | null } | null;
@@ -325,6 +329,9 @@ export function pendingStatus(
       recovery,
       pendingPushes: observed.pendingPushes ?? [],
       metadataPending: observed.metadataPending ?? 0,
+      metadataError: observed.metadataError ?? null,
+      metadataNextAttemptAt: observed.metadataNextAttemptAt ?? null,
+      metadataRejected: observed.metadataRejected ?? 0,
       pendingSince: null,
       pendingAgeMs: null,
       // There is no timestamp of the oldest unsent Work/evidence mutation yet.

@@ -70,6 +70,9 @@ export function readPendingStatus(
           autoExchange: readAutoExchangeStatus(store, Date.parse(now)),
           recovery: recovery?.(store) ?? null,
           pendingPushes: pushes.map(push => ({ operationId: push!.operationId, revision: push!.revision })),
+          metadataError: host.agentSync?.headError ?? null,
+          metadataNextAttemptAt: host.agentSync?.nextAttemptAt ?? null,
+          metadataRejected: host.agentSync?.rejected?.length ?? 0,
           metadataPending: host.agentSync?.pending.length ?? 0,
           waitingLaneIds: waitingFinishes(store).flatMap(command =>
             typeof command.laneId === 'string' ? [command.laneId] : [],

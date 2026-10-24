@@ -8,6 +8,7 @@ import {
   fsyncSync,
   closeSync,
   renameSync,
+  rmSync,
 } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -18,6 +19,7 @@ import { exchangeObservationSchema } from './exchange-observation.js';
 import { wakeAutoExchange } from './auto-exchange-wake.js';
 import { WorkStore } from './work-store.js';
 import { invariant } from './errors.js';
+import { agentSyncSchema, compactAgentSync } from './agent-sync-state.js';
 import { reportedTokensSchema } from './making-of.js';
 const binding = z.object({
   projectId: z.string(),
@@ -131,54 +133,62 @@ const schema = z.object({
       }),
     )
     .optional(),
-  agentSync: z
-    .object({
-      sequence: z.number().int().nonnegative(),
-      observations: z.record(z.string(), z.string()).optional(),
-      pending: z.array(
-        z.object({
-          operationId: z.uuid(),
-          projectId: z.string(),
-          deployment: z.string(),
-          activity: z.unknown(),
-          metadata: z.string(),
-        }),
-      ),
-    })
-    .optional(),
+  agentSync: agentSyncSchema.optional(),
 });
 export type HostState = z.infer<typeof schema>;
 export type HostedBinding = z.infer<typeof binding>;
 export function readHostState(store: WorkStore): HostState {
   const path = join(store.directory, 'hosted-binding.json');
-  return existsSync(path) ? schema.parse(JSON.parse(readFileSync(path, 'utf8'))) : { schema: 1 };
+  const state = existsSync(path)
+    ? schema.parse(JSON.parse(readFileSync(path, 'utf8')))
+    : { schema: 1 as const };
+  const queuePath = join(store.directory, 'hosted-agent-sync.json');
+  if (existsSync(queuePath))
+    state.agentSync = agentSyncSchema.parse(JSON.parse(readFileSync(queuePath, 'utf8')));
+  return state;
 }
-/** Transport metadata lives alongside Work, serialized by its owner lock without changing Work revision. */
+/** Transport metadata is serialized by the owner lock, without changing Work revision.
+ * The queue sidecar is authoritative once present, including during legacy migration. */
 export function updateHostState<T>(store: WorkStore, update: (state: HostState) => T): T {
   const result = store.locked(() => {
     const state = readHostState(store),
       result = update(state);
-    const path = join(store.directory, 'hosted-binding.json'),
-      temporary = `${path}.${randomUUID()}`;
-    const fd = openSync(temporary, 'wx', 0o600);
-    try {
-      writeFileSync(fd, JSON.stringify(schema.parse(state)) + '\n');
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    renameSync(temporary, path);
-    const directory = openSync(store.directory, 'r');
-    try {
-      fsyncSync(directory);
-    } finally {
-      closeSync(directory);
-    }
+    if (state.agentSync) compactAgentSync(state.agentSync);
+    const validated = schema.parse(state);
+    const { agentSync, ...bindingState } = validated;
+    // Write the sidecar before removing legacy pending entries from the binding.
+    if (agentSync) writeChanged(store, 'hosted-agent-sync.json', agentSync);
+    writeChanged(store, 'hosted-binding.json', {
+      ...bindingState,
+      ...(agentSync ? { agentSync: { ...agentSync, pending: [] } } : {}),
+    });
+    if (!agentSync) rmSync(join(store.directory, 'hosted-agent-sync.json'), { force: true });
     return result;
   });
   wakeAutoExchange(store);
   return result;
 }
+function writeChanged(store: WorkStore, name: string, value: unknown) {
+  const path = join(store.directory, name),
+    bytes = JSON.stringify(value) + '\n';
+  if (existsSync(path) && readFileSync(path, 'utf8') === bytes) return;
+  const temporary = `${path}.${randomUUID()}`,
+    fd = openSync(temporary, 'wx', 0o600);
+  try {
+    writeFileSync(fd, bytes);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(temporary, path);
+  const directory = openSync(store.directory, 'r');
+  try {
+    fsyncSync(directory);
+  } finally {
+    closeSync(directory);
+  }
+}
+
 export function requireHostedBinding(store: WorkStore): HostedBinding {
   const state = readHostState(store);
   if (state.binding) return state.binding;
