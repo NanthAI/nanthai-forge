@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-for (const failure of ['none', 'exit', 'signal', 'ordinary']) {
+for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex']) {
   test(`synthetic static verification preserves ${failure} outcome with queued builds`, t => {
     const root = mkdtempSync(join(tmpdir(), 'forge-verify-static-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -29,7 +29,9 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary']) {
         scripts: Object.fromEntries(
           ['build:core', 'build:web', 'check', 'format:check', 'lint'].map(name => [
             name,
-            'node -e "process.exit(0)"',
+            name === 'build:core'
+              ? "node -e \"require('node:fs').writeFileSync('core-built', '')\""
+              : 'node -e "process.exit(0)"',
           ]),
         ),
       }),
@@ -41,10 +43,16 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary']) {
       const outcome =
         failure === 'signal'
           ? "process.kill(process.pid, 'SIGKILL');"
-          : `process.exit(${failure === 'exit' ? 137 : failure === 'ordinary' ? 7 : 0});`;
+          : failure === 'convex'
+            ? `process.exit(${log === 'legacy' ? "process.argv.includes('convex/tsconfig.json') ? 7 : 0" : '0'});`
+            : `process.exit(${failure === 'exit' ? 137 : failure === 'ordinary' ? 7 : 0});`;
       write(
         `node_modules/${compiler}/bin/tsc`,
-        `require('node:fs').appendFileSync('${log}.jsonl', JSON.stringify(process.argv.slice(2)) + '\\n'); ${outcome}`,
+        `const fs = require('node:fs');
+        fs.appendFileSync('${log}.jsonl', JSON.stringify(process.argv.slice(2)) + '\\n');
+        if (${log === 'legacy'} && process.argv.includes('convex/tsconfig.json') && !fs.existsSync('core-built'))
+          throw Error('Convex compatibility check ran before core build');
+        ${outcome}`,
       );
     }
     const result = spawnSync(process.execPath, ['scripts/verify.mjs'], {
@@ -60,7 +68,7 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary']) {
     assert.equal(result.error, undefined);
     assert.equal(
       result.status,
-      failure === 'none' ? 0 : failure === 'ordinary' ? 1 : 137,
+      failure === 'none' ? 0 : ['ordinary', 'convex'].includes(failure) ? 1 : 137,
       result.stdout + result.stderr,
     );
     assert.match(result.stdout, /\[build:core\] ok/);
@@ -70,7 +78,14 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary']) {
         .trim()
         .split('\n')
         .map(JSON.parse);
-    assert.deepEqual(calls('legacy'), [['-p', 'web/tsconfig.json']]);
+    assert.deepEqual(calls('legacy'), [
+      ['-p', 'web/tsconfig.json'],
+      ['-p', 'convex/tsconfig.json', '--noEmit'],
+    ]);
+    assert.match(
+      result.stdout,
+      new RegExp(`\\[typecheck:convex:tsc\\] ${failure === 'none' ? 'ok' : 'FAILED'}`),
+    );
     assert.deepEqual(
       calls('native').map(args => args.slice(0, 2)),
       Array(3).fill(['--noUncheckedSideEffectImports', 'false']),

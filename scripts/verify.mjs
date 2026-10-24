@@ -123,8 +123,8 @@ function runCommand(name, command, args) {
 }
 const npm = (name, ...args) => run(name, process.execPath, [npmCli, 'run', '--silent', ...args]);
 const tsc = (name, ...args) => {
-  // Web retains tsc 5: the native checker currently disagrees on useInventory's generic action.
-  const legacy = name === 'typecheck:web';
+  // Web retains tsc 5; Convex also checks compatibility with the runtime TypeScript dependency.
+  const legacy = name === 'typecheck:web' || name === 'typecheck:convex:tsc';
   return run(name, process.execPath, [
     join('node_modules', legacy ? 'typescript' : '@typescript/native', 'bin', 'tsc'),
     ...(legacy ? [] : ['--noUncheckedSideEffectImports', 'false']),
@@ -132,9 +132,12 @@ const tsc = (name, ...args) => {
   ]);
 };
 
-// The only ordering constraint: tests need dist/, so they wait for build:core. The hosted web build
+// Tests and the Convex compatibility check wait for core emit. The hosted web build
 // runs alongside them; no test reads its output.
 const coreBuild = npm('build:core', 'build:core');
+const convexCompatibility = coreBuild.then(
+  ok => ok && tsc('typecheck:convex:tsc', '-p', 'convex/tsconfig.json', '--noEmit'),
+);
 const build = Promise.all([coreBuild, npm('build:web', 'build:web')]).then(results => results.every(Boolean));
 const tests = coreBuild.then(ok => {
   if (!ok) return false;
@@ -178,6 +181,7 @@ const results = await Promise.all([
   tsc('typecheck:web', '-p', 'web/tsconfig.json'),
   tsc('typecheck:convex', '--types', '*', '-p', 'convex/tsconfig.json', '--noEmit'),
   tsc('typecheck:netlify', '-p', 'netlify/tsconfig.json'),
+  convexCompatibility,
   npm('lint', 'lint'),
   build,
   tests,

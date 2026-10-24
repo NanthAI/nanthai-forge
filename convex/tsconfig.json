@@ -2,6 +2,8 @@
   "compilerOptions": {
     "allowJs": true,
     "strict": true,
+    "types": ["node"],
+    "noUncheckedSideEffectImports": false,
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "skipLibCheck": true,

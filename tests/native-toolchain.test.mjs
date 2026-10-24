@@ -35,6 +35,16 @@ const options = {
   noUncheckedSideEffectImports: false,
 };
 
+test('Convex deployment config typechecks after core build with native and tsc 5', () => {
+  // Standard verification builds core before tests. Use the real deployment config
+  // without npm's compatibility flags, just as the Convex CLI invokes its compiler.
+  readFileSync('dist/index.d.ts');
+  for (const compiler of compilers) {
+    const result = compile(resolve('.'), compiler, ['-p', 'convex/tsconfig.json', '--noEmit']);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  }
+});
+
 test('native compiler and tsc fallback detect assignment, argument and property errors', t => {
   const root = fixture(t);
   writeFileSync(
