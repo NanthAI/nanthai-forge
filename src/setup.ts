@@ -2,6 +2,7 @@
 import { fileURLToPath } from 'node:url';
 import { Workspace } from './workspace.js';
 import { ForgeError } from './errors.js';
+import { probeLocalWatching } from './local-watcher.js';
 export function mcpConfig(root: string, options: { agent?: boolean } = {}) {
   const workspace = new Workspace(root);
   return {
@@ -18,14 +19,16 @@ export function mcpConfig(root: string, options: { agent?: boolean } = {}) {
     },
   };
 }
-export function doctor(root: string): object {
+export async function doctor(root: string): Promise<object> {
   const workspace = new Workspace(root);
+  const watching = await probeLocalWatching();
   try {
     const query = workspace.query();
     const status = query.status();
     return {
       ready: query.freshness === 'current',
       node: process.version,
+      watching,
       transport: 'stdio',
       targetExecution: false,
       networkRequired: false,
@@ -36,6 +39,7 @@ export function doctor(root: string): object {
     return {
       ready: false,
       node: process.version,
+      watching,
       error: { code: error.code, message: error.message },
       next: 'Run index, then doctor again.',
     };

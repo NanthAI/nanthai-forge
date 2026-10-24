@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
-import { mkdirSync, watch } from 'node:fs';
+import { mkdirSync } from 'node:fs';
+import { watchLocal } from '../dist/local-watcher.js';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { fixture } from './landing-batch-fixture.mjs';
@@ -50,8 +51,7 @@ export function until(f, read, message, signal) {
       // Exact directories avoid depending on recursive watcher discovery of a
       // newly created landing-workers directory (notably macOS FSEvents).
       for (const path of [f.store.directory, states]) {
-        const watcher = watch(path, changed);
-        watcher.on('error', error => close(error));
+        const watcher = watchLocal(path, {}, changed);
         watchers.push(watcher);
       }
       signal?.addEventListener('abort', aborted, { once: true });
@@ -87,10 +87,9 @@ export function until(f, read, message, signal) {
 }
 
 export async function childWorker(f, { filesystem = true, env = process.env } = {}) {
-  const script = `import fs from 'node:fs';
-import { EventEmitter } from 'node:events';
-import { syncBuiltinESMExports } from 'node:module';
-${filesystem ? '' : `fs.watch = () => Object.assign(new EventEmitter(), { close() {} }); syncBuiltinESMExports();`}
+  const script = `import { watcherRuntime } from ${JSON.stringify(new URL('../dist/local-watcher.js', import.meta.url).href)};
+import { FakeWatchWorker } from ${JSON.stringify(new URL('./local-watcher-fixture.mjs', import.meta.url).href)};
+${filesystem ? '' : `watcherRuntime.createWorker = () => new FakeWatchWorker({ silent: true });`}
 import { WorkStore } from ${JSON.stringify(new URL('../dist/work-store.js', import.meta.url).href)};
 import { watchLandingWorker } from ${JSON.stringify(new URL('../dist/landing-worker.js', import.meta.url).href)};
 const c=new AbortController();process.on('SIGTERM',()=>c.abort());

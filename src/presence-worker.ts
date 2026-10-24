@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { watch, existsSync, type FSWatcher } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { watchLocal } from './local-watcher.js';
 import { join } from 'node:path';
 import { WorkStore } from './work-store.js';
 import { withQueueSlot } from './landing-queue.js';
@@ -35,8 +36,8 @@ export async function watchLanePresence(
     () =>
       new Promise<void>(resolve => {
         let edited = false;
-        const observeFiles =
-          process.platform === 'darwin' ? observePresenceFiles(store.path(laneId)) : undefined;
+        const metadata = observePresenceFiles(store.path(laneId));
+        const observeFiles = process.platform === 'darwin' ? metadata : undefined;
         if (observeFiles) {
           // A detached observer can attach after the first edit. Compare the live
           // source with the saved head once; subsequent ticks need metadata only.
@@ -50,53 +51,45 @@ export async function watchLanePresence(
             /* Advisory initialization; later metadata changes still reconcile. */
           }
         }
-        let watcher: FSWatcher;
-        try {
-          watcher = watch(store.path(laneId), { recursive: true }, (_event, filename) => {
+        if (!existsSync(store.path(laneId)) && existsSync(store.directory)) {
+          ownerDying = true;
+          return;
+        }
+        const watcher = watchLocal(
+          store.path(laneId),
+          {
+            recursive: true,
+            onReady: () => {
+              // Helper startup/open is asynchronous. Linux inotify cannot replay
+              // edits made before attachment; reconcile the snapshot taken above
+              // once native watching is installed, including after recovery.
+              if (metadata()) {
+                edited = true;
+                onEdit?.(laneId);
+              }
+            },
+          },
+          (_event, filename) => {
             if (!existsSync(store.directory)) return close();
-            if (filename && !exclusion(filename.toString().replaceAll('\\', '/'))) {
-              // FSEvents may replay materialization events from before subscription.
-              // On macOS the metadata comparison decides whether source really changed.
+            if (filename && !exclusion(filename.replaceAll('\\', '/'))) {
               if (!observeFiles) edited = true;
               onEdit?.(laneId);
             }
-          });
-        } catch (error) {
-          // The Lane directory vanished while we started: the owner is being deleted. Failing would
-          // release our queue ticket inside it mid-`rm -r`; stay put and let the guard end the process.
-          if (!existsSync(store.path(laneId)) && existsSync(store.directory)) {
-            ownerDying = true;
-            return;
-          }
-          throw error;
-        }
+          },
+        );
+        let closed = false;
         const close = () => {
+          if (closed) return;
+          closed = true;
           clearInterval(timer);
-          watcher.close();
           signal?.removeEventListener('abort', close);
-          resolve();
+          void watcher.close().then(resolve);
         };
         if (signal) watcher.unref();
-        watcher.on('error', () => {
-          // A watched Lane directory that vanished under a live Lane is the owner being deleted: closing
-          // would remove our queue ticket inside it mid-`rm -r`. Stop observing and leave it as found.
-          if (!ownerDying && !existsSync(store.path(laneId)) && existsSync(store.directory)) {
-            try {
-              const lane = store.select('lanes', laneId);
-              if (lane && lane.state !== 'completed') {
-                ownerDying = true;
-                clearInterval(timer);
-                watcher.close();
-                return;
-              }
-            } catch {
-              /* Unreadable state: treat as an ordinary close. */
-            }
-          }
-          close();
-        });
         const touch = () => {
           if (ownerDying) return;
+          const reconcileFiles = observeFiles ?? (watcher.health.status !== 'healthy' ? metadata : undefined);
+          void watcher.probe();
           try {
             if (!existsSync(store.directory)) return close();
             const lane = store.select('lanes', laneId);
@@ -121,7 +114,7 @@ export async function watchLanePresence(
               ownerDying = true;
               return;
             }
-            if (observeFiles?.()) {
+            if (reconcileFiles?.()) {
               edited = true;
               onEdit?.(laneId);
             }
@@ -225,25 +218,29 @@ export async function watchOwnerPresence(
             if (!existsSync(store.directory)) close();
           }
         };
-        const watcher = watch(store.directory, (_event, filename) => {
+        const watcher = watchLocal(store.directory, { onReady: reconcile }, (_event, filename) => {
           // Each successful lifecycle observation atomically replaces this file after its Lane exists.
           if (filename?.toString() === 'hosted-binding.json') reconcile();
         });
-        const timer = setInterval(reconcile, touchMs());
+        const timer = setInterval(() => {
+          void watcher.probe();
+          reconcile();
+        }, touchMs());
         const close = () => {
           if (closed) return;
           closed = true;
           clearInterval(timer);
-          watcher.close();
+          const watcherClosed = watcher.close();
           signal?.removeEventListener('abort', close);
           const pending = [...lanes.values()];
           for (const { controller } of pending) controller.abort();
           lifecycleController.abort();
-          void Promise.all([...pending.map(lane => lane.pending), lifecyclePending]).then(() => resolve());
+          void Promise.all([...pending.map(lane => lane.pending), lifecyclePending, watcherClosed]).then(() =>
+            resolve(),
+          );
         };
         if (signal) watcher.unref();
         if (signal) timer.unref?.();
-        watcher.on('error', close);
         signal?.addEventListener('abort', close, { once: true });
         if (signal?.aborted) close();
         else {

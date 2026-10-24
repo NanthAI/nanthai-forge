@@ -348,8 +348,9 @@ test('finish bounces add one counted report and a conditional hint, stable on re
 test('exhausted Work retries retain cost without changing the thrown error', async t => {
   const { store } = fixture(t),
     operationId = randomUUID();
+  // The retry deadline starts at the first failure; 1 ms could expire before any retry on a slow runner.
   await assert.rejects(
-    withWorkLockOptions({ waitMs: 1 }, () =>
+    withWorkLockOptions({ waitMs: 100 }, () =>
       withRetryObservation(
         (id, code, retries) =>
           captureAutomatic(store, {

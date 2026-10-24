@@ -3,7 +3,7 @@ import { autoDriverStalled } from './push-progress-state.js';
 import { withExchangeProgress } from './exchange-progress.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { watch } from 'node:fs';
+import { watchLocal } from './local-watcher.js';
 import { WorkStore } from './work-store.js';
 import { effectivePolicy } from './autonomy-policy.js';
 import { boundExchange } from './bound-exchange.js';
@@ -54,7 +54,7 @@ export function waitForPendingChange(
 ) {
   const key = () => pendingKey(input(store));
   const before = expectedKey ?? key();
-  return new Promise<'changed' | 'deadline'>((resolveWait, reject) => {
+  return new Promise<'changed' | 'deadline'>(resolveWait => {
     const changed = () => {
       try {
         if (key() !== before) stop('changed');
@@ -63,7 +63,7 @@ export function waitForPendingChange(
       }
     };
     const unsubscribe = subscribe?.(changed);
-    const watcher = watch(store.directory, (_event, filename) => {
+    const watcher = watchLocal(store.directory, { onReady: changed }, (_event, filename) => {
       if (!['work.json', 'pending-exchange.json', 'hosted-binding.json'].includes(String(filename))) return;
       try {
         if (key() !== before) stop('changed');
@@ -74,16 +74,9 @@ export function waitForPendingChange(
     const timer = setTimeout(() => stop('deadline'), Math.min(ms, 2_147_483_647));
     function stop(reason: 'changed' | 'deadline') {
       clearTimeout(timer);
-      watcher.close();
       unsubscribe?.();
-      resolveWait(reason);
+      void watcher.close().then(() => resolveWait(reason));
     }
-    watcher.on('error', error => {
-      clearTimeout(timer);
-      watcher.close();
-      unsubscribe?.();
-      reject(error);
-    });
     // Close the publication-before-watch race.
     if (key() !== before) stop('changed');
   });

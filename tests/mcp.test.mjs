@@ -79,9 +79,9 @@ test('real stdio MCP discovery, refresh, queries, mutations, validation and shut
   assert.equal(stderr, '');
 });
 
-test('doctor and emitted MCP configuration preserve existing client settings', t => {
+test('doctor and emitted MCP configuration preserve existing client settings', async t => {
   const root = fixture(t, { 'a.ts': 'export const a = 1;' });
-  assert.equal(doctor(root).ready, false);
+  assert.equal((await doctor(root)).ready, false);
   const config = mcpConfig(root);
   assert.equal(config.mcpServers.forge.command, process.execPath);
   assert.deepEqual(config.mcpServers.forge.args.slice(1), ['mcp', realpathSync(root)]);

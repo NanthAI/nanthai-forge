@@ -4,9 +4,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import fs from 'node:fs';
-import { EventEmitter } from 'node:events';
-import { syncBuiltinESMExports } from 'node:module';
+import { watcherRuntime } from '../dist/local-watcher.js';
+import { FakeWatchWorker } from './local-watcher-fixture.mjs';
 import { join } from 'node:path';
 import { fixture } from './landing-batch-fixture.mjs';
 import { selectBatch, composeBatch, batchEdit } from '../dist/landing-batch-store.js';
@@ -144,18 +143,19 @@ test('one observer registers the retained batch receipt and follows later settle
   const path = join(f.store.directory, `check-${f.full.runId}`);
   mkdirSync(path);
   const watchers = new Map();
-  t.mock.method(fs, 'watch', (path, changed) => {
-    watchers.set(path, changed);
-    return Object.assign(new EventEmitter(), {
-      close() {
-        watchers.delete(path);
-      },
-    });
-  });
-  syncBuiltinESMExports();
-  t.after(() => {
-    t.mock.restoreAll();
-    syncBuiltinESMExports();
+  t.mock.method(watcherRuntime, 'createWorker', () => {
+    const worker = new FakeWatchWorker();
+    const post = worker.postMessage.bind(worker);
+    worker.postMessage = message => {
+      if (message.type === 'open')
+        watchers.set(message.path, () => worker.event(null, 'change', message.path));
+      if (message.type === 'close') {
+        const subscription = worker.subscriptions.get(message.id);
+        if (subscription) watchers.delete(subscription.path);
+      }
+      post(message);
+    };
+    return worker;
   });
   const events = [],
     controller = new AbortController();
@@ -178,6 +178,7 @@ test('one observer registers the retained batch receipt and follows later settle
     return value;
   });
   try {
+    await new Promise(resolve => setImmediate(resolve));
     assert.ok(watchers.has(path), 'the shared check directory is registered before sleeping');
     writeFileSync(
       join(path, 'result.json'),

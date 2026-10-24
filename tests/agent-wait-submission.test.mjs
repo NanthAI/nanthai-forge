@@ -9,6 +9,8 @@ import { fixture } from './landing-batch-fixture.mjs';
 import { gatedFixture } from './landing-worker-fixture.mjs';
 import { agentWait } from '../dist/agent-wait.js';
 import { watchLandingWorker } from '../dist/landing-worker.js';
+import { watcherRuntime } from '../dist/local-watcher.js';
+import { FakeWatchWorker } from './local-watcher-fixture.mjs';
 import { landingWorkerStates } from '../dist/landing-worker-status.js';
 import { FinishJournal } from '../dist/agent-finish-journal.js';
 import { checkEnvironment } from '../dist/check-environment.js';
@@ -337,24 +339,13 @@ test('new Lane save is not credited with an older submission, whose operation st
 test('missed filesystem notifications recover from saved state and duplicate wakes emit once', async t => {
   const f = await fixture(t, { remote: false });
   const c = await f.candidate('missed-wake.txt');
-  const fs = await import('node:fs');
-  const { syncBuiltinESMExports } = await import('node:module');
-  const { EventEmitter } = await import('node:events');
-  const watch = fs.default.watch;
-  fs.default.watch = () => Object.assign(new EventEmitter(), { close() {} });
-  syncBuiltinESMExports();
+  t.mock.method(watcherRuntime, 'createWorker', () => new FakeWatchWorker({ code: 'EMFILE' }));
   const events = [];
-  let wait;
-  try {
-    wait = agentWait(
-      f.store,
-      { operationIds: [c.command.operationId], until: 'any-change', timeoutSeconds: 10 },
-      e => events.push(e),
-    );
-  } finally {
-    fs.default.watch = watch;
-    syncBuiltinESMExports();
-  }
+  const wait = agentWait(
+    f.store,
+    { operationIds: [c.command.operationId], until: 'any-change', timeoutSeconds: 10 },
+    e => events.push(e),
+  );
   // Watchers are deliberately disconnected. Repeated durable writes are not new observations.
   update(f, () => {});
   update(f, () => {});

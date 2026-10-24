@@ -33,6 +33,40 @@ For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [co
 
 The local native owner is canonical for Forge's own development. A hosted project holds checkpoints you send it plus its own metadata journal. Source synchronization is explicit unless the owner enables the separate `autoExchange` policy. Its saved-mutation driver shares bound-push serialization and retained-operation reconciliation, with no idle polling. Bound owners also send advisory agent presence and lifecycle metadata automatically, with a binding opt-out; these updates do not transfer source or check artifacts.
 
+## Local filesystem watching
+
+All native filesystem hints use `src/local-watcher.ts`. Each parent process lazily
+starts at most one owned child and multiplexes its subscriptions by ID. The last
+close releases the helper. Native open and close run only in that child, so a
+synchronous FSEvents hang cannot block the owner or agent event loop or shutdown.
+Worker threads can still wait in native teardown during Node shutdown.
+
+Opening errors (including EMFILE, ENOSPC and EPERM) mark the affected subscription
+degraded. Startup, native open and private-probe open have separate three-second
+deadlines; the event deadline starts when the signal is written, after a finite
+100 ms stream-arming delay. Overlapping requests share one native probe, avoiding
+stream changes from closing one probe while another signal is in flight. The
+helper owns its private directory independently of subscribers; the parent tracks
+cleanup if it must kill the helper. Probe directories use the real temporary path,
+never source. Both probe close and subscription close wait at most 250 ms for an
+acknowledgement. A timeout degrades all subscriptions on that helper, kills it,
+disconnects IPC and unrefs it without waiting for native teardown. A replacement
+requires an existing consumer's probe or a new subscription, a completed prior
+process exit, and the one-minute failure backoff. No retry timer is installed.
+
+Degradation itself starts no polling, network calls or notifications. Presence
+keeps its existing minute reconciliation and retries the health probe on that
+tick; degraded watching on other platforms also uses that metadata fallback.
+Lane presence also compares its pre-open metadata snapshot when the helper
+acknowledges native attachment, covering edits during asynchronous startup or
+recovery that Linux inotify cannot replay.
+Agent wait keeps its existing two-second local receipt fallback. Landing and
+exchange retain their durable socket wakes and existing pending deadlines; MCP
+notices remain in the durable next-call inbox. No new idle reconciliation timer
+is installed. A successful later probe restores native hints. `nforge doctor`
+reports one `watching` health result from a finite local probe, including a
+structured degradation code; no permanent UI notice is added.
+
 ## Four kinds of state
 
 - **Source** is a State: immutable bytes.

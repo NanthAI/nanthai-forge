@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { compactOverlapNotice } from './agent-peers-bound.js';
 import { onOverlapPublication } from './agent-coordination-events.js';
-import { watch } from 'node:fs';
+import { watchLocal } from './local-watcher.js';
 import { join } from 'node:path';
 import { mkdirBelow } from './mkdir-below.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
@@ -62,13 +62,12 @@ export function overlapNotifications(server: McpServer, store: WorkStore) {
     try {
       const directory = join(store.directory, 'coordination');
       mkdirBelow(store.directory, directory);
-      const watcher = watch(directory, { persistent: false }, (_event, name) => {
+      const watcher = watchLocal(directory, { persistent: false }, (_event, name) => {
         if (!name || !name.toString().startsWith('.pending-')) publish();
       });
-      watcher.on('error', () => watcher.close());
       stop = () => {
         off();
-        watcher.close();
+        void watcher.close();
       };
     } catch {
       /* Results carry notices on transports without local watching. */

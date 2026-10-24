@@ -8,6 +8,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
+import { watcherRuntime } from '../dist/local-watcher.js';
+import { FakeWatchWorker } from './local-watcher-fixture.mjs';
+import { LONG_ACTION_DEADLINE_MS } from '../dist/long-action.js';
 import { boundExchange } from '../dist/bound-exchange.js';
 import { drainAutoExchange, autoExchangeDue, waitForPendingChange } from '../dist/auto-exchange.js';
 import { readHostState, updateHostState } from '../dist/host-binding.js';
@@ -736,4 +739,17 @@ test('unbound push keeps its structured setup error and creates no progress reco
   });
   await assert.rejects(f.manual(), error => error.code === 'HOST_NOT_BOUND');
   assert.equal(f.state().pushProgress, undefined);
+});
+
+test('degraded pending watch retains its existing deadline and makes no Convex or network calls', async t => {
+  const f = fixture(t);
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', () => {
+    calls++;
+    throw new Error('network forbidden');
+  });
+  t.mock.method(watcherRuntime, 'createWorker', () => new FakeWatchWorker({ code: 'EMFILE' }));
+  assert.equal(await waitForPendingChange(f.store, 20), 'deadline');
+  assert.equal(calls, 0);
+  assert.equal(f.attempts.length, 0);
 });

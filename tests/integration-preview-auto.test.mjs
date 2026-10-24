@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { createHook } from 'node:async_hooks';
 import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { updateHostState } from '../dist/host-binding.js';
@@ -594,7 +595,18 @@ test('integration delivery uses the bilateral inbox, MCP next-call context and w
 
 test('opt-out main and saved changes create no request, process, notice or idle timer', async t => {
   const f = await fixture(t);
-  const before = process.getActiveResourcesInfo().filter(name => name === 'Timeout').length;
+  // Existing finite probe/close timers may finish during this test. Track only
+  // newly created resources so unrelated teardown cannot change the baseline.
+  const timers = new Set();
+  const hook = createHook({
+    init(id, type) {
+      if (type === 'Timeout') timers.add(id);
+    },
+    destroy(id) {
+      timers.delete(id);
+    },
+  }).enable();
+  t.after(() => hook.disable());
   await f.save(f.b, 'b.txt', '2');
   f.store.locked(() => {
     const data = f.store.load();
@@ -605,7 +617,8 @@ test('opt-out main and saved changes create no request, process, notice or idle 
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(existsSync(join(f.store.directory, 'integration-preview-request.json')), false);
   assert.equal(new CoordinationJournal(f.store).context(f.a.laneId).notices.length, 0);
-  assert.equal(process.getActiveResourcesInfo().filter(name => name === 'Timeout').length, before);
+  hook.disable();
+  assert.equal(timers.size, 0, 'opt-out leaves no newly created idle timers');
 });
 
 test('runtime drift between a wake and tuple capture finishes without an idle rerun', async t => {

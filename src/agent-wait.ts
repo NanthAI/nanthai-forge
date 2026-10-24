@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { watch, type FSWatcher } from 'node:fs';
+import { watchLocal, type LocalWatcher } from './local-watcher.js';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { WaitCursor } from './agent-wait-cursor.js';
@@ -27,10 +27,11 @@ export type WaitSummary = {
   cursor: string;
 };
 
-/** Subscribe before the first read. A generation counter closes read-to-sleep races.
+/** Register hints before the first read. Opening a child can complete asynchronously;
+ * its ready wake and a generation counter close read-to-sleep races.
  * Only local missed-notification/dead-process fallback runs on the two-second timer. */
 class WaitSignals {
-  private watchers = new Map<string, FSWatcher>();
+  private watchers = new Map<string, LocalWatcher>();
   private wake: (() => void) | undefined;
   generation = 0;
   private changed = () => {
@@ -39,23 +40,7 @@ class WaitSignals {
   };
   add(path: string) {
     if (this.watchers.has(path)) return;
-    try {
-      const watcher = watch(path, this.changed);
-      watcher.on('error', () => {
-        watcher.close();
-        this.watchers.delete(path);
-        this.changed();
-      });
-      this.watchers.set(path, watcher);
-    } catch (error) {
-      if (
-        !['ENOENT', 'ENOSYS', 'ENOTSUP', 'EPERM', 'ENOSPC', 'EMFILE'].includes(
-          (error as NodeJS.ErrnoException).code ?? '',
-        )
-      )
-        throw error;
-      // Newly created directories and platforms without watch support use the local fallback.
-    }
+    this.watchers.set(path, watchLocal(path, { onReady: this.changed }, this.changed));
   }
   async next(generation: number, timeout: number, signal?: AbortSignal) {
     if (generation !== this.generation || signal?.aborted) return;
@@ -71,8 +56,9 @@ class WaitSignals {
       signal?.addEventListener('abort', done, { once: true });
     });
   }
-  close() {
-    for (const watcher of this.watchers.values()) watcher.close();
+  async close() {
+    await Promise.all([...this.watchers.values()].map(watcher => watcher.close()));
+    this.watchers.clear();
   }
 }
 
@@ -176,7 +162,7 @@ export async function agentWait(
       await signals.next(generation, end - performance.now(), signal);
     }
   } finally {
-    signals.close();
+    await signals.close();
   }
 }
 export function waitText(event: WaitEvent | WaitSummary): string {

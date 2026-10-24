@@ -11,8 +11,8 @@ import fs, {
   renameSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { EventEmitter } from 'node:events';
-import { syncBuiltinESMExports } from 'node:module';
+import { watcherRuntime } from '../dist/local-watcher.js';
+import { FakeWatchWorker } from './local-watcher-fixture.mjs';
 import { join } from 'node:path';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -153,18 +153,15 @@ test('Lane observation reconciles macOS edits without notifications and retains 
   const observation = () => Object.values(readHostState(agent.work.store).presence)[0];
   const initial = observation().lastActivity;
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: initial });
-  let notify;
-  t.mock.method(fs, 'watch', (_path, _options, listener) => {
-    notify = listener;
-    const watcher = new EventEmitter();
-    watcher.close = () => {};
-    watcher.unref = () => watcher;
-    return watcher;
+  let notify, workerStarted;
+  const ready = new Promise(resolve => {
+    workerStarted = resolve;
   });
-  syncBuiltinESMExports();
-  t.after(() => {
-    t.mock.restoreAll();
-    syncBuiltinESMExports();
+  t.mock.method(watcherRuntime, 'createWorker', () => {
+    const worker = new FakeWatchWorker();
+    notify = (event, name) => worker.event(name, event);
+    workerStarted();
+    return worker;
   });
   // The first write precedes observer attachment; no native callback is delivered.
   writeFileSync(join(lane.path, 'file.txt'), 'two');
@@ -187,12 +184,14 @@ test('Lane observation reconciles macOS edits without notifications and retains 
     assert.deepEqual(editedLanes, [lane.laneId], 'reconciliation reports the edited Lane');
     mkdirSync(join(lane.path, 'dist'));
     writeFileSync(join(lane.path, 'dist/noise.js'), 'generated');
+    await ready;
     notify('rename', 'file.txt'); // replayed FSEvents must not invent a second source edit
     t.mock.timers.tick(PRESENCE.touchMs);
     assert.equal(observation().lastActivity, initial + PRESENCE.touchMs);
     assert.deepEqual(editedLanes, [lane.laneId, lane.laneId], 'native callbacks retain Lane identity');
   } else {
     assert.equal(observation().activityKind, 'started', 'other platforms retain native observation');
+    await ready;
     notify('change', 'file.txt');
     t.mock.timers.tick(PRESENCE.touchMs);
     assert.equal(observation().activityKind, 'edited files');
@@ -361,6 +360,48 @@ test('one owner observer reconciles new Lanes and rejects a duplicate observer w
   await observing;
 });
 
+test('owner observer reconciles edits made before the helper attaches without a later timer or native event', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-presence-attach-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'file.txt'), 'one');
+  initNative(root);
+  const agent = new AgentWorkflow(root);
+  const first = (await agent.dispatch({ action: 'start', outcome: 'Unedited Lane' })).result;
+  let worker;
+  const started = new Promise(resolve => {
+    t.mock.method(watcherRuntime, 'createWorker', () => {
+      worker = new FakeWatchWorker({ hangStartup: true });
+      resolve();
+      return worker;
+    });
+  });
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const controller = new AbortController();
+  const edits = [];
+  const observing = watchOwnerPresence(agent.work.store, controller.signal, id => edits.push(id));
+  t.after(async () => {
+    controller.abort();
+    await observing;
+  });
+  await started;
+  const second = (await agent.dispatch({ action: 'start', outcome: 'Edited during attachment' })).result;
+  t.mock.timers.tick(PRESENCE.touchMs);
+  mkdirSync(join(first.path, 'dist'));
+  writeFileSync(join(first.path, 'dist/noise.js'), 'generated');
+  writeFileSync(join(second.path, 'file.txt'), 'edited before native open');
+  worker.emit('message', { type: 'ready' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(edits, [second.laneId], 'attachment reconciles source but ignores generated output');
+  t.mock.timers.tick(PRESENCE.touchMs);
+  const rows = Object.values(readHostState(agent.work.store).presence);
+  assert.equal(rows.find(row => row.context.laneId === second.laneId).activityKind, 'edited files');
+  assert.equal(rows.find(row => row.context.laneId === first.laneId).activityKind, 'started');
+  controller.abort();
+  await observing;
+  assert.equal(worker.subscriptions.size, 0);
+  assert.equal(worker.terminations, 1);
+});
+
 test('owner observer does not revive a completed duplicate after binding changes while its Lane stays open', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-duplicate-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -411,6 +452,63 @@ test('owned presence close drains Lane queues and leaves no later writes or hand
   assert.equal(existsSync(root), false);
 });
 
+for (const phase of ['opening', 'healthy'])
+  test(`owner close during ${phase} releases its real shared helper and IPC`, async t => {
+    const root = mkdtempSync(join(tmpdir(), 'forge-presence-helper-close-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    writeFileSync(join(root, 'file.txt'), 'one');
+    initNative(root);
+    const agent = new AgentWorkflow(root);
+    const lane = (await agent.dispatch({ action: 'start', outcome: 'Real helper lifecycle' })).result;
+    const workers = [];
+    const create = watcherRuntime.createWorker;
+    let started;
+    const startup = new Promise(resolve => {
+      started = resolve;
+    });
+    t.mock.method(watcherRuntime, 'createWorker', () => {
+      const child = create();
+      child.received = [];
+      child.on('message', message => child.received.push(message));
+      workers.push(child);
+      started(child);
+      return child;
+    });
+    const controller = new AbortController();
+    let edits = 0;
+    const observing = watchOwnerPresence(agent.work.store, controller.signal, () => edits++);
+    t.after(async () => {
+      controller.abort();
+      await observing;
+    });
+    const child = await startup;
+    if (phase === 'healthy') {
+      const deadline = performance.now() + 10_000;
+      while (child.received.filter(message => message.type === 'healthy').length < 2) {
+        assert.ok(performance.now() < deadline, 'owner and Lane subscriptions become healthy');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    }
+    controller.abort();
+    await observing;
+    assert.equal(child.connected, false, 'close disconnects IPC without awaiting native teardown');
+    await new Promise((resolve, reject) => {
+      if (child.exitCode !== null || child.signalCode !== null) return resolve();
+      const bound = setTimeout(() => reject(new Error('owner helper retained after close')), 2000);
+      child.once('exit', () => {
+        clearTimeout(bound);
+        resolve();
+      });
+    });
+    assert.equal(workers.length, 1);
+    assert.deepEqual(readdirSync(join(agent.work.store.directory, 'presence-owner')), []);
+    assert.deepEqual(readdirSync(join(agent.work.store.directory, 'presence-workers', lane.laneId)), []);
+    const before = edits;
+    writeFileSync(join(lane.path, 'file.txt'), 'after close');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(edits, before, 'a closed observer never reports later edits');
+  });
+
 test('immediate owned presence close never starts a deferred observer', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-immediate-close-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -456,4 +554,33 @@ test('unsupported Work never creates owner or Lane presence tickets, including o
   await stop();
   await stop();
   assert.deepEqual(readdirSync(store.directory), before);
+});
+
+test('degraded presence keeps the minute fallback and stays quiet when idle', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-presence-degraded-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'file.txt'), 'one');
+  initNative(root);
+  const agent = new AgentWorkflow(root);
+  const lane = (await agent.dispatch({ action: 'start', outcome: 'Synthetic degraded presence' })).result;
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', () => {
+    calls++;
+    throw new Error('network forbidden');
+  });
+  t.mock.method(watcherRuntime, 'createWorker', () => new FakeWatchWorker({ code: 'EMFILE' }));
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const controller = new AbortController();
+  const watching = watchLanePresence(agent.work.store, lane.laneId, controller.signal);
+  t.after(() => controller.abort());
+  await new Promise(resolve => setImmediate(resolve));
+  const initial = Object.values(readHostState(agent.work.store).presence)[0].lastActivity;
+  t.mock.timers.tick(PRESENCE.touchMs);
+  assert.equal(Object.values(readHostState(agent.work.store).presence)[0].lastActivity, initial);
+  writeFileSync(join(lane.path, 'file.txt'), 'changed source');
+  t.mock.timers.tick(PRESENCE.touchMs);
+  assert.equal(Object.values(readHostState(agent.work.store).presence)[0].activityKind, 'edited files');
+  assert.equal(calls, 0);
+  controller.abort();
+  await watching;
 });

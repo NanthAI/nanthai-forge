@@ -4,7 +4,8 @@ import type { AgentWorkflow } from './agent-workflow.js';
 import { land } from './land.js';
 import { drainLandingBatches } from './landing-batch.js';
 // SPDX-License-Identifier: Apache-2.0
-import { watch, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
+import { watchLocal } from './local-watcher.js';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { unfinishedFinishes } from './agent-finish-journal.js';
@@ -35,7 +36,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
     resume?.();
   };
   const unsubscribe = notifications.subscribe(wake);
-  const watcher = watch(store.directory, { recursive: true }, (_event, filename) => {
+  const watcher = watchLocal(store.directory, { recursive: true, onReady: wake }, (_event, filename) => {
     const path = filename?.toString().replaceAll('\\', '/');
     // A failed nonblocking admission stays retryable, but our own transient
     // ticket creation/release must not repeatedly wake that same attempt.
@@ -50,7 +51,6 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
     )
       wake();
   });
-  watcher.on('error', wake);
   signal.addEventListener('abort', wake, { once: true });
   let affected: LandingWorkerState['affected'];
   const publish = (status: LandingWorkerState['status'], code?: string) =>
@@ -230,7 +230,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
     });
   } finally {
     signal.removeEventListener('abort', wake);
-    watcher.close();
+    await watcher.close();
     unsubscribe();
     await notifications.close();
     publish('stopped');
