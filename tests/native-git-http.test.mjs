@@ -22,6 +22,7 @@ import { initNative } from '../dist/native-work.js';
 import { importNativeGit, exportNativeGit } from '../dist/native-git.js';
 import { indexRepository } from '../dist/index.js';
 import { serveRepository } from '../dist/http.js';
+import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { workGit } from '../dist/work-git.js';
 
 // Hang guards only: a loaded machine slows every Git process, and the assertions below stay unchanged.
@@ -158,6 +159,13 @@ for (const kind of ['plain', 'sha1', 'sha256'])
       writeFileSync(join(root, 'unfinished.txt'), 'Keep dirty owner');
       writeFileSync(join(path, 'a.ts'), 'Keep dirty Lane');
       indexRepository(root);
+      // Serving starts owner presence, whose automatic Lane snapshot of the dirty Lane is a legitimate
+      // native write unrelated to Git; this test asserts that Git serving itself writes nothing.
+      await new AgentWorkflow(root).dispatch({
+        action: 'set-policy',
+        operationId: randomUUID(),
+        autoSnapshot: false,
+      });
       const before = snapshot(work),
         server = await serveRepository(root, 0);
       t.after(() => server.close());
