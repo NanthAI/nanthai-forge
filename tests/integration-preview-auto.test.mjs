@@ -105,7 +105,16 @@ async function fixture(t, { schema = false, configured = true } = {}) {
   t.after(async () => {
     await drainPostAccept(store);
     await drainIntegrationPreviews(store, undefined, 0);
-    await policy({ integrationPreview: { auto: false } });
+    // A detached preview or post-accept worker may still hold Work briefly under the zero test lock wait.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await policy({ integrationPreview: { auto: false } });
+        break;
+      } catch (error) {
+        if (error?.code !== 'WORK_BUSY' || attempt >= 300) throw error;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
     // Any already launched finite worker observes policy off before teardown.
     await new Promise(resolve => setImmediate(resolve));
     await drainIntegrationPreviews(store, undefined, 0);
