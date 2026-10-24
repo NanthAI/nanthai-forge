@@ -87,6 +87,8 @@
     "scripts/modal-source/bridge.py",
     "scripts/modal-source/worker.mjs",
     "scripts/test-impact.mjs",
+    "scripts/test-import-graph.mjs",
+    "scripts/test-directory-path.mjs",
     "scripts/test-coverage.mjs",
     "scripts/test-coverage.d.mts",
     "scripts/script-impact.mjs",

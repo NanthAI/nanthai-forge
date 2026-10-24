@@ -112,6 +112,15 @@ also retain runtime coverage. This applies to both `agent tests` and scoped
 landing shards; the final full landing/main verification is unchanged. Runtime
 hubs still select their transitive consumers; export names alone do not establish
 independence when module initialization or shared state can affect another export.
+The parsed import graph lives in `scripts/test-import-graph.mjs`. Directory-valued
+expressions used only for membership or process-path comparisons do not create
+module dependencies. `scripts/test-directory-path.mjs` follows aliases and local
+function arguments; directory reads, escaping values, unsupported uses and unknown
+consumers remain broad. This prevents directory names in the selector, foundation
+ignore tables and cleanup helpers from turning those modules into catch-all hubs.
+Unknown loaders include test and script helpers as well as product source. A known
+literal branch never hides an unknown branch of a conditional loader. Unparseable
+modules fail toward full coverage.
 Web edits also run the UI regression files. Computed module paths, including joined `dist/` paths, widen to their source domain; unknown dynamic imports
 widen to all source domains. The existing `tests/convex-module.mjs` adapter is modelled
 through its callers' paths and the loaded sources' imports. Its recursive moduleUrl
@@ -161,8 +170,13 @@ input is included in the environment fingerprint and forwarded by the clean runt
 allowlist. The automatic post-accept main worker must set this for every scoped
 acceptance, independently of its disjoint acceptance fast-path setting. The acceptance path owns that trigger. A pinned `Candidate.mainCheck = { channel }` role is copied into the run and runner comparison; it always forces full, including manual reruns with no environment override. A direct `npm run verify` remains full by default.
 
-The standard command writes `{scope, reason, tests}` to the runner-owned
-`FORGE_CHECK_SELECTION` output. The runner retains it as command-reported
+The standard command writes `{scope, reason, tests, reasons}` to the runner-owned
+`FORGE_CHECK_SELECTION` output. Each selected file's `reasons` entry identifies a
+changed-path dependency chain (with import, runtime-path, package-command or dynamic
+edges), a conservative domain rule, explicit coverage, smoke, audit recovery or full
+fallback. The retained `selection.json` and command stdout include this explanation;
+existing Work summaries retain their established scope/reason/test-list fields.
+The runner retains the selection as command-reported
 `checkSelection`, includes the scope in run details and agent receipts, and retains
 the complete test-file list and reason in stdout. This describes selected coverage,
 not proof of every possible runtime dependency. File fixtures, generated modules,
@@ -195,6 +209,17 @@ test changes retain graph coverage. Fixed smoke tests and full/docs/interaction
 overrides remain intact. A lead must separately decide any future activation
 using production shadow evidence; historical logs without traces cannot establish
 a smaller sound test set or recording overhead.
+
+For read-only selection replays, `node scripts/replay-test-selection.mjs CHECK_DIR...`
+parses each retained `modal-source` without importing or executing its modules. It
+compares the saved selection against the current selector on the same changed-path
+and main-audit pins, counts literal import and runtime-path consumers, and estimates
+aggregate shard minutes with two workers, preserving retained shard membership
+and order while removing deselected files (newly selected files are appended). Complete
+`__FORGE_TESTS__` file durations from these runs supply timing evidence; missing
+observations are reported and use the sharder’s existing p75 estimate. Static,
+build, startup and retry costs are excluded. This is a scheduling estimate, not a
+new measured check run.
 
 For recorded historical replays, `scripts/measure-test-impact.mjs` accepts explicit retained base/head/path pins, runs the same static/build/test pipeline, and reports command wall time and selected files. It also honors `FORGE_CHECK_FULL=1` for a matched full baseline. This measurement harness does not relax the standard wrapper's full fallback for legacy Candidates without a composed-main pin.
 

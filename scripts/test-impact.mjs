@@ -1,17 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, readdirSync } from 'node:fs';
 import { posix, join } from 'node:path';
-import ts from 'typescript';
+import { testImportGraph } from './test-import-graph.mjs';
 import { coverageShadow } from './test-coverage.mjs';
 import { classifyCheckPath, webTest } from './check-path-scopes.mjs';
-import { builtinModules } from 'node:module';
-import {
-  docsPackager,
-  docsWrapper,
-  packageScriptGraph,
-  scriptPath,
-  scriptSelectionReason,
-} from './script-impact.mjs';
+import { docsPackager, docsWrapper, scriptPath, scriptSelectionReason } from './script-impact.mjs';
 
 export const smokeTests = [
   'tests/files.test.mjs',
@@ -50,7 +43,7 @@ export function sourceFiles(root = '.') {
  * Nonliteral paths widen to their entire source domain, never prove independence. */
 export function selectTests({ paths, files, forceFull = false }) {
   const tests = [...files.keys()].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort();
-  const full = reason => ({ scope: 'full', reason, tests });
+  const full = reason => explainAll({ scope: 'full', reason, tests });
   if (forceFull) return full('FORGE_CHECK_FULL=1');
   if (!Array.isArray(paths) || !paths.length || paths.some(path => !safePath(path)))
     return full('Missing, empty or invalid pinned comparison');
@@ -61,178 +54,56 @@ export function selectTests({ paths, files, forceFull = false }) {
       tests: [],
     };
   const classifications = [];
-  for (const path of paths) {
+  for (const path of [...new Set(paths)].sort()) {
     if (documentation(path)) continue;
     const classification = classifyCheckPath(path, files);
     if (!classification) return full(`Unclassified or deleted path: ${path}`);
-    classifications.push({ path, ...classification });
+    classifications.push({ path, ...classification, seeds: classification.seeds.sort() });
   }
-  const reverse = new Map();
-  const edge = (dependency, importer) => {
-    // A runner naming behavior tests describes coverage, not its implementation.
-    // Keep test-to-test imports, but never cycle coverage back into the pipeline.
-    if (/^tests\/[^/]+\.test\.mjs$/.test(dependency) && !importer.startsWith('tests/')) return;
-    if (!reverse.has(dependency)) reverse.set(dependency, new Set());
-    reverse.get(dependency).add(importer);
-  };
   const scriptsChanged = classifications.filter(item => scriptPath(item.path) && files.has(item.path));
-  const packageGraph = packageScriptGraph(files, edge);
-  if (scriptsChanged.length && packageGraph.error) return full(packageGraph.error);
-  function resolve(from, value) {
-    let path = value.startsWith('.') ? posix.normalize(posix.join(posix.dirname(from), value)) : value;
-    path = path.replace(/^dist\//, 'src/').replace(/^(src\/.+)\.(?:js|d\.ts)$/, '$1.ts');
-    return [
-      path,
-      path.replace(/\.js$/, '.ts'),
-      path.replace(/\.js$/, '.tsx'),
-      `${path}.ts`,
-      `${path}.tsx`,
-      `${path}.js`,
-      `${path}/index.ts`,
-      `${path}/index.tsx`,
-    ].find(candidate => files.has(candidate));
-  }
-  const packages = new Set(builtinModules);
-  if (files.has('package-lock.json')) {
-    try {
-      const locked = JSON.parse(files.get('package-lock.json')).packages;
-      if (
-        Object.values(locked).some(
-          item => item.link || /^(?:file:|workspace:|\.|\/)/.test(item.resolved ?? ''),
-        )
-      )
-        return full('Local or workspace package dependency cannot be classified as external');
-      for (const path of Object.keys(locked)) {
-        const name = path.split('node_modules/').pop();
-        if (name) packages.add(name);
-      }
-    } catch {
-      return full('Cannot classify locked external imports');
-    }
-  }
-  const external = value =>
-    value.startsWith('node:') || [...packages].some(name => value === name || value.startsWith(`${name}/`));
-  let uncertain;
-  const domains = ['src/', 'web/src/', 'convex/', 'netlify/'];
-  for (const [path, text] of files) {
-    if (!/\.(?:[cm]?js|[cm]?tsx?)$/.test(path) || path.endsWith('.d.ts')) continue;
-    const ast = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
-    if (scriptsChanged.length && scriptPath(path) && ast.parseDiagnostics.length)
-      return full(`Unparseable script: ${path}`);
-    const widen = prefix => {
-      const normalized = prefix.startsWith('.')
-        ? posix.normalize(posix.join(posix.dirname(path), prefix))
-        : prefix;
-      const domain = normalized.startsWith('dist/')
-        ? 'src/'
-        : normalized.startsWith('scripts/')
-          ? 'scripts/'
-          : domains.find(dir => normalized.startsWith(dir));
-      for (const candidate of files.keys())
-        if (domain ? candidate.startsWith(domain) : domains.some(dir => candidate.startsWith(dir)))
-          edge(candidate, path);
-    };
-    function visit(node) {
-      if (ts.isImportDeclaration(node) && node.importClause?.isTypeOnly) return;
-      if (ts.isExportDeclaration(node) && node.isTypeOnly) return;
-      if (ts.isImportEqualsDeclaration(node) && node.isTypeOnly) return;
-      if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) return;
-      // Type literals can look like source paths or computed runtime loaders. They
-      // disappear during compilation and belong to the always-on static checks.
-      // A class's `extends` is ExpressionWithTypeArguments too: its expression
-      // executes, so retain it (and only discard its nested type arguments).
-      if (ts.isTypeNode(node) && !ts.isExpressionWithTypeArguments(node)) return;
-      if (ts.isStringLiteralLike(node)) {
-        const value = node.text;
-        const target = resolve(path, value);
-        if (
-          (ts.isImportDeclaration(node.parent) || ts.isExportDeclaration(node.parent)) &&
-          !target &&
-          !external(value)
-        ) {
-          uncertain = `Unresolved import ${value} in ${path}`;
-        }
-        if (target) edge(target, path);
-        if (path.startsWith('tests/') || path.startsWith('scripts/')) packageGraph.reference?.(value, path);
-        // Built web bundles, directory enumeration and generated CLI module paths.
-        if (/^(?:\.\.\/)?web-dist(?:\/|$)/.test(value) && path.startsWith('tests/')) widen('web/src/');
-        if (
-          (path.startsWith('tests/') || path.startsWith('scripts/')) &&
-          ['../dist', 'dist', '../web/src', 'web/src', '../convex'].includes(value)
-        )
-          widen(`${value}/`);
-      }
-      if (ts.isTemplateExpression(node)) {
-        const prefix = node.head.text;
-        if (/^(?:\.\.\/|\.\/)?(?:dist|src|web|convex|netlify|scripts)\//.test(prefix)) widen(prefix);
-      }
-      // Unknown module loading widens coverage, including wrapper calls such as moduleUrl().
-      if (
-        path !== 'tests/convex-module.mjs' &&
-        ts.isCallExpression(node) &&
-        (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-          (ts.isIdentifier(node.expression) && ['require', 'moduleUrl'].includes(node.expression.text)))
-      ) {
-        const arg = node.arguments[0];
-        const literals = [],
-          templates = [];
-        if (arg) {
-          const scan = n => {
-            if (ts.isStringLiteralLike(n)) literals.push(n.text);
-            if (ts.isTemplateExpression(n)) templates.push(n.head.text);
-            ts.forEachChild(n, scan);
-          };
-          scan(arg);
-        }
-        if (
-          !literals.some(value => resolve(path, value)) &&
-          !(arg && ts.isStringLiteralLike(arg) && external(arg.text))
-        ) {
-          // Packagers load installed artifacts, not repository sources.
-          if (scriptsChanged.some(item => item.path === path) && !docsPackager(path))
-            uncertain = `Unknown module loading in changed script: ${path}`;
-          if (templates.some(Boolean)) {
-            for (const prefix of templates.filter(Boolean)) widen(prefix);
-          } else {
-            const directories = literals.filter(value =>
-              ['dist', 'src', 'web/src', 'convex', 'netlify', 'scripts', '../scripts'].includes(value),
-            );
-            if (directories.length) {
-              for (const directory of directories) widen(`${directory}/`);
-            } else widen('');
-          }
-        }
-      }
-      ts.forEachChild(node, visit);
-    }
-    // convex-module is a known test loader: its moduleUrl callers contribute literal
-    // edges above; its recursive resolver is represented by transitive source imports.
-    visit(ast);
-  }
-  if (uncertain) return full(uncertain);
-  if (scriptsChanged.length && packageGraph.error) return full(packageGraph.error);
+  const graph = testImportGraph(files, scriptsChanged);
+  if (graph.error) return full(graph.error);
+  const { reverse, evidence, packageGraph } = graph;
   // The docs-check wrapper only spawns the docs check; the runner importing it is not a consumer.
-  const affected = new Set();
-  const spread = (seeds, blocked) => {
-    const queue = [...seeds];
-    for (const seed of seeds) affected.add(seed);
-    while (queue.length) {
-      const current = queue.shift();
+  const affected = new Map();
+  const spread = (items, blocked) => {
+    const queue = [];
+    for (const item of items)
+      for (const seed of item.seeds) {
+        if (affected.has(seed)) continue;
+        affected.set(seed, {
+          kind: seed === item.path ? 'changed' : 'domain',
+          changedPath: item.path,
+          chain: seed === item.path ? [seed] : [item.path, seed],
+          edges: [],
+          ...(item.reason ? { detail: item.reason } : {}),
+        });
+        queue.push(seed);
+      }
+    for (let i = 0; i < queue.length; i++) {
+      const current = queue[i];
       if (blocked && docsWrapper(current)) continue;
       for (const importer of reverse.get(current) ?? []) {
-        if (!affected.has(importer)) {
-          affected.add(importer);
-          queue.push(importer);
-        }
+        if (affected.has(importer)) continue;
+        const previous = affected.get(current),
+          edge = evidence.get(current).get(importer);
+        affected.set(importer, {
+          kind: previous.kind === 'dynamic' || edge.kind === 'dynamic' ? 'dynamic' : 'dependency',
+          changedPath: previous.changedPath,
+          chain: [...previous.chain, importer],
+          edges: [...previous.edges, edge.kind],
+          ...(edge.detail || previous.detail ? { detail: edge.detail ?? previous.detail } : {}),
+        });
+        queue.push(importer);
       }
     }
   };
   spread(
-    classifications.filter(item => !docsPackager(item.path)).flatMap(item => item.seeds),
+    classifications.filter(item => !docsPackager(item.path)),
     false,
   );
   spread(
-    classifications.filter(item => docsPackager(item.path)).flatMap(item => item.seeds),
+    classifications.filter(item => docsPackager(item.path)),
     true,
   );
   for (const item of scriptsChanged) {
@@ -276,6 +147,19 @@ export function selectTests({ paths, files, forceFull = false }) {
         'Transitive importers, runtime paths, conservative dynamic domains and fixed smoke tests',
       ].join('; '),
     tests: selected,
+    reasons: Object.fromEntries(
+      selected.map(test => {
+        if (smokeTests.includes(test)) return [test, { kind: 'smoke', detail: 'Fixed scoped smoke test' }];
+        const item = classifications.find(item => item.tests?.includes(test));
+        return [
+          test,
+          affected.get(test) ??
+            (item
+              ? { kind: 'explicit', changedPath: item.path, detail: item.reason }
+              : { kind: 'domain', detail: 'Web change: UI regression coverage' }),
+        ];
+      }),
+    ),
   };
 }
 
@@ -365,9 +249,12 @@ export function standardSelection({
     selection.scope === 'scoped' &&
     recovery.tests.every(test => /^tests\/[A-Za-z0-9_.-]+\.test\.mjs$/.test(test) && files.has(test))
   ) {
+    for (const test of recovery.tests)
+      selection.reasons[test] ??= { kind: 'recovery', detail: 'Failed audit shard' };
     selection.tests = [...new Set([...selection.tests, ...recovery.tests])].sort();
     selection.reason += '; failed audit shards plus newly affected tests';
   }
+  if (selection.scope === 'full') explainAll(selection);
   selection.coverage = coverageShadow({ selection, paths, files, coverage });
   return selection;
 }
@@ -409,7 +296,8 @@ export function validInteraction(value, comparison) {
   );
 }
 export function interactionSelection({ paths, files, mainCheck, interaction, env = process.env }) {
-  const full = reason => ({ ...selectTests({ files, forceFull: true }), reason });
+  const full = reason =>
+    explainAll({ scope: 'full', reason, tests: selectTests({ files, forceFull: true }).tests });
   if (mainCheck) return full(`Pinned main audit View for ${mainCheck.channel}`);
   if (env.FORGE_CHECK_FULL === '1') return full('FORGE_CHECK_FULL=1');
   if (env.FORGE_CHECK_SCOPED !== '1') return full('Scoped mode is OFF for interaction retry');
@@ -433,15 +321,25 @@ export function interactionSelection({ paths, files, mainCheck, interaction, env
     ? selectTests({ files, paths: interaction.overlap })
     : { tests: [] };
   if (overlap.scope === 'full') return full(overlap.reason);
-  return {
-    scope: 'interaction',
-    reason: 'Impacted-test intersection plus overlap and fixed smoke',
-    tests: [
-      ...new Set([
-        ...left.tests.filter(path => right.tests.includes(path)),
-        ...overlap.tests,
-        ...smokeTests.filter(path => files.has(path)),
-      ]),
-    ].sort(),
-  };
+  return explainAll(
+    {
+      scope: 'interaction',
+      reason: 'Impacted-test intersection plus overlap and fixed smoke',
+      tests: [
+        ...new Set([
+          ...left.tests.filter(path => right.tests.includes(path)),
+          ...overlap.tests,
+          ...smokeTests.filter(path => files.has(path)),
+        ]),
+      ].sort(),
+    },
+    'interaction',
+  );
+}
+
+function explainAll(selection, kind = 'full') {
+  selection.reasons = Object.fromEntries(
+    selection.tests.map(test => [test, { kind, detail: selection.reason }]),
+  );
+  return selection;
 }
