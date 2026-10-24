@@ -15,7 +15,7 @@ const row = (key, value = key) => ({
   position: 0,
 });
 
-async function setup() {
+async function setup(count = 10050) {
   const s = fixture();
   s.tables.hostedProjects.get('project').work = {
     backupId: 'prior',
@@ -50,7 +50,7 @@ async function setup() {
     status: 'stored',
     preview: { revision: 2 },
   });
-  for (let i = 0; i < 10050; i++)
+  for (let i = 0; i < count; i++)
     s.tables.projectWorkRecords.set(`original-${i}`, {
       ...row(`key-${i}`),
       _id: `original-${i}`,
@@ -70,8 +70,11 @@ async function setup() {
     localRevision: 2,
     at: 'now',
   };
-  const entries = Array.from({ length: 10050 }, (_, i) => row(`key-${i + 100}`, `changed-${i}`));
-  const removed = Array.from({ length: 100 }, (_, i) => ({ collection: 'synthetic', key: `key-${i}` }));
+  const entries = Array.from({ length: count }, (_, i) => row(`key-${i + 100}`, `changed-${i}`));
+  const removed = Array.from({ length: Math.min(100, count) }, (_, i) => ({
+    collection: 'synthetic',
+    key: `key-${i}`,
+  }));
   const c = {
     protocol: 3,
     phase: 'done',
@@ -79,7 +82,7 @@ async function setup() {
     generationId: 'public',
     snapshot: {},
     rows: [],
-    metadata: { schema: 18, counts: { synthetic: 10050 } },
+    metadata: { schema: 18, counts: { synthetic: count } },
     delta: { entries, removed },
   };
   s.tables.projectWorkGenerations.get('private').returnCursor = await s.ctx.storage.store(
@@ -221,7 +224,9 @@ test('legacy ready projection over 10,000 rows commits privately with bounded re
 
 for (const changed of ['owner', 'revision', 'superseded', 'plan'])
   test(`private commit rejects changed ${changed} without publishing`, async () => {
-    const s = await setup();
+    // Keep a second copy page pending so rejection still happens mid-copy.
+    // The scale/retry case above retains the full 10,050-row projection.
+    const s = await setup(1001);
     const args = {
       projectId: 'project',
       owner: 'owner',
@@ -238,7 +243,8 @@ for (const changed of ['owner', 'revision', 'superseded', 'plan'])
       entries: [row('new')],
       removed: [],
     };
-    await commit.batch._handler(s.ctx, args);
+    const staged = await commit.batch._handler(s.ctx, args);
+    assert.equal(staged.returnCommitCopied, false, 'the private copy is still in progress');
     if (changed === 'owner') s.tables.hostedProjects.get('project').owner = 'other';
     if (changed === 'revision') s.tables.hostedProjects.get('project').work.revision++;
     if (changed === 'superseded')

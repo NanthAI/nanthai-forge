@@ -122,8 +122,15 @@ function runCommand(name, command, args) {
   });
 }
 const npm = (name, ...args) => run(name, process.execPath, [npmCli, 'run', '--silent', ...args]);
-const tsc = (name, ...args) =>
-  run(name, process.execPath, [join('node_modules', 'typescript', 'bin', 'tsc'), ...args]);
+const tsc = (name, ...args) => {
+  // Web retains tsc 5: the native checker currently disagrees on useInventory's generic action.
+  const legacy = name === 'typecheck:web';
+  return run(name, process.execPath, [
+    join('node_modules', legacy ? 'typescript' : '@typescript/native', 'bin', 'tsc'),
+    ...(legacy ? [] : ['--noUncheckedSideEffectImports', 'false']),
+    ...args,
+  ]);
+};
 
 // The only ordering constraint: tests need dist/, so they wait for build:core. The hosted web build
 // runs alongside them; no test reads its output.
@@ -167,9 +174,9 @@ const tests = coreBuild.then(ok => {
 const results = await Promise.all([
   npm('check', 'check'),
   npm('format:check', 'format:check'),
-  tsc('typecheck:core', '--noEmit'),
+  tsc('typecheck:core', '--types', '*', '--noEmit'),
   tsc('typecheck:web', '-p', 'web/tsconfig.json'),
-  tsc('typecheck:convex', '-p', 'convex/tsconfig.json', '--noEmit'),
+  tsc('typecheck:convex', '--types', '*', '-p', 'convex/tsconfig.json', '--noEmit'),
   tsc('typecheck:netlify', '-p', 'netlify/tsconfig.json'),
   npm('lint', 'lint'),
   build,

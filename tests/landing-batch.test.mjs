@@ -26,7 +26,19 @@ import { assertWorkFormat, latestWorkFormat } from '../dist/work-format.js';
 import { workSchema } from '../dist/work-types.js';
 import { ForgeError } from '../dist/errors.js';
 import { NativeSource } from '../dist/native-source.js';
-import { fixture } from './landing-batch-fixture.mjs';
+import { fixture as batchFixture } from './landing-batch-fixture.mjs';
+
+async function fixture(t, options) {
+  const f = await batchFixture(t, { delay: 0, ...options });
+  // These cases enqueue the entire batch before draining it. Arrival-window
+  // timing is covered separately; use the existing policy to avoid real waits.
+  await f.agent.dispatch({
+    action: 'set-policy',
+    operationId: randomUUID(),
+    acceptance: { batchWindowMs: 0 },
+  });
+  return f;
+}
 
 test('four ready entries land with one exact combined check and one Channel move', async t => {
   const f = await fixture(t);
@@ -172,7 +184,8 @@ test('a lone finish runs immediately and terminal replay does not rerun it', asy
   assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
 });
 
-test('parallel failure checks all proper prefixes concurrently, and keeps a nonmonotonic longest pass', async () => {
+test('parallel failure checks all proper prefixes concurrently, and keeps a nonmonotonic longest pass', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const prefixes = Array.from({ length: 4 }, (_, i) => ({
     entryIds: Array(i + 1).fill('entry'),
     viewId: `${i}`,
@@ -181,13 +194,19 @@ test('parallel failure checks all proper prefixes concurrently, and keeps a nonm
   }));
   let active = 0,
     peak = 0;
-  const result = await passingPrefix(prefixes, 'parallel', async prefix => {
+  const pending = passingPrefix(prefixes, 'parallel', async prefix => {
     active++;
     peak = Math.max(peak, active);
     await new Promise(resolve => setTimeout(resolve, 10));
     active--;
     return ['passed', 'failed', 'passed', 'failed'][Number(prefix.viewId)];
   });
+  t.mock.timers.tick(10); // Full check fails first, then the three probes start together.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(active, 3);
+  t.mock.timers.tick(10);
+  const result = await pending;
+  assert.equal(active, 0);
   assert.equal(peak, 3);
   assert.equal(result.passing, prefixes[2]);
   assert.equal(result.culprit, prefixes[3]);

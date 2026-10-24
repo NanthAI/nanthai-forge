@@ -120,3 +120,45 @@ test('runMutation rolls back a real handler that writes before rejecting', async
   await s.ctx.runMutation(remember, input([{ actor: 'owner', displayName: 'Committed' }]));
   assert.equal([...s.tables.projectActorNames.values()][0].displayName, 'Committed');
 });
+
+test('query results stay ordered and detached when only returned pages are cloned', async () => {
+  for (const keysetPaging of [false, true]) {
+    const { ctx } = state([], { keysetPaging });
+    for (const key of ['c', 'a', 'b'])
+      await ctx.db.insert('hostedProjects', { ...project('owner', key), nested: { value: key } });
+    const query = () =>
+      ctx.db.query('hostedProjects').withIndex('by_owner_and_key', q => q.eq('owner', 'owner'));
+    const taken = await query().order('desc').take(1);
+    assert.deepEqual(
+      taken.map(row => row.key),
+      ['c'],
+    );
+    taken[0].nested.value = 'changed';
+    const first = await query().paginate({ cursor: null, numItems: 2 });
+    assert.deepEqual(
+      first.page.map(row => row.key),
+      ['a', 'b'],
+    );
+    assert.equal(first.isDone, false);
+    first.page[0].nested.value = 'changed';
+    const last = await query().paginate({ cursor: first.continueCursor, numItems: 2 });
+    assert.deepEqual(
+      last.page.map(row => row.key),
+      ['c'],
+    );
+    assert.equal(last.isDone, true);
+    const unique = await ctx.db
+      .query('hostedProjects')
+      .withIndex('by_owner_and_key', q => q.eq('owner', 'owner').eq('key', 'b'))
+      .unique();
+    unique.nested.value = 'changed';
+    for await (const row of query()) {
+      assert.equal(row.nested.value, row.key);
+      row.nested.value = 'changed';
+    }
+    assert.deepEqual(
+      (await query().take(3)).map(row => row.nested.value),
+      ['a', 'b', 'c'],
+    );
+  }
+});

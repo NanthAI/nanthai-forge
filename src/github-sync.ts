@@ -37,6 +37,7 @@ export async function githubSync(
     rebind?: boolean;
     waitAudit?: boolean;
     auditTimeoutMs?: number;
+    sleep?: (ms: number) => Promise<void>;
   } = {},
 ) {
   const store = new WorkStore(input);
@@ -283,7 +284,7 @@ export async function githubSync(
             }
           }
         },
-        undefined,
+        options.sleep,
         message => workProgress('github-sync', message),
       );
       remoteHead = await remoteSyncHead(root, remote, ref, !expected);

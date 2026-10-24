@@ -2,10 +2,10 @@ import { until as untilWorker } from './landing-worker-fixture.mjs';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { withQueueSlot } from '../dist/landing-queue.js';
 // SPDX-License-Identifier: Apache-2.0
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync, spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -18,18 +18,34 @@ import { checkEnvironment } from '../dist/work-run.js';
 import { githubSyncCli } from '../dist/github-sync-cli.js';
 import { git, write, code } from './helpers.mjs';
 
-function fixture(t, flags = {}) {
-  const temporary = mkdtempSync(join(tmpdir(), 'forge-github-sync-'));
-  t.after(() => rmSync(temporary, { recursive: true, force: true }));
-  const remote = join(temporary, 'remote.git'),
-    seed = join(temporary, 'seed'),
-    owner = join(temporary, 'native');
+const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+const shellQuote = value => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+
+// Reuse an immutable seed, copying the bare repository so every case can mutate
+// its own refs/config/objects. Git history and all sync operations remain real.
+let seedDirectory;
+function seedRepository() {
+  if (seedDirectory) return join(seedDirectory, 'remote.git');
+  seedDirectory = mkdtempSync(join(tmpdir(), 'forge-github-seed-'));
+  const seed = join(seedDirectory, 'seed');
   mkdirSync(seed);
   git(seed, ['init', '-q', '--initial-branch=main']);
   write(seed, 'old.txt', 'Old GitHub source');
   git(seed, ['add', '.']);
   git(seed, ['commit', '-qm', 'GitHub root']);
-  git(seed, ['clone', '--bare', seed, remote]);
+  git(seed, ['clone', '--bare', seed, join(seedDirectory, 'remote.git')]);
+  return join(seedDirectory, 'remote.git');
+}
+after(() => {
+  if (seedDirectory) rmSync(seedDirectory, { recursive: true, force: true });
+});
+
+function fixture(t, flags = {}) {
+  const temporary = mkdtempSync(join(tmpdir(), 'forge-github-sync-'));
+  t.after(() => rmSync(temporary, { recursive: true, force: true }));
+  const remote = join(temporary, 'remote.git'),
+    owner = join(temporary, 'native');
+  cpSync(seedRepository(), remote, { recursive: true });
   mkdirSync(owner);
   write(owner, 'a.txt', 'Accepted source\n');
   write(owner, '.env.local', 'synthetic secret');
@@ -116,21 +132,20 @@ function fixture(t, flags = {}) {
     args: ['-e', 'process.exit(0)'],
   });
   const first = accept('Initial accepted main', { 'acceptance.txt': 'First acceptance\n' });
-  const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim(),
-    bin = join(temporary, 'bin'),
+  const bin = join(temporary, 'bin'),
     control = join(temporary, 'control.json');
   mkdirSync(bin);
   writeFileSync(control, JSON.stringify(flags));
   writeFileSync(
-    join(bin, 'git'),
+    join(bin, 'git-control.mjs'),
     `#!${process.execPath}
 import {spawnSync} from 'node:child_process';
-import {readFileSync,writeFileSync} from 'node:fs';
+import {readFileSync,writeFileSync,rmSync} from 'node:fs';
 const file=${JSON.stringify(control)}, remote=${JSON.stringify(remote)}, real=${JSON.stringify(realGit)};
 const state=JSON.parse(readFileSync(file));
 const prefix='https://github.com/tests/';
 const args=process.argv.slice(2).map(a=>{if(!a.startsWith(prefix)||!a.endsWith('.git'))return a;const n=a.slice(prefix.length,-4);return n==='sync'?remote:${JSON.stringify(temporary)}+'/'+n+'.git';});
-const save=()=>writeFileSync(file,JSON.stringify(state));
+const save=()=>{writeFileSync(file,JSON.stringify(state));if(state.failObserve)writeFileSync(file+'.observe-failure','');else rmSync(file+'.observe-failure',{force:true});};
 if(args.includes('ls-remote')&&state.failObserve){state.failObserve=false;save();process.exit(91);}
 if(args.includes('push')){
  state.pushes=(state.pushes??0)+1;
@@ -148,6 +163,37 @@ process.exit(out.status??1);
 `,
     { mode: 0o700 },
   );
+  // Most Git calls only need URL/config rewriting. Exec Git directly for those;
+  // keep the Node shim for push/observation fault injection and retained counters.
+  const writeShim = state => {
+    if (state.failObserve) writeFileSync(control + '.observe-failure', '');
+    else rmSync(control + '.observe-failure', { force: true });
+    writeFileSync(
+      join(bin, 'git'),
+      `#!/bin/bash
+for arg in "$@"; do
+  case "$arg" in
+    push) exec ${shellQuote(process.execPath)} ${shellQuote(join(bin, 'git-control.mjs'))} "$@" ;;
+    ls-remote) if [ -f ${shellQuote(control + '.observe-failure')} ]; then exec ${shellQuote(process.execPath)} ${shellQuote(join(bin, 'git-control.mjs'))} "$@"; fi ;;
+  esac
+done
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    https://github.com/tests/*.git)
+      name="\${arg#https://github.com/tests/}"
+      name="\${name%.git}"
+      if [ "$name" = sync ]; then arg=${shellQuote(remote)}; else arg=${shellQuote(temporary)}/"$name.git"; fi ;;
+  esac
+  args+=("$arg")
+done
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+exec ${shellQuote(realGit)} -c 'user.name=Configured Human' -c 'user.email=configured@example.test' -c 'forge.githubSync.coAuthor=Synthetic lead <lead@example.test>' ${(state.config ?? []).map(value => '-c ' + shellQuote(value)).join(' ')} "\${args[@]}"
+`,
+      { mode: 0o700 },
+    );
+  };
+  writeShim(flags);
   const oldPath = process.env.PATH;
   process.env.PATH = `${bin}:${oldPath}`;
   t.after(() => {
@@ -156,7 +202,11 @@ process.exit(out.status??1);
   const sync = options => githubSync(owner, { repository: 'tests/sync', ...options });
   const head = () => git(remote, ['rev-parse', 'main']).trim();
   const controlState = () => JSON.parse(readFileSync(control));
-  const change = values => writeFileSync(control, JSON.stringify({ ...controlState(), ...values }));
+  const change = values => {
+    const state = { ...controlState(), ...values };
+    writeFileSync(control, JSON.stringify(state));
+    writeShim(state);
+  };
   const bare = name => {
     const path = join(temporary, `${name}.git`);
     git(temporary, ['init', '-q', '--bare', '--initial-branch=main', path]);
@@ -849,8 +899,16 @@ test('incremental commits keep the accepting actor name but use the sync-only em
 
 test('mirror retries a transient rejection with the same exact lease', async t => {
   const f = fixture(t, { transientPush: 1 });
-  const before = f.head();
-  const result = await f.sync({ push: true });
+  const before = f.head(),
+    delays = [];
+  const result = await f.sync({
+    push: true,
+    sleep: async ms => {
+      delays.push(ms);
+    },
+  });
+  assert.equal(delays.length, 1);
+  assert.ok(delays[0] >= 1000 && delays[0] <= 3000, 'first retry retains its jittered backoff');
   assert.equal(result.pushed, true);
   assert.equal(f.controlState().pushes, 2);
   assert.deepEqual(

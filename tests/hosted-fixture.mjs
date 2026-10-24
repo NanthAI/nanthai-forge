@@ -54,7 +54,8 @@ export const job = (id = 'own') => ({
   artifactKey: 'saved',
 });
 
-const field = (row, key) => key.split('.').reduce((value, part) => value?.[part], row);
+const field = (row, key) =>
+  key.includes('.') ? key.split('.').reduce((value, part) => value?.[part], row) : row?.[key];
 const indexes = new Map();
 /** Index fields come from convex/schema.ts, so a query on a missing index fails here too. */
 function indexFields(table, index) {
@@ -236,24 +237,31 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
         const lower = new Map(),
           upper = new Map(),
           bounds = [];
-        const rows = () =>
-          [...tables[table].values()]
+        const rows = () => {
+          const equal = [...matches].reverse(),
+            low = [...lower],
+            high = [...upper],
+            keys = [...fields, '_creationTime', ...(table === 'projectCoordinationEvents' ? ['_id'] : [])];
+          return [...tables[table].values()]
             .filter(
               row =>
-                [...matches].every(([key, value]) => field(row, key) === value) &&
-                [...lower].every(([key, value]) => row[key] > value) &&
-                [...upper].every(([key, value]) => row[key] <= value) &&
+                equal.every(([key, value]) => field(row, key) === value) &&
+                low.every(([key, value]) => row[key] > value) &&
+                high.every(([key, value]) => row[key] <= value) &&
                 bounds.every(test => test(row)),
             )
-            .map(row => structuredClone(row))
-            .sort(
-              (a, b) =>
-                direction *
-                ([...fields, '_creationTime', ...(table === 'projectCoordinationEvents' ? ['_id'] : [])]
-                  .map(key => [field(a, key), field(b, key)])
-                  .map(([x, y]) => (x === y ? 0 : x < y ? -1 : 1))
-                  .find(value => value !== 0) ?? 0),
-            );
+            .sort((a, b) => {
+              for (const key of keys) {
+                const x = field(a, key),
+                  y = field(b, key);
+                if (x !== y) return direction * (x < y ? -1 : 1);
+              }
+              return 0;
+            });
+        };
+        // Sort references, then copy only returned documents. Provider callers still
+        // receive detached values; a one-row lookup need not clone the whole table.
+        const copy = rows => rows.map(row => structuredClone(row));
         const query = {
           withIndex: (index, build) => {
             const indexed = indexFields(table, index);
@@ -309,11 +317,11 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
             direction = value === 'desc' ? -1 : 1;
             return query;
           },
-          take: async n => rows().slice(0, n),
+          take: async n => copy(rows().slice(0, n)),
           unique: async () => {
             const found = rows();
             if (found.length > 1) throw new Error(`unique() on ${table} matched ${found.length} documents.`);
-            return found[0] ?? null;
+            return structuredClone(found[0] ?? null);
           },
           paginate: async ({ cursor, numItems }) => {
             const all = rows();
@@ -330,7 +338,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
               const page = remaining.slice(0, numItems),
                 last = page.at(-1);
               return {
-                page,
+                page: copy(page),
                 isDone: remaining.length <= numItems,
                 continueCursor: last ? JSON.stringify(key(last)) : (cursor ?? ''),
                 pageStatus: null,
@@ -339,7 +347,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
             }
             const start = Number(cursor ?? 0);
             return {
-              page: all.slice(start, start + numItems),
+              page: copy(all.slice(start, start + numItems)),
               isDone: start + numItems >= all.length,
               continueCursor: String(start + numItems),
               pageStatus: null,
@@ -348,7 +356,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
           },
         };
         query[Symbol.asyncIterator] = async function* () {
-          yield* rows();
+          yield* copy(rows());
         };
         return query;
       },

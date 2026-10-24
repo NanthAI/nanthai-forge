@@ -10,13 +10,19 @@ test('verify prints a completed failing file diagnostic while another file is st
   const root = mkdtempSync(join(tmpdir(), 'forge-verify-stream-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const write = (path, text) => writeFileSync(join(root, path), text);
-  for (const dir of ['scripts', 'tests', 'node_modules/typescript/bin'])
+  for (const dir of [
+    'scripts',
+    'tests',
+    'node_modules/typescript/bin',
+    'node_modules/@typescript/native/bin',
+  ])
     mkdirSync(join(root, dir), { recursive: true });
   for (const name of ['verify.mjs', 'verify-queue.mjs', 'test-files.mjs', 'test-coverage.mjs'])
     write(`scripts/${name}`, readFileSync(`scripts/${name}`));
   write('tests/worker-budget.mjs', 'export const workerBudget = () => 2;');
   write('tests/check-runtime.mjs', '');
   write('node_modules/typescript/bin/tsc', '');
+  write('node_modules/@typescript/native/bin/tsc', '');
   write(
     'package.json',
     JSON.stringify({

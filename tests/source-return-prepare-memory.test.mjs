@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -11,11 +11,23 @@ const exec = promisify(execFile);
 // Compile outside the measured action process; no compiler heap is part of production actions.
 moduleUrl('../convex/projectSourceReturnPrepare.ts');
 moduleUrl('../convex/projectSourceReturnCursor.ts');
+// Both measured processes read the same immutable 100 MB input. Build it once;
+// each action still runs in its own process with its original heap/RSS limits.
+let directory, prepared;
+async function inputDirectory() {
+  if (!prepared) {
+    directory = mkdtempSync(join(tmpdir(), 'forge-prepare-memory-'));
+    prepared = exec(process.execPath, [worker, 'fixture', directory], { maxBuffer: 1024 * 1024 });
+  }
+  await prepared;
+  return directory;
+}
+after(() => {
+  if (directory) rmSync(directory, { recursive: true, force: true });
+});
+const worker = new URL('./source-return-prepare-memory-worker.mjs', import.meta.url).pathname;
 test('100 MB / 22,845-record compatibility candidate loads, stores and cold-validates below 512 MB', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'forge-prepare-memory-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const worker = new URL('./source-return-prepare-memory-worker.mjs', import.meta.url).pathname;
-  await exec(process.execPath, [worker, 'fixture', directory], { maxBuffer: 1024 * 1024 });
+  const directory = await inputDirectory();
   const { stdout } = await exec(
     process.execPath,
     ['--expose-gc', '--trace-gc-nvp', '--max-old-space-size=384', worker, 'after', directory],
@@ -64,10 +76,7 @@ test('streamed snapshot compression rejects encoder failures without storing par
 // Keep fixture creation and compilation outside the action's measured process.
 test('journal export hashes 100 MB of retained Work without a whole Work string below 512 MB', async t => {
   moduleUrl('../convex/projectWorkActions.ts');
-  const directory = mkdtempSync(join(tmpdir(), 'forge-journal-memory-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const worker = new URL('./source-return-prepare-memory-worker.mjs', import.meta.url).pathname;
-  await exec(process.execPath, [worker, 'fixture', directory], { maxBuffer: 1024 * 1024 });
+  const directory = await inputDirectory();
   const { stdout } = await exec(
     process.execPath,
     ['--expose-gc', '--max-old-space-size=384', worker, 'journal', directory],

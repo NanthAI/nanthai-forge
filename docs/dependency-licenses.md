@@ -1,6 +1,6 @@
 # Pinned npm dependency license inventory
 
-Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 389 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
+Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 410 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
 
 The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Apache-2.0 license](https://github.com/get-convex/convex-backend/blob/precompiled-2026-09-28-5c7cb5b/LICENSE.md), not the npm client license. Its bundled native dependencies are outside this npm inventory; [native license coverage](native-dependency-licenses.md) records the inspected pins and remaining gaps. Forge's own boundaries are in [the licensing map](../LICENSE.md).
 
@@ -107,6 +107,27 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@typescript-eslint/utils | 8.59.0 | MIT | development |
 | node_modules/@typescript-eslint/visitor-keys | 8.59.0 | MIT | development |
 | node_modules/@typescript-eslint/visitor-keys/node_modules/eslint-visitor-keys | 5.0.1 | Apache-2.0 | development |
+| node_modules/@typescript/native | 7.0.2 | Apache-2.0 | development |
+| node_modules/@typescript/typescript-aix-ppc64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-darwin-arm64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-darwin-x64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-freebsd-arm64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-freebsd-x64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-linux-arm | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-linux-arm64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-linux-loong64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-linux-mips64el | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-linux-ppc64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-linux-riscv64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-linux-s390x | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-linux-x64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-netbsd-arm64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-netbsd-x64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-openbsd-arm64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-openbsd-x64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-sunos-x64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-win32-arm64 | 7.0.2 | Apache-2.0 | development, optional |
+| node_modules/@typescript/typescript-win32-x64 | 7.0.2 | Apache-2.0 | development, optional |
 | node_modules/@ungap/structured-clone | 1.4.0 | ISC | runtime |
 | node_modules/accepts | 2.0.0 | MIT | runtime |
 | node_modules/acorn | 8.18.0 | MIT | development |

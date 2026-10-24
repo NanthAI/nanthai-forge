@@ -15,7 +15,10 @@ npm run format               # prettier --write; run before committing
 | Command | What it does |
 | --- | --- |
 | `npm run check` | Validates JSON, Markdown links, license inventory freshness and required root files |
-| `npm run typecheck` | Core, web, Convex and Netlify TypeScript |
+| `npm run typecheck` | Native TypeScript for core, Convex and Netlify; tsc 5.9.3 for web |
+| `npm run typecheck:tsc` | Explicit tsc 5.9.3 fallback for all four projects |
+| `npm run build:core` | Native TypeScript JavaScript and published declarations |
+| `npm run build:core:tsc` | Explicit tsc 5.9.3 build fallback |
 | `npm run lint` | ESLint, no warnings allowed |
 | `npm run verify:sequential` | The same steps one after another (slower; use to read one step's output in order) |
 | `npm test` | Builds, then runs `node --test tests/*.test.mjs` |
@@ -29,6 +32,71 @@ The compact Work/detail and native companion fixtures close their MCP clients an
 Interaction finish fixtures isolate the outer `FORGE_CHECK_FULL` override so their nested checks exercise the explicitly selected docs, scoped and interaction scenarios. The enclosing verification run keeps its full selection. Interaction and landing fixtures drain post-accept work and join spawned helpers before deleting their owners. Finish replay assertions compare recorded receipt fields separately from live peer observations, whose coverage can change when source becomes unavailable. Peer coverage is independent of machine speed; load regressions require complete reads without retries, while unavailable source remains incomplete. The running-output exchange fixture holds its writer at an explicit barrier during preparation, then verifies that later appended bytes do not change the pinned retry.
 
 `npm run check` fails if `docs/dependency-licenses.md` is out of date. After changing dependencies, run `node scripts/render-dependency-licenses.mjs`.
+
+### Native TypeScript selection
+
+The development compiler is the official Microsoft `typescript@7.0.2` package,
+installed as the exact dev-only alias `@typescript/native`. The runtime
+`typescript@5.9.3` dependency stays in place for source analysis, ESLint and public
+SDK consumers. Scripts use explicit compiler paths, so npm's shared `tsc` shim
+cannot accidentally select the other compiler. No installation lifecycle scripts
+are needed. The generated [dependency license inventory](dependency-licenses.md)
+includes the compiler and its optional platform binaries (Apache-2.0).
+
+Core, Convex and Netlify checks use the native compiler. Web remains on tsc 5.9.3:
+with ambient types restored, native 7.0.2 reports TS2345 at the generic action call
+in `web/src/useInventory.ts` that the existing checker accepts. Application code
+is unchanged. Native core/Convex commands pass `--types "*"` to preserve tsc 5's
+automatic ambient types; Netlify retains its explicit types list. Native commands
+also pass `--noUncheckedSideEffectImports false` to preserve the old side-effect
+import behavior. The verification runner uses this same routing and settings.
+
+`npm run typecheck:tsc` and `npm run build:core:tsc` select the original compiler
+explicitly. There is no automatic fallback after an error. The archived
+`@typescript/native-preview@7.0.0-dev.20260707.2` package was measured, but is not a
+project dependency. Microsoft now ships the maintained native compiler in the
+standard TypeScript package; see the [TypeScript 7 announcement](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
+and the [preview staging repository](https://github.com/microsoft/typescript-go).
+
+### Toolchain measurements
+
+Local wall-clock measurements use the source at State `3e593b83e00f4961014cef997a2f76edceaba676fc5039b2f2373c13e1b7414c`, Node 24.22.1 and an Apple M4 (10 logical CPUs, 16 GiB). Other agents were active; the host load varied substantially. These are not CI or idle-machine measurements. Native worker pools were set to four (`GOMAXPROCS=4`, `RAYON_NUM_THREADS=4`, Oxlint `--threads 4`).
+
+Each cell lists all three samples in seconds. Cold removes tool caches and build outputs before a fresh process; warm immediately repeats the same command with its outputs retained. OS file caches were not flushed on the shared machine. Typechecks are full, non-incremental checks; the four repo configs have no project references. Different tools run sequentially. Complete transpiler builds include the time for native declaration generation and typechecking; no transpile-only timing is presented as a package build.
+
+| Tool | Task | Cold seconds (3 runs) | Warm seconds (3 runs) | Parity / decision |
+| --- | --- | --- | --- | --- |
+| tsc 5.9.3 | Four-project typecheck | 76.138, 71.413, 101.897 | 104.873, 92.742, 81.318 | Reference; pass |
+| tsgo preview 7.0.0-dev.20260707.2 | Four-project typecheck, unchanged options | 45.662, 48.101, 28.850 | 38.710, 35.468, 30.947 | Fail: ambient types; archived preview |
+| Native TS 7.0.2 | Four-project typecheck, unchanged options | 27.005, 15.322, 18.256 | 18.128, 18.648, 16.835 | Fail: ambient types; web generic disagreement after compatibility flag |
+| Native TS 7.0.2 + tsc web | Four-project typecheck, compatible options | 31.219, 48.732, 34.030 | 42.763, 44.896, 29.566 | Pass; adopted |
+| tsc 5.9.3 | Core JS + declarations | 17.969, 15.617, 25.235 | 17.586, 15.315, 27.381 | Reference; pass |
+| tsgo preview | Core JS + declarations | 6.727, 5.967, 5.407 | 6.065, 6.814, 4.078 | JS matches; archived preview, not adopted |
+| Native TS 7.0.2 | Core JS + declarations | 4.724, 6.708, 6.801 | 7.203, 5.205, 6.144 | Pass; adopted |
+| SWC 1.16.20 + native declarations | Complete core build | 13.741, 9.984, 7.652 | 10.109, 10.541, 6.835 | Runtime probe passes; repository JS equivalence unverified |
+| oxc-transform 0.155.0 + native declarations | Complete core build | 6.796, 5.121, 5.356 | 7.434, 5.191, 4.514 | Runtime probe passes; repository JS equivalence unverified |
+| esbuild 0.28.2 + native declarations | Complete core build | 4.846, 4.702, 4.193 | 4.099, 4.479, 4.887 | Runtime probe passes; repository JS equivalence unverified |
+| ESLint 9.39.4 | Lint | 24.161, 12.133, 14.194 | 12.100, 23.345, 11.186 | Reference; retained |
+| Oxlint 1.89.0 | Lint, 24 mapped rules | 0.266, 0.187, 0.137 | 0.131, 0.148, 0.128 | Fail: no-unused-vars differs |
+| Oxlint 23 rules + ESLint no-unused-vars | Lint | 12.881, 12.975, 12.346 | 14.824, 11.369, 16.197 | Pass; no clear net win |
+| Biome 2.6.2 | Lint, strict migrated rules | 0.901, 0.769, 0.749 | 0.617, 0.703, 0.781 | Fail; incomplete rule parity |
+| Prettier 3.9.10 | Format check | 27.149, 21.077, 23.954 | 22.386, 22.306, 22.433 | Reference; retained |
+| Oxfmt 0.74.0 | Format check | 0.330, 0.175, 0.192 | 0.176, 0.182, 0.186 | 20 changed files; not adopted |
+| Biome 2.6.2 | Format check | 1.365, 1.245, 1.176 | 1.332, 1.237, 1.188 | 76 changed files; not adopted |
+
+The adopted typecheck medians are 34.030 s cold / 42.763 s warm versus 76.138 s / 92.742 s for the all-tsc reference (2.24× / 2.17× locally). Native core build medians are 6.708 s / 6.144 s versus 17.969 s / 17.586 s (2.68× / 2.86× locally). Measurements under contention do not establish the same speedup on the 4-vCPU CI runner.
+
+Parity checks introduce assignment (TS2322), argument (TS2345) and missing-property (TS2339) errors into a scratch file in each of the four projects. The adopted routing matches tsc 5 on all 12 diagnostic codes and locations and reports no errors on the clean source. A synthetic two-project reference graph builds cold and warm and rejects a broken consumer with both tsc and the native compilers. The retained regression test also covers the existing unresolved side-effect import behavior.
+
+Core emits contain 587 JavaScript and 587 declaration files, with no missing/extra files and no source maps (the config does not request them). Native JavaScript matches tsc token-for-token after ignoring trivia and literal spelling. Of 260 declaration files with token differences, 256 differ only in union/property order. Three internal files use an equivalent `typeof syncGitSleep` function alias, and `owner-acceptance-consumer.d.ts` adds optional `never` members to an internal inferred union. Those four files are outside the 12-file transitive declaration closure of the two public package exports. That public closure matches after union/property-order normalization; the entry declarations themselves are unchanged apart from trivia. The synthetic runtime probe checks enums, namespaces, parameter properties, ES2022 class fields/accessors, private fields and async behavior. It passes for every emitter. SWC/Oxc/esbuild produce different repository JavaScript; full semantic equivalence of those rewrites remains unverified, so their faster isolated figures do not justify adopting them. Oxc isolated declaration generation also requires `isolatedDeclarations`, which this project does not enable.
+
+Lint uses the same 1,130 source files and the effective ESLint configuration: four core rules (`no-var`, `prefer-const`, `prefer-rest-params`, `prefer-spread`) and twenty TypeScript rules. Oxlint accepts all 24 mappings, but treats a destructured parameter read through `void` as unused where ESLint accepts it. Its default underscore-argument handling also differs. A 28-case synthetic corpus covers each enabled rule, existing suppression comments and these discrepancies. The mixed setup keeps unused-variable checks in ESLint; its cold/warm medians (12.881 s / 14.824 s) do not beat ESLint consistently (14.194 s / 12.100 s). No lint rules or source code were changed.
+
+Biome strict migration maps 17 of the 24 enabled rules. Five are only inspired equivalents (`ban-ts-comment`, `no-empty-object-type`, `no-this-alias`, `no-unsafe-function-type`, `no-wrapper-object-types`); `no-unused-expressions` and `triple-slash-reference` lack an identical mapping. Retaining ESLint preserves those checks and their options.
+
+Formatting compares the same 1,770 files after migrating print width 110, single quotes, trailing commas, arrow parentheses and ignore patterns. Scratch writes change 20 files with Oxfmt and 76 with Biome. Prettier remains the formatter; no mass reformat is included.
+
+Candidate packages were fetched at exact versions from their official projects with `--ignore-scripts`; SWC/esbuild postinstall scripts were not executed. Only maintained native TypeScript is added to the project. Primary references: [SWC compilation](https://swc.rs/docs/configuration/compilation), [Oxc TypeScript/declarations](https://oxc.rs/docs/guide/usage/transformer/typescript), [esbuild TypeScript caveats](https://esbuild.github.io/content-types/#typescript-caveats), [Oxlint migration](https://oxc.rs/docs/guide/usage/linter/migrate-from-eslint.html), [Biome migration](https://biomejs.dev/installation/migrate-from-other-tools/), [Oxfmt compatibility](https://oxc.rs/docs/guide/usage/formatter/migrate-from-prettier.html), [Biome formatting differences](https://biomejs.dev/formatter/differences-with-prettier/).
 
 ### Targeted test preparation
 
@@ -44,7 +112,7 @@ For new prose under `docs/`, add its path to `packageDocuments` in `scripts/pack
 
 `scripts/forge-check.mjs` installs locked dependencies, selects impact from the runner’s pinned Candidate comparison, and verifies with the Node that launches it. The existing `verify` check ID stays unchanged. Forge-launched checks share the machine queue and disk guards described in [operations](operations.md). Validated native standard-check docs-overlap retries classify immutable merged bytes with the installed selector before admission and run merged static checks outside the heavyweight queue; disk guards still apply. Unclassified changes and code interactions keep ordinary admission. Direct `npm run verify` / `node scripts/forge-check.mjs` invocations bypass Forge's queue; use recorded `run` / `finish` to coordinate dogfood checks. Test execution preloads `tests/check-runtime.mjs` so synthetic fixture checks use a private queue per test process, separate from real dogfood checks. The automatic-cleanup tests also import that setup themselves, so direct focused runs stay isolated without a preload flag; their process coverage uses one mutable mock per test. Cross-process reliability tests explicitly share one queue. For focused check-run tests use `node --import ./tests/check-runtime.mjs --test tests/local-reliability.test.mjs`. No test assertion is bypassed.
 
-`npm run verify` is `scripts/verify.mjs`. It runs the verification stages concurrently: `check`, `format:check`, the four `tsc` typechecks and `lint` start together with `build:core` then `build:web`, and the tests start as soon as the build finishes instead of after every static step. Static-step output is buffered; tests stream completed/failed counts and failure names as TAP results arrive. Each completed failing file also emits its file-attributed diagnostic block immediately, while other files and static steps continue. Passing steps print their totals and a timing table closes the run. The default test-file budget is `min(max(1, floor((available CPUs - 2) / check slots)), 8)`, where check slots is `FORGE_MAX_CONCURRENT_CHECKS` or the check queue default `max(1, floor(CPUs / 4))`, so concurrent checks together leave two CPUs free (4 workers per check on a 10-CPU machine with 2 slots). Set `FORGE_TEST_WORKERS` to a positive integer to compare or override it. The runner starts historically slow files first. Each test file has a 600000 ms wall-clock hang guard, covering module loading, tests, teardown and leaked child handles. Set `FORGE_TEST_FILE_TIMEOUT_MS` to a positive integer in milliseconds (up to 2147483647) to override it. A timeout names the file, kills its process group and fails verification; queued files get their own deadline when started. This is a suite scheduling budget; fixture queues remain private per test process and queue correctness tests keep their explicit overrides. `FORGE_GIT_TIMEOUT_MS` (default 20000, accepted range 1000 to 3600000) is the per-command ceiling for local Git; the check sets it to 240000 because several checks usually share one machine.
+`npm run verify` is `scripts/verify.mjs`. It runs the verification stages concurrently: `check`, `format:check`, the four project typechecks and `lint` start together with `build:core` then `build:web`, and the tests start as soon as the build finishes instead of after every static step. Static-step output is buffered; tests stream completed/failed counts and failure names as TAP results arrive. Each completed failing file also emits its file-attributed diagnostic block immediately, while other files and static steps continue. Passing steps print their totals and a timing table closes the run. The default test-file budget is `min(max(1, floor((available CPUs - 2) / check slots)), 8)`, where check slots is `FORGE_MAX_CONCURRENT_CHECKS` or the check queue default `max(1, floor(CPUs / 4))`, so concurrent checks together leave two CPUs free (4 workers per check on a 10-CPU machine with 2 slots). Set `FORGE_TEST_WORKERS` to a positive integer to compare or override it. The runner starts historically slow files first. Each test file has a 600000 ms wall-clock hang guard, covering module loading, tests, teardown and leaked child handles. Set `FORGE_TEST_FILE_TIMEOUT_MS` to a positive integer in milliseconds (up to 2147483647) to override it. A timeout names the file, kills its process group and fails verification; queued files get their own deadline when started. This is a suite scheduling budget; fixture queues remain private per test process and queue correctness tests keep their explicit overrides. `FORGE_GIT_TIMEOUT_MS` (default 20000, accepted range 1000 to 3600000) is the per-command ceiling for local Git; the check sets it to 240000 because several checks usually share one machine.
 
 Compare performance with the same Node version, source pins and machine load.
 Per-file wall times include real Git subprocesses and filesystem work; a heavily
