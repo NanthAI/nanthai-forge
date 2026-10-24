@@ -1,0 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.fx .fx-setting.fx-github-command-row { display: grid; grid-template-columns: 80px minmax(0, 1fr); align-items: center; gap: 16px; padding: 14px; border-top: 1px solid var(--fx-line); border-bottom: 0; }
+.fx-github-command-row .fx-copy-command { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-width: 0; padding: 6px 6px 6px 12px; background: var(--fx-surface-2); border: 1px solid var(--fx-line-strong); border-radius: var(--fx-r-2); }
+.fx-github-command-row .fx-copy-command code { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--fx-font-mono); }
+.fx-github-command-row .fx-copy-command > [role='alert'] { grid-column: 1 / -1; }
+@media (max-width: 720px) { .fx .fx-setting.fx-github-command-row { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
