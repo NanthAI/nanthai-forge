@@ -118,6 +118,7 @@ Each spike ends in a short decision memo agreed with the owner and recorded as a
 - **Arm N:** the native object store on R2 with reachability GC from main, Lanes, Candidates and retained backups.
 - **Arm G:** Git-native objects and packfiles (a hosted bare repository or the jj backend) under Forge's State, Lane, Candidate and Work model.
 - **Same criteria for both,** measured on the dogfood project: disk and R2 bytes per year at 30 landings a day; GC cost and correctness (nothing reachable is collected, retained backups stay restorable); interop (GitHub sync, import, export); migration cost for the dogfood project; disjointness check cost on nested trees; code removed and code added, in lines.
+- **Prior art:** Delta (Zed, 2026) keeps Git as the authority for commits, branches and remotes and stores fine-grained edits and conversations beside it ("Git keeps the commits. DeltaDB keeps everything in between"). Arm G is the same shape; count that as evidence for interop, not as a decision.
 - **Decision rule:** pick the arm with lower disk per year and at least equal GC correctness, unless the other arm removes clearly more code at no more than 2× the disjointness cost. Ties stay native. If the week ends without an answer, stay native. Arm G winning also needs the constraint 7 change.
 - **Gates:** B1.4b and the deletion slices B1.6–B1.8. The losing arm's code is not merged. B1.4a does not wait.
 
@@ -342,8 +343,8 @@ Each result is published next to the 2.36× burst-4 figure in [why-forge](why-fo
 ### B3.1. Overlap at first write, in the agent's loop
 
 - **Size:** M. **Depends on:** E1, M2. **Must land before the R3 benchmark.**
-- **Changes:** a pre-edit hook for Claude Code and Codex calls `nforge agent peers --path` (a read, which never writes) before the first edit of a path and blocks until the overlap is acknowledged or routed around. Every nforge CLI and MCP response also carries the caller's unacknowledged overlaps. Acknowledgements are records, so metric 4 gains its acknowledgement rate. Never a lock on source.
-- **Acceptance:** incident replay of the 2026-10-21 four Lanes editing the same docs: both agents see the alert before their first overlapping write, and each acknowledgement is recorded. The hook adds under 200 ms p95 to an edit and fails open with a recorded event if Forge is unreachable. **Metrics:** moves 4. Must not regress 2.
+- **Changes:** a pre-edit hook for Claude Code and Codex calls `nforge agent peers --path` (a read, which never writes) before the first edit of a path and blocks until the overlap is acknowledged or routed around. Every nforge CLI and MCP response also carries the caller's unacknowledged overlaps. Acknowledgements are records, so metric 4 gains its acknowledgement rate. Never a lock on source. The same hook records the agent session and turn behind each save, so a saved State, its automatic snapshots and later each hunk link back to the conversation that produced them; making-of, review and decision records (D1) show that link, and a snapshot can be restored to the turn it came from.
+- **Acceptance:** incident replay of the 2026-10-21 four Lanes editing the same docs: both agents see the alert before their first overlapping write, and each acknowledgement is recorded. The hook adds under 200 ms p95 to an edit and fails open with a recorded event if Forge is unreachable. A save made through the hook names its agent session and turn; transcript text stays with the agent unless the owner opts in. **Metrics:** moves 4. Must not regress 2.
 
 ### B3.2. Intent semantic conflict
 
@@ -417,6 +418,7 @@ Frozen under decision 4:
 - Hosted landing gaps not needed by Bet 1 (G4, G5, G7–G10).
 - CI adapters (Azure DevOps, GitLab, GitHub).
 - Landing timeline UI and CI insights.
+- Review comments anchored to declarations or text ranges that survive later edits, instead of to a Candidate snapshot (prior art: Delta anchors comments to exact text, diff lines and plan steps). Builds on the declaration identity from SP2 and B3.4.
 
 **Unfreezes when** E1 and E3 are published and B1.5b (cutover) has landed. Bug fixes to frozen surfaces are allowed.
 
@@ -464,3 +466,4 @@ The 2026-10-24 external review (four reports: history and state, architecture, e
 | Risk #12 checks through GitHub refs | B1.3a |
 | Risk #14 child environments | Phase 4 minimal child environments |
 | Risk #15 bundle size | X2 |
+| Delta (Zed) prior art, 2026-10-24 | B3.1 session and turn provenance; SP1 prior art; Freeze list (anchored comments) |
