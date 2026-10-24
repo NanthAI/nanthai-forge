@@ -28,10 +28,17 @@ export function automaticCleanup(
       action: 'clean',
       apply: true,
       kinds: scope.runId
-        ? ['check-workspaces', 'check-retention', 'exchange-staging']
+        ? ['check-workspaces', 'check-retention', 'exchange-staging', 'auto-snapshots']
         : scope.laneIds
-          ? ['lanes', 'lane-deps', 'check-retention', 'exchange-staging']
-          : ['lanes', 'lane-deps', 'check-workspaces', 'check-retention', 'exchange-staging'],
+          ? ['lanes', 'lane-deps', 'check-retention', 'exchange-staging', 'auto-snapshots']
+          : [
+              'lanes',
+              'lane-deps',
+              'check-workspaces',
+              'check-retention',
+              'exchange-staging',
+              'auto-snapshots',
+            ],
     },
     { id, actor, ...scope },
   );

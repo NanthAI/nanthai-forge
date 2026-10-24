@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  autoSnapshotRetentionPlan,
+  autoSnapshotDiskUsage,
+  removeAutoSnapshot,
+  type SnapshotRetentionItem,
+} from './lane-auto-snapshot-retention.js';
 import { retentionPlan, removeRetention } from './clean-retention.js';
 import { readPolicy } from './work-autonomy.js';
 import { checkCleanupBlocker } from './clean-check-safety.js';
@@ -22,6 +28,7 @@ export const CLEAN_KINDS = [
   'lane-deps',
   'lanes',
   'exchange-staging',
+  'auto-snapshots',
   'objects',
 ] as const;
 type Kind = (typeof CLEAN_KINDS)[number];
@@ -32,6 +39,7 @@ const DEFAULT_KINDS: Kind[] = [
   'lane-deps',
   'lanes',
   'exchange-staging',
+  'auto-snapshots',
 ];
 export const cleanSchema = z.object({
   action: z.literal('clean'),
@@ -51,6 +59,7 @@ type Item = {
   laneId?: string;
   runId?: string;
   tail?: true;
+  snapshotBytes?: number;
 };
 type Skipped = { kind: Kind; id: string; reason: string; laneId?: string; runId?: string };
 const BUILD_DIRS = new Set([
@@ -303,6 +312,7 @@ function plan(store: WorkStore, kinds: Kind[], automatic?: Automatic, selected?:
   const processes = workingProcesses();
   if (kinds.includes('check-workspaces')) checkWorkspaces(store, items, skipped, automatic, processes);
   laneDirectories(store, kinds, items, skipped, automatic, processes);
+  if (kinds.includes('auto-snapshots')) items.push(...autoSnapshotRetentionPlan(store));
   const retention = retentionPlan(store, kinds, processes, Date.now(), selected);
   items.push(...retention.items.filter(item => !items.some(existing => existing.path === item.path)));
   skipped.push(...retention.skipped);
@@ -323,6 +333,13 @@ const objectItems = (store: WorkStore) =>
   }));
 
 function remove(store: WorkStore, item: Item): string | undefined {
+  if (item.kind === 'auto-snapshots') {
+    try {
+      return removeAutoSnapshot(store, item as SnapshotRetentionItem);
+    } catch {
+      return 'Auto-snapshot removal failed; remaining files stay for retry.';
+    }
+  }
   // Re-check immediately before deleting: inside the owner's Work directory, and not a link.
   const inside = (path: string) => path.startsWith(store.directory + '/');
   if (!inside(item.path) || (!item.tail && !plainDirectory(item.path)))
@@ -347,7 +364,15 @@ function cleanupResult(
 ) {
   const group = (kind: Kind) => {
       const own = listed.filter(item => item.kind === kind);
-      return { kind, count: own.length, bytes: own.reduce((sum, item) => sum + item.bytes, 0), items: own };
+      return {
+        kind,
+        count: own.length,
+        bytes: own.reduce((sum, item) => sum + item.bytes, 0),
+        ...(kind === 'auto-snapshots'
+          ? { snapshotBytes: own.reduce((sum, item) => sum + (item.snapshotBytes ?? 0), 0) }
+          : {}),
+        items: own,
+      };
     },
     groups = kinds.map(group).filter(item => item.count > 0 || skipped.some(s => s.kind === item.kind));
   return {
@@ -369,7 +394,14 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
     invariant(
       command.apply &&
         command.kinds?.every(kind =>
-          ['check-workspaces', 'check-retention', 'exchange-staging', 'lane-deps', 'lanes'].includes(kind),
+          [
+            'check-workspaces',
+            'check-retention',
+            'exchange-staging',
+            'auto-snapshots',
+            'lane-deps',
+            'lanes',
+          ].includes(kind),
         ),
       'BAD_ARGUMENT',
       'Automatic cleanup supports regenerable copies and seven-day retention only.',
@@ -424,7 +456,7 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
               summary: chosen.length
                 ? `Clean regenerable copies: ${chosen.map(i => i.path).join(', ')}`
                 : 'No eligible regenerable copies to clean',
-              undo: 'Run reopen with the Lane id to re-materialize its retained head. Checks reconstruct workspaces when run again. Restore Lane dependencies with npm ci --ignore-scripts and rerun the build; retained source, log tails and artifacts remain. Seven-day retention removes older copies and log prefixes; those prefixes cannot be reconstructed.',
+              undo: 'Run reopen with the Lane id to re-materialize its retained head. Checks reconstruct workspaces when run again. Restore Lane dependencies with npm ci --ignore-scripts and rerun the build; retained source, log tails and artifacts remain. Seven-day retention removes older copies and log prefixes; those prefixes cannot be reconstructed. Expired closed-Lane auto-snapshot pointers and caches cannot be restored; object collection can later reclaim their otherwise unreachable unsaved source.',
             },
           });
           store.commitRecords(tx);
@@ -481,6 +513,11 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
     revision: store.revision(),
     result: automatic
       ? (JSON.parse(store.select('automaticActions', automatic.id)!.result!) as typeof result)
-      : result,
+      : {
+          ...result,
+          ...(!command.apply && kinds.includes('auto-snapshots')
+            ? { disk: { kinds: [autoSnapshotDiskUsage(store)] } }
+            : {}),
+        },
   };
 }

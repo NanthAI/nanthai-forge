@@ -1482,7 +1482,9 @@ for (const via of ['run-check', 'finish', 'observation']) {
         async pages() {
           return [];
         },
-        async sleep() {},
+        async sleep() {
+          throw new Error('synthetic controller interruption');
+        },
       },
       async (_plan, journal, save) => {
         journal.commit = commit;
@@ -1640,16 +1642,22 @@ for (const conclusion of ['success', 'failure', 'cancelled']) {
   });
 }
 
-test('HTTP 400 stays pending, then adopts the original execution and retains diagnostics', async t => {
+test('HTTP 400 interrupted before its deadline adopts the original execution and retains diagnostics', async t => {
   const { work, run, path } = fixture(t);
   let api,
     dispatches = 0,
     reads = 0;
+  let interrupted = false;
   const proxy = {
     request: (...args) => api.request(...args),
     pages: (...args) => api.pages(...args),
     log: (...args) => api.log(...args),
-    sleep: async () => {},
+    sleep: async () => {
+      if (!interrupted) {
+        interrupted = true;
+        throw new Error('synthetic controller interruption');
+      }
+    },
   };
   await launchGithubActionsRun(
     work.store,
@@ -1672,14 +1680,15 @@ test('HTTP 400 stays pending, then adopts the original execution and retains dia
         }
         return request(...args);
       };
-      api.pages = (...args) => (args[0].includes('/runs?') && ++reads < 16 ? [] : pages(...args));
+      api.pages = (...args) => (args[0].includes('/runs?') && ++reads < 4 ? [] : pages(...args));
     },
     async () => assert.fail('unresolved execution must keep its ref'),
   );
   const pending = read(join(path, 'result.json'));
   assert.equal(pending.status, 'interrupted');
   assert.equal(pending.error.code, 'GITHUB_ACTIONS_PENDING_INFRA');
-  assert.match(pending.details, /pending-infra.*HTTP 400/);
+  assert.match(pending.details, /pending-infra/);
+  assert.equal(read(join(path, 'github-actions.json')).dispatchStatus, 400);
   recoverRuns(work.store, { runs: [run] });
   assert.equal(run.error.code, 'GITHUB_ACTIONS_PENDING_INFRA');
   await launchGithubActionsRun(
@@ -2037,3 +2046,114 @@ for (const mode of ['workflow-scope', 'ambiguous-exhausted']) {
     assert.equal(run.error.code, receipt.error.code);
   });
 }
+
+for (const alreadyRequested of [false, true]) {
+  test(`cancel with a dead Actions controller settles locally (alreadyRequested=${alreadyRequested})`, async t => {
+    const { work, run, path } = fixture(t);
+    work.store.locked(() => {
+      const tx = work.store.records(),
+        selected = tx.find('runs', run.id);
+      Object.assign(selected.record, {
+        status: 'running',
+        runner: { pid: 2147483647, host: hostname() },
+        ...(alreadyRequested
+          ? { cancelRequested: true, cancellation: { reason: 'command', at: new Date().toISOString() } }
+          : {}),
+      });
+      tx.replace('runs', selected.position, selected.record);
+      work.store.commitRecords(tx);
+    });
+    if (alreadyRequested) {
+      const saved = work.store.select('runs', run.id);
+      assert.equal(recoverRuns(work.store, { runs: [saved] }), true);
+      assert.equal(saved.status, 'cancelled');
+      assert.equal(
+        existsSync(join(path, 'result.json')),
+        false,
+        'observation does not publish a completion file',
+      );
+      return;
+    }
+    const command = { action: 'cancel-check', operationId: run.id, reason: 'stop stuck discovery' };
+    const cancelled = await work.dispatch(command, work.store.revision());
+    assert.equal(cancelled.result.status, 'cancelled');
+    assert.equal(cancelled.result.cancellation.details, 'stop stuck discovery');
+    assert.equal(read(join(path, 'result.json')).status, 'cancelled');
+    let adopted = false;
+    await adoptModalRun(work.store, run.id, async () => {
+      adopted = true;
+    });
+    assert.equal(adopted, false);
+    const retry = await work.dispatch(command, work.store.revision());
+    assert.equal(retry.result.endedAt, cancelled.result.endedAt);
+    assert.match(retry.result.details, /Provider cancellation is unconfirmed/);
+  });
+}
+
+test('incident: ambiguous push becomes visible, the single dispatch disappears and discovery ends', async t => {
+  const { work, run, path } = fixture(t);
+  let posts = 0;
+  const api = {
+    async request(endpoint) {
+      if (endpoint.includes('/branches/')) return { commit: { sha: 'a'.repeat(40) } };
+      posts++;
+      throw new Error('synthetic lost dispatch response');
+    },
+    async pages() {
+      return [];
+    },
+    async sleep() {},
+  };
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    api,
+    async (_plan, journal, save) => {
+      journal.commit = 'a'.repeat(40);
+      journal.pushOutcome = 'ambiguous';
+      const { ensureActionsPush } = await import('../dist/github-actions-push.js');
+      await ensureActionsPush(_plan, journal, save, async (_source, args) => {
+        assert.equal(args[0], 'ls-remote');
+        return `${journal.commit}\trefs/heads/forge-check/${run.id}`;
+      });
+    },
+    async () => assert.fail('unknown remote execution retains the ref'),
+  );
+  const result = read(join(path, 'result.json'));
+  assert.equal(result.status, 'interrupted');
+  assert.equal(result.error.code, 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED');
+  assert.match(result.details, /without a source verdict/);
+  const journal = read(join(path, 'github-actions.json'));
+  assert.equal(journal.pushed, true);
+  assert.equal(journal.terminal, true);
+  assert.equal(journal.dispatchDiscovery.observations, 12);
+  assert.equal(posts, 1);
+  const { strandedActionsRun } = await import('../dist/github-actions-recovery.js');
+  assert.equal(strandedActionsRun(work.store, { ...run, ...result }), false);
+});
+
+test('a cancel racing an already written passing receipt preserves the completed outcome', async t => {
+  const { work, run, path } = fixture(t);
+  let api;
+  await launchGithubActionsRun(
+    work.store,
+    run,
+    {
+      request: (...args) => api.request(...args),
+      pages: (...args) => api.pages(...args),
+      log: (...args) => api.log(...args),
+      sleep: async () => {},
+    },
+    async (plan, journal, save) => {
+      journal.commit = 'a'.repeat(40);
+      journal.pushed = true;
+      save();
+      api = transport(plan, journal).api;
+    },
+    async () => {},
+  );
+  assert.equal(read(join(path, 'result.json')).status, 'passed');
+  const result = await work.dispatch({ action: 'cancel-check', operationId: run.id }, work.store.revision());
+  assert.equal(result.result.status, 'passed');
+  assert.equal(result.result.cancelRequested, undefined);
+});

@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostname } from 'node:os';
+import { processAlive } from './local-process.js';
+import { createRunReceipt } from './work-run-receipt.js';
 import { ForgeError } from './errors.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 import type { CheckRun, WorkView } from './work-types.js';
@@ -117,4 +120,29 @@ export function cancellationDetails(run: CheckRun) {
   return run.cancellation?.reason === 'superseded'
     ? ` Check cancelled-superseded by Candidate ${run.cancellation.supersededBy}; receipt retained. Queue a new run operation to check this Candidate again.`
     : '';
+}
+
+/** A dead controller cannot acknowledge cancellation. Settle the local operation
+ * without claiming that an unobserved provider execution has stopped. */
+export function finalizeDeadRunCancellation(run: CheckRun) {
+  if (
+    !run.cancelRequested ||
+    !['queued', 'preparing', 'running', 'interrupted'].includes(run.status) ||
+    run.runner.host !== hostname() ||
+    processAlive(run.runner)
+  )
+    return false;
+  const receipt = createRunReceipt({
+    ...run,
+    status: 'cancelled',
+    endedAt: new Date().toISOString(),
+    exitCode: null,
+    signal: null,
+    error: undefined,
+    details:
+      'Cancellation completed locally because the controller is no longer alive. Source, logs and provider identities remain retained. Provider cancellation is unconfirmed; inspect the retained execution before starting another check.',
+  });
+  Object.assign(run, receipt);
+  delete run.error;
+  return true;
 }

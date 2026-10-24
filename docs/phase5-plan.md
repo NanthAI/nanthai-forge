@@ -36,6 +36,7 @@ These are being built now as Phase 4 closure items. Phase 5 assumes them.
 7. **Vocabulary consolidation** is a real slice set, built after the Bet 1 cutover. No functionality is lost.
 8. **Bet 3 build waits only for E1 and E3** (confirmed 2026-10-24). E2 runs during Bet 1 and must be published before B3.5.
 9. **Every point of the 2026-10-24 review is tracked** in [Review coverage](#review-coverage); none is dropped silently.
+10. **Disk stays bounded per project** (2026-10-24). Automatic Lane snapshots of completed or abandoned Lanes are collected after the 7-day retention window; the latest snapshot of every open Lane is always kept. Forge watches free space and per-project growth (see P5-M2) and warns before either crosses its budget.
 
 ## How we work
 
@@ -92,8 +93,8 @@ Bet metrics also need one tag: **no-owner incidents**, errors in metrics 2 and 3
 ### P5-M2. Metric joins
 
 - **Size:** M. **Depends on:** M1.
-- **Changes:** metric 7 in both forms, metric 8 (bill records, per-landing join, estimator error), metric 4 (overlapping saves and delivery records, instrumented now even if the count is low) and red-main minutes.
-- **Acceptance:** fixture tests per metric. Replaying the "Closed without landing" hosted page records contradiction minutes. A main head with a failed full run records red minutes until the next passing head. No new polling: sampling happens on existing writes, so an idle project costs nothing. **Metrics:** creates 4, 7, 8, R.
+- **Changes:** metric 7 in both forms, metric 8 (bill records, per-landing join, estimator error), metric 4 (overlapping saves and delivery records, instrumented now even if the count is low) and red-main minutes. Also **disk per project**: local bytes by kind (objects, records, Lanes, check workspaces, snapshots, backups) and hosted/R2 bytes, growth per day and per landing, and free space on the owner volume, with a budget per project and a warning in status before free space or growth crosses it (owner decision 10).
+- **Acceptance:** fixture tests per metric. Replaying the "Closed without landing" hosted page records contradiction minutes. A fixture project growing faster than its budget raises one warning, not one per write. A main head with a failed full run records red minutes until the next passing head. No new polling: sampling happens on existing writes, so an idle project costs nothing. **Metrics:** creates 4, 7, 8, R.
 
 ### P5-M3. Metric surface
 

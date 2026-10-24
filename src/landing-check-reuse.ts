@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { validatePrefixRun } from './landing-diagnosis.js';
+import { hostname } from 'node:os';
+import { processAlive } from './local-process.js';
+import { finishChild } from './finish-child.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -58,13 +62,28 @@ function observedInputs(run: CheckRun) {
   );
 }
 
-export function reuseLandingCheck(
+export async function reuseLandingCheck(
   work: WorkService,
   batch: LandingBatch,
   prefix: BatchPrefix,
   driver: LandingDriver,
 ) {
-  return reuseCheck(work, batch, prefix, driver);
+  const existing = work.store.select('runs', prefix.runId);
+  if (existing) validatePrefixRun(work, batch, prefix, existing);
+  if (
+    existing &&
+    (existing.cancelRequested ||
+      !(
+        existing.status === 'interrupted' ||
+        (['queued', 'preparing', 'running'].includes(existing.status) &&
+          existing.runner.host === hostname() &&
+          !processAlive(existing.runner))
+      ))
+  )
+    return;
+  const reused = await reuseCheck(work, batch, prefix, driver, undefined, existing);
+  if (reused && existing && reused.reusedFrom) prefix.runId = reused.id;
+  return reused;
 }
 
 /** Main audits use the same retained full-plan evidence before run registration. */
@@ -84,6 +103,7 @@ async function reuseCheck(
   prefix: BatchPrefix,
   driver: LandingDriver,
   audit?: Check,
+  replaced?: CheckRun,
 ): Promise<CheckRun | undefined> {
   if (!work.store.native || (!batch?.environment && !audit)) return;
   const store = work.store,
@@ -104,7 +124,7 @@ async function reuseCheck(
     runtime =
       route.actual === 'github-actions' ? actionsCheckRuntime(policy?.repo, policy?.runsOn) : modalRuntime;
   const draft: CheckRun = {
-    id: prefix.runId,
+    id: replaced ? finishChild(prefix.runId, 'passed-twin') : prefix.runId,
     viewId: view.id,
     head: view.head,
     base: view.base,
@@ -223,8 +243,16 @@ async function reuseCheck(
         work,
         batch?.id ?? prefix.runId,
         current => {
-          const existing = current.runs.find(run => run.id === prefix.runId);
+          const existing = current.runs.find(run => run.id === draft.id);
           if (existing) return existing;
+          if (
+            replaced &&
+            !same(
+              current.runs.find(run => run.id === replaced.id),
+              replaced,
+            )
+          )
+            return;
           const retained = retainedPassedCheck(
             store,
             current.runs.find(run => run.id === original.id),
@@ -278,6 +306,15 @@ async function reuseCheck(
               },
             },
           };
+          if (replaced && savedBatch) {
+            const selected = savedBatch.prefixes.find(item => same(item, prefix))!;
+            selected.runId = reused.id;
+            // Re-evaluate any persisted interrupted verdict with the new receipt.
+            delete savedBatch.settlement;
+            for (const entry of current.landingEntries ?? []) {
+              if (entry.batchId === batch!.id && entry.runId === replaced.id) entry.runId = reused.id;
+            }
+          }
           current.runs.push(reused);
           return reused;
         },

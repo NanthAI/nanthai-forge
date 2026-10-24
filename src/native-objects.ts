@@ -5,7 +5,8 @@ import { z } from 'zod';
 import { NativeSource } from './native-source.js';
 import { nativeReachable } from './native-reachable.js';
 import { invariant } from './errors.js';
-import { autoSnapshotObjects, withAutoSnapshotLock } from './lane-auto-snapshot.js';
+import { withAutoSnapshotLock } from './lane-auto-snapshot.js';
+import { autoSnapshotObjects } from './lane-auto-snapshot-retention.js';
 import type { WorkStore } from './work-store.js';
 
 export const nativeObjectCommandSchema = z.object({
@@ -87,7 +88,7 @@ export function nativeObjects(store: WorkStore, input: unknown) {
             removed,
             preserved,
             coverage:
-              "Retained native State ancestry, source, Git provenance/projections, observations, historical Work archives and each Lane's latest auto-snapshot. Workspaces, check evidence, backup files, temporary files and unknown entries are not collected.",
+              'Retained native State ancestry, source, Git provenance/projections, observations, historical Work archives and unexpired closed-Lane or latest open-Lane auto-snapshots. Workspaces, check evidence, backup files, temporary files and unknown entries are not collected.',
             compatibility:
               command.action === 'collect-native-objects'
                 ? `This native owner requires Work format ${data.schema} readers. Each retry recomputes reachability; completed deletions are not rolled back.`

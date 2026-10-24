@@ -29,6 +29,7 @@ import { CheckQueue, foregroundQueued } from './check-queue.js';
 import { diskGuard } from './disk-guard.js';
 import { processAlive, processIdentity, processStartTime, processGroupAlive } from './local-process.js';
 import { spawn } from 'node:child_process';
+import { finalizeDeadRunCancellation } from './work-run-cancellation.js';
 import { recoverRecordRuns } from './work-record-runs.js';
 import { SelectedRunObserver } from './work-run-observation.js';
 import {
@@ -82,7 +83,7 @@ export function runOutputDirectory(store: WorkStore, id: string) {
   return path;
 }
 const adoptingModalRuns = new Set<string>();
-export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>): boolean {
+export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>, adopt = true): boolean {
   let changed = false;
   for (const run of data.runs.filter(active)) {
     const path = directory(store, run.id);
@@ -98,14 +99,19 @@ export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>): boo
           Object.assign(run, result.data);
           recordCheckTimings(store, run, path);
           changed = true;
-          continue;
+          if (!run.cancelRequested || run.status !== 'interrupted') continue;
         }
       }
     } catch {
       /* Ambiguous output never manufactures a successful result. */
     }
+    if (finalizeDeadRunCancellation(run)) {
+      changed = true;
+      continue;
+    }
     if (run.runner.host !== hostname()) continue;
     if (
+      adopt &&
       run.status === 'queued' &&
       !run.childPid &&
       !processAlive(run.runner) &&
@@ -117,6 +123,7 @@ export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>): boo
       continue;
     }
     if (['modal', 'github-actions'].includes(run.backend?.actual ?? '') && !processAlive(run.runner)) {
+      if (!adopt) continue;
       const key = `${store.root}:${run.id}`;
       if (!adoptingModalRuns.has(key)) {
         adoptingModalRuns.add(key);
@@ -157,6 +164,7 @@ export async function adoptModalRun(
       if (
         !run ||
         !active(run) ||
+        run.cancelRequested ||
         !['modal', 'github-actions'].includes(run.backend?.actual ?? '') ||
         run.runner.host !== hostname() ||
         processAlive(run.runner)
@@ -774,13 +782,16 @@ export function runWork(
   const result = store.locked(() => {
     beforePublish?.();
     if (!store.native) executionGuard(store.root);
-    const tx = recoverRecordRuns(store, store.records()),
+    const tx =
+        command.action === 'cancel-check' ? store.records() : recoverRecordRuns(store, store.records()),
       data = tx.data();
     const selected = tx.find('runs', command.operationId),
       existing = selected?.record;
     if (command.action === 'cancel-check') {
       invariant(existing, 'NOT_FOUND', 'Run not found.');
-      if (active(existing) && !existing.cancelRequested) {
+      const before = JSON.stringify(existing);
+      if (active(existing)) recoverRuns(store, { runs: [existing] }, false);
+      if ((active(existing) || existing.status === 'interrupted') && !existing.cancelRequested) {
         existing.cancelRequested = true;
         existing.cancellation = {
           reason: 'command',
@@ -788,8 +799,19 @@ export function runWork(
           actor: command.actor ?? localActor('person'),
           ...(command.reason ? { details: command.reason } : {}),
         };
+      }
+      if (active(existing)) recoverRuns(store, { runs: [existing] });
+      else finalizeDeadRunCancellation(existing);
+      if (JSON.stringify(existing) !== before) {
+        if (existing.status === 'cancelled') {
+          const path = directory(store, existing.id);
+          mkdirBelow(store.directory, path);
+          retainInterruptedActionsReceipt(store, existing);
+          durableReplace(join(path, 'result.json'), JSON.stringify(createRunReceipt(existing)));
+        }
         tx.replace('runs', selected!.position, existing);
         data.revision = store.commitRecords(tx);
+        wakeLandingWorker(store);
       }
       return { revision: data.revision, result: existing };
     }

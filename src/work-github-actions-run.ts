@@ -11,7 +11,7 @@ import { modalPlan, validateModalPlan, type ModalPlan } from './modal-plan.js';
 import { actionsApi, ActionsApiError, recordActionsFailures, type ActionsApi } from './github-actions-api.js';
 import { cleanupActionsResult, sweepActionsRefs } from './github-actions-cleanup.js';
 import { actionsJournal, deleteActionsRef, exportActionsSnapshot } from './github-actions-export.js';
-import { ActionsDispatchRejected, ActionsDispatchUnknown } from './github-actions-dispatch.js';
+import { ActionsDispatchRejected, ActionsDispatchExhausted } from './github-actions-dispatch.js';
 import { controlActions } from './github-actions-controller.js';
 import { durableReplace } from './native-durability.js';
 import { remoteCancellation, cancellationDetails } from './work-run-cancellation.js';
@@ -167,7 +167,7 @@ export async function launchGithubActionsRun(
     await cleanupActionsResult(plan, journal, save, api, progress, deleteRef);
     await sweepActionsRefs(store, repo, api, progress, deleteRef);
   } catch (error) {
-    let pendingInfra = error instanceof ActionsDispatchUnknown || error instanceof ActionsPushUnknown;
+    let pendingInfra = error instanceof ActionsPushUnknown;
     try {
       const journalFile = join(path, 'github-actions.json');
       if (existsSync(journalFile)) {
@@ -197,14 +197,14 @@ export async function launchGithubActionsRun(
     // Never serialize raw transport errors or stacks. Git's stderr is kept only after redaction.
     const dispatchRejected = error instanceof ActionsDispatchRejected;
     const pendingMessage =
-      error instanceof ActionsDispatchUnknown || error instanceof ActionsPushUnknown
+      error instanceof ActionsPushUnknown
         ? error.message
         : `pending-infra: original provider operation requires discovery (${errorKind(error)}).`;
     const receipt = createRunReceipt({
-      status: dispatchRejected ? 'failed' : 'interrupted',
+      status: run.cancelRequested ? 'cancelled' : dispatchRejected ? 'failed' : 'interrupted',
       ...(pendingInfra
         ? { error: { code: PENDING_ACTIONS_INFRA, message: pendingMessage } }
-        : error instanceof ActionsPushFailed
+        : error instanceof ActionsPushFailed || error instanceof ActionsDispatchExhausted
           ? { error: { code: error.code, message: error.message } }
           : {}),
       cancellation: run.cancellation,
@@ -216,9 +216,11 @@ export async function launchGithubActionsRun(
         ? `${pendingMessage} Source export, attempt outcomes, rejection classes, branch visibility and discovery windows are retained in github-actions.json. Reconcile this same operation to adopt the original execution; push recovery uses the identical commit and create-only ref lease within its retained attempt bound; no ambiguous dispatch or shard rerun is repeated. This interruption adds no source verdict; earlier job evidence remains retained.`
         : error instanceof ActionsPushFailed
           ? `${error.code}: ${error.message} Push attempts and redacted Git diagnostics remain retained; this is a terminal infrastructure failure, not a source verdict.`
-          : dispatchRejected
-            ? `${error.code}: ${error.message} Source export and dispatch rejections are retained.`
-            : `GitHub Actions controller interrupted (${errorKind(error)}${error instanceof GitSyncError && error.detail ? `: git said "${error.detail}"` : ''}); source export, dispatch intent and job identities are retained. Check gh access and workflow registration, then reconcile the retained run. Retained dispatch outcomes govern recovery; ambiguous reruns are never repeated.`,
+          : error instanceof ActionsDispatchExhausted
+            ? `${error.code}: ${error.message} Dispatch discovery diagnostics remain retained; this is a terminal infrastructure outcome, not a source verdict.`
+            : dispatchRejected
+              ? `${error.code}: ${error.message} Source export and dispatch rejections are retained.`
+              : `GitHub Actions controller interrupted (${errorKind(error)}${error instanceof GitSyncError && error.detail ? `: git said "${error.detail}"` : ''}); source export, dispatch intent and job identities are retained. Check gh access and workflow registration, then reconcile the retained run. Retained dispatch outcomes govern recovery; ambiguous reruns are never repeated.`,
     });
     progress(receipt.details);
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
@@ -235,7 +237,6 @@ function errorKind(error: unknown) {
   if (
     error instanceof ActionsApiError ||
     error instanceof ActionsPushFailed ||
-    error instanceof ActionsDispatchUnknown ||
     error instanceof ActionsPushUnknown
   )
     return `${error.code}: ${error.message}`;

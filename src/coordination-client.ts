@@ -38,12 +38,17 @@ export function coordinationCredentials(
   );
   return { url: url.origin, token };
 }
-export function coordinationClient(deployment: string, token: string | undefined): ConvexHttpClient {
+export function coordinationClient(
+  deployment: string,
+  token: string | undefined,
+  options?: { signal: AbortSignal },
+): ConvexHttpClient {
   const credentials = coordinationCredentials(deployment, token);
   const client = new ConvexHttpClient(credentials.url, {
     skipConvexDeploymentUrlCheck: true,
     logger: false,
-    fetch: (input, init) => fetch(input, { ...init, redirect: 'error' }),
+    fetch: (input, init) =>
+      fetch(input, { ...init, redirect: 'error', ...(options ? { signal: options.signal } : {}) }),
   });
   client.setAuth(credentials.token);
   return client;

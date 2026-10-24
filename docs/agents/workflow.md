@@ -315,7 +315,7 @@ Hosted UI metadata uses `projectViewReads.read({projectId,generationId?,action:"
 
 ### Unsaved edits after a crash
 
-On native owners the presence observer snapshots each open Lane about 5 seconds after its files stop changing (at most every 30 seconds, and within a minute of continuous editing). An auto-snapshot is a content-addressed State whose parent is the Lane head. It is not a save: it adds no checkpoint, moves no head, syncs nothing and is never pushed. Each Lane keeps only its latest auto-snapshot, which native object collection retains. Capture rereads only files whose metadata changed; a Lane that is busy (sync, merge, checkpoint) or has a pending merge is skipped. A Lane that matches its head has no auto-snapshot.
+On native owners the presence observer snapshots each open Lane about 5 seconds after its files stop changing (at most every 30 seconds, and within a minute of continuous editing). An auto-snapshot is a content-addressed State whose parent is the Lane head. It is not a save: it adds no checkpoint, moves no head, syncs nothing and is never pushed. Each open Lane keeps its latest auto-snapshot regardless of age. Completed or abandoned Lanes retain that protection for seven days after the later of the snapshot and latest closure; reopening restores protection immediately. After the window, `clean` removes the pointer/cache and native object collection can reclaim only objects unreachable from all other retained source and history. Saved checkpoints remain retained. Capture rereads only files whose metadata changed; a Lane that is busy (sync, merge, checkpoint) or has a pending merge is skipped. A Lane that matches its head has no auto-snapshot.
 
 After an agent dies, `status {"laneId":…}` returns `lane.autoSnapshot` (`state`, `at`, `changedPathCount`, up to 20 `paths`, `notice`); owner `status` lists them as `unsavedEdits`, and `start` with the same `actor` warns about that actor's Lanes. The edits normally remain in the Lane folder, so `checkpoint` saves them. If the folder is gone, read them with `diff {"from":HEAD,"to":STATE}` and `show {"state":STATE,"path":…}`. Disable with `nforge set-policy ROOT '{"operationId":"UUID","autoSnapshot":false}'`.
 
@@ -446,6 +446,13 @@ coverage diagnostics and billing safety margins do not change execution. Local r
 Node binary bytes and matching scope/selection; unobserved external executables,
 passthrough values and external claims fall back to a normal run. Missing or corrupt
 completion/plan evidence, failed and cancelled runs are never reused.
+
+A batch whose diagnostic run is interrupted or whose local controller is dead
+also searches for a later identical pass before waiting or reopening the original.
+The same source, definition, environment, inputs and runtime evidence checks apply.
+Adoption creates a new virtual receipt and updates the batch prefix; the original
+run and diagnosis remain retained. A cancelled request is not revived, and a live
+controller is left to complete normally.
 
 A reused run records `reusedFrom.runId` and the original completion time. Progress
 and queue status say `reused check <run> from <time>`; the original run owns logs

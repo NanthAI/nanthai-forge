@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { deleteHostedProject, parseDeleteProjectOptions } from './host-delete.js';
 import { readRecoveryInventory } from './recovery-inventory.js';
 import { readAutoExchangeStatus } from './auto-exchange-status.js';
 import { consumeOwnerRequests, startOwnerAcceptanceListener } from './owner-acceptance-consumer.js';
@@ -19,6 +20,16 @@ export async function hostCli(args: string[]) {
   const json = args.includes('--json');
   const [root, ...flags] = args.filter(arg => arg !== '--json');
   invariant(root && !root.startsWith('-'), 'BAD_ARGUMENT', HOST_HELP);
+  if (flags.includes('--delete-project')) {
+    const result = await deleteHostedProject(root, {
+      ...parseDeleteProjectOptions(flags),
+      onProgress: message => {
+        if (json) process.stdout.write(`${JSON.stringify({ type: 'host-delete-progress', message })}\n`);
+        else process.stderr.write(`${message}\n`);
+      },
+    });
+    return json ? { type: 'host-delete-result', ...result } : result;
+  }
   if (flags.length === 1 && flags[0] === '--sync-agent') {
     const store = new WorkStore(root);
     const result = await flushAgentSync(store);

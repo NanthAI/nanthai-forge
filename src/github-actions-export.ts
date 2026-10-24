@@ -36,6 +36,8 @@ export type ActionsJournal = {
   apiFailures?: ActionsFailure[];
   dispatchRejections?: number;
   dispatchLookupExhausted?: boolean;
+  dispatchDiscovery?: { startedAt: string; observations: number };
+  dispatchFailure?: { code: string; message: string };
   dispatchRecoveryUsed?: boolean;
   runId?: number;
   retrying: number[];

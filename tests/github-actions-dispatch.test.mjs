@@ -145,28 +145,25 @@ test('ambiguous timeout observes an eventually visible run without another dispa
 });
 
 for (const legacy of [false, true]) {
-  test(`empty discovery windows never authorize another POST (legacy=${legacy})`, async () => {
+  test(`exhausted discovery is terminal across restarts without another POST (legacy=${legacy})`, async () => {
     const f = fixture({ reject: [new ActionsApiError(503)], runs: () => [] });
     if (legacy) f.journal.dispatching = true;
     for (let window = 0; window < 3; window++) {
-      await assert.rejects(
-        f.control(),
-        error => error.code === 'GITHUB_ACTIONS_UNKNOWN' && error.state === 'pending-infra',
-      );
+      await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED');
       assert.equal(f.journal.dispatchLookupExhausted, true);
       assert.equal(f.journal.dispatchRecoveryUsed, undefined);
       assert.equal(f.calls.filter(call => call.method === 'POST').length, legacy ? 0 : 1);
-      assert.equal(f.journal.discovery.length, window + 1);
+      assert.equal(f.journal.discovery.length, 1);
+      assert.equal(f.journal.terminal, true);
+      assert.equal(f.journal.dispatchDiscovery.observations, 12);
       f.reload();
     }
   });
 }
 
-test('a stranded legacy operation adopts a run discovered beyond its first window', async () => {
-  const f = fixture({ runs: ({ lookups, run }) => (lookups >= 13 ? [run] : []) });
+test('a stranded legacy operation adopts a run before its retained window expires', async () => {
+  const f = fixture({ runs: ({ lookups, run }) => (lookups >= 12 ? [run] : []) });
   f.journal.dispatching = true;
-  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
-  f.reload();
   await f.control();
   assert.equal(f.journal.runId, 10);
   assert.equal(f.journal.dispatchRecoveryUsed, undefined);
@@ -176,16 +173,16 @@ test('a stranded legacy operation adopts a run discovered beyond its first windo
 test('a different run on the branch prevents recovery, even without an exact match', async () => {
   const f = fixture({ runs: ({ run }) => [{ ...run, display_title: 'other' }] });
   f.journal.dispatching = true;
-  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
+  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED');
   assert.equal(f.journal.dispatchRecoveryUsed, undefined);
   assert.equal(f.calls.filter(call => call.method === 'POST').length, 0);
 });
 
 test('an acknowledged dispatch with zero runs is never redispatched on retry', async () => {
   const f = fixture({ runs: () => [] });
-  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
+  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED');
   f.reload();
-  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
+  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED');
   assert.equal(f.journal.dispatchOutcome, 'accepted');
   assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
 });
@@ -355,13 +352,18 @@ test('same-op recovery excludes completed outcomes, cancellation and changed dis
 });
 
 for (const status of [400, 503, undefined]) {
-  test(`ambiguous response ${status} adopts original success in a later discovery window`, async () => {
+  test(`ambiguous response ${status} adopts original success after controller interruptions within the retained window`, async () => {
     const f = fixture({
       reject: [new ActionsApiError(status, { message: 'Synthetic ambiguous response' })],
-      runs: ({ lookups, run }) => (lookups >= 27 ? [run] : []),
+      runs: ({ lookups, run }) => (lookups >= 5 ? [run] : []),
     });
+    let interruptions = 0;
+    f.api.sleep = async () => {
+      if (interruptions++ < 2)
+        throw new ForgeError('SYNTHETIC_INTERRUPTION', 'synthetic controller interruption');
+    };
     for (let window = 0; window < 2; window++) {
-      await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
+      await assert.rejects(f.control(), { code: 'SYNTHETIC_INTERRUPTION' });
       f.reload();
     }
     await f.control();
@@ -374,10 +376,10 @@ for (const status of [400, 503, undefined]) {
   });
 }
 
-test('an HTTP 400 with persistently empty listings stays pending across restarts', async () => {
+test('an HTTP 400 with persistently empty listings stays terminal across restarts', async () => {
   const f = fixture({ reject: [new ActionsApiError(400)], runs: () => [] });
   for (let window = 0; window < 3; window++) {
-    await assert.rejects(f.control(), error => error.state === 'pending-infra');
+    await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED');
     f.reload();
   }
   assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
@@ -391,7 +393,7 @@ test('cancellation after the HTTP 400 lookup window prevents its recovery dispat
   f.api.sleep = async () => {
     cancelled = true;
   };
-  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_UNKNOWN');
+  await f.control();
   assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
   assert.equal(f.journal.dispatchRecoveryUsed, undefined);
 });
@@ -441,9 +443,9 @@ test('historical consumed recovery preserves the original ambiguity even with a 
     dispatchRecoveryUsed: true,
     dispatchStatus: 422,
   });
-  await assert.rejects(f.control(), error => error.state === 'pending-infra');
+  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED');
   f.reload();
-  await assert.rejects(f.control(), error => error.state === 'pending-infra');
+  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED');
   assert.equal(f.calls.filter(call => call.method === 'POST').length, 0);
 });
 
@@ -467,6 +469,40 @@ test('structured diagnostics redact account identifiers and keep documentation a
 test('a rejection marker with an ambiguous HTTP class cannot authorize a dispatch', async () => {
   const f = fixture({ runs: () => [] });
   Object.assign(f.journal, { dispatchOutcome: 'rejected', dispatchStatus: 400 });
-  await assert.rejects(f.control(), error => error.state === 'pending-infra');
+  await assert.rejects(f.control(), error => error.code === 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED');
   assert.equal(f.calls.filter(call => call.method === 'POST').length, 0);
+});
+
+test('legacy exhausted discovery gets one final lookup instead of another window', async () => {
+  const f = fixture({ runs: () => [] });
+  Object.assign(f.journal, {
+    dispatching: true,
+    dispatchOutcome: 'ambiguous',
+    dispatchLookupExhausted: true,
+  });
+  await assert.rejects(f.control(), { code: 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED' });
+  assert.equal(f.calls.filter(call => call.lookup).length, 1);
+  assert.equal(f.waits.length, 0);
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 0);
+});
+
+test('restart retains the discovery deadline and never repeats an ambiguous POST', async () => {
+  const f = fixture({ runs: () => [] });
+  Object.assign(f.journal, {
+    dispatching: true,
+    dispatchOutcome: 'ambiguous',
+    dispatchDiscovery: { startedAt: '2026-01-01T00:00:00.000Z', observations: 2 },
+  });
+  await assert.rejects(f.control(), { code: 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED' });
+  assert.equal(f.journal.dispatchDiscovery.observations, 3);
+  assert.equal(f.calls.filter(call => call.lookup).length, 1);
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 0);
+});
+
+test('cancellation during unresolved dispatch discovery does not wait or send another POST', async () => {
+  const f = fixture({ cancelled: () => true, runs: () => [] });
+  Object.assign(f.journal, { dispatching: true, dispatchOutcome: 'ambiguous' });
+  await f.control();
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.journal.dispatchFailure, undefined);
 });

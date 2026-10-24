@@ -126,6 +126,43 @@ old CLI's pending full-host operation retains its original behavior. The CLI doe
 After the lead deploys, qualify a large native owner and a Git owner against the real provider,
 including credential expiry and restart, before claiming a live-host speedup.
 
+### Permanently delete a hosted project
+
+An owner signed in with `nforge login DEPLOYMENT_URL` (CLI scope) can use the same
+public `projectLifecycle:permanentlyDelete` mutation as the browser:
+
+```sh
+nforge host ROOT --delete-project PROJECT_ID --confirm PROJECT_SLUG
+nforge host ROOT --delete-project PROJECT_ID --confirm PROJECT_SLUG --deployment https://DEPLOYMENT.convex.cloud
+```
+
+`--confirm` must exactly match the current project slug. ROOT can be an unbound
+local Forge owner or a local owner bound to another project; the project ID and
+current owner authentication select the hosted project. Deployment selection uses
+`--deployment`, then ROOT's binding, `FORGE_DEPLOYMENT_URL`, then the saved login's
+default deployment. To delete the project ROOT itself is bound to, explicitly add
+`--allow-bound-project`. The check compares both deployment and project ID.
+
+The command reads the owner's project metadata, retains the operation UUID and
+expected revision privately under ROOT's Work directory before submitting, prints
+progress, and polls for up to sixty observations one second apart. Completion
+prints `purgeComplete: true` and the observed tombstone (`removal: "deleted"`,
+`name: ""`, `currentBackup: null`). `--json` emits progress and result JSON lines.
+A pending purge exits with `HOST_DELETE_PENDING`; an interrupted request or poll
+can be retried with the exact same command and ROOT to reuse its saved pins.
+The entire network observation window is bounded to ninety seconds, including slow
+requests. Owner/authentication and server concurrency errors remain explicit. An
+explicit retry refreshes pins after a definite `WORK_STALE` rejection, or when a
+newer active project revision proves the earlier deletion could not have committed.
+Unknown outcomes retain the original operation and revision.
+
+Permanent removal deletes the project's hosted source, Work, backups, grants and
+project settings through the existing scheduled purge. Its minimal tombstone and
+cleanup receipts remain. Deletion is permanent; local recovery copies remain
+separate. The command retains the local owner, source and hosting binding.
+After deliberately replacing the hosted project, `nforge host ROOT --new` creates
+and binds a replacement.
+
 ### Hosted cockpit index format and team reset
 
 Hosted Work index format **4** includes Candidate Lane/head inputs and dependency counts, run timing,
@@ -155,6 +192,7 @@ project and seed a replacement instead of migrating it. Only the lead performs t
 
 2. In the deployed browser, open the old project → Settings → **Permanently delete project** →
    **Delete project permanently**. Wait for **Project removed**; use **Retry removal** if interrupted.
+   The owner may instead use the [CLI deletion command](#permanently-delete-a-hosted-project).
    This is the existing owner-authorized deletion flow, scoped to that project. It removes hosted
    source, Work, backups, grants, prepared briefing sources, project guidance (including its operation
    history and maintainer assignments) and autonomy policy history. The project tombstone clears its
@@ -303,11 +341,12 @@ Before Lane/check materialization and check execution, Forge probes free space o
 - `lane-deps`: `node_modules`, `dist` and similar gitignored build directories inside completed or abandoned Lanes.
 - `lanes`: the whole directory of a completed or abandoned Lane, only when a capture of it equals the Lane head State; otherwise it is skipped as uncaptured edits. Gitignored files (such as `.env`) are not in State and are deleted with it. `reopen`, `checkpoint`, `sync` and `finish` re-materialize a removed Lane from its head State.
 - `exchange-staging`: unreferenced exchange staging older than seven days. Pending operations, old baseline hints that still depend on staging, and retained export references keep their directories. Pending or explicitly retained export manifests pin only the exact check-file bytes they reference; completed preparation baselines retain staging metadata without pinning owner log prefixes. Unreferenced staging, including staging younger than seven days, does not pin old check files. A log pin does not protect its run’s source or shard work copies.
+- `auto-snapshots`: remove automatic snapshot pointers and caches of completed or abandoned Lanes after strictly more than seven days from both the snapshot and latest Lane closure. Open Lanes are protected regardless of snapshot age; reopening within the window keeps their source protected. Dry-run `disk.kinds` reports the current footprint of all snapshots, including protected open Lanes, with shared State/blob objects counted once. Candidate `bytes` counts pointer/cache bytes; `snapshotBytes` separately reports the referenced State/blob footprint, including shared objects (per-snapshot sums can overlap). Removing a pointer does not delete source objects: `objects` can reclaim only those unreachable from every other retained root. Saved checkpoints are unaffected.
 - `objects` (only when named): wraps `inspect-native-objects` and `collect-native-objects`.
 
 Active and paused Lanes, Work records, referenced objects and anything outside ROOT are never touched. Repeating is safe.
 
-With `lifecycle.cleanRegenerableCopies:true`, terminal checks immediately remove eligible remote source copies and Lane lifecycle events also sweep these copies and the seven-day retention kinds. Retention is automatic only under that existing opt-in; there is no background daemon. It removes old log prefixes permanently and records that fact; rerunning a check reconstructs its source copy, not its original output. A resumed run gets a separate cleanup action for its new terminal end time; repeating the same completion returns its recorded cleanup result. Dry runs do not reconcile or rewrite run records.
+With `lifecycle.cleanRegenerableCopies:true`, terminal checks immediately remove eligible remote source copies and Lane lifecycle events also sweep these copies and the seven-day retention kinds. Retention is automatic only under that existing opt-in; there is no background daemon. It removes old log prefixes and expired closed-Lane auto-snapshot pointers/caches permanently and records that fact; rerunning a check reconstructs its source copy, not its original output. A resumed run gets a separate cleanup action for its new terminal end time; repeating the same completion returns its recorded cleanup result. Dry runs do not reconcile or rewrite run records.
 
 With `lifecycle.cleanRegenerableCopies:true`, Lane completion and abandonment automatically apply the shared cleanup validator under the owner lock; accepted-work completion also sweeps eligible older copies. Preset defaults are unchanged: Autonomous opts in, while other presets and migrated owners retain their existing setting. Automatic whole-Lane cleanup preserves excluded local settings and arbitrary ignored files outside recognized build directories. Dirty, active, pending, in-use or unverifiable copies stay, with reasons recorded alongside removed paths and `reopen`/rebuild instructions in automatic-action receipts. Terminal native checks retain immediate workspace/runtime cleanup across presets after validating and flushing terminal receipts, logs and selected artifacts; run details report removals or skipped copies. Retained source and evidence stay readable. Retrying a completed finish does not re-materialize its removed closed Lane.
 

@@ -706,3 +706,113 @@ test('a main audit does not reuse a scoped pass over identical source', async t 
   });
   assert.equal(await reuseMainCheck(f.work, view, randomUUID(), f.store.load().checks[0]), undefined);
 });
+
+for (const status of ['interrupted', 'running']) {
+  test(`a ${status} diagnostic adopts a later identical pass without altering the old run`, async t => {
+    const f = await prepared(t);
+    const { hostname } = await import('node:os');
+    const { retainDiagnosisNode } = await import('../dist/landing-diagnosis.js');
+    const stalled = {
+      ...f.original,
+      id: f.prefix.runId,
+      viewId: f.prefix.viewId,
+      head: f.prefix.head,
+      status,
+      runner: { pid: 2147483647, host: hostname() },
+      endedAt: undefined,
+      exitCode: undefined,
+      error: { code: 'GITHUB_ACTIONS_PENDING_INFRA', message: 'synthetic pending discovery' },
+    };
+    await batchEdit(f.work, 'stalled-diagnostic', data => {
+      data.runs.push(stalled);
+    });
+    const originalId = stalled.id;
+    await retainDiagnosisNode(f.work, f.batch, f.prefix, undefined, driver, stalled);
+    const retained = f.store.select('runs', originalId);
+    const dispatch = f.work.dispatch.bind(f.work);
+    f.work.dispatch = (...args) => {
+      assert.notEqual(args[0].action, 'run-check', 'a validated passing twin must not dispatch');
+      return dispatch(...args);
+    };
+    assert.equal(await evaluateBatch(f.work, f.store.select('landingBatches', f.batch.id), driver, 0), true);
+    const saved = f.store.select('landingBatches', f.batch.id);
+    const adopted = f.store.select('runs', saved.prefixes[0].runId);
+    assert.notEqual(adopted.id, originalId);
+    assert.equal(adopted.reusedFrom.runId, f.original.id);
+    assert.equal(adopted.status, 'passed');
+    assert.deepEqual(f.store.select('runs', originalId), retained);
+    assert.equal(saved.diagnosis.nodes.find(node => node.runId === originalId).status, status);
+    assert.equal(saved.diagnosis.nodes.find(node => node.runId === adopted.id).status, 'passed');
+    validatePassingPrefix(f.work, saved, saved.prefixes[0]);
+    await advanceLandingBatch(f.work, saved.id, driver);
+    assert.equal(f.store.select('landingEntries', f.entryId).status, 'accepted');
+  });
+}
+
+test('a dead-controller cancellation settles the batch even when a passing twin exists', async t => {
+  const f = await prepared(t);
+  const { hostname } = await import('node:os');
+  const stalled = {
+    ...f.original,
+    id: f.prefix.runId,
+    viewId: f.prefix.viewId,
+    head: f.prefix.head,
+    status: 'running',
+    runner: { pid: 2147483647, host: hostname() },
+    endedAt: undefined,
+    exitCode: undefined,
+  };
+  await batchEdit(f.work, 'cancel-stalled-diagnostic', data => {
+    data.runs.push(stalled);
+  });
+  const result = await f.work.dispatch(
+    { action: 'cancel-check', operationId: stalled.id },
+    f.store.revision(),
+  );
+  assert.equal(result.result.status, 'cancelled');
+  await evaluateBatch(f.work, f.store.select('landingBatches', f.batch.id), driver, 0);
+  await advanceLandingBatch(f.work, f.batch.id, driver);
+  assert.equal(f.store.select('landingEntries', f.entryId).status, 'cancelled');
+  assert.equal(f.store.select('landingBatches', f.batch.id).status, 'completed');
+  assert.equal(f.store.select('landingBatches', f.batch.id).acceptanceId, undefined);
+});
+
+test('a live controller retains its diagnostic identity despite an identical pass', async t => {
+  const f = await prepared(t);
+  const { hostname } = await import('node:os');
+  const pending = {
+    ...f.original,
+    id: f.prefix.runId,
+    viewId: f.prefix.viewId,
+    head: f.prefix.head,
+    status: 'running',
+    runner: { pid: process.pid, host: hostname() },
+    endedAt: undefined,
+    exitCode: undefined,
+  };
+  await batchEdit(f.work, 'live-diagnostic', data => {
+    data.runs.push(pending);
+  });
+  assert.equal(await reuseLandingCheck(f.work, f.batch, f.prefix, driver), undefined);
+  assert.equal(f.store.select('landingBatches', f.batch.id).prefixes[0].runId, pending.id);
+});
+
+test('a passing twin cannot hide changed pins on the retained diagnostic run', async t => {
+  const f = await prepared(t);
+  const stalled = {
+    ...f.original,
+    id: f.prefix.runId,
+    viewId: f.prefix.viewId,
+    head: 'a'.repeat(64),
+    status: 'interrupted',
+    endedAt: undefined,
+    exitCode: undefined,
+  };
+  await batchEdit(f.work, 'changed-diagnostic-pins', data => {
+    data.runs.push(stalled);
+  });
+  const retained = f.store.select('runs', stalled.id);
+  await assert.rejects(reuseLandingCheck(f.work, f.batch, f.prefix, driver), { code: 'EVIDENCE_CHANGED' });
+  assert.equal(f.store.select('landingBatches', f.batch.id).prefixes[0].runId, stalled.id);
+  assert.deepEqual(f.store.select('runs', stalled.id), retained);
+});

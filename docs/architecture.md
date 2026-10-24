@@ -1123,8 +1123,8 @@ redelivered. An ambiguous dispatch gets twelve spaced complete branch lookups,
 then one fresh empty lookup immediately before its single recovery dispatch.
 Nonmatching runs, incomplete lookups and transport errors do not establish an
 empty branch. This hosted adapter retains that recovery allowance. The native
-owner [reconciles ambiguous dispatches across later discovery windows](operations/github-actions-checks.md)
-without redispatch; GitHub offers no atomic idempotency key, so an empty listing
+owner [retains one bounded discovery window across restarts](operations/github-actions-checks.md)
+and ends exhaustion with an infrastructure outcome without redispatch; GitHub offers no atomic idempotency key, so an empty listing
 cannot prove non-execution.
 Multiple exact matches surface an evidence error. No global project scan runs.
 The retained mapping survives terminal-result branch cleanup. Targeted,

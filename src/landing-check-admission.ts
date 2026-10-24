@@ -56,7 +56,8 @@ export async function admitLandingCheck(
   parent?: BatchPrefix,
 ) {
   const store = work.store;
-  const recorded = store.select('runs', prefix.runId);
+  let recorded = store.select('runs', prefix.runId);
+  if (recorded) recorded = (await reuseLandingCheck(work, batch, prefix, driver)) ?? recorded;
   if (recorded && recorded.status !== 'interrupted') {
     validatePrefixRun(work, batch, prefix, recorded);
     await retainDiagnosisNode(work, batch, prefix, parent, driver);

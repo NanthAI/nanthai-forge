@@ -290,7 +290,9 @@ test('agent resumes original journaled native start; partial source is retained'
 });
 test('agent cancellation and unknown process outcome do not replay executable', async () => {
   const root = fixture(true),
-    agent = new AgentWorkflow(root);
+    agent = new AgentWorkflow(root),
+    executionLog = join(root, 'executions.log'),
+    executions = () => (existsSync(executionLog) ? readFileSync(executionLog, 'utf8') : '');
   try {
     const lane = await start(agent),
       cp = await editCheckpoint(agent, lane, 'changed\n'),
@@ -307,7 +309,10 @@ test('agent cancellation and unknown process outcome do not replay executable', 
         action: 'define-check',
         name: 'Long check',
         executable: process.execPath,
-        args: ['-e', 'setTimeout(()=>process.exit(0),10000)'],
+        args: [
+          '-e',
+          `require('node:fs').appendFileSync(${JSON.stringify(executionLog)}, 'started\\n'); setTimeout(()=>process.exit(0),10000)`,
+        ],
       })
     ).result;
     const command = {
@@ -337,29 +342,44 @@ test('agent cancellation and unknown process outcome do not replay executable', 
     ).result;
     assert.equal(cancelled.status, 'cancelled');
     assert.deepEqual(cancelled.cancellation, request);
+    const beforeReplay = executions();
     assert.equal((await agent.dispatch(command)).result.status, 'cancelled');
     const store = agent.work.store;
-    store.locked(() => {
-      const data = store.load();
-      const original = data.runs[0];
-      data.runs.push({
-        ...original,
-        id: randomUUID(),
-        status: 'preparing',
-        runner: { pid: 2147483647, host: original.runner.host },
+    for (const cancelRequested of [false, true]) {
+      const id = randomUUID();
+      store.locked(() => {
+        const data = store.load(),
+          original = data.runs.find(run => run.id === command.operationId),
+          unknown = {
+            ...original,
+            id,
+            status: 'preparing',
+            runner: { pid: 2147483647, host: original.runner.host },
+          };
+        // Unknown completion alone is interrupted. A retained cancellation request
+        // must instead settle as cancelled even without a controller to acknowledge it.
+        if (!cancelRequested) {
+          delete unknown.cancelRequested;
+          delete unknown.cancellation;
+        }
+        delete unknown.endedAt;
+        delete unknown.exitCode;
+        delete unknown.signal;
+        data.runs.push(unknown);
+        data.revision++;
+        store.save(data);
       });
-      data.revision++;
-      store.save(data);
-    });
-    const interrupted = store.load().runs.at(-1);
-    assert.equal(
-      (await agent.dispatch({ action: 'observe', operationId: interrupted.id })).result.status,
-      'interrupted',
-    );
-    assert.equal(
-      (await agent.dispatch({ ...command, operationId: interrupted.id })).result.status,
-      'interrupted',
-    );
+      const expected = cancelRequested ? 'cancelled' : 'interrupted',
+        observed = (await agent.dispatch({ action: 'observe', operationId: id })).result;
+      assert.equal(observed.status, expected);
+      assert.deepEqual(observed.cancellation, cancelRequested ? request : undefined);
+      const replay = { ...command, operationId: id };
+      assert.equal((await agent.dispatch(replay)).result.status, expected);
+      assert.equal((await new AgentWorkflow(root).dispatch(replay)).result.status, expected);
+      assert.equal(store.select('runs', id).status, expected);
+      assert.equal(existsSync(join(store.directory, `check-${id}`)), false);
+      assert.equal(executions(), beforeReplay, 'terminal retries must not execute the check again');
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

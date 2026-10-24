@@ -103,12 +103,17 @@ HTTP status, rather than an interrupted check.
 Ambiguous dispatch responses, including HTTP 400, transport failure, HTTP 5xx and
 unknown status, preserve the original POST outcome. HTTP 400 uses a two-minute
 lookup window (thirteen reads, ten seconds apart); other unknown or acknowledged
-responses use the longer existing window. Later reconciliation opens another
-discovery window for the same repository, branch, commit and run title. An exact
-matching execution is adopted; duplicate matches remain an evidence error. Empty
-listings never license a recovery dispatch. Historical journals, including those
-with a consumed recovery allowance, also only observe their unresolved original
-execution. An acknowledged but undiscovered execution remains adoptable.
+responses use twelve reads over at most five and a half minutes. The journal
+retains the start and observation count across controller restarts. An exact
+matching execution is adopted; duplicate matches remain an evidence error.
+Exhaustion records terminal infrastructure outcome
+`GITHUB_ACTIONS_DISCOVERY_EXHAUSTED`, without a source verdict. Legacy exhausted
+journals get one final lookup. The run is no longer automatically reopened.
+Empty listings never license another ambiguous or accepted POST: GitHub has no
+idempotency key. If only the push reply was lost, observing its exact commit
+permits the original `workflow_dispatch` once; a definitively rejected dispatch
+can still retry as described above. The ref and original identities remain
+available to inspect a late execution before starting a new check.
 
 This is an evidence policy, not an exactly-once provider guarantee: Forge cannot
 prove that an ambiguous POST or push did not execute. Only a retained definitive
@@ -167,8 +172,13 @@ replacement is unresolved. Recovery uses the original source, definition, shard
 selection, repository and runner label even if current runner settings change;
 new settings apply to new operations. Durable recovery receipts explicitly wake
 the owner landing worker, including before Work metadata reconciliation.
-Unrecoverable incomplete runs are interrupted; requested cancellation cancels the
-retained Actions run and records cancellation only after observing it terminal.
+Unrecoverable incomplete runs are interrupted. A live controller requests provider
+cancellation and observes the retained execution. If the local controller is dead,
+the cancel command or worker recovery promptly writes a terminal `cancelled`
+receipt and releases the submission. It retains provider identities and explicitly
+reports that provider cancellation is unconfirmed; it does not claim the remote
+execution stopped or delete its ref. An unresolved dispatch can also complete
+local cancellation without waiting through discovery.
 When a newer Candidate supersedes the checked Candidate in the same Intent and
 Lane-input family, the controller cancels only the retained older execution.
 Each new run retains the latest family Candidate when requested, so a fresh explicit

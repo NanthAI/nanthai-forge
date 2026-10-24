@@ -14,6 +14,7 @@ import { prepareNativeExchange, pushNativeExchange, type ExchangeTransport } fro
 import { readHostState, updateHostState, type HostState } from './host-binding.js';
 import { ForgeError, invariant } from './errors.js';
 export const HOST_HELP = `nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--new] [--json] [--wait]
+nforge host ROOT --delete-project PROJECT_ID --confirm SLUG [--deployment URL] [--allow-bound-project] [--json]
 nforge host ROOT --listen
 nforge host ROOT --status
 nforge host ROOT --no-auto-sync | --auto-sync

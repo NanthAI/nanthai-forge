@@ -28,16 +28,9 @@ export class ActionsDispatchRejected extends ForgeError {
 }
 const rejected = (journal: ActionsJournal) =>
   new ActionsDispatchRejected(journal.dispatchStatus!, journal.dispatchRejections!, journal.dispatchError);
-export class ActionsDispatchUnknown extends ForgeError {
-  readonly state = 'pending-infra';
-  constructor(
-    readonly httpStatus?: number,
-    readonly response?: ActionsFailure,
-  ) {
-    super(
-      'GITHUB_ACTIONS_UNKNOWN',
-      `pending-infra: Actions dispatch outcome unresolved${httpStatus === undefined ? '' : ` (HTTP ${httpStatus})`}; retained dispatch must be reconciled.${actionsFailureText(response)}`,
-    );
+export class ActionsDispatchExhausted extends ForgeError {
+  constructor(failure: { code: string; message: string }) {
+    super(failure.code, failure.message);
   }
 }
 
@@ -94,7 +87,9 @@ export async function ensureActionsDispatch(
   cancelled: () => boolean,
   progress: (message: string) => void,
   executionAllowed = true,
+  now = Date.now,
 ) {
+  if (journal.dispatchFailure) throw new ActionsDispatchExhausted(journal.dispatchFailure);
   if (journal.runId) return;
   const branch = `forge-check/${plan.runId}`,
     base = `repos/${journal.repo}/actions`;
@@ -122,23 +117,46 @@ export async function ensureActionsDispatch(
     }
   };
   const lookup = async () => {
-    // The window bounds this observation only; zero matches never authorizes another POST.
     const short = journal.dispatchOutcome === 'ambiguous' && journal.dispatchStatus === 400;
     const polls = short ? 13 : 12;
-    for (let attempt = 0; attempt < polls; attempt++) {
+    // Legacy exhausted windows get one final fresh observation, never a new window.
+    journal.dispatchDiscovery ??= {
+      startedAt:
+        journal.dispatchAttempts?.at(-1)?.startedAt ??
+        journal.branchEvidence?.find(evidence => evidence.commit === journal.commit)?.observedAt ??
+        new Date(now()).toISOString(),
+      observations: journal.dispatchLookupExhausted ? polls - 1 : 0,
+    };
+    save();
+    const window = journal.dispatchDiscovery;
+    for (;;) {
+      if (cancelled()) return;
       adopt(await readRuns());
-      if (journal.runId) return;
-      if (attempt < polls - 1) await api.sleep(short ? 10_000 : Math.min(60_000, 5_000 * (attempt + 1)));
+      window.observations++;
+      save();
+      if (journal.runId || cancelled()) return;
+      if (window.observations >= polls || now() - Date.parse(window.startedAt) >= (short ? 120_000 : 330_000))
+        return;
+      await api.sleep(short ? 10_000 : Math.min(60_000, 5_000 * window.observations));
     }
   };
-  const unknown = () => {
+  const exhausted = () => {
+    if (cancelled()) return;
     journal.dispatchLookupExhausted = true;
-    (journal.discovery ??= []).push({ phase: 'dispatch', observedAt: new Date().toISOString(), matches: 0 });
+    (journal.discovery ??= []).push({
+      phase: 'dispatch',
+      observedAt: new Date(now()).toISOString(),
+      matches: 0,
+    });
+    journal.dispatchFailure = {
+      code: 'GITHUB_ACTIONS_DISCOVERY_EXHAUSTED',
+      message:
+        'No matching GitHub Actions run appeared within the retained discovery window. Infrastructure ended without a source verdict. Inspect the retained ref, dispatch diagnostics and GitHub workflow registration, then start a new check. The original dispatch may still appear later; its ambiguous or accepted POST was not repeated.',
+    };
+    journal.terminal = true;
     save();
-    progress(
-      'pending-infra: no matching run visible yet; later discovery will adopt the original execution. No dispatch repeated.',
-    );
-    throw new ActionsDispatchUnknown(journal.dispatchStatus, journal.dispatchError);
+    progress(journal.dispatchFailure.message);
+    throw new ActionsDispatchExhausted(journal.dispatchFailure);
   };
 
   const definitiveRejection =
@@ -152,7 +170,7 @@ export async function ensureActionsDispatch(
     save();
     await lookup();
     if (journal.runId) return;
-    unknown();
+    return exhausted();
   }
 
   invariant(executionAllowed, 'UNSUPPORTED_NODE', 'Retained Actions runtime cannot start a new execution.');
@@ -161,12 +179,13 @@ export async function ensureActionsDispatch(
     // Revalidate visibility even after a definitive 404/422 rejection.
     await visibleBranch(plan, journal, api, progress, save);
     if (cancelled()) return;
-    const attempt: ActionsAttempt = { outcome: 'ambiguous' };
+    const attempt: ActionsAttempt = { outcome: 'ambiguous', startedAt: new Date(now()).toISOString() };
     (journal.dispatchAttempts ??= []).push(attempt);
     journal.dispatching = true;
     // A crash before recording the response must be treated as ambiguous.
     journal.dispatchOutcome = 'ambiguous';
     journal.dispatchLookupExhausted = false;
+    journal.dispatchDiscovery = { startedAt: attempt.startedAt!, observations: 0 };
     delete journal.dispatchStatus;
     delete journal.dispatchError;
     save();
@@ -210,5 +229,5 @@ export async function ensureActionsDispatch(
   if (!journal.dispatching) return;
   await lookup();
   if (journal.runId) return;
-  unknown();
+  return exhausted();
 }

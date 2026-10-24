@@ -46,13 +46,18 @@ const cacheSchema = z.object({
   entries: z.array(z.tuple([z.string(), z.string(), oid, z.enum(['file', 'executable', 'symlink'])])),
 });
 
-const directory = (store: WorkStore) => join(store.directory, 'auto-snapshots');
-const pointerPath = (store: WorkStore, laneId: string) => join(directory(store), `${laneId}.json`);
-const cachePath = (store: WorkStore, laneId: string) => join(directory(store), `${laneId}.cache.json`);
+export const autoSnapshotDirectory = (store: WorkStore) => join(store.directory, 'auto-snapshots');
+const pointerPath = (store: WorkStore, laneId: string) =>
+  join(autoSnapshotDirectory(store), `${laneId}.json`);
+const cachePath = (store: WorkStore, laneId: string) =>
+  join(autoSnapshotDirectory(store), `${laneId}.cache.json`);
 /** Short publication section shared only with native object collection. */
 export function withAutoSnapshotLock<T>(store: WorkStore, run: () => T, waitMs = 2_000): T {
-  mkdirBelow(store.directory, directory(store));
-  return workLocked(join(directory(store), 'lock'), run, { waitMs, operation: 'auto-snapshot publication' });
+  mkdirBelow(store.directory, autoSnapshotDirectory(store));
+  return workLocked(join(autoSnapshotDirectory(store), 'lock'), run, {
+    waitMs,
+    operation: 'auto-snapshot publication',
+  });
 }
 
 export function readAutoSnapshot(store: WorkStore, laneId: string): AutoSnapshot | undefined {
@@ -73,7 +78,7 @@ function readCache(store: WorkStore, laneId: string) {
 }
 function writeCache(store: WorkStore, laneId: string, cache: Map<string, CacheEntry>) {
   const entries = [...cache].map(([path, entry]) => [path, entry.key, entry.blob, entry.mode]);
-  mkdirBelow(store.directory, directory(store));
+  mkdirBelow(store.directory, autoSnapshotDirectory(store));
   writeRecoveryState(cachePath(store, laneId), { schema: 1, entries });
 }
 function statKey(root: string, path: string) {
@@ -85,7 +90,8 @@ function statKey(root: string, path: string) {
  * snapshot whose parent is no longer the head was superseded by a checkpoint. */
 export function autoSnapshotNotice(store: WorkStore, lane: Pick<Lane, 'id' | 'head' | 'state'>) {
   const snapshot = readAutoSnapshot(store, lane.id);
-  if (!snapshot || snapshot.parent !== lane.head || lane.state === 'completed') return undefined;
+  if (!snapshot || snapshot.parent !== lane.head || ['completed', 'abandoned'].includes(lane.state))
+    return undefined;
   return {
     state: snapshot.state,
     at: snapshot.at,
@@ -99,7 +105,7 @@ export function autoSnapshotNotice(store: WorkStore, lane: Pick<Lane, 'id' | 'he
 export function autoSnapshotNotices(store: WorkStore, actor?: string) {
   let names: string[];
   try {
-    names = readdirSync(directory(store)).filter(name => /^[0-9a-f-]{36}\.json$/.test(name));
+    names = readdirSync(autoSnapshotDirectory(store)).filter(name => /^[0-9a-f-]{36}\.json$/.test(name));
   } catch {
     return [];
   }
@@ -108,24 +114,6 @@ export function autoSnapshotNotices(store: WorkStore, actor?: string) {
     if (!lane || (actor && lane.startedBy?.name !== actor)) return [];
     const notice = autoSnapshotNotice(store, lane);
     return notice ? [{ laneId: lane.id, path: store.path(lane.id), ...notice }] : [];
-  });
-}
-/** Collection retains the latest snapshot of every Lane; superseded ones are collectable. */
-export function autoSnapshotObjects(store: WorkStore, source = new NativeSource(store.root)) {
-  let names: string[];
-  try {
-    names = readdirSync(directory(store)).filter(name => /^[0-9a-f-]{36}\.json$/.test(name));
-  } catch {
-    return [];
-  }
-  return names.flatMap(name => {
-    const snapshot = readAutoSnapshot(store, name.slice(0, -5));
-    if (!snapshot) return [];
-    try {
-      return [snapshot.state, ...source.state(snapshot.state).files.map(file => file.blob)];
-    } catch {
-      return [];
-    }
   });
 }
 
@@ -143,7 +131,8 @@ export function snapshotLane(store: WorkStore, laneId: string): AutoSnapshotResu
   if (!store.native) return { status: 'skipped', reason: 'not-native' };
   if (readPolicy(store).autoSnapshot === false) return { status: 'skipped', reason: 'disabled' };
   const outer = store.select('lanes', laneId);
-  if (!outer || outer.state === 'completed') return { status: 'skipped', reason: 'inactive' };
+  if (!outer || ['completed', 'abandoned'].includes(outer.state))
+    return { status: 'skipped', reason: 'inactive' };
   if (pending(outer)) return { status: 'skipped', reason: 'merge-pending' };
   if (!existsSync(store.path(laneId))) return { status: 'skipped', reason: 'missing' };
   try {
@@ -160,7 +149,8 @@ export function snapshotLane(store: WorkStore, laneId: string): AutoSnapshotResu
 function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
   const began = Date.now();
   const lane = store.select('lanes', laneId);
-  if (!lane || lane.state === 'completed') return { status: 'skipped', reason: 'inactive' };
+  if (!lane || ['completed', 'abandoned'].includes(lane.state))
+    return { status: 'skipped', reason: 'inactive' };
   if (pending(lane)) return { status: 'skipped', reason: 'merge-pending' };
   const root = store.path(laneId),
     source = new NativeSource(store.root),
@@ -176,7 +166,7 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
   ).map(path => {
     const before = statKey(root, path),
       hit = cache.get(path);
-    if (hit?.key === before) {
+    if (hit?.key === before && existsSync(join(source.directory, hit.blob))) {
       next.set(path, hit);
       if (!headBlobs.has(hit.blob)) written.add(hit.blob);
       return { path, blob: hit.blob, mode: hit.mode };
@@ -203,7 +193,7 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
     saveCache();
     return { status: 'clean', reread, ms: elapsed() };
   }
-  if (prior?.parent === lane.head && prior.tree === tree) {
+  if (prior?.parent === lane.head && prior.tree === tree && existsSync(join(source.directory, prior.state))) {
     saveCache();
     return { status: 'unchanged', reread, ms: elapsed() };
   }
@@ -211,6 +201,8 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
     state = source.writeState(files, [lane.head], 'Auto-snapshot of unsaved Lane edits', at),
     paths = changedPaths(head.files, files);
   const published = withAutoSnapshotLock(store, () => {
+    const current = store.select('lanes', laneId);
+    if (!current || ['completed', 'abandoned'].includes(current.state)) return false;
     // Collection may have removed an object written before this lock; retry later.
     for (const id of [state, ...written]) if (!existsSync(join(source.directory, id))) return false;
     writeRecoveryState(pointerPath(store, laneId), {
