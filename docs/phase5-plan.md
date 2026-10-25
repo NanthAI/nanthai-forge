@@ -320,7 +320,7 @@ Each result is published next to the 2.36× burst-4 figure in [why-forge](why-fo
 
 ### E1. Live overlap-alert replay ×5
 
-- **Status:** running 2026-10-24; published week 1. **Cost:** about $10.
+- **Status:** published. Run 1 (2026-10-24, d57) passed all three bars, but only 37 of 90 overlapping agent-pair×file combinations reached both agents. Run 2 (2026-10-25, d59, after overlap ranking) reached 90 of 90 at save time and 84 of 90 in both transcripts, but only 2 of 5 replays delivered the first alert to both agents before the second save: alerts arrive with an agent's next Forge call, and in three replays that call was the second save, 1–3.5 s later. Delivery at first write (B3.1) is the fix. Results: forge-bench `results/E1-2026-10-24.md` and `results/E1-2026-10-25.md`. **Cost:** about $10.
 - **Method:** on a scratch owner seeded from main, four Codex agents edit the same three docs, plus eight concurrent finishes, five repetitions. Record alerts per overlapping save, time from the first overlapping save to an alert in the agent's transcript, `WORK_STALE` and `WORK_BUSY` counts, and dropped landings.
 - **Bar:** at least 4 of 5 replays deliver an alert to both agents before the second save; 0 of 40 finishes dropped; 0 `WORK_STALE` visible to agents.
 
@@ -332,7 +332,7 @@ Each result is published next to the 2.36× burst-4 figure in [why-forge](why-fo
 
 ### E3. Failing-change burst-4 vs a tuned merge queue
 
-- **Status:** running 2026-10-24; published week 1. **Cost:** about $5.
+- **Status:** published 2026-10-24: **the bar failed**. The tuned GitHub merge queue landed the three good changes in a median 189 s; Forge took 989 s (about 5.2× slower; about 2.4× even if every Forge check had been as fast as a GitHub PR check). Neither side landed the bad change or turned main red. The landing work that answers it is in [Landing without an operator](#landing-without-an-operator-q) and Bet 2. Result: forge-bench `results/E3-2026-10-24.md`. **Cost:** about $5.
 - **Method:** P2 burst-4 on Blacksmith with one of four changes failing a test, three runs each side. GitHub's merge queue is tuned (batching and `max_entries_to_build`), not default.
 - **Bar:** Forge lands the three good changes faster than the tuned queue and never lands the bad one.
 

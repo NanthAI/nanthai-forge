@@ -1,8 +1,8 @@
 # Roadmap
 
-What we are doing, in what order, and why. Six phases. Phases 1–3 are done. Phase 4 is in progress. Phase 5 is private alpha; Phase 6 is public beta. Open work items live in the [backlog](backlog.md); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
+What we are doing, in what order, and why. Six phases. Phases 1–4 are done. Phase 5 is next. Phase 5 is private alpha; Phase 6 is public beta. Open work items live in the [backlog](backlog.md); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
 
-Last updated: 2026-10-24.
+Last updated: 2026-10-25.
 
 ## Direction
 
@@ -52,7 +52,7 @@ Delivered:
 
 Closed on 2026-10-20. Current measurements and capabilities are in [status](status.md). Remaining work follows below and in the [backlog](backlog.md).
 
-## Phase 4: we're happy using it (in progress)
+## Phase 4: we're happy using it (done)
 
 Goal: the Forge team uses Forge end to end on its own project and is happy with it.
 
@@ -68,6 +68,8 @@ Started on 2026-10-21. Work in order:
 8. **Closure fixes — added 2026-10-24**: automatic Lane snapshots after file changes, read-only commands that never write, no-op landings that finish themselves without empty GitHub commits.
 
 Moved to Phase 5: the agent-coordination benchmark (forge-bench R3), which now runs after overlap at first write exists (Bet 3), and the big-backlog push measurement.
+
+Closed on 2026-10-25. Experiments E1 and E3 are published in [why-forge](why-forge.md#when-one-change-in-the-burst-fails): overlap alerts now reach every overlapping pair at save time, but not always before the next save; with one failing change, a tuned GitHub merge queue landed about 5.2× faster. Both feed Phase 5. Closing also fixed two idle Convex cost leaks: a sync drainer that retried a failing publish, and a project-delete purge that rescheduled itself forever.
 
 ## Phase 5: one authority, three bets, then private alpha (planned)
 

@@ -25,8 +25,8 @@ docs-only changes retain the ordinary finish path.
 
 Peers and presence show other agents' announced or observed files and work.
 Agents can spot overlap, exchange messages and hand work off before a conflict.
-These observations are advisory and can be incomplete. Coordination quality has
-not yet been measured.
+These observations are advisory and can be incomplete. Alert delivery has been
+measured (below); whether alerts make agents' work better has not.
 
 ## Measured landing throughput
 
@@ -58,6 +58,31 @@ landed in a median 57 s on Forge versus 172 s on GitHub (3.0×, 3 / 3 runs), and
 four-change burst in 310 s versus 678 s (2.2×, 3 / 2 runs; one GitHub run was cut
 short by the operator's job time limit). Main stayed green with zero retries on
 both sides; Forge ran 4 checks per burst, the merge queue 12.
+
+### When one change in the burst fails
+
+Measured on **2026-10-24** (E3), on the same Blacksmith runners, with one of four
+burst changes deliberately failing a test. GitHub's merge queue was tuned
+(batching and `max_entries_to_build`), not left at its defaults. **GitHub was
+faster:** it put the three good changes on main in a median 189 s; Forge took
+989 s (3 / 3 valid runs each side). That is about 5.2×; even if every Forge check
+had been as fast as a GitHub PR check, GitHub would still be about 2.4× faster.
+Neither side landed the bad change or turned main red, and Forge used fewer check
+jobs (20–25 against 48–54). Forge isolates a failure by checking prefixes one
+after another, and that serial recovery is what lost. The fix is planned in the
+[Phase 5 plan](phase5-plan.md#landing-without-an-operator-q).
+
+### Overlap alerts between live agents
+
+Measured on **2026-10-24 and 2026-10-25** (E1): four Codex agents edited the same
+paragraphs of three documents while eight Lanes finished at once, five replays per
+run. No finish was dropped (0 / 40) and no agent saw `WORK_STALE` or `WORK_BUSY`.
+On the current build every overlapping agent pair and file raised an alert at save
+time (90 / 90), and 84 / 90 reached both agents' transcripts. Alerts arrive with an
+agent's next Forge call, so a fast second save can come first: only 2 / 5 replays
+delivered the first alert to both agents before the second save. Delivery at first
+write is planned. Sources: the forge-bench results `E1-2026-10-24.md`,
+`E1-2026-10-25.md` and `E3-2026-10-24.md`.
 
 This measures landing throughput of completed changes. It does not measure agent
 coding time, total development time, token use or coordination quality. R3, the
