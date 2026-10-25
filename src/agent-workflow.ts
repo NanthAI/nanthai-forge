@@ -68,17 +68,7 @@ import { readMakingOf, reportUsage } from './making-of-read.js';
 import type { CheckRun, WorkView, WorkData } from './work-types.js';
 export { agentActionSchema, type AgentAction } from './agent-workflow-schema.js';
 import type { AgentAction } from './agent-workflow-schema.js';
-const readOnlyActions = new Set([
-  'status',
-  'tests',
-  'peers',
-  'review',
-  'diff',
-  'show',
-  'brief',
-  'handoff-read',
-  'improve',
-]);
+import { READ_ONLY_ACTIONS, SNAPSHOT_READ_ACTIONS } from './agent-read-actions.js';
 export class AgentWorkflow {
   readonly work: WorkService;
   constructor(
@@ -165,7 +155,7 @@ export class AgentWorkflow {
             ...(settings.action ? { phase: settings.action } : {}),
           },
           () =>
-            readOnlyActions.has(settings.action ?? '')
+            SNAPSHOT_READ_ACTIONS.has(settings.action ?? '')
               ? this.work.store.observing(() => this.dispatchAction(parsed, retainedResolved))
               : this.dispatchAction(parsed, retainedResolved),
         ),
@@ -236,7 +226,7 @@ export class AgentWorkflow {
     const ownershipStop =
       command.action === 'take' && (response.result as { status: string }).status === 'ownership';
     const hostedSync =
-      ownershipStop || command.action === 'handoff' || readOnlyActions.has(command.action)
+      ownershipStop || command.action === 'handoff' || READ_ONLY_ACTIONS.has(command.action)
         ? undefined
         : queueAgentSync(store, command, response.result, false, this.liveMcp ? 'MCP call' : undefined);
     let links: unknown;
