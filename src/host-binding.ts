@@ -29,6 +29,7 @@ const binding = z.object({
   name: z.string(),
   visibility: z.enum(['private', 'public']),
   backupId: z.string(),
+  workIndexPreparation: z.uuid().optional(),
   autoSync: z.boolean().optional(),
   acceptanceOwner: z.boolean().optional(),
   /** Local executable; never imported from portable Work policy. */

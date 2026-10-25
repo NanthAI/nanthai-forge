@@ -6,6 +6,7 @@ import { readRecoveryInventory } from './recovery-inventory.js';
 import { readAutoExchangeStatus } from './auto-exchange-status.js';
 import { consumeOwnerRequests, startOwnerAcceptanceListener } from './owner-acceptance-consumer.js';
 import { flushAgentSync } from './agent-hosted-sync.js';
+import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { spawn } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,11 +59,15 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
     return;
   }
   if (flags.length === 1 && ['--no-auto-sync', '--auto-sync'].includes(flags[0]!)) {
-    return updateHostState(new WorkStore(root), state => {
+    const store = new WorkStore(root);
+    const result = updateHostState(store, state => {
       invariant(state.binding, 'HOST_NOT_BOUND', 'Host this owner first.');
       state.binding.autoSync = flags[0] === '--auto-sync';
+      if (state.binding.autoSync) markAgentSyncPrepared(state, state.binding);
       return { autoSync: state.binding.autoSync, sourcePush: 'explicit' };
     });
+    if (result.autoSync) startAgentSyncWorker(store);
+    return result;
   }
   if (flags[0] === '--spend-command' || flags[0] === '--no-spend-command') {
     const command = flags[0] === '--spend-command' ? flags[1] : undefined;

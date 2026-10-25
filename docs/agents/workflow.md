@@ -339,7 +339,13 @@ Unsent metadata snapshots coalesce to the highest revision per session; newer
 presence-only observations remain separately until a metadata snapshot supersedes
 them, and expire after 15 minutes. The queue retains at most 100 entries and 512 KiB
 of payloads, evicting oldest presence first; status records the discarded count.
-Rejected application entries are discarded with the latest 20 error diagnostics,
+`PROJECT_WORK_INDEX_MISSING` retains the queued metadata and records the local
+index-preparation/source pin. While that pin is unchanged, neither coordination
+nor metadata publication retries, regardless of elapsed time or new presence.
+A successful local hosting/index preparation, source push, or `nforge host ROOT --auto-sync`
+(operator retry after an external prepare) resumes the sender. The drainer never
+prepares hosted Work itself. Other rejected application entries are discarded with
+the latest 20 error diagnostics,
 then later entries continue. Network, timeout, rate-limit, server and authentication
 failures retain exact payloads and back off from one second up to five minutes.
 The next lifecycle command or presence signal retries after backoff; an explicit

@@ -1,3 +1,4 @@
+import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { withBoundPushProgress } from './bound-push-progress.js';
 import { currentExchangeProgress } from './exchange-progress-hooks.js';
 import { acknowledgePendingExchange } from './pending-exchange.js';
@@ -267,10 +268,12 @@ async function boundExchangeAction(
       // completed while its upload was in flight.
       if (state.binding?.projectId === binding.projectId && state.binding.deployment === binding.deployment)
         state.binding = { ...state.binding, backupId: result.backupId };
+      markAgentSyncPrepared(state, binding);
       if (state.push?.operationId === request.operationId) delete state.push;
       if (state.pendingPushes)
         state.pendingPushes = state.pendingPushes.filter(push => push.operationId !== request.operationId);
     });
+    startAgentSyncWorker(store);
     if (result.pendingCoverage) acknowledgePendingExchange(store, result.pendingCoverage);
     return {
       ...result,

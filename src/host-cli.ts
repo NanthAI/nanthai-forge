@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { retainRecoveryCapture } from './recovery-capture.js';
 import { join } from 'node:path';
 import { hostProgress, type ProgressSink } from './host-progress.js';
@@ -201,12 +202,14 @@ export async function hostProject(
         'Hosting operation changed.',
       );
       if (!pending.ready) state.binding = binding;
+      markAgentSyncPrepared(state, binding);
       if (!pending.currentFirst) delete state.hosting;
       else {
         pending.ready = true;
         state.hosting = { ...pending };
       }
     });
+    startAgentSyncWorker(store);
     if (pending.currentFirst) {
       progress.phase('ready; history backfilling');
       if (options.deferBackfill)

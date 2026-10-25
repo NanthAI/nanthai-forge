@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, readFileSync, statSync, rmSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { getFunctionName } from 'convex/server';
+import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
@@ -13,7 +13,7 @@ import { readHostState, updateHostState } from '../dist/host-binding.js';
 import { compactAgentSync } from '../dist/agent-sync-state.js';
 import { agentSyncError } from '../dist/agent-sync-error.js';
 import { flushAgentSync } from '../dist/agent-hosted-sync.js';
-import { startAgentSyncWorker } from '../dist/agent-sync-worker.js';
+import { startAgentSyncWorker, markAgentSyncPrepared } from '../dist/agent-sync-worker.js';
 import { CheckQueue } from '../dist/check-queue.js';
 import { hostCli } from '../dist/host-command.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
@@ -76,7 +76,7 @@ for (const phase of ['projectCoordination:publish', 'projectOwnerSync:publish'])
       mutation: async (ref, args) => {
         if (args.operationId === first.operationId && getFunctionName(ref) === phase)
           throw new ConvexError({
-            code: phase.includes('Owner') ? 'PROJECT_WORK_INDEX_MISSING' : 'COORDINATION_STALE',
+            code: phase.includes('Owner') ? 'BAD_ARGUMENT' : 'COORDINATION_STALE',
             message: 'Synthetic rejected entry',
           });
         published.push(args.operationId);
@@ -100,6 +100,145 @@ for (const phase of ['projectCoordination:publish', 'projectOwnerSync:publish'])
     assert.match(formatPendingStatus(owner), /seq 1.*attempts 1.*Synthetic rejected entry/);
   });
 }
+
+for (const phase of ['projectCoordination:publish', 'projectOwnerSync:publish']) {
+  test(`unprepared Work at ${phase} gates both publishes across time and restart, then preserves replay after prepare`, async t => {
+    const first = entry(1),
+      second = entry(2),
+      store = fixture(t, [first, second]);
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    let prepared = false;
+    const calls = [];
+    const client = {
+      mutation: async (ref, args) => {
+        const name = getFunctionName(ref);
+        calls.push({ name, args: structuredClone(args) });
+        if (!prepared && name === phase)
+          throw new ConvexError({ code: 'PROJECT_WORK_INDEX_MISSING', message: 'Prepare hosted Work.' });
+      },
+      action: async (ref, args) => {
+        assert.equal(getFunctionName(ref), 'projectWorkIndexActions:ensure');
+        assert.equal(args.projectId, first.projectId);
+        prepared = true;
+      },
+    };
+    await flushAgentSync(store, client);
+    const before = calls.length;
+    assert.equal(before, phase.includes('Owner') ? 2 : 1);
+    assert.deepEqual(readHostState(store).agentSync.pending, [first, second]);
+    assert.equal(readHostState(store).agentSync.rejected, undefined);
+    assert.equal(readHostState(store).agentSync.nextAttemptAt, undefined);
+    const restarted = new WorkStore(store.root);
+    for (let hour = 0; hour < 24 * 7; hour++) {
+      t.mock.timers.tick(3_600_000);
+      updateHostState(restarted, () => {});
+      assert.equal(startAgentSyncWorker(restarted), false);
+      await flushAgentSync(restarted, client);
+    }
+    const third = entry(3);
+    updateHostState(restarted, state => {
+      state.agentSync.pending.push(third);
+    });
+    assert.equal(startAgentSyncWorker(restarted), false);
+    await flushAgentSync(restarted, client);
+    assert.equal(calls.length, before);
+    assert.deepEqual(readHostState(restarted).agentSync.pending, [first, second, third]);
+    const sender = new CheckQueue(join(store.directory, 'hosted-agent-sync-spawn'), {
+      limit: 1,
+      anchor: store.directory,
+    });
+    assert.equal(sender.tryAcquire(), true);
+    try {
+      updateHostState(restarted, state =>
+        markAgentSyncPrepared(state, { projectId: 'unrelated', deployment: first.deployment }),
+      );
+      await flushAgentSync(restarted, client);
+      assert.equal(calls.length, before);
+      // The owner-side prepare caller signals only after the fake action succeeds.
+      await client.action(makeFunctionReference('projectWorkIndexActions:ensure'), {
+        projectId: first.projectId,
+      });
+      updateHostState(restarted, state =>
+        markAgentSyncPrepared(state, { projectId: first.projectId, deployment: first.deployment }),
+      );
+      await flushAgentSync(restarted, client);
+    } finally {
+      sender.release();
+    }
+    assert.deepEqual(
+      calls.slice(before),
+      [first, second, third].flatMap(item => [
+        {
+          name: 'projectCoordination:publish',
+          args: { projectId: item.projectId, operationId: item.operationId, command: item.activity },
+        },
+        {
+          name: 'projectOwnerSync:publish',
+          args: { projectId: item.projectId, operationId: item.operationId, metadata: item.metadata },
+        },
+      ]),
+    );
+    assert.equal(readHostState(restarted).agentSync.pending.length, 0);
+    assert.equal(readHostState(restarted).agentSync.unprepared, undefined);
+    assert.equal(readHostState(restarted).agentSync.headError, undefined);
+  });
+}
+
+test('source checkpoint change and explicit operator retry release the unprepared gate', async t => {
+  const first = entry(1),
+    store = fixture(t, [first]);
+  const missing = {
+    mutation: async () => {
+      throw new ConvexError({ code: 'PROJECT_WORK_INDEX_MISSING' });
+    },
+  };
+  await flushAgentSync(store, missing);
+  updateHostState(store, state => {
+    state.binding.backupId = 'prepared-source';
+  });
+  const published = [];
+  await flushAgentSync(store, {
+    mutation: async ref => {
+      published.push(getFunctionName(ref));
+    },
+  });
+  assert.deepEqual(published, ['projectCoordination:publish', 'projectOwnerSync:publish']);
+  updateHostState(store, state => {
+    state.agentSync.pending.push(entry(2));
+  });
+  await flushAgentSync(store, missing);
+  const sender = new CheckQueue(join(store.directory, 'hosted-agent-sync-spawn'), {
+    limit: 1,
+    anchor: store.directory,
+  });
+  assert.equal(sender.tryAcquire(), true);
+  try {
+    await hostCli([store.root, '--auto-sync']);
+    await flushAgentSync(store, { mutation: async () => {} });
+  } finally {
+    sender.release();
+  }
+  assert.equal(readHostState(store).agentSync.pending.length, 0);
+});
+
+test('a prepare completed during publication does not leave a stale unprepared gate', async t => {
+  const first = entry(1),
+    store = fixture(t, [first]);
+  let calls = 0;
+  await flushAgentSync(store, {
+    mutation: async () => {
+      if (++calls === 1) {
+        updateHostState(store, state =>
+          markAgentSyncPrepared(state, { projectId: first.projectId, deployment: first.deployment }),
+        );
+        throw new ConvexError({ code: 'PROJECT_WORK_INDEX_MISSING' });
+      }
+    },
+  });
+  assert.equal(calls, 3);
+  assert.equal(readHostState(store).agentSync.pending.length, 0);
+  assert.equal(readHostState(store).agentSync.unprepared, undefined);
+});
 
 test('transient failure backs off exact payloads and repeated commands do not spawn', async t => {
   const first = entry(1),

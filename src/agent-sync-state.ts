@@ -24,11 +24,22 @@ export const agentSyncSchema = z.object({
   ),
   headError: syncErrorSchema.optional(),
   nextAttemptAt: z.number().optional(),
+  unprepared: z.string().optional(),
   rejected: z.array(syncErrorSchema).optional(),
   discarded: z.number().optional(),
 });
 export type AgentSyncState = z.infer<typeof agentSyncSchema>;
 export type SyncEntry = AgentSyncState['pending'][number];
+/** Changes only when local preparation/source publication or an operator can make a retry useful. */
+export const syncIndexState = (binding?: {
+  operationId: string;
+  backupId: string;
+  workIndexPreparation?: string | undefined;
+}) => JSON.stringify([binding?.operationId, binding?.backupId, binding?.workIndexPreparation]);
+export const syncUnprepared = (state: {
+  agentSync?: AgentSyncState | undefined;
+  binding?: Parameters<typeof syncIndexState>[0];
+}) => state.agentSync?.unprepared === syncIndexState(state.binding);
 const activity = (entry: SyncEntry) =>
   entry.activity as { sessionId?: string; sequence?: number; activityAt?: number };
 const metadata = (entry: SyncEntry) => {

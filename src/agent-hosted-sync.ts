@@ -22,7 +22,7 @@ import { readWorkFile } from './work-records.js';
 import { workLockWaitMs } from './work-lock.js';
 import { startAgentSyncWorker } from './agent-sync-worker.js';
 import { agentSyncError } from './agent-sync-error.js';
-import { syncSequence } from './agent-sync-state.js';
+import { syncIndexState, syncSequence, syncUnprepared } from './agent-sync-state.js';
 
 function sessionId(binding: string, lane: string, actor: string) {
   const bytes = createHash('sha256')
@@ -264,11 +264,13 @@ export async function flushAgentSync(store: WorkStore, supplied?: Pick<ConvexHtt
           pending = state.agentSync?.pending.find(item => !attempted.has(item.operationId));
         if (
           !pending ||
+          syncUnprepared(state) ||
           state.binding?.autoSync === false ||
           (state.agentSync?.nextAttemptAt ?? 0) > Date.now()
         )
           return { pending: state.agentSync?.pending.length ?? 0 };
         attempted.add(pending.operationId);
+        const indexState = syncIndexState(state.binding);
         try {
           let client = supplied;
           if (!client) {
@@ -297,6 +299,7 @@ export async function flushAgentSync(store: WorkStore, supplied?: Pick<ConvexHtt
               current.agentSync.pending = current.agentSync.pending.filter(
                 item => item.operationId !== pending.operationId,
               );
+              delete current.agentSync.unprepared;
               if (current.agentSync.headError?.operationId === pending.operationId) {
                 delete current.agentSync.headError;
                 delete current.agentSync.nextAttemptAt;
@@ -305,9 +308,11 @@ export async function flushAgentSync(store: WorkStore, supplied?: Pick<ConvexHtt
           });
         } catch (error) {
           const failure = agentSyncError(error);
+          const unprepared = failure.code === 'PROJECT_WORK_INDEX_MISSING';
           updateHostState(store, current => {
             const queue = current.agentSync;
             if (!queue) return;
+            if (unprepared && syncIndexState(current.binding) !== indexState) return;
             const attempts =
               queue.headError?.operationId === pending.operationId ? queue.headError.attempts + 1 : 1;
             queue.headError = {
@@ -318,7 +323,10 @@ export async function flushAgentSync(store: WorkStore, supplied?: Pick<ConvexHtt
               attempts,
               operationId: pending.operationId,
             };
-            if (failure.transient)
+            if (unprepared) {
+              queue.unprepared = indexState;
+              delete queue.nextAttemptAt;
+            } else if (failure.transient)
               queue.nextAttemptAt = Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(attempts - 1, 9));
             else {
               (queue.rejected ??= []).push(queue.headError);
@@ -326,7 +334,11 @@ export async function flushAgentSync(store: WorkStore, supplied?: Pick<ConvexHtt
               delete queue.nextAttemptAt;
             }
           });
-          if (failure.transient)
+          if (unprepared && !syncUnprepared(readHostState(store))) {
+            attempted.delete(pending.operationId); // A prepare completed while publication was in flight.
+            continue;
+          }
+          if (unprepared || failure.transient)
             return { pending: readHostState(store).agentSync?.pending.length ?? 0, code: failure.code };
         }
       }
