@@ -372,10 +372,9 @@ Inspection counts objects and lists verified unreferenced candidates, and change
 ## One authority cutover
 
 This is the Bet 1 cutover procedure for [Phase 5](phase5-plan.md#bet-1-one-authority-then-delete),
-not a claim that the project has switched. At this inventory baseline,
-`convex/projectSourceAuthority.ts` exposes only `current`;
-`src/hosted-source-authority.ts` supplies the pure `nextSourceAuthority` CAS helper.
-B1.2a owns the transition mutation and writer fences, B1.2c the seed. Follow the
+not a claim that the project has switched. The authority transition mutation,
+epoch fences and journaled native client are implemented and qualified locally
+below. The complete pinned hosted recovery/cutover still needs B1.5a/B1.5b. Follow the
 [migration invariants](operations/hosted-landing-contract.md#migration-invariants-deferred-implementation)
 throughout. No deployment, account operation or real-owner cutover was performed
 for this document.
@@ -415,10 +414,10 @@ zero-dropped-landings invariant; the live zero is still to be measured by M1/B1.
 
 ### Ordered cutover and forced upgrade
 
-1. **B1.2a — transition and all-writer fencing.** Expose an authenticated,
-   operation-idempotent mutation in `convex/projectSourceAuthority.ts` that uses
-   `nextSourceAuthority(current, expected, targetMode)` and commits the new epoch
-   with the expected main **head and receipt**, native Work revision, hosted
+1. **B1.2a — transition and all-writer fencing.** The authenticated mutation in
+   `convex/projectSourceAuthority.ts` uses `nextSourceAuthority` and retains an
+   operation-idempotent mode/epoch receipt. Before real cutover, qualify that
+   transition together with the expected main **head and receipt**, native Work revision, hosted
    source/journal revision and validated seed/snapshot pins. Both forward and
    rollback directions are required. `server-shadow` still leaves the owner in
    charge. Fence `ownerAcceptance.complete`, `projectExchange.publish`,
@@ -503,36 +502,45 @@ pins. Retain the matching package/lockfile and these private inputs off-owner:
   backup of hosted tables. Runner/auth/keyring configuration stays separately
   backed up through the existing private process.
 
-**Rollback is another transition, not an epoch rewind or a file-copy failover.**
-First reconcile unknown hosted acceptances under their original IDs and drain
-hosted in-flight landings with delivered terminal outcomes. Fold the **latest**
-server main/receipts and all subsequent hosted records through B1.5a into a new
-native recovery copy; compare its bytes and receipts before publishing it. Then
-use the B1.2a mutation, driven by `nextSourceAuthority`, with the currently
-observed server mode/epoch and main head/receipt, source/Work/snapshot pins, to
-select `native-owner` at **current epoch + 1**. If forward cutover was epoch E+1,
-rollback is at least E+2. B1.2a must expose that reverse target, CAS pins, durable
-idempotent receipt and fencing of late server callbacks as well as old-owner
-writers. Rebind the selected owner at the returned epoch, restart observations
-from authoritative records (deduplicate retained IDs), then resume native
-admission. An outage or an old local backup never authorizes this transition.
-If the backend cannot perform the CAS or the latest hosted work cannot be folded,
-owner-authority rollback is unavailable; keep the snapshots and reconcile when
-it returns. B1.2a and B1.5a need qualification together before the real switch.
+**Return to owner authority by another transition, at a higher epoch:**
 
-At the pre-switch point a restore loses no saved, included source/Work; unfinished
-recorded runs become interrupted and are not restarted. Beyond that point the old
-snapshot alone omits every later hosted save, note, acceptance, pending submission
-and completion overlay. Those must be folded/reconciled, preserving original
-receipt and operation identities; accepted work is never replayed as a new accept.
-A terminally failed request is not automatically resubmitted. Pending work resumes
-only through its reconciled identity/current owner; paid executions with unknown
-outcomes are not duplicated. Uncheckpointed edits after the snapshot need their
-separate saved copy, and caches/dependencies/runner workspaces are rebuilt.
-Historic journal bytes/digests are never rewritten. Deleting the old owner stack
-in B1.6 narrows software rollback: retain the compatible pre-deletion package;
-returning to owner then requires it plus a lossless, format-compatible folded
-snapshot. Keeping a backup is not proof that this post-deletion path works.
+1. Reconcile unknown hosted acceptances using their original operation IDs. Drain
+   hosted in-flight landings to delivered terminal outcomes, as for the forward
+   switch. Keep editing and saves available while landing waits.
+2. Fold the **latest** hosted main, receipts, saved Lanes, records and completion
+   overlays through B1.5a into a new native recovery package. The pre-switch
+   `export-work` archive is the rollback baseline; it omits later hosted work.
+   Never replay already accepted work as a new acceptance. Keep the original
+   request hashes and receipt identities.
+3. Restore the archive into a fresh folder with a compatible package:
+   `node dist/cli.js restore-native "$ARCHIVE" "$NEW_OWNER"`. Compare accepted
+   main through its Channel receipt, all saved Lane heads and source bytes, and
+   logical Work records. The returned top-level `head` is the native bootstrap
+   State, not necessarily accepted main. Restore validates hashes and source
+   closure, reconstructs physical record pages, and marks unfinished runs
+   interrupted without launching commands. Keep dirty/ignored edits separately.
+4. Perform the B1.2a reverse CAS from the currently observed server mode/epoch to
+   `native-owner` at **current epoch + 1**, with the qualified cutover's matching
+   source/Work/main-receipt/snapshot pins. Forward at E+1 means reverse at E+2 or
+   later. Retain the transition UUID for an unknown reply; replay reconciles the
+   existing receipt. An older local epoch never grants permission to accept.
+5. Rebind the recovered owner at the returned epoch, resume observations from
+   authoritative records, and resume native admission with original pending
+   identities. Terminal failures are not automatically resubmitted; an unknown
+   paid execution is not duplicated. Caches and runner workspaces can be rebuilt.
+
+**If hosted is down, landing pauses and editing continues.** Keep the snapshots,
+local edits and original operation IDs, then reconcile when hosted returns. If
+hosted cannot execute the CAS or its latest records cannot be folded, rollback
+cannot complete. There is no emergency override, epoch rewind or local file-copy
+failover. The full source/Work-pinned reverse path still needs B1.5a/B1.5b
+qualification before the real switch; the local mode/epoch drill below does not
+establish that path.
+
+Deleting the old owner stack in B1.6 narrows software rollback. Retain the
+compatible pre-deletion package and a lossless folded snapshot. Historical
+journal bytes and digests stay unchanged. Keeping an archive alone does not prove
+that the post-deletion path works.
 
 ### Local rollback qualification
 
@@ -545,38 +553,72 @@ npm run build:core
 node scripts/phase5-rollback-drill.mjs
 ```
 
-The assert-based drill accepts no owner argument and always creates a throwaway
-native project under `/tmp/forge-b1-rollback-*`. It calls the existing CLI paths:
+For dogfood scale, add `--clone-owner "$FORGE_OWNER"`. The source owner is
+only read: the script pins its atomic Work pointer, runs `cp -c -R` into a fresh
+throwaway directory, and removes copied bindings, credentials, dotenv files and
+local worker endpoints before constructing an owner service. It uses no shell,
+real hosted project, account or deployment. Only the copy's automation/provider
+policy is neutralized. Both modes delete the copies, archive and restored owner
+in `finally`; the JSON result confirms `copyDeleted`.
 
-```sh
-node dist/cli.js init-native "$SCRATCH/owner"
-node dist/cli.js work "$SCRATCH/owner" '{"action":"export-work","archive":true}' 6
-node dist/cli.js restore-native "$ARCHIVE" "$SCRATCH/restored"
-node dist/cli.js work "$SCRATCH/restored" '{"action":"inspect-native-objects"}' 6
-```
+The drill calls the actual `projectSourceAuthority:transition` mutation through
+the same in-memory local fake as the transition tests. It switches native epoch 0
+→ server epoch 1, saves one local Lane change, exports its full Work archive,
+restores it, compares source States and logical Work/Lane/acceptance records,
+then reverses to native epoch 2. It reconciles a repeated reverse UUID and
+checkpoints, composes and accepts another edit locally at the returned epoch.
+The saved change is local; this does not simulate hosted-only recovery folding.
 
-**Observed: exit 0.** A real synthetic native acceptance was snapshotted at Work
-revision 6, then the original scratch owner accepted a different head. The archive
-restored its earlier accepted main and receipt, all three text/binary/executable
-files and modes, and byte-identical portable Work records; deep comparison of
-hydrated records also passed. Verification inspected six retained objects
-(1,036 bytes), with no candidates, removals or malformed objects. The original
-owner still selected its later acceptance. `restore-native`'s top-level `head`
-is the native bootstrap State: the drill checks accepted main through its Channel
-receipt and materializes that exact State separately, rather than mistaking the
-restored root files for selected main. Physical immutable `records/` page layout
-is reconstructed, so byte identity here means source objects and portable logical
-records, not identical page filenames or obsolete pages. The drill also asserts
-that export did not change Work. Scratch copies remain for inspection.
+The default synthetic drill first creates accepted `main` distinct from the native
+bootstrap State. Its regression test verifies that the drill pins that acceptance
+as its Intent base, round-trips both Lanes and lands after epoch 2. This catches a
+bootstrap-based Candidate that would correctly fail with `CHANNEL_DIVERGED`.
 
-The existing native verification command is `inspect-native-objects` plus
-restore's manifest/hash validation; there is no standalone `verify-native` CLI.
-The script adds exact source/record assertions. No recorded product check is
-started by restore. **Unrun:** the hosted transition mutation and stale-epoch
-fences (B1.2a), drain/admission concurrency, hosted-only recovery folding (B1.5a),
-actual reverse transition, clean-machine Route A/Route B drills and seven-day
-single-authority observation (B1.5b). The local result establishes the native
-snapshot rollback point only, not hosted cutover correctness or production RPO/RTO.
+**Dogfood qualification: exit 0; copies deleted.** The copy contained 527 Lanes. All source-State and logical Work comparisons
+passed; the one unfinished run became interrupted without restarting a command.
+The reverse CAS reached epoch 2, reconciled its original UUID, and the restored
+owner checkpointed, composed and accepted locally. The archive contained 19,888
+files: **1,296,268,470 compressed bytes**, **4,231,746,621 logical bytes**.
+Observed on one Mac with other builders running:
+
+| Step | Seconds |
+| --- | ---: |
+| APFS clone and credential/binding scrub | 229.457 |
+| Isolate the copy's automation/provider policy | 35.625 |
+| Create a Lane pinned to accepted main | 40.418 |
+| Forward transition: native 0 → server 1 | 0.057 |
+| Edit and checkpoint | 3.799 |
+| Archive export | 387.089 |
+| Full archive restore, including run interruption | 603.070 |
+| Compare source States, Lanes and Work records | 11.833 |
+| Reverse transition: server 1 → native 2 | 0.031 |
+| Checkpoint, compose and accept locally | 100.518 |
+| Delete the throwaway owner, restored owner and archive | 192.323 |
+
+The earlier argv-only fix exported 19,859 files in 403.384 s, but its original
+restore was still incomplete after 630 s: 233 of 527 Lanes had materialized.
+Native sampling showed repeated per-file `fsync` calls. Restore now stages each
+Lane inside the unpublished private owner and publishes the owner as a whole,
+preserving independent writable files, failure cleanup and the existing space
+check. The completed restore remains just over ten minutes; these observations
+are not a production recovery-time guarantee. Physical record-page filenames may
+differ; logical records differ only by the documented interruption.
+The restore profile attributed 195.075 s to 528 materializations (root plus Lanes)
+and 7.112 s to Work loading. The remaining time includes archive processing,
+validation and publication of indexed records for the interrupted run. The shared
+record writer and checkpoint code were not changed by this archive qualification.
+
+Archive filenames use a NUL-delimited stdin list, and native metadata output is
+spooled privately. USTAR/gzip and the existing archive schemas remain unchanged;
+old archives still restore. The live-copy helper tolerates only vanished temporary
+owner locks/files that it discards anyway. Missing durable records or source,
+permission failures and other copy errors still fail; source and Work validation
+remain mandatory parts of the drill.
+
+**Unrun:** real hosted cutover and drain/admission concurrency, hosted-only
+recovery folding (B1.5a), clean-machine Route A/Route B and seven days of single
+hosted authority (B1.5b). Local fake transitions and archive recovery are not
+production RPO/RTO measurements.
 
 ### Deletion inventory and last callers
 

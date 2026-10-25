@@ -15,9 +15,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { packWorkArchive, withWorkArchive, validateArchiveEntrySizes } from '../dist/work-backup-archive.js';
+import { initNative } from '../dist/native-work.js';
+import { NativeSource } from '../dist/native-source.js';
+import { WorkStore } from '../dist/work-store.js';
+import { exportNativeWork } from '../dist/native-backup.js';
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const invalid = error => error.code === 'INVALID_WORK_BACKUP';
 function fixture(t) {
@@ -78,6 +82,82 @@ async function archive(root, count = 1, claimedDelta = 0) {
     originals,
   };
 }
+
+test('owner archive export exceeds ARG_MAX without putting its file list on argv', async t => {
+  const root = fixture(t),
+    owner = join(root, 'owner');
+  mkdirSync(owner);
+  initNative(owner);
+  const source = new NativeSource(owner),
+    store = new WorkStore(owner),
+    data = store.load(),
+    argMax = Number(execFileSync('getconf', ['ARG_MAX'], { encoding: 'utf8' }).trim()),
+    count = Math.ceil(argMax / Buffer.byteLength(`objects/${'0'.repeat(64)}\0`)) + 128,
+    files = Array.from({ length: count }, (_, index) => {
+      const bytes = Buffer.from(String(index)),
+        blob = sha(bytes);
+      // Seed tiny immutable fixtures directly; this test exercises export, not
+      // the per-object durability flush already covered by source-store tests.
+      writeFileSync(join(source.directory, blob), bytes, { flag: 'wx', mode: 0o600 });
+      return { path: `file-${index}.txt`, blob, mode: 'file' };
+    });
+  data.nativeHead = source.writeState(files, [], 'Synthetic large archive', new Date().toISOString());
+  store.save(data);
+  const names = files.map(file => `objects/${file.blob}`);
+  assert(Buffer.byteLength(names.join('\0')) > argMax);
+  const oldInvocation = spawnSync('tar', ['-cf', '/dev/null', '--', ...names], { cwd: owner });
+  assert.equal(oldInvocation.error?.code, 'E2BIG', 'Fixture must reproduce the old argv failure');
+  const backup = (await exportNativeWork(store, data.revision, true)).result;
+  assert.equal(backup.files, count + 2); // Work plus the State and its blobs.
+  assert(backup.archive.size > 0);
+  await withWorkArchive(backup.archive.path, async directory => {
+    assert.equal(readdirSync(join(directory, 'objects')).length, count + 1);
+    assert.deepEqual(readFileSync(join(directory, names.at(-1))), Buffer.from(String(count - 1)));
+  });
+});
+
+test('archives written by the old argv-based packer still restore', async t => {
+  const root = fixture(t),
+    backup = await archive(root),
+    directory = join(root, 'source'),
+    oldArchive = join(root, 'old.tar.gz');
+  execFileSync(
+    'tar',
+    [
+      '--format=ustar',
+      '-czf',
+      oldArchive,
+      '--',
+      ...readdirSync(directory).filter(name => name !== 'objects'),
+      ...[...backup.originals.keys()].filter(name => name.startsWith('objects/')),
+    ],
+    { cwd: directory },
+  );
+  await withWorkArchive(oldArchive, async extracted => {
+    for (const [path, bytes] of backup.originals)
+      assert.deepEqual(readFileSync(join(extracted, path)), bytes);
+  });
+});
+
+test('owner-sized manifest metadata is not truncated by the native command output buffer', async t => {
+  const root = fixture(t),
+    backup = await archive(root),
+    directory = join(root, 'source');
+  const manifest = Buffer.from(
+    JSON.stringify({
+      ...JSON.parse(readFileSync(join(directory, 'manifest.json'))),
+      coverage: 'synthetic retained coverage '.repeat(200_000),
+    }),
+  );
+  assert(manifest.length > 4 * 1024 * 1024);
+  writeFileSync(join(directory, 'manifest.json'), manifest);
+  const packed = await packWorkArchive(directory, [...backup.originals.keys()]);
+  await withWorkArchive(packed.path, async extracted => {
+    assert.deepEqual(readFileSync(join(extracted, 'manifest.json')), manifest);
+    for (const [path, bytes] of backup.originals)
+      assert.deepEqual(readFileSync(join(extracted, path)), bytes);
+  });
+});
 
 test('one native extraction restores every original byte with private modes, without per-file decompression', async t => {
   const root = fixture(t),

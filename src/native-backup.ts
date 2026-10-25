@@ -33,6 +33,7 @@ import { invariant } from './errors.js';
 import { packWorkArchive, withWorkArchive } from './work-backup-archive.js';
 import { validateNativeArchiveRecords } from './native-archive-validation.js';
 import { nativeReachable } from './native-reachable.js';
+import { diskGuard } from './disk-guard.js';
 import {
   artifactArchivePlan,
   deduplicateArtifactFiles,
@@ -323,9 +324,16 @@ async function restoreDirectory(
       warnings: string[] = [];
     try {
       source.materialize(manifest.head, materialized, false);
-      // Keep every eager Lane inside scratch until all independent files exist.
-      for (const lane of data.lanes)
-        warnings.push(...source.materialize(lane.head, join(work, `lane-${lane.id}`)));
+      // This whole owner is private until the final publication below. Use a
+      // sibling staging name so ordinary live-Lane publication does not flush
+      // every file for each historical Lane. Immutable source remains retained
+      // and all independent working files must exist before owner publication.
+      for (const lane of data.lanes) {
+        const staged = join(work, `restore-${lane.id}`);
+        warnings.push(...diskGuard(owner));
+        warnings.push(...source.materialize(lane.head, staged));
+        renameSync(staged, join(work, `lane-${lane.id}`));
+      }
     } finally {
       source.dispose();
     }

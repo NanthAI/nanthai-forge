@@ -91,7 +91,7 @@ test('Lane materialization failure keeps destination absent and cleans scratch w
     target = join(f.parent, 'failed'),
     original = NativeMaterialization.prototype.materialize;
   NativeMaterialization.prototype.materialize = function (id, path, marker = true) {
-    if (path.endsWith(`lane-${f.lanes[1].id}`))
+    if (path.endsWith(f.lanes[1].id))
       throw Object.assign(new Error('Simulated disk failure'), { code: 'ENOSPC' });
     return original.call(this, id, path, marker);
   };
@@ -102,6 +102,21 @@ test('Lane materialization failure keeps destination absent and cleans scratch w
   }
   assert.equal(existsSync(target), false);
   assert.deepEqual(readdirSync(f.parent), []);
+  assert.equal(readFileSync(join(f.exported.path, 'manifest.json'), 'utf8'), f.exported.json);
+});
+
+test('private owner staging preserves the existing Lane free-space check before publication', async t => {
+  const f = await fixture(t),
+    target = join(f.parent, 'disk-low'),
+    previous = process.env.FORGE_DISK_BLOCK_GB;
+  process.env.FORGE_DISK_BLOCK_GB = '1000000000';
+  try {
+    await assert.rejects(restoreNativeWork(f.exported.path, target), error => error.code === 'DISK_LOW');
+  } finally {
+    if (previous === undefined) delete process.env.FORGE_DISK_BLOCK_GB;
+    else process.env.FORGE_DISK_BLOCK_GB = previous;
+  }
+  assert.equal(existsSync(target), false);
   assert.equal(readFileSync(join(f.exported.path, 'manifest.json'), 'utf8'), f.exported.json);
 });
 

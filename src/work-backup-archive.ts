@@ -3,9 +3,11 @@ import { childEnv } from '../scripts/child-env.mjs';
 import { execFileSync, spawn } from 'node:child_process';
 import {
   chmodSync,
+  closeSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -20,24 +22,41 @@ import { artifactArchivePlan, materializeArtifactAliases } from './native-artifa
 
 const code = 'INVALID_WORK_BACKUP';
 const env = () => childEnv({ extra: { LC_ALL: 'C' } });
-function tar(args: string[], cwd: string): Buffer {
+function tar(args: string[], cwd: string, input?: Buffer): Buffer {
+  const scratch = mkdtempSync(join(tmpdir(), 'forge-tar-')),
+    output = join(scratch, 'stdout');
+  let fd: number | undefined;
   try {
-    return execFileSync('tar', args, {
+    fd = openSync(output, 'wx', 0o600);
+    // Owner-sized manifests/listings can also exceed execFile's pipe buffer.
+    // Spool native stdout privately, then read the complete metadata as before.
+    execFileSync('tar', args, {
       cwd,
       env: env(),
       maxBuffer: 4 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      input,
+      stdio: [input ? 'pipe' : 'ignore', fd, 'pipe'],
     });
+    return readFileSync(output);
   } catch {
     throw new ForgeError(
       code,
       'Native tar could not process this backup. Original source and Work are preserved.',
     );
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    rmSync(scratch, { recursive: true, force: true });
   }
 }
 export async function packWorkArchive(directory: string, files: string[]) {
   const path = `${directory}.tar.gz`;
-  tar(['--format=ustar', '-czf', path, '--', 'manifest.json', ...files], directory);
+  // Keep argv constant at owner scale. NUL-delimited names are literal on both
+  // BSD and GNU tar; no shell or file-list option interpretation is involved.
+  tar(
+    ['--format=ustar', '-czf', path, '--null', '-T', '-'],
+    directory,
+    Buffer.from(['manifest.json', ...files, ''].join('\0')),
+  );
   chmodSync(path, 0o600);
   invariant(
     tar(['-tzf', path], directory).toString().trim().split('\n').sort().join('\n') ===
