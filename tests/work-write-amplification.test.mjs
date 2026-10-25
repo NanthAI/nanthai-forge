@@ -227,6 +227,10 @@ test('empty automatic cleanup writes no action, record or revision', t => {
 });
 
 test('status, making-of, accounting, push and coverage readers agree with legacy fan-out', t => {
+  // Freeze before either selector creates its timestamped audit Candidate, not
+  // just before reading: making-of includes those events in its wall-clock span.
+  const now = Date.parse(at) + 1_000;
+  t.mock.timers.enable({ apis: ['Date'], now });
   const { store, data } = fixture(t),
     legacy = structuredClone(data);
   const selected = selectMainAudit(data),
@@ -267,13 +271,9 @@ test('status, making-of, accounting, push and coverage readers agree with legacy
       coverage: latestCheckCoverage(store, run.head),
     };
   };
-  // Observation timestamps are injected by each making-of read. Both reads see one
-  // clock so a millisecond between them cannot change event-derived times.
-  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const before = inspect(legacy),
     after = inspect(data);
-  t.mock.timers.reset();
-  delete before.makingOf.observedAt;
-  delete after.makingOf.observedAt;
+  assert.equal(after.makingOf.lastEventAt, new Date(now).toISOString());
+  assert.equal(after.makingOf.wallClockMs, now - Date.parse(at));
   assert.deepEqual(after, before);
 });
