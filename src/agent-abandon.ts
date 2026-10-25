@@ -201,7 +201,8 @@ export function agentAbandon(store: WorkStore, command: Command, attribution?: W
       const saved = store
         .readRecords()
         ?.fieldFind('lanes', lane.id, 'checkpoints', operationId, 'operation') as
-        Lane['checkpoints'][number] | undefined;
+        | Lane['checkpoints'][number]
+        | undefined;
       if (!saved && !dirty(store, lane)) continue;
       if (!store.native && !saved) workGit(store.path(lane.id), ['add', '--all']);
       const savedReceipt = agentCheckpoint(

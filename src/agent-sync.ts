@@ -204,11 +204,13 @@ export function agentSync(
       });
       const changed = (message: string) => invariant(false, 'WORK_OPERATION_CHANGED', message) as never;
       const original = tx.fieldFind('lanes', lane.id, 'checkpoints', command.operationId, 'operation') as
-        Lane['checkpoints'][number] | undefined;
+        | Lane['checkpoints'][number]
+        | undefined;
       const resolved =
         original ??
         (tx.fieldFind('lanes', lane.id, 'checkpoints', command.operationId, 'syncOperation') as
-          Lane['checkpoints'][number] | undefined);
+          | Lane['checkpoints'][number]
+          | undefined);
       if (resolved?.sync?.operation?.id === command.operationId) {
         if (resolved.sync.operation.request !== hash)
           changed('Sync operation inputs changed. Original source remains.');

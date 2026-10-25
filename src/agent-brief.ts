@@ -33,13 +33,15 @@ async function readBrief(store: WorkStore, input: unknown, liveMcp: boolean): Pr
     try {
       hosted = await read();
     } catch (error) {
-      if (!(
-        error instanceof ConvexError &&
-        typeof error.data === 'object' &&
-        error.data !== null &&
-        'code' in error.data &&
-        error.data.code === 'WORK_STALE'
-      ))
+      if (
+        !(
+          error instanceof ConvexError &&
+          typeof error.data === 'object' &&
+          error.data !== null &&
+          'code' in error.data &&
+          error.data.code === 'WORK_STALE'
+        )
+      )
         throw error;
       await client.action(makeFunctionReference<'action'>('projectWorkIndexActions:ensure'), { projectId });
       hosted = await read();

@@ -20,6 +20,10 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex']) {
       mkdirSync(join(root, directory), { recursive: true });
     for (const name of ['verify.mjs', 'verify-queue.mjs'])
       write(`scripts/${name}`, readFileSync(`scripts/${name}`));
+    write(
+      'scripts/oxc.mjs',
+      `import { appendFileSync } from 'node:fs'; appendFileSync('oxc.jsonl', JSON.stringify(process.argv.slice(2)) + '\\n');`,
+    );
     write('tests/worker-budget.mjs', 'export const workerBudget = () => 2;');
     write('scripts/test-files.mjs', 'export const fileTimeout = () => 1000;');
     write(
@@ -78,6 +82,7 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex']) {
         .trim()
         .split('\n')
         .map(JSON.parse);
+    assert.deepEqual(calls('oxc').sort(), [['format:check'], ['lint']]);
     assert.deepEqual(calls('legacy'), [
       ['-p', 'web/tsconfig.json'],
       ['-p', 'convex/tsconfig.json', '--noEmit'],

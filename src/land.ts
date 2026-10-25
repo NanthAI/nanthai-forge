@@ -192,10 +192,12 @@ async function landOnce(
           try {
             await drainLandingBatches(work, command.channel, command.waitMs, cancelSelected);
           } catch (error) {
-            if (!(
-              error instanceof ForgeError &&
-              ['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)
-            ))
+            if (
+              !(
+                error instanceof ForgeError &&
+                ['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)
+              )
+            )
               throw error;
             drainIssue = error;
           }

@@ -135,3 +135,39 @@ test('native compiler and fallback build project references and reject a broken 
     assert.match(broken.stdout, /TS2322/);
   }
 });
+
+test('compiler unused checks cover all projects and permit underscore parameters', t => {
+  for (const path of [
+    'tsconfig.json',
+    'web/tsconfig.json',
+    'convex/tsconfig.json',
+    'netlify/tsconfig.json',
+  ]) {
+    const config = JSON.parse(readFileSync(path, 'utf8'));
+    assert.equal(config.compilerOptions.noUnusedLocals, true, path);
+    assert.equal(config.compilerOptions.noUnusedParameters, true, path);
+  }
+  const root = fixture(t);
+  writeFileSync(
+    join(root, 'tsconfig.json'),
+    JSON.stringify({
+      compilerOptions: { ...options, noUnusedLocals: true, noUnusedParameters: true },
+      files: ['probe.ts'],
+    }),
+  );
+  for (const compiler of compilers) {
+    writeFileSync(
+      join(root, 'probe.ts'),
+      ['const unusedLocal = 1;', 'export function value(unusedParameter: number) { return 1; }'].join('\n'),
+    );
+    const bad = compile(root, compiler, ['--noEmit']);
+    assert.notEqual(bad.status, 0, bad.stdout + bad.stderr);
+    assert.equal([...bad.stdout.matchAll(/error TS6133:/g)].length, 2, bad.stdout);
+    writeFileSync(
+      join(root, 'probe.ts'),
+      'export function value({ item }: { item: number }, _unused: number) { void item; }',
+    );
+    const good = compile(root, compiler, ['--noEmit']);
+    assert.equal(good.status, 0, good.stdout + good.stderr);
+  }
+});

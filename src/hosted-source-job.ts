@@ -88,9 +88,13 @@ export type SourceDispatch = {
   dispatchKey: string;
 };
 export type SourceDispatchResult =
-  { status: 'accepted'; executionId: string } | { status: 'rejected' } | { status: 'unknown' };
+  | { status: 'accepted'; executionId: string }
+  | { status: 'rejected' }
+  | { status: 'unknown' };
 export type SourceLookup =
-  { status: 'found'; executionId: string } | { status: 'empty'; authoritative: true } | { status: 'unknown' };
+  | { status: 'found'; executionId: string }
+  | { status: 'empty'; authoritative: true }
+  | { status: 'unknown' };
 /** Adapters must submit idempotently by dispatchKey, including concurrent/lost
  * replies. An eventually consistent empty search is UNKNOWN, never authoritative
  * absence. Adapters may not retry a non-idempotent paid request underneath this API. */

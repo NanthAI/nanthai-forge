@@ -16,7 +16,8 @@ type Index =
   | { available: true; paths: (ReviewPath & { add?: number; del?: number })[] }
   | { available: false; reason: string };
 type File =
-  { available: true; file: ReviewPath; comparison: Comparison } | { available: false; reason: string };
+  | { available: true; file: ReviewPath; comparison: Comparison }
+  | { available: false; reason: string };
 /** Manifest first, then only the selected file. No source is fetched to populate the file list. */
 export function HostedLaneChanges({
   projectId,

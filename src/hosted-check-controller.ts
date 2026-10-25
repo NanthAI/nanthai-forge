@@ -16,7 +16,9 @@ export type HostedCheckDispatch = Pick<
   | 'planDigest'
 >;
 export type HostedCheckDispatchResult =
-  { status: 'accepted'; executionId: string } | { status: 'unknown' } | { status: 'rejected' };
+  | { status: 'accepted'; executionId: string }
+  | { status: 'unknown' }
+  | { status: 'rejected' };
 export interface HostedCheckProvider {
   readonly id: string;
   /** Stable dispatchKey must be deduplicated by the adapter/provider, including

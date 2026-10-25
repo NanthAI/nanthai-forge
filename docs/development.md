@@ -9,7 +9,7 @@ The CLI and standard check refuse other Node versions with `UNSUPPORTED_NODE`. T
 ```sh
 npm ci --ignore-scripts      # locked install, no lifecycle scripts
 npm run verify               # check + format:check + typecheck + lint + build + test, run concurrently
-npm run format               # prettier --write; run before committing
+npm run format               # oxfmt --write; run before committing
 ```
 
 | Command | What it does |
@@ -19,7 +19,8 @@ npm run format               # prettier --write; run before committing
 | `npm run typecheck:tsc` | Explicit tsc 5.9.3 fallback for all four projects |
 | `npm run build:core` | Native TypeScript JavaScript and published declarations |
 | `npm run build:core:tsc` | Explicit tsc 5.9.3 build fallback |
-| `npm run lint` | ESLint, no warnings allowed |
+| `npm run lint` | Oxlint with the explicit TypeScript rule map, no warnings allowed |
+| `npm run format:check` | Oxfmt checks the existing JS/TS-only formatting scope |
 | `npm run verify:sequential` | The same steps one after another (slower; use to read one step's output in order) |
 | `npm test` | Builds, then runs `node --test tests/*.test.mjs` |
 | `npm run build:web` | Hosted browser build into `hosted-web-dist` (no deployment); `build:hosted` is an alias |
@@ -37,7 +38,7 @@ Interaction finish fixtures isolate the outer `FORGE_CHECK_FULL` override so the
 
 The development compiler is the official Microsoft `typescript@7.0.2` package,
 installed as the exact dev-only alias `@typescript/native`. The runtime
-`typescript@5.9.3` dependency stays in place for source analysis, ESLint and public
+`typescript@5.9.3` dependency stays in place for source analysis and public
 SDK consumers. Scripts use explicit compiler paths, so npm's shared `tsc` shim
 cannot accidentally select the other compiler. No installation lifecycle scripts
 are needed. The generated [dependency license inventory](dependency-licenses.md)
@@ -87,12 +88,12 @@ Each cell lists all three samples in seconds. Cold removes tool caches and build
 | SWC 1.16.20 + native declarations | Complete core build | 13.741, 9.984, 7.652 | 10.109, 10.541, 6.835 | Runtime probe passes; repository JS equivalence unverified |
 | oxc-transform 0.155.0 + native declarations | Complete core build | 6.796, 5.121, 5.356 | 7.434, 5.191, 4.514 | Runtime probe passes; repository JS equivalence unverified |
 | esbuild 0.28.2 + native declarations | Complete core build | 4.846, 4.702, 4.193 | 4.099, 4.479, 4.887 | Runtime probe passes; repository JS equivalence unverified |
-| ESLint 9.39.4 | Lint | 24.161, 12.133, 14.194 | 12.100, 23.345, 11.186 | Reference; retained |
-| Oxlint 1.89.0 | Lint, 24 mapped rules | 0.266, 0.187, 0.137 | 0.131, 0.148, 0.128 | Fail: no-unused-vars differs |
-| Oxlint 23 rules + ESLint no-unused-vars | Lint | 12.881, 12.975, 12.346 | 14.824, 11.369, 16.197 | Pass; no clear net win |
+| ESLint 9.39.4 | Lint | 24.161, 12.133, 14.194 | 12.100, 23.345, 11.186 | Original reference |
+| Oxlint 1.89.0 | Lint, 24 mapped rules | 0.266, 0.187, 0.137 | 0.131, 0.148, 0.128 | Original trial: no-unused-vars parameter handling differs |
+| Oxlint 23 rules + ESLint no-unused-vars | Lint | 12.881, 12.975, 12.346 | 14.824, 11.369, 16.197 | Original mixed trial; superseded by compiler unused checks |
 | Biome 2.6.2 | Lint, strict migrated rules | 0.901, 0.769, 0.749 | 0.617, 0.703, 0.781 | Fail; incomplete rule parity |
-| Prettier 3.9.10 | Format check | 27.149, 21.077, 23.954 | 22.386, 22.306, 22.433 | Reference; retained |
-| Oxfmt 0.74.0 | Format check | 0.330, 0.175, 0.192 | 0.176, 0.182, 0.186 | 20 changed files; not adopted |
+| Prettier 3.9.10 | Format check | 27.149, 21.077, 23.954 | 22.386, 22.306, 22.433 | Original reference |
+| Oxfmt 0.74.0 | Format check | 0.330, 0.175, 0.192 | 0.176, 0.182, 0.186 | Original trial; adopted with a mechanical reformat below |
 | Biome 2.6.2 | Format check | 1.365, 1.245, 1.176 | 1.332, 1.237, 1.188 | 76 changed files; not adopted |
 
 The adopted typecheck medians are 34.030 s cold / 42.763 s warm versus 76.138 s / 92.742 s for the all-tsc reference (2.24× / 2.17× locally). Native core build medians are 6.708 s / 6.144 s versus 17.969 s / 17.586 s (2.68× / 2.86× locally). Measurements under contention do not establish the same speedup on the 4-vCPU CI runner.
@@ -101,13 +102,72 @@ Parity checks introduce assignment (TS2322), argument (TS2345) and missing-prope
 
 Core emits contain 587 JavaScript and 587 declaration files, with no missing/extra files and no source maps (the config does not request them). Native JavaScript matches tsc token-for-token after ignoring trivia and literal spelling. Of 260 declaration files with token differences, 256 differ only in union/property order. Three internal files use an equivalent `typeof syncGitSleep` function alias, and `owner-acceptance-consumer.d.ts` adds optional `never` members to an internal inferred union. Those four files are outside the 12-file transitive declaration closure of the two public package exports. That public closure matches after union/property-order normalization; the entry declarations themselves are unchanged apart from trivia. The synthetic runtime probe checks enums, namespaces, parameter properties, ES2022 class fields/accessors, private fields and async behavior. It passes for every emitter. SWC/Oxc/esbuild produce different repository JavaScript; full semantic equivalence of those rewrites remains unverified, so their faster isolated figures do not justify adopting them. Oxc isolated declaration generation also requires `isolatedDeclarations`, which this project does not enable.
 
-Lint uses the same 1,130 source files and the effective ESLint configuration: four core rules (`no-var`, `prefer-const`, `prefer-rest-params`, `prefer-spread`) and twenty TypeScript rules. Oxlint accepts all 24 mappings, but treats a destructured parameter read through `void` as unused where ESLint accepts it. Its default underscore-argument handling also differs. A 28-case synthetic corpus covers each enabled rule, existing suppression comments and these discrepancies. The mixed setup keeps unused-variable checks in ESLint; its cold/warm medians (12.881 s / 14.824 s) do not beat ESLint consistently (14.194 s / 12.100 s). No lint rules or source code were changed.
+### Oxlint and Oxfmt
 
-Biome strict migration maps 17 of the 24 enabled rules. Five are only inspired equivalents (`ban-ts-comment`, `no-empty-object-type`, `no-this-alias`, `no-unsafe-function-type`, `no-wrapper-object-types`); `no-unused-expressions` and `triple-slash-reference` lack an identical mapping. Retaining ESLint preserves those checks and their options.
+The standard scripts now use pinned Oxlint 1.89.0 and Oxfmt 0.74.0. The
+[Oxlint configuration](../.oxlintrc.json) explicitly maps all 24 previously enabled
+ESLint rules: `no-var`, `prefer-const`, `prefer-rest-params`, `prefer-spread`, and the
+20 recommended TypeScript rules under their same names with the `typescript/`
+prefix replacing `@typescript-eslint/`. Default extra correctness rules are off.
+No enabled rule lacks an Oxlint equivalent, so there is no `lint:eslint` fallback
+and the ESLint packages/config are removed. This is a tested mapping, not a claim
+that the two implementations behave identically on all possible source.
 
-Formatting compares the same 1,770 files after migrating print width 110, single quotes, trailing commas, arrow parentheses and ignore patterns. Scratch writes change 20 files with Oxfmt and 76 with Biome. Prettier remains the formatter; no mass reformat is included.
+All four TypeScript projects enable `noUnusedLocals` and `noUnusedParameters`.
+The compiler checks parameters, allowing `_`-prefixed parameters, and accepts
+used destructured parameters read through `void`. Oxlint's `no-unused-vars` has
+`args: "none"` to avoid the parameter discrepancy found in the original trial;
+it still checks locals, unused catch bindings and values used only in types
+(`reportVarsOnlyUsedAsTypes: true`). The last two cases are not diagnosed by the
+compiler. No source fixes were needed when enabling the remaining compiler flags.
+The retained corpus exercises all 24 rules, these gaps, used destructuring,
+underscore parameters and existing ESLint/TypeScript suppression comments. Both
+the original ESLint and Oxlint rejected all 24 negative rule fixtures.
 
-Candidate packages were fetched at exact versions from their official projects with `--ignore-scripts`; SWC/esbuild postinstall scripts were not executed. Only maintained native TypeScript is added to the project. Primary references: [SWC compilation](https://swc.rs/docs/configuration/compilation), [Oxc TypeScript/declarations](https://oxc.rs/docs/guide/usage/transformer/typescript), [esbuild TypeScript caveats](https://esbuild.github.io/content-types/#typescript-caveats), [Oxlint migration](https://oxc.rs/docs/guide/usage/linter/migrate-from-eslint.html), [Biome migration](https://biomejs.dev/installation/migrate-from-other-tools/), [Oxfmt compatibility](https://oxc.rs/docs/guide/usage/formatter/migrate-from-prettier.html), [Biome formatting differences](https://biomejs.dev/formatter/differences-with-prettier/).
+[Oxfmt configuration](../.oxfmtrc.json) preserves print width 110, single quotes,
+trailing commas, arrow parentheses and the previous ignore patterns. Import and
+package.json sorting are disabled. The migration mechanically reformats 21
+existing source files. Prose, JSON records, CSS, HTML and fixtures retain their
+bytes. Prettier remains a dependency because Convex uses it; it no longer runs
+Forge's format checks.
+
+`scripts/oxc.mjs` enumerates the same JS/TS scope using root ignore rules and
+passes explicit file paths. This is necessary inside native Lanes: Oxc directory
+walking otherwise skips the Lane beneath the owner's ignored `.forge/` ancestor.
+An empty selection fails explicitly. `scripts/verify.mjs` calls this runner
+directly, avoiding another npm launch for each static step. Public and exported
+Forge CI checks use the same runner through verification.
+
+The adoption measurements below use Node 24.22.1 on the same Apple M4 under
+concurrent-agent load. Each entry is wall time for a fresh process; OS caches
+were not flushed. Baseline source is State
+`f9e030a6d60432876b650c0b6ece3fae202928b4eecad3786869725843755d6a`.
+Baseline commands passed once; adopted commands passed all three repeats.
+
+| Invocation | Baseline seconds | Adopted seconds (3 runs) |
+| --- | --- | --- |
+| `npm run lint` | ESLint: 18.065 | Oxlint: 0.824, 0.899, 0.723 |
+| `npm run format:check` | Prettier: 42.042 | Oxfmt: 1.486, 1.551, 1.400 |
+| Verification's `node scripts/oxc.mjs lint` | Not measured separately | 0.437, 0.354, 0.361 |
+| Verification's `node scripts/oxc.mjs format:check` | Not measured separately | 0.813, 0.744, 0.856 |
+
+Each direct verification step is below one second in these samples; the combined
+steps and the npm-wrapped format command are not below one second. These local
+measurements do not establish CI timings. Oxfmt checked 1,783 files during the
+adopted timing runs, including the new runner and regression tests.
+
+Candidate packages were fetched at exact versions from their official projects
+with `--ignore-scripts`; SWC/esbuild postinstall scripts were not executed.
+Only maintained native TypeScript and the Oxc check tools are adopted. Primary
+references: [SWC compilation](https://swc.rs/docs/configuration/compilation),
+[Oxc TypeScript/declarations](https://oxc.rs/docs/guide/usage/transformer/typescript),
+[esbuild TypeScript caveats](https://esbuild.github.io/content-types/#typescript-caveats),
+[Oxlint configuration](https://oxc.rs/docs/guide/usage/linter/config),
+[Oxlint unused variables](https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-unused-vars),
+[Oxfmt configuration](https://oxc.rs/docs/guide/usage/formatter/config),
+[Oxfmt ignored files](https://oxc.rs/docs/guide/usage/formatter/ignore-files),
+[Biome migration](https://biomejs.dev/installation/migrate-from-other-tools/),
+[Biome formatting differences](https://biomejs.dev/formatter/differences-with-prettier/).
 
 ### Targeted test preparation
 

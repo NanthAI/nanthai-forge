@@ -140,8 +140,8 @@ export function readLandCheckController(store: WorkStore, run: CheckRun) {
   })[0];
   const detached = hasDetachedCheckRequest(store, run);
   const owner:
-    { pid: number; host: string; startTime?: string | undefined; lease?: string | undefined } | undefined =
-    holder ?? (!detached ? run.runner : undefined);
+    | { pid: number; host: string; startTime?: string | undefined; lease?: string | undefined }
+    | undefined = holder ?? (!detached ? run.runner : undefined);
   return {
     runId: run.id,
     phase: run.status,

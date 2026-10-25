@@ -1,7 +1,7 @@
 NanthAi:Forge third-party npm notices
 
 Exact upstream license/notice files for installed locked production dependencies.
-Lockfile SHA-256: 7db0075f64d9b40640399a06d4e8e7d1970b0618f49bb749dd0b0bed427d989c
+Lockfile SHA-256: a583de92aff4967c50c1f265a68e5ad2b95e89dac26d8739e3b7a6a06f4d7b47
 Dependencies retain their own licenses; this document does not relicense them.
 The separately launched native Convex backend is not included in this package.
 NanthAi brand rights are described separately in web/src/assets/NOTICE.md.

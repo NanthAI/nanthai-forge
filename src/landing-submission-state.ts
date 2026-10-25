@@ -2,7 +2,11 @@ import type { LandingDiagnosisReport } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
 export type SubmissionState = 'pending' | 'terminal-failed' | 'landed' | 'superseded';
 export type PendingReason =
-  'queued' | 'checking' | 'waiting-for-review' | 'waiting-for-dependency' | 'pending-infra';
+  | 'queued'
+  | 'checking'
+  | 'waiting-for-review'
+  | 'waiting-for-dependency'
+  | 'pending-infra';
 export type SubmissionCause = 'conflict' | 'check-failed' | 'infra' | 'stale-head' | 'rejected';
 export type Submission = {
   submissionId: string;

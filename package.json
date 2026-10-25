@@ -12,7 +12,7 @@
     "check": "node scripts/check-foundation.mjs",
     "build": "npm run build:core && npm run build:web",
     "typecheck": "node node_modules/@typescript/native/bin/tsc --noUncheckedSideEffectImports false --types \"*\" --noEmit && node node_modules/typescript/bin/tsc -p web/tsconfig.json && node node_modules/@typescript/native/bin/tsc --noUncheckedSideEffectImports false --types \"*\" -p convex/tsconfig.json --noEmit && node node_modules/@typescript/native/bin/tsc --noUncheckedSideEffectImports false -p netlify/tsconfig.json",
-    "lint": "eslint src web/src convex netlify/functions --max-warnings 0",
+    "lint": "node scripts/oxc.mjs lint",
     "test": "npm run build && node --import ./tests/check-runtime.mjs --test tests/*.test.mjs",
     "forge": "node dist/cli.js",
     "verify": "node scripts/verify.mjs",
@@ -25,8 +25,8 @@
     "smoke:package": "node scripts/package-smoke.mjs",
     "package:notices": "node scripts/package-notices.mjs",
     "package:local": "node scripts/package-local.mjs",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format": "node scripts/oxc.mjs format",
+    "format:check": "node scripts/oxc.mjs format:check",
     "typecheck:tsc": "node node_modules/typescript/bin/tsc --noEmit && node node_modules/typescript/bin/tsc -p web/tsconfig.json && node node_modules/typescript/bin/tsc -p convex/tsconfig.json --noEmit && node node_modules/typescript/bin/tsc -p netlify/tsconfig.json",
     "build:core:tsc": "node node_modules/typescript/bin/tsc"
   },
@@ -57,11 +57,10 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@typescript/native": "npm:typescript@7.0.2",
-    "eslint": "9.39.4",
-    "eslint-config-prettier": "10.1.8",
+    "oxfmt": "0.74.0",
+    "oxlint": "1.89.0",
     "playwright": "1.64.1",
     "prettier": "3.9.10",
-    "typescript-eslint": "8.59.0",
     "vite": "8.3.0"
   },
   "bin": {

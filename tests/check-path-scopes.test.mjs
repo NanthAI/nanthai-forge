@@ -47,6 +47,15 @@ test('ignore/tool configuration selects ignore regressions while static checks r
   assert.match(result.reason, /Repository ignore rules/);
 });
 
+test('Oxc configuration changes retain static checks without widening behavior scope', () => {
+  for (const path of ['.oxlintrc.json', '.oxfmtrc.json']) {
+    const result = select([path]);
+    assert.equal(result.scope, 'scoped');
+    assert.equal(result.domain, 'tooling');
+    assert.match(result.reason, /Formatting\/lint config/);
+  }
+});
+
 test('manual QA/browser fixtures, including deletions, select UI regression coverage', () => {
   for (const path of [
     'tests/browser/planning-code.html',

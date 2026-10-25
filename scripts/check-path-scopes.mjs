@@ -27,6 +27,8 @@ export function classifyCheckPath(path, files) {
   if (
     [
       '.editorconfig',
+      '.oxlintrc.json',
+      '.oxfmtrc.json',
       '.prettierignore',
       '.prettierrc',
       '.prettierrc.json',

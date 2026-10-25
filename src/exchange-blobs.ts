@@ -15,7 +15,8 @@ import { readSigned, SignedDownloadCache, type SignedObject } from './exchange-r
 export type BlobRow = { digest: string; size: number; data: ArrayBuffer };
 /** The destination `projectObjects:prepareBatch` returned: a Convex upload URL, or a presigned R2 PUT. */
 export type PutTarget =
-  { uploadUrl: string; contentType: string } | { kind: 'r2'; url: string; headers: Record<string, string> };
+  | { uploadUrl: string; contentType: string }
+  | { kind: 'r2'; url: string; headers: Record<string, string> };
 export interface ExchangeBlobs {
   /** Send one object to its prepared destination. Convex uploads return the storage id; R2 uploads return `{}`. */
   put(target: PutTarget, bytes: Buffer): Promise<{ storageId?: string }>;

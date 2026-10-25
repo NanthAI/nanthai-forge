@@ -472,7 +472,8 @@ class FinishRunner {
         );
         const result = response.result;
         const exhausted = result.entries.find(entry => entry.status === 'retry-exhausted') as
-          Record<string, unknown> | undefined;
+          | Record<string, unknown>
+          | undefined;
         return this.stop(attempt, {
           phase: result.entries.some(entry => entry.status === 'retry-exhausted')
             ? 'accept'

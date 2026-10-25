@@ -176,13 +176,13 @@ const tests = coreBuild.then(ok => {
 });
 const results = await Promise.all([
   npm('check', 'check'),
-  npm('format:check', 'format:check'),
+  run('format:check (oxfmt)', process.execPath, ['scripts/oxc.mjs', 'format:check']),
   tsc('typecheck:core', '--types', '*', '--noEmit'),
   tsc('typecheck:web', '-p', 'web/tsconfig.json'),
   tsc('typecheck:convex', '--types', '*', '-p', 'convex/tsconfig.json', '--noEmit'),
   tsc('typecheck:netlify', '-p', 'netlify/tsconfig.json'),
   convexCompatibility,
-  npm('lint', 'lint'),
+  run('lint (oxlint)', process.execPath, ['scripts/oxc.mjs', 'lint']),
   build,
   tests,
 ]);

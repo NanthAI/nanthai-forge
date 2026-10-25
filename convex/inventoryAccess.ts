@@ -26,9 +26,12 @@ export const read = internalAction({
         pins.set(id, job);
         allowed = true;
       } catch (error) {
-        if (!(
-          error instanceof ForgeError && ['GITHUB_UNAVAILABLE', 'GITHUB_SETUP_REQUIRED'].includes(error.code)
-        ))
+        if (
+          !(
+            error instanceof ForgeError &&
+            ['GITHUB_UNAVAILABLE', 'GITHUB_SETUP_REQUIRED'].includes(error.code)
+          )
+        )
           throw error;
       }
       access.set(id, allowed);

@@ -66,7 +66,8 @@ function unifiedPlanningWork(
   };
   const load = (id: string) => {
     const alias = tx.find('intentAliases' as WorkCollection, id, 'aliasId')?.record as
-      UnifiedPlanningData['intentAliases'][number] | undefined;
+      | UnifiedPlanningData['intentAliases'][number]
+      | undefined;
     if (alias && !unified.intentAliases.some(item => item.aliasId === id)) unified.intentAliases.push(alias);
     const intentId = alias?.intentId ?? id;
     if (unified.intents.some(item => item.id === intentId)) return;

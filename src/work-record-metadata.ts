@@ -14,7 +14,8 @@ type ScopedMetadataCommand = Extract<LocalWorkCommand, { action: 'note' | 'inten
 export const scopedMetadata = (
   command: LocalWorkCommand,
 ): command is
-  ScopedMetadataCommand | (Extract<LocalWorkCommand, { action: 'intent' }> & { baseChannel?: undefined }) =>
+  | ScopedMetadataCommand
+  | (Extract<LocalWorkCommand, { action: 'intent' }> & { baseChannel?: undefined }) =>
   ['note', 'intent-status', 'lane-status'].includes(command.action) ||
   (command.action === 'intent' && !command.baseChannel);
 export function recordMetadata(

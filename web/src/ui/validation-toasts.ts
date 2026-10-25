@@ -20,11 +20,13 @@ export function useNativeValidationToasts(store: ToastStore) {
     };
     const invalid = (event: Event) => {
       const field = event.target;
-      if (!(
-        field instanceof HTMLInputElement ||
-        field instanceof HTMLTextAreaElement ||
-        field instanceof HTMLSelectElement
-      ))
+      if (
+        !(
+          field instanceof HTMLInputElement ||
+          field instanceof HTMLTextAreaElement ||
+          field instanceof HTMLSelectElement
+        )
+      )
         return;
       event.preventDefault();
       const id = store.show({ message: field.validationMessage });

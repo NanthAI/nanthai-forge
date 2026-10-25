@@ -124,7 +124,8 @@ export function workSourcePins(data: WorkData) {
   ];
 }
 export type ArchiveSource =
-  { head: string; refs: { ref: string; head: string }[] } | { head: string; states: string[] };
+  | { head: string; refs: { ref: string; head: string }[] }
+  | { head: string; states: string[] };
 function nativeManifestObjects(manifest: z.infer<typeof nativeManifestSchema>) {
   return new Set(
     manifest.files.filter(file => file.path === `objects/${file.sha256}`).map(file => file.sha256),

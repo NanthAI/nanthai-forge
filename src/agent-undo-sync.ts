@@ -26,7 +26,8 @@ export function agentUndoSync(store: WorkStore, command: UndoSync) {
           const source = new NativeSource(store.root),
             path = store.path(lane.id),
             original = tx.fieldFind('lanes', lane.id, 'checkpoints', command.operationId, 'operation') as
-              Lane['checkpoints'][number] | undefined;
+              | Lane['checkpoints'][number]
+              | undefined;
           const receipt = (head: string, forced: boolean) => ({
             operationId: command.operationId,
             laneId: lane.id,
@@ -69,7 +70,8 @@ export function agentUndoSync(store: WorkStore, command: UndoSync) {
             const sync =
               recordedSync ??
               (tx.fieldFind('lanes', lane.id, 'checkpoints', command.syncOperationId, 'syncOperation') as
-                Lane['checkpoints'][number] | undefined);
+                | Lane['checkpoints'][number]
+                | undefined);
             const conflict =
               lane.pendingMerge?.operation.id === command.syncOperationId ? lane.pendingMerge : undefined;
             invariant(sync?.sync || conflict, 'NOT_FOUND', 'Select a retained sync operation.');
@@ -164,7 +166,8 @@ export function agentUndoSync(store: WorkStore, command: UndoSync) {
           const originalSync =
             savedSync ??
             (tx.fieldFind('lanes', lane.id, 'checkpoints', command.syncOperationId, 'syncOperation') as
-              Lane['checkpoints'][number] | undefined);
+              | Lane['checkpoints'][number]
+              | undefined);
           const stack = originalSync?.sync?.stack;
           tx.patchFields('lanes', lane.id, {
             head: pending.target,

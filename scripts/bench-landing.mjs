@@ -587,8 +587,7 @@ export async function main(argv, run = exec) {
           continue;
         if (Date.now() > deadline)
           return (
-            save(),
-            console.error(`Stopped at --max-minutes; rerun with --out ${options.out} to resume.`)
+            save(), console.error(`Stopped at --max-minutes; rerun with --out ${options.out} to resume.`)
           );
         const token = randomUUID().slice(0, 8),
           load = os.loadavg()[0];

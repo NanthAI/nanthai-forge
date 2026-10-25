@@ -125,7 +125,8 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
             laneId = randomUUID();
           const alias = command.intentId
             ? (tx.find('intentAliases' as never, command.intentId, 'aliasId')?.record as unknown as
-                { intentId: string } | undefined)
+                | { intentId: string }
+                | undefined)
             : undefined;
           const selectedId = alias?.intentId ?? command.intentId;
           let existing = selectedId ? tx.fields('intents', selectedId)?.record : undefined;
@@ -363,7 +364,8 @@ export function agentCheckpoint(
             const original =
               (store.native
                 ? (tx.fieldFind('lanes', lane.id, 'checkpoints', command.operationId, 'operation') as
-                    Lane['checkpoints'][number] | undefined)
+                    | Lane['checkpoints'][number]
+                    | undefined)
                 : lane.checkpoints.find(item => item.operation?.id === command.operationId)) ?? pending;
             if (original) {
               invariant(

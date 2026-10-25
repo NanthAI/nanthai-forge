@@ -8,7 +8,7 @@ The user's current instructions win over anything here.
 
 ```sh
 npm ci --ignore-scripts
-npm run format      # Prettier; verify fails on unformatted code
+npm run format      # Oxfmt; verify fails on unformatted code
 npm run verify      # docs check, format check, typecheck, lint, all tests
 ```
 

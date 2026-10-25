@@ -19,6 +19,7 @@ test('verify prints a completed failing file diagnostic while another file is st
     mkdirSync(join(root, dir), { recursive: true });
   for (const name of ['verify.mjs', 'verify-queue.mjs', 'test-files.mjs', 'test-coverage.mjs'])
     write(`scripts/${name}`, readFileSync(`scripts/${name}`));
+  write('scripts/oxc.mjs', '');
   write('tests/worker-budget.mjs', 'export const workerBudget = () => 2;');
   write('tests/check-runtime.mjs', '');
   write('node_modules/typescript/bin/tsc', '');

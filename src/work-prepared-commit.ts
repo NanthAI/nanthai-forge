@@ -40,9 +40,9 @@ export function preparedRecordCommit<T>(
         { operation },
       );
     } catch (error) {
-      if (!(
-        error instanceof ForgeError && ['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(error.code)
-      ))
+      if (
+        !(error instanceof ForgeError && ['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(error.code))
+      )
         throw error;
       end ??= Date.now() + (workLockWaitMs() || 1000);
       if (Date.now() >= end) {

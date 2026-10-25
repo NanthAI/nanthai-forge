@@ -77,7 +77,8 @@ function recordNativeLaneLocked(
         const checkpoint =
           command.action === 'undo'
             ? (tx.fieldFind('lanes', lane.id, 'checkpoints', lane.head, 'head') as
-                { parent: string } | undefined)
+                | { parent: string }
+                | undefined)
             : undefined;
         const original = command.action === 'undo' ? checkpoint?.parent : (command.baseHead ?? lane.head);
         invariant(
