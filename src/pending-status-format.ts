@@ -53,5 +53,6 @@ export function formatPendingStatus(value: PendingStatus) {
     lines.splice(recovery, 1);
   }
   lines.splice(3, 0, ...examples.slice(0, Math.min(3, Math.max(0, 15 - lines.length))));
+  if (value.disk?.warning) lines.push(oneLine(value.disk.warning));
   return lines.join('\n');
 }

@@ -51,7 +51,7 @@ export class SelectedRunObserver {
       this.observed = run;
       return run;
     };
-    if (manifest.schema === 'forge-work-records-v2' && manifest.collections.runs?.lookup) {
+    if (manifest.schema !== 'forge-work-records-v1' && manifest.collections.runs?.lookup) {
       const selected = new WorkRecordTransaction(this.store.directory, manifest, bytes!).find(
         'runs',
         this.id,

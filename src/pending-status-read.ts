@@ -1,3 +1,4 @@
+import { readSelfMetricDisk } from './self-metrics-disk.js';
 import { integrationPreviewStatus } from './integration-preview-auto.js';
 import { readLandingWorkerStatus } from './landing-worker-status.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -94,6 +95,7 @@ export function readPendingStatus(
   // Immutable saved pins are analyzed after releasing the owner lock.
   return {
     ...pending,
+    disk: readSelfMetricDisk(store.directory),
     overlap: savedOverlapPlan(
       store,
       observedLanes.filter(lane => pendingIds.has(lane.id)),

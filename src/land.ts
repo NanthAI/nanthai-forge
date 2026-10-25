@@ -73,6 +73,49 @@ async function landOnce(
         store,
         [...pins].map(([id, head]) => ({ ...store.select('lanes', id)!, head })),
       );
+      const queuedResult = (entry: LandEntry, issue?: ForgeError) => {
+        const queued = store.select('landingEntries', entry.command.operationId)!;
+        return {
+          status:
+            queued.status === 'awaiting-review'
+              ? 'review-needed'
+              : ['queued', 'checking'].includes(queued.status)
+                ? 'waiting'
+                : ['accepted', 'conflict', 'failed', 'cancelled', 'interrupted'].includes(queued.status)
+                  ? queued.status
+                  : 'failed',
+          ...(issue && ['queued', 'checking'].includes(queued.status)
+            ? { code: issue.code, message: issue.message }
+            : {}),
+          queueStatus: queued.status,
+          batchId: queued.batchId,
+          ...landingDiagnosis(store, queued),
+          runId: queued.runId,
+          acceptanceId: queued.acceptanceId,
+          ...(queued.error ? { code: queued.error.code, message: queued.error.message } : {}),
+          viewId: queued.conflictViewId ?? queued.viewId,
+          ...(queued.previewDiagnostic
+            ? { code: 'INTEGRATION_PREVIEW_EXCLUDED', preview: queued.previewDiagnostic }
+            : {}),
+          ...(queued.conflictViewId
+            ? { conflict: store.select('views', queued.conflictViewId)?.details }
+            : {}),
+          ...(queued.reason ? { message: queued.reason } : {}),
+        };
+      };
+      // A channel sweep can keep driving other submissions after ours settles.
+      // Publish this request's outcomes at each batch boundary, not after that sweep.
+      const recordSettled = () => {
+        let changed = false;
+        for (const entry of journal.state.entries) {
+          if (!entry.queued || (entry.result && !waiting(entry.result))) continue;
+          const queued = store.select('landingEntries', entry.command.operationId);
+          if (!queued || ['queued', 'checking'].includes(queued.status)) continue;
+          entry.result = queuedResult(entry);
+          changed = true;
+        }
+        if (changed) journal.save();
+      };
       const cancelSelected = async () => {
         if (!cancelled?.()) return;
         for (const entry of journal.state.entries) {
@@ -190,7 +233,14 @@ async function landOnce(
         let drainIssue: ForgeError | undefined;
         if (journal.state.entries.some(entry => entry.queued && (!entry.result || waiting(entry.result)))) {
           try {
-            await drainLandingBatches(work, command.channel, command.waitMs, cancelSelected);
+            await drainLandingBatches(
+              work,
+              command.channel,
+              command.waitMs,
+              cancelSelected,
+              undefined,
+              recordSettled,
+            );
           } catch (error) {
             if (
               !(
@@ -235,34 +285,7 @@ async function landOnce(
             continue;
           try {
             if (entry.queued) {
-              const queued = store.select('landingEntries', entry.command.operationId)!;
-              entry.result = {
-                status:
-                  queued.status === 'awaiting-review'
-                    ? 'review-needed'
-                    : ['queued', 'checking'].includes(queued.status)
-                      ? 'waiting'
-                      : ['accepted', 'conflict', 'failed', 'cancelled', 'interrupted'].includes(queued.status)
-                        ? queued.status
-                        : 'failed',
-                ...(drainIssue && ['queued', 'checking'].includes(queued.status)
-                  ? { code: drainIssue.code, message: drainIssue.message }
-                  : {}),
-                queueStatus: queued.status,
-                batchId: queued.batchId,
-                ...landingDiagnosis(store, queued),
-                runId: queued.runId,
-                acceptanceId: queued.acceptanceId,
-                ...(queued.error ? { code: queued.error.code, message: queued.error.message } : {}),
-                viewId: queued.conflictViewId ?? queued.viewId,
-                ...(queued.previewDiagnostic
-                  ? { code: 'INTEGRATION_PREVIEW_EXCLUDED', preview: queued.previewDiagnostic }
-                  : {}),
-                ...(queued.conflictViewId
-                  ? { conflict: store.select('views', queued.conflictViewId)?.details }
-                  : {}),
-                ...(queued.reason ? { message: queued.reason } : {}),
-              };
+              entry.result = queuedResult(entry, drainIssue);
             } else if (!entry.result && entry.viewId) {
               entry.result = await landSingle(work, entry, command, phase, () => journal.save(), {
                 cancelled: () => cancelled?.() ?? false,

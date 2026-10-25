@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { calculateOverlapMetrics, calculateAuthorityMetrics } from './self-metrics-joins.js';
+import { calculateBillingMetrics } from './self-metrics-billing.js';
+import { calculateRedMainMetrics } from './self-metrics-red-main.js';
+import { calculateStorageMetrics } from './self-metrics-storage.js';
 import type { MetricInput, MetricPeriod, MetricRecords, SelfMetricsReader } from './self-metrics-types.js';
 export type { SelfMetricsReader, MetricRecords, MetricPeriod } from './self-metrics-types.js';
 const excluded = new Set(['start', 'checkpoint', 'finish', 'land']);
@@ -64,6 +68,11 @@ export function calculateSelfMetrics(records: MetricRecords, period: MetricPerio
         `${incompleteReceiptRecords} incomplete trailing metric receipt records were ignored; receipt coverage is partial.`,
       ]
     : [];
+  const joined = <T extends { partial: boolean; gaps: string[] }>(value: T): T => ({
+    ...value,
+    partial: value.partial || !!incompleteReceiptRecords,
+    gaps: [...value.gaps, ...receiptGaps],
+  });
   const moves = unique(
     records.moves.filter(move => inPeriod(move.at, period)),
     move => move.id,
@@ -268,6 +277,11 @@ export function calculateSelfMetrics(records: MetricRecords, period: MetricPerio
       dropped: deliveryGaps.length && !dropped.length ? null : dropped.length,
       rows: dropped,
     },
+    metric4: joined(calculateOverlapMetrics(records, { ...period, asOf })),
+    metric7: joined(calculateAuthorityMetrics(records, { ...period, asOf })),
+    metric8: joined(calculateBillingMetrics(records, { ...period, asOf })),
+    redMain: joined(calculateRedMainMetrics(records, { ...period, asOf })),
+    disk: joined(calculateStorageMetrics(records, { ...period, asOf })),
     metric5: {
       partial: !!mutationGaps.length,
       gaps: mutationGaps,

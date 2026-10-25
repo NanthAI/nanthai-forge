@@ -33,6 +33,21 @@ export async function composeSavedMain(work: WorkService, view: WorkView, main: 
   // The source bytes above are immutable. Publish one selected record; acceptance rechecks main.
   return retryWorkPhase(id, () =>
     work.store.locked(() => {
+      const tx = work.store.readRecords();
+      const indexed = tx?.find('views', id)?.record;
+      if (indexed) return indexed;
+      if (tx) {
+        invariant(
+          tx.find('views', view.id)?.record.head === view.head,
+          'VIEW_STALE',
+          'Original saved Candidate changed.',
+        );
+        if (!work.store.native && candidate.head)
+          workGit(work.store.root, ['update-ref', `refs/forge/views/${id}`, candidate.head]);
+        tx.append('views', candidate);
+        work.store.commitRecords(tx);
+        return candidate;
+      }
       const data = work.store.load(),
         retained = data.views.find(view => view.id === id);
       if (retained) return retained;

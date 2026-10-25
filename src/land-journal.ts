@@ -75,8 +75,18 @@ export class LandJournal {
       );
       return;
     }
-    const data = store.load(),
-      check = command.checkId ? data.checks.find(item => item.id === command.checkId) : defaultCheck(store);
+    const tx = store.readRecords();
+    const data = tx
+      ? {
+          ...tx.data(),
+          lanes: command.laneIds.flatMap(id => tx.find('lanes', id)?.record ?? []),
+        }
+      : store.load();
+    if (tx)
+      data.intents = [...new Set(data.lanes.map(lane => lane.intentId))].flatMap(
+        id => tx.find('intents', id)?.record ?? [],
+      );
+    const check = command.checkId ? store.select('checks', command.checkId) : defaultCheck(store);
     invariant(check, 'CHECK_REQUIRED', 'Choose a defined check.');
     const groups = new Map<string, WorkView['inputs']>();
     const pinned: WorkView['inputs'] = [];

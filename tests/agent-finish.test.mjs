@@ -316,15 +316,21 @@ for (const native of [true, false])
 test('finish reconciles unknown checkpoint reply and preserves full request binding', async () => {
   const { root, agent, command } = await setup(true);
   try {
-    const original = agent.work.store.save.bind(agent.work.store);
+    // Lose the reply after whichever write makes the checkpoint durable
+    // (full save or indexed record commit).
+    const store = agent.work.store;
     let interrupted = false;
-    agent.work.store.save = data => {
-      original(data);
-      if (!interrupted && data.lanes[0].checkpoints.length) {
-        interrupted = true;
-        throw new Error('Unknown checkpoint reply');
-      }
-    };
+    for (const method of ['save', 'commitRecords']) {
+      const original = store[method].bind(store);
+      store[method] = (...args) => {
+        const result = original(...args);
+        if (!interrupted && store.load().lanes[0].checkpoints.length) {
+          interrupted = true;
+          throw new Error('Unknown checkpoint reply');
+        }
+        return result;
+      };
+    }
     await assert.rejects(agent.dispatch(command), /Unknown checkpoint reply/);
     const head = agent.work.store.load().lanes[0].head;
     await assert.rejects(

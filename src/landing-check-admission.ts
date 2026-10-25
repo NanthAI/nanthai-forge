@@ -142,9 +142,11 @@ export async function admitLandingCheck(
                 return;
               selected.runId = current.id;
               selected.viewId = current.viewId;
-              return { prefix: selected, run: data.runs.find(run => run.id === current.id) };
+              // The shared run can belong to another Channel, outside this queue projection.
+              return { prefix: selected, run: store.select('runs', current.id) };
             },
             driver.beforePublish,
+            batch.channel,
           );
           if (shared) {
             Object.assign(prefix, shared.prefix);

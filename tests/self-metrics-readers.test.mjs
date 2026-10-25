@@ -479,3 +479,46 @@ test('lifecycle format refusals and pre-store BAD_ARGUMENT failures create no me
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('M2 workflow saves record path overlaps and response delivery without treating sync as another save', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-m2-save-'));
+  writeFileSync(join(root, 'shared.ts'), 'export const a = 1;\nexport const b = 1;\n');
+  initNative(root);
+  const agent = new AgentWorkflow(root);
+  try {
+    const a = (await agent.dispatch({ action: 'start', outcome: 'first peer' })).result;
+    const b = (await agent.dispatch({ action: 'start', outcome: 'second peer' })).result;
+    writeFileSync(join(a.path, 'shared.ts'), 'export const a = 2;\nexport const b = 1;\n');
+    await agent.dispatch({ action: 'checkpoint', laneId: a.laneId, expectedHead: a.head, message: 'A save' });
+    writeFileSync(join(b.path, 'shared.ts'), 'export const a = 3;\nexport const b = 1;\n');
+    const saved = (
+      await agent.dispatch({
+        action: 'checkpoint',
+        laneId: b.laneId,
+        expectedHead: b.head,
+        message: 'B save',
+      })
+    ).result;
+    const receipts = readSelfMetricReceipts(agent.work.store.directory);
+    const observation = receipts.find(
+      r => r.observation?.type === 'save' && r.observation.laneId === b.laneId,
+    )?.observation;
+    assert.ok(observation);
+    assert.ok(
+      observation.overlaps.some(peer => peer.laneId === a.laneId && peer.paths.includes('shared.ts')),
+    );
+    assert.ok(
+      receipts.some(r => r.observation?.type === 'overlap-delivery' && r.observation.head === saved.head),
+    );
+    const result = await readSelfMetrics(nativeSelfMetricsReader(root), {
+      from: '2000-01-01T00:00:00.000Z',
+      to: '2100-01-01T00:00:00.000Z',
+    });
+    assert.equal(result.metric4.overlappingSaves, 1);
+    assert.equal(result.metric4.delivered, 1);
+    assert.ok(result.metric7.modes[0].rows.length > 0);
+    assert.ok(result.disk.sample);
+  } finally {
+    await cleanupOwner(root);
+  }
+});

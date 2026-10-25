@@ -745,6 +745,13 @@ wake the observer; a two-second local fallback covers missed signals and local r
 death. Durable completion receipts can be observed before Work metadata catches up;
 remote controller loss stays pending for the existing recovery owner to resolve.
 
+Indexed native landing queues read and publish the selected queue records rather
+than hydrating unrelated Lane and run history. A failed sole Candidate in a
+non-speculative batch records its diagnosis and terminal entry atomically; it
+needs no prefix search or acceptance attempt. Multi-entry batches keep their
+parallel/halving diagnosis. Each settled batch updates its requesting land
+journal before the channel sweep continues with unrelated submissions.
+
 The native landing worker reconciles active check runs before replaying retained
 landing journals. A dead local runner ends as interrupted; a dead Modal or Actions
 controller is adopted with the original run and provider pins. If adoption itself
@@ -1026,7 +1033,7 @@ receipt. Errors rejected before opening a valid store are outside metric 2's
 coverage; recording them must not create files in the refused store.
 
 `readSelfMetrics(reader, { from, to, asOf? })` in `src/self-metrics.ts` calculates
-metrics 1, 2, 3, 5 and 6. The period includes `from` and excludes `to`; days are UTC
+metrics 1–8, red-main minutes and per-project disk use. The period includes `from` and excludes `to`; days are UTC
 and `asOf` fixes the dropped-submission test. `nativeSelfMetricsReader(owner)`
 reads a pinned Work manifest directly, without constructing a Work service or
 waking workers. `hostedSelfMetricsReader(source)` accepts revision-pinned hosted
@@ -1036,8 +1043,41 @@ reuse facts and delivery history produce named partial results. Unknown values
 are `null`; available timing sums remain partial subtotals. Friction prose and
 automation definitions never substitute for execution or caller-delivery facts.
 Manual service restarts outside Forge have no requester record and remain a
-coverage gap. There is no metrics command or product surface yet.
+coverage gap. The metrics command and full metrics surface are separate from these readers.
 Readers ignore an unterminated final journal line without changing its bytes.
 The output counts it in `incompleteReceiptRecords` and marks receipt-dependent
 metrics partial; complete earlier receipts remain available. Malformed complete
 records still fail explicitly.
+
+The M2 observation recorder accepts structured bills, revision acknowledgements,
+surface comparisons, overlap deliveries/answers, exact-State full-suite results,
+culprit identities and hosted/R2 byte accounting. Bills retain billed, list and
+estimated dollars separately. GitHub-hosted Actions for this public Forge project
+have a real billed price of $0; `githubHostedZeroBill` records that basis without
+zeroing list price or execution minutes. A zero invoice has undefined percentage
+estimator error. Missing provider bills remain partial. Monthly shared charges
+and otherwise unjoined runs are allocated over ordinary landings; exact run/input
+or landing identities take precedence.
+
+Checkpoint overlap observations count shared changed paths against active,
+unlanded peers, including edits in different regions. Delivery records describe
+what the lifecycle response actually returned. Only a delivery for the saved head
+before the next save counts. First-write and acknowledgement coverage remain
+partial until their producers supply records. Authority revision streams are
+scoped to one comparable epoch; source publication acknowledges the captured
+owner revision. Schema-2 cache writes record hosted and cache revisions. Surface
+comparison records retain observed contradictory intervals, including a hosted
+page showing a closed Intent while authority still records it as unlanded.
+
+Disk sampling runs only after committed Work writes, at most once per UTC day
+across processes. The scan stops after 100,000 entries or 250 ms, follows no
+symlinks and retains incomplete bytes as lower bounds. It separates objects,
+records, Lane directories, check workspaces, snapshot metadata and backups
+(including registered record-collection backups), and samples volume free space.
+Growth requires two complete samples; missing hosted/R2 accounting stays unknown.
+The retained per-project advisory budget defaults to 10 GiB total, 100 MiB/day
+growth and 1 GiB free-space reserve, with a one-day forecast.
+`setSelfMetricDiskBudget` changes these values. One combined warning appears in
+status at 90% of a size/growth budget or within 10% of the free-space reserve,
+including forecast growth; it never blocks a write. Status reads only the retained
+sample and does not scan, poll storage or schedule work.

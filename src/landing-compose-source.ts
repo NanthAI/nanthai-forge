@@ -1,10 +1,11 @@
+import { allRecords } from './agent-lifecycle.js';
 // SPDX-License-Identifier: Apache-2.0
 import { stackLanding } from './agent-stack.js';
 import { composeStack } from './native-stack-compose.js';
 import { resolveDocsComposition } from './native-docs-resolve.js';
 import type { NativeSource } from './native-source.js';
 import type { WorkStore } from './work-store.js';
-import type { Lane, WorkView } from './work-types.js';
+import type { ChannelMove, Lane, WorkView } from './work-types.js';
 
 /** Recover the stack pin of a queued saved head even after a later sync/undo. */
 export function savedStack(lane: Lane, head: string) {
@@ -28,7 +29,6 @@ export function composeLandingSource(
   message: string,
   at: string,
 ) {
-  const data = store.load();
   let base: string | undefined;
   for (const pin of view.inputs) {
     const lane = store.select('lanes', pin.laneId);
@@ -37,11 +37,11 @@ export function composeLandingSource(
     if (!stack || stack.detached) continue;
     // A previous accepted child save is already a better common merge base.
     if (
-      data.channelMoves.some(
+      allRecords<ChannelMove>(store, 'channelMoves').some(
         move =>
           move.status === 'accepted' &&
-          data.views
-            .find(candidate => candidate.id === move.viewId)
+          store
+            .select('views', move.viewId)
             ?.inputs.some(input => input.laneId === pin.laneId && source.contains(pin.head, input.head)) &&
           source.contains(main, move.head),
       )

@@ -302,16 +302,17 @@ test('at runner capacity repeated drain observations publish no unchanged Work',
   await ready;
   await f.candidate('capacity-next.txt');
   const revision = f.store.revision(),
-    load = f.store.load.bind(f.store),
-    save = f.store.save.bind(f.store);
+    readRecords = f.store.readRecords.bind(f.store),
+    save = f.store.save.bind(f.store),
+    commit = f.store.commitRecords.bind(f.store);
   let observations = 0,
     writes = 0,
     observed;
   const sampled = new Promise(resolve => {
     observed = resolve;
   });
-  f.store.load = () => {
-    const data = load();
+  f.store.readRecords = () => {
+    const data = readRecords();
     if (++observations >= 3) observed();
     return data;
   };
@@ -319,13 +320,18 @@ test('at runner capacity repeated drain observations publish no unchanged Work',
     writes++;
     return save(data);
   };
+  f.store.commitRecords = (...args) => {
+    writes++;
+    return commit(...args);
+  };
   try {
     await sampled;
     assert.equal(writes, 0);
     assert.equal(f.store.revision(), revision);
   } finally {
-    f.store.load = load;
+    f.store.readRecords = readRecords;
     f.store.save = save;
+    f.store.commitRecords = commit;
     release();
     await driving;
   }

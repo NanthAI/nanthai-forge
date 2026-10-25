@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { MetricObservation } from './self-metrics-observations.js';
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { readWorkFile, recordManifest, readRecordPage } from './work-records.js';
@@ -35,7 +36,9 @@ export function nativeSelfMetricsReader(owner: string): SelfMetricsReader {
         entries = (read('landingEntries') ?? []).filter(entry => entry.channel === 'main'),
         batches = read('landingBatches') ?? [],
         runs = read('runs'),
-        moves = read('channelMoves');
+        moves = read('channelMoves'),
+        githubChecks = read('githubChecks') ?? [],
+        githubSync = (manifest?.fields.githubSync ?? raw.githubSync) as WorkData['githubSync'];
       // Automation definitions and friction prose cannot establish commands, errors or timings.
       // Read these collections to retain only structured evidence; never mine their text.
       const automations = read('automations'),
@@ -81,7 +84,48 @@ export function nativeSelfMetricsReader(owner: string): SelfMetricsReader {
         });
       };
       const { receipts, incompleteTrailingRecords } = readSelfMetricJournal(directory);
+      const supplemental: MetricObservation[] = receipts.flatMap(r =>
+        r.kind === 'mutation' && r.revision !== undefined
+          ? [
+              {
+                type: 'revision' as const,
+                id: `owner:${r.revision}`,
+                at: r.at,
+                mode: 'owner-hosted' as const,
+                stream: 'owner',
+                side: 'authority' as const,
+                revision: r.revision,
+              },
+            ]
+          : [],
+      );
+      for (const snapshot of githubChecks)
+        for (const check of snapshot.checks) {
+          const mapped = githubSync?.commits.find(commit => commit.commit === check.head_sha);
+          if (
+            mapped &&
+            /^verify$/i.test(check.name) &&
+            check.completed_at &&
+            ['success', 'failure'].includes(check.conclusion ?? '')
+          )
+            supplemental.push({
+              type: 'full-result',
+              id: `github-verify:${check.id}`,
+              at: check.completed_at,
+              head: mapped.state,
+              source: 'github-verify',
+              status: check.conclusion === 'success' ? 'passed' : 'failed',
+            });
+        }
+      const culpritIds = new Set(moves.flatMap(move => move.optimisticRecovery?.culpritIds ?? []));
+      const culpritHeads = moves.filter(move => culpritIds.has(move.id)).map(move => move.head);
+      for (const id of culpritIds) {
+        const move = moves.find(move => move.id === id);
+        if (!move) continue;
+        supplemental.push({ type: 'culprit', id: `culprit:${id}`, landingId: id, at: move.at });
+      }
       const coverage = {
+        overlaps: receipts.find(r => r.observation?.type === 'save')?.at,
         lifecycle: receipts.find(r => r.kind === 'lifecycle')?.at,
         mutations: receipts.find(r => r.kind === 'mutation')?.at,
         deliveries: receipts.find(r => r.kind === 'lifecycle')?.at,
@@ -100,6 +144,7 @@ export function nativeSelfMetricsReader(owner: string): SelfMetricsReader {
             frictionEvents: friction.length,
           },
         },
+        observations: supplemental,
         landingKindsComplete: false,
         lifecycleCoverageGaps: [
           'Argument-validation and incompatible-store refusals have no local lifecycle receipt.',
@@ -111,6 +156,13 @@ export function nativeSelfMetricsReader(owner: string): SelfMetricsReader {
             id: move.id,
             at: move.at,
             head: move.head,
+            ancestorHeads: culpritHeads.filter(head => {
+              try {
+                return source.contains(move.head, head);
+              } catch {
+                return false;
+              }
+            }),
             inputs: inputs(viewMap.get(move.viewId)),
             kind: viewMap.get(move.viewId)?.recovery?.phase === 'revert' ? 'revert' : 'landing',
           })),
@@ -159,6 +211,9 @@ export function nativeSelfMetricsReader(owner: string): SelfMetricsReader {
           const wall = minutesBetween(run.startedAt, run.endedAt);
           return {
             id: run.id,
+            head: run.head,
+            fullSuite:
+              run.checkSelection?.scope === 'full' || (run.mainCheck?.channel === 'main' && !run.recovery),
             at: run.startedAt,
             ...(run.endedAt ? { endedAt: run.endedAt } : {}),
             status: run.status,

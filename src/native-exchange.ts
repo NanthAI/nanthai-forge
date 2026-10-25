@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { recordMetricPublication } from './self-metrics-source-observations.js';
 import {
   acknowledgePendingExchange,
   capturePendingExchange,
@@ -449,6 +450,7 @@ export async function pushNativeExchange(
     ...(ownerDerived ? { ownerDerived } : {}),
   });
   const retainBaseline = (backupId: string) => {
+    if (!options.stage) recordMetricPublication(store.directory, revision, operationId);
     const baselineKey = transport.checkpointKey?.(backupId);
     if (store.native && baselineKey && prepared.manifest.kind === 'forge-native-work-backup') {
       try {

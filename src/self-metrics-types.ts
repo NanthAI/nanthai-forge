@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { DiskSample } from './self-metrics-disk.js';
+import type { MetricObservation } from './self-metrics-observations.js';
 import type { SelfMetricReceipt } from './self-metrics-journal.js';
 export type MetricInput = {
   laneId: string;
@@ -13,6 +15,7 @@ export type MetricMove = {
   head: string;
   inputs: MetricInput[];
   kind: 'landing' | 'revert' | 'compensating';
+  ancestorHeads?: string[];
 };
 export type MetricSubmission = {
   id: string;
@@ -27,6 +30,8 @@ export type MetricSubmission = {
   noOwner?: boolean | undefined;
 };
 export type MetricRun = {
+  head?: string;
+  fullSuite?: boolean;
   id: string;
   at: string;
   endedAt?: string | undefined;
@@ -41,6 +46,8 @@ export type MetricRun = {
   started?: boolean | undefined;
 };
 export type MetricRecords = {
+  observations?: MetricObservation[];
+  diskSamples?: DiskSample[];
   moves: MetricMove[];
   submissions: MetricSubmission[];
   runs: MetricRun[];
@@ -49,6 +56,12 @@ export type MetricRecords = {
   checkRequests?: { id: string; at: string; runId: string; reused: boolean; reuseKey?: string | undefined }[];
   /** Earliest instant for which the producer guarantees complete collection. */
   coverage?: {
+    overlaps?: string | undefined;
+    overlapAnswers?: string | undefined;
+    authority?: string | undefined;
+    surfaces?: string | undefined;
+    fullResults?: string | undefined;
+    mirrorResults?: string | undefined;
     lifecycle?: string | undefined;
     mutations?: string | undefined;
     deliveries?: string | undefined;

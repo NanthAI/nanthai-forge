@@ -1,3 +1,4 @@
+import { allRecords } from './agent-lifecycle.js';
 // SPDX-License-Identifier: Apache-2.0
 import { validatePrefixRun } from './landing-diagnosis.js';
 import { hostname } from 'node:os';
@@ -107,10 +108,10 @@ async function reuseCheck(
 ): Promise<CheckRun | undefined> {
   if (!work.store.native || (!batch?.environment && !audit)) return;
   const store = work.store,
-    data = store.load(),
-    view = data.views.find(view => view.id === prefix.viewId),
-    first = data.landingEntries?.find(entry => entry.id === batch?.entryIds[0]),
-    check = data.checks.find(check => check.id === (audit?.id ?? first?.checkId)),
+    view = store.select('views', prefix.viewId),
+    first = batch && store.select('landingEntries', batch.entryIds[0]!),
+    checkId = audit?.id ?? first?.checkId,
+    check = checkId ? store.select('checks', checkId) : undefined,
     environment = batch?.environment ?? checkEnvironment();
   if (
     !view?.head ||
@@ -142,7 +143,7 @@ async function reuseCheck(
     details: '',
   };
   if (!observedInputs(draft)) return;
-  const candidates = data.runs.filter(
+  const candidates = (store.readRecords()?.all('runs', 'passed', 'status') ?? store.load().runs).filter(
     run =>
       successful(run) &&
       !run.reusedFrom &&
@@ -200,12 +201,10 @@ async function reuseCheck(
         if (route.actual === 'local') {
           // Legacy local runs have no recipe/runtime pin. A checked batch retains
           // the admitted Node bytes; arbitrary external executables remain unknown.
-          const oldBatch = data.landingBatches?.find(batch =>
+          const oldBatch = allRecords<LandingBatch>(store, 'landingBatches').find(batch =>
             batch.prefixes.some(prefix => prefix.runId === original.id),
           );
-          const pins = oldBatch?.entryIds.map(
-            id => data.landingEntries?.find(entry => entry.id === id)?.runtimeSnapshot,
-          );
+          const pins = oldBatch?.entryIds.map(id => store.select('landingEntries', id)?.runtimeSnapshot);
           if (
             executable?.status !== 'observed' ||
             !pins?.length ||

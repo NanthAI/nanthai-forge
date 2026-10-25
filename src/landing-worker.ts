@@ -1,3 +1,4 @@
+import { landingRecords } from './landing-records.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { resumeLegacyLand } from './landing-worker-journals.js';
 import type { AgentWorkflow } from './agent-workflow.js';
@@ -25,7 +26,7 @@ import type { WorkStore } from './work-store.js';
 export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) {
   if (!store.native || signal.aborted) return;
   // Unsupported Work must fail before any service control state is created.
-  store.load();
+  if (!store.readRecords()) store.load();
   const notifications = await openAutoExchangeNotifications();
   const id = randomUUID(),
     worker = processIdentity();
@@ -71,7 +72,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
     await withLandingWorker(signal, async () => {
       while (!signal.aborted) {
         const observed = sequence;
-        const data = store.load(),
+        const data = landingRecords(store),
           finishes = unfinishedFinishes(store),
           lands = pendingLands(store);
         // An exact result receipt can change without a Work publication. Peer

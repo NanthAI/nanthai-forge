@@ -21,6 +21,7 @@ export interface HostedMetricSource {
   records(table: string): Promise<unknown[]>;
   object?(pin: Pin): Promise<Uint8Array | undefined>;
   receipts?: SelfMetricReceipt[];
+  observations?: MetricRecords['observations'];
   incompleteReceiptRecords?: number;
   coverage?: MetricRecords['coverage'];
   revision?: number | string;
@@ -134,6 +135,7 @@ export function hostedSelfMetricsReader(source: HostedMetricSource): SelfMetrics
       );
       return {
         source: { kind: 'hosted', revision: source.revision },
+        ...(source.observations ? { observations: source.observations } : {}),
         landingKindsComplete: false,
         moves: await Promise.all(
           moves

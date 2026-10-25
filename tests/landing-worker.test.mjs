@@ -311,13 +311,13 @@ test('managed owner drives while another lifecycle owns advisory presence', asyn
 test('a wake retries a transient observation failure without a new Work revision', async t => {
   const f = await fixture(t, { remote: false });
   await f.candidate('retry-observation.txt');
-  const load = WorkStore.prototype.load;
+  const readRecords = WorkStore.prototype.readRecords;
   let injected = false;
   let acknowledge;
   const failed = new Promise(resolve => {
     acknowledge = resolve;
   });
-  t.mock.method(WorkStore.prototype, 'load', function () {
+  t.mock.method(WorkStore.prototype, 'readRecords', function () {
     // The worker's AgentWorkflow has its own store. Fail its first drain read,
     // after the worker has already retained this Work revision as observed.
     if (this.root === f.store.root && this !== f.store && !injected) {
@@ -325,7 +325,7 @@ test('a wake retries a transient observation failure without a new Work revision
       acknowledge();
       throw new ForgeError('SOURCE_CHANGED', 'Synthetic concurrent observation');
     }
-    return load.call(this);
+    return readRecords.call(this);
   });
   const revision = f.store.revision();
   const stop = worker(f);

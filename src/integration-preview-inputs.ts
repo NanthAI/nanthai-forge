@@ -1,3 +1,4 @@
+import { landingPreviewRecords, hasPreviewSave } from './landing-preview-records.js';
 // SPDX-License-Identifier: Apache-2.0
 import { checkEnvironment } from './check-environment.js';
 import { previewChecks } from './integration-preview-checks.js';
@@ -63,7 +64,7 @@ export function previewClosure(data: WorkData, roots: Lane[]) {
       for (const selected of lanes.sort((a, b) => a.id.localeCompare(b.id))) lane(selected);
     };
     const lane = (selected: Lane) => {
-      if (!selected.checkpoints.length) {
+      if (!hasPreviewSave(selected)) {
         errors.push(`Unsaved integration dependency Lane: ${selected.id}`);
         return;
       }
@@ -103,7 +104,7 @@ export function previewTuple(store: WorkStore, data: WorkData, lanes: Lane[], ma
     inputs = lanes.map(lane => ({ laneId: lane.id, head: lane.head }));
   const configuration = digest(JSON.stringify([checks, environment.fingerprint]));
   const availableLaneIds = data.lanes
-    .filter(lane => lane.state === 'active' && lane.checkpoints.length)
+    .filter(lane => lane.state === 'active' && hasPreviewSave(lane))
     .map(lane => lane.id)
     .sort();
   const key = digest(
@@ -118,7 +119,10 @@ export function previewCurrent(
   result: { main: string; inputs: { laneId: string; head: string }[]; key: string },
 ) {
   try {
-    const data = store.load(),
+    const data = landingPreviewRecords(
+        store,
+        result.inputs.map(pin => pin.laneId),
+      ),
       main = (store.native ? nativeChannels(data) : channelStatus(store, data)).find(
         channel => channel.name === 'main',
       )?.head;

@@ -1,3 +1,4 @@
+import { editLandingRecords } from './landing-records.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 import { assertLandingWorkerActive } from './landing-worker-context.js';
 import { interruptStaleLandingInputs } from './landing-stale.js';
@@ -36,11 +37,16 @@ export function batchEdit<T>(
   id: string,
   edit: (data: WorkData) => T,
   beforePublish?: () => void,
+  channel?: string,
 ) {
   return retryWorkPhase(id, () =>
     work.store.locked(() => {
       assertLandingWorkerActive();
       beforePublish?.();
+      if (channel !== undefined) {
+        const tx = work.store.readRecords();
+        if (tx) return editLandingRecords(work.store, channel, edit, tx, id);
+      }
       const data = work.store.load();
       const before = JSON.stringify(data);
       const result = edit(data);
@@ -81,55 +87,62 @@ export async function enqueueLanding(
   view: WorkView,
   pins?: LandingPins,
 ) {
-  return batchEdit(work, command.operationId, data => {
-    const request = digest(JSON.stringify({ command, viewId: view.id, head: view.head }));
-    const original = data.landingEntries?.find(entry => entry.id === command.operationId);
-    if (original) {
-      invariant(
-        original.request === request,
-        'WORK_OPERATION_CHANGED',
-        'Reconcile the original queued landing pins.',
+  return batchEdit(
+    work,
+    command.operationId,
+    data => {
+      const request = digest(JSON.stringify({ command, viewId: view.id, head: view.head }));
+      const original = data.landingEntries?.find(entry => entry.id === command.operationId);
+      if (original) {
+        invariant(
+          original.request === request,
+          'WORK_OPERATION_CHANGED',
+          'Reconcile the original queued landing pins.',
+        );
+        return original;
+      }
+      // Only an in-progress entry owns its Lane/head; a terminal one (failed, interrupted, conflict…) may be resubmitted.
+      const duplicate = data.landingEntries?.find(
+        entry =>
+          ACTIVE_LANDING.has(entry.status) &&
+          entry.channel === command.accept!.channel &&
+          data.views
+            .find(view => view.id === entry.viewId)
+            ?.inputs.some(old => view.inputs.some(pin => pin.laneId === old.laneId && pin.head === old.head)),
       );
-      return original;
-    }
-    // Only an in-progress entry owns its Lane/head; a terminal one (failed, interrupted, conflict…) may be resubmitted.
-    const duplicate = data.landingEntries?.find(
-      entry =>
-        ACTIVE_LANDING.has(entry.status) &&
-        entry.channel === command.accept!.channel &&
-        data.views
-          .find(view => view.id === entry.viewId)
-          ?.inputs.some(old => view.inputs.some(pin => pin.laneId === old.laneId && pin.head === old.head)),
-    );
-    invariant(
-      !duplicate,
-      'LANDING_ALREADY_SUBMITTED',
-      `This Lane/head already has landing entry ${duplicate?.id} (${duplicate?.status}). Replay that request or wait for it to finish.`,
-    );
-    const submitted = pins ?? landingPins();
-    const environment = submitted.environment;
-    const entry: LandingEntry = {
-      id: command.operationId,
-      request,
-      channel: command.accept!.channel,
-      viewId: view.id,
-      head: view.head!,
-      checkId: command.checkId!,
-      definition: command.expectedDefinition!,
-      environment: command.expectedEnvironment ?? environment.fingerprint,
-      ...(command.expectedEnvironment === undefined || command.expectedEnvironment === environment.fingerprint
-        ? { environmentSnapshot: environment, runtimeSnapshot: submitted.runtime }
-        : {}),
-      ...(command.preview ? { preview: command.preview } : {}),
-      arrivedAt: new Date().toISOString(),
-      priority: command.priority ?? 'normal',
-      submitter: command.actor ?? work.actor.id,
-      keepOpen: command.keepOpen ?? false,
-      status: 'queued',
-    };
-    (data.landingEntries ??= []).push(entry);
-    return entry;
-  });
+      invariant(
+        !duplicate,
+        'LANDING_ALREADY_SUBMITTED',
+        `This Lane/head already has landing entry ${duplicate?.id} (${duplicate?.status}). Replay that request or wait for it to finish.`,
+      );
+      const submitted = pins ?? landingPins();
+      const environment = submitted.environment;
+      const entry: LandingEntry = {
+        id: command.operationId,
+        request,
+        channel: command.accept!.channel,
+        viewId: view.id,
+        head: view.head!,
+        checkId: command.checkId!,
+        definition: command.expectedDefinition!,
+        environment: command.expectedEnvironment ?? environment.fingerprint,
+        ...(command.expectedEnvironment === undefined ||
+        command.expectedEnvironment === environment.fingerprint
+          ? { environmentSnapshot: environment, runtimeSnapshot: submitted.runtime }
+          : {}),
+        ...(command.preview ? { preview: command.preview } : {}),
+        arrivedAt: new Date().toISOString(),
+        priority: command.priority ?? 'normal',
+        submitter: command.actor ?? work.actor.id,
+        keepOpen: command.keepOpen ?? false,
+        status: 'queued',
+      };
+      (data.landingEntries ??= []).push(entry);
+      return entry;
+    },
+    undefined,
+    command.accept!.channel,
+  );
 }
 /** Channel head accepted so far, or null before the first acceptance. */
 export const acceptedHead = (data: WorkData, channel: string) =>
@@ -310,7 +323,8 @@ export function selectBatch(
       : parent.previous
     : acceptedHead(data, channel);
   const base = projected ?? previous ?? data.nativeHead!;
-  const ordinal = data.landingBatches?.length ?? 0;
+  const ordinal =
+    work.store.readRecords()?.manifest.collections.landingBatches?.count ?? data.landingBatches?.length ?? 0;
   const batch: LandingBatch = {
     id: finishChild(first.id, `batch:${ordinal}`),
     channel,
@@ -462,5 +476,6 @@ export async function composeBatch(work: WorkService, batch: LandingBatch, befor
       return saved;
     },
     beforePublish,
+    batch.channel,
   );
 }

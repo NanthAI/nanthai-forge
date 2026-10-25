@@ -1,3 +1,4 @@
+import { composeLandingInputs } from './landing-compose-inputs.js';
 import { collectRecords } from './work-record-collection.js';
 import { withMetricRequester } from './self-metrics-journal.js';
 import { postAcceptMoves } from './post-accept-coverage.js';
@@ -422,6 +423,16 @@ export class WorkService {
     },
   ) {
     if (input && typeof input === 'object' && 'action' in input) {
+      if (
+        input.action === 'compose' &&
+        'operationId' in input &&
+        typeof input.operationId === 'string' &&
+        options.reconcileComposition &&
+        this.store.native &&
+        this.store.readRecords() &&
+        !this.store.readRecords()?.manifest.collections.automations?.count
+      )
+        return composeLandingInputs(this.store, input, options);
       if (input.action === 'policy')
         return { revision: this.store.revision(), result: readPolicy(this.store) };
       if (input.action === 'set-policy') return setPolicy(this.store, input, this.actor, expectedRevision);

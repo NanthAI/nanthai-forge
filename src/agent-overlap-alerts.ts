@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { recordMetricOverlapSave } from './self-metrics-overlap.js';
 import { currentChannelHead } from './agent-defaults.js';
 import { PeersSource, RECEIPT_ANCESTRY_READS } from './agent-peers-source.js';
 import { digest } from './hash.js';
@@ -58,7 +59,12 @@ export function overlapRegions(item: PredictiveOverlap) {
   return out;
 }
 /** A checkpoint fans out one immutable inbox item to both participants. */
-export function recordOverlapAlerts(store: WorkStore, laneId: string, maxPeers = Infinity) {
+export function recordOverlapAlerts(
+  store: WorkStore,
+  laneId: string,
+  maxPeers = Infinity,
+  checkpoint = false,
+) {
   const main = currentChannelHead(store, 'main');
   const tx = store.readRecords();
   const fields = tx
@@ -104,6 +110,19 @@ export function recordOverlapAlerts(store: WorkStore, laneId: string, maxPeers =
       return false;
     }
   });
+  if (checkpoint)
+    recordMetricOverlapSave(
+      store.directory,
+      focus,
+      lanes,
+      lane =>
+        changedPaths(
+          source.state(lane.id === focus.id ? (source.state(lane.head).parents[0] ?? lane.base) : lane.base)
+            .files,
+          source.state(lane.head).files,
+        ),
+      !incomplete,
+    );
   const plan = savedOverlapPlan(store, lanes, laneId);
   if (incomplete) plan.coverage = 'local-incomplete';
   const participants = new Map<string, NonNullable<OverlapAlert['participants']>[number]>();

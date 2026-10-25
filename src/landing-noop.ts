@@ -1,3 +1,4 @@
+import { landingRecords } from './landing-records.js';
 // SPDX-License-Identifier: Apache-2.0
 import { optimisticLanding } from './autonomy-policy.js';
 import { readPolicy } from './work-autonomy.js';
@@ -68,7 +69,7 @@ export function settleCompletedLanes(
 /** Complete the Lanes of entries that were already on main, as acceptance would.
  * Retry-safe: completion of an already completed Lane is a no-op. */
 export async function completeAlreadyOnMain(work: WorkService, channel: string) {
-  const data = work.store.load(),
+  const data = landingRecords(work.store, channel),
     policy = readPolicy(work.store);
   if (optimisticLanding(policy) || !policy.lifecycle.completeOnAccept) return;
   for (const entry of data.landingEntries ?? []) {

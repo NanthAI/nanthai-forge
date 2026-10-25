@@ -7,6 +7,7 @@ import {
   mkdirSync,
   openSync,
   renameSync,
+  rmdirSync,
   unlinkSync,
   readdirSync,
   writeFileSync,
@@ -33,6 +34,8 @@ import {
 import { diskGuard } from './disk-guard.js';
 import { nativeFile } from './native-file.js';
 import { NativeWorkspaceFiles } from './native-workspace-files.js';
+import { cloneLaneTree } from './native-lane-cache.js';
+import { writeRecoveryState } from './recovery-state.js';
 import { syncDirectory, syncFile } from './native-durability.js';
 import { NativeAncestry } from './native-ancestry.js';
 
@@ -69,7 +72,7 @@ export function nativeOwner(root: string): string | null {
     invariant(nativeOwner(owner) === owner, 'INVALID_NATIVE_SOURCE', 'Native owner is unavailable.');
   return owner;
 }
-export function nativeMarker(root: string, owner = root) {
+export function nativeMarker(root: string, owner = root, publishedRoot?: string) {
   root = realpathSync(root);
   owner = realpathSync(owner);
   const path = join(root, '.forge');
@@ -77,7 +80,11 @@ export function nativeMarker(root: string, owner = root) {
   invariant(!lstatSync(path).isSymbolicLink(), 'UNSAFE_PATH', 'Native metadata directory must be real.');
   writeFileSync(
     join(path, 'native.json'),
-    JSON.stringify({ schema: 1, kind: 'forge-native', owner: relative(root, owner) || '.' }),
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-native',
+      owner: relative(publishedRoot ? resolve(publishedRoot) : root, owner) || '.',
+    }),
     { flag: 'wx', mode: 0o600 },
   );
 }
@@ -331,23 +338,44 @@ export class NativeSource {
       : [];
     const published = destination,
       staged = /^lane-[0-9a-f-]{36}$/.test(basename(destination));
-    if (staged)
-      destination = join(dirname(destination), `.lane-stage-${basename(destination)}-${randomUUID()}`);
+    let stageRoot: string | undefined;
+    if (staged) {
+      stageRoot = join(dirname(destination), `.lane-stage-${basename(destination)}-${randomUUID()}`);
+      mkdirSync(stageRoot, { mode: 0o700 });
+      destination = join(stageRoot, 'workspace');
+    }
     this.withMaterialization(files => {
-      const state = this.state(id);
-      for (const file of state.files) files.prepare(file.blob);
-      mkdirSync(destination, { recursive: true, mode: 0o700 });
-      for (const file of state.files) {
-        const path = join(destination, file.path);
-        mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
-        files.write(file.blob, path, file.mode);
+      const clone = staged ? cloneLaneTree(this, id, destination) : undefined;
+      if (!clone) {
+        const state = this.state(id);
+        for (const file of state.files) files.prepare(file.blob);
+        mkdirSync(destination, { recursive: true, mode: 0o700 });
+        for (const file of state.files) {
+          const path = join(destination, file.path);
+          mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
+          files.write(file.blob, path, file.mode);
+        }
       }
-      if (marker) nativeMarker(destination, this.owner);
+      if (marker) nativeMarker(destination, this.owner, staged ? published : undefined);
+      if (clone && marker)
+        writeRecoveryState(join(destination, '.forge/materialization.json'), {
+          schema: 1,
+          head: id,
+          ...clone,
+        });
       const flush = (directory: string) => {
         for (const name of readdirSync(directory)) {
           const path = join(directory, name);
           if (lstatSync(path).isDirectory()) flush(path);
-          else if (!lstatSync(path).isSymbolicLink()) syncFile(path);
+          // A reflink's source bytes were flushed once in the verified cache.
+          // Persist its new directory entries and marker; ordinary copy fallback
+          // still flushes every newly written file. Work retains the exact head
+          // for rematerialization even if a derived clone is lost on restart.
+          else if (
+            !lstatSync(path).isSymbolicLink() &&
+            (clone?.method !== 'clone' || path.startsWith(join(destination, '.forge') + '/'))
+          )
+            syncFile(path);
         }
         syncDirectory(directory);
       };
@@ -359,6 +387,9 @@ export class NativeSource {
         nativeSourceTestHooks.afterRename?.(published);
         syncDirectory(dirname(published));
         nativeSourceTestHooks.afterPublish?.(published);
+        // A failed/interrupted stage remains inspectable. Remove only our empty
+        // container after successful publication, never any possible edits.
+        if (stageRoot && readdirSync(stageRoot).length === 0) rmdirSync(stageRoot);
       }
     });
     return warnings;

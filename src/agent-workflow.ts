@@ -280,7 +280,10 @@ export class AgentWorkflow {
       try {
         overlapCoverage = await retryWorkPhase(
           command.operationId!,
-          () => store.observing(() => recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT)),
+          () =>
+            store.observing(() =>
+              recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT, command.action === 'checkpoint'),
+            ),
           ['SOURCE_CHANGED'],
         );
       } catch {
@@ -845,7 +848,7 @@ export class AgentWorkflow {
           });
         try {
           if (!admission)
-            store.observing(() => recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT));
+            store.observing(() => recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT, true));
         } catch {
           /* Advisory coordination never invalidates a saved checkpoint. */
         }

@@ -1,3 +1,4 @@
+import { landingCheckPrefix } from './landing-records.js';
 // SPDX-License-Identifier: Apache-2.0
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -41,15 +42,22 @@ export function writeCheckScope(store: WorkStore, run: CheckRun, directory: stri
   const base = run.comparisonBase ?? run.base;
   let paths = checkChangedPaths(store, base, run.head);
   if (store.native) {
-    const data = store.load();
-    const prefix = data.landingBatches
-      ?.flatMap(batch => batch.prefixes)
-      .find(prefix => prefix.viewId === run.viewId);
+    const indexed = store.readRecords?.();
+    const legacy = indexed ? undefined : store.load();
+    const prefix = indexed
+      ? landingCheckPrefix(store, run.viewId)
+      : legacy?.landingBatches?.flatMap(batch => batch.prefixes).find(prefix => prefix.viewId === run.viewId);
     if (prefix) {
       const source = new NativeSource(store.root);
       for (const id of prefix.entryIds) {
-        const entry = data.landingEntries!.find(entry => entry.id === id)!;
-        const view = data.views.find(view => view.id === entry.viewId)!;
+        const entry = (
+          indexed
+            ? store.select('landingEntries', id)
+            : legacy?.landingEntries?.find(entry => entry.id === id)
+        )!;
+        const view = (
+          indexed ? store.select('views', entry.viewId) : legacy?.views.find(view => view.id === entry.viewId)
+        )!;
         const before = new Map(
           source.state(view.composedMain ?? view.base).files.map(file => [file.path, file]),
         );

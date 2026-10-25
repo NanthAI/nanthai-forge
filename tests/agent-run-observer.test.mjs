@@ -117,6 +117,26 @@ test('waiting on a live selected run takes no owner locks or full Work loads whi
   assert.equal(peer.load().runs.find(item => item.id === unrelated.id).status, 'running');
 });
 
+test('a new v3 selected-run observer does not read unrelated run history', t => {
+  const { store, peer, run, unrelated } = fixture(t);
+  const data = peer.load();
+  data.runs.reverse();
+  data.revision++;
+  peer.save(data);
+  const manifest = JSON.parse(readFileSync(join(store.directory, 'work.json')));
+  assert.equal(manifest.schema, 'forge-work-records-v3');
+  const hashes = recordObject(store.directory, manifest.collections.runs.pages[0]);
+  const unrelatedPath = join(store.directory, 'records', hashes[0]);
+  assert.equal(recordObject(store.directory, hashes[0]).fields.id, unrelated.id);
+  const bytes = readFileSync(unrelatedPath);
+  writeFileSync(unrelatedPath, 'unavailable unrelated history');
+  try {
+    assert.equal(new SelectedRunObserver(store, run.id).read().id, run.id);
+  } finally {
+    writeFileSync(unrelatedPath, bytes);
+  }
+});
+
 test('cached selected run follows revision and position changes without reading unrelated record bytes', t => {
   const { store, peer, run, unrelated } = fixture(t),
     reader = new SelectedRunObserver(store, run.id);

@@ -6,7 +6,7 @@ export { diagnosticCause, diagnosticStatus, batchDiagnosis } from './landing-obs
 import { batchEdit } from './landing-batch-store.js';
 import type { BatchPrefix, LandingBatch, LandingEntry } from './landing-batch-types.js';
 import type { LandingDriver } from './landing-driver.js';
-import type { CheckRun } from './work-types.js';
+import type { CheckRun, WorkData } from './work-types.js';
 import type { WorkService } from './work.js';
 import type { WorkStore } from './work-store.js';
 
@@ -65,48 +65,58 @@ export async function retainDiagnosisNode(
   return batchEdit(
     work,
     batch.id,
-    data => {
-      const saved = data.landingBatches!.find(item => item.id === batch.id)!;
-      const first = data.landingEntries!.find(entry => entry.id === batch.entryIds[0])!;
-      const view = data.views.find(view => view.id === prefix.viewId)!;
-      const diagnosis = (saved.diagnosis ??= {
-        version: 1,
-        strategy: 'prefix',
-        minimization: 'incomplete',
-        nodes: [],
-      });
-      let node = diagnosis.nodes.find(node => node.id === prefix.runId);
-      if (!node) {
-        node = {
-          ...prefix,
-          id: prefix.runId,
-          inputs: view.inputs,
-          ...(parent ? { parentId: parent.runId } : {}),
-          base: batch.base,
-          previous: batch.previous,
-          checkId: first.checkId,
-          definition: first.definition,
-          environment: batch.environment?.fingerprint ?? first.environment,
-          status: 'reserved',
-          selection: { runId: prefix.runId, known: false },
-        };
-        diagnosis.nodes.push(node);
-      }
-      if (run) {
-        node.status = run.status;
-        delete node.cause;
-        const cause = diagnosticCause(run);
-        if (cause) node.cause = cause;
-        node.selection = {
-          runId: run.id,
-          known: !!run.checkSelection,
-          ...(run.checkSelection ? { scope: run.checkSelection.scope, tests: run.checkSelection.tests } : {}),
-          ...(run.backend?.pin ? { plan: run.backend.pin } : {}),
-        };
-      }
-    },
+    data => recordDiagnosisNode(data, batch, prefix, parent, run),
     driver.beforePublish,
+    batch.channel,
   );
+}
+
+/** Update diagnosis together with a terminal publication when no search is needed. */
+export function recordDiagnosisNode(
+  data: WorkData,
+  batch: LandingBatch,
+  prefix: BatchPrefix,
+  parent?: BatchPrefix,
+  run?: CheckRun,
+) {
+  const saved = data.landingBatches!.find(item => item.id === batch.id)!;
+  const first = data.landingEntries!.find(entry => entry.id === batch.entryIds[0])!;
+  const view = data.views.find(view => view.id === prefix.viewId)!;
+  const diagnosis = (saved.diagnosis ??= {
+    version: 1,
+    strategy: 'prefix',
+    minimization: 'incomplete',
+    nodes: [],
+  });
+  let node = diagnosis.nodes.find(node => node.id === prefix.runId);
+  if (!node) {
+    node = {
+      ...prefix,
+      id: prefix.runId,
+      inputs: view.inputs,
+      ...(parent ? { parentId: parent.runId } : {}),
+      base: batch.base,
+      previous: batch.previous,
+      checkId: first.checkId,
+      definition: first.definition,
+      environment: batch.environment?.fingerprint ?? first.environment,
+      status: 'reserved',
+      selection: { runId: prefix.runId, known: false },
+    };
+    diagnosis.nodes.push(node);
+  }
+  if (run) {
+    node.status = run.status;
+    delete node.cause;
+    const cause = diagnosticCause(run);
+    if (cause) node.cause = cause;
+    node.selection = {
+      runId: run.id,
+      known: !!run.checkSelection,
+      ...(run.checkSelection ? { scope: run.checkSelection.scope, tests: run.checkSelection.tests } : {}),
+      ...(run.backend?.pin ? { plan: run.backend.pin } : {}),
+    };
+  }
 }
 
 /** Source verdicts are conditional on the recorded main; speculative observations stay provisional. */

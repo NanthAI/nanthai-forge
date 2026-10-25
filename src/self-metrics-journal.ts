@@ -5,6 +5,10 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ForgeError } from './errors.js';
 import { workActorSchema, type WorkActor } from './work-actor.js';
+import type { DiskSample } from './self-metrics-disk.js';
+import type { MetricObservation } from './self-metrics-observations.js';
+import { sampleSelfMetricDisk } from './self-metrics-disk.js';
+import { recordLifecycleOverlap } from './self-metrics-overlap.js';
 import { READ_ONLY_ACTIONS } from './agent-read-actions.js';
 
 export type Requester = {
@@ -12,10 +16,13 @@ export type Requester = {
   operationId: string;
   actor: WorkActor | { kind: 'system'; name: string };
   origin: 'command' | 'system';
+  savedHead?: { laneId: string; head: string };
 };
 export type SelfMetricReceipt = Requester & {
   schema: 1;
-  kind: 'lifecycle' | 'mutation';
+  kind: 'lifecycle' | 'mutation' | 'observation';
+  observation?: MetricObservation;
+  disk?: DiskSample;
   at: string;
   errorCode?: string;
   errorCodes?: string[];
@@ -94,6 +101,10 @@ export function metricRequesterActor(actor: WorkActor) {
   const current = request.getStore();
   if (current) current.actor = actor;
 }
+export function metricSavedHead(laneId: string, head: string) {
+  const current = request.getStore();
+  if (current) current.savedHead = { laneId, head };
+}
 export function metricOperationId(operationId: string) {
   const current = request.getStore();
   if (current) current.operationId = operationId;
@@ -116,6 +127,7 @@ export function recordOwnerMutation(directory: string, revision?: number, name =
     },
     name,
   );
+  if (name === 'self-metrics.jsonl') sampleSelfMetricDisk(directory);
 }
 export function withMetricRequester<T>(input: unknown, actor: WorkActor, run: () => T): T {
   if (selfMetricsTestHooks.disabled || request.getStore()) return run();
@@ -227,6 +239,8 @@ export async function withLifecycleMetric<T>(
               ]
             : [],
       );
+      if (['checkpoint', 'finish', 'land'].includes(action))
+        recordLifecycleOverlap(directory, input, response, current, name);
       return response;
     } catch (error) {
       errorCode = error instanceof ForgeError ? error.code : 'INTERNAL_ERROR';

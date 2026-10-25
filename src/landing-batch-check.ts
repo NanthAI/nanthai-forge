@@ -1,5 +1,10 @@
 import { admitLandingCheck } from './landing-check-admission.js';
-import { retainDiagnosisNode, validatePrefixRun, diagnosticStatus } from './landing-diagnosis.js';
+import {
+  retainDiagnosisNode,
+  recordDiagnosisNode,
+  validatePrefixRun,
+  diagnosticStatus,
+} from './landing-diagnosis.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 // SPDX-License-Identifier: Apache-2.0
 import { waitForAgentRun } from './agent-run-observer.js';
@@ -76,6 +81,7 @@ export async function evaluateBatch(
   waitMs?: number,
 ) {
   const cancelledAt = cancellationBoundary(work, batch);
+  let settled = false;
   const outcome = await passingPrefix(
     cancelledAt < 0 ? batch.prefixes : batch.prefixes.slice(0, cancelledAt),
     () => batch.mode,
@@ -86,6 +92,43 @@ export async function evaluateBatch(
         await waitForAgentRun(work.store, prefix.runId, waitMs);
       const run = work.store.select('runs', prefix.runId)!;
       validatePrefixRun(work, batch, prefix, run);
+      // A sole failed Candidate has no proper prefix to diagnose or accept.
+      // Publish its exact evidence and terminal entry together, freeing the
+      // queue before unrelated acceptance/lifecycle work can delay it.
+      if (
+        batch.entryIds.length === 1 &&
+        batch.prefixes.length === 1 &&
+        !batch.parentId &&
+        cancelledAt < 0 &&
+        diagnosticStatus(run) === 'failed'
+      ) {
+        settled = await batchEdit(
+          work,
+          batch.id,
+          data => {
+            const saved = data.landingBatches!.find(item => item.id === batch.id)!;
+            const entry = data.landingEntries!.find(item => item.id === batch.entryIds[0])!;
+            if (
+              saved.status !== 'checking' ||
+              cancellationBoundary(work, saved) !== cancelledAt ||
+              entry.status !== 'checking'
+            )
+              return false;
+            recordDiagnosisNode(data, batch, prefix, parent, run);
+            saved.settlement = { cancelledAt, failingViewId: prefix.viewId, culpritViewId: prefix.viewId };
+            saved.status = 'completed';
+            saved.culpritId = entry.id;
+            entry.status = 'failed';
+            entry.terminalAt = new Date().toISOString();
+            entry.runId = run.id;
+            entry.reason = `Observed failing prefix of 1 landing entries on base ${batch.base}; run ${run.id}. This does not establish a standalone or minimal failing Lane.`;
+            return true;
+          },
+          driver.beforePublish,
+          batch.channel,
+        );
+        if (settled) return 'failed';
+      }
       await retainDiagnosisNode(work, batch, prefix, parent, driver, run);
       if (run.backend?.actual === 'local' && batch.mode === 'parallel') {
         batch.mode = 'halving';
@@ -96,11 +139,13 @@ export async function evaluateBatch(
             data.landingBatches!.find(item => item.id === batch.id)!.mode = 'halving';
           },
           driver.beforePublish,
+          batch.channel,
         );
       }
       return diagnosticStatus(run);
     },
   );
+  if (settled) return true;
   const infraRun = batch.prefixes
     .map(prefix => work.store.select('runs', prefix.runId))
     .find(run => run && pendingActionsInfra(run));
@@ -116,6 +161,7 @@ export async function evaluateBatch(
           entry.runId = infraRun.id;
       },
       driver.beforePublish,
+      batch.channel,
     );
     return false;
   }
@@ -138,6 +184,7 @@ export async function evaluateBatch(
       };
     },
     driver.beforePublish,
+    batch.channel,
   );
   return true;
 }

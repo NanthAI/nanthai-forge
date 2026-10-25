@@ -6,6 +6,7 @@ import { ForgeError } from './errors.js';
 import { digest } from './hash.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { nativeFile } from './native-file.js';
+import { snapshotBlob } from './native-snapshot-clone.js';
 import { NativeSource, nativePaths, type NativeFile } from './native-source.js';
 import { changedPaths } from './agent-sync.js';
 import { writeRecoveryState } from './recovery-state.js';
@@ -38,6 +39,13 @@ const pointerSchema = z.object({
   at: z.string().datetime(),
   changedPathCount: z.number().int().nonnegative(),
   paths: z.array(z.string()),
+  storage: z
+    .object({
+      cloned: z.number().int().nonnegative(),
+      copied: z.number().int().nonnegative(),
+      reasons: z.array(z.string()),
+    })
+    .optional(),
 });
 export type AutoSnapshot = z.infer<typeof pointerSchema>;
 type CacheEntry = { key: string; blob: string; mode: NativeFile['mode'] };
@@ -159,6 +167,7 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
     cache = readCache(store, laneId),
     next = new Map<string, CacheEntry>(),
     written = new Set<string>();
+  const storage = { cloned: 0, copied: 0, reasons: [] as string[] };
   let reread = 0;
   const files: NativeFile[] = nativePaths(
     root,
@@ -175,7 +184,12 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
     const { bytes, mode } = nativeFile(root, path);
     let blob = digest(bytes);
     if (!headBlobs.has(blob)) {
-      blob = source.put(bytes);
+      const retained = snapshotBlob(source, join(root, path), bytes, mode === 'symlink');
+      blob = retained.blob;
+      if (retained.storage?.method === 'clone') storage.cloned++;
+      if (retained.storage?.method === 'copy') storage.copied++;
+      if (retained.storage?.reason && !storage.reasons.includes(retained.storage.reason))
+        storage.reasons.push(retained.storage.reason);
       written.add(blob);
     }
     // A file rewritten during the read is not cached; the next attempt reads it again.
@@ -215,6 +229,7 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
       at,
       changedPathCount: paths.length,
       paths: paths.slice(0, 20),
+      storage,
     } satisfies AutoSnapshot);
     return true;
   });

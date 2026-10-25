@@ -14,9 +14,20 @@ test('post-prepare fallback and original-operation recovery fit 256 MiB with 100
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const worker = new URL('./source-return-post-prepare-worker.mjs', import.meta.url).pathname;
   await exec(process.execPath, [worker, 'fixture', directory], { maxBuffer: 1024 * 1024 });
+  // Collect within the asserted RSS budget instead of allowing a 384 MiB old
+  // generation and host-dependent young-generation growth. The same fixture,
+  // cold retries and peak-RSS assertion still run in the constrained process.
   const { stdout } = await exec(
     process.execPath,
-    ['--expose-gc', '--trace-gc-nvp', '--max-old-space-size=384', worker, 'recover', directory],
+    [
+      '--expose-gc',
+      '--trace-gc-nvp',
+      '--max-old-space-size=128',
+      '--max-semi-space-size=4',
+      worker,
+      'recover',
+      directory,
+    ],
     { env: { ...process.env, FORGE_TEST_PRECOMPILED: '1' }, maxBuffer: 32 * 1024 * 1024 },
   );
   const result = JSON.parse(stdout.match(/MEMORY_RESULT (.+)/)[1]);

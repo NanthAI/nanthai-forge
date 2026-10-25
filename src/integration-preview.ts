@@ -1,3 +1,4 @@
+import { landingPreviewRecords, hasPreviewSave } from './landing-preview-records.js';
 import { randomUUID } from 'node:crypto';
 import { localCost } from './check-cost.js';
 import { retainPreviewMeasurement } from './preview-accounting.js';
@@ -82,11 +83,16 @@ export function previewPinned(
     () => {
       const started = performance.now(),
         startedAt = new Date().toISOString();
-      const data = store.load(),
+      const data = pins
+          ? landingPreviewRecords(
+              store,
+              pins.map(pin => pin.laneId),
+            )
+          : store.load(),
         selected = data.lanes
           .filter(
             lane =>
-              lane.state === 'active' && lane.checkpoints.length && (!laneIds || laneIds.includes(lane.id)),
+              lane.state === 'active' && hasPreviewSave(lane) && (!laneIds || laneIds.includes(lane.id)),
           )
           .sort((a, b) => a.id.localeCompare(b.id)),
         lanes = pins
@@ -146,7 +152,7 @@ export function previewPinned(
         applicability: 'current',
         coverage: {
           omittedLaneIds: data.lanes
-            .filter(lane => lane.state === 'active' && lane.checkpoints.length)
+            .filter(lane => lane.state === 'active' && hasPreviewSave(lane))
             .filter(lane => !lanes.some(item => item.id === lane.id))
             .map(lane => lane.id),
           gaps: ['Only saved source is checked; unsaved files and runtime behavior are excluded.'],

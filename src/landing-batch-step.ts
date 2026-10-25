@@ -1,9 +1,10 @@
+import { currentChannelHead } from './agent-defaults.js';
 import { validatePassingPrefix, diagnosticStatus } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
 import { finishChild } from './agent-finish-journal.js';
 import { ForgeError } from './errors.js';
 import { retryWorkPhase } from './work-retry.js';
-import { acceptedHead, batchEdit, composeBatch } from './landing-batch-store.js';
+import { batchEdit, composeBatch } from './landing-batch-store.js';
 import { cancellationBoundary, evaluateBatch } from './landing-batch-check.js';
 import type { WorkService } from './work.js';
 import type { ChannelMove } from './work-types.js';
@@ -62,7 +63,7 @@ export async function advanceLandingBatch(
     prefix => prefix.viewId === (outcome?.failingViewId ?? outcome?.culpritViewId),
   );
   const edit = <T>(update: Parameters<typeof batchEdit<T>>[2]) =>
-    batchEdit(work, batch.id, update, driver.beforePublish);
+    batchEdit(work, batch.id, update, driver.beforePublish, batch.channel);
   await options.beforeAccept?.();
   if (!receipt && cancellationBoundary(work, batch) !== outcome!.cancelledAt) {
     await edit(data => {
@@ -80,7 +81,7 @@ export async function advanceLandingBatch(
     });
   if (!receipt && batch.parentId && !outcome?.stopped) {
     if (options.parent && !(await options.parent)) return 'waiting';
-    if (acceptedHead(work.store.load(), batch.channel) !== batch.previous) {
+    if (currentChannelHead(work.store, batch.channel) !== batch.previous) {
       await supersede();
       return 'settled';
     }

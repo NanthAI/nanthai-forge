@@ -1,3 +1,4 @@
+import { landingRecords } from './landing-records.js';
 import { observeWorkProgress } from './work-progress.js';
 import { landingWorkerSignal } from './landing-worker-context.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -14,7 +15,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /** Give a burst a moment to arrive before the first remote check starts. */
 async function batchWindow(work: WorkService, channel: string) {
   for (;;) {
-    const data = work.store.load();
+    const data = landingRecords(work.store, channel);
     if (
       data.landingBatches?.some(
         batch => batch.channel === channel && ['composing', 'checking'].includes(batch.status),
@@ -41,6 +42,7 @@ export async function drainLandingBatches(
   waitMs?: number,
   beforeAccept?: () => Promise<void>,
   onFailure?: (batch: LandingBatch) => void,
+  onSettled?: () => void,
 ) {
   return withQueueSlot(
     batchDirectory(work, channel),
@@ -52,7 +54,7 @@ export async function drainLandingBatches(
         started = new Set<string>(),
         running = new Map<string, Promise<boolean>>();
       const observe = () => {
-        const data = work.store.load();
+        const data = landingRecords(work.store, channel);
         for (const entry of data.landingEntries ?? [])
           if (entry.channel === channel && ['queued', 'checking'].includes(entry.status)) seen.add(entry.id);
         return data;
@@ -88,6 +90,7 @@ export async function drainLandingBatches(
             channel,
             data => selectBatch(work, data, channel, started),
             driver.beforePublish,
+            channel,
           );
         }
         if (batch) {
@@ -116,6 +119,7 @@ export async function drainLandingBatches(
             (async () => {
               for (;;) {
                 const step = await advanceLandingBatch(work, id, driver, { waitMs, parent, beforeAccept });
+                if (step === 'settled') onSettled?.();
                 if (step !== 'advanced') return step === 'settled';
               }
             })()

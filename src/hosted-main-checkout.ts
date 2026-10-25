@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { recordMetricCache } from './self-metrics-source-observations.js';
 import {
   existsSync,
   mkdirSync,
@@ -93,6 +94,7 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
       previousMarker: before ? digest(before) : null,
     };
     save(receiptPath, next);
+    recordMetricCache(cache, observed, 'authority', request.operationId);
     return next;
   });
   const selection = hostedMainSchema.parse(operation.selection);
@@ -172,6 +174,7 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
       syncDirectory(cache);
       operation.complete = true;
       save(receiptPath, operation);
+      recordMetricCache(cache, selection, 'replica', request.operationId);
       if (existsSync(previous)) rmSync(previous, { recursive: true });
     });
   } finally {

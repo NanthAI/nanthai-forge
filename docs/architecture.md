@@ -18,18 +18,18 @@ For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [co
 
 ## Who owns what
 
-| Part | Owns | Code |
-| --- | --- | --- |
-| Native store | Immutable source: file blobs (SHA-256), State manifests and disposable owner-computed source indexes | `src/native-source.ts` |
-| Work store | Mutable metadata: Intents, Lanes, notes, check runs, selections | `src/work-store.ts`, `src/work.ts`, `src/native-work.ts` |
-| Analysis | Derived, partial code graph with exact locators | `src/snapshot.ts`, `src/analyze.ts`, `src/graph-query.ts` |
-| Local execution | Check and Playbook processes in materialized Candidates | `src/work-run.ts`, `src/work-playbook.ts` |
-| Agent interface | Short commands over the same owners | `src/agent-workflow.ts`, `src/mcp-agent-workflow.ts` |
-| Convex | Hosted checkpoints, the Work event journal, sessions, messages, current access | `convex/` |
-| Web | Hosted browser UI (the only browser UI) | `web/src/` |
-| Local server | `nforge serve`: token-protected Git smart-HTTP and Work API on 127.0.0.1, no browser pages | `src/http.ts`, `src/work-git-http.ts`, `src/work-http.ts` |
-| Netlify worker | Public-repository analysis in the background | `netlify/functions/` |
-| Git compatibility | Import, export, projections and publication | `src/native-git*.ts`, `src/work-git*.ts` |
+| Part              | Owns                                                                                                 | Code                                                      |
+| ----------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Native store      | Immutable source: file blobs (SHA-256), State manifests and disposable owner-computed source indexes | `src/native-source.ts`                                    |
+| Work store        | Mutable metadata: Intents, Lanes, notes, check runs, selections                                      | `src/work-store.ts`, `src/work.ts`, `src/native-work.ts`  |
+| Analysis          | Derived, partial code graph with exact locators                                                      | `src/snapshot.ts`, `src/analyze.ts`, `src/graph-query.ts` |
+| Local execution   | Check and Playbook processes in materialized Candidates                                              | `src/work-run.ts`, `src/work-playbook.ts`                 |
+| Agent interface   | Short commands over the same owners                                                                  | `src/agent-workflow.ts`, `src/mcp-agent-workflow.ts`      |
+| Convex            | Hosted checkpoints, the Work event journal, sessions, messages, current access                       | `convex/`                                                 |
+| Web               | Hosted browser UI (the only browser UI)                                                              | `web/src/`                                                |
+| Local server      | `nforge serve`: token-protected Git smart-HTTP and Work API on 127.0.0.1, no browser pages           | `src/http.ts`, `src/work-git-http.ts`, `src/work-http.ts` |
+| Netlify worker    | Public-repository analysis in the background                                                         | `netlify/functions/`                                      |
+| Git compatibility | Import, export, projections and publication                                                          | `src/native-git*.ts`, `src/work-git*.ts`                  |
 
 The local native owner is canonical for Forge's own development. A hosted project holds checkpoints you send it plus its own metadata journal. Source synchronization is explicit unless the owner enables the separate `autoExchange` policy. Its saved-mutation driver shares bound-push serialization and retained-operation reconciliation, with no idle polling. Bound owners also send advisory agent presence and lifecycle metadata automatically, with a binding opt-out; these updates do not transfer source or check artifacts.
 
@@ -92,7 +92,9 @@ Freshness comes from rereading source, never from timestamps. Re-indexing captur
 
 **Hosted blob access.** Convex functions access file storage through `BlobStore` (`convex/blobStore.ts`); CLI exchange uses `ExchangeBlobs` (`src/exchange-blobs.ts`). Project objects dispatch on each row's `location`, with `r2Key` and a verified commit for R2. Server-built indexed artifacts and import cursors use opaque `r2blob:` references to `artifactBlobs` metadata, alongside legacy Convex storage IDs. R2 writes require the deployment flag and the owning project's or indexed import's opt-in, reserve immutable pins before create-only checksum-bound PUTs, and commit after HEAD verification. Readers keep dual-location support and verify downloaded bytes. See the [R2 storage plan](r2-storage-plan.md) for remaining compatibility paths.
 
-**Lanes and checks.** `materialize` writes a State into a fresh directory of ordinary files. Lanes and check workspaces are independent copies. Large files may share filesystem extents on supported systems. Editing a Lane never changes stored objects or other Lanes.
+**Lanes and checks.** `materialize` writes a State into a fresh directory of ordinary files. Native Lanes clone one disposable, pinned source-tree cache per owner using APFS `clonefile` (or filesystem reflinks elsewhere). The cloned tree is checked against every manifest path, blob digest and mode before publication; an edited or incomplete cache is rebuilt from the same State. Cache preparation and cloning hold only the cache/Lane locks, outside the owner writer lock. `.forge/materialization.json` records the selected head and clone/copy result, including the reason when the filesystem needs ordinary copying. Check workspaces retain their independent byte-only materialization. Editing a Lane never changes stored objects or other Lanes.
+
+Automatic snapshots reuse unchanged content-addressed blobs and clone newly changed regular files through the same filesystem helper. Every new clone is verified against the captured bytes before object publication; edits racing a clone retain the original captured bytes. Snapshot pointers record clone/copy counts and fallback reasons. State identities, symlink bytes, checkpoint behavior and the existing snapshot retention window are unchanged.
 
 **Work records.** Native owners keep Work in `.forge/work`. Git-backed owners keep it in the Git common directory under `forge-work`. `work.json` is a small manifest that points to immutable, content-addressed record pages. A save writes new records, syncs them, then atomically replaces the manifest. An interrupted save leaves the previous snapshot in place. The owner lock serializes manifest publication and shared Channel mutations. Agent Lane operations also take a per-Lane lock: checkpoint capture and native sync file writes run outside the owner lock; sync publishes only its Lane into a fresh manifest with a source-field CAS, preserving concurrent changes to other Lanes. Native start reserves its records, materializes outside the owner lock, then publishes activation. Check execution and observation hold no Work, Lane or Channel lock; after a Channel CAS race finish either proves the enabled disjoint fast-path or syncs, composes and checks a fresh pinned attempt before rejoining the acceptance queue. Transient contention at the final cancellation/spawn journal step retries without rematerializing, changing the run ID or releasing its machine-capacity ticket; a never-started command is not marked failed merely because this lock was busy. The per-operation finish journal guard prevents duplicate drivers of the same operation; it does not exclude other agents.
 
@@ -321,7 +323,6 @@ The `projectWorkHeads` row owns the mutable Work revision and projection metadat
 
 Related work is found by comparing changed paths against each Candidate's base. Composition merges independent text-line changes. Overlaps, binary changes and add/delete conflicts stay explicit. Agents should announce scope, watch related activity, message when needed and acknowledge agreements. See [agents](agents.md) and [decisions](decisions.md).
 
-
 ## Source durability and interrupted workspace updates
 
 `NativeSource` fsyncs new object bytes before publishing their hash names. The
@@ -384,7 +385,6 @@ Existing rows are populated by the bounded, idempotent internal
 `coordinationBackfill:activity({cursor})` mutation, repeating the returned cursor
 until `isDone`; counts for unbackfilled imported history are incomplete until then.
 
-
 Hosted Review uses this owner request path for native projects and offers every
 retained clean Candidate, including Candidates without a previous acceptance. People may
 accept clean unchecked Candidates; agents still need exact-Candidate passing evidence and
@@ -402,7 +402,6 @@ reason, save-first and Intent cascade semantics. Complete/reopen retain source
 and acceptance history. B4's cancel command cancels check runs: there is no
 cancelled Intent or Lane state, so these menus do not invent one. Hosted-canonical
 and Git projects retain their existing Intent status controls.
-
 
 An overlap rejection offers **Re-check on latest main**. It queues a separate
 owner request, composes the pinned reviewed Candidate with the latest local main using
@@ -766,7 +765,6 @@ health. The result names its exact inputs and duration; a concurrent save or mai
 advance does not silently change those pins. Workspaces and private dependency
 copies are removed after each preview; saved source and Work remain unchanged.
 
-
 ### Hosted Intent and Lane start APIs
 
 `projectHostedStart:start` atomically creates an Intent and Lane, or a sibling
@@ -1054,7 +1052,6 @@ Live provider dispatch (including Modal), credential use, callback ingress and
 check-output transfer remain adapter work; the contracts are exercised with local
 fake providers. See the
 [check API](operations/source-exchange.md#hosted-check-api).
-
 
 Mac runs use the same signed shard and terminal callbacks through the pull-based
 `projectHostedCheckWorker`. Completion retains `macEvidence`: machine ID, machine

@@ -1,3 +1,4 @@
+import type { DiskSample } from './self-metrics-disk.js';
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { batchDiagnosis, diagnosticCause } from './landing-observation.js';
 import type { LandingWorkerStatus } from './landing-worker-status.js';
@@ -39,6 +40,7 @@ export type PendingData = Pick<
 > &
   Partial<Pick<WorkData, 'intents' | 'landingBatches'>>;
 export type PendingObservations = {
+  disk?: DiskSample | null;
   integrationPreview?: string | undefined;
   landingWorker?: LandingWorkerStatus;
   autoExchange?: AutoExchangeStatus;
@@ -316,6 +318,7 @@ export function pendingStatus(
     overlap: observed.overlap ?? { groups: [], coverage: 'unknown' },
     schema: 1,
     integrationPreview: observed.integrationPreview,
+    disk: observed.disk ?? null,
     snapshot: { observedAt: now, workRevision: data.revision, scope: 'local-saved-records' },
     main: { head: mainHead, acceptanceId: main?.id ?? null, acceptedAt: main?.at ?? null },
     lanes,
