@@ -37,6 +37,7 @@ export const packageDocuments = [
   'docs/phase5-plan.md',
   'docs/r2-storage-plan.md',
   'docs/readable-urls.md',
+  'docs/research/sp1-storage.md',
   'docs/roadmap.md',
   'docs/security.md',
   'docs/status.md',

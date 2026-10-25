@@ -28,7 +28,7 @@ These landed in Phase 4 (closed 2026-10-25). Phase 5 assumes them.
 ## Owner decisions (decided)
 
 1. **Briefly red main is accepted** for trusted and autonomous actors, with automatic fix-forward or revert. Supervised projects keep the strict full gate.
-2. **Storage is decided by a head-to-head spike** (SP1): a native store on R2 with reachability GC against Git-native objects and packfiles, on the same criteria. Whichever wins, Lanes become APFS reflink (`clonefile`) clones with snapshots (B1.4a), built early. A Git-native winner also needs an explicit change to design constraint 7 ("Native is the daily format") in [decisions](decisions.md).
+2. **SP1 chose neither pure arm** (2026-10-25): "Git objects for source bytes, Forge identities for everything, a Forge packed store for everything else". A State stays a Forge SHA-256 record pointing at a Git tree, with a deterministic commit derived for export; existing native States stay readable through an alias table. Source lives in a local bare Git repository and immutable packs plus a catalog on R2. Work, evidence, edit streams, decisions and analysis live in Forge's own packed, collectable store. This replaces design constraint 7 ("Native is the daily format") in [decisions](decisions.md). B1.4a remains independent; P5-RC starts now and P5-SG follows B1.5b.
 3. **Structural merge** is either mergiraf or our own merge on the existing source graph (tree-sitter declarations). SP2 compares them. Output is always gated by the contract check, never by parse success.
 4. **Web breadth is frozen** until E1 and E3 are published and Bet 1 is cut over. Hosted landing gaps G1–G10 are frozen with it, except those Bet 1 needs (G1, G2, G3, G6). See [Freeze](#freeze).
 5. **Bet 1 is imperative** and starts at Phase 5 start. Its prerequisites are the first slices built.
@@ -49,15 +49,15 @@ These landed in Phase 4 (closed 2026-10-25). Phase 5 assumes them.
 
 ## Order and critical path
 
-The critical path is Bet 1: **B1.2a → B1.2b–d → B1.2e → B1.5a → B1.5b → B1.6**, with SP1 → B1.4b joining before B1.5a. Everything else fills spare builder capacity. Weeks are rough and assume three to four parallel builders.
+The critical path is Bet 1: **B1.2a → B1.2b–d → B1.2e → B1.5a → B1.5b → B1.6**, with B1.4b joining before B1.5a. SP1 is decided; B1.4b uses a two-method object interface and does not wait for P5-SG. Everything else fills spare builder capacity. Weeks are rough and assume three to four parallel builders.
 
 | Week | Critical path (Bet 1) | Alongside |
 | --- | --- | --- |
-| 1 | B1.1 published; B1.2a authority switch and fencing; B1.2c hosted seed | M1 metrics; D1 decision records; SP1 both arms; **E1 and E3 published — done** ([results](why-forge.md)) |
-| 2 | B1.2b finish to hosted queue; B1.2d browser accept (Claude design, GPT build); B1.3a runner lease | M2, M3; X1 schema compatibility check; SP1 memo and decision; B1.4a clonefile Lanes; Q3 reuse key; E2 starts on six independent slices |
+| 1 | B1.1 published; B1.2a authority switch and fencing; B1.2c hosted seed | M1 metrics; D1 decision records; SP1 decision recorded; P5-RC records packing and collection starts; **E1 and E3 published — done** ([results](why-forge.md)) |
+| 2 | B1.2b finish to hosted queue; B1.2d browser accept (Claude design, GPT build); B1.3a runner lease | M2, M3; X1 schema compatibility check; P5-RC continues; B1.4a clonefile Lanes; Q3 reuse key; E2 starts on six independent slices |
 | 3 | B1.2e Mac stops accepting; B1.3b runner evidence; B1.4b cache reads hosted; B1.5a recover folds hosted work | Q1 landing controller; B2.1 contract; B3.1 first-write hook |
 | 4 | B1.5b cutover, forced upgrade and drill | Q2 self-finishing entries and stall alarm; Q4 lifecycle drill; B3.1 ack metric; E2 published |
-| 5 | B1.6a–c, B1.7, B1.8 deletions | B2.2 policy gate; SP2 merge spike; V1 vocabulary design |
+| 5 | B1.6a–c, B1.7, B1.8 deletions; P5-SG Git source layer and projection deletions | B2.2 policy gate; SP2 merge spike; V1 vocabulary design |
 | 6 | B1.9 table purge (owner approves) | B2.3 audit; B2.4a–b culprit finding; B3.2 semantic conflict; B3.4 declaration merge; V2a |
 | 7 | | B2.5, B2.6 (owner approves defaults); B3.3; V2b, V3; B3.5 re-measure including R3 |
 | 8 | | X2 end-of-phase items; exit criteria; outside-user trial preparation |
@@ -114,13 +114,20 @@ Each spike ends in a short decision memo agreed with the owner and recorded as a
 
 ### SP1. Storage: native on R2 vs Git-native, head to head
 
-- **Size:** M per arm, two arms run in parallel, date-boxed to one calendar week. **Depends on:** none. **Week:** 1.
-- **Arm N:** the native object store on R2 with reachability GC from main, Lanes, Candidates and retained backups.
-- **Arm G:** Git-native objects and packfiles (a hosted bare repository or the jj backend) under Forge's State, Lane, Candidate and Work model.
-- **Same criteria for both,** measured on the dogfood project: disk and R2 bytes per year at 30 landings a day; GC cost and correctness (nothing reachable is collected, retained backups stay restorable); interop (GitHub sync, import, export); migration cost for the dogfood project; disjointness check cost on nested trees; code removed and code added, in lines.
-- **Prior art:** Delta (Zed, 2026) keeps Git as the authority for commits, branches and remotes and stores fine-grained edits and conversations beside it ("Git keeps the commits. DeltaDB keeps everything in between"). Arm G is the same shape; count that as evidence for interop, not as a decision.
-- **Decision rule:** pick the arm with lower disk per year and at least equal GC correctness, unless the other arm removes clearly more code at no more than 2× the disjointness cost. Ties stay native. If the week ends without an answer, stay native. Arm G winning also needs the constraint 7 change.
-- **Gates:** B1.4b and the deletion slices B1.6–B1.8. The losing arm's code is not merged. B1.4a does not wait.
+- **Decision:** owner, 2026-10-25: neither pure arm. Adopt "Git objects for source bytes, Forge identities for everything, a Forge packed store for everything else". A State stays a Forge SHA-256 record pointing at a Git tree, with a deterministic commit derived for export. Existing native States stay readable through an alias table; migration of native States and Git-backed owners is explicit and reversible.
+- **Layout:** a bare Git repository locally; immutable packs plus a catalog on R2. Work, evidence, edit streams, decisions and analysis live in Forge's own packed, collectable store.
+- **Evidence:** both arms measured the dogfood history; the [comparison and limits](research/sp1-storage.md) distinguish measured results from estimates. MB are decimal.
+
+| Storage measure | Result |
+| --- | --- |
+| Current native source store | 720 MB measured |
+| Git history, excluding one-time migration carry | 24 MB measured; 75.50 MB for the full converted bare repository |
+| Improved native history with manifest and blob deltas | 18 MB estimated; comparable to Git for 2–3× the code |
+| Why native is big | 53% full per-State manifests; 26% blobs without deltas; 21% one-time carry |
+| Work records | 418 MB measured; only ~85 MB reachable |
+| Git integration | ~1,500 LOC added, ~1,567 removed; 5–10 agent-days estimated; dogfood conversion 65–85 s measured |
+
+- **Order:** B1.4b uses `get(id)` / `put(bytes)` by object identity and does not wait for the Git layer. P5-RC runs now, weeks 1–2. P5-SG lands after B1.5b alongside B1.6–B1.8, deleting the native→Git projection code it replaces. B1.4a remains independent.
 
 ### SP2. Structural merge: mergiraf vs our own
 
@@ -128,6 +135,21 @@ Each spike ends in a short decision memo agreed with the owner and recorded as a
 - **Arm M:** mergiraf. **Arm S:** our own merge on the source graph: tree-sitter declarations already indexed for test selection and overlap.
 - **Method:** replay the real conflict corpus (the 33 sync-conflict episodes in coord-evidence and the conflict entries in the friction log). Measure the share of cheap conflicts (imports, registries, lists, docs) resolved, edits to different declarations in one file resolved, and the wrong-but-plausible rate, each judged by the Intent contract check. Also the dependency cost of Arm M and the lines Arm S needs.
 - **Decision rule:** adopt the arm that resolves more of the different-declaration class with no contract-passing resolution wrong on review. Arm M must also resolve at least half of the cheap class to justify a native dependency. Feeds B3.4.
+
+## Storage delivery
+
+### P5-RC. Records and evidence packing and collection
+
+- **Depends on:** no Git source-layer work. **Weeks:** 1–2, starting now (owner decision, 2026-10-25).
+- **Changes:** pack and compress Work records and evidence, deduplicate evidence, and collect unreferenced versions. Of 418 MB of records, only ~85 MB is reachable.
+- **Retention approved by the owner:** collect only what current Work, a kept backup, a 7-day snapshot or a pending operation does not reference; full directory backup before first apply.
+- **Acceptance:** report bytes before and after; verify every retained root and restore the backup on a scratch owner. **Target:** growth ~1–2 GB/yr from ~12 GB/yr (estimate). **Metrics:** disk per project and 8; must not regress 2, 3 or recovery.
+
+### P5-SG. Git source layer
+
+- **Size:** M–L, split if L; estimate 5–10 agent-days. **Depends on:** B1.5b. **Week:** 5, alongside B1.6–B1.8.
+- **Changes:** implement the SP1 layout and Forge State identities, reversible migration and aliases. Delete the native→Git projection code it replaces. GitHub outbound mirroring becomes a push of the derived commit; inbound external merges and git-push contributions become a fetch plus one State record. Actions checks need no per-run export.
+- **Acceptance:** exact source trees and historical Forge pins survive conversion and rollback; retained roots survive collection; backups restore. Dogfood conversion measured 65–85 s in the spike; production migration remains unrun. **LOC:** ~1,500 added, ~1,567 removed (estimate, including tests). **Metrics:** disk per project, 6 and 8; must not regress 2, 3 or 7.
 
 ## Bet 1: one authority, then delete
 
@@ -208,8 +230,8 @@ Without the conditional G and replace-first I: about 13,100 non-test. To add: ab
 
 ### B1.4b. The Mac as cache of hosted
 
-- **Size:** M. **Depends on:** B1.2a, SP1 decision.
-- **Changes:** `hosted-main-checkout.ts` reads schema-2 main from `projectHostedChannels:current` (`projectMain:current` returns `SOURCE_UNAVAILABLE` in server mode). Lanes materialise from hosted and R2; checkpoints upload directly through hosted saves and R2 presign; no exchange push. Storage layout follows the SP1 winner.
+- **Size:** M. **Depends on:** B1.2a; SP1 decision is recorded. Does not wait for P5-SG.
+- **Changes:** `hosted-main-checkout.ts` reads schema-2 main from `projectHostedChannels:current` (`projectMain:current` returns `SOURCE_UNAVAILABLE` in server mode). Lanes materialise from hosted and R2; checkpoints upload directly through hosted saves and R2 presign; no exchange push. Storage uses a two-method object interface (`get(id)`, `put(bytes)`) over current R2 keys; Git objects and packs sit behind it in P5-SG.
 - **Acceptance:** a fresh Mac materialises a Lane and checkpoints without a push; killing the Mac mid-checkpoint loses no saved head; exchange `pull`/`open` have no remaining caller. **Metrics:** moves 7 (cache lag). Must not regress 6 or 8.
 
 ### B1.5a. Recover folds hosted-only accepted work (G2)
@@ -226,7 +248,7 @@ Without the conditional G and replace-first I: about 13,100 non-test. To add: ab
 
 ### B1.6. Delete the push and relay code
 
-Split by group; all depend on B1.5b and the SP1 decision. Each reports actual LOC removed at landing; `verify` passes with no remaining import; hosted and Mac-offline landing tests still pass.
+Split by group; all depend on B1.5b. SP1 is decided; P5-SG lands alongside B1.6–B1.8 and deletes the native→Git projection code it replaces. B1.6 does not wait for that layer. Each reports actual LOC removed at landing; `verify` passes with no remaining import; hosted and Mac-offline landing tests still pass.
 
 - **B1.6a. Exchange push and auto exchange (A, E).** Size M. Includes the push half of `native-exchange.ts`, `exchange-client.ts` and `projectExchangeActions.ts`; keeps the download, upload and transport layer. Estimate 4,143 non-test, 6,142 test.
 - **B1.6b. Source return (B).** Size M. Keeps `work-source-return-chunks.ts` for historic journal replay. Estimate 3,406 non-test, 4,348 test.
@@ -235,8 +257,8 @@ Split by group; all depend on B1.5b and the SP1 decision. Each reports actual LO
 ### B1.7. Create at the current format; delete the format ladder
 
 - **Size:** M. **Depends on:** B1.5b, B1.6b (for the hosted half).
-- **Changes:** new stores are created at the current Work format (22), not schema 11 with lazy promotion. A one-time migration moves formats 1–21 to 22 (<15 bumps to 15, then 15/17/19/21 convert, unified 16/18/20 relabel), preserving `legacyIntentMerge`, `intentMergeReceipt` and `intentAliases`. The promotion ladder and `.refine` feature gates are removed; the converter stays behind `restore-native` only. Historic journal commands and request hashes are never rewritten. The same migration compacts Work records: superseded 128-record pages are rewritten into compact pages and unreferenced pages are collected (review risk #1: records outweighed source, 688 MB vs 679 MB).
-- **Acceptance:** the dogfood owner migrates with a receipt and verifies; the records directory shrinks and its size is reported before and after; an old-format store outside restore returns one `WORK_UPGRADE_REQUIRED` error; restoring an old backup still works; per-format fixtures are deleted. **LOC:** estimate 686 non-test plus ~150 of gate edits, 1,752 test. **Metrics:** must not regress 2.
+- **Changes:** new stores are created at the current Work format (22), not schema 11 with lazy promotion. A one-time migration moves formats 1–21 to 22 (<15 bumps to 15, then 15/17/19/21 convert, unified 16/18/20 relabel), preserving `legacyIntentMerge`, `intentMergeReceipt` and `intentAliases`. The promotion ladder and `.refine` feature gates are removed; the converter stays behind `restore-native` only. Historic journal commands and request hashes are never rewritten. Records and evidence packing and collection run earlier in P5-RC, independently of this format migration.
+- **Acceptance:** the dogfood owner migrates with a receipt and verifies; an old-format store outside restore returns one `WORK_UPGRADE_REQUIRED` error; restoring an old backup still works; per-format fixtures are deleted. **LOC:** estimate 686 non-test plus ~150 of gate edits, 1,752 test. **Metrics:** must not regress 2.
 
 ### B1.8. Delete reconcile, staleness strip and legacy accept (D, F, I)
 
@@ -405,7 +427,7 @@ Scheduled for week 8, kept here so they are not lost:
 - **Bundle hygiene** (review risk #15): replace the 611 KB PNG monogram with SVG, subset or drop the 165 KB font, and split the 471 KB main chunk. Acceptance: first-load bytes reported before and after.
 - **Hotspot files** (review A2): files every change edits, such as `CHANGELOG.md`, are generated from accepted Intents instead of hand-edited, so they never serialise landings or conflict.
 - **Experimental checks and sampled human review** (review C9): a check can run in observe-only mode before it gates, and supervised review can sample instead of reviewing every Candidate. Design memo first; needs B2.2.
-- **Git call sites in the native path** (review risk #6): decided by SP1. If the native arm wins, one slice removes the 24 `git` call sites in `native-*.ts` (projections, sync, Actions export, diff fallback). If Git-native wins, they become the intended layer.
+- **Git call sites in the native path** (review risk #6): SP1 is decided. P5-SG makes Git the source layer and deletes the separate native→Git projection, sync conversion and per-run Actions export.
 - **Agent usage budgets** (review C10) stay in Phase 6 with cross-repo usage pools.
 
 ## Freeze
@@ -454,13 +476,13 @@ The 2026-10-24 external review (four reports: history and state, architecture, e
 | A8 lead as queue operator | Q1–Q4, metric 5 |
 | A9 cost at the wrong layer | Metric 8, dollars per landing |
 | A10 cockpit before coordination | Freeze |
-| C7 Git-native storage; risk #2 no packing or GC | SP1 |
+| C7 Git-native storage; risk #2 no packing or GC | SP1 decision; P5-SG source layer; P5-RC records and evidence |
 | C8 trust per path | B2.6 |
 | C9 experimental checks, sampled review | X2 |
 | C10 agent budgets | Phase 6 |
-| Risk #1 records outweigh source | Phase 4 reads never write; B1.7 compaction |
+| Risk #1 records outweigh source | Phase 4 reads never write; P5-RC packing and collection, weeks 1–2 |
 | Risk #4 seven queues | Q1 controller; B1.6 deletes the push queues |
-| Risk #6 Git in the native path | SP1, X2 |
+| Risk #6 Git in the native path | SP1 decision; P5-SG deletes the projection |
 | Risk #9 `peers` writes | Phase 4 reads never write |
 | Risk #11 schema lockstep | X1 |
 | Risk #12 checks through GitHub refs | B1.3a |
