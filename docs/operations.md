@@ -369,6 +369,632 @@ nforge work OWNER '{"action":"collect-native-objects"}' 0
 
 Inspection counts objects and lists verified unreferenced candidates, and changes nothing. Collection repeats the inspection under the lock and deletes only those objects. It never touches referenced history, Lanes, run files, backups or temporary files. If the retained history cannot be verified, it deletes nothing. Retry after an interruption. Deletions are final, so keep a backup. Collection upgrades an older owner to at least Work format 3, and older CLIs then refuse it.
 
+## One authority cutover
+
+This is the Bet 1 cutover procedure for [Phase 5](phase5-plan.md#bet-1-one-authority-then-delete),
+not a claim that the project has switched. At this inventory baseline,
+`convex/projectSourceAuthority.ts` exposes only `current`;
+`src/hosted-source-authority.ts` supplies the pure `nextSourceAuthority` CAS helper.
+B1.2a owns the transition mutation and writer fences, B1.2c the seed. Follow the
+[migration invariants](operations/hosted-landing-contract.md#migration-invariants-deferred-implementation)
+throughout. No deployment, account operation or real-owner cutover was performed
+for this document.
+
+### B1.2b recommendation: drain the owner queue
+
+**Choose “drain the owner queue before the switch”, rather than implementing the
+G3 submission-ID bridge plus G6 journal bridge.** This is a one-time operator
+cutover rule, not a new quota or everyday user confirmation. It needs one pinned
+drain predicate and routing boundary. Bridges would additionally need durable
+per-Lane native ↔ per-request hosted ID mappings, parent/entry/attempt lineage,
+versioned journal conversion and reconciliation of different request hashes at
+every crash point. The drain retains those historic identities without translating
+a live native request into a hosted request.
+
+Stop admitting **new native landing requests for this bound project** during the
+handover, while allowing already admitted requests to finish. Keep Lane editing
+and saves available. B1.2b must retain a new finish/land's operation and exact saved
+inputs until hosted admission is available; report a pending handover and resume
+that original request after discovery, without silently choosing newer saves or
+losing the request. An old CLI follows the upgrade path below. This temporary
+routing boundary must not cancel admitted work or turn observer timeout into a
+terminal result.
+
+“Drained” means more than an empty batch: reconcile every owner `landingEntries`
+entry, `landingBatches` member, owner-acceptance request and native finish/land
+journal, including journal-only commands and unknown acceptance replies. Each
+admitted submission has either an actual main receipt or a retained
+`terminal-failed` outcome delivered to its requester (or durably available for
+that requester's reconnect). Finish reconciliation under the old IDs and request
+hashes; retain completed journals with the snapshot. A waiting review, dependency,
+ambiguous provider execution or missing receipt is **not drained**. Do not cancel
+it merely to enable cutover. If one cannot settle, remain owner-authoritative;
+there is no timeout that discards it. The tradeoff is a handover wait that may be
+longer than a bridge-enabled switch. This is less code and preserves metric 3's
+zero-dropped-landings invariant; the live zero is still to be measured by M1/B1.5b.
+
+### Ordered cutover and forced upgrade
+
+1. **B1.2a — transition and all-writer fencing.** Expose an authenticated,
+   operation-idempotent mutation in `convex/projectSourceAuthority.ts` that uses
+   `nextSourceAuthority(current, expected, targetMode)` and commits the new epoch
+   with the expected main **head and receipt**, native Work revision, hosted
+   source/journal revision and validated seed/snapshot pins. Both forward and
+   rollback directions are required. `server-shadow` still leaves the owner in
+   charge. Fence `ownerAcceptance.complete`, `projectExchange.publish`,
+   `projectWorkActions.acceptChannel`, native `accept-channel` and
+   `projectHostedChannels.seed`; audit source-return, bootstrap/import, recovery
+   and background publication paths against the same mode/epoch. A stale upload
+   or delayed owner completion cannot advance main. Replaying a completed
+   transition returns its original receipt; a changed request under the same UUID
+   fails explicitly. Same-head/new-receipt races must lose CAS too.
+2. **B1.2b–d — route, seed, browser.** Build bound CLI/MCP finish/land over
+   `projectHostedLanding:enqueue`, with the drain rule above; build the pinned,
+   paged, resumable seed of native main plus records (B1.2c); move browser accept,
+   request-changes and revert onto hosted landing/acceptance (B1.2d). Seed retries
+   resume their original pages and preserve source/record/receipt identities.
+   Shadow preparation is not a second acceptance ledger. Validate main digest,
+   receipt, saved Lanes, record pages and ancestry before selecting the seed.
+3. **B1.2e — stop bound Mac acceptance.** Install the authority-aware local
+   routing/fence before enabling server mode: when the project switches, bound
+   direct accept and the Mac landing worker cannot publish native main; the error
+   names the hosted path. Unbound native owners retain ordinary acceptance.
+   Re-read authority before publication; a saved local binding is not permission.
+4. **B1.5a — complete recoverability first.** SP1 → B1.4b must have supplied
+   schema-2 main/cache reads from `projectHostedChannels:current`; qualify the
+   runner/evidence prerequisites B1.3a–b too. Fold hosted queue, records, attempts,
+   acceptance snapshot deltas and pending completion overlays into an exact
+   recovery snapshot (B1.5a1). Rewrite Route B as recovery of a runner/cache,
+   without granting local acceptance authority (B1.5a2). Prove that work accepted
+   only on hosted survives. The old checkpoint plus legacy journal is insufficient.
+5. **B1.5b — snapshot, drain, final seed, switch and drill.** Publish/install the
+   compatible CLI and server code together before the switch. Drain as above;
+   capture the rollback package below, finish the seed at the final pinned owner
+   head/receipt/revision, then CAS to `server` at a higher epoch. If any pinned
+   input changed, renew preparation; never overwrite the newer source. Resume
+   held new requests through hosted admission. On a clean machine run Route B,
+   then re-measure Route A with every retained-backup object still available.
+   Any push-era object purge follows the existing approved retention scope;
+   this plan does not authorize a purge. Observe seven days in which every accept
+   uses hosted CAS, including with Macs offline. Record metrics 3, 5 and 7; metric
+   7 changes from owner/hosted lag to cache lag and surface contradictions.
+6. **B1.6a–c, then B1.7/B1.8 — delete only replaced callers.** Require B1.5b and
+   the SP1 decision before deleting push/auto-exchange, source return and owner
+   relay. Keep transport/cache/upload and historic replay dependencies listed
+   below. B1.7's hosted converter needs B1.6b plus journal compaction; B1.8 needs
+   the replacement browser path. Retired Convex table definitions remain until
+   B1.9's separately approved export/purge after two weekly backups.
+
+For old CLIs, server mode's source-contract schema 2 is the upgrade boundary:
+`requireSourceContract` returns `CLI_UPGRADE_REQUIRED` for schema-1 readers;
+`projectMain:current` cannot substitute the old seed for server main. B1.5b must
+also cover every legacy bound writer with the epoch fence, not just modern CLI
+capability discovery. Return a structured upgrade message naming a compatible
+package and the hosted path; do not fall back to native acceptance, source return
+or old exchange push. Preserve offline edits, saved heads and pending original
+operation IDs. Back up the local owner, install the compatible package separately,
+rediscover project authority, and reconcile the original requests before any
+new submission. Completed native requests reconcile from their retained native
+receipts/journals; never enqueue them again under hosted identity. No new
+login/consent step is implied beyond current authentication.
+`WORK_UPGRADE_REQUIRED` remains the separate Work-format error. Never use an older
+writer to downgrade an upgraded owner; restore its matching backup into a new
+folder with compatible tools.
+
+### Rollback point and return to owner authority
+
+The rollback point is the **fully drained, validated final owner snapshot immediately
+before the forward authority CAS**, with the matching hosted seed and authority
+pins. Retain the matching package/lockfile and these private inputs off-owner:
+
+- Exact accepted main State/blob closure and head/receipt chain; native bootstrap
+  head; every saved Lane base/head/checkpoint; Candidates, ordered dependencies,
+  runs/evidence hashes, unavailable-evidence declarations and lifecycle records.
+- Portable full Work snapshot/revision and records, plus the **whole owner Work
+  directory separately** for immutable physical record pages, local finish/land
+  journals, original commands/hashes/child IDs, pending transport operations and
+  binding. Portable `export-work` does not include every driver/retry file or
+  unsaved edit. Preserve dirty/ignored files separately if needed; never put
+  credentials in the cutover request or documentation.
+- Hosted snapshot/seed object closure, source and journal revisions, main
+  head/receipt, authority mode/epoch, queue/attempt/operation settlements and
+  completion overlays. Save a matching deployment export and references to
+  separately retained R2 bytes/configuration; a local tar archive alone is not a
+  backup of hosted tables. Runner/auth/keyring configuration stays separately
+  backed up through the existing private process.
+
+**Rollback is another transition, not an epoch rewind or a file-copy failover.**
+First reconcile unknown hosted acceptances under their original IDs and drain
+hosted in-flight landings with delivered terminal outcomes. Fold the **latest**
+server main/receipts and all subsequent hosted records through B1.5a into a new
+native recovery copy; compare its bytes and receipts before publishing it. Then
+use the B1.2a mutation, driven by `nextSourceAuthority`, with the currently
+observed server mode/epoch and main head/receipt, source/Work/snapshot pins, to
+select `native-owner` at **current epoch + 1**. If forward cutover was epoch E+1,
+rollback is at least E+2. B1.2a must expose that reverse target, CAS pins, durable
+idempotent receipt and fencing of late server callbacks as well as old-owner
+writers. Rebind the selected owner at the returned epoch, restart observations
+from authoritative records (deduplicate retained IDs), then resume native
+admission. An outage or an old local backup never authorizes this transition.
+If the backend cannot perform the CAS or the latest hosted work cannot be folded,
+owner-authority rollback is unavailable; keep the snapshots and reconcile when
+it returns. B1.2a and B1.5a need qualification together before the real switch.
+
+At the pre-switch point a restore loses no saved, included source/Work; unfinished
+recorded runs become interrupted and are not restarted. Beyond that point the old
+snapshot alone omits every later hosted save, note, acceptance, pending submission
+and completion overlay. Those must be folded/reconciled, preserving original
+receipt and operation identities; accepted work is never replayed as a new accept.
+A terminally failed request is not automatically resubmitted. Pending work resumes
+only through its reconciled identity/current owner; paid executions with unknown
+outcomes are not duplicated. Uncheckpointed edits after the snapshot need their
+separate saved copy, and caches/dependencies/runner workspaces are rebuilt.
+Historic journal bytes/digests are never rewritten. Deleting the old owner stack
+in B1.6 narrows software rollback: retain the compatible pre-deletion package;
+returning to owner then requires it plus a lossless, format-compatible folded
+snapshot. Keeping a backup is not proof that this post-deletion path works.
+
+### Local rollback qualification
+
+Run from the selected source Lane, with Node 24.22.1+ and no hosted connection:
+
+```sh
+export PATH=/usr/local/bin:$PATH
+npm ci --ignore-scripts
+npm run build:core
+node scripts/phase5-rollback-drill.mjs
+```
+
+The assert-based drill accepts no owner argument and always creates a throwaway
+native project under `/tmp/forge-b1-rollback-*`. It calls the existing CLI paths:
+
+```sh
+node dist/cli.js init-native "$SCRATCH/owner"
+node dist/cli.js work "$SCRATCH/owner" '{"action":"export-work","archive":true}' 6
+node dist/cli.js restore-native "$ARCHIVE" "$SCRATCH/restored"
+node dist/cli.js work "$SCRATCH/restored" '{"action":"inspect-native-objects"}' 6
+```
+
+**Observed: exit 0.** A real synthetic native acceptance was snapshotted at Work
+revision 6, then the original scratch owner accepted a different head. The archive
+restored its earlier accepted main and receipt, all three text/binary/executable
+files and modes, and byte-identical portable Work records; deep comparison of
+hydrated records also passed. Verification inspected six retained objects
+(1,036 bytes), with no candidates, removals or malformed objects. The original
+owner still selected its later acceptance. `restore-native`'s top-level `head`
+is the native bootstrap State: the drill checks accepted main through its Channel
+receipt and materializes that exact State separately, rather than mistaking the
+restored root files for selected main. Physical immutable `records/` page layout
+is reconstructed, so byte identity here means source objects and portable logical
+records, not identical page filenames or obsolete pages. The drill also asserts
+that export did not change Work. Scratch copies remain for inspection.
+
+The existing native verification command is `inspect-native-objects` plus
+restore's manifest/hash validation; there is no standalone `verify-native` CLI.
+The script adds exact source/record assertions. No recorded product check is
+started by restore. **Unrun:** the hosted transition mutation and stale-epoch
+fences (B1.2a), drain/admission concurrency, hosted-only recovery folding (B1.5a),
+actual reverse transition, clean-machine Route A/Route B drills and seven-day
+single-authority observation (B1.5b). The local result establishes the native
+snapshot rollback point only, not hosted cutover correctness or production RPO/RTO.
+
+### Deletion inventory and last callers
+
+Counts below are full-file **`wc -l` on the B1.1 Lane tree**, based on source
+`f066fcc92c451af97f7c28a9a2e73cdf001debdcea2b1d10372493e80e4370d0`.
+They re-measure the Phase 5 input inventory; they are not estimates of lines
+actually removed. Caller evidence includes imports/re-exports, worker `new URL`
+paths, `moduleUrl`, string Convex function references and `api`/`internal` uses.
+Generated `convex/_generated/api.d.ts` declarations are not live callers. This
+static inspection is partial; a missing reference is not proof of independence.
+
+Every row's last callers are the first **surviving production modules** reached
+backwards through the retiring A–I modules. Directory prefixes and extensions
+are kept in paths. Repeated caller sets are named immediately below each table.
+A surviving module may still lose the particular calling function; the split
+inventory below records that boundary. Tests/scripts are inventoried separately.
+G is conditional on server-projection coverage; I is gross replace/re-parent
+scope, not a promise to delete useful review components.
+
+#### B1.6a — exchange push/publication
+
+| Module                                   |       LOC | Last surviving callers |
+| ---------------------------------------- | --------: | ---------------------- |
+| `src/bound-exchange.ts`                  |       478 | A1                     |
+| `src/bound-exchange-supersede.ts`        |        91 | A1                     |
+| `src/bound-push-progress.ts`             |        50 | A1                     |
+| `src/bound-push-id.ts`                   |        12 | A1                     |
+| `src/exchange-cli.ts`                    |       267 | A2                     |
+| `src/mcp-exchange.ts`                    |        82 | A3                     |
+| `src/exchange-progress.ts`               |         8 | A1                     |
+| `src/native-exchange-prepared.ts`        |        73 | A4                     |
+| `src/native-exchange-migrate.ts`         |       105 | A2                     |
+| `src/git-exchange-prepared.ts`           |        62 | A4                     |
+| `src/pending-exchange.ts`                |       163 | A5                     |
+| `src/push-progress-state.ts`             |        36 | A6                     |
+| `src/native-publication.ts`              |        75 | A4                     |
+| `src/publication-metadata.ts`            |        46 | A7                     |
+| `src/publication-pin-window.ts`          |        67 | A8                     |
+| `src/work-exchange-context.ts`           |        87 | A9                     |
+| `src/exchange-proposal.ts`               |        78 | A2                     |
+| `convex/projectExchange.ts`              |       271 | A10                    |
+| `convex/projectExchangeMigration.ts`     |       124 | A11                    |
+| `convex/projectWorkRecordExchange.ts`    |       255 | A9                     |
+| `convex/projectPublicationValidation.ts` |       287 | A8                     |
+| `convex/projectPublicationProgress.ts`   |       115 | A8                     |
+| `convex/projectPublicationStore.ts`      |       313 | A8                     |
+| `convex/projectPublicationAttempt.ts`    |        78 | A12                    |
+| `convex/projectPublicationRun.ts`        |        43 | A12                    |
+| `web/src/ExchangeHandoff.tsx`            |       110 | A13                    |
+| **Whole-file scope**                     | **3,376** |                        |
+
+- **A1:** `src/cli.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/work-store.ts`.
+- **A2:** `src/cli.ts`, `src/mcp-agent-workflow.ts`.
+- **A3:** `src/mcp-agent-workflow.ts`.
+- **A4:** `src/native-exchange.ts`.
+- **A5:** `src/cli.ts`, `src/host-binding.ts`, `src/host-command.ts`, `src/mcp-agent-workflow.ts`, `src/native-exchange.ts`, `src/pending-status-read.ts`, `src/pending-status.ts`, `src/work-records.ts`, `src/work-store.ts`, `src/work.ts`.
+- **A6:** `src/host-binding.ts`, `src/host-command.ts`, `src/pending-status-read.ts`, `src/pending-status.ts`, `src/work-store.ts`.
+- **A7:** `convex/projectExchangeActions.ts`, `convex/projectSourceProjection.ts`, `convex/projectWorkLoad.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `src/native-exchange.ts`, `web/src/HostedWork.tsx`.
+- **A8:** `convex/projectExchangeActions.ts`, `convex/projectSourceProjection.ts`, `convex/projectWorkLoad.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.
+- **A9:** `convex/projectExchangeActions.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.
+- **A10:** `convex/projectExchangeActions.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`.
+- **A11:** `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`.
+- **A12:** `convex/projectExchangeActions.ts`.
+- **A13:** `web/src/HostedWork.tsx`, `web/src/ProjectBackups.tsx`.
+
+#### B1.6b — source return
+
+| Module                                  |       LOC | Last surviving callers |
+| --------------------------------------- | --------: | ---------------------- |
+| `convex/projectSourceReturn.ts`         |       453 | B1                     |
+| `convex/projectSourceReturnProgress.ts` |       457 | B1                     |
+| `convex/projectSourceReturnPrepare.ts`  |       317 | B1                     |
+| `convex/projectSourceReturnRecords.ts`  |       211 | B1                     |
+| `convex/projectSourceReturnDelta.ts`    |       144 | B2                     |
+| `convex/projectSourceReturnStep.ts`     |       120 | B2                     |
+| `convex/projectSourceReturnCursor.ts`   |        94 | B1                     |
+| `convex/projectSourceReturnMetadata.ts` |        93 | B2                     |
+| `convex/projectSourceReturnRows.ts`     |        82 | B1                     |
+| `convex/projectSourceReturnJournal.ts`  |        49 | B1                     |
+| `convex/projectSourceReturnBudget.ts`   |        17 | B1                     |
+| `convex/projectWorkRecordReturn.ts`     |       323 | B1                     |
+| `convex/projectReturnIndexStage.ts`     |       245 | B3                     |
+| `convex/projectReturnMetadataStore.ts`  |       157 | B4                     |
+| `convex/projectReturnCommit.ts`         |       122 | B1                     |
+| `convex/projectReturnSupersede.ts`      |        88 | B5                     |
+| `convex/projectGitReturnIndex.ts`       |       112 | B1                     |
+| `convex/coordinationReturnChanges.ts`   |        50 | B1                     |
+| `src/work-source-return.ts`             |       136 | B6                     |
+| `src/source-return-progress.ts`         |        30 | B7                     |
+| `web/src/HostedSourceReturn.tsx`        |       107 | B8                     |
+| **Whole-file scope**                    | **3,407** |                        |
+
+- **B1:** `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.
+- **B2:** `convex/projectExchangeActions.ts`, `convex/projectSourceProjection.ts`, `convex/projectWorkLoad.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.
+- **B3:** `convex/projectWork.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.
+- **B4:** `convex/projectExchangeActions.ts`, `convex/projectSourceProjection.ts`, `convex/projectWork.ts`, `convex/projectWorkLoad.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.
+- **B5:** `convex/projectWork.ts`, `src/cli.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/work-store.ts`, `web/src/HostedWork.tsx`.
+- **B6:** `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `src/work-source-return-chunks.ts`, `web/src/HostedWork.tsx`.
+- **B7:** `src/cli.ts`, `src/exchange-client.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/work-store.ts`.
+- **B8:** `web/src/HostedWork.tsx`.
+
+#### B1.6c — owner relay/activity
+
+| Module                                 |       LOC | Last surviving callers |
+| -------------------------------------- | --------: | ---------------------- |
+| `src/owner-acceptance-consumer.ts`     |       279 | C1                     |
+| `src/owner-acceptance.ts`              |        60 | C2                     |
+| `src/owner-lifecycle.ts`               |       110 | C1                     |
+| `src/owner-lifecycle-schema.ts`        |        15 | C3                     |
+| `src/owner-recheck.ts`                 |        83 | C1                     |
+| `src/owner-request-publication.ts`     |        37 | C1                     |
+| `src/owner-sync-types.ts`              |        28 | C4                     |
+| `src/agent-hosted-sync.ts`             |       348 | C5                     |
+| `src/agent-activity-snapshot.ts`       |        42 | C5                     |
+| `convex/ownerAcceptance.ts`            |       271 | C6                     |
+| `convex/ownerLifecycle.ts`             |        75 | C7                     |
+| `convex/projectOwnerSync.ts`           |       132 | C4                     |
+| `web/src/lane/OwnerDecision.tsx`       |       151 | C8                     |
+| `web/src/lane/owner-decision-model.ts` |        77 | C8                     |
+| `web/src/lane/OwnerLifecycle.tsx`      |       163 | C7                     |
+| **Whole-file scope**                   | **1,871** |                        |
+
+- **C1:** `src/host-command.ts`, `src/http.ts`.
+- **C2:** `src/native-work.ts`.
+- **C3:** `src/host-command.ts`, `src/http.ts`, `web/src/PlanningIntents.tsx`, `web/src/intents/HostedIntents.tsx`, `web/src/lane/HostedLane.tsx`.
+- **C4:** `src/agent-workflow.ts`, `src/github-sync-status.ts`, `src/host-command.ts`, `src/http.ts`, `src/mcp.ts`, `src/presence-worker.ts`.
+- **C5:** `src/agent-workflow.ts`, `src/host-command.ts`, `src/mcp.ts`, `src/presence-worker.ts`.
+- **C6:** `convex/projectWorkActions.ts`, `src/host-command.ts`, `src/http.ts`, `web/src/HostedWork.tsx`, `web/src/PlanningIntents.tsx`, `web/src/intents/HostedIntents.tsx`, `web/src/lane/HostedLane.tsx`.
+- **C7:** `web/src/PlanningIntents.tsx`, `web/src/intents/HostedIntents.tsx`, `web/src/lane/HostedLane.tsx`.
+- **C8:** `web/src/HostedWork.tsx`.
+
+#### B1.8 — reconciliation/baselines
+
+| Module                             |     LOC | Last surviving callers |
+| ---------------------------------- | ------: | ---------------------- |
+| `src/native-companion.ts`          |     470 | D1                     |
+| `src/exchange-reconcile.ts`        |     195 | D2                     |
+| `src/native-exchange-reconcile.ts` |      57 | D1                     |
+| `src/native-exchange-baseline.ts`  |      84 | D3                     |
+| `src/exchange-journal-delta.ts`    |     100 | D2                     |
+| `src/native-closure-validation.ts` |      60 | D1                     |
+| `src/work-journal-page.ts`         |      24 | D2                     |
+| **Whole-file scope**               | **990** |                        |
+
+- **D1:** `src/cli.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/work-store.ts`, `src/work.ts`.
+- **D2:** `src/cli.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/work-store.ts`.
+- **D3:** `src/cli.ts`, `src/host-binding.ts`, `src/mcp-agent-workflow.ts`, `src/native-exchange.ts`, `src/work-store.ts`.
+
+#### B1.6a — auto exchange/spend pause
+
+| Module                               |     LOC | Last surviving callers |
+| ------------------------------------ | ------: | ---------------------- |
+| `src/auto-exchange.ts`               |     341 | E1                     |
+| `src/auto-exchange-status.ts`        |      97 | E2                     |
+| `src/auto-exchange-spend.ts`         |      83 | E3                     |
+| `src/auto-exchange-usage-command.ts` |      81 | E1                     |
+| `src/auto-exchange-wake.ts`          |      69 | E1                     |
+| `src/auto-exchange-notify.ts`        |      53 | E4                     |
+| `src/auto-exchange-state.ts`         |      45 | E3                     |
+| **Whole-file scope**                 | **769** |                        |
+
+- **E1:** `src/host-binding.ts`, `src/work-store.ts`.
+- **E2:** `src/host-command.ts`, `src/pending-status-read.ts`, `src/pending-status.ts`.
+- **E3:** `src/host-binding.ts`, `src/host-command.ts`, `src/pending-status-read.ts`, `src/pending-status.ts`, `src/work-store.ts`.
+- **E4:** `src/host-binding.ts`, `src/landing-worker-wake.ts`, `src/landing-worker.ts`, `src/work-store.ts`.
+
+#### B1.8 — freshness/unsynced UI
+
+| Module                                  |     LOC | Last surviving callers |
+| --------------------------------------- | ------: | ---------------------- |
+| `convex/projectFreshness.ts`            |      74 | F1                     |
+| `src/hosted-freshness.ts`               |      23 | F2                     |
+| `web/src/shell/HostedFreshnessLine.tsx` |      45 | F3                     |
+| `web/src/ui/generation-freshness.ts`    |       9 | F4                     |
+| **Whole-file scope**                    | **151** |                        |
+
+- **F1:** `convex/projectWorkIndex.ts`.
+- **F2:** `convex/projectWorkIndex.ts`, `web/src/HostedLanes.tsx`, `web/src/cockpit/HostedNow.tsx`, `web/src/cockpit/LaneRow.tsx`, `web/src/hosted-work-index.ts`, `web/src/intents/IntentBoard.tsx`, `web/src/intents/IntentDetail.tsx`, `web/src/intents/IntentParts.tsx`, `web/src/lane/HostedLane.tsx`, `web/src/lane/LaneParts.tsx`, `web/src/shell/Attention.tsx`, `web/src/shell/HostedStrip.tsx`, `web/src/ui/Rail.tsx`, `web/src/ui/primitives.tsx`, `web/src/views/LaneViews.tsx`, `web/src/views/ViewPage.tsx`, `web/src/views/WorkMap.tsx`, `web/src/views/intent-views.ts`.
+- **F3:** `web/src/shell/HostedStrip.tsx`.
+- **F4:** `web/src/HostedLanes.tsx`, `web/src/cockpit/HostedNow.tsx`, `web/src/cockpit/LaneRow.tsx`, `web/src/intents/IntentBoard.tsx`, `web/src/intents/IntentDetail.tsx`, `web/src/intents/IntentParts.tsx`, `web/src/lane/HostedLane.tsx`, `web/src/lane/LaneParts.tsx`, `web/src/shell/Attention.tsx`, `web/src/shell/HostedStrip.tsx`, `web/src/ui/Rail.tsx`, `web/src/ui/primitives.tsx`, `web/src/views/LaneViews.tsx`, `web/src/views/ViewPage.tsx`, `web/src/views/WorkMap.tsx`.
+
+#### B1.6c — conditional owner-derived display
+
+| Module                             |     LOC | Last surviving callers |
+| ---------------------------------- | ------: | ---------------------- |
+| `src/owner-derived.ts`             |     272 | G1                     |
+| `src/owner-derived-pages.ts`       |     106 | G1                     |
+| `src/owner-derived-local.ts`       |      68 | G2                     |
+| `convex/projectOwnerDerived.ts`    |     329 | G3                     |
+| `convex/projectOwnerIndexRows.ts`  |     100 | G4                     |
+| `convex/projectOwnerProjection.ts` |      82 | G5                     |
+| **Whole-file scope**               | **957** |                        |
+
+- **G1:** `convex/projectExchangeActions.ts`, `convex/projectSourceProjection.ts`, `convex/projectWorkLoad.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `src/native-exchange.ts`, `web/src/HostedWork.tsx`.
+- **G2:** `src/native-exchange.ts`.
+- **G3:** `convex/projectExchangeActions.ts`, `convex/projectSourceProjection.ts`, `convex/projectWorkLoad.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.
+- **G4:** `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.
+- **G5:** `convex/projectSourceProjection.ts`.
+
+#### B1.7 — format conversion
+
+| Module                                    |     LOC | Last surviving callers |
+| ----------------------------------------- | ------: | ---------------------- |
+| `src/work-intent-converter.ts`            |     232 | H1                     |
+| `src/work-intent-migration.ts`            |     107 | H2                     |
+| `src/hosted-intent-migration-client.ts`   |      74 | H3                     |
+| `convex/projectIntentMigration.ts`        |     156 | H3                     |
+| `convex/projectIntentMigrationActions.ts` |     117 | H3                     |
+| **Whole-file scope**                      | **686** |                        |
+
+- **H1:** `src/work-hosted-intents.ts`, `src/work-intent-local.ts`, `src/work.ts`.
+- **H2:** `src/work.ts`.
+- **H3:** `src/hosted-work-client.ts`.
+
+#### B1.8 — legacy hosted accept/review
+
+| Module                               |       LOC | Last surviving callers |
+| ------------------------------------ | --------: | ---------------------- |
+| `web/src/IntentDelivery.tsx`         |        92 | I1                     |
+| `web/src/HostedChannels.tsx`         |       200 | I1                     |
+| `web/src/NativeSourceReview.tsx`     |       459 | I1                     |
+| `web/src/lane/HostedReview.tsx`      |       511 | I1                     |
+| `web/src/lane/ReviewStory.tsx`       |       151 | I1                     |
+| `web/src/lane/RevertAcceptance.tsx`  |       105 | I1                     |
+| `web/src/lane/RequestChanges.tsx`    |        68 | I1                     |
+| `web/src/lane/review-model.ts`       |        68 | I1                     |
+| `web/src/lane/ReviewDisposition.tsx` |        52 | I1                     |
+| `web/src/lane/ReviewCheck.tsx`       |        45 | I1                     |
+| **Whole-file scope**                 | **1,751** |                        |
+
+- **I1:** `web/src/HostedWork.tsx`.
+
+#### Surviving modules with split edits
+
+These are whole-module measurements, **not additional removable LOC**. The
+calling function/entry point below is the last consumer of the retiring portion;
+retained functions still have normal callers. Re-run impact selection at deletion.
+
+| Module                                |   LOC | Retiring portion and last caller/boundary                                                                                                                                                                                                                        |
+| ------------------------------------- | ----: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/native-exchange.ts`              |   821 | Push prepare/push halves; keep pullNativeExchange and shared ContentPin/manifest/transport types for recovery-source and checkouts. Last push callers: host-cli, exchange-cli, bound-exchange.                                                                   |
+| `src/exchange-client.ts`              |   698 | Publication/migration/journal/returnSource halves; keep current/objects/missing/upload/manifest/download for saves and cache. Last push/return callers: host-cli, native-exchange and exchange-convex-fetch; recovery-transport still needs journal until B1.5a. |
+| `convex/projectExchangeActions.ts`    |   524 | Publication/published/publish/completeHistory entry points; keep checkpoint/manifest/downloadBatch/downloadPart/objectBytes/exchangeMetadata. Last callers: exchange-client and host-cli (via client).                                                           |
+| `src/host-binding.ts`                 |   212 | Push, autoExchange and acceptanceOwner configuration; last consumers: host-command, bound-exchange, auto-exchange-wake, owner-acceptance-consumer.                                                                                                               |
+| `src/host-command.ts`                 |   190 | Listen/sync-agent/auto-sync/spend flags, flush consumer and status wiring; last caller: host-cli.                                                                                                                                                                |
+| `src/host-cli.ts`                     |   277 | Creation prepare/push/completeHistory replaced by B1.2c seed; entry: CLI host.                                                                                                                                                                                   |
+| `src/cli.ts`                          |   442 | Exchange/migrate-archive dispatch; top-level executable.                                                                                                                                                                                                         |
+| `src/mcp.ts`                          |   302 | Owner activity/reconcile command exposure; entry: MCP.                                                                                                                                                                                                           |
+| `src/mcp-agent-workflow.ts`           |   269 | forge_exchange and forge_migrate_archive exposure; entry: MCP agent mode.                                                                                                                                                                                        |
+| `src/native-work.ts`                  |   609 | Owner-request compose/accept branch and creation/promotion ladder; callers: WorkService and init-native CLI; unbound acceptance stays.                                                                                                                           |
+| `src/work.ts`                         |   963 | reconcile-hosted-work and migrate-intents dispatch; callers: CLI/MCP/HTTP Work service.                                                                                                                                                                          |
+| `src/work-records.ts`                 |   389 | recordPendingExchange on writes; WorkStore and record transactions still need record storage.                                                                                                                                                                    |
+| `src/work-store.ts`                   |   283 | Auto-exchange wakes and creation/format promotion; WorkService/record transactions retain storage.                                                                                                                                                               |
+| `src/landing-worker.ts`               |   238 | notifyAutoExchange after landing; native unbound landing controller survives.                                                                                                                                                                                    |
+| `src/landing-worker-wake.ts`          |    28 | notifyAutoExchange wake; native Work writers retain landing wakes.                                                                                                                                                                                               |
+| `src/presence-worker.ts`              |   294 | queueAgentSync; Lane presence callers remain.                                                                                                                                                                                                                    |
+| `src/agent-workflow.ts`               |   884 | B5 relay scheduling; agent CLI/MCP lifecycle remains.                                                                                                                                                                                                            |
+| `src/http.ts`                         |   128 | startOwnerAcceptanceListener; CLI serve remains Git/Work transport.                                                                                                                                                                                              |
+| `src/github-sync-status.ts`           |    81 | projectOwnerSync display publication; GitHub mirror/status callers remain.                                                                                                                                                                                       |
+| `src/pending-status.ts`               |   374 | Auto-exchange projection; agent status callers remain.                                                                                                                                                                                                           |
+| `src/pending-status-read.ts`          |   102 | Auto-exchange projection; pending-status callers remain.                                                                                                                                                                                                         |
+| `src/exchange-convex-fetch.ts`        |   124 | Source-return/supersede RPC routing; exchange-client retains object transport.                                                                                                                                                                                   |
+| `convex/projectWork.ts`               |   602 | detachReturnMetadata/requireActiveReturn and retirePartition scheduling; projectWorkActions retains legacy replay until folded.                                                                                                                                  |
+| `convex/projectWorkLoad.ts`           |   195 | publicationSnapshot and migration replay; projectWork query/action callers need a replacement before deletion.                                                                                                                                                   |
+| `convex/projectWorkIndex.ts`          |   227 | projectFreshness projection; hosted Work reads remain.                                                                                                                                                                                                           |
+| `convex/projectWorkActions.ts`        |   249 | acceptChannel native owner relay and legacy selection branch; hosted-work-client/legacy browser accept must route to hosted landing.                                                                                                                             |
+| `convex/projectSourceProjection.ts`   |   165 | Owner projection dependency; callers: projectWorkIndexActions and projectIntentMigrationActions. Verify projectHostedProjection parity before deleting G.                                                                                                                                         |
+| `convex/projectWorkCommand.ts`        |   177 | hostedChannelMoves hydration; projectWorkActions uses legacy Work command replay until folded.                                                                                                                                                                   |
+| `convex/projectWorkIndexedCommand.ts` |   182 | hostedChannelMoves hydration; projectWorkActions indexed command path.                                                                                                                                                                                           |
+| `convex/projectWorkProjection.ts`     |   250 | hostedChannelMoves read/write; projectWork command/index paths.                                                                                                                                                                                                  |
+| `convex/projectMain.ts`               |   112 | Legacy selected-main read; hosted-main-checkout must use projectHostedChannels current in server mode.                                                                                                                                                           |
+| `web/src/HostedWork.tsx`              |   823 | Exchange/source-return and legacy IntentDelivery wiring; hosted project shell remains.                                                                                                                                                                           |
+| `web/src/ProjectBackups.tsx`          |   556 | Publish UI; project backup settings remain.                                                                                                                                                                                                                      |
+| `web/src/hosted-handoff.ts`           |   144 | Printed reconcile-hosted-work command; copy-prompt/handoff callers.                                                                                                                                                                                              |
+| `src/work-types.ts`                   | 1,329 | Legacy workSchema union and refine gates; shared WorkData imports remain across src/convex/web.                                                                                                                                                                  |
+| `src/work-unified-types.ts`           |   104 | Dual isUnifiedWork/safeParseWork paths; WorkStore and hosted readers retain current-format parsing.                                                                                                                                                              |
+| `src/work-hosted-intents.ts`          |    70 | Hosted journal converter; projectWorkLoad, projectIntentMigrationActions, work-backup, work-metadata and source-return journal need original replay until compaction. Keep restore-only conversion.                                      |
+| `src/work-intent-local.ts`            |    58 | noteId imported from work-intent-converter; ordinary unified Intent/note writes survive: extract noteId before making converter restore-only.                                                                                                                    |
+| `src/work-format.ts`                  |    13 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/native-git.ts`                   |   422 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/hosted-bootstrap.ts`             |    78 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/hosted-github-bootstrap.ts`      |   117 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-autonomy.ts`                |   135 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/landing-batch-store.ts`          |   466 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-channel.ts`                 |   512 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/post-accept-selection.ts`        |    83 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/native-contribution-register.ts` |   138 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-record-transaction.ts`      |   434 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-lifecycle.ts`               |    29 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-metadata.ts`                |   268 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/native-pr.ts`                    |   259 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/work-evidence.ts`                |   208 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/native-objects.ts`               |   102 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/native-work-history.ts`          |   229 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `src/landing-replay-planner.ts`       |   217 | B1.7 creation/current-format gate or lazy-promotion site; retain its ordinary native/Work callers, remove the legacy branch after migration. Historic replay keeps its original representation.                                                                  |
+| `web/src/hosted-work-index.ts`        |   304 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/HostedLanes.tsx`             |   298 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/cockpit/HostedNow.tsx`       |   407 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/cockpit/LaneRow.tsx`         |   161 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/intents/IntentBoard.tsx`     |   285 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/intents/IntentDetail.tsx`    |   479 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/intents/IntentParts.tsx`     |   452 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/lane/HostedLane.tsx`         |   591 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/lane/LaneParts.tsx`          |   176 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/shell/Attention.tsx`         |   223 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/shell/HostedStrip.tsx`       |    64 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/ui/Rail.tsx`                 |    70 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/ui/primitives.tsx`           |   334 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/views/LaneViews.tsx`         |   114 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/views/ViewPage.tsx`          |   332 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/views/WorkMap.tsx`           |   325 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/views/intent-views.ts`       |    86 | B1.8 freshness/unsynced status or projection consumer; retain the page/component and its route/parent, remove only owner-lag display logic.                                                                                                                      |
+| `web/src/intents/HostedIntents.tsx`   |   487 | B1.6c OwnerLifecycle/owner-request call site; retain the page and re-parent lifecycle onto hosted records.                                                                                                                                                       |
+| `web/src/PlanningIntents.tsx`         |   361 | B1.6c OwnerLifecycle/owner-request call site; retain the page and re-parent lifecycle onto hosted records.                                                                                                                                                       |
+
+The B group has a live retained dependency that the input inventory understated:
+`src/work-source-return-chunks.ts` (69 LOC) imports **and calls**
+`validateSourceReturn` from `src/work-source-return.ts`; `src/work-metadata.ts`
+uses the chunk validator for historical journal replay. B1.6b must extract/retain
+that validator with its original digest semantics, not delete it merely because
+the new return RPC disappears. Similarly, `work-intent-converter.ts` exports
+`noteId`, used by live `work-intent-local.ts`; B1.7 keeps that helper outside the
+restore-only converter. `projectWorkLoad.ts` still calls `publicationSnapshot`
+from `projectSourceReturnMetadata.ts`; replace/fold that read before removing B.
+
+Keep `src/native-companion-types.ts` (41 LOC): `work-types.ts` retains
+`nativeCompanionReceipts`. Keep `convex/ownerAcceptanceFields.ts` (42 LOC) and
+all retired table schemas until B1.9. Keep object upload/download/retry/cache and
+chunk modules, `work-exchange-records`/`work-exchange-delta`,
+`native-exchange-tree`/`stream`/`files`, `recovery-capture`, `recovery-inventory`,
+`native-backup`, `work-backup`/`work-backup-archive`, and the Convex exchange
+reader/cache/validation modules. Saved-state recovery, cache, checkpoint upload
+or historic replay still calls them. `src/native-checkpoint-publication.ts` is
+native checkpoint lock preparation, **not** hosted push publication; keep it.
+Unbound native Work and its landing worker also stay.
+
+#### Tests, fixtures and benchmark scripts
+
+These are current whole-file sizes for the input inventory's deletion-specific
+coverage, **not a recommendation to delete a test that still proves a retained
+path**. Test entry points are `node --test`/the selected test runner; fixtures and
+workers are reached from the named test family. Re-parent useful review/restore
+assertions first. Mixed tests (for example `host-cli`, `hosted-work`,
+`landing-worker`, `exchange-request`, `project-exchange-reader`,
+`work-exchange-delta` and upload scheduling) retain their surviving coverage.
+
+| Slice/group | Test/fixture/worker LOC (`wc -l`)                       | Current last caller                      |
+| ----------- | ------------------------------------------------------- | ---------------------------------------- |
+| A           | `tests/native-exchange.test.mjs` (832)                  | Selected test runner                     |
+| A           | `tests/project-exchange.test.mjs` (797)                 | Selected test runner                     |
+| A           | `tests/work-exchange-records-hosted.test.mjs` (654)     | Selected test runner                     |
+| A           | `tests/agent-prepared-publication.test.mjs` (395)       | Selected test runner                     |
+| A           | `tests/publication-read-churn.test.mjs` (359)           | Selected test runner                     |
+| A           | `tests/r3a-publication.test.mjs` (354)                  | Selected test runner                     |
+| A           | `tests/project-exchange-publication.test.mjs` (320)     | Selected test runner                     |
+| A           | `tests/pending-exchange.test.mjs` (276)                 | Selected test runner                     |
+| A           | `tests/exchange-contention.test.mjs` (234)              | Selected test runner                     |
+| A           | `tests/native-exchange-cutover.test.mjs` (224)          | Selected test runner                     |
+| A           | `tests/exchange-pinned-snapshot.test.mjs` (186)         | Selected test runner                     |
+| A           | `tests/native-exchange-records.test.mjs` (172)          | Selected test runner                     |
+| A           | `tests/exchange-latency-contract.test.mjs` (166)        | Selected test runner                     |
+| A           | `tests/exchange-latency.test.mjs` (116)                 | Selected test runner                     |
+| A           | `tests/project-exchange-fixture.mjs` (142)              | project-exchange test family             |
+| B           | `tests/hosted-return-progress.test.mjs` (768)           | Selected test runner                     |
+| B           | `tests/r3b-source-return.test.mjs` (250)                | Selected test runner                     |
+| B           | `tests/work-source-return.test.mjs` (258)               | Selected test runner                     |
+| B           | `tests/source-return-commit.test.mjs` (292)             | Selected test runner                     |
+| B           | `tests/source-return-egress.test.mjs` (257)             | Selected test runner                     |
+| B           | `tests/source-return-incremental.test.mjs` (217)        | Selected test runner                     |
+| B           | `tests/source-return-index.test.mjs` (318)              | Selected test runner                     |
+| B           | `tests/source-return-memory-fixture.mjs` (220)          | source-return memory/prepare test family |
+| B           | `tests/source-return-memory.test.mjs` (192)             | Selected test runner                     |
+| B           | `tests/source-return-post-prepare-memory.test.mjs` (35) | Selected test runner                     |
+| B           | `tests/source-return-post-prepare-worker.mjs` (299)     | source-return memory/prepare test family |
+| B           | `tests/source-return-prepare-logs.test.mjs` (140)       | Selected test runner                     |
+| B           | `tests/source-return-prepare-memory-worker.mjs` (293)   | source-return memory/prepare test family |
+| B           | `tests/source-return-prepare-memory.test.mjs` (89)      | Selected test runner                     |
+| B           | `tests/source-return-prepare.test.mjs` (244)            | Selected test runner                     |
+| B           | `tests/source-return-progress.test.mjs` (142)           | Selected test runner                     |
+| B           | `tests/source-return-records.test.mjs` (169)            | Selected test runner                     |
+| B           | `tests/source-return-supersede.test.mjs` (165)          | Selected test runner                     |
+| C           | `tests/owner-acceptance.test.mjs` (968)                 | Selected test runner                     |
+| C           | `tests/agent-hosted-sync.test.mjs` (483)                | Selected test runner                     |
+| C           | `tests/r3c-owner-only.test.mjs` (374)                   | Selected test runner                     |
+| C           | `tests/ui-owner-acceptance.test.mjs` (49)               | Selected test runner                     |
+| D           | `tests/native-companion.test.mjs` (554)                 | Selected test runner                     |
+| D           | `tests/exchange-journal-delta.test.mjs` (482)           | Selected test runner                     |
+| D           | `tests/native-closure-validation.test.mjs` (231)        | Selected test runner                     |
+| E           | `tests/auto-exchange.test.mjs` (755)                    | Selected test runner                     |
+| E           | `tests/auto-exchange-usage-command.test.mjs` (100)      | Selected test runner                     |
+| E           | `tests/auto-exchange-spend.test.mjs` (76)               | Selected test runner                     |
+| F           | `tests/hosted-freshness.test.mjs` (191)                 | Selected test runner                     |
+| G           | `tests/owner-derived.test.mjs` (448)                    | Selected test runner                     |
+| H           | `tests/intent-merge-local.test.mjs` (553)               | Selected test runner                     |
+| H           | `tests/hosted-intent-migration.test.mjs` (425)          | Selected test runner                     |
+| H           | `tests/intent-merge.test.mjs` (291)                     | Selected test runner                     |
+| H           | `tests/hosted-intent-migration-cli.test.mjs` (269)      | Selected test runner                     |
+| H           | `tests/work-format-compatibility.test.mjs` (214)        | Selected test runner                     |
+| I           | `tests/ui-review.test.mjs` (91)                         | Selected test runner                     |
+
+Benchmarks are explicit operator entry points; their CLI runner is the last caller:
+
+| Script                                  | LOC |
+| --------------------------------------- | --: |
+| `scripts/measure-exchange-delta.mjs`    | 109 |
+| `scripts/measure-exchange-latency.mjs`  | 256 |
+| `scripts/measure-owner-derived.mjs`     |  50 |
+| `scripts/measure-work-exchange.mjs`     | 125 |
+| `scripts/measure-work-record-delta.mjs` | 128 |
+| `scripts/measure-source-upload.mjs`     |  80 |
+
+The A–I whole-file production scope totals **13,958 LOC** before
+split edits, test/benchmark changes, retained helpers and review re-parenting.
+This is the LOC baseline for B1.1; runtime metrics do not move in this docs slice.
+Metrics 3 (dropped landings), 5 (operator interventions) and 7 (authority/cache lag)
+remain unmeasured here, not assumed zero. The drain/rollback procedure is designed
+to preserve them; B1.5b must supply the live before/after evidence.
+
 ## Account data
 
 Account, then "Your Forge data", then "Refresh inventory" lists everything you own across seven families. "Download metadata" saves the inventory with hashes. It holds no source, raw Work, secret values or credentials. Use project archives, import snapshot controls and Secret Object export for those.

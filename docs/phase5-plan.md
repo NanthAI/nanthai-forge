@@ -18,7 +18,7 @@ Two supporting tracks run alongside: **landing without an operator** (Q) and, af
 
 ## Done in Phase 4 (prerequisites, not Phase 5 slices)
 
-These are being built now as Phase 4 closure items. Phase 5 assumes them.
+These landed in Phase 4 (closed 2026-10-25). Phase 5 assumes them.
 
 - **Reads never write.** `nforge agent peers` previews and every other read return without writing owner or hosted state.
 - **Automatic Lane snapshots.** Lanes are snapshotted automatically, so a lost process or machine never loses unsaved work beyond the last snapshot.
@@ -53,7 +53,7 @@ The critical path is Bet 1: **B1.2a → B1.2b–d → B1.2e → B1.5a → B1.5b 
 
 | Week | Critical path (Bet 1) | Alongside |
 | --- | --- | --- |
-| 1 | B1.1 published; B1.2a authority switch and fencing; B1.2c hosted seed | M1 metrics; D1 decision records; SP1 both arms; E1 and E3 published |
+| 1 | B1.1 published; B1.2a authority switch and fencing; B1.2c hosted seed | M1 metrics; D1 decision records; SP1 both arms; **E1 and E3 published — done** ([results](why-forge.md)) |
 | 2 | B1.2b finish to hosted queue; B1.2d browser accept (Claude design, GPT build); B1.3a runner lease | M2, M3; X1 schema compatibility check; SP1 memo and decision; B1.4a clonefile Lanes; Q3 reuse key; E2 starts on six independent slices |
 | 3 | B1.2e Mac stops accepting; B1.3b runner evidence; B1.4b cache reads hosted; B1.5a recover folds hosted work | Q1 landing controller; B2.1 contract; B3.1 first-write hook |
 | 4 | B1.5b cutover, forced upgrade and drill | Q2 self-finishing entries and stall alarm; Q4 lifecycle drill; B3.1 ack metric; E2 published |
