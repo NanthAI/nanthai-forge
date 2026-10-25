@@ -1,3 +1,4 @@
+import { recordObject } from '../dist/work-records.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -170,7 +171,7 @@ for (const count of [8, 256])
       const added = readdirSync(join(store.directory, 'records')).filter(id => !before.has(id));
       const ids = new Set(data.channelMoves.map(move => move.id));
       const moves = added
-        .map(id => JSON.parse(readFileSync(join(store.directory, 'records', id))))
+        .map(id => recordObject(store.directory, id))
         .filter(record => ids.has(record.fields?.id));
       assert.equal(moves.length, 1);
       assert.ok(added.length <= 20, `${added.length} fragments for ${count} moves`);

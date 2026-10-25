@@ -12,6 +12,7 @@ import { WorkStore } from '../dist/work-store.js';
 import { WorkService } from '../dist/work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { recordManifest, readRecords } from '../dist/work-records.js';
+import { unpackRecord } from '../dist/work-record-codec.js';
 function fixture(t) {
   const root = fs.mkdtempSync(join(tmpdir(), 'forge-incremental-'));
   fs.writeFileSync(join(root, 'a.txt'), 'source\n');
@@ -179,8 +180,9 @@ test('scoped CAS, unpublished fragments, corruption and extension fields preserv
   assert.equal(result.intents[0].notes.length, 2);
   const pointer = fs.readFileSync(join(store.directory, 'work.json')),
     manifest = recordManifest(JSON.parse(pointer));
+  // Pages may be stored compressed; their identity is the decoded JSON.
   const page = JSON.parse(
-    fs.readFileSync(join(store.directory, 'records', manifest.collections.intents.pages[0])),
+    unpackRecord(fs.readFileSync(join(store.directory, 'records', manifest.collections.intents.pages[0]))),
   );
   fs.writeFileSync(join(store.directory, 'records', page[1]), 'corrupt');
   const scoped = store.records();

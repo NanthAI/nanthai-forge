@@ -228,7 +228,7 @@ for (const format of ['sha1', 'sha256'])
         const workFile = join(f.work.store.directory, 'work.json'),
           indexed = readFileSync(workFile),
           portable = f.work.store.snapshotBytes();
-        assert.equal(JSON.parse(indexed).schema, 'forge-work-records-v2');
+        assert.equal(JSON.parse(indexed).schema, 'forge-work-records-v3');
         assert.equal(JSON.parse(portable).schema, 5);
         // Both the new indexed representation and unsupported portable format5 fail without a write.
         for (const retained of [indexed, portable]) {

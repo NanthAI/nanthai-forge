@@ -10,6 +10,7 @@ import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { workSchema } from '../dist/work-types.js';
+import { recordObject } from '../dist/work-records.js';
 import { exportNativeWork, restoreNativeWork } from '../dist/native-backup.js';
 
 function fixture(t) {
@@ -47,7 +48,7 @@ test('legacy journal migration retains unknown fields, history, ordering and all
   next.intents[1].notes.push({ kind: 'comment', at: 'now', text: 'A new note' });
   store.locked(() => store.save(next));
   assert.deepEqual(new WorkStore(store.root).load(), next);
-  assert.equal(JSON.parse(readFileSync(join(store.directory, 'work.json'))).schema, 'forge-work-records-v2');
+  assert.equal(JSON.parse(readFileSync(join(store.directory, 'work.json'))).schema, 'forge-work-records-v3');
   assert.throws(() => workSchema.parse(JSON.parse(readFileSync(join(store.directory, 'work.json')))));
   assert.deepEqual(store.page('intents', 125, 10).records, next.intents.slice(125, 135));
   assert.equal(store.page('intents', 125, 10).nextOffset, 135);
@@ -70,7 +71,7 @@ test('one changed record writes only selected fragments and leaves retained byte
   for (const [name, mtime] of before) assert.equal(statSync(join(dir, name)).mtimeMs, mtime);
   const pointer = JSON.parse(readFileSync(join(store.directory, 'work.json'))),
     changed = pointer.collections.intents.pages[1];
-  const hashes = JSON.parse(readFileSync(join(dir, changed)));
+  const hashes = recordObject(store.directory, changed);
   rmSync(join(dir, hashes[0]));
   // Reading another page does not touch records outside the requested slice.
   assert.equal(store.page('intents', 0, 5).records.length, 5);
@@ -221,9 +222,7 @@ test('full-load memo keeps shared immutable references independent and revalidat
   assert.deepEqual(loaded.intents[1].future.retained, ['original']);
   assert.deepEqual(store.load().intents[0].future.retained, ['original']);
   const manifest = JSON.parse(readFileSync(join(store.directory, 'work.json'), 'utf8'));
-  const page = JSON.parse(
-    readFileSync(join(store.directory, 'records', manifest.collections.intents.pages[0]), 'utf8'),
-  );
+  const page = recordObject(store.directory, manifest.collections.intents.pages[0]);
   writeFileSync(join(store.directory, 'records', page[0]), '{}');
   assert.throws(() => store.load(), { code: 'INVALID_WORK_STORE' });
 });

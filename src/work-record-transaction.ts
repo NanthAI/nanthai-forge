@@ -37,7 +37,7 @@ export class WorkRecordTransaction {
     bytes: Buffer,
   ) {
     assertWorkFormat(manifest.fields);
-    this.io = recordIO(directory, false);
+    this.io = recordIO(directory, false, undefined, true);
     this.original = digest(bytes);
     this.initial = JSON.stringify(manifest);
   }
@@ -417,7 +417,17 @@ export class WorkRecordTransaction {
       'Work changed. Refresh before retrying; nothing was overwritten.',
     );
   }
+  dispose() {
+    this.io.release();
+  }
   commit(revision?: number) {
+    try {
+      return this.publish(revision);
+    } finally {
+      this.dispose();
+    }
+  }
+  private publish(revision?: number) {
     const nextRevision = revision ?? this.revision + 1;
     assertWorkFormat(this.manifest.fields);
     invariant(

@@ -400,7 +400,7 @@ test(
       assert.deepEqual(fs.readFileSync(path), bytes);
     };
     // The old executable rejects the new physical layout even when its portable data is supported.
-    assert.equal(JSON.parse(fs.readFileSync(path)).schema, 'forge-work-records-v2');
+    assert.equal(JSON.parse(fs.readFileSync(path)).schema, 'forge-work-records-v3');
     rejected();
     const supported = f.w.store.snapshotBytes();
     fs.writeFileSync(path, supported);
@@ -409,7 +409,7 @@ test(
     assert.deepEqual(fs.readFileSync(path), supported);
     f.collect();
     assert.equal(f.w.store.load().schema, 3);
-    assert.equal(JSON.parse(fs.readFileSync(path)).schema, 'forge-work-records-v2');
+    assert.equal(JSON.parse(fs.readFileSync(path)).schema, 'forge-work-records-v3');
     rejected();
     // Portable format3 must also be rejected: do not accidentally test only the storage marker.
     const unsupported = f.w.store.snapshotBytes();

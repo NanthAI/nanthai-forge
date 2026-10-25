@@ -1,3 +1,4 @@
+import { recordObject } from '../dist/work-records.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -130,10 +131,10 @@ test('cached selected run follows revision and position changes without reading 
   data.runs.find(item => item.id === run.id).details = 'Changed';
   peer.save(data);
   const manifest = JSON.parse(readFileSync(join(store.directory, 'work.json'))),
-    hashes = JSON.parse(readFileSync(join(store.directory, 'records', manifest.collections.runs.pages[0])));
+    hashes = recordObject(store.directory, manifest.collections.runs.pages[0]);
   const unrelatedPath = join(store.directory, 'records', hashes[0]),
     bytes = readFileSync(unrelatedPath);
-  assert.equal(JSON.parse(bytes).fields.id, unrelated.id);
+  assert.equal(recordObject(store.directory, hashes[0]).fields.id, unrelated.id);
   writeFileSync(unrelatedPath, 'unavailable unrelated history');
   try {
     assert.equal(reader.read().details, 'Changed');

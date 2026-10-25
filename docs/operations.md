@@ -1099,3 +1099,52 @@ writes populate the same field. Imported-history activity counts are incomplete
 until the backfill finishes; source and retained Work history remain intact.
 
 Lossless hosted source acquisition uses the [GitHub project import](operations/github-project-import.md) API, separate from the derived analysis tour.
+
+## Work record collection
+
+```sh
+nforge work OWNER '{"action":"collect-records"}' 0
+nforge work OWNER '{"action":"collect-records","apply":true,"backup":true}' 0
+```
+
+The default is a read-only plan: page counts, physical bytes, reclaimable pages,
+projected remaining bytes, and the reasons for every retained page. It takes no
+lock, creates no backup and rewrites no records. Source objects and check files
+are outside this command's collection scope.
+
+Application holds the owner lock. It requires a verified full-directory copy of
+the exact current Work pointer/revision; `backup:true` creates one first as a
+sibling `OWNER.records-backup-UUID` directory, including uncheckpointed workspace
+files, pending operations and all old pages. The private
+`record-collection-backups.json` receipt records that copy's file digests. A new
+Work revision requires a new backup. Keep the backup directory for recovery;
+restore its complete contents into a separate directory. This full-directory
+copy is separate from the portable `export-work` / `restore-native` format.
+
+A page is eligible only when unreachable from the current Work closure, kept
+backup Work pointers, protected Lane snapshot pins and local pending
+journal/operation metadata. Closed Lane snapshots expire strictly after seven
+days from both snapshot and closure; the latest open Lane snapshot stays
+protected. Current automatic snapshots contain source pins only. Portable
+`export-work` directories and archives contain self-contained Work, so they do
+not depend on local record pages. Unknown or damaged metadata stops collection;
+unverifiable orphan pages are preserved for diagnosis. Interrupted application
+leaves current Work readable; retry recomputes reachability and finishes the
+remaining unlinks. Writers announce pending record staging under a short collection fence before
+writing any pages. While a live writer is staging, collection conservatively
+keeps all pages because its future references are not yet published. Committing
+or aborting prepared publication releases that pin. Dead process pins do not
+retain pages; any durable pending operation references remain protected.
+The staging fence prevents those unpublished pages from being removed.
+
+New pages use zstd when it is smaller than plain JSON. Their identities still
+hash the original JSON bytes. Storage manifest `forge-work-records-v3` advertises
+this physical capability; v1/v2 pointers and plain JSON pages remain readable
+without migration, and the portable Work schema is unchanged. Upgrade every
+writer before using v3 owners: old CLIs reject the new storage manifest. Reads
+never repack existing pages; existing raw pages shrink only as later writes
+produce compressed versions and unreferenced versions are explicitly collected.
+
+Run backend evidence still contains inline verdict arrays. A separate test-name
+catalog is deferred: stable names repeat alongside their per-run verdicts. Splitting a run's stable test identities from its verdict/status
+vector requires a further record capability and reader/export compatibility work.

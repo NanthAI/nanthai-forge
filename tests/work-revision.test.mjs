@@ -20,7 +20,7 @@ test('revision observation reads only the record manifest and remains available 
   const revision = work.store.load().revision;
   assert.equal(work.store.revision(), revision);
   const manifest = JSON.parse(readFileSync(join(work.store.directory, 'work.json'), 'utf8'));
-  assert.equal(manifest.schema, 'forge-work-records-v2');
+  assert.equal(manifest.schema, 'forge-work-records-v3');
   rmSync(join(work.store.directory, 'records'), { recursive: true, force: true });
   assert.equal(work.store.revision(), revision);
   assert.throws(() => work.store.load());

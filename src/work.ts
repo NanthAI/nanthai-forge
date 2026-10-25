@@ -1,3 +1,4 @@
+import { collectRecords } from './work-record-collection.js';
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { landingWorkerSignal, assertLandingWorkerActive } from './landing-worker-context.js';
 import { withDetachedChecks } from './check-execution-context.js';
@@ -479,6 +480,8 @@ export class WorkService {
       input.action === 'import-native-git-contribution'
     )
       return importNativeGitContribution(this.store, input, expectedRevision);
+    if (input && typeof input === 'object' && 'action' in input && input.action === 'collect-records')
+      return collectRecords(this.store, input);
     if (
       input &&
       typeof input === 'object' &&

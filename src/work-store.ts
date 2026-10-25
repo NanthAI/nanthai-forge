@@ -168,7 +168,8 @@ export class WorkStore {
   readRecords(): WorkRecordTransaction | undefined {
     const bytes = this.readPointer(),
       manifest = bytes ? recordManifest(JSON.parse(bytes.toString('utf8'))) : undefined;
-    return manifest?.schema === 'forge-work-records-v2' &&
+    return manifest &&
+      manifest.schema !== 'forge-work-records-v1' &&
       Object.values(manifest.collections).every(index => index.lookup)
       ? new WorkRecordTransaction(this.directory, manifest, bytes!)
       : undefined;
@@ -197,7 +198,8 @@ export class WorkStore {
     let bytes = this.readPointer(),
       manifest = bytes ? recordManifest(JSON.parse(bytes.toString('utf8'))) : undefined;
     if (
-      manifest?.schema !== 'forge-work-records-v2' ||
+      !manifest ||
+      manifest.schema === 'forge-work-records-v1' ||
       Object.values(manifest.collections).some(index => !index.lookup)
     ) {
       this.save(this.load());

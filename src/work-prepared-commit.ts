@@ -19,26 +19,30 @@ export function preparedRecordCommit<T>(
     try {
       let tx = store.readRecords();
       if (!tx) tx = store.locked(() => store.records(), { operation: `${operation} migration` });
-      let publish: () => T;
       try {
-        publish = prepare(tx);
-      } catch (error) {
-        // An error from an obsolete snapshot is not authoritative.
+        let publish: () => T;
+        try {
+          publish = prepare(tx);
+        } catch (error) {
+          // An error from an obsolete snapshot is not authoritative.
+          return store.locked(
+            () => {
+              tx.assertCurrent();
+              throw error;
+            },
+            { operation },
+          );
+        }
         return store.locked(
           () => {
             tx.assertCurrent();
-            throw error;
+            return publish();
           },
           { operation },
         );
+      } finally {
+        tx.dispose();
       }
-      return store.locked(
-        () => {
-          tx.assertCurrent();
-          return publish();
-        },
-        { operation },
-      );
     } catch (error) {
       if (
         !(error instanceof ForgeError && ['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(error.code))

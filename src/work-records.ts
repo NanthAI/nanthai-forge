@@ -1,3 +1,4 @@
+import { pendingRecordWriter } from './work-record-staging.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
   closeSync,
@@ -12,6 +13,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { packRecord, unpackRecord } from './work-record-codec.js';
 import { recordPendingExchange } from './pending-exchange.js';
 import { z } from 'zod';
 import { digest } from './hash.js';
@@ -27,7 +29,7 @@ export const collectionSchema = z.object({
 });
 export type RecordCollection = z.infer<typeof collectionSchema>;
 const manifestSchema = z.object({
-  schema: z.enum(['forge-work-records-v1', 'forge-work-records-v2']),
+  schema: z.enum(['forge-work-records-v1', 'forge-work-records-v2', 'forge-work-records-v3']),
   fields: z.record(z.string(), z.unknown()),
   keys: z.array(z.string()),
   collections: z.record(z.string(), collectionSchema),
@@ -86,7 +88,8 @@ type ReadMemo = {
 export function recordObject(directory: string, id: string, memo?: ReadMemo): unknown {
   const cached = memo?.json.get(id);
   if (cached !== undefined) return JSON.parse(cached);
-  const bytes = readSource(directory, `records/${id}`, Number.MAX_SAFE_INTEGER, id);
+  const physical = readSource(directory, `records/${id}`, Number.MAX_SAFE_INTEGER);
+  const bytes = physical && unpackRecord(physical);
   invariant(
     bytes && digest(bytes) === id,
     code,
@@ -133,7 +136,9 @@ export function recordManifest(value: unknown): RecordManifest | undefined {
     typeof value !== 'object' ||
     value === null ||
     !('schema' in value) ||
-    !['forge-work-records-v1', 'forge-work-records-v2'].includes(String(value.schema))
+    !['forge-work-records-v1', 'forge-work-records-v2', 'forge-work-records-v3'].includes(
+      String(value.schema),
+    )
   )
     return;
   const parsed = manifestSchema.safeParse(value);
@@ -224,7 +229,7 @@ export function readRecordPage(
     manifest.collections[collection]!,
     offset,
     limit,
-    manifest.schema === 'forge-work-records-v2',
+    manifest.schema !== 'forge-work-records-v1',
   );
 }
 // Schema-16 legacy copies are large and immutable: page them as a one-record collection
@@ -259,7 +264,7 @@ function readRecordFields(directory: string, manifest: RecordManifest): Record<s
             manifest.collections[key]!,
             0,
             manifest.collections[key]!.count,
-            manifest.schema === 'forge-work-records-v2',
+            manifest.schema !== 'forge-work-records-v1',
             true,
             memo,
           ).records
@@ -275,7 +280,12 @@ function syncDirectory(directory: string) {
     closeSync(fd);
   }
 }
-export function recordIO(directory: string, create = true, memo?: ReadMemo): IndexIO {
+export function recordIO(
+  directory: string,
+  create = true,
+  memo?: ReadMemo,
+  pending = false,
+): IndexIO & { release(): void } {
   const records = join(directory, 'records');
   if (!existsSync(records) && create) mkdirSync(records, { mode: 0o700 });
   invariant(existsSync(records), code, 'Work records are unavailable.');
@@ -284,9 +294,15 @@ export function recordIO(directory: string, create = true, memo?: ReadMemo): Ind
     code,
     'Work records must be a real directory.',
   );
-  return {
-    read: id => recordObject(directory, id, memo),
-    put(value) {
+  let release: (() => void) | undefined;
+  const io = {
+    release() {
+      release?.();
+      release = undefined;
+    },
+    read: (id: string) => recordObject(directory, id, memo),
+    put(value: unknown): string {
+      if (pending && !release) release = pendingRecordWriter(directory);
       const bytes = Buffer.from(JSON.stringify(value)),
         id = digest(bytes),
         path = join(records, id);
@@ -297,7 +313,7 @@ export function recordIO(directory: string, create = true, memo?: ReadMemo): Ind
       const temp = join(directory, `${randomUUID()}.tmp`),
         fd = openSync(temp, 'wx', 0o600);
       try {
-        writeFileSync(fd, bytes);
+        writeFileSync(fd, packRecord(bytes));
         fsyncSync(fd);
       } finally {
         closeSync(fd);
@@ -311,6 +327,7 @@ export function recordIO(directory: string, create = true, memo?: ReadMemo): Ind
       return id;
     },
   };
+  return io;
 }
 export function putRecord(io: IndexIO, value: unknown, nestedArrays = true): string {
   value = jsonValue(value);
@@ -346,6 +363,7 @@ export function putCollection(
   return { count: values.length, pages, ...(indexed ? { lookup: indexBuild(io, entries) } : {}) };
 }
 export function publishRecords(directory: string, manifest: RecordManifest) {
+  manifest.schema = 'forge-work-records-v3';
   syncDirectory(join(directory, 'records'));
   const temp = join(directory, `${randomUUID()}.tmp`),
     fd = openSync(temp, 'wx', 0o600);
@@ -364,7 +382,7 @@ export function stageRecords(directory: string, value: Record<string, unknown>):
   value = encodeStored(jsonValue(value) as Record<string, unknown>);
   const io = recordIO(directory),
     manifest: RecordManifest = {
-      schema: 'forge-work-records-v2',
+      schema: 'forge-work-records-v3',
       fields: Object.create(null),
       keys: Object.keys(value),
       collections: Object.create(null),
