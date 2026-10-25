@@ -117,7 +117,11 @@ export function enforceAcceptance(
   invariant(!reason, 'REVIEW_REQUIRED', reason ?? 'Waiting for review by a person; not in main yet');
   if (actor.kind === 'person') return undefined;
   const run = data.runs.find(
-    run => run.viewId === view.id && run.head === view.head && run.status === 'passed',
+    run =>
+      run.viewId === view.id &&
+      run.head === view.head &&
+      run.status === 'passed' &&
+      run.checkSelection?.scope !== 'partial',
   );
   invariant(
     run,

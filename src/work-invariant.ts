@@ -43,7 +43,8 @@ export function assessInvariant(
   const environment = checkEnvironment();
   const checks: InvariantAssessment['checks'] = policy.checkIds.map(id => {
     const check = data.checks.find(item => item.id === id);
-    const run = data.runs.filter(item => item.viewId === view.id && item.check.id === id).at(-1);
+    const runs = data.runs.filter(item => item.viewId === view.id && item.check.id === id);
+    const run = runs.filter(item => item.checkSelection?.scope !== 'partial').at(-1) ?? runs.at(-1);
     const reasons: string[] = [];
     if (!check) reasons.push('The check definition is unavailable.');
     if (!run) reasons.push('No run exists for this exact Candidate.');
@@ -59,6 +60,8 @@ export function assessInvariant(
       if (environment.fingerprint !== run.environment.fingerprint)
         reasons.push('Recorded runtime settings changed.');
       if (run.cancelRequested) reasons.push('Cancellation was requested.');
+      if (run.checkSelection?.scope === 'partial')
+        reasons.push('Explicit test-file runs are partial evidence, not a landing gate.');
       if (run.status === 'passed' && (!run.endedAt || run.exitCode !== 0 || run.signal))
         reasons.push('A complete successful outcome is unavailable.');
     }

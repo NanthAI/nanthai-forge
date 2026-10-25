@@ -96,7 +96,7 @@ export const landingDiagnosisNodeSchema = batchPrefixSchema.extend({
   selection: z.object({
     runId: id,
     known: z.boolean(),
-    scope: z.enum(['docs', 'interaction', 'scoped', 'full']).optional(),
+    scope: z.enum(['docs', 'interaction', 'scoped', 'full', 'partial']).optional(),
     tests: z.array(z.string()).optional(),
     plan: z.string().optional(),
   }),

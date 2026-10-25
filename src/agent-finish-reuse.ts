@@ -29,6 +29,7 @@ export function reusableFinish(store: WorkStore, command: FinishAction, head: st
           run.viewId === candidate.id &&
           run.head === candidate.head &&
           run.status === 'passed' &&
+          run.checkSelection?.scope !== 'partial' &&
           run.check.id === command.checkId &&
           run.check.definition === command.expectedDefinition &&
           (!command.expectedEnvironment || run.environment.fingerprint === command.expectedEnvironment) &&
@@ -47,6 +48,7 @@ export function adoptFinishRun(store: WorkStore, command: FinishAction, viewId: 
     .reverse()
     .find(
       run =>
+        run.checkSelection?.scope !== 'partial' &&
         run.head === view.head &&
         run.base === view.base &&
         JSON.stringify(run.inputs) === JSON.stringify(view.inputs) &&

@@ -600,6 +600,7 @@ export class AgentWorkflow {
       await this.work.dispatch(
         {
           action: 'run-check',
+          ...(input.tests !== undefined ? { tests: input.tests } : {}),
           operationId: input.operationId,
           viewId: input.viewId,
           expectedHead: input.expectedHead,

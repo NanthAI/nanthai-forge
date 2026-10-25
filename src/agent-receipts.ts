@@ -50,7 +50,10 @@ export const runReceipt = (run: CheckRun) => ({
   signal: run.signal ?? null,
   cancelRequested: run.cancelRequested ?? false,
   ...(run.cancellation ? { cancellation: run.cancellation } : {}),
-  coverage: 'Selected command outcome; external inputs and review coverage remain unknown.',
+  coverage:
+    run.checkSelection?.scope === 'partial'
+      ? 'Partial evidence from explicit test files; cannot satisfy a landing gate.'
+      : 'Selected command outcome; external inputs and review coverage remain unknown.',
   reuse: run.reusedFrom ? 'reused' : 'disabled',
   ...(run.reusedFrom ? { reusedFrom: run.reusedFrom, diagnostic: run.details } : {}),
   humanReview: 'separate',

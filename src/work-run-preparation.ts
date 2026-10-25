@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ForgeError } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { hostname } from 'node:os';
 import { processIdentity } from './local-process.js';
 import { diskGuard } from './disk-guard.js';
@@ -36,6 +36,13 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
               prefix.head === command.expectedHead,
           ),
       );
+      if (command.tests !== undefined)
+        invariant(
+          JSON.stringify(check.args) === JSON.stringify(['scripts/forge-check.mjs']) &&
+            (check.executable === process.execPath || /(?:^|\/)node$/.test(check.executable)),
+          'BAD_ARGUMENT',
+          'Explicit test files require the standard Forge check.',
+        );
       const environment = batch?.environment ?? checkEnvironment();
       if (environment.fingerprint !== command.expectedEnvironment)
         throw new ForgeError(
@@ -63,6 +70,15 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
         ...(view.recovery ? { recovery: view.recovery } : {}),
         dependencies: view.dependencies ?? [],
         check,
+        ...(command.tests !== undefined
+          ? {
+              checkSelection: {
+                scope: 'partial' as const,
+                reason: 'Explicit test-file list; partial evidence cannot satisfy a landing gate.',
+                tests: command.tests,
+              },
+            }
+          : {}),
         environment,
         status: 'queued',
         queuedAt: new Date().toISOString(),
@@ -75,6 +91,8 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
         ...(inputObservations ? { inputObservations } : {}),
         ...(sequenceId ? { playbookRunId: sequenceId } : {}),
       };
+      // Older readers without selection evidence must reject this optional feature.
+      if (command.tests !== undefined) tx.setSchema(15);
       if (command.interaction !== undefined) {
         run.interaction = command.interaction ? interactionEvidence(store, run, command.interaction) : null;
         tx.setSchema(15);

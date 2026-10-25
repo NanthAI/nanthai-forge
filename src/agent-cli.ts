@@ -188,6 +188,9 @@ function actionHelp(action: string): string {
   if (action === 'link')
     result +=
       'Select exactly one laneId, viewId or save (full source digest). path is an optional relative source file; line requires path. Links target the hosted app; an unpublished head may be unavailable until source is pushed.\n';
+  if (action === 'run')
+    result +=
+      'Optional tests:["tests/example.test.mjs"] replaces only the standard check test selection. Static checks still run. Explicit lists (including []) are partial evidence and cannot satisfy a landing gate or check reuse.\n';
   if (action === 'observe' || action === 'log' || action === 'cancel')
     result +=
       'operationId is the nested check run operation ID, not the finish operation ID. Resume a finish by replaying its original finish request plus resolved pins.\n';

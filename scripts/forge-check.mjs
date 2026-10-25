@@ -51,15 +51,22 @@ try {
 } catch {
   /* Missing advisory evidence uses the graph selection. */
 }
-const selection = standardSelection({
-  coverage,
-  paths: comparison?.paths,
-  optimistic: comparison?.optimistic,
-  recovery: comparison?.recovery,
-  mainCheck: comparison?.mainCheck,
-  interaction: comparison?.interaction,
-  files: sourceFiles(),
-});
+const explicit = env.FORGE_SELECTED_TESTS ? JSON.parse(env.FORGE_SELECTED_TESTS) : undefined;
+const files = sourceFiles();
+if (explicit?.scope === 'partial' && explicit.tests.some(path => !files.has(path)))
+  throw new Error('An explicit test file is absent from the pinned source.');
+const selection =
+  explicit?.scope === 'partial'
+    ? explicit
+    : standardSelection({
+        coverage,
+        paths: comparison?.paths,
+        optimistic: comparison?.optimistic,
+        recovery: comparison?.recovery,
+        mainCheck: comparison?.mainCheck,
+        interaction: comparison?.interaction,
+        files,
+      });
 if (env.FORGE_CHECK_DOCS_ADMISSION === '1' && selection.scope !== 'docs')
   throw new Error(
     'Docs admission classification changed; no heavyweight verification started. Retry through ordinary check admission.',

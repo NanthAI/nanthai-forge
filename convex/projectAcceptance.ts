@@ -101,7 +101,13 @@ export async function hostedAcceptance(
   invariant(!reason, 'REVIEW_REQUIRED', reason ?? 'Waiting for review by a person');
   const run =
     actor.kind === 'agent'
-      ? snapshot.data.runs.find(r => r.viewId === view.id && r.head === command.head && r.status === 'passed')
+      ? snapshot.data.runs.find(
+          r =>
+            r.viewId === view.id &&
+            r.head === command.head &&
+            r.status === 'passed' &&
+            r.checkSelection?.scope !== 'partial',
+        )
       : undefined;
   invariant(
     actor.kind === 'person' || run,

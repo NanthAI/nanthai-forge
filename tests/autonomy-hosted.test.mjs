@@ -20,7 +20,7 @@ const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const work = await import(moduleUrl('../convex/projectWork.ts'));
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
-async function hosted(t) {
+async function hosted(t, partial = false) {
   const root = mkdtempSync(join(tmpdir(), 'forge-hosted-autonomy-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, 'file.txt'), 'original\n');
@@ -38,9 +38,16 @@ async function hosted(t) {
     await agent.dispatch({ action: 'finish', laneId: lane.laneId, message: 'Proposal', accept: true })
   ).result;
   assert.equal(finish.status, 'awaiting-review');
-  const owner = new WorkService(root),
-    archive = (await owner.dispatch({ action: 'export-work', archive: true }, owner.store.revision())).result
-      .archive;
+  const owner = new WorkService(root);
+  if (partial)
+    owner.store.locked(() => {
+      const data = owner.store.load();
+      data.schema = Math.max(data.schema, 15);
+      data.runs[0].checkSelection = { scope: 'partial', reason: 'Explicit fixture list', tests: [] };
+      owner.store.save(data);
+    });
+  const archive = (await owner.dispatch({ action: 'export-work', archive: true }, owner.store.revision()))
+    .result.archive;
   const bytes = readFileSync(archive.path),
     preview = await previewWorkArchive(new File([bytes], 'proposal.tar.gz'));
   const s = state([]),
@@ -309,4 +316,41 @@ test('an account JWT can downscope to agent authority but cannot bypass supervis
     ),
     error => error.code === 'REVIEW_REQUIRED',
   );
+});
+
+test('hosted automatic acceptance refuses imported partial evidence while person review stays available', async t => {
+  const s = await hosted(t, true);
+  s.device('cli');
+  await policies.set._handler(s.ctx, {
+    projectId: s.projectId,
+    command: JSON.stringify({ action: 'set-policy', operationId: randomUUID(), preset: 'trusted' }),
+  });
+  await assert.rejects(actions.acceptChannel._handler(s.ctx, s.selection()), errorCode('CHECK_REQUIRED'));
+  assert.equal(s.tables.projectWorkEvents.size, 0);
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+  assert.ok(await actions.acceptChannel._handler(s.ctx, s.selection()));
+});
+
+test('final hosted Channel boundary refuses a run changed to partial after action evidence', async t => {
+  const s = await hosted(t);
+  s.device('cli');
+  await policies.set._handler(s.ctx, {
+    projectId: s.projectId,
+    command: JSON.stringify({ action: 'set-policy', operationId: randomUUID(), preset: 'trusted' }),
+  });
+  const append = s.ctx.runMutation;
+  s.ctx.runMutation = (ref, args) => {
+    if (getFunctionName(ref) === 'projectWork:append') {
+      const rows = [...s.tables.projectWorkRecords.values()].filter(row => row.collection === 'runs');
+      assert.ok(rows.length);
+      for (const row of rows) {
+        const run = JSON.parse(row.value);
+        run.checkSelection = { scope: 'partial', reason: 'Explicit fixture list', tests: [] };
+        row.value = JSON.stringify(run);
+      }
+    }
+    return append(ref, args);
+  };
+  await assert.rejects(actions.acceptChannel._handler(s.ctx, s.selection()), errorCode('CHECK_REQUIRED'));
+  assert.equal(s.tables.projectWorkEvents.size, 0);
 });

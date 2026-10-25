@@ -87,6 +87,8 @@ export function evidenceApplicability(data: WorkData, viewId: string) {
 }
 export function runApplicability(data: WorkData, run: CheckRun, environment: CheckEnvironment) {
   const reasons = [];
+  if (run.checkSelection?.scope === 'partial')
+    reasons.push('Explicit test-file runs are partial evidence, not a landing gate.');
   if (evidenceApplicability(data, run.viewId) === 'historical')
     reasons.push('A different Candidate is now the latest candidate.');
   if (data.checks.find(c => c.id === run.check.id)?.definition !== run.check.definition)

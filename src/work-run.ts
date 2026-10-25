@@ -398,13 +398,13 @@ async function launchLocal(
         details += ' Run workspace cleanup is unconfirmed; existing files are retained.';
       }
     }
-    let checkSelection: CheckRun['checkSelection'];
+    let checkSelection: CheckRun['checkSelection'] = run.checkSelection;
     try {
       const bytes = readSource(path, 'selection.json', 4 * 1024 * 1024);
       if (bytes) {
         const parsed = checkRunSchema.shape.checkSelection.safeParse(JSON.parse(bytes.toString('utf8')));
         if (parsed.success && parsed.data && (parsed.data.scope !== 'interaction' || run.interaction)) {
-          checkSelection = parsed.data;
+          checkSelection = run.checkSelection?.scope === 'partial' ? run.checkSelection : parsed.data;
           details += ` Check selection: ${checkSelection.scope}; ${checkSelection.reason}; ${checkSelection.tests.length} test files (command-reported).`;
         }
       }
@@ -529,6 +529,8 @@ async function launchLocal(
         processEnvironment.env.FORGE_CHECK_COVERAGE = coveragePath;
       }
       processEnvironment.env.FORGE_CHECK_SELECTION = join(path, 'selection.json');
+      if (run.checkSelection?.scope === 'partial')
+        processEnvironment.env.FORGE_SELECTED_TESTS = JSON.stringify(run.checkSelection);
       const out = openSync(
         join(path, 'stdout.log'),
         constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
@@ -817,7 +819,10 @@ export function runWork(
     }
     if (existing) {
       invariant(
-        existing.viewId === command.viewId &&
+        JSON.stringify(
+          existing.checkSelection?.scope === 'partial' ? existing.checkSelection.tests : undefined,
+        ) === JSON.stringify(command.tests) &&
+          existing.viewId === command.viewId &&
           existing.head === command.expectedHead &&
           existing.check.id === command.checkId &&
           existing.check.definition === command.expectedDefinition &&

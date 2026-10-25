@@ -2163,3 +2163,73 @@ test('a cancel racing an already written passing receipt preserves the completed
   assert.equal(result.result.status, 'passed');
   assert.equal(result.result.cancelRequested, undefined);
 });
+
+for (const shardResult of ['success', 'failure', 'oom'])
+  test(`explicit partial Actions evidence preserves a ${shardResult} shard result without landing authority`, async t => {
+    const { work, run, path } = fixture(t, {
+      'scripts/forge-check.mjs': '// synthetic standard check',
+      'tests/a.test.mjs': '// chosen fixture',
+      'tests/b.test.mjs': '// unrelated fixture',
+    });
+    run.check = { ...run.check, args: ['scripts/forge-check.mjs'] };
+    run.checkSelection = { scope: 'partial', reason: 'Explicit fixture list', tests: ['tests/a.test.mjs'] };
+    work.store.locked(() => {
+      const tx = work.store.records();
+      tx.setSchema(15);
+      work.store.commitRecords(tx);
+    });
+    let fake, exported;
+    const api = {
+      request: (...args) => fake.api.request(...args),
+      pages: (...args) => fake.api.pages(...args),
+      log: (...args) => fake.api.log(...args),
+      sleep: async () => {},
+    };
+    await launchGithubActionsRun(
+      work.store,
+      run,
+      api,
+      async (plan, journal, save) => {
+        exported = githubActionsRecipe(plan);
+        journal.commit = 'a'.repeat(40);
+        journal.pushed = true;
+        save();
+        fake = transport(plan, journal);
+        const log = fake.api.log;
+        fake.api.log = (...args) =>
+          args[0] === 100 && shardResult === 'oom'
+            ? Promise.resolve('Process completed with exit code 137')
+            : log(...args);
+        const pages = fake.api.pages;
+        fake.api.pages = async (...args) => {
+          const jobs = await pages(...args);
+          if (!args[0].includes('/jobs?')) return jobs;
+          return jobs.map(job =>
+            job.name === 'forge-shard-0'
+              ? {
+                  ...job,
+                  conclusion: shardResult === 'success' ? 'success' : 'failure',
+                  started_at: '2026-10-01T12:00:00Z',
+                  completed_at: '2026-10-01T12:00:05Z',
+                }
+              : job,
+          );
+        };
+      },
+      async () => {},
+    );
+    assert.equal(exported.selection.scope, 'partial');
+    assert.deepEqual(exported.groups.flat(), ['tests/a.test.mjs']);
+    const receipt = read(join(path, 'result.json'));
+    assert.equal(receipt.status, shardResult === 'success' ? 'passed' : 'failed');
+    assert.equal(receipt.exitCode, shardResult === 'success' ? 0 : shardResult === 'oom' ? 137 : 1);
+    if (shardResult !== 'success') assert.match(receipt.failureSummary, /forge-shard-0/);
+    assert.deepEqual(receipt.checkSelection, run.checkSelection);
+    const journal = read(join(path, 'github-actions.json'));
+    assert.ok(
+      journal.jobUsage.some(job => job.id === 100),
+      'shard build and test time is included in cost observations',
+    );
+    const { successfulCheck } = await import('../dist/check-reuse-evidence.js');
+    assert.equal(successfulCheck({ ...run, ...receipt }), false);
+  });

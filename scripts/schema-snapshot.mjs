@@ -195,8 +195,9 @@ export function generateSnapshot(root, files = sharedSchemaFiles, version) {
       const call = node.expression,
         name = call.name.text;
       const receiver = evaluate(call.expression, module);
-      if (receiver instanceof z.ZodType && ['refine', 'superRefine'].includes(name)) {
+      if (receiver instanceof z.ZodType && ['refine', 'superRefine', 'transform'].includes(name)) {
         // Arbitrary predicates have no structural JSON Schema equivalent. Never execute them.
+        // A transform changes the parsed output only; the accepted input is the receiver's.
         value = receiver;
       } else if (receiver instanceof z.ZodType && name === 'default') {
         // A default accepts an absent input. Its value is irrelevant to input compatibility.

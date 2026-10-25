@@ -496,6 +496,7 @@ export async function appendWork(
         const run = storedRun ? JSON.parse(storedRun.value) : null;
         invariant(
           run?.status === 'passed' &&
+            run.checkSelection?.scope !== 'partial' &&
             run.head === channelCommand.data.head &&
             run.viewId === channelCommand.data.viewId,
           'CHECK_REQUIRED',

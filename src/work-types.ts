@@ -378,6 +378,20 @@ export const interactionEvidenceSchema = interactionRequestSchema.extend({
   mainPaths: z.array(z.string()),
   overlap: z.array(z.string()),
 });
+export const explicitTestsSchema = z
+  .array(
+    z
+      .string()
+      .refine(
+        path =>
+          safeRelative(path) &&
+          path.startsWith('tests/') &&
+          path.endsWith('.test.mjs') &&
+          !/[\x00-\x1f\x7f*?\[\]{}!]/.test(path),
+        'Use a relative tests/*.test.mjs file path.',
+      ),
+  )
+  .transform(tests => [...new Set(tests)].sort());
 export const checkRunSchema = z
   .object({
     reusedFrom: z.object({ runId: id, endedAt: z.string(), evidence: oid }).optional(),
@@ -400,7 +414,7 @@ export const checkRunSchema = z
     interaction: interactionEvidenceSchema.nullable().optional(),
     checkSelection: z
       .object({
-        scope: z.enum(['docs', 'interaction', 'scoped', 'full']),
+        scope: z.enum(['docs', 'interaction', 'scoped', 'full', 'partial']),
         reason: z.string(),
         tests: z.array(z.string()),
         coverage: z
@@ -938,6 +952,7 @@ export const evidenceCommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('export-check'), id }),
   z.object({
     action: z.literal('run-check'),
+    tests: explicitTestsSchema.optional(),
     operationId: id,
     viewId: id,
     expectedHead: oid,
@@ -1079,7 +1094,11 @@ export const workSchema = z
         !data.landingBatches?.length &&
         !data.channelMoves.some(move => move.postAccept?.reason === 'batch')) ||
         data.schema >= 17) &&
-      (!data.runs.some(run => run.interaction !== undefined || run.checkSelection?.scope === 'interaction') ||
+      (!data.runs.some(
+        run =>
+          run.interaction !== undefined ||
+          ['interaction', 'partial'].includes(run.checkSelection?.scope ?? ''),
+      ) ||
         data.schema >= 15) &&
       ((!data.autonomyPolicy?.acceptance.disjointFastPath &&
         !data.channelMoves.some(move => move.fastPath)) ||

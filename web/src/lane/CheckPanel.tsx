@@ -8,7 +8,11 @@ export type RunView = {
   id: string;
   status: string;
   check?: string;
-  checkSelection?: { scope: 'docs' | 'interaction' | 'scoped' | 'full'; reason: string; tests: string[] };
+  checkSelection?: {
+    scope: 'docs' | 'interaction' | 'scoped' | 'full' | 'partial';
+    reason: string;
+    tests: string[];
+  };
   startedAt?: string;
   endedAt?: string;
   exitCode?: number | null;

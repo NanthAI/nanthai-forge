@@ -156,12 +156,16 @@ const tests = coreBuild.then(ok => {
     'evidence',
   ].map(name => `${name}.test.mjs`);
   const rank = name => (slowest.includes(name) ? slowest.indexOf(name) : slowest.length);
-  const files = readdirSync('tests')
-    .filter(
-      name => name.endsWith('.test.mjs') && (!selection || selection.tests.includes(join('tests', name))),
-    )
-    .sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1))
-    .map(name => join('tests', name));
+  const files =
+    selection?.scope === 'partial'
+      ? selection.tests
+      : readdirSync('tests')
+          .filter(
+            name =>
+              name.endsWith('.test.mjs') && (!selection || selection.tests.includes(join('tests', name))),
+          )
+          .sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1))
+          .map(name => join('tests', name));
   // Budget test files explicitly: concurrent recorded verifies already share this machine.
   // Fixture queues stay private; no correctness test loses its own queue overrides.
   const workers = workerBudget(env);

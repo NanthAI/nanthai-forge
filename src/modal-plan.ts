@@ -51,16 +51,21 @@ export async function modalPlan(
   } catch {
     /* Full selection on missing ancestry. */
   }
-  const selection = standard
-    ? standardSelection({
-        files,
-        coverage: comparison.base ? latestCheckCoverage(store, comparison.base) : undefined,
-        ...comparison,
-        ...(run.mainCheck ? { mainCheck: run.mainCheck } : {}),
-        ...(run.interaction !== undefined ? { interaction: run.interaction } : {}),
-        env: run.environment.env,
-      })
-    : { scope: 'full', reason: 'Exact configured command', tests: [] as string[] };
+  const selection =
+    run.checkSelection?.scope === 'partial'
+      ? run.checkSelection
+      : standard
+        ? standardSelection({
+            files,
+            coverage: comparison.base ? latestCheckCoverage(store, comparison.base) : undefined,
+            ...comparison,
+            ...(run.mainCheck ? { mainCheck: run.mainCheck } : {}),
+            ...(run.interaction !== undefined ? { interaction: run.interaction } : {}),
+            env: run.environment.env,
+          })
+        : { scope: 'full', reason: 'Exact configured command', tests: [] as string[] };
+  if (run.checkSelection?.scope === 'partial' && selection.tests.some(path => !files.has(path)))
+    throw new Error('An explicit test file is absent from the pinned source.');
   const durations = timingDurations(readTimingHistory(join(store.directory, 'test-timings.json')));
   const lockfile = digest(files.get('package-lock.json') ?? '');
   const pins = {

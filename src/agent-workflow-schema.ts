@@ -10,7 +10,7 @@ import { briefInputSchema } from './agent-brief-types.js';
 import { guidanceInputSchema } from './agent-guidance.js';
 import { z } from 'zod';
 import { peersInputSchema, peersScopeSchema } from './agent-peers.js';
-import { afterSchema } from './work-types.js';
+import { afterSchema, explicitTestsSchema } from './work-types.js';
 import { dependencySchema, invariantPinSchema, defineCheckCommandSchema } from './work-types.js';
 import { agentReviewSchema } from './agent-review.js';
 import { agentDiffSchema, agentShowSchema } from './agent-source-read.js';
@@ -155,6 +155,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   defineCheckCommandSchema,
   z.object({
     action: z.literal('run'),
+    tests: explicitTestsSchema.optional(),
     ...lockWait,
     operationId,
     /** Either viewId, or laneId (that Lane's latest clean View). */

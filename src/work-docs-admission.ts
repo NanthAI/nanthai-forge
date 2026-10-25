@@ -8,6 +8,7 @@ import type { CheckRun } from './work-types.js';
 export async function lightweightDocsRun(store: WorkStore, run: CheckRun): Promise<boolean> {
   if (
     !store.native ||
+    run.checkSelection?.scope === 'partial' ||
     !run.interaction?.eligible ||
     run.interaction.basis !== 'docs-overlap' ||
     run.mainCheck ||

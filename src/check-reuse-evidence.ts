@@ -10,6 +10,7 @@ import type { WorkStore } from './work-store.js';
 
 export const successfulCheck = (run: CheckRun) =>
   run.status === 'passed' &&
+  run.checkSelection?.scope !== 'partial' &&
   !!run.endedAt &&
   Number.isFinite(Date.parse(run.endedAt)) &&
   run.exitCode === 0 &&
@@ -56,6 +57,11 @@ export function retainedPassedCheck(store: WorkStore, value: unknown): CheckRun 
 
 /** A reused run is a new exact-Candidate receipt, never a second execution. */
 export function validateReusedCheck(store: WorkStore, run: CheckRun) {
+  invariant(
+    run.checkSelection?.scope !== 'partial',
+    'CHECK_REQUIRED',
+    'Explicit test-file runs are partial evidence, not a landing gate.',
+  );
   invariant(
     run.runner.pid !== 0 || !!run.reusedFrom,
     'EVIDENCE_CHANGED',
