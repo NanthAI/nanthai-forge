@@ -751,9 +751,15 @@ for (const native of [true, false])
         child.kill('SIGKILL');
         await exited;
       }
-      while (processAlive(run.runner) && Date.now() < deadline)
+      const runnerDeadline = Date.now() + 60000;
+      let runnerAlive = processAlive(run.runner);
+      while (runnerAlive && Date.now() < runnerDeadline) {
         await new Promise(resolve => setTimeout(resolve, 20));
-      assert.equal(processAlive(run.runner), false);
+        runnerAlive = processAlive(run.runner);
+      }
+      // Keep the definitive dead observation. A second probe can conservatively
+      // return true if kill(0) sees a zombie that is reaped before its identity read.
+      assert.equal(runnerAlive, false);
       // Stop this fixture's detached command after its owning runner died. No
       // completion writer survives, so the canonical owner records interruption.
       try {
