@@ -3,6 +3,7 @@ import { WorkStore } from '../dist/work-store.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -11,7 +12,9 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,9 +33,16 @@ import {
 
 const cli = new URL('../dist/cli.js', import.meta.url).pathname;
 const worker = new URL('../dist/presence-worker.js', import.meta.url).pathname;
+const clock = new URL('./robust-errors-clock.mjs', import.meta.url).pathname;
+const workers = new WeakMap();
 const temp = (t, name) => {
   const root = mkdtempSync(join(tmpdir(), `forge-${name}-`));
-  t.after(() => {
+  t.after(async () => {
+    // after hooks run in registration order: stop/reap children before removing any fixture tree.
+    for (const running of workers.get(t) ?? []) {
+      if (running.child.exitCode === null && running.child.signalCode === null) running.child.kill();
+      assert.equal(await within(running.exited, 5000), true, 'fixture worker was reaped');
+    }
     try {
       chmodSync(root, 0o700);
     } catch {
@@ -57,24 +67,32 @@ const owner = async (t, name) => {
   await agent.dispatch({ action: 'start', outcome: 'Observed' });
   return root;
 };
-const start = (root, env = {}) => {
-  const child = spawn(process.execPath, [worker, root], {
-    stdio: 'ignore',
+const start = (t, root, env = {}, controlled = false) => {
+  const child = spawn(process.execPath, [...(controlled ? ['--import', clock] : []), worker, root], {
+    stdio: controlled ? ['ignore', 'ignore', 'ignore', 'ipc'] : 'ignore',
     env: { ...process.env, FORGE_PRESENCE_GUARD_MS: '100', ...env },
   });
-  const exited = new Promise(resolve => child.once('exit', resolve));
-  return { child, exited };
+  const exited = once(child, 'exit');
+  const running = { child, exited };
+  workers.set(t, [...(workers.get(t) ?? []), running]);
+  return running;
 };
-// Startup is over when the owner slot and the Lane's slot both hold a ticket marked `holding`: every
-// presence startup write has landed. The managed landing service must also report idle
-// before a deletion fixture can assume startup publication is complete.
-const ready = async root => {
+const waitFor = async (observe, message, ms = 10_000) => {
+  const end = performance.now() + ms;
+  while (!observe()) {
+    assert.ok(performance.now() < end, message);
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+};
+// Startup is over when this child's owner slot and Lane slot both hold a ticket marked `holding`.
+// Its managed landing service must also report idle before deletion can start.
+const ready = async (root, child) => {
   const held = name => {
     const dir = join(root, '.forge', 'work', name);
     return (
       existsSync(dir) &&
       readdirSync(dir, { recursive: true }).some(path => {
-        if (!String(path).endsWith('ticket.json')) return false;
+        if (!String(path).endsWith('ticket.json') || !String(path).includes(`${child.pid}.`)) return false;
         try {
           return JSON.parse(readFileSync(join(dir, String(path)), 'utf8')).holding === true;
         } catch {
@@ -83,51 +101,75 @@ const ready = async root => {
       })
     );
   };
-  const landingReady = () => landingWorkerStates(new WorkStore(root)).some(state => state.status === 'idle');
-  for (
-    const end = Date.now() + 10_000;
-    Date.now() < end && !(held('presence-owner') && held('presence-workers') && landingReady());
-  )
-    await new Promise(resolve => setTimeout(resolve, 50));
-  assert.ok(
-    held('presence-owner') && held('presence-workers') && landingReady(),
-    'presence and landing worker finished starting',
-  );
+  const landingReady = () =>
+    landingWorkerStates(new WorkStore(root)).some(
+      state => state.worker.pid === child.pid && state.status === 'idle',
+    );
+  await waitFor(() => {
+    assert.equal(child.exitCode, null, 'worker did not exit during startup');
+    assert.equal(child.signalCode, null, 'worker was not signalled during startup');
+    return held('presence-owner') && held('presence-workers') && landingReady();
+  }, 'presence and landing worker finished starting');
 };
-const within = (promise, ms) =>
-  Promise.race([promise.then(() => true), new Promise(resolve => setTimeout(() => resolve(false), ms))]);
-
-// A worker can rename an entry during deletion before observing owner death. rmSync
-// may return early (Linux) or throw ENOTEMPTY (macOS). Use the existing retry
-// budget to complete deletion, then strictly assert that the owner stays absent.
-const removeOwner = root => {
-  for (let attempt = 0; attempt < 20 && existsSync(root); attempt += 1) {
-    try {
-      rmSync(root, { recursive: true, force: true });
-    } catch (error) {
-      if (error.code !== 'ENOTEMPTY') throw error;
-    }
+const within = async (promise, ms) => {
+  let timer;
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise(resolve => {
+        timer = setTimeout(() => resolve(false), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
+};
+const ended = async ({ child, exited }, absentRoot) => {
+  // This phase owns a fresh deadline, independent of startup and previous observations. ChildProcess
+  // exit/signal state (and the saved exit event) also distinguishes a killed child from a normal exit.
+  await waitFor(
+    () => {
+      if (absentRoot) assert.equal(existsSync(absentRoot), false, 'the worker must not recreate the owner');
+      return child.exitCode !== null || child.signalCode !== null;
+    },
+    'the worker exited',
+    5000,
+  );
+  assert.deepEqual(await exited, [0, null], 'worker exited normally');
+};
+const advance = async (child, ms) => {
+  const advanced = once(child, 'message');
+  child.send({ ms });
+  assert.equal(await within(advanced, 5000), true, 'worker completed the requested interval callbacks');
+  assert.deepEqual((await advanced)[0], { advanced: ms });
+};
+
+// Recursive removal has no atomic ordering relative to another process's writes/renames. Detach the
+// live pathname first, then delete its descendants without competing writers. The half-deletion test
+// below separately injects the Linux order where descendants disappear while the owner still exists.
+const removeOwner = (t, root) => {
+  const removed = join(temp(t, 'removed-owner'), 'owner');
+  renameSync(root, removed);
+  rmSync(removed, { recursive: true, force: true });
   assert.equal(existsSync(root), false, 'the owner was removed');
 };
 
 test('a presence worker exits when its owner directory is deleted', async t => {
   const root = await owner(t, 'worker-deleted');
-  const { child, exited } = start(root);
-  t.after(() => child.kill());
-  await ready(root);
+  const running = start(t, root);
+  const { child, exited } = running;
+  await ready(root, child);
   assert.equal(await within(exited, 700), false, 'a live owner keeps its worker');
-  rmSync(root, { recursive: true, force: true });
-  assert.equal(await within(exited, 5000), true, 'deleting the owner ends the worker');
+  removeOwner(t, root);
+  await ended(running, root);
 });
 
 test('a presence worker exits when its owner is replaced by a new directory', async t => {
   const root = await owner(t, 'worker-replaced');
   const debug = join(temp(t, 'worker-replaced-debug'), 'guard.jsonl');
-  const { child, exited } = start(root, { FORGE_PRESENCE_DEBUG_FILE: debug });
-  t.after(() => child.kill());
-  await ready(root);
-  removeOwner(root);
+  const { child, exited } = start(t, root, { FORGE_PRESENCE_DEBUG_FILE: debug });
+  await ready(root, child);
+  removeOwner(t, root);
   mkdirSync(root);
   initNative(root);
   await new AgentWorkflow(root).dispatch({ action: 'start', outcome: 'Replacement' });
@@ -143,53 +185,57 @@ test('a presence worker exits when its owner is replaced by a new directory', as
     true,
     `a worker never serves a different owner at the same path; exit=${child.exitCode} ticks=${ticks.length} first=${ticks[0]} last=${ticks.at(-1)}`,
   );
+  assert.deepEqual(await exited, [0, null], 'replacement ends the worker normally');
 });
 
 test('a deleted owner is never recreated by its running worker', async t => {
   const root = await owner(t, 'worker-no-resurrect');
-  const { child, exited } = start(root);
-  t.after(() => child.kill());
-  await ready(root);
-  // A live worker may still refresh a ticket before it sees the owner dying; removeOwner repeats the rm.
-  removeOwner(root);
-  // Several guard ticks (100 ms) plus any watch events the deletion produced.
-  for (let tick = 0; tick < 15; tick++) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    assert.equal(existsSync(root), false, 'the worker must not recreate the owner root');
-  }
-  assert.equal(await within(exited, 5000), true);
+  const running = start(t, root);
+  await ready(root, running.child);
+  removeOwner(t, root);
+  await ended(running, root);
   assert.equal(existsSync(root), false);
 });
 
-const tree = root => (existsSync(root) ? readdirSync(root, { recursive: true }).map(String).sort() : []);
+const tree = root =>
+  readdirSync(root, { recursive: true })
+    .map(String)
+    .sort()
+    .map(path => {
+      const entry = join(root, path),
+        stat = statSync(entry, { bigint: true });
+      return [path, stat.mtimeNs, stat.isFile() ? readFileSync(entry) : null];
+    });
 test('a worker leaves a half-deleted owner untouched (Linux rm -r timing)', async t => {
   // inotify reports each unlink while `rm -r` is still running, so the worker sees deep entries go
   // while the root and .forge/work still exist. Emulate that order deterministically.
   const root = await owner(t, 'worker-half-deleted');
-  // A 50 ms observation period makes the timers certain to fire inside the observation window.
-  const { child, exited } = start(root, { FORGE_PRESENCE_TOUCH_MS: '50' });
-  t.after(() => child.kill());
-  await ready(root);
+  const running = start(t, root, { FORGE_PRESENCE_TOUCH_MS: '50' }, true);
+  const { child } = running;
+  await ready(root, child);
   const work = join(root, '.forge', 'work');
   for (const name of readdirSync(work))
-    if (/^lane-|^hosted-binding\.json$|^presence-worker-\d+\.marker$/.test(name))
+    if (/^lane-|^hosted-binding\.json$/.test(name))
       rmSync(join(work, name), { recursive: true, force: true });
   const before = tree(root);
   assert.ok(
-    before.some(path => path.includes('presence-owner')),
+    before.some(([path]) => path.includes('presence-owner')),
     'the worker holds its owner slot',
   );
-  // Watch events for the removals plus ten guard ticks and twenty observation ticks, all while the
-  // owner directory still exists.
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  // Keep the marker: removing it here would let the guard exit before observation can run. Force
+  // twenty observation ticks and ten guard ticks, then await the child's acknowledgement.
+  await advance(child, 1000);
+  assert.equal(child.exitCode, null, 'the worker remains alive during partial deletion');
+  assert.equal(child.signalCode, null);
   assert.deepEqual(tree(root), before, 'the worker neither writes nor deletes in a dying owner');
+  // Next Linux deletion stage: the marker disappears but the owner and queue tickets remain.
+  rmSync(join(work, `presence-worker-${child.pid}.marker`));
+  const dying = tree(root);
+  child.send({ ms: 100 });
+  await ended(running);
+  assert.deepEqual(tree(root), dying, 'owner-death exit does not clean up inside the dying owner');
   rmSync(root, { recursive: true, force: true });
   assert.equal(existsSync(root), false);
-  for (let tick = 0; tick < 15; tick++) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    assert.equal(existsSync(root), false, 'the worker must not recreate the owner root');
-  }
-  assert.equal(await within(exited, 5000), true);
 });
 
 test('diagnostics for an owner never create a missing owner directory', t => {
@@ -219,13 +265,9 @@ test('queues and locks under a deleted owner fail instead of recreating it', asy
 
 test('an idle presence worker exits after the idle limit, an active one stays', async t => {
   const idle = await owner(t, 'worker-idle');
-  const quiet = start(idle, { FORGE_PRESENCE_IDLE_MS: '1500' });
+  const quiet = start(t, idle, { FORGE_PRESENCE_IDLE_MS: '1500' });
   const busy = await owner(t, 'worker-busy');
-  const active = start(busy, { FORGE_PRESENCE_IDLE_MS: '1500' });
-  t.after(() => {
-    quiet.child.kill();
-    active.child.kill();
-  });
+  const active = start(t, busy, { FORGE_PRESENCE_IDLE_MS: '1500' });
   const lane = readdirSync(join(busy, '.forge', 'work')).find(name => name.startsWith('lane-'));
   const ticker = setInterval(
     () => writeFileSync(join(busy, '.forge', 'work', lane, 'edit.txt'), `${Date.now()}`),
@@ -233,19 +275,21 @@ test('an idle presence worker exits after the idle limit, an active one stays', 
   );
   t.after(() => clearInterval(ticker));
   assert.equal(await within(quiet.exited, 6000), true, 'idle worker exits');
+  assert.deepEqual(await quiet.exited, [0, null]);
   assert.equal(active.child.exitCode, null, 'a worker with Lane edits keeps running');
+  assert.equal(active.child.signalCode, null);
 });
 
 test('a second worker for the same owner exits at once', async t => {
   const root = await owner(t, 'worker-single');
-  const first = start(root);
-  t.after(() => first.child.kill());
+  const first = start(t, root);
   // The first worker must hold the slot before the second starts; a fixed wait loses that race on slow runners.
-  await ready(root);
-  const second = start(root);
-  t.after(() => second.child.kill());
+  await ready(root, first.child);
+  const second = start(t, root);
   assert.equal(await within(second.exited, 10_000), true);
+  assert.deepEqual(await second.exited, [0, null]);
   assert.equal(first.child.exitCode, null);
+  assert.equal(first.child.signalCode, null);
 });
 
 test('system errors map to a code, syscall, path and hint', () => {
