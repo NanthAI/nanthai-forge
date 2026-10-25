@@ -4,6 +4,27 @@
 
 Run `nforge login DEPLOYMENT_URL` and approve the device in Forge. Saved credentials are used automatically; `FORGE_AUTH_TOKEN` remains an environment override for CI. Never put credentials in request files. Owners can push and migrate. Contributors can read accessible checkpoints and upload immutable proposal objects; checkpoint publication and hosted source return remain owner-only. A scoped source grant cannot upload.
 
+`nforge host ROOT` creates a project through a one-time hosted seed, independently of
+exchange push/publication. It pins native main and its actual acceptance receipt
+(or explicitly records the bootstrap State when no acceptance exists), portable
+Work bytes/revision, and journal-only commands, attempts, waits and unknown
+outcomes in recovery format 1. Immutable objects and Work records reuse the
+missing-object upload layer and R2 presigning. Source/record validation pages
+contain at most 100 references and 128 KiB of metadata; source/record bodies use
+a 2 MiB action window, with an oversized individual body handled alone. Each
+committed page saves its cursor. Retrying resumes that cursor and the original
+local capture, even when local Work has since advanced. A completed seed returns
+its original checkpoint without uploading again.
+
+Partial seeds select neither a checkpoint nor hosted main. The final action
+reads and hashes hosted native main, compares it with the pinned native digest,
+then atomically selects the checkpoint and main and records seed completion.
+It checks the authority mode/epoch and selected source/journal pins captured at
+seed start. Seeding preserves native authority; switching authority is a separate
+cutover. No seed polling or scheduled continuation runs. The command drives the
+finite pages itself; rerun the same hosting command after an interruption.
+`--wait` remains accepted, with no first-host background history backfill.
+
 Use `nforge host ROOT` to create and bind a hosted project first. Bound owners need no request file:
 
 ```sh
@@ -670,15 +691,17 @@ The latest successful bound observation is retained for local status.
 `nforge host ROOT --status` includes the read-only `recovery` inventory. The exported
 `readRecoveryInventory(root, now?)` function returns the same typed data for other
 status consumers. It performs no network calls, export, check recovery or Work
-mutation. It reports completed exchange/export capture times, root source and
+mutation. It reports completed seed/exchange/export capture times, root source and
 accepted main heads, exact Work revision/hash, manifest pin, complete-history state
 and each check evidence path's included/unavailable status. Source/Work capture
 time is separate from evidence sampling and successful completion time.
 
 A successful local export is listed separately and **does not prove an off-machine
-copy**. Only completed exchanges with complete retained history establish the
-inventory's off-machine baseline. First-host current-source publication stays
-incomplete until history upload and `completeHistory` validation succeed. Missing
+copy**. Completed seeds and exchanges with complete retained history establish the
+inventory's off-machine baseline. First hosting records a complete seed capture
+only after seed finish succeeds and the pinned main digest is validated. Failed
+or unknown finish outcomes add no capture until a retry confirms completion;
+completed replays reuse the same receipt. Missing
 logs/artifacts remain unavailable even when source and Work publication succeeds.
 Nothing here blocks export, manual push, checking or acceptance.
 

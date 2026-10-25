@@ -28,6 +28,8 @@ const hosting = await import(moduleUrl('../convex/projectHosting.ts'));
 const devices = await import(moduleUrl('../convex/deviceStore.ts'));
 const projectMain = await import(moduleUrl('../convex/projectMain.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
+for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
+  modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const { activeProject } = await import(moduleUrl('../convex/projectAuthority.ts'));
 function setup(t, git = false, empty = false) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-host-')),
@@ -55,6 +57,8 @@ function setup(t, git = false, empty = false) {
     : service.execute({ action: 'intent', outcome: 'Synthetic hosted task' }, store.revision()).result;
   const s = fixture();
   s.tables.hostedProjects.clear();
+  for (const table of ['projectHostedSeeds', 'projectHostedSeedPages', 'projectHostedChannels'])
+    s.tables[table] = new Map();
   // The in-memory harness must enforce the deployed document schema on creation.
   const insert = s.ctx.db.insert;
   s.ctx.db.insert = async (table, row) => {
@@ -230,19 +234,14 @@ test('lost create and publish replies reconcile original IDs without a second pr
     },
     f.store.revision(),
   );
-  const exchange = f.dependencies.exchange;
-  f.dependencies.exchange = (...args) => {
-    const transport = exchange(...args),
-      publish = transport.publish.bind(transport);
-    transport.publish = async pin => {
-      const result = await publish(pin);
-      if (lostPublish) {
-        lostPublish = false;
-        throw new Error('lost publish reply');
-      }
-      return result;
-    };
-    return transport;
+  const action = f.dependencies.client.action;
+  f.dependencies.client.action = async (ref, args) => {
+    const result = await action(ref, args);
+    if (getFunctionName(ref) === 'projectHostedSeedActions:finish' && lostPublish) {
+      lostPublish = false;
+      throw new Error('lost publish reply');
+    }
+    return result;
   };
   await assert.rejects(hostProject(f.root, {}, f.dependencies), /lost publish/);
   const count = f.uploaded.length;
@@ -922,13 +921,19 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
   // A retry of an unknown push owns an immutable prepared candidate, even when later work changes.
   const { prepareNativeExchange } = await import('../dist/native-exchange.js');
   await prepareNativeExchange(f.store, retained.revision, retained.operationId, true);
+  const seedRoutes = routes.length;
   const replacement = JSON.parse((await cli('host', f.root, '--new')).stdout);
   assert.notEqual(replacement.projectId, hosted.projectId);
-  assert.equal(replacement.historyBackfilling, true);
-  const deadline = Date.now() + 30_000;
-  while (readHostState(f.store).hosting && Date.now() < deadline)
-    await new Promise(resolve => setTimeout(resolve, 50));
-  assert.equal(readHostState(f.store).hosting, undefined, 'detached backfill completed');
+  assert.equal(replacement.historyBackfilling, undefined);
+  assert.equal(readHostState(f.store).hosting, undefined, 'complete seed is selected before binding');
+  assert(
+    !routes
+      .slice(seedRoutes)
+      .some(route =>
+        ['projectExchangeActions:publish', 'projectExchangeActions:completeHistory'].includes(route),
+      ),
+  );
+  assert([...f.s.tables.projectHostedChannels.values()].some(row => row.projectId === replacement.projectId));
   const newPush = JSON.parse((await cli('exchange', f.root, 'push')).stdout);
   assert.equal(newPush.projectId, replacement.projectId);
   assert.deepEqual(readHostState(f.store).pendingPushes, [retained]);
@@ -1023,36 +1028,35 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
   );
 });
 
-test('current source is usable before history; interruption resumes the exact manifest without missing or duplicated objects', async t => {
+test('interrupted history stays unselected until the complete seed validates', async t => {
   const f = setup(t);
   const { NativeSource } = await import('../dist/native-source.js');
-  const { nativeReachable } = await import('../dist/native-reachable.js');
   const source = new NativeSource(f.root),
     data = f.store.load();
-  const old = [source.put(Buffer.from('older first file')), source.put(Buffer.from('older second file'))];
+  const old = source.put(Buffer.from('retained historic bytes'));
   const past = source.writeState(
-    old.map((blob, i) => ({ path: `past-${i}`, blob, mode: 'file' })),
+    [{ path: 'past', blob: old, mode: 'file' }],
     [data.nativeHead],
     'Past',
     new Date(0).toISOString(),
   );
-  const current = source.writeState(
+  data.nativeHead = source.writeState(
     source.state(data.nativeHead).files,
     [past],
     'Current',
     new Date(1).toISOString(),
   );
-  data.nativeHead = current;
   f.store.locked(() => f.store.save(data));
-  const retained = nativeReachable(f.store);
-  const events = [],
-    exchange = f.dependencies.exchange;
+  const exchange = f.dependencies.exchange;
   let interrupted = true;
   f.dependencies.exchange = (...args) => {
     const transport = exchange(...args),
       batch = transport.uploadLazyBatch;
+    transport.publish = () => {
+      throw new Error('host must not push');
+    };
     transport.uploadLazyBatch = async objects => {
-      if (interrupted && objects.some(object => old.includes(object.pin.sha256))) {
+      if (interrupted && objects.some(object => object.pin.sha256 === old)) {
         interrupted = false;
         await batch(objects.slice(0, 1));
         throw Error('history interrupted');
@@ -1061,68 +1065,30 @@ test('current source is usable before history; interruption resumes the exact ma
     };
     return transport;
   };
+  const events = [];
   await assert.rejects(
-    hostProject(
-      f.root,
-      { deployment: 'https://fixture.convex.cloud', onProgress: event => events.push(event) },
-      f.dependencies,
-    ),
+    hostProject(f.root, { deployment: 'https://fixture.convex.cloud' }, f.dependencies),
     /history interrupted/,
   );
-  const state = readHostState(f.store),
-    backup = f.s.tables.projectBackups.get(state.binding.backupId);
-  assert.equal(state.hosting.ready, true);
-  assert.equal(backup.historyBackfilling, true);
-  assert.equal(requireHostedBinding(f.store).projectId, state.binding.projectId);
-  const status = await hostCli([f.root, '--status', '--json']);
-  assert.equal(status.status, 'history backfilling');
-  assert.equal(status.historyBackfilling, true);
-  assert.equal(status.errorCode, 'HOST_INTERRUPTED');
-  assert.equal(
-    JSON.parse(await workIndex.workspace._handler(f.s.ctx, { projectId: state.binding.projectId })).counts
-      .intents,
-    1,
-  );
-  // A partial upload cannot claim complete retained history.
-  await assert.rejects(
-    modules.projectExchangeActions.completeHistory._handler(f.s.ctx, { backupId: backup._id }),
-    error => error.data?.code === 'INVALID_WORK_BACKUP',
-  );
-  new WorkService(f.root).execute(
-    { action: 'note', intentId: f.intent.id, kind: 'comment', text: 'Concurrent local Work' },
-    f.store.revision(),
-  );
+  const pending = readHostState(f.store).hosting;
+  assert.equal(readHostState(f.store).binding, undefined);
+  assert.equal(f.s.tables.projectBackups.size, 0);
+  assert.equal(f.s.tables.projectHostedChannels.size, 0);
   const result = await hostProject(f.root, { onProgress: event => events.push(event) }, f.dependencies);
-  assert.equal(result.operationId, state.hosting.operationId);
+  const selected = JSON.parse([...f.s.tables.projectHostedChannels.values()][0].selection);
+  assert.equal(selected.head, data.nativeHead);
   assert.equal(f.s.tables.projectBackups.size, 1);
-  assert.equal(f.s.tables.projectBackups.get(result.backupId).historyBackfilling, false);
+  assert.equal(readHostState(f.store).hosting, undefined);
+  assert.equal(result.operationId, pending.operationId);
   assert.equal(new Set(f.uploaded).size, f.uploaded.length);
-  for (const id of retained) assert(f.uploaded.includes(id), id);
-  assert.equal((await hostCli([f.root, '--status'])).status, 'complete');
-  f.identity({ subject: 'reader' });
-  await assert.rejects(
-    modules.projectExchangeActions.completeHistory._handler(f.s.ctx, { backupId: result.backupId }),
-    error => error.data?.code === 'PROJECT_UNAVAILABLE',
-  );
-  f.identity({ subject: 'owner', forgeCredential: f.s.tables.cliCredentials.get('device').credentialId });
   for (const phase of [
-    'preparing source and Work',
-    'negotiating',
-    'uploading current source',
+    'seeding source and records',
+    'validating seeded main',
     'building Work index',
-    'ready; history backfilling',
-    'history backfilling',
-    'validating complete history',
     'complete',
   ])
     assert(
       events.some(event => event.phase === phase),
       phase,
     );
-  for (const event of events) {
-    assert(event.objectsDone <= event.objectsTotal);
-    assert(event.bytesDone <= event.bytesTotal);
-    assert(event.bytesPerSecond >= 0);
-  }
-  assert.doesNotMatch(JSON.stringify(events), /fixture|token|https?:|older first|Concurrent local/);
 });

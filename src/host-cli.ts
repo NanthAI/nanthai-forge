@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
-import { retainRecoveryCapture } from './recovery-capture.js';
-import { join } from 'node:path';
 import { hostProgress, type ProgressSink } from './host-progress.js';
 import { basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -12,7 +10,8 @@ import { WorkStore } from './work-store.js';
 import { deploymentUrl, readAuth, resolveAuthToken, savedCredential } from './auth-store.js';
 import { coordinationClient } from './coordination-client.js';
 import { ConvexExchange } from './exchange-client.js';
-import { prepareNativeExchange, pushNativeExchange, type ExchangeTransport } from './native-exchange.js';
+import type { ExchangeTransport } from './native-exchange.js';
+import { prepareHostedSeed, seedHostedProject } from './hosted-seed.js';
 import { readHostState, updateHostState, type HostState } from './host-binding.js';
 import { ForgeError, invariant } from './errors.js';
 export const HOST_HELP = `nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--new] [--json] [--wait]
@@ -24,8 +23,8 @@ nforge host ROOT --no-auto-sync | --auto-sync
 nforge host ROOT --spend-command /absolute/executable | --no-spend-command
 --listen consumes hosted acceptance requests every five seconds while running.
 Run nforge login first (cli scope). Only missing source/Work objects are uploaded.
-Current source becomes usable first; history backfills in a resumable background process.
---json streams progress and result events as JSON lines; --wait follows history to completion. Interrupted hosting resumes its original operation. An already bound owner needs --new to create another project.
+Source and records are seeded in bounded pages, then main is validated and selected.
+--json streams progress and result events as JSON lines; --wait remains accepted for compatibility. Interrupted hosting resumes its original operation. An already bound owner needs --new to create another project.
 `;
 export interface HostingClient {
   mutation(ref: FunctionReference<'mutation'>, args: Record<string, unknown>): Promise<unknown>;
@@ -100,7 +99,7 @@ export async function hostProject(
       name: options.name?.trim() ?? basename(store.root),
       visibility: options.visibility ?? ('private' as const),
       revision: store.revision(),
-      currentFirst: store.native,
+      currentFirst: false,
     };
     state.hosting = current;
     return structuredClone(current);
@@ -145,7 +144,7 @@ export async function hostProject(
     progress.phase('preparing source and Work');
     // Pin before the first creation call; a lost creation reply can then resume
     // even if concurrent local work advances this owner in the meantime.
-    await prepareNativeExchange(store, pending.revision, pending.pushId, true);
+    await prepareHostedSeed(store, pending.revision, pending.pushId);
     const client = dependencies?.client ?? coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN);
     progress.phase('creating hosted project');
     const created = (await client.mutation(makeFunctionReference<'mutation'>('projectHosting:create'), {
@@ -164,17 +163,18 @@ export async function hostProject(
     const transport =
       dependencies?.exchange(created.projectId, pending.pushId) ??
       new ConvexExchange(deployment, process.env.FORGE_AUTH_TOKEN, created.projectId, pending.pushId, null);
-    if (transport instanceof ConvexExchange) {
-      transport.deferHistory = pending.currentFirst ?? false;
-      transport.uploadBatchSize = 100;
-    }
-    const pushed =
-      pending.ready && pending.backupId
-        ? { backupId: pending.backupId, uploadedObjects: 0, uploadedBytes: 0 }
-        : await pushNativeExchange(store, pending.revision, pending.pushId, transport, {
-            progress,
-            ...(pending.currentFirst ? { stage: 'current' } : {}),
-          });
+    if (transport instanceof ConvexExchange) transport.uploadBatchSize = 100;
+    const pushed = await seedHostedProject(
+      store,
+      {
+        projectId: created.projectId,
+        operationId: pending.pushId,
+        revision: pending.revision,
+      },
+      client,
+      transport,
+      progress,
+    );
     pending.backupId = pushed.backupId;
     save();
     progress.phase('initializing Work');
@@ -203,47 +203,11 @@ export async function hostProject(
         'WORK_OPERATION_CHANGED',
         'Hosting operation changed.',
       );
-      if (!pending.ready) state.binding = binding;
+      state.binding = binding;
       markAgentSyncPrepared(state, binding);
-      if (!pending.currentFirst) delete state.hosting;
-      else {
-        pending.ready = true;
-        state.hosting = { ...pending };
-      }
+      delete state.hosting;
     });
     startAgentSyncWorker(store);
-    if (pending.currentFirst) {
-      progress.phase('ready; history backfilling');
-      if (options.deferBackfill)
-        return {
-          ...binding,
-          hosted: true,
-          historyBackfilling: true,
-          uploadedObjects: pushed.uploadedObjects,
-          uploadedBytes: pushed.uploadedBytes,
-          message: `Hosted ${binding.name}: ${binding.projectUrl}; history backfilling`,
-        };
-      const history = await pushNativeExchange(store, pending.revision, pending.pushId, transport, {
-        progress,
-        stage: 'history',
-      });
-      pushed.uploadedObjects += history.uploadedObjects;
-      pushed.uploadedBytes += history.uploadedBytes;
-      progress.phase('validating complete history');
-      await client.action(makeFunctionReference<'action'>('projectExchangeActions:completeHistory'), {
-        backupId: pushed.backupId,
-      });
-      const recovery = retainRecoveryCapture(
-        store,
-        join(store.directory, `exchange-${pending.pushId}`),
-        history.manifest,
-        { kind: 'exchange', backupId: history.backupId, completeHistory: 'complete' },
-      );
-      updateHostState(store, state => {
-        if (state.hosting?.operationId === pending.operationId) delete state.hosting;
-      });
-      Object.assign(pushed, { recovery });
-    }
     progress.phase('complete');
     return {
       ...binding,

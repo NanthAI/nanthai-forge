@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedSeedTables } from './projectHostedSeedFields';
 import { backfillFields } from './r2BackfillFields';
 import { ownerAcceptanceTables } from './ownerAcceptanceFields';
 import { sourceAuthority, sourceAuthorityTables } from './projectSourceAuthorityFields';
@@ -391,6 +392,7 @@ export const projectProposalDocument = v.object({
   ...projectProposalFields,
 });
 export default defineSchema({
+  ...hostedSeedTables,
   // Explicit current Channel pins; recovery/display snapshots never select these.
   projectHostedChannels: defineTable({
     operationId: v.string(),

@@ -14,13 +14,20 @@ import {
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
+import { moduleUrl } from './convex-module.mjs';
+import { fixture as hostedFixture, modules, upload } from './project-exchange-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { readRecoveryInventory } from '../dist/recovery-inventory.js';
 import { prepareNativeExchange, pushNativeExchange } from '../dist/native-exchange.js';
 import { exportNativeWork } from '../dist/native-backup.js';
 import { hostProject } from '../dist/host-cli.js';
+import { readHostState } from '../dist/host-binding.js';
+import { seedHostedProject } from '../dist/hosted-seed.js';
 import { digest } from '../dist/hash.js';
+for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
+  modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-recovery-inventory-'));
@@ -191,40 +198,90 @@ test('running-log tail and a later completion are uncovered even when main is un
   assert.ok(inventory.pending.evidence.every(item => item.status === 'covered'));
 });
 
-test('first hosting remains incomplete until completeHistory succeeds, including resumable failure', async t => {
-  const f = fixture(t);
-  let fail = true;
-  const dependencies = {
-    exchange: () => f.transport,
-    client: {
-      mutation: async () => ({
-        projectId: 'synthetic-project',
-        projectUrl: 'https://example.invalid/project',
-      }),
-      action: async ref => {
-        // Function references use the Convex helper, rather than depending on object layout.
-        const { getFunctionName } = await import('convex/server');
-        if (getFunctionName(ref).endsWith(':completeHistory') && fail)
-          throw Error('synthetic history not validated');
+for (const outcome of ['failed', 'unknown'])
+  test(`first hosting remains incomplete until seed finish succeeds, including resumable ${outcome} finish`, async t => {
+    const f = fixture(t),
+      s = hostedFixture();
+    const { directory } = runRecord(f, true);
+    save(f);
+    rmSync(join(directory, 'stderr.log'));
+    for (const table of ['projectHostedSeeds', 'projectHostedSeedPages', 'projectHostedChannels'])
+      s.tables[table] = new Map();
+    s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+    const exchange = {
+      ...f.transport,
+      upload: async (pin, bytes) => {
+        await f.transport.upload(pin, bytes);
+        await upload(s, bytes);
       },
-    },
-  };
-  const options = { deployment: 'https://example.convex.cloud', deferBackfill: true };
-  const first = await hostProject(f.root, options, dependencies);
-  assert.equal(first.historyBackfilling, true);
-  let inventory = await readRecoveryInventory(f.root);
-  assert.equal(inventory.latestCompleteOffMachine, null);
-  assert.ok(inventory.captures.some(item => item.completeHistory === 'incomplete'));
-  await assert.rejects(
-    hostProject(f.root, { ...options, deferBackfill: false }, dependencies),
-    /synthetic history/,
-  );
-  assert.equal((await readRecoveryInventory(f.root)).latestCompleteOffMachine, null);
-  fail = false;
-  await hostProject(f.root, { ...options, deferBackfill: false }, dependencies);
-  inventory = await readRecoveryInventory(f.root);
-  assert.equal(inventory.latestCompleteOffMachine.completeHistory, 'complete');
-});
+      publish: () => assert.fail('hosting must use the seed protocol'),
+    };
+    let fail = true,
+      finishes = 0;
+    const dependencies = {
+      exchange: () => exchange,
+      client: {
+        mutation: (ref, args) => {
+          if (getFunctionName(ref) === 'projectHosting:create')
+            return { projectId: 'project', projectUrl: 'https://example.invalid/project' };
+          return s.ctx.runMutation(ref, args);
+        },
+        action: async (ref, args) => {
+          const name = getFunctionName(ref);
+          if (name === 'projectHostedSeedActions:finish') {
+            finishes++;
+            assert.equal((await readRecoveryInventory(f.root)).latestCompleteOffMachine, null);
+            if (fail && outcome === 'failed') throw Error('synthetic finish failed');
+            const result = await s.ctx.runAction(ref, args);
+            assert.equal((await readRecoveryInventory(f.root)).latestCompleteOffMachine, null);
+            if (fail) throw Error('synthetic finish reply lost');
+            return result;
+          }
+          if (name === 'projectHostedSeedActions:stage') return s.ctx.runAction(ref, args);
+          assert.ok(['projectWorkActions:initialize', 'projectWorkIndexActions:ensure'].includes(name));
+          assert.equal((await readRecoveryInventory(f.root)).latestCompleteOffMachine.kind, 'seed');
+        },
+      },
+    };
+    const options = { deployment: 'https://example.convex.cloud' };
+    await assert.rejects(hostProject(f.root, options, dependencies), /synthetic finish/);
+    const pending = readHostState(f.work.store).hosting;
+    let inventory = await readRecoveryInventory(f.root);
+    assert.equal(inventory.latestCompleteOffMachine, null);
+    assert.equal(inventory.captures.length, 0);
+    const seed = [...s.tables.projectHostedSeeds.values()][0];
+    assert.equal(seed.nextPage, JSON.parse(seed.request).pages);
+    assert.equal(s.tables.projectHostedChannels.size, outcome === 'unknown' ? 1 : 0);
+    fail = false;
+    const hosted = await hostProject(f.root, options, dependencies);
+    inventory = await readRecoveryInventory(f.root);
+    assert.equal(finishes, outcome === 'unknown' ? 1 : 2);
+    assert.equal(inventory.captures.length, 1);
+    const capture = inventory.latestCompleteOffMachine;
+    assert.equal(capture.kind, 'seed');
+    assert.equal(capture.id, pending.pushId);
+    assert.equal(capture.backupId, hosted.backupId);
+    assert.equal(capture.completeHistory, 'complete');
+    assert.equal(capture.offMachine, true);
+    assert.deepEqual(capture.manifest, JSON.parse(seed.request).root);
+    assert.equal(s.tables.projectBackups.get(hosted.backupId).digest, capture.manifest.sha256);
+    assert.deepEqual(capture.work, JSON.parse(seed.request).work);
+    assert.equal(capture.workRevision, pending.revision);
+    assert.equal(inventory.pending.saves.length, 0);
+    assert.ok(capture.evidence.some(item => item.status === 'included'));
+    assert.ok(capture.evidence.some(item => item.status === 'unavailable'));
+    const replay = await seedHostedProject(
+      f.work.store,
+      { projectId: 'project', operationId: pending.pushId, revision: pending.revision },
+      dependencies.client,
+      exchange,
+    );
+    assert.equal(replay.uploadedObjects, 0);
+    assert.deepEqual(replay.recovery.capture, capture);
+    inventory = await readRecoveryInventory(f.root);
+    assert.equal(inventory.captures.length, 1);
+    assert.deepEqual(inventory.latestCompleteOffMachine, capture);
+  });
 
 test('unknown old capture time stays unknown, retry keeps pins and does not invent a new capture time', async t => {
   const f = fixture(t),

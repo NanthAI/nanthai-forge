@@ -11,7 +11,7 @@ const pin = z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), size: z.numbe
 export const recoveryCaptureSchema = z.object({
   schema: z.literal(1),
   id: z.string().uuid(),
-  kind: z.enum(['exchange', 'export']),
+  kind: z.enum(['exchange', 'export', 'seed']),
   capturedAt: z.string().datetime().nullable(),
   evidenceCapturedAt: z.string().datetime().nullable(),
   completedAt: z.string().datetime(),
@@ -65,14 +65,16 @@ export function retainRecoveryCapture(
   directory: string,
   manifestPin: { sha256: string; size: number },
   options: {
-    kind: 'exchange' | 'export';
+    kind: RecoveryCapture['kind'];
     backupId?: string;
     completeHistory?: RecoveryCapture['completeHistory'];
+    /** Seeds retain metadata under content hashes rather than export filenames. */
+    files?: { manifest: string; work: string };
   },
 ): RecoveryReceipt {
   try {
     const manifest = sourceManifestSchema.parse(
-      JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')),
+      JSON.parse(readFileSync(join(directory, options.files?.manifest ?? 'manifest.json'), 'utf8')),
     );
     const incomplete = join(
       store.directory,
@@ -92,8 +94,11 @@ export function retainRecoveryCapture(
       ),
     });
     if (existsSync(join(destination, 'receipt.json'))) return existing();
-    const data = JSON.parse(readFileSync(join(directory, 'work.json'), 'utf8'));
     const work = manifest.files.find(file => file.path === 'work.json');
+    const bytes = readFileSync(join(directory, options.files?.work ?? 'work.json'));
+    // Seeds preserve raw portable bytes. Fingerprint their normalized records
+    // exactly as inventory's store.load() does, without changing the Work pin.
+    const data = options.kind === 'seed' ? store.pinnedData(bytes) : JSON.parse(bytes.toString('utf8'));
     const timing = recoveryTiming(directory);
     const capture = recoveryCaptureSchema.parse({
       schema: 1,
@@ -101,7 +106,7 @@ export function retainRecoveryCapture(
       kind: options.kind,
       ...timing,
       completedAt: new Date().toISOString(),
-      offMachine: options.kind === 'exchange',
+      offMachine: options.kind !== 'export',
       completeHistory: history,
       backupId: options.backupId ?? null,
       sourceHead: manifest.head,
