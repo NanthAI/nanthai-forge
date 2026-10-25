@@ -69,6 +69,44 @@ test('handoff round trip separates optional self reports from check evidence and
   assert.deepEqual(latest.tests, []);
   assert.equal(agent.work.store.select('intents', lane.intentId).notes.length, 2);
 });
+test('CLI handoff delivers a peer notice created after the last checkpoint exactly once', async t => {
+  const { root, agent, lane } = await fixture(t);
+  const peer = (await agent.dispatch({ action: 'start', outcome: 'Peer edit' })).result;
+  writeFileSync(join(lane.path, 'example.txt'), 'my saved change\n');
+  const saved = (
+    await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'Last checkpoint' })
+  ).result;
+  assert.equal(saved.peers.inbox, undefined);
+  writeFileSync(join(peer.path, 'example.txt'), 'peer saved change\n');
+  const reciprocal = (
+    await agent.dispatch({ action: 'checkpoint', laneId: peer.laneId, message: 'Later peer save' })
+  ).result.peers.inbox;
+  assert.equal(reciprocal.length, 1);
+  const noticeId = reciprocal[0].noticeId;
+  const request = command(lane);
+  const first = (await invoke(root, request)).result;
+  assert.equal(first.handoff.head, saved.head);
+  assert.deepEqual(
+    first.peers.inbox.map(notice => notice.noticeId),
+    [noticeId],
+  );
+  assert.ok(Buffer.byteLength(JSON.stringify(first.peers)) <= 12_000);
+  assert.equal(new CoordinationJournal(agent.work.store).pendingOverlaps(lane.laneId).length, 0);
+  const replay = (await invoke(root, request)).result;
+  assert.deepEqual(replay, first);
+  const later = (await invoke(root, command(lane))).result;
+  assert.equal(later.peers?.inbox, undefined);
+  assert.equal(
+    (await agent.dispatch({ action: 'status', laneId: lane.laneId })).result.peers.inbox,
+    undefined,
+  );
+  assert.ok(
+    (await agent.dispatch({ action: 'peers', laneId: lane.laneId })).result.inbox.some(
+      notice => notice.noticeId === noticeId,
+    ),
+    'historical notices remain readable',
+  );
+});
 test('replay returns original saved source and evidence after later edits and handoffs', async t => {
   const { agent, lane } = await fixture(t),
     request = command(lane);

@@ -8,6 +8,7 @@ import { withRetryObservation } from './friction-retry.js';
 import { captureFriction, triageFriction, citeFriction } from './friction.js';
 import { readImprovements } from './improve.js';
 import { recordOverlapAlerts } from './agent-overlap-alerts.js';
+import { overlapReceipt } from './agent-overlap-receipt.js';
 import { readLaneSubmissions } from './landing-submission-read.js';
 import { land } from './land.js';
 import type { LandCommand } from './land-schema.js';
@@ -23,7 +24,7 @@ import { parseAgentAction } from './agent-action-parse.js';
 import { undoOptimisticRevert } from './optimistic-undo.js';
 import { indexPeerSource } from './agent-peers-index.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
-import { agentPeers, boundPeers, RECEIPT_PEER_LIMIT } from './agent-peers.js';
+import { agentPeers, RECEIPT_PEER_LIMIT } from './agent-peers.js';
 import { cancelLandingEntry } from './landing-batch-cancel.js';
 import { modalMonthCost } from './check-backend.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -220,8 +221,20 @@ export class AgentWorkflow {
       (command.action === 'sync' && (response.result as { status?: string }).status !== 'conflict')
     )
       scheduleIntegrationPreview(store);
-    if (!wait && (command.action === 'finish' || command.action === 'land'))
-      return { ...response, result: { ...(response.result as object), ...(resolved ? { resolved } : {}) } };
+    if (!wait && (command.action === 'finish' || command.action === 'land')) {
+      const peers =
+        command.action === 'finish'
+          ? overlapReceipt(store, command.laneId, undefined, false, false, command.operationId)
+          : undefined;
+      return {
+        ...response,
+        result: {
+          ...(response.result as object),
+          ...(peers ? { peers } : {}),
+          ...(resolved ? { resolved } : {}),
+        },
+      };
+    }
     const friction = frictionReceipt(store, command, response.result);
     const ownershipStop =
       command.action === 'take' && (response.result as { status: string }).status === 'ownership';
@@ -266,7 +279,7 @@ export class AgentWorkflow {
         overlapCoverage = 'local-incomplete';
       }
     }
-    const peers =
+    let peers =
       ['start', 'checkpoint', 'sync', 'finish'].includes(command.action) ||
       (command.action === 'status' && command.laneId)
         ? agentPeers(
@@ -320,8 +333,24 @@ export class AgentWorkflow {
       }
       const detail = 'detail' in command && command.detail === true;
       if (!detail && ['checkpoint', 'sync'].includes(command.action)) delete peers.changes;
-      boundPeers(peers, detail);
     }
+    const receiptLane =
+      command.action === 'start'
+        ? (response.result as { laneId: string }).laneId
+        : 'laneId' in command
+          ? command.laneId
+          : undefined;
+    if (receiptLane && (peers || ['handoff', 'complete', 'abandon'].includes(command.action)))
+      peers = overlapReceipt(
+        store,
+        receiptLane,
+        peers,
+        READ_ONLY_ACTIONS.has(command.action),
+        'detail' in command && command.detail === true,
+        ['finish', 'handoff'].includes(command.action) && 'operationId' in command
+          ? command.operationId
+          : undefined,
+      );
     const summary =
       command.action === 'sync'
         ? syncSummary(response.result as Parameters<typeof syncSummary>[0], command.channel)

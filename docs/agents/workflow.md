@@ -868,10 +868,22 @@ overlap slots. Source/ancestry failures remain explicitly incomplete; a detailed
 local coordination journal for both Lanes. Heads and unrelated edits do not make
 a duplicate; changed overlapping ranges or symbols create a new notice. Notices
 retain source pins and attribution and are advisory inbox items, available on the
-next checkpoint, status, sync, brief or MCP call. They name the proposed region
+next checkpoint, status, sync, handoff, finish, brief or MCP call. They name the proposed region
 owner (the first Lane), the peer, the reason for the order and “sync after X
 lands”. Historical notices remain readable; current overlap is recomputed from
 source. No background polling, heartbeat or model call is added.
+
+Lifecycle receipts share the compact `peers.inbox` digest of undelivered notices,
+including handoff, finish (also `wait:false`), complete and abandon. Only notices
+actually included in a mutating receipt are marked delivered to that Lane in the
+local coordination journal; later operations omit them. Finish and handoff retain
+the delivered digest with the operation ID, including an empty digest: replay
+returns that original digest without consuming newer notices. Lane status includes the
+same pending digest without marking delivery or writing anything. Explicit peers
+and brief reads retain historical notices. Compact receipt display/byte bounds
+still apply; omitted notices remain pending for a later receipt.
+If delivery bookkeeping is unavailable, the receipt reports `local-incomplete`
+and returns the readable pending digest without consuming it.
 
 The existing `start.scope.paths` declaration is the early signal: planned claims
 appear as planned file overlaps before either save and never become high-risk

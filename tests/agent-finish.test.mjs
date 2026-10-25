@@ -83,7 +83,7 @@ function readRunWhileStarting(store) {
     throw error;
   }
 }
-// Peers are a fresh, bounded observation; only the recorded finish receipt replays.
+// These phase assertions compare canonical evidence; replay advice is asserted separately.
 function canonicalReceipt({ peers: _peers, ...receipt }) {
   return receipt;
 }
@@ -163,11 +163,10 @@ for (const native of [true, false])
         person.store.revision(),
       );
       const replay = (await agent.dispatch(request)).result;
-      const { peers: originalPeers, ...originalReceipt } = receipt;
-      const { peers, ...replayedReceipt } = replay;
-      assert.deepEqual(replayedReceipt, originalReceipt);
-      assert.deepEqual(originalPeers, { clear: true });
-      assert.equal(peers.landed[0].head, cp.head); // Advisory peers refresh; canonical operation pins replay.
+      assert.deepEqual(replay, receipt);
+      assert.deepEqual(replay.peers, { clear: true });
+      const current = (await agent.dispatch({ action: 'status', laneId: lane.laneId })).result;
+      assert.equal(current.peers.landed[0].head, cp.head);
     } finally {
       await cleanupOwner(root);
     }
@@ -465,19 +464,21 @@ for (const native of [true, false])
       assert.equal(receipt.acceptance, null);
       assert.equal(agent.work.store.load().runs.length, 0);
       assert.equal(agent.work.store.load().channelMoves.length, 0);
-      // A live source gap may change advisory peers, never original terminal evidence.
+      // A live source gap changes status advice while the original receipt stays identical.
       const unavailable = t.mock.method(PeersSource.prototype, 'live', () => {
         throw new ForgeError('LANE_UNAVAILABLE', 'Synthetic unavailable peer source.');
       });
-      let replay;
+      let replay, current;
       try {
-        replay = (await new AgentWorkflow(root).dispatch(request)).result;
+        const restarted = new AgentWorkflow(root);
+        replay = (await restarted.dispatch(request)).result;
+        current = (await restarted.dispatch({ action: 'status', laneId: lane.laneId })).result;
       } finally {
         unavailable.mock.restore();
       }
-      assert.equal(replay.peers.coverage, 'local-incomplete');
-      assert.match(replay.peers.next, /peer source is unavailable/);
-      assert.deepEqual(canonicalReceipt(replay), canonicalReceipt(receipt));
+      assert.deepEqual(replay, receipt);
+      assert.equal(current.peers.coverage, 'local-incomplete');
+      assert.match(current.peers.next, /peer source is unavailable/);
       assert.equal(readFileSync(join(lane.path, 'file.txt'), 'utf8'), 'changed\n');
     } finally {
       await cleanupOwner(root);

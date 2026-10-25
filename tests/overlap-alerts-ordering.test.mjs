@@ -133,7 +133,7 @@ test('planned scope is visible before saves; canonical alerts deduplicate heads 
   );
 });
 
-test('both Lanes get durable inbox on status/checkpoint/sync/brief and CLI; no journal writes on reads', async t => {
+test('both Lanes get pending receipts once and retain historical peers/brief inbox; reads never write', async t => {
   const f = await fixture(t),
     a = await f.start('Alpha'),
     b = await f.start('Beta');
@@ -142,9 +142,11 @@ test('both Lanes get durable inbox on status/checkpoint/sync/brief and CLI; no j
   await f.save(a);
   const saved = await f.save(b);
   assert.ok(saved.peers.inbox.length);
-  const before = readdirSync(join(f.store.directory, 'coordination')).sort();
+  const delivered = new Map([[b.laneId, new Set(saved.peers.inbox.map(item => item.noticeId))]]);
   for (const lane of [a, b]) {
-    for (const action of ['status', 'checkpoint', 'sync', 'brief']) {
+    const seen = delivered.get(lane.laneId) ?? new Set();
+    for (const action of ['status', 'checkpoint', 'sync', 'brief', 'peers']) {
+      const before = readdirSync(join(f.store.directory, 'coordination')).sort();
       const result = (
         await f.agent.dispatch({
           action,
@@ -153,23 +155,35 @@ test('both Lanes get durable inbox on status/checkpoint/sync/brief and CLI; no j
           ...(action === 'checkpoint' ? { message: 'Unchanged' } : {}),
         })
       ).result;
-      assert.ok(
-        result.peers.inbox.some(item => item.lanes.includes(a.laneId) && item.lanes.includes(b.laneId)),
-        action,
-      );
+      const historical = ['brief', 'peers'].includes(action);
+      const inbox = (action === 'peers' ? result.inbox : result.peers.inbox) ?? [];
+      if (historical) {
+        assert.ok(
+          inbox.some(item => item.lanes.includes(a.laneId) && item.lanes.includes(b.laneId)),
+          action,
+        );
+      } else {
+        assert.ok(
+          inbox.every(item => !seen.has(item.noticeId)),
+          `${action} repeats no delivered notice`,
+        );
+        if (action !== 'status') for (const item of inbox) seen.add(item.noticeId);
+      }
+      if (['status', 'brief', 'peers'].includes(action))
+        assert.deepEqual(readdirSync(join(f.store.directory, 'coordination')).sort(), before);
       if (action === 'brief')
         assert.ok(result.context.messages.some(message => message.id === saved.peers.inbox[0].noticeId));
     }
+    assert.equal(f.journal.pendingOverlaps(lane.laneId).length, 0);
+    assert.equal(seen.size, f.journal.overlaps(lane.laneId).length);
   }
-  assert.deepEqual(readdirSync(join(f.store.directory, 'coordination')).sort(), before);
   const cli = spawnSync(
     process.execPath,
     [resolve('dist/cli.js'), 'agent', f.root, 'status', JSON.stringify({ laneId: a.laneId })],
     { encoding: 'utf8' },
   );
   assert.equal(cli.status, 0, cli.stderr);
-  assert.ok(JSON.parse(cli.stdout).result.peers.inbox.length);
-  assert.match(cli.stderr, /proposed region owner.*sync after/);
+  assert.equal(JSON.parse(cli.stdout).result.peers.inbox, undefined);
 });
 
 test('overlap notices and pending groups retain the latest handoff context together', async t => {

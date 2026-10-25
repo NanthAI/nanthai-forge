@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { OverlapAlert } from './agent-overlap-alerts.js';
+import type { PeersDigest } from './agent-peers.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { workLocked } from './work-lock.js';
@@ -125,6 +126,54 @@ export class CoordinationJournal {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw error;
     }
+  }
+  private deliveryName(laneId: string, noticeId: string) {
+    return `delivered-${digest(JSON.stringify([laneId, noticeId]))}.json`;
+  }
+  pendingOverlaps(laneId: string) {
+    const delivered = new Set<string>();
+    try {
+      const prefix = `delivery-${digest(laneId)}-`;
+      for (const name of readdirSync(this.directory).filter(
+        name => name.startsWith(prefix) && name.endsWith('.json'),
+      )) {
+        const receipt = this.read<{ laneId: string; peers: PeersDigest | null }>(name);
+        if (receipt?.laneId === laneId)
+          for (const notice of receipt.peers?.inbox ?? []) delivered.add(notice.noticeId);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    return this.overlaps(laneId).filter(
+      notice => !delivered.has(notice.noticeId) && !this.read(this.deliveryName(laneId, notice.noticeId)),
+    );
+  }
+  /** Retaining a receipt atomically records its delivered notices as well as its replay digest. */
+  deliverOverlaps(
+    laneId: string,
+    select: (pending: OverlapAlert[]) => PeersDigest | undefined,
+    operationId?: string,
+  ) {
+    this.prepare();
+    return workLocked(
+      join(this.directory, 'lock'),
+      () => {
+        const name = operationId ? `delivery-${digest(laneId)}-${digest(operationId)}.json` : undefined;
+        const prior = name ? this.read<{ peers: PeersDigest | null }>(name) : undefined;
+        if (prior) return prior.peers ?? undefined;
+        const pending = this.pendingOverlaps(laneId);
+        const peers = select(pending);
+        if (name) this.write(name, { laneId, peers: peers ?? null });
+        else {
+          const selected = new Set(peers?.inbox?.map(notice => notice.noticeId));
+          for (const notice of pending)
+            if (selected.has(notice.noticeId))
+              this.write(this.deliveryName(laneId, notice.noticeId), { laneId, noticeId: notice.noticeId });
+        }
+        return peers;
+      },
+      { operation: 'local overlap delivery' },
+    );
   }
   decorate(notice: ConflictNotice, laneId: string): ConflictNotice {
     let names: string[];

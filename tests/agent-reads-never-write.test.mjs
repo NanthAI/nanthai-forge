@@ -102,6 +102,7 @@ async function fixture(t, mcp) {
   assert.equal(run.status, 'passed');
   // Overlapping live edits make peers build in-memory previews of both Lanes.
   writeFileSync(join(second.path, 'a.txt'), 'one\nSECOND\nthree\n');
+  await act('checkpoint', { laneId: second.laneId, message: 'Peer notice for read-only receipts' });
   writeFileSync(join(first.path, 'a.txt'), 'one\nFIRST live\nthree\n');
   return { root, agent, act, first, second, saved, view, run };
 }
