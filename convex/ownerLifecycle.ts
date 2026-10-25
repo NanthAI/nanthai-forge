@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sourceAuthority, requireSourceAuthority } from '../src/hosted-source-authority';
 import { v } from 'convex/values';
 import { z } from 'zod';
 import { mutation } from './cliServer';
@@ -20,6 +21,8 @@ export const request = mutation({
         'UNSUPPORTED',
         'Lifecycle actions run on this project’s canonical native owner.',
       );
+      const authority = sourceAuthority(project);
+      requireSourceAuthority(project, { mode: 'native-owner', epoch: authority.epoch });
       const actor = await acceptanceActor(ctx);
       const old = await find(ctx, input.projectId, input.operationId);
       if (old) {
@@ -56,6 +59,7 @@ export const request = mutation({
         projectId: input.projectId,
         operationId: input.operationId,
         lifecycle: input.command,
+        authorityEpoch: authority.epoch,
         ownerId: project.key,
         requester,
         actorKind: actor.kind,

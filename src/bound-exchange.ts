@@ -1,3 +1,4 @@
+import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { withBoundPushProgress } from './bound-push-progress.js';
 import { currentExchangeProgress } from './exchange-progress-hooks.js';
@@ -18,7 +19,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { ConvexError } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { WorkStore } from './work-store.js';
-import { requireHostedBinding, updateHostState, type HostState } from './host-binding.js';
+import { readHostState, requireHostedBinding, updateHostState, type HostState } from './host-binding.js';
 import { digest } from './hash.js';
 import { ConvexExchange } from './exchange-client.js';
 import { prepareNativeExchange, pushNativeExchange } from './native-exchange.js';
@@ -59,10 +60,17 @@ export async function boundExchange(
   supersedeRetained = false,
   options: BoundExchangeOptions = {},
 ) {
-  const { value, observation } = await withExchangeObservation(() =>
-    runBoundExchange(root, action, target, supersedeRetained, options),
-  );
-  return { ...value, observation };
+  const store = new WorkStore(root),
+    binding = readHostState(store).binding;
+  try {
+    const { value, observation } = await withExchangeObservation(() =>
+      runBoundExchange(root, action, target, supersedeRetained, options),
+    );
+    return { ...value, observation };
+  } catch (error) {
+    if (binding) rememberSourceAuthorityError(store, error, binding.projectId);
+    throw error;
+  }
 }
 async function runBoundExchange(
   root: string,
@@ -168,6 +176,7 @@ async function boundExchangeAction(
       previous: store.native ? binding.backupId : remote!.currentBackup,
       // A floor: native preparation pins the current revision under the short owner lock.
       revision: store.revision(),
+      ...(binding.sourceAuthority ? { authorityEpoch: binding.sourceAuthority.epoch } : {}),
       ...(store.native ? { captureId: pushAttemptId(operationId, 0, 'capture'), needsBaseline: true } : {}),
     };
     state.push = pending;
@@ -207,6 +216,7 @@ async function boundExchangeAction(
           projectId: request.projectId,
           deployment: request.deployment,
           previous: fresh.currentBackup,
+          ...(request.authorityEpoch === undefined ? {} : { authorityEpoch: request.authorityEpoch }),
           revision: request.revision,
           ...(request.captureId
             ? {
@@ -306,6 +316,7 @@ async function pushAttempt(
     request.operationId,
     request.previous,
   );
+  transport.authorityEpoch = request.authorityEpoch;
   transport.onReturnProgress = event => process.stderr.write(formatSourceReturnProgress(event));
   // Capture all mutable local inputs before the first hosted read. The separate
   // capture ID stays unchanged across rebases; each attempt overlays only hosted

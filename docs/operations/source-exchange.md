@@ -1557,3 +1557,45 @@ Lane saves as superseded. Old attempts predating retained progress return null
 historical evidence rather than borrowing the current attempt's result.
 
 These paths are qualified with local fakes, not live accounts or providers.
+
+### Source authority transition and writer fencing
+
+`projectSourceAuthority:transition` is an explicit owner mutation with
+`{projectId, operationId, expected: {mode, epoch}, mode}`. It compares both expected
+fields and commits `{mode, epoch: epoch + 1}` with an indexed operation receipt in
+one transaction. Replaying the original UUID and inputs returns the original
+result even after later transitions. Rollback is another transition to
+`native-owner` at a higher epoch; it never resets the epoch.
+
+On the bound native owner, run:
+
+```sh
+nforge host ROOT --source-authority '{"operationId":"UUID","expected":{"mode":"native-owner","epoch":0},"mode":"server"}'
+```
+
+The command records its exact request before network IO. Only a successful hosted
+CAS installs its result in the local binding. If the process stops between the
+hosted commit and the local pin update, repeat the same command; its receipt
+finishes the local update without another transition. A known stale CAS updates
+the observed pin and releases the pending command; an unknown outcome retains it.
+Coordinate this command with the cutover's seeded source/Work pins and queue drain.
+It does not seed main, drain work or enable hosted routing on its own.
+
+`requireSourceAuthority(project, expected?)` in `src/hosted-source-authority.ts` is
+the shared writer guard. `project` needs only an optional `sourceAuthority`;
+`expected` is `{mode, epoch}`, defaulting to `native-owner` epoch 0. The helper
+returns the matching authority or throws `SOURCE_AUTHORITY_STALE` with
+`authority: {mode, epoch}`. Hosted errors retain that object in their structured
+data. Existing epoch-zero callers need no new argument. Publication and legacy
+acceptance calls can supply `authorityEpoch` after rollback; owner requests retain
+the epoch at creation so an old completion cannot cross a rollback.
+
+The existing hosted main seed, owner completion, exchange publication and legacy
+acceptance commit check their authority in their write transaction. Their guards
+reuse project rows already read for authorization. Native `accept-channel` checks
+the binding pin under the owner lock, including before replay. It adds no hosted
+read and remains usable offline before a switch. Hosted transactions are the real
+fence; the local pin provides fast refusal. Stale-authority feedback received by
+the owner transition, bound exchange, owner request consumer and hosted transports
+advances the matching binding pin; delayed errors cannot rewind a newer epoch.
+There is no polling or scheduled authority job.

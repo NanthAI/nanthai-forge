@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { WorkStore } from './work-store.js';
 import { requireHostedBinding } from './host-binding.js';
 import { readFileSync } from 'node:fs';
@@ -28,8 +29,10 @@ export async function hostedWorkCli(args: string[]) {
     process.stdout.write(HOSTED_WORK_HELP);
     return undefined;
   }
+  let store: WorkStore | undefined;
   if (args.length === 2 || (args.length === 3 && args[1] === '--command-file')) {
-    const binding = requireHostedBinding(new WorkStore(args[0]!));
+    store = new WorkStore(args[0]!);
+    const binding = requireHostedBinding(store);
     args = [binding.deployment, binding.projectId, ...args.slice(1)];
   }
   const [deployment, projectId, option, file] = args;
@@ -47,12 +50,17 @@ export async function hostedWorkCli(args: string[]) {
   } catch {
     invariant(false, 'BAD_ARGUMENT', 'Read a valid hosted Work request JSON object.');
   }
-  return dispatchHostedWork(
-    coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN),
-    projectId,
-    input,
-    line => {
-      process.stderr.write(`${line}\n`);
-    },
-  );
+  try {
+    return await dispatchHostedWork(
+      coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN),
+      projectId,
+      input,
+      line => {
+        process.stderr.write(`${line}\n`);
+      },
+    );
+  } catch (error) {
+    if (store) rememberSourceAuthorityError(store, error, projectId);
+    throw error;
+  }
 }

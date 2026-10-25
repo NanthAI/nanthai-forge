@@ -23,6 +23,7 @@ export function localBrief(store: WorkStore, input: unknown, liveMcp = false) {
   const data = store.load();
   const coordination = new CoordinationJournal(store).context(parsed.data.laneId);
   const records: BriefRecords = {
+    ...(data.decisions ? { decisions: data.decisions } : {}),
     intents: [
       ...data.intents,
       ...currentPlanning(data)

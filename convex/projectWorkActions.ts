@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { v } from 'convex/values';
 import { api } from './_generated/api';
 import { acceptanceRequestDocument } from './ownerAcceptanceFields';
@@ -179,12 +180,14 @@ export const acceptChannel = action({
     operationId: v.string(),
     revision: v.number(),
     command: v.string(),
+    authorityEpoch: v.optional(v.number()),
   },
   returns: v.union(hostedWorkEventDocument, acceptanceRequestDocument),
   handler: async (ctx, input): Promise<Doc<'projectWorkEvents'> | Doc<'ownerAcceptanceRequests'>> => {
     try {
       const owner = await caller(ctx);
       const project = await ctx.runQuery(internal.projectWork.owner, { projectId: input.projectId, owner });
+      requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
       let command;
       try {
         command = hostedChannelCommandSchema.parse(JSON.parse(input.command));
@@ -205,6 +208,7 @@ export const acceptChannel = action({
             viewId: command.viewId,
             head: command.head,
             channel: command.channel,
+            ...(input.authorityEpoch === undefined ? {} : { authorityEpoch: input.authorityEpoch }),
           })
         : null;
       if (native) {
@@ -214,6 +218,7 @@ export const acceptChannel = action({
           viewId: command.viewId,
           head: command.head,
           expectedMain: native.expectedMain,
+          ...(input.authorityEpoch === undefined ? {} : { authorityEpoch: input.authorityEpoch }),
           channel: command.channel,
           ...(command.agent ? { agent: true as const } : {}),
         });
@@ -241,6 +246,7 @@ export const acceptChannel = action({
         previousRevision: input.revision,
         command: JSON.stringify(command),
         projection,
+        ...(input.authorityEpoch === undefined ? {} : { authorityEpoch: input.authorityEpoch }),
       });
     } catch (error) {
       return report(error);

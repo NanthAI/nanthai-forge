@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ConvexError } from 'convex/values';
+import { SourceAuthorityStaleError } from '../src/hosted-source-authority';
 import { ForgeError } from '../src/errors';
 
 export function report(error: unknown): never {
@@ -41,6 +42,7 @@ export function report(error: unknown): never {
     error instanceof ForgeError
       ? {
           code: error.code,
+          ...(error instanceof SourceAuthorityStaleError ? { authority: error.authority } : {}),
           message: error.message,
           ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
         }

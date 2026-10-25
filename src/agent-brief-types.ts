@@ -1,3 +1,4 @@
+import type { DecisionRecord, DecisionContext } from './decision-types.js';
 // SPDX-License-Identifier: Apache-2.0
 import type { DeliveryHandoff } from './agent-handoff-types.js';
 import type { AutonomyPolicy } from './autonomy-policy.js';
@@ -45,6 +46,7 @@ export type BriefClaim = {
   intentId?: string;
 };
 export type BriefRecords = {
+  decisions?: DecisionRecord[];
   intents: Intent[];
   lanes: Lane[];
   views: WorkView[];
@@ -54,6 +56,7 @@ export type BriefRecords = {
   claims: BriefClaim[];
 };
 export type BriefContext = {
+  decisions?: DecisionContext;
   handoff?: DeliveryHandoff | null;
   parentHandoff?: DeliveryHandoff | null;
   stack?: string;

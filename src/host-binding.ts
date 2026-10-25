@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { z } from 'zod';
 import { pushProgressSchema } from './push-progress-state.js';
 import { autoExchangeStateSchema } from './auto-exchange-state.js';
@@ -32,6 +33,7 @@ const binding = z.object({
   workIndexPreparation: z.uuid().optional(),
   autoSync: z.boolean().optional(),
   acceptanceOwner: z.boolean().optional(),
+  sourceAuthority: sourceAuthoritySchema.optional(),
   /** Local executable; never imported from portable Work policy. */
   spendCommand: z.string().refine(isAbsolute).optional(),
 });
@@ -66,6 +68,7 @@ const hosting = z.object({
   errorCode: z.string().optional(),
 });
 const push = z.object({
+  authorityEpoch: z.number().safe().nonnegative().optional(),
   operationId: z.uuid(),
   projectId: z.string(),
   deployment: z.url(),
@@ -94,6 +97,15 @@ const schema = z.object({
   acceptancePublications: z.record(z.string(), z.string()).optional(),
   acceptanceReceipts: z.record(z.string(), z.string()).optional(),
   binding: binding.optional(),
+  authorityTransition: z
+    .object({
+      projectId: z.string(),
+      deployment: z.url(),
+      operationId: z.uuid(),
+      expected: sourceAuthoritySchema,
+      mode: sourceAuthoritySchema.shape.mode,
+    })
+    .optional(),
   hosting: hosting.optional(),
   pulls: z.record(z.string(), z.uuid()).optional(),
   push: push.optional(),

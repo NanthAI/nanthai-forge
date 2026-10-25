@@ -55,7 +55,7 @@ composes and submits durable agent landing. Pending is not accepted.
 
 Actions: integrate, wait, handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, save, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
-         making-of, report, friction, friction-triage, improve.
+         making-of, report, friction, friction-triage, improve, decide, decisions.
 start stackOn:LANE_ID bases a native Lane on that parent’s latest saved head and waits for its landing.
 sync restacks onto the latest parent; after landing it targets main. ontoMain:true detaches explicitly.
 status/peers/pending show the chain, parent movement and abandonment.
@@ -95,6 +95,14 @@ const examples: Record<string, unknown> = {
   },
   'friction-triage': { frictionIds: ['FRICTION_ID'], status: 'planned', reason: 'Next check-runner slice' },
   improve: {},
+  decide: {
+    target: { kind: 'intent', intentId: 'INTENT_ID' },
+    decidedBy: 'Owner',
+    what: 'Use the contract check',
+    why: 'Keep the landing loop short',
+    overrides: { kind: 'default', description: 'Full-suite landing gate', link: 'docs/workflows.md' },
+  },
+  decisions: { target: { kind: 'project' } },
   wait: { laneIds: ['LANE_ID'], operationIds: [], until: 'terminal', timeoutSeconds: 600 },
   integrate: { laneIds: ['LANE_ID', 'OTHER_LANE_ID'] },
   tests: { laneId: 'LANE_ID' },
@@ -207,6 +215,9 @@ function actionHelp(action: string): string {
   if (action === 'sync')
     result +=
       'Needs a checkpointed Lane (else LANE_DIRTY). Returns up-to-date, merged, or conflict with markers; resolve them and checkpoint or finish.\n';
+  if (action === 'decide' || action === 'decisions')
+    result +=
+      'decide records who decided, what, why and when on target:{kind:"project"} or {kind:"intent",intentId}. overrides names a default (description, optional link) or decision (decisionId, optional link); supersedes:DECISION_ID retains the earlier decision with a replacement link. decidedAt optionally records a historical ISO date/time. actor/tool declare the entering agent; requester is the local caller. decisions omits target to list all records, including superseded ones. Records supply context; they do not change policy or authorization. Replay operationId and original inputs after an unknown reply.\n';
   if (action === 'report')
     result +=
       'Totals are cumulative for this Lane session (actor + optional sessionId); a new report replaces them. Advisory and local; nothing is verified.\n';

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { backfillFields } from './r2BackfillFields';
 import { ownerAcceptanceTables } from './ownerAcceptanceFields';
-import { sourceAuthority } from './projectSourceAuthorityFields';
+import { sourceAuthority, sourceAuthorityTables } from './projectSourceAuthorityFields';
 import { actorTables } from './projectActorFields';
 import { autonomyPolicy, autonomyTables, automaticAction } from './autonomyFields';
 import { briefTables } from './agentBriefFields';
@@ -419,6 +419,7 @@ export default defineSchema({
     ['owner', 'slug'],
   ),
   ...ownerAcceptanceTables,
+  ...sourceAuthorityTables,
   ...autonomyTables,
   ...briefTables,
   ...actorTables,

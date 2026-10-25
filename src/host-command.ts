@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { transitionBoundSourceAuthority } from './source-authority-client.js';
 import { deleteHostedProject, parseDeleteProjectOptions } from './host-delete.js';
 import { checkServiceEnv } from './worker-environment.js';
 import { effectivePolicy as childPolicy } from './autonomy-policy.js';
@@ -23,6 +24,8 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
   const json = args.includes('--json');
   const [root, ...flags] = args.filter(arg => arg !== '--json');
   invariant(root && !root.startsWith('-'), 'BAD_ARGUMENT', HOST_HELP);
+  if (flags.length === 2 && flags[0] === '--source-authority')
+    return transitionBoundSourceAuthority(new WorkStore(root), JSON.parse(flags[1]!));
   if (flags.includes('--delete-project')) {
     const result = await deleteHostedProject(root, {
       ...parseDeleteProjectOptions(flags),

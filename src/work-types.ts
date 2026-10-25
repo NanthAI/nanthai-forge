@@ -1,3 +1,4 @@
+import { decisionRecordSchema } from './decision-types.js';
 import { frictionEventSchema } from './friction-types.js';
 import { checkEnvironmentSchema } from './check-environment-schema.js';
 export { checkEnvironmentSchema } from './check-environment-schema.js';
@@ -786,6 +787,7 @@ export const channelCommandSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('accept-channel'),
     operationId: id,
+    authorityEpoch: z.number().safe().nonnegative().optional(),
     reuseRunId: id.optional(),
     channel: z.string().trim().min(1),
     viewId: id,
@@ -1043,6 +1045,7 @@ export const workSchema = z
       .array(z.object({ id, at: z.string(), action: automaticActionSchema, result: z.string().optional() }))
       .optional(),
     frictionEvents: z.array(frictionEventSchema).optional(),
+    decisions: z.array(decisionRecordSchema).optional(),
     hostedEvents: z.array(hostedEventSchema).default([]),
     intents: z.array(intentSchema),
     lanes: z.array(laneSchema),

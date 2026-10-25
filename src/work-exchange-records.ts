@@ -80,6 +80,8 @@ const targets: Record<string, string> = {
   deploymentId: 'deployments',
   runId: 'runs',
   frictionId: 'frictionEvents',
+  decisionId: 'decisions',
+  supersedes: 'decisions',
 };
 /** Only schema-owned fields supply references; uninterpreted extension fields remain opaque. */
 export function recordReferences(collection: string, value: unknown, format = 15): RecordRef[] {

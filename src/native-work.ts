@@ -1,6 +1,7 @@
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { optimisticLanding } from './autonomy-policy.js';
 import { ownerRootNotice, updateOwnerRoot } from './owner-root.js';
+import { requireSourceAuthority, sourceAuthority } from './hosted-source-authority.js';
 import { readHostState } from './host-binding.js';
 import { pendingStatus } from './pending-status.js';
 import { decorateRepair } from './agent-repair-lineage.js';
@@ -274,6 +275,11 @@ export function nativeExecute(
   if (parsed.success && scopedMetadata(parsed.data))
     return recordMetadata(store, parsed.data, revision, options);
   const command = parsed.success ? parsed.data : channel.data!;
+  const binding = command.action === 'accept-channel' ? readHostState(store).binding : undefined;
+  const authorityEpoch =
+    command.action === 'accept-channel'
+      ? (command.authorityEpoch ?? (binding ? sourceAuthority(binding).epoch : 0))
+      : 0;
   let composition: ReturnType<typeof prepareNativeComposition> | undefined;
   if (parsed.success && parsed.data.action === 'compose') {
     const snapshot = store.load(),
@@ -309,6 +315,9 @@ export function nativeExecute(
           }
         }
         if (command.action === 'accept-channel') {
+          const currentBinding = readHostState(store).binding;
+          if (currentBinding)
+            requireSourceAuthority(currentBinding, { mode: 'native-owner', epoch: authorityEpoch });
           const existing = data.channelMoves.find(move => move.id === command.operationId);
           if (existing) {
             invariant(

@@ -12,6 +12,7 @@ export const acceptanceRequestFields = {
   projectId: v.id('hostedProjects'),
   operationId: v.string(),
   ownerId: v.string(),
+  authorityEpoch: v.optional(v.number()),
   lifecycle: v.optional(v.string()),
   recheck: v.optional(v.literal(true)),
   agent: v.optional(v.literal(true)),

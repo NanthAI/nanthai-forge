@@ -1,3 +1,4 @@
+import { decisionContext } from './decision-types.js';
 // SPDX-License-Identifier: Apache-2.0
 import { latestHandoff } from './agent-handoff-types.js';
 import { invariant } from './errors.js';
@@ -137,6 +138,7 @@ export function briefingContext(
   const parent = lane?.stack ? records.lanes.find(item => item.id === lane.stack!.laneId) : undefined;
   const parentIntent = parent ? records.intents.find(item => item.id === parent.intentId) : undefined;
   return {
+    ...(records.decisions?.length ? { decisions: decisionContext(records.decisions, intent?.id) } : {}),
     ...(parent
       ? {
           parentHandoff: latestHandoff(parentIntent?.notes ?? [], parent.id),

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
@@ -16,11 +17,13 @@ export const published = internalQuery({
     owner: v.string(),
     operationId: v.string(),
     request: v.string(),
+    authorityEpoch: v.optional(v.number()),
   },
   returns: v.union(v.id('projectBackups'), v.null()),
   handler: async (ctx, input) => {
     try {
-      await activeOwnedProject(ctx, input.projectId, input.owner);
+      const project = await activeOwnedProject(ctx, input.projectId, input.owner);
+      requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
       const original = await ctx.db
         .query('projectBackups')
         .withIndex('by_project_and_operation', q =>
@@ -46,6 +49,7 @@ export const publish = internalMutation({
     owner: v.string(),
     operationId: v.string(),
     request: v.string(),
+    authorityEpoch: v.optional(v.number()),
     previous: v.union(v.id('projectBackups'), v.null()),
     digest: v.string(),
     size: v.number(),
@@ -62,6 +66,7 @@ export const publish = internalMutation({
   handler: async (ctx, input) => {
     try {
       const project = await activeOwnedProject(ctx, input.projectId, input.owner);
+      requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
       const original = await ctx.db
         .query('projectBackups')
         .withIndex('by_project_and_operation', q =>

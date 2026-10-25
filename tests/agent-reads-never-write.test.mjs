@@ -130,6 +130,7 @@ const reads = f => [
   ],
   ['handoff-read', { laneId: f.first.laneId }],
   ['improve', {}],
+  ['decisions', {}],
   ['policy', {}],
   ['link', { laneId: f.first.laneId }],
   ['records', { collection: 'lanes' }],

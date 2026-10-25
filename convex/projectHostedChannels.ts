@@ -6,8 +6,7 @@ import type { Id } from './_generated/dataModel';
 import { activeOwnedProject, accessibleProject } from './projectAuthority';
 import { query } from './cliServer';
 import { report } from './errors';
-import { sourceAuthority } from '../src/hosted-source-authority';
-import { hostedWriteProject } from './projectHostedRecords';
+import { sourceAuthority, requireSourceAuthority } from '../src/hosted-source-authority';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { beginHostedOperation, finishHostedOperation } from './projectHostedOperations';
@@ -49,7 +48,7 @@ export const seed = internalMutation({
       'BAD_ARGUMENT',
       'Retain the seed operation UUID.',
     );
-    await activeOwnedProject(ctx, input.projectId, input.actor);
+    const project = await activeOwnedProject(ctx, input.projectId, input.actor);
     const selected = hostedMainV2Schema.parse(JSON.parse(input.selection));
     invariant(selected.projectId === input.projectId, 'SOURCE_UNAVAILABLE', 'Seed this project’s main.');
     const expected = {
@@ -62,6 +61,7 @@ export const seed = internalMutation({
       projectId: input.projectId,
       actor: input.actor,
       payload,
+      expectedAuthority: selected.authority,
       request: {
         schema: 1,
         projectId: input.projectId,
@@ -81,12 +81,7 @@ export const seed = internalMutation({
       },
     });
     if (prepared.operation.terminal) return null;
-    const project = await hostedWriteProject(ctx, input.projectId, input.actor, selected.authority.epoch);
-    invariant(
-      project.sourceAuthority?.mode === selected.authority.mode,
-      'SOURCE_AUTHORITY_CHANGED',
-      'Seed the current source authority.',
-    );
+    requireSourceAuthority(project, selected.authority);
     const selection = canonicalPayload(selected),
       old = await channelRow(ctx, input.projectId);
     invariant(

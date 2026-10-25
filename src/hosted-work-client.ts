@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedActionError } from './hosted-action-error.js';
+import { SourceAuthorityStaleError } from './hosted-source-authority.js';
 import { runHostedIntentMigration } from './hosted-intent-migration-client.js';
 import { assembleIndexValue } from './work-index-value.js';
 import { policyWriteSchema } from './autonomy-policy.js';
@@ -12,6 +14,7 @@ export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('accept'),
+      authorityEpoch: z.number().safe().nonnegative().optional(),
       operationId: z.uuid(),
       revision: z.number().int().nonnegative(),
       viewId: z.uuid(),
@@ -159,13 +162,14 @@ export async function dispatchHostedWork(
     if (request.action === 'migrate-intents')
       return await runHostedIntentMigration(client, projectId, request, progress);
     if (request.action === 'accept') {
-      const { action: _action, operationId, revision, ...pins } = request;
+      const { action: _action, operationId, revision, authorityEpoch, ...pins } = request;
       void _action;
       return await client.action(makeFunctionReference('projectWorkActions:acceptChannel'), {
         projectId,
         operationId,
         revision,
         command: JSON.stringify({ action: 'accept-hosted-channel', ...pins, agent: true }),
+        ...(authorityEpoch === undefined ? {} : { authorityEpoch }),
       });
     }
     if (request.action === 'policy')
@@ -258,6 +262,8 @@ export async function dispatchHostedWork(
     };
   } catch (error) {
     if (error instanceof ForgeError) throw error;
+    const authorityFailure = hostedActionError(error, 'hosted Work');
+    if (authorityFailure instanceof SourceAuthorityStaleError) throw authorityFailure;
     const data =
       error instanceof ConvexError && error.data && typeof error.data === 'object'
         ? (error.data as { code?: unknown; message?: unknown })

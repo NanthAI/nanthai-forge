@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { requireSourceAuthority, type SourceAuthority } from '../src/hosted-source-authority';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
@@ -36,9 +37,10 @@ export async function beginHostedOperation(
     request: unknown;
     payload: unknown;
     firstAttempt: unknown;
+    expectedAuthority?: SourceAuthority;
   },
 ) {
-  await activeProject(ctx, input.projectId, input.actor);
+  const project = await activeProject(ctx, input.projectId, input.actor);
   const request = hostedOperationRequestSchema.parse(input.request);
   // The envelope must belong to the same authorized project and actor.
   invariant(
@@ -47,7 +49,10 @@ export async function beginHostedOperation(
     'Operation identity differs from the authorized caller.',
   );
   const old = await hostedOperationRow(ctx, input.projectId, input.actor, request.operationId);
-  if (!old) await hostedWriteProject(ctx, input.projectId, input.actor, request.expected.authorityEpoch);
+  if (!old) {
+    if (input.expectedAuthority) requireSourceAuthority(project, input.expectedAuthority);
+    else await hostedWriteProject(ctx, input.projectId, input.actor, request.expected.authorityEpoch);
+  }
   const prepared = await prepareHostedOperation(
     request,
     input.payload,

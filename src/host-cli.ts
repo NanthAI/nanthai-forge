@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { retainRecoveryCapture } from './recovery-capture.js';
 import { join } from 'node:path';
@@ -18,6 +19,7 @@ export const HOST_HELP = `nforge host ROOT [--deployment URL] [--name NAME] [--v
 nforge host ROOT --delete-project PROJECT_ID --confirm SLUG [--deployment URL] [--allow-bound-project] [--json]
 nforge host ROOT --listen
 nforge host ROOT --status
+nforge host ROOT --source-authority '{"operationId":"UUID","expected":{"mode":"native-owner","epoch":0},"mode":"server"}'
 nforge host ROOT --no-auto-sync | --auto-sync
 nforge host ROOT --spend-command /absolute/executable | --no-spend-command
 --listen consumes hosted acceptance requests every five seconds while running.
@@ -256,6 +258,7 @@ export async function hostProject(
       ],
     };
   } catch (error) {
+    if (pending.projectId) rememberSourceAuthorityError(store, error, pending.projectId);
     updateHostState(store, state => {
       if (state.hosting?.operationId === pending.operationId)
         state.hosting.errorCode = error instanceof ForgeError ? error.code : 'HOST_INTERRUPTED';

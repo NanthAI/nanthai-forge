@@ -1,3 +1,4 @@
+import { recordDecision, readDecisions } from './decisions.js';
 import { previewMeasurements } from './preview-accounting.js';
 import { trainAccounting } from './train-accounting.js';
 import { scheduleIntegrationPreview } from './integration-preview-auto.js';
@@ -379,6 +380,8 @@ export class AgentWorkflow {
     if (command.action === 'handoff')
       return recordHandoff(store, { ...command, operationId: command.operationId! });
     if (command.action === 'handoff-read') return readHandoff(store, command.laneId);
+    if (command.action === 'decide') return recordDecision(store, command);
+    if (command.action === 'decisions') return readDecisions(store, command);
     if (command.action === 'friction') return captureFriction(store, command);
     if (command.action === 'friction-triage') return triageFriction(store, command);
     if (command.action === 'improve') return readImprovements(store);

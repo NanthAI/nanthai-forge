@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { v } from 'convex/values';
 import { storeProjectArtifact } from './projectArtifactActions';
 import { action, type ActionCtx } from './cliServer';
@@ -125,6 +126,7 @@ async function cacheLogicalMetadata(
   await storeProjectArtifact(ctx, projectId, actor, bytes);
 }
 const publicationFields = {
+  authorityEpoch: v.optional(v.number()),
   projectId: v.id('hostedProjects'),
   operationId: v.string(),
   previous: v.union(v.id('projectBackups'), v.null()),
@@ -134,6 +136,7 @@ const publicationFields = {
   retainCandidate: v.optional(v.boolean()),
 };
 type Publication = {
+  authorityEpoch?: number;
   projectId: Id<'hostedProjects'>;
   operationId: string;
   previous: Id<'projectBackups'> | null;
@@ -144,7 +147,8 @@ type Publication = {
 };
 async function publicationReceipt(ctx: ActionCtx, input: Publication) {
   const owner = await caller(ctx);
-  await ctx.runQuery(internal.projectWork.owner, { projectId: input.projectId, owner });
+  const project = await ctx.runQuery(internal.projectWork.owner, { projectId: input.projectId, owner });
+  requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
   invariant(
     /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.operationId),
     'BAD_ARGUMENT',
@@ -159,6 +163,7 @@ async function publicationReceipt(ctx: ActionCtx, input: Publication) {
       input.size,
       ...(input.deferHistory ? [true] : []),
       ...(input.retainCandidate ? ['retain-candidate'] : []),
+      ...(input.authorityEpoch ? ['authority-epoch', input.authorityEpoch] : []),
     ]),
   );
   const original: Id<'projectBackups'> | null = await ctx.runQuery(internal.projectExchange.published, {
@@ -166,6 +171,7 @@ async function publicationReceipt(ctx: ActionCtx, input: Publication) {
     owner,
     operationId: input.operationId,
     request,
+    ...(input.authorityEpoch === undefined ? {} : { authorityEpoch: input.authorityEpoch }),
   });
   return { owner, request, original };
 }

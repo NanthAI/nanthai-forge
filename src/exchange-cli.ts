@@ -6,6 +6,8 @@ import { withExchangeObservation } from './exchange-observation.js';
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 import { mainExpectationSchema } from './hosted-main.js';
 // SPDX-License-Identifier: Apache-2.0
+import { rememberSourceAuthorityError } from './source-authority-client.js';
+import { nativeOwner } from './native-source.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { retryExchange } from './exchange-retry.js';
 import { formatSourceReturnProgress } from './source-return-progress.js';
@@ -150,6 +152,15 @@ export async function exchangeCommand(root: string, action: string, input: unkno
     }
     return await executeExchangeCommand(root, action, input);
   } catch (error) {
+    const owner = nativeOwner(root);
+    if (
+      owner &&
+      input &&
+      typeof input === 'object' &&
+      'projectId' in input &&
+      typeof input.projectId === 'string'
+    )
+      rememberSourceAuthorityError(new WorkStore(owner), error, input.projectId);
     throw hostedActionError(error, `exchange ${action}`);
   }
 }

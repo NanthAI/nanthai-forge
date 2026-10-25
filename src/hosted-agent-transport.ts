@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { SourceAuthorityStaleError } from './hosted-source-authority.js';
+import { rememberSourceAuthorityError } from './source-authority-client.js';
+import { nativeOwner } from './native-source.js';
+import { WorkStore } from './work-store.js';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { ConvexExchange } from './exchange-client.js';
@@ -139,12 +143,15 @@ export class HostedAgentTransport {
       const result = await executeHostedAgent(session, action, command.data);
       return this.response(action, journal.operationId, result);
     } catch (error) {
+      const owner = nativeOwner(this.root);
+      if (owner) rememberSourceAuthorityError(new WorkStore(owner), error, this.address.projectId);
       if (error instanceof z.ZodError)
         throw new ForgeError(
           'HOSTED_PROTOCOL_INVALID',
           'Hosted agent response does not match the supported contract.',
         );
       const safe = hostedActionError(error, `agent ${action}`);
+      if (safe instanceof SourceAuthorityStaleError) throw safe;
       throw new ForgeError(
         safe.code,
         `${safe.code === 'HOSTED_ACTION_FAILED' ? `Hosted agent ${action} failed.` : safe.message} Retry the original hosted agent action and parameters to reconcile its retained operation.`,

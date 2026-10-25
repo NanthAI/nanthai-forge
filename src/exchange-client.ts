@@ -42,6 +42,7 @@ const chunked = (pin: ContentPin) => {
 };
 export class ConvexExchange implements ExchangeTransport {
   readonly metadataTrees = true;
+  authorityEpoch: number | undefined;
   metadataCacheDirectory?: string;
   private readonly downloadCache = new ExchangeDownloadCache();
   private readonly signedDownloads = new WeakMap<ConvexHttpClient, SignedDownloadCache>();
@@ -233,6 +234,7 @@ export class ConvexExchange implements ExchangeTransport {
   async published(pin: ContentPin): Promise<string | null> {
     return retryExchange('publication receipt', this.operationId, () =>
       this.client.action(action('projectExchangeActions:published'), {
+        ...(this.authorityEpoch === undefined ? {} : { authorityEpoch: this.authorityEpoch }),
         projectId: this.projectId,
         operationId: this.operationId,
         previous: this.previous,
@@ -269,7 +271,14 @@ export class ConvexExchange implements ExchangeTransport {
     const payload = build(),
       { pages, digest: metadataDigest } = publicationPages(payload),
       request = publicationHash(
-        JSON.stringify([this.projectId, this.operationId, this.previous, pin.sha256, pin.size]),
+        JSON.stringify([
+          this.projectId,
+          this.operationId,
+          this.previous,
+          pin.sha256,
+          pin.size,
+          ...(this.authorityEpoch ? ['authority-epoch', this.authorityEpoch] : []),
+        ]),
       );
     let cursor: { id: string; cursor: number; chain: string } = await retryExchange(
       'publication begin',
@@ -315,6 +324,7 @@ export class ConvexExchange implements ExchangeTransport {
     try {
       return await retryExchange('checkpoint publication', this.operationId, () =>
         this.client.action(action('projectExchangeActions:publish'), {
+          ...(this.authorityEpoch === undefined ? {} : { authorityEpoch: this.authorityEpoch }),
           displayProtocol: 3,
           ...(ownerDerived ? { ownerDerived } : {}),
           projectId: this.projectId,

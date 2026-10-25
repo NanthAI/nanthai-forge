@@ -1,3 +1,5 @@
+import { decisionContext } from './decision-types.js';
+import { decisionRecords } from './decisions.js';
 // SPDX-License-Identifier: Apache-2.0
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { digest } from './hash.js';
@@ -94,6 +96,7 @@ export function readHandoff(store: WorkStore, laneId: string) {
       revision: tx?.revision ?? data!.revision,
       result: {
         laneId,
+        decisions: decisionContext(decisionRecords(store), lane.intentId),
         handoff: latestHandoff(intent.notes, laneId),
         ...(lane.stack
           ? {

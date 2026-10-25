@@ -11,6 +11,7 @@ export const SNAPSHOT_READ_ACTIONS: ReadonlySet<string> = new Set([
   'brief',
   'handoff-read',
   'improve',
+  'decisions',
   'records',
   'making-of',
   'view',

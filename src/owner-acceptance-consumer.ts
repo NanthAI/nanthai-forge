@@ -1,3 +1,4 @@
+import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { hostedPaths } from './hosted-paths.js';
 // SPDX-License-Identifier: Apache-2.0
 import { queueOwnerRecheck } from './owner-recheck.js';
@@ -21,6 +22,7 @@ import { laneSummary, viewSummary, runSummary } from './work-hosted-summary.js';
 import type { WorkStore } from './work-store.js';
 import type { CoordinationTransport } from './coordination-client.js';
 export type OwnerAcceptRequest = {
+  authorityEpoch?: number;
   lifecycle?: string;
   recheck?: true;
   operationId: string;
@@ -48,6 +50,7 @@ export function acceptOwnerRequest(store: WorkStore, request: OwnerAcceptRequest
       viewId: request.viewId,
       expectedHead: request.head,
       expectedPrevious: request.expectedMain,
+      ...(request.authorityEpoch === undefined ? {} : { authorityEpoch: request.authorityEpoch }),
     },
     store.revision(),
     {
@@ -79,11 +82,18 @@ export async function consumeOwnerRequests(
       }
       const scope = { projectId: binding.projectId, ownerId: binding.operationId };
       const transport = client;
-      const mutate = (name: string, args: Record<string, unknown>) =>
-        transport.mutation(makeFunctionReference<'mutation'>(name), args);
+      const mutate = async (name: string, args: Record<string, unknown>) => {
+        try {
+          return await transport.mutation(makeFunctionReference<'mutation'>(name), args);
+        } catch (error) {
+          rememberSourceAuthorityError(store, error, binding.projectId);
+          throw error;
+        }
+      };
       // One request per tick keeps activity sync and the local server responsive.
       const request = (await mutate('ownerAcceptance:poll', {
         ...scope,
+        ...(binding.sourceAuthority ? { authorityEpoch: binding.sourceAuthority.epoch } : {}),
         name: hostname(),
         lastSeen: Date.now(),
         mainHead: nativeChannels(store.load()).find(c => c.name === 'main')?.head ?? null,

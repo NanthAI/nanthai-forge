@@ -1,3 +1,4 @@
+import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { hostedPaths } from '../src/hosted-paths';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
@@ -38,6 +39,7 @@ export const request = mutation({
     operationId: v.string(),
     agent: v.optional(v.literal(true)),
     recheck: v.optional(v.literal(true)),
+    authorityEpoch: v.optional(v.number()),
     channel: v.optional(v.string()),
     viewId: v.string(),
     head: v.string(),
@@ -52,13 +54,15 @@ export const request = mutation({
         'BAD_ARGUMENT',
         'This project uses hosted Channel acceptance.',
       );
+      requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
       const actor = await acceptanceActor(ctx, input.agent),
         channel = input.recheck ? 'recheck' : (input.channel ?? 'main').trim();
       invariant(channel, 'BAD_ARGUMENT', 'Use a Channel name.');
       const old = await find(ctx, input.projectId, input.operationId);
       if (old) {
         invariant(
-          old.channel === channel &&
+          (old.authorityEpoch ?? 0) === (input.authorityEpoch ?? 0) &&
+            old.channel === channel &&
             Boolean(old.recheck) === Boolean(input.recheck) &&
             old.actorKind === actor.kind &&
             old.viewId === input.viewId &&
@@ -151,7 +155,7 @@ export const status = query({
   },
 });
 export const poll = mutation({
-  args: { ...scope, ...ownerMachine.fields },
+  args: { ...scope, ...ownerMachine.fields, authorityEpoch: v.optional(v.number()) },
   returns: v.union(acceptanceRequestDocument, v.null()),
   handler: async (ctx, input) => {
     try {
@@ -161,7 +165,9 @@ export const poll = mutation({
         'PROJECT_UNAVAILABLE',
         'Connect this project’s original bound native owner.',
       );
-      const { projectId, ...fields } = input;
+      requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
+      const { projectId, authorityEpoch: _authorityEpoch, ...fields } = input;
+      void _authorityEpoch;
       const old = await machine(ctx, projectId, input.ownerId);
       const observed = { ...fields, lastSeen: Date.now() };
       if (old) await ctx.db.patch(old._id, observed);
@@ -188,6 +194,7 @@ export const complete = mutation({
         'PROJECT_UNAVAILABLE',
         'Report to the original owner request.',
       );
+      requireSourceAuthority(project, { mode: 'native-owner', epoch: item.authorityEpoch ?? 0 });
       if (item.state !== 'requested') {
         invariant(
           item.receipt === input.receipt,
@@ -250,10 +257,18 @@ export const complete = mutation({
 });
 /** Legacy acceptChannel callers route here rather than creating hosted moves. */
 export const route = internalMutation({
-  args: { ...scope, operationId: v.string(), channel: v.string(), viewId: v.string(), head: v.string() },
+  args: {
+    ...scope,
+    operationId: v.string(),
+    channel: v.string(),
+    viewId: v.string(),
+    head: v.string(),
+    authorityEpoch: v.optional(v.number()),
+  },
   returns: v.union(v.object({ expectedMain: v.union(v.string(), v.null()) }), v.null()),
   handler: async (ctx, input) => {
     const { project } = await owned(ctx, input.projectId);
+    requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
     if (!(await isNativeOwner(ctx, input.projectId))) return null;
     const existing = await find(ctx, input.projectId, input.operationId);
     if (existing) return { expectedMain: existing.expectedMain };

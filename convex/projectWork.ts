@@ -1,3 +1,4 @@
+import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { detachReturnMetadata } from './projectReturnMetadataStore';
 import { requireActiveReturn } from './projectReturnSupersede';
 import { indexActivity } from '../src/work-hosted-index';
@@ -190,6 +191,7 @@ export const append = internalMutation({
     request: v.string(),
     previousRevision: v.number(),
     command: v.string(),
+    authorityEpoch: v.optional(v.number()),
     projection: v.optional(
       v.object({
         generationId: v.id('projectWorkGenerations'),
@@ -411,10 +413,14 @@ export async function appendWork(
     previousRevision: number;
     command: string;
     projection?: ReturnType<typeof commandProjection>;
+    authorityEpoch?: number;
   },
 ) {
   try {
     const project = await workProject(ctx, await activeProject(ctx, input.projectId, input.owner));
+    const channelCommand = hostedChannelCommandSchema.safeParse(JSON.parse(input.command));
+    if (channelCommand.success)
+      requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
     const parsed = metadataCommandSchema.safeParse(JSON.parse(input.command));
     if (
       parsed.success &&
@@ -456,7 +462,6 @@ export async function appendWork(
       );
       return original;
     }
-    const channelCommand = hostedChannelCommandSchema.safeParse(JSON.parse(input.command));
     if (channelCommand.success) {
       const actor = await acceptanceActor(ctx, channelCommand.data.agent),
         policy = effectivePolicy(project),

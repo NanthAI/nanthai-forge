@@ -1,3 +1,4 @@
+import { decideInputSchema, decisionsInputSchema } from './decision-types.js';
 import { handoffSchema, handoffReadSchema } from './agent-handoff-types.js';
 import { frictionInputSchema, frictionTriageSchema } from './friction-types.js';
 import { landSchema } from './land-schema.js';
@@ -31,6 +32,8 @@ const acceptPin = z.object({
 });
 export const agentActionSchema = z.discriminatedUnion('action', [
   ...viewReadSchemas,
+  decideInputSchema.extend({ action: z.literal('decide') }),
+  decisionsInputSchema.extend({ action: z.literal('decisions') }),
   frictionInputSchema.extend({ action: z.literal('friction') }),
   frictionTriageSchema.safeExtend({ action: z.literal('friction-triage') }),
   z.object({ action: z.literal('improve') }),

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 
 export const sourceAuthoritySchema = z
   .object({
@@ -11,7 +11,7 @@ export const sourceAuthoritySchema = z
 export type SourceAuthority = z.infer<typeof sourceAuthoritySchema>;
 
 /** Missing fields are legacy native authority, regardless of project origin or presence. */
-export function sourceAuthority(project: { sourceAuthority?: SourceAuthority }): SourceAuthority {
+export function sourceAuthority(project: { sourceAuthority?: SourceAuthority | undefined }): SourceAuthority {
   return sourceAuthoritySchema.parse(project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 });
 }
 
@@ -37,4 +37,25 @@ export function requireSourceContract(authority: SourceAuthority, maxSchema = 1)
     'CLI_UPGRADE_REQUIRED',
     'Upgrade nforge to read server-owned source with source contract schema 2.',
   );
+}
+
+/** Shared in-transaction fence. Legacy callers are pinned to native-owner epoch 0. */
+export function requireSourceAuthority(
+  project: { sourceAuthority?: SourceAuthority | undefined },
+  expected: SourceAuthority = { mode: 'native-owner', epoch: 0 },
+): SourceAuthority {
+  const current = sourceAuthority(project);
+  expected = sourceAuthoritySchema.parse(expected);
+  if (current.mode !== expected.mode || current.epoch !== expected.epoch)
+    throw new SourceAuthorityStaleError(current);
+  return current;
+}
+
+export class SourceAuthorityStaleError extends ForgeError {
+  constructor(readonly authority: SourceAuthority) {
+    super(
+      'SOURCE_AUTHORITY_STALE',
+      `Source authority is ${authority.mode} at epoch ${authority.epoch}. Refresh the authority pin and use its writer; retain the original operation to reconcile its outcome.`,
+    );
+  }
 }

@@ -73,6 +73,7 @@ export function resolveAgentDefaults(
     case 'undo-sync':
     case 'report':
     case 'handoff':
+    case 'decide':
     case 'friction':
     case 'friction-triage':
     case 'peer-ack':
