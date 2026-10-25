@@ -49,18 +49,18 @@ These landed in Phase 4 (closed 2026-10-25). Phase 5 assumes them.
 
 ## Order and critical path
 
-The critical path is Bet 1: **B1.2a → B1.2b–d → B1.2e → B1.5a → B1.5b → B1.6**, with B1.4b joining before B1.5a. SP1 is decided; B1.4b uses a two-method object interface and does not wait for P5-SG. Everything else fills spare builder capacity. Weeks are rough and assume three to four parallel builders.
+The critical path is Bet 1: **B1.2a → B1.2b–d → B1.2e → B1.5a → B1.5b → B1.6**, with B1.4b joining before B1.5a. SP1 is decided; B1.4b uses a two-method object interface and does not wait for P5-SG. Everything else fills spare builder capacity. Stages run in order; each is as long as its work takes, with three to four parallel builders. Stage 5.1 was planned as a week and took about a day.
 
-| Week | Critical path (Bet 1) | Alongside |
+| Stage | Critical path (Bet 1) | Alongside |
 | --- | --- | --- |
-| 1 | B1.1 published; B1.2a authority switch and fencing; B1.2c hosted seed | M1 metrics; D1 decision records; SP1 decision recorded; P5-RC records packing and collection starts; **E1 and E3 published — done** ([results](why-forge.md)) |
-| 2 | B1.2b finish to hosted queue; B1.2d browser accept (Claude design, GPT build); B1.3a runner lease | M2, M3; X1 schema compatibility check; P5-RC continues; B1.4a clonefile Lanes; Q3 reuse key; E2 starts on six independent slices |
-| 3 | B1.2e Mac stops accepting; B1.3b runner evidence; B1.4b cache reads hosted; B1.5a recover folds hosted work | Q1 landing controller; B2.1 contract; B3.1 first-write hook |
-| 4 | B1.5b cutover, forced upgrade and drill | Q2 self-finishing entries and stall alarm; Q4 lifecycle drill; B3.1 ack metric; E2 published |
-| 5 | B1.6a–c, B1.7, B1.8 deletions; P5-SG Git source layer and projection deletions | B2.2 policy gate; SP2 merge spike; V1 vocabulary design |
-| 6 | B1.9 table purge (owner approves) | B2.3 audit; B2.4a–b culprit finding; B3.2 semantic conflict; B3.4 declaration merge; V2a |
-| 7 | | B2.5, B2.6 (owner approves defaults); B3.3; V2b, V3; B3.5 re-measure including R3 |
-| 8 | | X2 end-of-phase items; exit criteria; outside-user trial preparation |
+| 5.1 | B1.1 published; B1.2a authority switch and fencing; B1.2c hosted seed | M1 metrics; D1 decision records; SP1 decision recorded; P5-RC records packing and collection starts; **E1 and E3 published — done** ([results](why-forge.md)) |
+| 5.2 | B1.2b finish to hosted queue; B1.2d browser accept (Claude design, GPT build); B1.3a runner lease | M2, M3; X1 schema compatibility check; P5-RC continues; B1.4a clonefile Lanes; Q3 reuse key; E2 starts on six independent slices |
+| 5.3 | B1.2e Mac stops accepting; B1.3b runner evidence; B1.4b cache reads hosted; B1.5a recover folds hosted work | Q1 landing controller; B2.1 contract; B3.1 first-write hook |
+| 5.4 | B1.5b cutover, forced upgrade and drill | Q2 self-finishing entries and stall alarm; Q4 lifecycle drill; B3.1 ack metric; E2 published |
+| 5.5 | B1.6a–c, B1.7, B1.8 deletions; P5-SG Git source layer and projection deletions | B2.2 policy gate; SP2 merge spike; V1 vocabulary design |
+| 5.6 | B1.9 table purge (owner approves) | B2.3 audit; B2.4a–b culprit finding; B3.2 semantic conflict; B3.4 declaration merge; V2a |
+| 5.7 | | B2.5, B2.6 (owner approves defaults); B3.3; V2b, V3; B3.5 re-measure including R3 |
+| 5.8 | | X2 end-of-phase items; exit criteria; outside-user trial preparation |
 
 ## Self-metrics (first)
 
@@ -72,21 +72,21 @@ Every slice reports against these metrics at landing: the values before and afte
 
 | # | Metric | Definition |
 | --- | --- | --- |
-| 1 | Landings per day, by path | Landings per day, each classed by its Intent's submission history. **First-try:** the landed head is the head of the Intent's first submission and no earlier run for it failed or was interrupted. **After-retry:** an earlier submission of the same head ended failed, interrupted or superseded and the same head was resubmitted. **After-fixer:** the landed head was saved after an earlier submission for the Intent ended failed, by any actor. |
-| 2 | Agent-visible lifecycle errors per 100 finishes | Structured error codes returned to the caller by `start`, `checkpoint`, `sync`, `finish` or `land`, by code, per 100 finishes. One count per `operationId` and code; internal retries that end in success are not counted. Target: `WORK_STALE` 0; `WORK_BUSY` retried internally. |
-| 3 | Dropped landings | Submissions that entered a batch or queue, did not reach main, and have no terminal outcome delivered to the requester: no `landed` or `terminal-failed` state, and no progress event (run, batch step or acceptance) for 60 minutes. Target: 0. |
-| 4 | Overlap alerts delivered ÷ overlapping saves; acknowledgement rate | An *overlapping save* is a save (checkpoint, and first write once B3.1 lands) in Lane B touching a path that another active, unlanded Lane A has changed against its base. An alert is *delivered* when an overlap event is recorded as returned to B's actor (lifecycle receipt, MCP response, hook output) before B's next save. Also report median time from save to delivery, and, from B3.1, acknowledged or routed-around ÷ delivered. |
-| 5 | Operator interventions per landing | Owner-mutating commands that are not `start`, `checkpoint`, `finish` or `land` (for example `cancel`, `accept`, `revert`, `abandon`, `take`, `set-policy`, a retry, a manual owner-service restart, a manual queue nudge), by actor, ÷ landings. Requires a requester on every mutation, including cancellations. **Target: near zero** (Q track). |
-| 6 | Check minutes per landing; reuse rate | Runner minutes (sum of shard durations, the billing basis) and wall minutes for all runs in the period, whatever their outcome, ÷ landings. Continuous-audit minutes count. Reuse rate: check requests satisfied by an existing passed run with the same reuse key ÷ (those requests + full checks started). The **reuse key** is tree + check definition + lockfile + Node major.minor + declared inputs. Install paths and runtime fingerprints that change on restart are not part of it. |
-| 7 | Authority lag | **Before cutover:** for each owner revision, owner revision − hosted revision and seconds until hosted reaches it, p50 and p95 per day, plus contradiction minutes (time any hosted page showed a Lane, Intent or Candidate state that owner records contradict). **After cutover:** Mac cache lag behind hosted (p50, p95) and contradiction minutes on any surface, CLI, MCP or web. |
-| 8 | Dollars per landing | Runner (Modal, Blacksmith, Actions) + hosted (Convex, Netlify) + storage (R2) ÷ landings, per month, at billed price and at list price. Bills are entered as records. Estimator error: (estimate − bill) ÷ bill. |
+| 5.1 | Landings per day, by path | Landings per day, each classed by its Intent's submission history. **First-try:** the landed head is the head of the Intent's first submission and no earlier run for it failed or was interrupted. **After-retry:** an earlier submission of the same head ended failed, interrupted or superseded and the same head was resubmitted. **After-fixer:** the landed head was saved after an earlier submission for the Intent ended failed, by any actor. |
+| 5.2 | Agent-visible lifecycle errors per 100 finishes | Structured error codes returned to the caller by `start`, `checkpoint`, `sync`, `finish` or `land`, by code, per 100 finishes. One count per `operationId` and code; internal retries that end in success are not counted. Target: `WORK_STALE` 0; `WORK_BUSY` retried internally. |
+| 5.3 | Dropped landings | Submissions that entered a batch or queue, did not reach main, and have no terminal outcome delivered to the requester: no `landed` or `terminal-failed` state, and no progress event (run, batch step or acceptance) for 60 minutes. Target: 0. |
+| 5.4 | Overlap alerts delivered ÷ overlapping saves; acknowledgement rate | An *overlapping save* is a save (checkpoint, and first write once B3.1 lands) in Lane B touching a path that another active, unlanded Lane A has changed against its base. An alert is *delivered* when an overlap event is recorded as returned to B's actor (lifecycle receipt, MCP response, hook output) before B's next save. Also report median time from save to delivery, and, from B3.1, acknowledged or routed-around ÷ delivered. |
+| 5.5 | Operator interventions per landing | Owner-mutating commands that are not `start`, `checkpoint`, `finish` or `land` (for example `cancel`, `accept`, `revert`, `abandon`, `take`, `set-policy`, a retry, a manual owner-service restart, a manual queue nudge), by actor, ÷ landings. Requires a requester on every mutation, including cancellations. **Target: near zero** (Q track). |
+| 5.6 | Check minutes per landing; reuse rate | Runner minutes (sum of shard durations, the billing basis) and wall minutes for all runs in the period, whatever their outcome, ÷ landings. Continuous-audit minutes count. Reuse rate: check requests satisfied by an existing passed run with the same reuse key ÷ (those requests + full checks started). The **reuse key** is tree + check definition + lockfile + Node major.minor + declared inputs. Install paths and runtime fingerprints that change on restart are not part of it. |
+| 5.7 | Authority lag | **Before cutover:** for each owner revision, owner revision − hosted revision and seconds until hosted reaches it, p50 and p95 per day, plus contradiction minutes (time any hosted page showed a Lane, Intent or Candidate state that owner records contradict). **After cutover:** Mac cache lag behind hosted (p50, p95) and contradiction minutes on any surface, CLI, MCP or web. |
+| 5.8 | Dollars per landing | Runner (Modal, Blacksmith, Actions) + hosted (Convex, Netlify) + storage (R2) ÷ landings, per month, at billed price and at list price. Bills are entered as records. Estimator error: (estimate − bill) ÷ bill. |
 | R | Red-main minutes per day | Minutes per day during which the current main head has a failed full-suite result on its exact State, or is a descendant of a landed Intent later named as a culprit, until a main head passes the full suite. Before B2.3 the source is full runs on main heads plus public GitHub Verify on the mirror; report both. |
 
 Bet metrics also need one tag: **no-owner incidents**, errors in metrics 2 and 3 whose cause is a run, worker or batch with no live owner of record.
 
 ### P5-M1. Metric recorder
 
-- **Size:** M. **Depends on:** none. **Week:** 1.
+- **Size:** M. **Depends on:** none. **Stage:** 5.1.
 - **Changes:** rows for metrics 1, 2, 3, 5 and 6 from `channelMoves`, `landingEntries`, `landingBatches`, `runs`, `automations` and `frictionEvents`. Adds the two records the baseline lacks: a lifecycle receipt (action, actor, `operationId`, error code) and a requester on every mutation, including `cancel`. Backfills the baseline period. Readers work against both owner and hosted records so the metrics survive cutover.
 - **Acceptance:** each metric has a fixture test with hand-computed values, including a dropped submission, a same-head retry and a fixer save. Replaying the 2026-10-23 batch that waited with no leader counts it as dropped. Replaying the 2026-10-21 eight concurrent finishes counts seven `WORK_STALE` errors. Baseline gaps are reported as partial, not zero. **Metrics:** creates 1, 2, 3, 5, 6. Must not slow `finish` p50 by more than 5%.
 
@@ -104,7 +104,7 @@ Bet metrics also need one tag: **no-owner incidents**, errors in metrics 2 and 3
 
 ### P5-D1. Owner decision records
 
-- **Size:** M. **Depends on:** none. **Week:** 1, next to M1. Claude design pass for the display, GPT build.
+- **Size:** M. **Depends on:** none. **Stage:** 5.1, next to M1. Claude design pass for the display, GPT build.
 - **Changes:** a `decision` record on an Intent or project: who decided, what, why, and which earlier decision or default it overrides. Created by CLI, MCP and the site; shown in Now, in agent briefs and in the making-of. Superseded decisions stay visible with a link to the one that replaced them.
 - **Acceptance:** an agent brief for an Intent lists its decisions with the overrides; a superseding decision marks the old one. This plan's owner decisions are entered as records. **Success:** the lead's STATE.md shrinks to links to decision records. **Metrics:** moves 5 (fewer "ask the lead" interventions). Must not regress 2.
 
@@ -127,7 +127,7 @@ Each spike ends in a short decision memo agreed with the owner and recorded as a
 | Work records | 418 MB measured; only ~85 MB reachable |
 | Git integration | ~1,500 LOC added, ~1,567 removed; 5–10 agent-days estimated; dogfood conversion 65–85 s measured |
 
-- **Order:** B1.4b uses `get(id)` / `put(bytes)` by object identity and does not wait for the Git layer. P5-RC runs now, weeks 1–2. P5-SG lands after B1.5b alongside B1.6–B1.8, deleting the native→Git projection code it replaces. B1.4a remains independent.
+- **Order:** B1.4b uses `get(id)` / `put(bytes)` by object identity and does not wait for the Git layer. P5-RC runs now, in stage 5.1. P5-SG lands after B1.5b alongside B1.6–B1.8, deleting the native→Git projection code it replaces. B1.4a remains independent.
 
 ### SP2. Structural merge: mergiraf vs our own
 
@@ -140,14 +140,14 @@ Each spike ends in a short decision memo agreed with the owner and recorded as a
 
 ### P5-RC. Records and evidence packing and collection
 
-- **Depends on:** no Git source-layer work. **Weeks:** 1–2, starting now (owner decision, 2026-10-25).
+- **Depends on:** no Git source-layer work. **Stage:** 5.1, starting now (owner decision, 2026-10-25).
 - **Changes:** pack and compress Work records and evidence, deduplicate evidence, and collect unreferenced versions. Of 418 MB of records, only ~85 MB is reachable.
 - **Retention approved by the owner:** collect only what current Work, a kept backup, a 7-day snapshot or a pending operation does not reference; full directory backup before first apply.
 - **Acceptance:** report bytes before and after; verify every retained root and restore the backup on a scratch owner. **Target:** growth ~1–2 GB/yr from ~12 GB/yr (estimate). **Metrics:** disk per project and 8; must not regress 2, 3 or recovery.
 
 ### P5-SG. Git source layer
 
-- **Size:** M–L, split if L; estimate 5–10 agent-days. **Depends on:** B1.5b. **Week:** 5, alongside B1.6–B1.8.
+- **Size:** M–L, split if L; estimate 5–10 agent-days. **Depends on:** B1.5b. **Stage:** 5.5, alongside B1.6–B1.8.
 - **Changes:** implement the SP1 layout and Forge State identities, reversible migration and aliases. Delete the native→Git projection code it replaces. GitHub outbound mirroring becomes a push of the derived commit; inbound external merges and git-push contributions become a fetch plus one State record. Actions checks need no per-run export.
 - **Acceptance:** exact source trees and historical Forge pins survive conversion and rollback; retained roots survive collection; backups restore. Dogfood conversion measured 65–85 s in the spike; production migration remains unrun. **LOC:** ~1,500 added, ~1,567 removed (estimate, including tests). **Metrics:** disk per project, 6 and 8; must not regress 2, 3 or 7.
 
@@ -177,7 +177,7 @@ Without the conditional G and replace-first I: about 13,100 non-test. To add: ab
 
 ### B1.1. Cutover plan and rollback point
 
-- **Size:** S (docs). **Depends on:** none. **Week:** 1.
+- **Size:** S (docs). **Depends on:** none. **Stage:** 5.1.
 - **Changes:** publish the inventory above with per-module LOC and last callers in [operations](operations.md); cutover steps, rollback point and forced-upgrade path.
 - **Acceptance:** every module in B1.6–B1.8 is listed with LOC and its last caller; the rollback point is tested on a scratch owner. **Metrics:** none moved; LOC baseline.
 
@@ -224,7 +224,7 @@ Without the conditional G and replace-first I: about 13,100 non-test. To add: ab
 
 ### B1.4a. Lanes as APFS reflink clones with snapshots
 
-- **Size:** M. **Depends on:** none (independent of SP1). **Week:** 2.
+- **Size:** M. **Depends on:** none (independent of SP1). **Stage:** 5.2.
 - **Changes:** Lane materialisation uses `clonefile` from the cached main tree, with a copy fallback off APFS. Automatic snapshots (Phase 4) use the same mechanism.
 - **Acceptance:** creating a Lane on the dogfood tree takes under one second and near-zero extra disk until edited; a snapshot restores byte-identical; non-APFS volumes fall back with a recorded reason. **Metrics:** moves 6 (Lane setup wall time). Must not regress 8.
 
@@ -348,8 +348,8 @@ Each result is published next to the 2.36× burst-4 figure in [why-forge](why-fo
 
 ### E2. Git control arm for one real wave
 
-- **Cost:** about $0 (Blacksmith free tier and existing builder budget). **Weeks:** 2–4.
-- **Method:** six mutually independent S/M slices from weeks 2–3, paired by size (candidates: B1.4a, B1.3a, B1.2d, Q1, Q3, M2): three through Forge, three in a plain Git worktree with a GitHub PR and merge queue. Same builders, instructions and time box. Per slice: wall-clock to green main, builder tokens, lead interventions (every manual command), conflicts and red-main minutes. Git-arm results come back into Forge as one Candidate each; that import is excluded and reported.
+- **Cost:** about $0 (free GitHub-hosted runners on the public repository and existing builder budget). **Stages:** 5.2–5.4.
+- **Method:** six mutually independent S/M slices from stages 5.2–5.3, paired by size (candidates: B1.4a, B1.3a, B1.2d, Q1, Q3, M2): three through Forge, three in a plain Git worktree with a GitHub PR and merge queue. Same builders, instructions and time box. Per slice: wall-clock to green main, builder tokens, lead interventions (every manual command), conflicts and red-main minutes. Git-arm results come back into Forge as one Candidate each; that import is excluded and reported.
 - **Bar:** Forge wins on lead interventions and time to main with no red main. If Git wins on interventions, that is the headline.
 
 ### E3. Failing-change burst-4 vs a tuned merge queue
@@ -416,13 +416,13 @@ After the B1.5b cutover. Goal: fewer concepts and actions, the same functionalit
 
 ### X1. Schema compatibility check
 
-- **Size:** S. **Depends on:** nothing. Week 2.
+- **Size:** S. **Depends on:** nothing. Stage 5.2.
 - **Changes:** the shared schema (one Zod file used by CLI, Convex and web) gets a check that compares it with the last released schema and refuses removals, renames and narrowing unless a migration is declared. "Additive-only" becomes a check, not a convention (review risk #11).
 - **Acceptance:** a fixture removing a field or narrowing an enum fails the check with the field named; adding an optional field passes; the check runs in `verify`.
 
 ### X2. End-of-phase items
 
-Scheduled for week 8, kept here so they are not lost:
+Scheduled for stage 5.8, kept here so they are not lost:
 
 - **Bundle hygiene** (review risk #15): replace the 611 KB PNG monogram with SVG, subset or drop the 165 KB font, and split the 471 KB main chunk. Acceptance: first-load bytes reported before and after.
 - **Hotspot files** (review A2): files every change edits, such as `CHANGELOG.md`, are generated from accepted Intents instead of hand-edited, so they never serialise landings or conflict.
@@ -480,7 +480,7 @@ The 2026-10-24 external review (four reports: history and state, architecture, e
 | C8 trust per path | B2.6 |
 | C9 experimental checks, sampled review | X2 |
 | C10 agent budgets | Phase 6 |
-| Risk #1 records outweigh source | Phase 4 reads never write; P5-RC packing and collection, weeks 1–2 |
+| Risk #1 records outweigh source | Phase 4 reads never write; P5-RC packing and collection, stage 5.1 |
 | Risk #4 seven queues | Q1 controller; B1.6 deletes the push queues |
 | Risk #6 Git in the native path | SP1 decision; P5-SG deletes the projection |
 | Risk #9 `peers` writes | Phase 4 reads never write |
