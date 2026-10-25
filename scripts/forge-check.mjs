@@ -32,7 +32,7 @@ if (process.env.FORGE_ACTIONS_PLAN) {
     runActionsCheck();
   } catch (error) {
     // A failed child already printed its own output; anything else would otherwise exit silently.
-    if (error.status === undefined && !error.signal) console.error(error);
+    if (error.status == null && !error.signal) console.error(error);
     process.exit(error.signal === 'SIGKILL' ? 137 : (error.status ?? 1));
   }
   process.exit(0);

@@ -267,9 +267,12 @@ test('status, making-of, accounting, push and coverage readers agree with legacy
       coverage: latestCheckCoverage(store, run.head),
     };
   };
-  // Observation timestamps are injected by each making-of read.
+  // Observation timestamps are injected by each making-of read. Both reads see one
+  // clock so a millisecond between them cannot change event-derived times.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const before = inspect(legacy),
     after = inspect(data);
+  t.mock.timers.reset();
   delete before.makingOf.observedAt;
   delete after.makingOf.observedAt;
   assert.deepEqual(after, before);
