@@ -1,4 +1,5 @@
 import { collectRecords } from './work-record-collection.js';
+import { withMetricRequester } from './self-metrics-journal.js';
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { landingWorkerSignal, assertLandingWorkerActive } from './landing-worker-context.js';
 import { withDetachedChecks } from './check-execution-context.js';
@@ -316,6 +317,11 @@ export class WorkService {
     });
   }
   execute(input: unknown, expectedRevision: number, options: { compact?: boolean } = {}) {
+    return withMetricRequester(input, localActor(this.actor.kind, this.actor.id), () =>
+      this.executeRequest(input, expectedRevision, options),
+    );
+  }
+  private executeRequest(input: unknown, expectedRevision: number, options: { compact?: boolean }) {
     if (this.store.native)
       return nativeExecute(this.store, input, expectedRevision, { ...options, actor: this.actor });
     const parsed = commandSchema.safeParse(input);
@@ -399,7 +405,9 @@ export class WorkService {
     input = candidateCommand(input);
     const operation = input && typeof input === 'object' && 'action' in input ? String(input.action) : 'work';
     const dispatch = () =>
-      withWorkLockOptions({ operation }, () => this.dispatchAction(input, expectedRevision, options));
+      withMetricRequester(input, options.attribution ?? localActor(this.actor.kind, this.actor.id), () =>
+        withWorkLockOptions({ operation }, () => this.dispatchAction(input, expectedRevision, options)),
+      );
     return this.detachedChecks ? withDetachedChecks(dispatch) : dispatch();
   }
   private async dispatchAction(
@@ -807,7 +815,7 @@ export class WorkService {
           parent: command.expectedHead,
           message: command.message,
           at,
-          actor: localActor(this.actor.kind),
+          actor: localActor(this.actor.kind, this.actor.id),
         };
         this.store.save(data);
         this.recover(data);

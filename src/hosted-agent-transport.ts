@@ -1,3 +1,10 @@
+import { dirname, basename, resolve } from 'node:path';
+import {
+  withLifecycleMetric,
+  metricOperationId,
+  metricRequesterActor,
+  recordOwnerMutation,
+} from './self-metrics-journal.js';
 // SPDX-License-Identifier: Apache-2.0
 import { SourceAuthorityStaleError } from './hosted-source-authority.js';
 import { rememberSourceAuthorityError } from './source-authority-client.js';
@@ -56,6 +63,20 @@ export class HostedAgentTransport {
     ),
   ) {}
   async dispatch(requestedAction: string, input: Record<string, unknown>): Promise<HostedAgentResponse> {
+    if (['capabilities', 'status', 'observe'].includes(requestedAction))
+      return this.dispatchRequest(requestedAction, input);
+    const metricRoot = resolve(this.root);
+    return withLifecycleMetric(
+      dirname(metricRoot),
+      { ...input, action: requestedAction },
+      () => this.dispatchRequest(requestedAction, input),
+      `${basename(metricRoot)}.forge-metrics.jsonl`,
+    );
+  }
+  private async dispatchRequest(
+    requestedAction: string,
+    input: Record<string, unknown>,
+  ): Promise<HostedAgentResponse> {
     const action = hostedAgentAction(requestedAction);
     invariant(
       hostedAgentAddressSchema.safeParse(this.address).success &&
@@ -86,6 +107,7 @@ export class HostedAgentTransport {
         );
       }
       const capabilities = hostedAgentCapabilitiesSchema.parse(discovery);
+      metricRequesterActor({ kind: 'agent', name: capabilities.actor });
       invariant(
         capabilities.projectId === this.address.projectId,
         'PROJECT_UNAVAILABLE',
@@ -112,6 +134,7 @@ export class HostedAgentTransport {
           command.data,
           operationId as string | undefined,
         );
+      metricOperationId(journal.operationId);
       const session: HostedAgentSession = {
         root,
         address: this.address,
@@ -184,6 +207,8 @@ export class HostedAgentTransport {
       ...args,
       projectId: this.address.projectId,
     });
+    const metricRoot = resolve(this.root);
+    recordOwnerMutation(dirname(metricRoot), undefined, `${basename(metricRoot)}.forge-metrics.jsonl`);
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }
   private async observe(command: z.infer<typeof hostedAgentCommandSchemas.status>) {

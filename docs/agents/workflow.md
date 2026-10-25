@@ -1007,3 +1007,37 @@ are context; recording one does not change policy, grant access or enable the
 behavior it describes. Native portable Work export/restore retains these records.
 The optional additive `decisions` collection uses version-1 decision records and
 requires no Work format bump. Existing checkpoints without decisions stay unchanged.
+
+### Local self-metric records
+
+Agent `start`, `checkpoint` (`save`), `sync`, `finish` and `land` responses append
+local lifecycle receipts with the requester, operation ID and final structured
+error codes. Work commits append requester-attributed mutation receipts, including
+cancellations; nested phases retain the original requester. Automatic writes name
+the Forge owner as their system requester. These append-only records live in
+`self-metrics.jsonl` beside Work metadata. Hosted clients append to
+`<checkout>.forge-metrics.jsonl` beside the checkout, so a failed capability lookup
+creates neither an owner nor a recovery cache. Recording adds no hosted mutation or polling. A receipt-write failure
+reports `METRIC_RECEIPT_UNAVAILABLE` without changing the action's outcome.
+Mutation receipts are emitted only after the Work commit pointer is published,
+with its committed revision; no-op, refused and aborted writes emit none.
+Format/compatibility refusals and argument-validation failures emit no lifecycle
+receipt. Errors rejected before opening a valid store are outside metric 2's
+coverage; recording them must not create files in the refused store.
+
+`readSelfMetrics(reader, { from, to, asOf? })` in `src/self-metrics.ts` calculates
+metrics 1, 2, 3, 5 and 6. The period includes `from` and excludes `to`; days are UTC
+and `asOf` fixes the dropped-submission test. `nativeSelfMetricsReader(owner)`
+reads a pinned Work manifest directly, without constructing a Work service or
+waking workers. `hostedSelfMetricsReader(source)` accepts revision-pinned hosted
+table pages, immutable object bytes and local lifecycle receipts through the
+same small reader interface. Missing receipts, input pages, runner durations,
+reuse facts and delivery history produce named partial results. Unknown values
+are `null`; available timing sums remain partial subtotals. Friction prose and
+automation definitions never substitute for execution or caller-delivery facts.
+Manual service restarts outside Forge have no requester record and remain a
+coverage gap. There is no metrics command or product surface yet.
+Readers ignore an unterminated final journal line without changing its bytes.
+The output counts it in `incompleteReceiptRecords` and marks receipt-dependent
+metrics partial; complete earlier receipts remain available. Malformed complete
+records still fail explicitly.

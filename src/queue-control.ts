@@ -10,12 +10,16 @@ import {
 } from './check-queue.js';
 import { workLocked } from './work-lock.js';
 import { invariant } from './errors.js';
+import { appendSelfMetric } from './self-metrics-journal.js';
+import { localActor, type WorkActor } from './work-actor.js';
+import { nativeOwner } from './native-source.js';
 
 /** Ticket markers are idempotent and scoped to immutable process/ticket identities. */
 export function controlQueue(
   action: 'list' | 'cancel' | 'prioritize',
   operation?: string,
   directory = checkQueueDirectory(),
+  requester: WorkActor = localActor('person'),
 ) {
   const entries = queueEntries(directory).sort(compareTickets);
   if (action === 'list') {
@@ -38,8 +42,34 @@ export function controlQueue(
   }
   invariant(operation, 'BAD_ARGUMENT', 'Queue mutation requires an operation id.');
   const selected = operationTickets(operation, directory);
-  if (action === 'cancel') return { operation, cancelled: cancelTickets(operation, directory) };
-  return workLocked(join(directory, 'admission.lock'), () => {
+  const record = () => {
+    const roots = new Set(selected.flatMap(item => (item.ticket?.root ? [item.ticket.root] : [])));
+    for (const root of roots) {
+      try {
+        const owner = nativeOwner(root);
+        if (owner)
+          appendSelfMetric(join(owner, '.forge', 'work'), {
+            schema: 1,
+            kind: 'mutation',
+            at: new Date().toISOString(),
+            action: `queue-${action}`,
+            operationId: operation,
+            actor: requester,
+            origin: 'command',
+          });
+      } catch {
+        process.emitWarning('Queue mutation metric could not be recorded.', {
+          code: 'METRIC_RECEIPT_UNAVAILABLE',
+        });
+      }
+    }
+  };
+  if (action === 'cancel') {
+    const cancelled = cancelTickets(operation, directory);
+    if (cancelled) record();
+    return { operation, cancelled };
+  }
+  const result = workLocked(join(directory, 'admission.lock'), () => {
     const first =
       Math.min(
         0,
@@ -60,6 +90,8 @@ export function controlQueue(
     }
     return { operation, prioritized: selected.length };
   });
+  if (result.prioritized) record();
+  return result;
 }
 export function queueCli(args: string[]) {
   const [action, operation] = args;

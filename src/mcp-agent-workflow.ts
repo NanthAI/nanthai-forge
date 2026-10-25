@@ -1,4 +1,5 @@
 import { registerAgentWait } from './mcp-agent-wait.js';
+import { localActor } from './work-actor.js';
 import { overlapNotifications } from './mcp-overlap-notifications.js';
 import { candidateActionSchema } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -49,7 +50,12 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
     async ({ action, operation }) => {
       try {
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify(controlQueue(action, operation)) }],
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(controlQueue(action, operation, undefined, localActor('agent'))),
+            },
+          ],
         };
       } catch (error) {
         return {

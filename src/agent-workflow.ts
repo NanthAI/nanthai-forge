@@ -1,4 +1,5 @@
 import { recordDecision, readDecisions } from './decisions.js';
+import { withLifecycleMetric, metricOperationId } from './self-metrics-journal.js';
 import { previewMeasurements } from './preview-accounting.js';
 import { trainAccounting } from './train-accounting.js';
 import { scheduleIntegrationPreview } from './integration-preview-auto.js';
@@ -80,6 +81,9 @@ export class AgentWorkflow {
     this.work = new WorkService(root, localAgent(), liveMcp);
   }
   async dispatch(input: unknown) {
+    return this.dispatchRequest(input);
+  }
+  private async dispatchRequest(input: unknown) {
     let selected = candidateCommand(input);
     const retainedResolved: Record<string, unknown> = {};
     if (
@@ -135,32 +139,34 @@ export class AgentWorkflow {
     const waitMs =
       settings.lockWaitMs ??
       (['start', 'checkpoint', 'sync'].includes(settings.action ?? '') ? settings.waitMs : undefined);
-    return withWorkLockOptions(
-      {
-        waitMs,
-        operation: settings.action,
-        actor:
-          settings.actor ??
-          process.env.FORGE_AGENT_NAME ??
-          process.env.FORGE_ACTOR ??
-          `Agent workflow (pid ${process.pid})`,
-      },
-      () =>
-        withWorkProgress(
-          {
-            ...(settings.operationId ? { operationId: settings.operationId } : {}),
-            actor:
-              settings.actor ??
-              process.env.FORGE_AGENT_NAME ??
-              process.env.FORGE_ACTOR ??
-              `pid ${process.pid}`,
-            ...(settings.action ? { phase: settings.action } : {}),
-          },
-          () =>
-            SNAPSHOT_READ_ACTIONS.has(settings.action ?? '')
-              ? this.work.store.observing(() => this.dispatchAction(parsed, retainedResolved))
-              : this.dispatchAction(parsed, retainedResolved),
-        ),
+    return withLifecycleMetric(this.work.store.directory, parsed, () =>
+      withWorkLockOptions(
+        {
+          waitMs,
+          operation: settings.action,
+          actor:
+            settings.actor ??
+            process.env.FORGE_AGENT_NAME ??
+            process.env.FORGE_ACTOR ??
+            `Agent workflow (pid ${process.pid})`,
+        },
+        () =>
+          withWorkProgress(
+            {
+              ...(settings.operationId ? { operationId: settings.operationId } : {}),
+              actor:
+                settings.actor ??
+                process.env.FORGE_AGENT_NAME ??
+                process.env.FORGE_ACTOR ??
+                `pid ${process.pid}`,
+              ...(settings.action ? { phase: settings.action } : {}),
+            },
+            () =>
+              SNAPSHOT_READ_ACTIONS.has(settings.action ?? '')
+                ? this.work.store.observing(() => this.dispatchAction(parsed, retainedResolved))
+                : this.dispatchAction(parsed, retainedResolved),
+          ),
+      ),
     );
   }
   private async dispatchAction(parsed: AgentAction, retainedResolved: Record<string, unknown> = {}) {
@@ -174,6 +180,7 @@ export class AgentWorkflow {
     if (identity.action === 'finish') delete identity.wait;
     const store = this.work.store,
       { command, resolved: defaultResolved } = resolveAgentDefaults(store, identity);
+    if ('operationId' in command && command.operationId) metricOperationId(command.operationId);
     const filled = { ...retainedResolved, ...defaultResolved };
     const resolved = Object.keys(filled).length ? filled : undefined;
     if (command.action === 'tests') return agentLaneTests(store, command.laneId);

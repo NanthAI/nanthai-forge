@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { packRecord, unpackRecord } from './work-record-codec.js';
 import { recordPendingExchange } from './pending-exchange.js';
+import { recordOwnerMutation } from './self-metrics-journal.js';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { readSource } from './files.js';
@@ -376,6 +377,7 @@ export function publishRecords(directory: string, manifest: RecordManifest) {
   recordPendingExchange(directory, manifest.fields.revision as number);
   renameSync(temp, join(directory, 'work.json'));
   syncDirectory(directory);
+  recordOwnerMutation(directory, manifest.fields.revision as number);
 }
 /** Write content-addressed pages only; nothing is visible until `publishRecords` switches the pointer. */
 export function stageRecords(directory: string, value: Record<string, unknown>): RecordManifest {

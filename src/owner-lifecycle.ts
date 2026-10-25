@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ensureLaneDirectory } from './agent-lane-directory.js';
+import { withMetricRequester } from './self-metrics-journal.js';
 import { automaticCleanup } from './work-auto-clean.js';
 import type { OwnerLifecycle } from './owner-lifecycle-schema.js';
 import { digest } from './hash.js';
@@ -8,6 +9,16 @@ import { agentAbandon } from './agent-abandon.js';
 import type { WorkStore } from './work-store.js';
 /** Retry the same lifecycle event before examining current state, even after a later reopen. */
 export function applyOwnerLifecycle(
+  store: WorkStore,
+  command: OwnerLifecycle,
+  operationId: string,
+  actor: { kind: 'person' | 'agent'; name: string },
+) {
+  return withMetricRequester({ action: command.action, operationId }, actor, () =>
+    applyRequestedOwnerLifecycle(store, command, operationId, actor),
+  );
+}
+function applyRequestedOwnerLifecycle(
   store: WorkStore,
   command: OwnerLifecycle,
   operationId: string,
