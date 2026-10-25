@@ -145,7 +145,8 @@ default deployment. To delete the project ROOT itself is bound to, explicitly ad
 
 The command reads the owner's project metadata, retains the operation UUID and
 expected revision privately under ROOT's Work directory before submitting, prints
-progress, and polls for up to sixty observations one second apart. Completion
+progress, and waits for up to ten observations, backing off from two seconds to
+ten seconds between reads. Completion
 prints `purgeComplete: true` and the observed tombstone (`removal: "deleted"`,
 `name: ""`, `currentBackup: null`). `--json` emits progress and result JSON lines.
 A pending purge exits with `HOST_DELETE_PENDING`; an interrupted request or poll
@@ -155,6 +156,15 @@ requests. Owner/authentication and server concurrency errors remain explicit. An
 explicit retry refreshes pins after a definite `WORK_STALE` rejection, or when a
 newer active project revision proves the earlier deletion could not have committed.
 Unknown outcomes retain the original operation and revision.
+
+Projects with R2 data remain `deleting` until every prefix DELETE succeeds. If
+maintenance is disabled, the purge records `R2_MAINTENANCE_DISABLED` and schedules
+nothing further. The CLI names the required backend setting,
+`FORGE_R2_MAINTENANCE=1`; after it is enabled, retry the same command to resume.
+Transient R2 errors retry the saved page up to eight attempts, with delays doubling
+from one minute to a fifteen-minute cap. Exhaustion records
+`R2_PURGE_RETRY_EXHAUSTED`; resolve the storage error and retry the command. Retries
+reuse one tracked chain per project, and completed tombstones schedule no purge.
 
 Permanent removal deletes the project's hosted source, Work, backups, grants and
 project settings through the existing scheduled purge. Its minimal tombstone and

@@ -432,3 +432,82 @@ test('a known stale rejection can retry and resume a different removal already u
   assert.notEqual(requests[1].operationId, requests[0].operationId);
   assert.equal(requests[1].expectedRevision, 8);
 });
+
+test('blocked R2 maintenance is actionable immediately and retry retains the original delete operation', async t => {
+  const f = setup(t),
+    requests = [];
+  f.client.mutation = async (_ref, args) => {
+    requests.push(args);
+    f.project({
+      id: 'project',
+      slug: 'synthetic',
+      name: 'Synthetic',
+      revision: 8,
+      currentBackup: null,
+      removal: 'deleting',
+      purgeBlocked: 'R2_MAINTENANCE_DISABLED',
+    });
+  };
+  await assert.rejects(
+    deleteHostedProject(f.root, f.options, {
+      client: f.client,
+      wait: async () => assert.fail('blocked purge must not poll'),
+    }),
+    error =>
+      error.code === 'R2_MAINTENANCE_DISABLED' &&
+      error.message.includes('FORGE_R2_MAINTENANCE=1') &&
+      error.message.includes('retry this command'),
+  );
+  const reads = f.calls.length;
+  f.client.mutation = async (_ref, args) => {
+    requests.push(args);
+    f.project({
+      id: 'project',
+      slug: 'synthetic',
+      name: '',
+      revision: 8,
+      currentBackup: null,
+      removal: 'deleted',
+    });
+  };
+  assert.equal((await deleteHostedProject(f.root, f.options, { client: f.client })).purgeComplete, true);
+  assert.deepEqual(requests[1], requests[0]);
+  assert.equal(reads, 2, 'one initial read and one blocked status read');
+});
+
+test('CLI names retry exhaustion without claiming completion', async t => {
+  const f = setup(t);
+  f.client.mutation = async () => {
+    f.project({
+      id: 'project',
+      slug: 'synthetic',
+      name: 'Synthetic',
+      revision: 8,
+      currentBackup: null,
+      removal: 'deleting',
+      purgeBlocked: 'R2_PURGE_RETRY_EXHAUSTED',
+    });
+  };
+  await assert.rejects(
+    deleteHostedProject(f.root, f.options, { client: f.client }),
+    error => error.code === 'R2_PURGE_RETRY_EXHAUSTED' && error.message.includes('R2 storage failure'),
+  );
+});
+
+test('CLI observation backs off modestly and stops at ten observations', async t => {
+  const f = setup(t),
+    delays = [];
+  f.client.mutation = async () => null;
+  await assert.rejects(
+    deleteHostedProject(f.root, f.options, {
+      client: f.client,
+      wait: async (delay, signal) => {
+        assert.equal(signal.aborted, false);
+        delays.push(delay);
+      },
+    }),
+    code('HOST_DELETE_PENDING'),
+  );
+  assert.deepEqual(delays, [2000, 4000, 8000, 10000, 10000, 10000, 10000, 10000, 10000]);
+  assert.equal(f.calls.length, 11, 'one lookup plus ten finite status reads');
+});

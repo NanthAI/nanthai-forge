@@ -5,7 +5,13 @@ import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, internalMutation, internalQuery } from './cliServer';
 import type { Doc } from './_generated/dataModel';
-import { projectBackupPreview, projectDocument, projectBackupDocument, projectRemoval } from './schema';
+import {
+  projectBackupPreview,
+  projectDocument,
+  projectBackupDocument,
+  projectRemoval,
+  projectPurgeBlocked,
+} from './schema';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { accessibleProject, activeOwnedProject } from './projectAuthority';
@@ -60,6 +66,7 @@ export const list = query({
       currentBackup: v.union(v.id('projectBackups'), v.null()),
       revision: v.number(),
       removal: v.optional(projectRemoval),
+      purgeBlocked: v.optional(projectPurgeBlocked),
     }),
   ),
   handler: async (ctx, { paginationOpts }) => {
@@ -82,6 +89,7 @@ export const list = query({
         currentBackup: project.currentBackup,
         revision: project.revision,
         ...(project.removal ? { removal: project.removal } : {}),
+        ...(project.purgeBlocked ? { purgeBlocked: project.purgeBlocked } : {}),
       })),
     };
   },

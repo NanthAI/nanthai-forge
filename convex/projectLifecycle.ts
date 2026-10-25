@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { makeFunctionReference } from 'convex/server';
+import { scheduleR2Purge } from './projectPurgeScheduling';
 import { ensureProjectSlug, slugTaken } from './urlIdentity';
 import { blobStore } from './blobStore';
 import { invariant as check } from '../src/errors';
@@ -20,6 +20,7 @@ async function schedule(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
     const task = await ctx.db.system.get(project.task);
     if (task && ['pending', 'inProgress'].includes(task.state.kind)) return;
   }
+  if (project.r2Purge && !project.r2PrefixPurged) return scheduleR2Purge(ctx, project);
   const task = await ctx.scheduler.runAfter(0, internal.projectLifecycle.purge, { projectId: project._id });
   await ctx.db.patch(project._id, { task });
 }
@@ -242,7 +243,7 @@ export const purge = internalMutation({
   returns: v.null(),
   handler: async (ctx, { projectId }) => {
     const project = await ctx.db.get(projectId);
-    if (project?.removal !== 'deleting') return null;
+    if (project?.removal !== 'deleting' || (project.r2Purge && !project.r2PrefixPurged)) return null;
     const imports = await ctx.db
       .query('projectGithubImports')
       .withIndex('by_project', q => q.eq('projectId', projectId))
@@ -436,12 +437,7 @@ export const purge = internalMutation({
         process.env.FORGE_R2_MAINTENANCE === '1') &&
       !project.r2PrefixPurged
     ) {
-      const task = await ctx.scheduler.runAfter(
-        0,
-        makeFunctionReference<'action'>('projectR2Maintenance:purgeDeletedProjectPage'),
-        { projectId },
-      );
-      await ctx.db.patch(projectId, { task });
+      await scheduleR2Purge(ctx, project);
       return null;
     }
     // The owner/key tombstone prevents an old initial-upload retry from silently recreating this project.
@@ -455,6 +451,7 @@ export const purge = internalMutation({
       work: undefined,
       removal: 'deleted',
       task: undefined,
+      purgeBlocked: undefined,
     });
     return null;
   },

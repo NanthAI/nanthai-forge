@@ -80,6 +80,27 @@ async function fixture(t) {
     x.fake.objects.set(x.fake.key(key), Buffer.from(text));
     return x.s.ctx.db.get(id);
   };
+  x.step = async (
+    task = x.s.scheduled.find(item => item.id === x.s.tables.hostedProjects.get('project').task),
+  ) => {
+    assert.ok(task, 'project retains its scheduled task');
+    x.s.tasks.set(task.id, { state: { kind: 'inProgress' } });
+    try {
+      await x.run(getFunctionName(task.fn), task.args);
+      x.s.tasks.set(task.id, { state: { kind: 'success' } });
+    } catch (error) {
+      x.s.tasks.set(task.id, { state: { kind: 'failed' } });
+      throw error;
+    }
+    return task;
+  };
+  x.startPrefix = async () => {
+    await x.s.ctx.db.patch('project', { removal: 'deleting' });
+    for (let i = 0; !x.s.tables.hostedProjects.get('project').r2Purge; i++) {
+      assert.ok(i < 5, 'metadata cleanup reaches the prefix');
+      await x.run('projectLifecycle:purge', { projectId: 'project' });
+    }
+  };
   return x;
 }
 
@@ -284,13 +305,11 @@ test('project-prefix cleanup pages R2 and never touches another prefix or an act
     x.fake.objects.set(x.fake.key(`v1/p/project/o/${String(i).padStart(3, '0')}`), Buffer.from('x'));
   await x.run('projectR2Maintenance:purgeDeletedProjectPage', { projectId: 'project' });
   assert.equal(x.fake.objects.size, 102);
-  await x.s.ctx.db.patch('project', { removal: 'deleting' });
-  await x.run('projectR2Maintenance:purgeDeletedProjectPage', { projectId: 'project' });
-  const continuation = x.s.scheduled.find(
-    item => getFunctionName(item.fn) === 'projectR2Maintenance:purgeDeletedProjectPage',
-  );
+  await x.startPrefix();
+  await x.step();
+  const continuation = x.s.scheduled.at(-1);
   assert.ok(continuation);
-  await x.run('projectR2Maintenance:purgeDeletedProjectPage', continuation.args);
+  await x.step(continuation);
   assert.equal(x.fake.objects.size, 1);
   assert.equal((await x.s.ctx.db.get('project')).r2PrefixPurged, true);
 });
@@ -367,8 +386,8 @@ test('permanent project deletion discovers pre-existing R2 rows and waits for pr
   assert.ok(
     x.s.scheduled.some(task => getFunctionName(task.fn) === 'projectR2Maintenance:purgeDeletedProjectPage'),
   );
-  await x.run('projectR2Maintenance:purgeDeletedProjectPage', { projectId: 'project' });
-  await x.run('projectLifecycle:purge', { projectId: 'project' });
+  await x.step();
+  await x.step();
   assert.equal((await x.s.ctx.db.get('project')).removal, 'deleted');
   assert.equal(x.fake.objects.size, 0);
 });
@@ -382,20 +401,20 @@ test('enabled project deletion removes untracked R2 prefix keys even without obj
   assert.ok(
     x.s.scheduled.some(task => getFunctionName(task.fn) === 'projectR2Maintenance:purgeDeletedProjectPage'),
   );
-  await x.run('projectR2Maintenance:purgeDeletedProjectPage', { projectId: 'project' });
-  await x.run('projectLifecycle:purge', { projectId: 'project' });
+  await x.step();
+  await x.step();
   assert.equal((await x.s.ctx.db.get('project')).removal, 'deleted');
   assert.equal(x.fake.objects.size, 0);
 });
 
 for (const failure of ['disabled', 'list', 'delete'])
-  test(`project-prefix cleanup reports ${failure} failure and retries its saved page to completion`, async t => {
+  test(`project-prefix ${failure} failure retains its cursor and resumes without duplicate chains`, async t => {
     const x = await fixture(t);
     for (let i = 0; i < 101; i++)
       x.fake.objects.set(x.fake.key(`v1/p/project/o/${String(i).padStart(3, '0')}`), Buffer.from('x'));
     x.fake.objects.set(x.fake.key('v1/p/other/o/keep'), Buffer.from('keep'));
-    await x.s.ctx.db.patch('project', { removal: 'deleting' });
-    await x.run('projectR2Maintenance:purgeDeletedProjectPage', { projectId: 'project' });
+    await x.startPrefix();
+    await x.step();
     const continuation = x.s.scheduled.at(-1);
     assert.equal(x.fake.objects.size, 2);
     assert.ok(continuation.args.cursor);
@@ -415,34 +434,132 @@ for (const failure of ['disabled', 'list', 'delete'])
       return runAfter(delay, ...args);
     };
     try {
-      await assert.rejects(
-        x.run('projectR2Maintenance:purgeDeletedProjectPage', continuation.args),
-        error =>
-          error.code ===
-          {
-            disabled: 'R2_MAINTENANCE_DISABLED',
-            list: 'R2_LIST_FAILED',
-            delete: 'R2_DELETE_FAILED',
-          }[failure],
-      );
+      if (failure === 'disabled') await x.step(continuation);
+      else
+        await assert.rejects(
+          x.step(continuation),
+          error =>
+            error.code ===
+            {
+              list: 'R2_LIST_FAILED',
+              delete: 'R2_DELETE_FAILED',
+            }[failure],
+        );
     } finally {
       globalThis.fetch = fetch;
       process.env.FORGE_R2_MAINTENANCE = '1';
     }
-    assert.equal(x.s.scheduled.length, scheduled + 1, 'failed actions retain a retry');
-    const retry = x.s.scheduled.at(-1);
-    assert.equal(getFunctionName(retry.fn), 'projectR2Maintenance:purgeDeletedProjectPage');
-    assert.deepEqual(retry.args, continuation.args, 'do not advance the failed page cursor');
-    assert.deepEqual(delays, [60_000]);
-    assert.equal((await x.s.ctx.db.get('project')).removal, 'deleting');
-    assert.notEqual((await x.s.ctx.db.get('project')).r2PrefixPurged, true);
+    const project = await x.s.ctx.db.get('project');
+    assert.equal(project.removal, 'deleting');
+    assert.notEqual(project.r2PrefixPurged, true);
+    assert.equal(project.r2Purge.cursor, continuation.args.cursor);
     assert.equal(x.fake.objects.size, 2);
-    await x.run(getFunctionName(retry.fn), retry.args);
-    await x.run('projectLifecycle:purge', { projectId: 'project' });
+    if (failure === 'disabled') {
+      assert.equal(x.s.scheduled.length, scheduled);
+      assert.deepEqual(delays, []);
+      assert.equal(project.purgeBlocked, 'R2_MAINTENANCE_DISABLED');
+      assert.equal(project.task, undefined);
+      await x.run('projectLifecycle:permanentlyDelete', {
+        projectId: 'project',
+        operationId: 'resume',
+        expectedRevision: project.revision,
+      });
+    } else {
+      assert.equal(x.s.scheduled.length, scheduled + 1);
+      assert.deepEqual(delays, [60_000]);
+    }
+    const retry = x.s.scheduled.at(-1);
+    assert.equal(retry.args.cursor, continuation.args.cursor);
+    assert.ok(retry.args.generation > continuation.args.generation);
+    // Stale successes/failures cannot replace the new continuation or complete it.
+    const count = x.s.scheduled.length;
+    await x.run('projectR2Maintenance:pageResult', { ...continuation.args, outcome: 'failed' });
+    await x.run('projectR2Maintenance:prefixComplete', {
+      projectId: 'project',
+      generation: continuation.args.generation,
+    });
+    await x.step(continuation);
+    assert.equal(x.s.scheduled.length, count);
+    assert.equal((await x.s.ctx.db.get('project')).r2PrefixPurged, undefined);
+    await x.step(retry);
+    await x.step();
     assert.equal((await x.s.ctx.db.get('project')).removal, 'deleted');
     assert.equal(x.fake.objects.size, 1);
     assert.ok(x.fake.objects.has(x.fake.key('v1/p/other/o/keep')));
   });
+
+test('prefix retries exhaust a finite capped backoff and owner retry resumes the same page', async t => {
+  const x = await fixture(t);
+  x.fake.objects.set(x.fake.key('v1/p/project/o/keep-until-success'), Buffer.from('x'));
+  await x.startPrefix();
+  x.fake.failDeletes = 8;
+  const delays = [],
+    runAfter = x.s.ctx.scheduler.runAfter;
+  x.s.ctx.scheduler.runAfter = (delay, ...args) => {
+    delays.push(delay);
+    return runAfter(delay, ...args);
+  };
+  for (let i = 0; i < 8; i++) {
+    const project = await x.s.ctx.db.get('project');
+    const count = x.s.scheduled.length;
+    // Both pending and in-progress task receipts coalesce owner retries.
+    await x.run('projectLifecycle:permanentlyDelete', {
+      projectId: 'project',
+      operationId: `retry-${i}`,
+      expectedRevision: project.revision,
+    });
+    x.s.tasks.set(project.task, { state: { kind: 'inProgress' } });
+    await x.run('projectLifecycle:permanentlyDelete', {
+      projectId: 'project',
+      operationId: `retry-inflight-${i}`,
+      expectedRevision: project.revision,
+    });
+    assert.equal(x.s.scheduled.length, count);
+    await assert.rejects(x.step(), error => error.code === 'R2_DELETE_FAILED');
+  }
+  assert.deepEqual(delays, [60_000, 120_000, 240_000, 480_000, 900_000, 900_000, 900_000]);
+  const project = await x.s.ctx.db.get('project');
+  assert.equal(project.purgeBlocked, 'R2_PURGE_RETRY_EXHAUSTED');
+  assert.equal(project.task, undefined);
+  assert.equal(project.r2Purge.failures, 8);
+  assert.equal(project.removal, 'deleting');
+  assert.equal(x.fake.objects.size, 1);
+  await x.run('projectLifecycle:permanentlyDelete', {
+    projectId: 'project',
+    operationId: 'explicit-resume',
+    expectedRevision: project.revision,
+  });
+  assert.equal((await x.s.ctx.db.get('project')).purgeBlocked, undefined);
+  await x.step();
+  await x.step();
+  assert.equal((await x.s.ctx.db.get('project')).removal, 'deleted');
+  assert.equal(x.fake.objects.size, 0);
+});
+
+test('deleted, active, trashed, missing and legacy unfenced deliveries do no R2 work or scheduling', async t => {
+  const x = await fixture(t);
+  await x.startPrefix();
+  const task = x.s.scheduled.at(-1);
+  const count = x.s.scheduled.length,
+    requests = x.fake.requests.length;
+  for (const removal of ['deleted', undefined, 'trash']) {
+    await x.s.ctx.db.patch('project', { removal });
+    assert.equal(await x.run('projectR2Maintenance:deletingProject', { projectId: 'project' }), false);
+    await x.step(task);
+    await x.run('projectR2Maintenance:pageResult', { ...task.args, outcome: 'failed' });
+    await x.run('projectR2Maintenance:prefixComplete', {
+      projectId: 'project',
+      generation: task.args.generation,
+    });
+  }
+  await x.s.ctx.db.patch('project', { removal: 'deleting' });
+  for (let i = 0; i < 7; i++)
+    await x.run('projectR2Maintenance:purgeDeletedProjectPage', { projectId: 'project', cursor: 'old' });
+  await x.s.ctx.db.delete('project');
+  await x.step(task);
+  assert.equal(x.s.scheduled.length, count);
+  assert.equal(x.fake.requests.length, requests);
+});
 
 const earlyPass = x => {
   const now = Date.now();

@@ -19,6 +19,7 @@ type Project = {
   revision: number;
   currentBackup: string | null;
   removal?: 'trash' | 'deleting' | 'deleted';
+  purgeBlocked?: 'R2_MAINTENANCE_DISABLED' | 'R2_PURGE_RETRY_EXHAUSTED';
 };
 const requestSchema = z.object({
   deployment: z.string(),
@@ -40,7 +41,12 @@ export type DeleteProjectOptions = {
 export async function deleteHostedProject(
   root: string,
   options: DeleteProjectOptions,
-  dependencies?: { client: CoordinationTransport; pollAttempts?: number; pollIntervalMs?: number },
+  dependencies?: {
+    client: CoordinationTransport;
+    pollAttempts?: number;
+    pollIntervalMs?: number;
+    wait?: (delay: number, signal: AbortSignal) => Promise<void>;
+  },
 ) {
   const store = new WorkStore(root),
     binding = readHostState(store).binding,
@@ -172,10 +178,22 @@ export async function deleteHostedProject(
     options.onProgress?.(
       `Permanent removal ${request.operationId}: requested; waiting for purge completion.`,
     );
-    for (let attempt = 0; attempt < (dependencies?.pollAttempts ?? 60); attempt++) {
+    const pollAttempts = dependencies?.pollAttempts ?? 10;
+    for (let attempt = 0; attempt < pollAttempts; attempt++) {
       project = await readProject();
       if (project.removal === 'deleted') return result();
-      if (attempt + 1 < (dependencies?.pollAttempts ?? 60)) await sleep(dependencies?.pollIntervalMs ?? 1000);
+      if (project.purgeBlocked)
+        throw new ForgeError(
+          project.purgeBlocked,
+          project.purgeBlocked === 'R2_MAINTENANCE_DISABLED'
+            ? `Project purge is blocked: set FORGE_R2_MAINTENANCE=1 on the backend, then retry this command to resume operation ${request.operationId}.`
+            : `R2 purge stopped after repeated storage errors. Resolve the R2 storage failure, then retry this command to resume operation ${request.operationId}.`,
+        );
+      if (attempt + 1 < pollAttempts) {
+        const delay = Math.min((dependencies?.pollIntervalMs ?? 2000) * 2 ** attempt, 10_000);
+        if (dependencies?.wait) await dependencies.wait(delay, signal);
+        else await sleep(delay, undefined, { signal });
+      }
     }
     throw new ForgeError(
       'HOST_DELETE_PENDING',

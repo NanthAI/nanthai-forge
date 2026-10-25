@@ -276,7 +276,15 @@ export const hostedWorkEventDocument = v.object({
   ...hostedWorkEventFields,
 });
 export const projectRemoval = v.union(v.literal('trash'), v.literal('deleting'), v.literal('deleted'));
+export const projectPurgeBlocked = v.union(
+  v.literal('R2_MAINTENANCE_DISABLED'),
+  v.literal('R2_PURGE_RETRY_EXHAUSTED'),
+);
 const projectFields = {
+  purgeBlocked: v.optional(projectPurgeBlocked),
+  r2Purge: v.optional(
+    v.object({ generation: v.number(), cursor: v.union(v.string(), v.null()), failures: v.number() }),
+  ),
   sourceAuthority: v.optional(sourceAuthority),
   visibility: v.optional(v.union(v.literal('private'), v.literal('public'))),
   hostingRequest: v.optional(v.string()),

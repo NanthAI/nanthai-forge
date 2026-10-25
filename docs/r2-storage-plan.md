@@ -377,13 +377,19 @@ operator command past the failing page; earlier completed pages remain applied.
 Existing explicit permanent project deletion also removes the entire R2 project
 prefix in 100-key S3 pages once maintenance is enabled. When maintenance is off, Convex-only projects need
 no R2 configuration. Once enabled, prefix cleanup also covers projects without a
-prior R2 marker, including artifact-only or orphaned uploads. A failed prefix action
-reports its error and schedules the same page again after 60 seconds, retaining its
-cursor. The project stays deleting until prefix cleanup succeeds; replaying the
-original project deletion also remains available. Already-issued PUTs can complete late;
-the lead can run the internal `projectR2Maintenance:purgeDeletedProjectPage`
-action again for the retained deleted-project tombstone after the 15-minute PUT
-expiry. No new project or source-history expiry is introduced.
+prior R2 marker, including artifact-only or orphaned uploads. Each page transaction
+retains the next scheduled task, cursor and generation; concurrent deletion retries
+and stale deliveries cannot fork another chain. Disabled maintenance records
+`purgeBlocked: R2_MAINTENANCE_DISABLED` without rescheduling. The CLI reports
+`FORGE_R2_MAINTENANCE=1` and resumes the saved page on an explicit retry after it is
+enabled. Transient errors retain the same cursor and retry at one, two, four, eight,
+then fifteen-minute intervals, stopping after eight failed attempts per page with
+`R2_PURGE_RETRY_EXHAUSTED`. An owner retry resets that page's retry budget.
+Completion remains gated on successful R2 deletes. Prefix actions stop for every
+state other than `deleting`, including retained `deleted` tombstones; old unfenced
+scheduled deliveries stop as well. Already-issued PUTs can complete late; retained
+upload cleanup receipts and explicit reconciliation remain separate from this
+finite deletion chain. No new project or source-history expiry is introduced.
 
 The weekly backup supports database-only snapshots after deployment-wide source
 bytes are in R2; see [database-only backup and restore](operations/hosted-durability.md#database-only-backup-and-restore).

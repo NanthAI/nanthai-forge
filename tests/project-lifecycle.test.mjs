@@ -738,3 +738,49 @@ test('permanent removal purges project briefing/guidance/policy in resumable bat
   assert.deepEqual(project, tombstone, 'completed purge replay is a no-op');
   assert.deepEqual([...s.tables.projectUploadCleanup], receipts);
 });
+
+test('delete retries coalesce the tracked R2 chain and owner-only list exposes resumable blockage', async () => {
+  const s = fixture(),
+    op = s.operation();
+  await s.ctx.db.patch('project', { r2Writes: true });
+  await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
+  for (let i = 0; !s.tables.hostedProjects.get('project').r2Purge; i++) {
+    assert.ok(i < 10);
+    await modules.projectLifecycle.purge._handler(s.ctx, { projectId: 'project' });
+  }
+  const original = structuredClone(s.tables.hostedProjects.get('project')),
+    count = s.scheduled.length;
+  for (const kind of ['pending', 'inProgress']) {
+    s.tasks.set(original.task, { state: { kind } });
+    for (let i = 0; i < 7; i++) {
+      await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
+      await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, s.operation());
+      await modules.projectLifecycle.purge._handler(s.ctx, { projectId: 'project' });
+    }
+    assert.equal(s.scheduled.length, count);
+  }
+  await s.ctx.db.patch('project', { task: undefined, purgeBlocked: 'R2_MAINTENANCE_DISABLED' });
+  assert.equal(
+    (await modules.projectBackups.list._handler(s.ctx, page)).page[0].purgeBlocked,
+    'R2_MAINTENANCE_DISABLED',
+  );
+  s.caller('other');
+  assert.deepEqual((await modules.projectBackups.list._handler(s.ctx, page)).page, []);
+  await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
+  assert.equal(s.scheduled.length, count);
+  s.caller('owner');
+  await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
+  const resumed = structuredClone(s.tables.hostedProjects.get('project'));
+  assert.equal(s.scheduled.length, count + 1);
+  assert.equal(resumed.purgeBlocked, undefined);
+  assert.equal(resumed.r2Purge.cursor, original.r2Purge.cursor);
+  assert.ok(resumed.r2Purge.generation > original.r2Purge.generation);
+  assert.equal(getFunctionName(s.scheduled.at(-1).fn), 'projectR2Maintenance:purgeDeletedProjectPage');
+  assert.equal(resumed.removal, 'deleting');
+  assert.equal(resumed.r2PrefixPurged, undefined);
+  // A failed scheduler receipt resumes with another fence, rather than reusing an old page token.
+  s.tasks.set(resumed.task, { state: { kind: 'failed' } });
+  await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
+  assert.equal(s.scheduled.length, count + 2);
+  assert.ok(s.tables.hostedProjects.get('project').r2Purge.generation > resumed.r2Purge.generation);
+});
