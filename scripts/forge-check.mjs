@@ -75,6 +75,8 @@ if (selection.scope === 'docs') {
     interaction: comparison?.interaction !== undefined,
   });
 } else {
-  env.FORGE_SELECTED_TESTS = JSON.stringify(selection);
+  // verify reads only scope and tests; reasons can exceed Linux's per-variable limit.
+  const { scope, domain, reason, tests } = selection;
+  env.FORGE_SELECTED_TESTS = JSON.stringify({ scope, domain, reason, tests });
   npm('run', 'verify');
 }

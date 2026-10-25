@@ -154,7 +154,9 @@ def main():
                 command = plan['command']
             elif files is None:
                 command = ['node', 'scripts/verify.mjs']
-                env['FORGE_SELECTED_TESTS'] = json.dumps(dict(plan['selection'], tests=[]))
+                # verify reads only scope and tests; reasons can exceed Linux's per-variable limit.
+                selection = plan['selection']
+                env['FORGE_SELECTED_TESTS'] = json.dumps({key: selection.get(key) for key in ('scope', 'domain', 'reason')} | {'tests': []})
                 if plan['selection']['scope'] == 'docs':
                     command = ['node', '--input-type=module', '-e',
                                "import {execFileSync as x} from 'node:child_process';import {runDocumentationChecks as d} from './scripts/check-documentation.mjs';d({npm:(...a)=>x('npm',a,{stdio:'inherit'}),node:s=>x('node',[s],{stdio:'inherit'}),interaction:" + ('true' if plan['interaction'] else 'false') + "})"]

@@ -610,7 +610,11 @@ test('Actions shard command uses the pinned complete selection and Modal worker 
     JSON.stringify({
       standard: true,
       groups: [['tests/a.test.mjs', 'tests/b.test.mjs']],
-      selection: { scope: 'full', tests: ['tests/a.test.mjs', 'tests/b.test.mjs'] },
+      selection: {
+        scope: 'full',
+        tests: ['tests/a.test.mjs', 'tests/b.test.mjs'],
+        reasons: { 'tests/a.test.mjs': 'x'.repeat(200_000) },
+      },
     }),
   );
   const previous = { plan: process.env.FORGE_ACTIONS_PLAN, shard: process.env.FORGE_ACTIONS_SHARD };
@@ -642,6 +646,8 @@ test('Actions shard command uses the pinned complete selection and Modal worker 
   runActionsCheck((command, args, options) => calls.push({ command, args, env: options.env }));
   assert.deepEqual(calls.at(-1).args, ['scripts/verify.mjs']);
   assert.deepEqual(JSON.parse(calls.at(-1).env.FORGE_SELECTED_TESTS).tests, []);
+  // Large selection reasons stay out of the environment (Linux limits one variable to 128 KiB).
+  assert.ok(Buffer.byteLength(calls.at(-1).env.FORGE_SELECTED_TESTS) < 4096);
 });
 test('remote cancellation without an owner request is an infrastructure interruption', async t => {
   const { plan, journal } = controllerFixture(t),

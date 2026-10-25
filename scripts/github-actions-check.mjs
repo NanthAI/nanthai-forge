@@ -39,7 +39,10 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
     if (shard !== 'static') throw new Error('Arbitrary commands have only a static job.');
     run(plan.command[0], plan.command.slice(1));
   } else if (shard === 'static') {
-    env.FORGE_SELECTED_TESTS = JSON.stringify({ ...plan.selection, tests: [] });
+    // verify reads only scope and tests. Selection reasons can exceed Linux's 128 KiB
+    // per-variable limit, which makes the child spawn fail with E2BIG.
+    const { scope, domain, reason } = plan.selection;
+    env.FORGE_SELECTED_TESTS = JSON.stringify({ scope, domain, reason, tests: [] });
     if (plan.selection.scope === 'docs')
       runDocumentationChecks({ npm, node: script => run('node', [script]), interaction: plan.interaction });
     else run('node', ['scripts/verify.mjs']);
