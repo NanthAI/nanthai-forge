@@ -10,7 +10,7 @@ export function shortId(id: string, kind: string): string {
   return `${kind}-${btoa(bytes).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')}`;
 }
 export function longId(id: string): string {
-  if (!/^[ilv]-[\w-]{22}$/.test(id)) return id;
+  if (!/^[ilvd]-[\w-]{22}$/.test(id)) return id;
   try {
     const hex = [...atob(id.slice(2).replaceAll('-', '+').replaceAll('_', '/') + '==')]
       .map(byte => byte.charCodeAt(0).toString(16).padStart(2, '0'))
@@ -70,6 +70,7 @@ const projectKeys = [
   'review',
   'reviewView',
   'viewId',
+  'decision',
   'workPage',
   'legacy',
   'classic',
@@ -138,6 +139,10 @@ export function routeUrlState(href = typeof location === 'undefined' ? 'http://l
     p.set(sectionKey, 'intent');
     p.set('intentTab', 'delivery');
     p.set(owner === 'local' ? 'review' : 'reviewView', longId(id));
+  }
+  if (section === 'decisions') {
+    p.set(sectionKey, 'decisions');
+    if (id) p.set('decision', longId(id));
   }
   if (section === 'planning') p.set(sectionKey, 'planning');
   if (section === 'settings') {
@@ -218,7 +223,9 @@ export function cleanUrl(
   let path = '';
   const lane = p.get('lane') || (p.has('legacy') || p.get('view') === 'work' ? p.get('laneId') : null);
   const review = p.get('review') || p.get('reviewView');
-  if (review) path = `/review/${enc(shortId(review, 'v'))}`;
+  if (section === 'decisions' || p.get('workPage') === 'decisions')
+    path = '/decisions' + (p.get('decision') ? `/${enc(shortId(p.get('decision')!, 'd'))}` : '');
+  else if (review) path = `/review/${enc(shortId(review, 'v'))}`;
   else if (lane && (tab === 'intents' || section === 'lanes' || p.has('legacy') || p.get('view') === 'work'))
     path = `/lanes/${enc(shortId(lane, 'l'))}`;
   else if (p.get('viewId')) path = `/views/${enc(shortId(p.get('viewId')!, 'v'))}`;
@@ -284,6 +291,7 @@ export function projectNavigationHref(
     'review',
     'reviewView',
     'viewId',
+    'decision',
     'workPage',
     'legacy',
     'classic',

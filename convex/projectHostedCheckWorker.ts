@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { macMachine, requireMacMachine } from './projectHostedCheckMachines';
 import { macHeartbeatSchema, verifyMacHeartbeat } from '../src/hosted-mac-lease';
 import { watchMacLease, macLeaseMs } from './projectHostedCheckLease';
 import { writableHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
@@ -36,12 +37,7 @@ async function worker(
   input: { projectId: Id<'hostedProjects'>; machineId: string; sessionId: string },
 ) {
   const { actor } = await owner(ctx, input.projectId);
-  const row = await ctx.db
-    .query('projectHostedCheckWorkers')
-    .withIndex('by_project_and_machine', q =>
-      q.eq('projectId', input.projectId).eq('machineId', input.machineId),
-    )
-    .unique();
+  const row = await requireMacMachine(ctx, input.projectId, input.machineId);
   invariant(
     row && row.actor === actor && row.sessionId === input.sessionId,
     'WORK_STALE',
@@ -92,12 +88,12 @@ export const register = mutation({
         configuration: configuration.digest,
         keyId,
       };
-      const old = await ctx.db
-        .query('projectHostedCheckWorkers')
-        .withIndex('by_project_and_machine', q =>
-          q.eq('projectId', input.projectId).eq('machineId', row.machineId),
-        )
-        .unique();
+      const old = await macMachine(ctx, input.projectId, row.machineId);
+      invariant(
+        !old || old.revokedAt === undefined,
+        'MAC_MACHINE_REVOKED',
+        `Mac machine ${row.machineId} is revoked; register a new machine identity.`,
+      );
       if (old) await ctx.db.replace(old._id, row);
       else await ctx.db.insert('projectHostedCheckWorkers', row);
       await completeCheckOperation(ctx, operation.operation, row);

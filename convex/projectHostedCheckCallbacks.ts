@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { requireMacMachine } from './projectHostedCheckMachines';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { writableHostedCheck, writeHostedCheck, completeHostedCheck } from './projectHostedCheckStore';
@@ -49,6 +50,18 @@ export async function receiveHostedCheckCallback(
     'EVIDENCE_CHANGED',
     'Provider evidence differs from the original execution, source or plan.',
   );
+  const machine =
+    run.configuration.provider === 'mac'
+      ? await requireMacMachine(ctx, input.projectId, run.configuration.machineId)
+      : null;
+  if (machine)
+    invariant(
+      machine.sessionId === run.lease?.owner &&
+        machine.configuration === run.request.expectedConfiguration &&
+        machine.keyId === run.keyId,
+      'EVIDENCE_CHANGED',
+      'Mac evidence must come from its registered execution owner.',
+    );
   const digest = checkPin(callback);
   const old = await ctx.db
     .query('projectHostedCheckCallbacks')
@@ -144,6 +157,18 @@ export async function receiveHostedCheckCallback(
       run.exitCode = result.exitCode;
       run.output = result.output;
       run.cost = result.cost;
+      if (machine)
+        run.macEvidence = {
+          provider: 'mac',
+          machineId: machine.machineId,
+          machineOwner: machine.actor,
+          registrationId: machine.sessionId,
+          reuseKey: null,
+          runnerFingerprint: checkPin({
+            runtime: run.configuration.runtime,
+            environmentFingerprint: run.configuration.environmentFingerprint,
+          }),
+        };
       await completeHostedCheck(ctx, run);
     }
   }

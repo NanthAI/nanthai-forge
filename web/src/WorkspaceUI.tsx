@@ -56,7 +56,7 @@ export function useSection<T extends string>(key: string, allowed: readonly T[],
       }
       url.searchParams.set(key, value);
       if (key === 'projectTab')
-        for (const drill of ['intent', 'lane', 'reviewView', 'viewId', 'intentTab', 'activity'])
+        for (const drill of ['intent', 'lane', 'reviewView', 'viewId', 'decision', 'intentTab', 'activity'])
           url.searchParams.delete(drill);
       if (key === 'projectTab') history.pushState(null, '', url);
       else history.replaceState(history.state, '', url);

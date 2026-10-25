@@ -266,3 +266,82 @@ test('pinned hosted accept forwards the original operation and pins without chan
     /Use workspace/,
   );
 });
+
+test('owner decision reads page immutable Work, hydrate oversized what, retain access checks and reject changed selection', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { indexedRecord } = await import('../dist/work-hosted-index.js');
+  const { readProjectedDecisions } = await import(moduleUrl('../web/src/hosted-work-index.ts'));
+  const records = JSON.parse(readFileSync(new URL('./fixtures/owner-decisions.json', import.meta.url)));
+  const huge = { ...records[0], what: 'A complete untruncated owner decision. '.repeat(2000) };
+  const entries = indexedRecord('decisions', huge.id, '', 0, huge);
+  const header = entries[0];
+  const workspace = { generationId: 'g', decisionVersion: 'v1' };
+  let calls = 0;
+  let changed = false;
+  const client = {
+    query: async (ref, args) => {
+      calls++;
+      const method = getFunctionName(ref).split(':')[1];
+      if (method === 'workspace')
+        return JSON.stringify({ ...workspace, decisionVersion: changed ? 'v2' : 'v1' });
+      if (method === 'detail') return { generationId: 'g', revision: 1, value: header.value };
+      if (args.collection === 'decisions:payload')
+        return {
+          generationId: 'g',
+          revision: 1,
+          page: entries.slice(1).map(row => ({ ...row, id: row.key })),
+          isDone: true,
+          continueCursor: '',
+        };
+      return args.paginationOpts.cursor
+        ? {
+            generationId: 'g',
+            revision: 1,
+            page: records
+              .slice(1)
+              .map((value, i) => ({ id: value.id, position: i + 1, value: JSON.stringify(value) })),
+            isDone: true,
+            continueCursor: '',
+          }
+        : {
+            generationId: 'g',
+            revision: 1,
+            page: [{ ...header, id: header.key }],
+            isDone: false,
+            continueCursor: 'next',
+          };
+    },
+  };
+  const result = await readProjectedDecisions(client, 'project', workspace);
+  assert.equal(result.length, 19);
+  assert.equal(result[0].what, huge.what);
+  assert.ok(calls > 3, 'pages and exact large payload are hydrated');
+  changed = true;
+  await assert.rejects(readProjectedDecisions(client, 'project', workspace), /source changed/);
+  await assert.rejects(
+    readProjectedDecisions(
+      {
+        query: async () => {
+          throw new Error('PROJECT_UNAVAILABLE');
+        },
+      },
+      'project',
+      workspace,
+    ),
+    /PROJECT_UNAVAILABLE/,
+  );
+  calls = 0;
+  assert.deepEqual(
+    await readProjectedDecisions(
+      {
+        query: async () => {
+          calls++;
+        },
+      },
+      'project',
+      { generationId: 'old' },
+    ),
+    [],
+  );
+  assert.equal(calls, 0, 'older optional projections render empty without reads');
+});

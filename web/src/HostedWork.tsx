@@ -1,3 +1,4 @@
+import { OwnerDecisionsRoute } from './decisions/OwnerDecisionsRoute';
 import { continueLongAction } from '../../src/long-action';
 import { ErrorToast } from './ui/Toast';
 import { routeUrlState } from './shell/location';
@@ -123,6 +124,7 @@ export default function HostedWork({
       'lanes',
       'views',
       'planning',
+      'decisions',
       'activity',
       'coordination',
       'delivery',
@@ -751,6 +753,9 @@ export default function HostedWork({
                     loading={laneRecords.loading}
                     openIntent={openIntent}
                   />
+                </LazyPage>
+                <LazyPage active={section === 'decisions'}>
+                  <OwnerDecisionsRoute />
                 </LazyPage>
                 <LazyPage active={section === 'planning'}>
                   {snapshot.capabilities?.planning || !owner ? (

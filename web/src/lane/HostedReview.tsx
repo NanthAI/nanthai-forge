@@ -1,3 +1,4 @@
+import { OwnerDecisionsDisclosure } from '../decisions/OwnerDecisionsPanel';
 import { Breadcrumbs, workHref } from '../shell/Breadcrumbs';
 import { useReadRetry } from '../ui/read-retry';
 import { ErrorToast } from '../ui/Toast';
@@ -475,6 +476,7 @@ export function HostedReview({
                 )}
               </Panel>
             )}
+            <OwnerDecisionsDisclosure intentId={view.intentId} />
             {ownerStatus?.request?.state === 'accepted' && ownerStatus.request.receipt && (
               <HostedRevertAcceptance
                 projectId={projectId}

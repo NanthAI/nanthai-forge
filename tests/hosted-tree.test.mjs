@@ -115,12 +115,12 @@ test('hosted Intents use one primary navigation and a compact page selector', as
   const workNav = html.match(/<nav[^>]*aria-label="Work pages"[\s\S]*?<\/nav>/)?.[0];
   assert.ok(workNav, 'the collection switcher is inside the Work heading');
   assert.match(workNav, /aria-label="Work views"/);
-  assert.equal((workNav.match(/<button\b/g) ?? []).length, 3);
+  assert.equal((workNav.match(/<button\b/g) ?? []).length, 4);
   assert.match(
     workNav,
     /<button[^>]*aria-pressed="true"[^>]*>(?:(?!<\/button>)[\s\S])*<span>Intents<\/span>/,
   );
-  for (const label of ['Intents', 'Lanes', 'Planning'])
+  for (const label of ['Intents', 'Lanes', 'Planning', 'Decisions'])
     assert.match(workNav, new RegExp(`<span>${label}</span>`));
   assert.doesNotMatch(workNav, /<span>Views<\/span>/);
   assert.match(html, /class="fx-mark"/);

@@ -44,6 +44,7 @@ export const workIndex = {
   checksum: makeFunctionReference<'action', Project, string>('projectWorkIndexActions:checksum'),
 };
 export type WorkIndexWorkspace = {
+  decisionVersion?: string;
   landingWorker?: import('../../src/pending-status').PendingStatus['landingWorker'];
   repairNotices?: import('../../src/agent-conflict-notice').ConflictNotice[];
   generationId: string;
@@ -257,7 +258,7 @@ export function useWorkRecord<T>(
 }
 /** Fully resolve an explicitly selected editor value before allowing a replacement write. */
 export async function readWorkRecord<T>(
-  client: ConvexReactClient,
+  client: Pick<ConvexReactClient, 'query'>,
   projectId: Id<'hostedProjects'>,
   workspace: WorkIndexWorkspace,
   collection: string,
@@ -301,4 +302,74 @@ export async function readWorkRecord<T>(
   if (latest.revision !== result.revision || latest.value !== result.value)
     return readWorkRecord(client, projectId, workspace, collection, id);
   return assembleIndexValue(collection, header, parts);
+}
+
+/** Immutable records use one-shot pages, invalidated only by the existing workspace query.
+ * No per-decision subscription, polling, or reads on unrelated Work revisions. */
+export async function readProjectedDecisions(
+  client: Pick<ConvexReactClient, 'query'>,
+  projectId: Id<'hostedProjects'>,
+  workspace: WorkIndexWorkspace,
+): Promise<import('../../src/decision-types').DecisionRecord[]> {
+  type Decision = import('../../src/decision-types').DecisionRecord;
+  if (!workspace.decisionVersion) return [];
+  const records: Decision[] = [];
+  let cursor: string | null = null;
+  do {
+    const page: Page = await client.query(workIndex.records, {
+      projectId,
+      generationId: workspace.generationId,
+      collection: 'decisions',
+      paginationOpts: { cursor, numItems: 100 },
+    });
+    if (page.generationId !== workspace.generationId)
+      throw new Error('Owner decision source changed. Read the current Work index.');
+    for (const row of page.page) {
+      const header = JSON.parse(row.value) as Decision & IndexHeader;
+      records.push(
+        header.payloadKey
+          ? await readWorkRecord<Decision>(client, projectId, workspace, 'decisions', row.id)
+          : header,
+      );
+    }
+    cursor = page.isDone ? null : page.continueCursor;
+  } while (cursor !== null);
+  const selected = await client.query(workIndex.workspace, { projectId });
+  const current = selected ? (JSON.parse(selected) as WorkIndexWorkspace) : null;
+  if (
+    current?.generationId !== workspace.generationId ||
+    current.decisionVersion !== workspace.decisionVersion
+  )
+    throw new Error('Owner decision source changed. Read the current Work index.');
+  return records;
+}
+export function useProjectedDecisions(projectId: Id<'hostedProjects'>, workspace: WorkIndexWorkspace | null) {
+  const client = useConvex();
+  const readAttempt = useReadRetry();
+  const generationId = workspace?.generationId;
+  const version = workspace?.decisionVersion;
+  const key = JSON.stringify([projectId, generationId, version]);
+  const selection = useRef(workspace);
+  selection.current = workspace;
+  const [result, setResult] = useState<{
+    key: string;
+    records: import('../../src/decision-types').DecisionRecord[];
+    error: string;
+  }>({ key: '', records: [], error: '' });
+  useEffect(() => {
+    const workspace = selection.current;
+    if (!workspace?.decisionVersion) return;
+    let active = true;
+    void readProjectedDecisions(client, projectId, workspace)
+      .then(records => {
+        if (active) setResult({ key, records, error: '' });
+      })
+      .catch(error => {
+        if (active) setResult({ key, records: [], error: hostedError(error) });
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, projectId, key, readAttempt]);
+  return result.key === key ? { ...result, loading: false } : { records: [], error: '', loading: !!version };
 }

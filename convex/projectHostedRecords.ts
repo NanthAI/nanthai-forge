@@ -131,6 +131,7 @@ export async function writeHostedRecord(
     ...identity,
     ...indexed,
     bodyId,
+    ...(record.kind === 'candidate' ? { creatorAccountId: input.actor } : {}),
     digest: ref.digest,
     bytes: ref.bytes,
   });

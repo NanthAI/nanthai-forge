@@ -1056,6 +1056,30 @@ fake providers. See the
 [check API](operations/source-exchange.md#hosted-check-api).
 
 
+Mac runs use the same signed shard and terminal callbacks through the pull-based
+`projectHostedCheckWorker`. Completion retains `macEvidence`: machine ID, machine
+owner, registration session, runner fingerprint (runtime plus environment), and
+`reuseKey`. The reuse key is explicitly null until Q3 supplies the hosted content
+key; it is not evidence reuse permission. Final acceptance copies this receipt.
+
+The single server-side sufficiency rule in `requireHostedCheckEvidence` allows Mac
+evidence for owner-controlled work under trusted/autonomous acceptance, including
+custom policies retaining `auto-on-pass`. The machine owner, check requester,
+Candidate creator and accepting account must match the project owner. Candidate
+creator provenance is written by the canonical record writer, independent of the
+account requesting its check. Missing creator provenance, supervised projects and
+outside contributors require hosted-runner evidence (`HOSTED_RUNNER_REQUIRED`).
+Modal and GitHub Actions retain their existing sufficiency rules, and unchecked
+person review remains available.
+
+`projectHostedCheckMachines:revoke` is an idempotent project-owner mutation with
+`operationId`, `authorityEpoch` and `machineId`. Revocation is checked against the
+current registration on work, control, heartbeat, callback and acceptance; rejected
+evidence returns `MAC_MACHINE_REVOKED` naming the machine. A new registration
+session cannot clear revocation. Already committed acceptances retain their original
+receipts. These decisions use indexed reads in existing transactions, with no new
+polling, timers or paid provider calls.
+
 ### Hosted check output and artifact manifests
 
 `projectHostedOutputApi` is an internal, provider-neutral collection boundary.

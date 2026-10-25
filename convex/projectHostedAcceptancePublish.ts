@@ -140,6 +140,7 @@ export async function publishAcceptance(ctx: MutationCtx, claim: LandingClaim, n
       terminalDigest: run.terminalDigest!,
       planDigest: run.planDigest!,
       executionId: run.executionId!,
+      ...(run.macEvidence ? { macEvidence: run.macEvidence } : {}),
     };
   }
   invariant(

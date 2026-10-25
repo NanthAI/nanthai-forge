@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { hostedMacEvidenceSchema } from './hosted-check.js';
 import { hostedLandingAttemptSchema } from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';
@@ -32,6 +33,7 @@ export const hostedAcceptanceSchema = z
         terminalDigest: hash,
         planDigest: hash,
         executionId: z.string().min(1),
+        macEvidence: hostedMacEvidenceSchema.optional(),
       })
       .strict()
       .nullable(),

@@ -89,6 +89,7 @@ export function HostedFrame({
   const [laneId] = useDestination('lane');
   const [intentId] = useDestination('intent');
   const [viewId] = useDestination('viewId');
+  const [decisionId] = useDestination('decision');
   const [planningItem] = useDestination('planningItem');
   const [section, setSection] = useSection('projectTab', allSections, 'overview');
   const inProject = identity && surface === 'projects' && Boolean(projectId);
@@ -112,6 +113,7 @@ export function HostedFrame({
             !laneId &&
             !intentId &&
             !viewId &&
+            !decisionId &&
             !(section === 'planning' && planningItem)
               ? { page: (section === 'intent' ? 'intents' : section) as WorkPage }
               : {})}

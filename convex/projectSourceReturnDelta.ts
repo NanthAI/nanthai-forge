@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { digest } from '../src/portable-hash';
 import { selectedTreeHeads } from '../src/owner-derived';
 import type { Doc } from './_generated/dataModel';
-import { materializeWork, type IndexEntry } from '../src/work-hosted-index';
+import { materializeWork, type IndexEntry, type IndexMetadata } from '../src/work-hosted-index';
 import { viewReadModels, viewContributors } from '../src/view-read-model';
 import type { WorkData } from '../src/work-types';
 import type { sourceManifestSchema } from '../src/work-archive-metadata';
@@ -94,7 +95,20 @@ export function prepareDelta(
     for (const lane of model.inputs)
       if (!newModels.get(id)?.inputs.some(i => i.laneId === lane.laneId))
         removedLanes.push({ collection: 'laneViews', key: `${lane.laneId}:${id}` });
-  const counts = JSON.parse(generation.metadata).counts as Record<string, number>;
+  const currentMetadata = JSON.parse(generation.metadata) as IndexMetadata;
+  const counts = currentMetadata.counts;
+  if (partial) {
+    // Unrelated source returns leave the shared workspace's decision cache valid.
+    const beforeRecords = JSON.stringify(previous.data.decisions ?? []);
+    const afterRecords = JSON.stringify(next.data.decisions ?? []);
+    if (beforeRecords !== afterRecords)
+      after.metadata.decisionVersion = digest(
+        JSON.stringify([currentMetadata.decisionVersion, beforeRecords, afterRecords]),
+      );
+    else if (currentMetadata.decisionVersion)
+      after.metadata.decisionVersion = currentMetadata.decisionVersion;
+    else delete after.metadata.decisionVersion;
+  }
   if (partial)
     for (const name of new Set([...Object.keys(counts), ...Object.keys(after.metadata.counts)])) {
       after.metadata.counts[name] =

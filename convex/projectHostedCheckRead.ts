@@ -3,7 +3,10 @@ import { v } from 'convex/values';
 import { query, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
-import { hostedWriteProject } from './projectHostedRecords';
+import { requireMacMachine } from './projectHostedCheckMachines';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { checkPin } from '../src/hosted-check';
+import { recordHead, hostedWriteProject } from './projectHostedRecords';
 import { checkSetting, loadHostedCheck, type CheckIdentity } from './projectHostedCheckStore';
 import { exactHostedCheckEvidence } from '../src/hosted-check-evidence';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -95,7 +98,7 @@ export async function requireHostedCheckEvidence(
     authorityEpoch: number;
   },
 ) {
-  await hostedWriteProject(ctx, input.projectId, input.actor, input.authorityEpoch);
+  const project = await hostedWriteProject(ctx, input.projectId, input.actor, input.authorityEpoch);
   const { run } = await loadHostedCheck(ctx, input);
   await hostedWriteProject(ctx, input.projectId, run.actor, input.authorityEpoch);
   const check = await checkSetting(ctx, input.projectId, 'definition', input.checkId);
@@ -105,5 +108,34 @@ export async function requireHostedCheckEvidence(
     'EVIDENCE_CHANGED',
     'The current check definition or runner configuration changed.',
   );
-  return exactHostedCheckEvidence(run, input);
+  exactHostedCheckEvidence(run, input);
+  if (run.configuration.provider === 'mac') {
+    const machineId = run.configuration.machineId;
+    const machine = await requireMacMachine(ctx, input.projectId, machineId);
+    const evidence = run.macEvidence;
+    invariant(
+      evidence &&
+        evidence.machineId === machineId &&
+        evidence.machineOwner === machine.actor &&
+        evidence.runnerFingerprint ===
+          checkPin({
+            runtime: run.configuration.runtime,
+            environmentFingerprint: run.configuration.environmentFingerprint,
+          }),
+      'EVIDENCE_CHANGED',
+      `Mac machine ${machineId} has no matching completed-run receipt.`,
+    );
+    const head = await recordHead(ctx, input.projectId, 'candidate', input.candidateId);
+    const candidate = head ? await ctx.db.get(head.recordId) : null;
+    invariant(
+      effectivePolicy(project).acceptance.mode === 'auto-on-pass' &&
+        machine.actor === project.owner &&
+        run.actor === project.owner &&
+        input.actor === project.owner &&
+        candidate?.creatorAccountId === project.owner,
+      'HOSTED_RUNNER_REQUIRED',
+      `Mac machine ${machineId} evidence requires owner-controlled trusted or autonomous work; supervised projects and outside contributors need hosted-runner evidence.`,
+    );
+  }
+  return run;
 }

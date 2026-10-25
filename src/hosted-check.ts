@@ -123,6 +123,18 @@ export const hostedCheckCostSchema = z.discriminatedUnion('status', [
     })
     .strict(),
 ]);
+/** Fixed-runner evidence, retained on completion and copied into acceptance.
+ * Q3 fills reuseKey with the hosted content key; null never claims reuse. */
+export const hostedMacEvidenceSchema = z
+  .object({
+    provider: z.literal('mac'),
+    machineId: z.uuid(),
+    machineOwner: text,
+    registrationId: z.uuid(),
+    reuseKey: checkHash.nullable(),
+    runnerFingerprint: checkHash,
+  })
+  .strict();
 export const hostedCheckRunSchema = z
   .object({
     schema: z.literal(1),
@@ -159,6 +171,7 @@ export const hostedCheckRunSchema = z
     cancelRequested: z.boolean(),
     counts: z.object({ completed: checkNumber, passed: checkNumber, failed: checkNumber }).strict(),
     terminalDigest: checkHash.nullable(),
+    macEvidence: hostedMacEvidenceSchema.optional(),
     endedAt: z.iso.datetime().nullable(),
     exitCode: z.number().int().nullable(),
     output: checkObject.nullable(),

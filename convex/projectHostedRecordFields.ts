@@ -21,6 +21,8 @@ export const hostedRecordFields = {
   ...identity,
   ...indexed,
   bodyId: v.id('projectHostedRecordBodies'),
+  /** Server-written Candidate creator, independent of its check requester. */
+  creatorAccountId: v.optional(v.string()),
   digest: v.string(),
   bytes: v.number(),
   lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),

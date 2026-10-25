@@ -13,6 +13,7 @@ export function hostedHref(params: Record<string, string>): string {
     'reviewView',
     'checkRun',
     'viewId',
+    'decision',
     'planningItem',
     'classic',
     'delegate',

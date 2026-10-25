@@ -6,7 +6,7 @@ export const projectTabs: readonly ProjectTab[] = ['now', 'intents', 'code', 'se
 /** Hosted project pages (HostedWork `projectTab`) grouped under the four destinations. */
 export const hostedSections = {
   now: ['overview', 'activity', 'coordination'],
-  intents: ['intent', 'lanes', 'views', 'planning'],
+  intents: ['intent', 'lanes', 'views', 'planning', 'decisions'],
   code: ['delivery'],
   settings: [
     'sharing',

@@ -14,6 +14,7 @@ export const hostedCheckTables = {
   projectHostedCheckWorkers: defineTable({
     projectId: v.id('hostedProjects'),
     machineId: v.string(),
+    revokedAt: v.optional(v.number()),
     sessionId: v.string(),
     actor: v.string(),
     configuration: v.string(),

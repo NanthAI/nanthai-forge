@@ -89,6 +89,7 @@ const paths = {
   ),
   chevron: <path d="m6 4 4 4-4 4" {...s} />,
   down: <path d="m4 6 4 4 4-4" {...s} />,
+  undo: <path d="M3 7h7a3 3 0 0 1 0 6H8M3 7l3-3M3 7l3 3" {...s} />,
   back: <path d="M10 4 6 8l4 4" {...s} />,
   more: (
     <>

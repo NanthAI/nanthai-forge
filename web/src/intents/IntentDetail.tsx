@@ -1,3 +1,6 @@
+import { OwnerDecisionsPanel } from '../decisions/OwnerDecisionsPanel';
+import { useOwnerDecisions } from '../decisions/context';
+import { decisionTimeline } from '../decisions/model';
 import { queueHref } from '../cockpit/queue-model';
 import { useGenerationFreshness } from '../ui/generation-freshness';
 // SPDX-License-Identifier: Apache-2.0
@@ -110,6 +113,10 @@ export function IntentDetailView({
   startIntentId?: string;
   canStart?: boolean;
 }) {
+  const ownerDecisions = useOwnerDecisions();
+  timeline = [...timeline, ...decisionTimeline(ownerDecisions.records, row.id)].sort(
+    (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
+  );
   const freshness = useGenerationFreshness();
   views = views.map(view => ({
     ...view,
@@ -386,7 +393,8 @@ export function IntentDetailView({
         </>
       }
     >
-      {row.lanes.length === 0 && details}
+      {details}
+      <OwnerDecisionsPanel intentId={row.id} />
       {row.lanes.length > 0 && (
         <WorkMap
           compact
@@ -472,8 +480,6 @@ export function IntentDetailView({
           base={base}
         />
       )}
-
-      {row.lanes.length > 0 && details}
     </WorkDetailLayout>
   );
 }

@@ -1,3 +1,4 @@
+import { OwnerDecisionsPointer } from '../decisions/OwnerDecisionsPanel';
 import { useGenerationFreshness } from '../ui/generation-freshness';
 import { usePageCritical } from '../ui/page-critical';
 import { ErrorToast } from '../ui/Toast';
@@ -258,6 +259,7 @@ export function HostedNowView({
                 loading={loading}
                 href={lane => laneHref(lane.id)}
               />
+              <OwnerDecisionsPointer />
               <Overlaps
                 rows={overlaps}
                 laneHref={laneHref}

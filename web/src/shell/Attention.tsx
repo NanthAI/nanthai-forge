@@ -1,3 +1,5 @@
+import { ErrorToast } from '../ui/Toast';
+import { OwnerDecisionsContext, ownerDecisionLinks } from '../decisions/context';
 import { queueStatus, queueFacts } from '../cockpit/queue-model';
 import { hostedFreshness } from '../../../src/hosted-freshness';
 import { GenerationFreshness } from '../ui/generation-freshness';
@@ -24,7 +26,13 @@ import {
   withChangedFiles,
   withSessions,
 } from '../cockpit/coordination';
-import { WorkRecordsContext, useWorkRecords, workIndex, type WorkIndexWorkspace } from '../hosted-work-index';
+import {
+  WorkRecordsContext,
+  useWorkRecords,
+  useProjectedDecisions,
+  workIndex,
+  type WorkIndexWorkspace,
+} from '../hosted-work-index';
 import { WorkCountsContext } from './WorkHeader';
 import { useNow } from './StatusBar';
 import { AttentionContext as Context } from './attention-context';
@@ -72,6 +80,7 @@ export function HostedAttention({
 }) {
   const raw = useQuery(workIndex.workspace, { projectId });
   const workspace = useMemo(() => (raw ? (JSON.parse(raw) as WorkIndexWorkspace) : null), [raw]);
+  const ownerDecisions = useProjectedDecisions(projectId, workspace);
   const intents = useWorkRecords<CockpitWork['intents'][number]>(projectId, workspace, 'intents');
   const lanes = useWorkRecords<CockpitWork['lanes'][number]>(projectId, workspace, 'lanes');
   const views = useWorkRecords<CockpitWork['views'][number]>(projectId, workspace, 'views');
@@ -181,6 +190,7 @@ export function HostedAttention({
   const counts = workspace?.counts;
   return (
     <GenerationFreshness.Provider value={workspace?.freshness ?? null}>
+      {ownerDecisions.error && <ErrorToast>{ownerDecisions.error}</ErrorToast>}
       <AcceptedToast accepted={arrival} onClose={clearArrival} />
       <div className={hostedFreshness(workspace?.freshness).behind ? 'fx-hosted-behind' : undefined}>
         <WorkCountsContext.Provider
@@ -188,6 +198,7 @@ export function HostedAttention({
             ...(counts?.intents !== undefined ? { intents: counts.intents } : {}),
             ...(counts?.lanes !== undefined ? { lanes: counts.lanes } : {}),
             ...(counts?.views !== undefined ? { views: counts.views } : {}),
+            ...(counts?.decisions !== undefined ? { decisions: counts.decisions } : {}),
             ...(workspace?.capabilities.planning &&
             workspace.capabilities.owner &&
             counts?.planningItems !== undefined
@@ -213,7 +224,18 @@ export function HostedAttention({
             }}
           >
             <CoordinationContext.Provider value={live}>
-              <Context.Provider value={value}>{children}</Context.Provider>
+              <OwnerDecisionsContext.Provider
+                value={{
+                  records: ownerDecisions.records,
+                  loading: ownerDecisions.loading,
+                  unavailable: !!ownerDecisions.error,
+                  intents: intents.records,
+                  now,
+                  links: ownerDecisionLinks,
+                }}
+              >
+                <Context.Provider value={value}>{children}</Context.Provider>
+              </OwnerDecisionsContext.Provider>
             </CoordinationContext.Provider>
           </WorkRecordsContext.Provider>
         </WorkCountsContext.Provider>

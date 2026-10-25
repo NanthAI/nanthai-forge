@@ -594,3 +594,51 @@ test('summary pages resolve a repeated actor once per request and keep fresh nam
   await assert.rejects(page(s, 'perf-actors'), error => error.data?.code === 'PROJECT_UNAVAILABLE');
   assert.equal(names, 2);
 });
+
+test('owner decisions project additively into the shared workspace and exact collection without a format bump', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { parseWork } = await import('../dist/work-unified-types.js');
+  const records = JSON.parse(readFileSync(new URL('./fixtures/owner-decisions.json', import.meta.url)));
+  const head = 'a'.repeat(64);
+  const data = parseWork(
+    {
+      schema: 22,
+      intentMergeReceipt: {
+        converter: 'intent-merge-v1',
+        fromSchema: 21,
+        toSchema: 22,
+        counts: { before: {}, after: {}, foldedPairs: 0 },
+        hashes: { input: head, output: head, intents: head, planningItems: head, planningComments: head },
+      },
+      revision: 1,
+      nativeHead: head,
+      intents: [],
+      lanes: [],
+      views: [],
+      decisions: records,
+    },
+    true,
+  );
+  const manifest = {
+    schema: 1,
+    kind: 'forge-native-work-backup',
+    id: randomUUID(),
+    head,
+    revision: 1,
+    files: [{ path: `objects/${head}`, sha256: head, size: 1 }],
+    unavailable: [],
+    coverage: '',
+  };
+  const result = materializeWork(data, manifest, []);
+  assert.equal(result.metadata.schema, 22);
+  assert.equal(result.metadata.counts.decisions, 19);
+  assert.equal(typeof result.metadata.decisionVersion, 'string');
+  assert.equal(result.metadata.decisions, undefined);
+  assert.deepEqual(
+    result.entries.filter(row => row.collection === 'decisions').map(row => JSON.parse(row.value)),
+    records,
+  );
+  const older = materializeWork({ ...data, decisions: undefined }, manifest, []);
+  assert.equal(older.metadata.decisionVersion, undefined);
+  assert.equal(older.metadata.counts.decisions, 0);
+});

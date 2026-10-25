@@ -4,20 +4,20 @@ Forge tracks two kinds of thing: **source** (the files, stored as immutable snap
 
 ## Core model
 
-| Term | Plain meaning | Git analogy |
-| --- | --- | --- |
-| **State** | An immutable snapshot of every file (paths, content hashes, modes) plus its parent States. | commit |
-| **Intent** | An outcome someone wants, with notes and a status (`active`, `ready`, `completed`, `abandoned`). | issue / PR description |
-| **Lane** | An isolated working directory for one contributor to an Intent. Has a base State, a head State and checkpoints. | branch + worktree |
-| **Checkpoint** | Saving a Lane's current files as a new State. | commit |
-| **Sync** | Merging the latest accepted source (usually `main`) into a Lane, so the Lane sees everyone else's accepted work. | `git pull` |
-| **Candidate** | An exact, pinned combination of one or more Lane heads on top of a base, ready to check and review. | merge preview / PR head |
-| **Check** | A command definition (executable + arguments). A **run** records the exact Candidate, definition, environment and result. | CI job |
-| **Channel** | A named pointer to accepted source, e.g. `main`. Moved by **accepting** a clean Candidate; agents require a passing exact-Candidate check, while people can accept under review. | protected branch |
+| Term           | Plain meaning                                                                                                                                                                    | Git analogy             |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| **State**      | An immutable snapshot of every file (paths, content hashes, modes) plus its parent States.                                                                                       | commit                  |
+| **Intent**     | An outcome someone wants, with notes and a status (`active`, `ready`, `completed`, `abandoned`).                                                                                 | issue / PR description  |
+| **Lane**       | An isolated working directory for one contributor to an Intent. Has a base State, a head State and checkpoints.                                                                  | branch + worktree       |
+| **Checkpoint** | Saving a Lane's current files as a new State.                                                                                                                                    | commit                  |
+| **Sync**       | Merging the latest accepted source (usually `main`) into a Lane, so the Lane sees everyone else's accepted work.                                                                 | `git pull`              |
+| **Candidate**  | An exact, pinned combination of one or more Lane heads on top of a base, ready to check and review.                                                                              | merge preview / PR head |
+| **Check**      | A command definition (executable + arguments). A **run** records the exact Candidate, definition, environment and result.                                                        | CI job                  |
+| **Channel**    | A named pointer to accepted source, e.g. `main`. Moved by **accepting** a clean Candidate; agents require a passing exact-Candidate check, while people can accept under review. | protected branch        |
 
 The Intents UI labels open work with Lane status words (Working, Waiting, Ready, Check failed, Conflict, Stale); an active Intent that has never had a Lane is Planned, shown in a quiet neutral style. Every retained Lane counts, including completed and abandoned Lanes. Starting the first Lane uses the existing start path and the normal Lane status derivation. Planned is a presentation state; the stored Intent status remains `active` for older CLIs. Completed Intents show Done with a passed check glyph; abandoned Intents stay Abandoned.
 
-Work has Intents, Lanes and Planning. Candidate pages remain linked from Intents, Lanes, review and history; the retired Candidates list redirects to Intents.
+Work has Intents, Lanes, Planning and Owner decisions. Candidate pages remain linked from Intents, Lanes, review and history; the retired Candidates list redirects to Intents.
 
 Work › Intents offers List and Board layouts. The URL records the layout and list filter; the browser remembers the layout per signed-in account and project. The read-only Board groups the same derived list status into Planned, Working, Checking, Ready and Done. Planned has a five-card initial page with continuation, shows linked Initiative names and omits time-in-state. Planned Intents have their own list filter and are excluded from Open and Now work counts. Planning uses the same Work row as Intents and Lanes; clicking a row opens its full page. New Intent and New Initiative open inline forms above the groups. Unassigned Proposed Intents appear before No Initiative. Initiative groups show their derived state and linked Intent counts; export remains in the header menu. History contains versions and provenance. Code always renders one frame (file tree, file, This file); a saved head in a link only sets the Source picker, which lists main, Open Lanes, Recent Candidates (newest per Intent and Lane set) and Exact head… for a pasted hash. Without a file in the URL Code opens the root README.md, else the first file. A file shows its touching Lanes under Changing this file in the file panel, hidden when none touch it. Tree dots mark files and folders an open Lane touches, coloured by the most urgent Lane. The This file column shows Changing now, Symbols and History (recent acceptances touching the file). Code files open without a selected line; explicit line links highlight their target. Syntax comments use muted text without a background. Planning lists each Initiative’s linked Intents with Planned, Working, Ready or Done states; their links open the existing Intent hand-off path. Intents and Planning filter by Proposed, Planned, In motion, Done and All, counting the rows they display (Ready is In motion, Abandoned is Done); duplicate links within an Initiative count once. Group headers report Intent totals and in-motion counts. Search matches Intent and Initiative titles. Planning uses Intent/Status columns, and export is in the toolbar’s more-actions menu. Legacy planning records keep their stored kinds and commands. Landing shares Ready because acceptance in progress has no separate recorded Intent state. Paused, needs-you and failed checks are card flags. Counts cover the loaded records and agree with the list filters; Done includes abandoned work, shows landings from the last seven days (last activity when no acceptance time is loaded), and links to the full Done list. Done cards with loaded acceptance evidence show the landing age, including combined Candidates and their exact pinned Candidate dependencies; missing acceptance evidence omits the landing age and redundant Done card label. Other cards show Lane counts, adding a landed count only for multiple Lanes with recorded landings; progress appears only for multiple Lanes. Only recorded running, passed or failed checks show a glyph. Agent initials resolve from the same session tree and actor kinds as Now, without generic workflow or missing-actor placeholders. Columns scroll separately and reveal twenty cards at a time. On phones a counted segment picker shows one column, with Done initially collapsed.
 
@@ -39,6 +39,16 @@ Merging is line-based three-way text merge. Overlapping edits, binary files and 
 - **Exchange** — pushing and pulling between a local owner and a hosted project. Only missing content is transferred.
 
 The hosted main strip shows “Synced from <machine> <age>” only when owner reports lead the selected hosted source or an exchange is pending, adding “catching up” during the push. Its hover/focus tooltip gives recorded sync/report times and known pending work; missing names or times stay unknown. Elapsed time alone never marks a project behind. While behind, generation-derived Working/Checking statuses and check progress stay static and muted, with an as-of time. The connection no longer says Live and main’s passing check is muted. Newer completed/abandoned lifecycle metadata takes precedence over an older running check. Hosted completed Lanes without acceptance evidence say “Completed on owner machine”; their hover detail says landing details arrive with the next push. Missing exact-Candidate check evidence says “Check result not synced” while owner Work/main is ahead or an exact input Lane is reported completed. Recorded landings and check results keep their normal labels; local pages are unchanged.
+
+## Owner decisions
+
+Work › Decisions lists immutable owner decision records, grouped by the owner's decision date.
+Active, Superseded and All filters retain the complete decision text and link to each record's
+replacement chain and exact details. Intent pages show their targeted decisions below Details
+and add a recorded Timeline event; project-wide decisions stay linked by count. Review keeps
+applicable context in a collapsed disclosure. Now shows a three-record pointer only when a
+record was entered within the last seven days. These read-only surfaces reuse the hosted Work projection; immutable records are paged once
+when their version in the existing workspace response changes. They add no polling or subscriptions. Recording from the site awaits the B1.5b hosted write path.
 
 ## Autonomy
 

@@ -316,3 +316,63 @@ test('index optimization never bypasses final current-owner authorization', asyn
     false,
   );
 });
+
+test('partial source returns preserve unchanged owner decisions in the existing workspace summary', async () => {
+  const { readFileSync } = await import('node:fs');
+
+  const { prepareDelta } = await import(moduleUrl('../convex/projectSourceReturnDelta.ts'));
+  const { parseWork } = await import('../dist/work-unified-types.js');
+  const records = JSON.parse(readFileSync(new URL('./fixtures/owner-decisions.json', import.meta.url)));
+  const head = 'a'.repeat(64);
+  const data = parseWork(
+    {
+      schema: 22,
+      intentMergeReceipt: {
+        converter: 'intent-merge-v1',
+        fromSchema: 21,
+        toSchema: 22,
+        counts: { before: {}, after: {}, foldedPairs: 0 },
+        hashes: { input: head, output: head, intents: head, planningItems: head, planningComments: head },
+      },
+      revision: 1,
+      nativeHead: head,
+      intents: [],
+      lanes: [],
+      views: [],
+    },
+    true,
+  );
+  const manifest = {
+    schema: 1,
+    kind: 'forge-native-work-backup',
+    id: randomUUID(),
+    head,
+    revision: 1,
+    files: [{ path: `objects/${head}`, sha256: head, size: 1 }],
+    unavailable: [],
+    coverage: '',
+  };
+  const full = materializeWork({ ...data, decisions: records }, manifest, []);
+  const generation = { metadata: JSON.stringify(full.metadata) };
+  const snapshot = values => ({
+    data: { ...data, decisions: values },
+    manifest,
+    backup: { transport: 'objects' },
+  });
+  const unchanged = prepareDelta(snapshot([]), snapshot([]), generation, true);
+  assert.equal(unchanged.metadata.decisionVersion, full.metadata.decisionVersion);
+  assert.equal(unchanged.metadata.counts.decisions, 19);
+  const next = {
+    ...records[0],
+    id: randomUUID(),
+    operationId: randomUUID(),
+    what: 'A new owner decision',
+    supersedes: records[0].id,
+  };
+  const appended = prepareDelta(snapshot([]), snapshot([next]), generation, true);
+  assert.notEqual(appended.metadata.decisionVersion, full.metadata.decisionVersion);
+  assert.equal(appended.metadata.counts.decisions, 20);
+  const removed = prepareDelta(snapshot([records[0]]), snapshot([]), generation, true);
+  assert.notEqual(removed.metadata.decisionVersion, full.metadata.decisionVersion);
+  assert.equal(removed.metadata.counts.decisions, 18);
+});

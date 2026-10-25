@@ -2,13 +2,14 @@
 import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react';
 import { Glyph } from '../ui/Glyph';
 import { Segmented } from '../ui/primitives';
-export type WorkPage = 'intents' | 'lanes' | 'views' | 'planning';
+export type WorkPage = 'intents' | 'lanes' | 'views' | 'planning' | 'decisions';
 export type WorkCounts = Partial<Record<WorkPage, number>>;
 export const WorkCountsContext = createContext<WorkCounts>({});
 const pages = [
   { id: 'intents', label: 'Intents', glyph: 'intent' },
   { id: 'lanes', label: 'Lanes', glyph: 'lane' },
   { id: 'planning', label: 'Planning', glyph: 'initiative' },
+  { id: 'decisions', label: 'Decisions', glyph: 'claim' },
 ] as const;
 type Header = { page: WorkPage; counts: WorkCounts; onChange: (page: WorkPage) => void };
 const Context = createContext<Header | null>(null);
@@ -38,7 +39,14 @@ export function InlineWorkNav({ header }: { header: Header }) {
     root.current
       ?.querySelector('[aria-pressed="true"]')
       ?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
-  }, [header.page, header.counts.intents, header.counts.lanes, header.counts.views, header.counts.planning]);
+  }, [
+    header.page,
+    header.counts.intents,
+    header.counts.lanes,
+    header.counts.views,
+    header.counts.planning,
+    header.counts.decisions,
+  ]);
   return (
     <nav ref={root} className="fx-work-nav" aria-label="Work pages">
       <Segmented

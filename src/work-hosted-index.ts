@@ -29,6 +29,8 @@ export type IndexMetadata = {
   sourceHead: string;
   sourceKind: 'native' | 'git';
   counts: Record<string, number>;
+  /** Changes only with immutable owner records; older indexes omit it. */
+  decisionVersion?: string;
   defaultIntentId?: string | undefined;
   initialRevision: number;
   sourceTransport?: 'objects';
@@ -288,6 +290,12 @@ export function* workIndexRows(
   yield* add('automaticActions', data.automaticActions ?? [], value => value.id);
   yield* add('policyChanges', data.policyChanges ?? [], value => value.id);
   yield* add(
+    'decisions',
+    data.decisions ?? [],
+    value => value.id,
+    value => (value.target.kind === 'intent' ? value.target.intentId : ''),
+  );
+  yield* add(
     'checkpoints',
     data.lanes.flatMap(lane =>
       lane.checkpoints.map((checkpoint, index) => ({ ...checkpoint, laneId: lane.id, index })),
@@ -476,6 +484,7 @@ export function* workIndexRows(
     sourceHead: manifest.head,
     sourceKind: manifest.kind === 'forge-native-work-backup' ? 'native' : 'git',
     counts,
+    ...(data.decisions ? { decisionVersion: digest(json(data.decisions)) } : {}),
     defaultIntentId:
       [...data.intents].reverse().find(intent => intent.status === 'active')?.id ?? data.intents.at(-1)?.id,
     initialRevision: manifest.revision,
