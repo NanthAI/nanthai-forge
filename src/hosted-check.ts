@@ -50,7 +50,16 @@ export const hostedActionsRunnerSchema = z
     credential,
   })
   .strict();
+export const hostedMacRunnerSchema = z
+  .object({
+    provider: z.literal('mac'),
+    machineId: z.uuid(),
+    runtime: checkHash,
+    environmentFingerprint: checkHash,
+  })
+  .strict();
 export const hostedCheckRunnerSchema = z.union([
+  hostedMacRunnerSchema,
   z
     .object({
       provider: z.literal('modal'),
@@ -140,6 +149,9 @@ export const hostedCheckRunSchema = z
     emptyLookups: z.array(z.uuid()).max(2),
     executionId: text.nullable(),
     fence: checkNumber,
+    leaseRetries: checkNumber.optional(),
+    ownerDeadline: checkNumber.optional(),
+    failureReason: text.optional(),
     lease: z.object({ owner: z.uuid(), token: checkNumber, until: checkNumber }).strict().nullable(),
     plan: hostedCheckPlanSchema.nullable(),
     planDigest: checkHash.nullable(),

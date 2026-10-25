@@ -63,6 +63,12 @@ export async function authorizeOutput(
     'EVIDENCE_CHANGED',
     'Output differs from the retained check execution and source pins.',
   );
+  if (run.configuration.provider === 'mac' && !hostedCheckTerminal(run))
+    invariant(
+      run.lease && run.lease.until > Date.now() && !run.cancelRequested,
+      'WORK_STALE',
+      'Output requires the live Mac execution owner.',
+    );
   const stream =
     message.body.kind === 'chunk'
       ? message.body.chunk.stream

@@ -11,6 +11,14 @@ const setting = {
   value: v.string(),
 };
 export const hostedCheckTables = {
+  projectHostedCheckWorkers: defineTable({
+    projectId: v.id('hostedProjects'),
+    machineId: v.string(),
+    sessionId: v.string(),
+    actor: v.string(),
+    configuration: v.string(),
+    keyId: v.string(),
+  }).index('by_project_and_machine', ['projectId', 'machineId']),
   projectHostedCheckSettings: defineTable(setting)
     .index('by_project_and_kind_and_key', ['projectId', 'kind', 'key'])
     .index('by_project_and_kind', ['projectId', 'kind']),
@@ -24,12 +32,14 @@ export const hostedCheckTables = {
     projectId: v.id('hostedProjects'),
     runId: v.string(),
     candidateId: v.string(),
+    machineId: v.optional(v.string()),
     status: v.string(),
     value: v.string(),
   })
     .index('by_project_and_run', ['projectId', 'runId'])
     .index('by_project_and_candidate', ['projectId', 'candidateId'])
-    .index('by_project_and_status', ['projectId', 'status']),
+    .index('by_project_and_status', ['projectId', 'status'])
+    .index('by_project_and_machine_and_status', ['projectId', 'machineId', 'status']),
   projectHostedCheckCallbacks: defineTable({
     projectId: v.id('hostedProjects'),
     runId: v.string(),

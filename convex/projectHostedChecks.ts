@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { watchMacLease, macLeaseMs } from './projectHostedCheckLease';
 import { v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -75,7 +76,12 @@ export const cancel = mutation({
         run.cancelRequested = true;
         // Nothing external was submitted: cancellation is already certain. Once
         // dispatch is reserved, only the provider can acknowledge cancellation.
-        if (!run.dispatchStarted) {
+        if (!run.dispatchStarted || run.configuration.provider === 'mac') {
+          // Fencing makes cancellation immediate even when the Mac is gone.
+          if (run.configuration.provider === 'mac') {
+            run.fence++;
+            run.lease = null;
+          }
           run.status = 'cancelled';
           run.endedAt = new Date().toISOString();
           run.terminalDigest = checkPin({ kind: 'cancel-before-dispatch', request });
@@ -199,6 +205,7 @@ export async function enqueueHostedCheck(
     lease: null,
     plan: null,
     planDigest: null,
+    ...(runner.provider === 'mac' ? { ownerDeadline: Date.now() + macLeaseMs } : {}),
     status: 'queued',
     cancelRequested: false,
     counts: { completed: 0, passed: 0, failed: 0 },
@@ -212,8 +219,10 @@ export async function enqueueHostedCheck(
     projectId: input.projectId,
     runId: id,
     candidateId: request.candidateId,
+    ...(runner.provider === 'mac' ? { machineId: runner.machineId } : {}),
     status: run.status,
     value: canonicalPayload(run),
   });
+  await watchMacLease(ctx, run);
   return run;
 }

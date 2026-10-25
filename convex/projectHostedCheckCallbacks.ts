@@ -61,12 +61,19 @@ export async function receiveHostedCheckCallback(
     return run;
   }
   invariant(!hostedCheckTerminal(run), 'EVIDENCE_CHANGED', 'The original terminal result is immutable.');
+  if (run.configuration.provider === 'mac')
+    invariant(
+      run.lease && run.lease.until > now && !run.cancelRequested,
+      'WORK_STALE',
+      'The Mac execution no longer has a live owner.',
+    );
   run.executionId = callback.executionId;
   const result = callback.result;
   if (result.kind === 'shard') {
     const shard = result.shard;
     invariant(
       shard.index < plan.shardCount &&
+        (run.configuration.provider !== 'mac' || shard.attempt === run.fence) &&
         (shard.status !== 'passed' || shard.exitCode === 0) &&
         (shard.status !== 'failed' || (shard.exitCode !== null && shard.exitCode !== 0)),
       'EVIDENCE_CHANGED',
@@ -87,7 +94,7 @@ export async function receiveHostedCheckCallback(
     );
     invariant(
       !previous
-        ? shard.attempt === 0
+        ? shard.attempt === (run.configuration.provider === 'mac' ? run.fence : 0)
         : (shard.attempt === previous.attempt &&
             (prior!.digest === shardDigest || previous.status === 'running')) ||
             shard.attempt === previous.attempt + 1,
@@ -100,7 +107,7 @@ export async function receiveHostedCheckCallback(
       if (item.status === 'passed') run.counts.passed += sign;
       if (item.status === 'failed') run.counts.failed += sign;
     };
-    count(previous, -1);
+    if (run.configuration.provider !== 'mac' || previous?.attempt === run.fence) count(previous, -1);
     count(shard, 1);
     const saved = {
       projectId: input.projectId,

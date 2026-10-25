@@ -2,6 +2,7 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction, internalMutation } from './_generated/server';
+import { mutation, action } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { authorizeOutput, commitHostedOutput } from './projectHostedOutputStore';
 import { outputMessageObject, outputKey, type OutputMessage } from '../src/hosted-check-output';
@@ -18,30 +19,34 @@ export const outputSigningKey = (id: string) => {
 };
 /** Fixed collector only. No project-code/account credential grants signing
  * authority. Targets bind one exact immutable key, length and checksum. */
+const prepareHandler = async (
+  ctx: import('./_generated/server').MutationCtx,
+  input: { projectId: Id<'hostedProjects'>; message: string; signature: string },
+) => {
+  try {
+    const message = await authorizeOutput(
+      ctx,
+      { ...input, message: JSON.parse(input.message) },
+      outputSigningKey,
+    );
+    const object = outputMessageObject(message);
+    return canonicalPayload({
+      object,
+      target: object
+        ? await presignPut(r2Config(), outputKey(input.projectId, message.runId, object), {
+            digest: object.sha256,
+            size: object.size,
+          })
+        : null,
+    });
+  } catch (error) {
+    return report(error);
+  }
+};
 export const prepare = internalMutation({
   args,
   returns: v.string(),
-  handler: async (ctx, input) => {
-    try {
-      const message = await authorizeOutput(
-        ctx,
-        { ...input, message: JSON.parse(input.message) },
-        outputSigningKey,
-      );
-      const object = outputMessageObject(message);
-      return canonicalPayload({
-        object,
-        target: object
-          ? await presignPut(r2Config(), outputKey(input.projectId, message.runId, object), {
-              digest: object.sha256,
-              size: object.size,
-            })
-          : null,
-      });
-    } catch (error) {
-      return report(error);
-    }
-  },
+  handler: prepareHandler,
 });
 /** The apply entrypoint is internal to the verified transfer action. No output
  * byte body is accepted by either API. Rechecks authority after external I/O. */
@@ -106,16 +111,21 @@ export async function verifyOutputObject(
     'Output upload checksum differs.',
   );
 }
-export const commit = internalAction({
-  args,
-  returns: v.string(),
-  handler: async (ctx, input): Promise<string> => {
-    try {
-      const message: OutputMessage = JSON.parse(await ctx.runMutation(authorizedRef, input));
-      if (outputMessageObject(message)) await verifyOutputObject(input.projectId, message);
-      return await ctx.runMutation(applyRef, input);
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
+const commitHandler = async (
+  ctx: import('./_generated/server').ActionCtx,
+  input: { projectId: Id<'hostedProjects'>; message: string; signature: string },
+): Promise<string> => {
+  try {
+    const message: OutputMessage = JSON.parse(await ctx.runMutation(authorizedRef, input));
+    if (outputMessageObject(message)) await verifyOutputObject(input.projectId, message);
+    return await ctx.runMutation(applyRef, input);
+  } catch (error) {
+    return report(error);
+  }
+};
+export const commit = internalAction({ args, returns: v.string(), handler: commitHandler });
+
+// Signed fixed collectors may pull output targets directly. apply stays internal;
+// the public commit action performs the same authoritative R2 HEAD verification.
+export const workerPrepare = mutation({ args, returns: v.string(), handler: prepareHandler });
+export const workerCommit = action({ args, returns: v.string(), handler: commitHandler });

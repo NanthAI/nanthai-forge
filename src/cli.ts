@@ -49,6 +49,7 @@ Start here: nforge docs quickstart (offline Git adoption).
 Browse packaged documentation: nforge docs
 
 Usage:
+  nforge worker DEPLOYMENT_URL PROJECT_ID MACHINE_UUID
   nforge improve ROOT [--json]
   nforge release ROOT --command-file FILE | --resume UUID | --status UUID
   nforge land ROOT LANE… [--message MESSAGE] [--operation-id UUID] [--wait]
@@ -123,6 +124,7 @@ async function main(args: string[]): Promise<unknown> {
     process.stdout.write(HELP);
     return undefined;
   }
+  if (args[0] === 'worker') return (await import('./worker-cli.js')).workerCli(args.slice(1));
   if (args[0] === 'improve') return improveCli(args.slice(1));
   if (args[0] === 'docs') return docsCli(args.slice(1));
   if (args[0] === '--version') {

@@ -413,3 +413,30 @@ Pointers: `convex/projectHostedFinish.ts` (`resume`),
 `convex/projectHostedFinishControl.ts` (`finishStep`),
 `convex/projectHostedRecords.ts` (`hostedWriteProject`) and
 `convex/projectAuthority.ts` (`activeProject`).
+
+## Pull-based Mac checks
+
+`nforge worker DEPLOYMENT_URL PROJECT_ID MACHINE_UUID` registers an authenticated
+project-owner collector session and subscribes to its configured machine's queue.
+Configure the runner through `projectHostedCheckDefinitions:configure` with provider
+`mac`, the stable `machineId`, `hostedMacRuntime` from `hosted-mac-lease`, and the
+machine's `checkEnvironment().fingerprint`. The fixed collector uses the existing
+`FORGE_HOSTED_CHECK_KEY_ID` / `FORGE_HOSTED_CHECK_KEY_<ID>` signing configuration;
+project commands receive neither that key nor the collector's account token.
+
+A claim records the live owner before source preparation or command execution.
+The 60-second execution lease is renewed by signed callbacks every 20 seconds.
+Targeted watchdogs requeue the same exact run once, fencing the prior execution,
+then settle another expiry as `runner-unavailable` with `MAC_RUNNER_LEASE_EXPIRED`
+or `MAC_RUNNER_NO_OWNER`. Unclaimed work has the same finite owner windows. Cancel
+settles immediately, fences late callbacks and stops a connected process through
+its status subscription. No process or controller restart is needed.
+
+Checks download hash-verified source directly from hosted object storage/R2 into
+a private checkout and use the configured command and clean environment. No Git
+export, GitHub branch or `forge-check/<runId>` ref is involved. Redacted stdout,
+stderr and selected artifacts use `projectHostedOutputApi` signed targets and
+verified commits. Local failed transfers retain their private spool. An idle
+worker retains only subscriptions: it performs no polling or periodic Convex
+calls. Provider execution records do not themselves grant acceptance; current
+landing policy and exact-Candidate evidence are still checked separately.
