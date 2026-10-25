@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex']) {
+for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex', 'schema']) {
   test(`synthetic static verification preserves ${failure} outcome with queued builds`, t => {
     const root = mkdtempSync(join(tmpdir(), 'forge-verify-static-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -20,6 +20,7 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex']) {
       mkdirSync(join(root, directory), { recursive: true });
     for (const name of ['verify.mjs', 'verify-queue.mjs'])
       write(`scripts/${name}`, readFileSync(`scripts/${name}`));
+    write('scripts/check-schema-compat.mjs', `process.exit(${failure === 'schema' ? 9 : 0});`);
     write(
       'scripts/oxc.mjs',
       `import { appendFileSync } from 'node:fs'; appendFileSync('oxc.jsonl', JSON.stringify(process.argv.slice(2)) + '\\n');`,
@@ -72,11 +73,15 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex']) {
     assert.equal(result.error, undefined);
     assert.equal(
       result.status,
-      failure === 'none' ? 0 : ['ordinary', 'convex'].includes(failure) ? 1 : 137,
+      failure === 'none' ? 0 : ['ordinary', 'convex', 'schema'].includes(failure) ? 1 : 137,
       result.stdout + result.stderr,
     );
     assert.match(result.stdout, /\[build:core\] ok/);
     assert.match(result.stdout, /\[test\] ok/);
+    assert.match(
+      result.stdout,
+      new RegExp(`\\[schema compatibility\\] ${failure === 'schema' ? 'FAILED' : 'ok'}`),
+    );
     const calls = name =>
       readFileSync(join(root, `${name}.jsonl`), 'utf8')
         .trim()
@@ -89,7 +94,7 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex']) {
     ]);
     assert.match(
       result.stdout,
-      new RegExp(`\\[typecheck:convex:tsc\\] ${failure === 'none' ? 'ok' : 'FAILED'}`),
+      new RegExp(`\\[typecheck:convex:tsc\\] ${['none', 'schema'].includes(failure) ? 'ok' : 'FAILED'}`),
     );
     assert.deepEqual(
       calls('native').map(args => args.slice(0, 2)),

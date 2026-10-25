@@ -13,6 +13,12 @@ outside this workflow. The web stage uses the configured Netlify site's producti
 URL (`--prod`), rather than making a draft. Backend, web and installed CLI receipts
 all name the originally selected native State and acceptance.
 
+Prepare the shared-schema release baseline in a Lane with
+`npm run schema:snapshot`, commit it with the release source, and land it before
+selecting the accepted State to release. The command checks declared migrations
+before updating `scripts/schema-compat/released.json`; see
+[shared schema compatibility](../development.md#shared-schema-compatibility).
+
 ## Configure once per release
 
 Save a private request file containing paths, not credential values. Use a fresh

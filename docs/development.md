@@ -34,6 +34,30 @@ Interaction finish fixtures isolate the outer `FORGE_CHECK_FULL` override so the
 
 `npm run check` fails if `docs/dependency-licenses.md` is out of date. After changing dependencies, run `node scripts/render-dependency-licenses.mjs`.
 
+### Shared schema compatibility
+
+`npm run check:schema` runs in both verification paths, independently of builds.
+It statically reads the exported Zod schemas in `src/work-types.ts` and
+`src/work-unified-types.ts`, including imported declarations, and compares them
+with `scripts/schema-compat/released.json`. It never imports project modules.
+Removed or renamed fields, required additions, optional-to-required changes,
+removed enum values and structural or scalar-constraint narrowing fail with the
+field path. Additive optional fields and wider types pass.
+
+For an intentional breaking change, copy each reported `path` and `change` digest
+into `scripts/schema-compat/declared-migrations.json` with a `reason` describing
+the migration. Each declaration covers only that exact transition, including
+its field path; it does not execute a migration. Before releasing, run
+`npm run schema:snapshot` and commit the refreshed baseline with the release
+source. Refresh refuses undeclared breaking changes and never runs in verify.
+The initial baseline comes from the installed CLI release's matching schemas.
+
+The extractor supports explicit Zod declarations, shapes, imports, unions and
+standard scalar validators. Unknown expressions fail explicitly. Arbitrary
+`refine`/`superRefine` predicates are not executed or compared; transforms and
+other unsupported builders require extractor support. This check covers schema
+structure and representable constraints, not every runtime predicate.
+
 ### Native TypeScript selection
 
 The development compiler is the official Microsoft `typescript@7.0.2` package,

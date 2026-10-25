@@ -176,6 +176,7 @@ const tests = coreBuild.then(ok => {
 });
 const results = await Promise.all([
   npm('check', 'check'),
+  run('schema compatibility', process.execPath, ['scripts/check-schema-compat.mjs']),
   run('format:check (oxfmt)', process.execPath, ['scripts/oxc.mjs', 'format:check']),
   tsc('typecheck:core', '--types', '*', '--noEmit'),
   tsc('typecheck:web', '-p', 'web/tsconfig.json'),
