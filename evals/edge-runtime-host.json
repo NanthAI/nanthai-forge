@@ -1,0 +1,303 @@
+{
+  "repository": "thevarsek/nanthai-edge",
+  "commit": "f05b40e4fec7bdd2f70d5c9839648f623b441812",
+  "scope": "runtime-host/src/**",
+  "files": [
+    {
+      "path": "runtime-host/src/adapter_registry.ts",
+      "sha": "339d6e089334ecf48e92832bad6d02bb3d16c123"
+    },
+    {
+      "path": "runtime-host/src/async_event_queue.ts",
+      "sha": "a7b55b6c310475314e36400f5bf51043b74de681"
+    },
+    {
+      "path": "runtime-host/src/attempt_session_manager.ts",
+      "sha": "fc0202bbc8afee5ff3d1baff19700fd3d316770c"
+    },
+    {
+      "path": "runtime-host/src/bounded_event_buffer.ts",
+      "sha": "a94d7c1b5e9ebc371bc575e65f52af8672509dba"
+    },
+    {
+      "path": "runtime-host/src/canonical_capabilities.ts",
+      "sha": "47dc5272f259db8c661c84f7a95e4a2de8319592"
+    },
+    {
+      "path": "runtime-host/src/canonical_codex_adapter.ts",
+      "sha": "89bacb88599c2bb0474a59853b198f5bd80ace88"
+    },
+    {
+      "path": "runtime-host/src/canonical_event_factory.ts",
+      "sha": "1f48bd390da76ea36228a39411ac0c59e081eb48"
+    },
+    {
+      "path": "runtime-host/src/cli.ts",
+      "sha": "bcc859d287fbdb3942b94259bb77076ca476ef87"
+    },
+    {
+      "path": "runtime-host/src/cli_dependencies.ts",
+      "sha": "9d008da8078ab81512af80271509a49c9b41a50d"
+    },
+    {
+      "path": "runtime-host/src/cli_entry.ts",
+      "sha": "67c5fc2317d4ec4e42e04c3bb846d17a476eb1fe"
+    },
+    {
+      "path": "runtime-host/src/codex_adapter.ts",
+      "sha": "1fb9f9dc8245b24f2e4338a2dea33e9f7eec3f1e"
+    },
+    {
+      "path": "runtime-host/src/codex_app_server_operator.ts",
+      "sha": "c235a9e2c8cf72299ea724d6ef4a6b8d504696a1"
+    },
+    {
+      "path": "runtime-host/src/codex_app_server_warning.ts",
+      "sha": "b5bcbb6a0c7a36303c1829a94216d8fb3d5c1e92"
+    },
+    {
+      "path": "runtime-host/src/codex_attempt_pump.ts",
+      "sha": "9aa123eeee3463e063ac7e54af9409a2bb38070a"
+    },
+    {
+      "path": "runtime-host/src/codex_capabilities.ts",
+      "sha": "b2087d1066972b0dcf0c25ba527fc8df13a8a10e"
+    },
+    {
+      "path": "runtime-host/src/codex_command_executor.ts",
+      "sha": "00ee73a16e095112d0124d68c36e7496fe6cd776"
+    },
+    {
+      "path": "runtime-host/src/codex_context_projection.ts",
+      "sha": "e8d0f5885f642a8d151323e86a3c6645cf50c1e3"
+    },
+    {
+      "path": "runtime-host/src/codex_event_items.ts",
+      "sha": "c630785f8b1564bd3e98dafedd67a0d8f5affedb"
+    },
+    {
+      "path": "runtime-host/src/codex_event_normalizer.ts",
+      "sha": "bbd12e0e8e6e2402e03c4c23b2335f5a58f0bcf2"
+    },
+    {
+      "path": "runtime-host/src/codex_executable.ts",
+      "sha": "3535c7c58b50d0c5e49efa3d2b8318a587ca8b0b"
+    },
+    {
+      "path": "runtime-host/src/codex_model_discovery.ts",
+      "sha": "5d0568d7a995502e130da7aa2ef19f2a6ddd71ca"
+    },
+    {
+      "path": "runtime-host/src/codex_native_agent_values.ts",
+      "sha": "9de7c26b06232fad3ba9550d44fd6d8fdb1eb315"
+    },
+    {
+      "path": "runtime-host/src/codex_native_agents.ts",
+      "sha": "d72f104470de8415966d4c8f75f380106b711ecf"
+    },
+    {
+      "path": "runtime-host/src/codex_request_mapping.ts",
+      "sha": "cb514b27745457fb2b20bcaf3a229c6d28eaff85"
+    },
+    {
+      "path": "runtime-host/src/codex_terminal_result.ts",
+      "sha": "347958a4a35016c3d2c73daab22fbb8d3f7da621"
+    },
+    {
+      "path": "runtime-host/src/codex_transport.ts",
+      "sha": "6455f0cc0fe1a3496ebc4152479e5af448b5db80"
+    },
+    {
+      "path": "runtime-host/src/codex_worker_backend.ts",
+      "sha": "8e6bb758f6872b645574ca2ce47dd7d87300cf65"
+    },
+    {
+      "path": "runtime-host/src/codex_worker_spec.ts",
+      "sha": "f4ed568735f1f8ec80c75bf8fc1ab5d5aa8e1b00"
+    },
+    {
+      "path": "runtime-host/src/control_plane.ts",
+      "sha": "8515bdbc5af96b5f7c80ebf0132c2961a2a92045"
+    },
+    {
+      "path": "runtime-host/src/credential_store.ts",
+      "sha": "67cacfb7b7b268276194686ca365e389dc260ce4"
+    },
+    {
+      "path": "runtime-host/src/host_lock.ts",
+      "sha": "2704b5475d818faebaa83cb18564216ff345d0c4"
+    },
+    {
+      "path": "runtime-host/src/host_platform.ts",
+      "sha": "4788d9848698b684ec853b81b28e0770708fbca6"
+    },
+    {
+      "path": "runtime-host/src/host_status_store.ts",
+      "sha": "c7b505aa66c37f6b7f7430da6389e2f3b2274959"
+    },
+    {
+      "path": "runtime-host/src/host_wire_sequencer.ts",
+      "sha": "0ece9a1974dc7723fe0c7317e39b735f0f0ca745"
+    },
+    {
+      "path": "runtime-host/src/http_json_client.ts",
+      "sha": "6dc2450ee6e1baa524c6f6aeab65ad894e17a383"
+    },
+    {
+      "path": "runtime-host/src/http_model_discovery.ts",
+      "sha": "967f6bb9d9c36c9b7d390c68c8fa061f140a0021"
+    },
+    {
+      "path": "runtime-host/src/http_pairing_client.ts",
+      "sha": "7f2a5307f63da248c7812ef21e718b4d4fe56db3"
+    },
+    {
+      "path": "runtime-host/src/http_runtime_contract.ts",
+      "sha": "e86453673f57d5bc24cb9039794155e6a1ec54fa"
+    },
+    {
+      "path": "runtime-host/src/http_runtime_transport.ts",
+      "sha": "411dd86a2a5c86b863861f244e9c1ee9d61922c6"
+    },
+    {
+      "path": "runtime-host/src/json_rpc_stdio_client.ts",
+      "sha": "8a460cd5f47d275f123e80686a78029ea1275df7"
+    },
+    {
+      "path": "runtime-host/src/json_rpc_types.ts",
+      "sha": "e0a3016a351a4a530e3c390b9fc6e3db4a4d0047"
+    },
+    {
+      "path": "runtime-host/src/local_runtime_part_resolver.ts",
+      "sha": "550ac31c1f659202cfb7a0625a69495f73fcfad1"
+    },
+    {
+      "path": "runtime-host/src/macos_keychain_store.ts",
+      "sha": "5d9b1f10ce4e6cce6548e3dccdde1c13b198fbab"
+    },
+    {
+      "path": "runtime-host/src/native_context_reuse.ts",
+      "sha": "85bb3d06a5843b20e2d14a2dda561e1f3703fb4d"
+    },
+    {
+      "path": "runtime-host/src/outbound_spool.ts",
+      "sha": "012a36ce1cb1c210d16ccff9a9decc7b17510165"
+    },
+    {
+      "path": "runtime-host/src/packet_integrity.ts",
+      "sha": "0319ea98044cda9c3ee537ccd59e66bcad76f98a"
+    },
+    {
+      "path": "runtime-host/src/packet_translation.ts",
+      "sha": "20f7ab9cb2b848249c9de21652c6ec0498e7e1ab"
+    },
+    {
+      "path": "runtime-host/src/process_group_resources.ts",
+      "sha": "0cb0fe52c8a24ba0a3b15f84fdb438ff141f85ba"
+    },
+    {
+      "path": "runtime-host/src/process_tree.ts",
+      "sha": "efc59f7a515c0a0aa33f7dab231afaeb45c2da26"
+    },
+    {
+      "path": "runtime-host/src/protocol.ts",
+      "sha": "ff2df26ddf46b4cfa591797c271a32ee705ec153"
+    },
+    {
+      "path": "runtime-host/src/resource_sampler.ts",
+      "sha": "a1fed43cf7b37bb6307d4ce79d5032b709d939c2"
+    },
+    {
+      "path": "runtime-host/src/result_bridge.ts",
+      "sha": "b964e27a2cfe386c525d17a5c67d3587a6806d1b"
+    },
+    {
+      "path": "runtime-host/src/runtime_attempt_heartbeats.ts",
+      "sha": "80ea5ab5f594c8b6850a1433ca6ea334e584298d"
+    },
+    {
+      "path": "runtime-host/src/runtime_command_translation.ts",
+      "sha": "dd9bb48027dd3176d24b4325e4a1f2d9f1560f64"
+    },
+    {
+      "path": "runtime-host/src/runtime_event_outcome.ts",
+      "sha": "146e8a192f22bee1809e90b34e36a8dbf15c1998"
+    },
+    {
+      "path": "runtime-host/src/runtime_host.ts",
+      "sha": "2bcd450626e0e5c1ee3899a16702fdf644724d56"
+    },
+    {
+      "path": "runtime-host/src/runtime_identity.ts",
+      "sha": "8947ea788497d600143f3e9b897aeeda292eec36"
+    },
+    {
+      "path": "runtime-host/src/runtime_model_discovery.ts",
+      "sha": "2910fd1438fa26669279ff5195f2f57b7fd725cf"
+    },
+    {
+      "path": "runtime-host/src/runtime_part_fetcher.ts",
+      "sha": "c2b1b29378cd2dbca9eb5c33023e05ef5044ffa8"
+    },
+    {
+      "path": "runtime-host/src/runtime_part_materializer.ts",
+      "sha": "4f656dafc506a0095c50ec50411639f68c3bb52b"
+    },
+    {
+      "path": "runtime-host/src/runtime_part_paths.ts",
+      "sha": "312fa83b81a2e7256368c9b0fa69ef42ff31bee9"
+    },
+    {
+      "path": "runtime-host/src/runtime_paths.ts",
+      "sha": "3946935b498a423685554cc604ff2c1712f92ddd"
+    },
+    {
+      "path": "runtime-host/src/session_supervisor.ts",
+      "sha": "bf2aaaf7a893360e3b9c711026775b17f98d57d2"
+    },
+    {
+      "path": "runtime-host/src/transports/app_server_protocol_mapping.ts",
+      "sha": "db0076d0ede31a77ae8983da89b098bedeedb6a4"
+    },
+    {
+      "path": "runtime-host/src/transports/app_server_session_state.ts",
+      "sha": "9e40cf1977e9f63208e9a892ae5185a80c793800"
+    },
+    {
+      "path": "runtime-host/src/transports/app_server_thread_routing.ts",
+      "sha": "5d1735f038bdffff710c3a8d3ceb698dbbcda078"
+    },
+    {
+      "path": "runtime-host/src/transports/app_server_tool_bridge.ts",
+      "sha": "d9f905e90b3fff2e3675519c49565433869a6a83"
+    },
+    {
+      "path": "runtime-host/src/transports/codex_app_server_transport.ts",
+      "sha": "5055989ad1eaaf41ba6f743d4584578042f56560"
+    },
+    {
+      "path": "runtime-host/src/usage_history.ts",
+      "sha": "253fa0cdc53cdc8e4a9ef3538064ccb3e8743d22"
+    },
+    {
+      "path": "runtime-host/src/wire_worker.ts",
+      "sha": "74d77629cd22e85ee63db867e7020b07abcc3b59"
+    },
+    {
+      "path": "runtime-host/src/worker_bridge.ts",
+      "sha": "9aeccef71ef1854e921c30c9ad459f7ed0b5a370"
+    },
+    {
+      "path": "runtime-host/src/worker_controller.ts",
+      "sha": "31df380079946a5775253a837ee9312e36869de5"
+    },
+    {
+      "path": "runtime-host/src/worker_entry.ts",
+      "sha": "96491e71dd15a3b4e24fadb274d4b5b02cdec4af"
+    },
+    {
+      "path": "runtime-host/src/worker_wire_output.ts",
+      "sha": "950ed60f6a2d5c41ab5370e4c0158a4a6f39211a"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+.fx-review-why { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:18px; }
+.fx-review-outcome { font-size:16px; line-height:1.5; margin:0 0 10px; }
+.fx-review-notes { list-style:none; margin:0; padding:0; display:grid; gap:12px; font-size:13px; }
+.fx-review-notes small,.fx-review-groups small { display:block; color:var(--fx-text-3); margin-top:4px; font-size:11px; }
+.fx-review-risks { display:flex; flex-wrap:wrap; gap:12px; border-top:1px solid var(--fx-line); padding:12px 18px; color:var(--fx-waiting); font-size:12px; }
+.fx-review-groups { display:grid; }
+.fx-review-groups button { display:grid; grid-template-columns:24px minmax(0,1fr) 90px 55px; gap:12px; align-items:center; text-align:left; border:0; border-bottom:1px solid var(--fx-line); border-radius:0; padding:14px 18px; color:var(--fx-text); background:transparent; cursor:pointer; font:inherit; font-size:12px; }
+.fx-review-groups button[aria-pressed=true] { background:var(--fx-surface-2); box-shadow:inset 3px 0 var(--fx-accent); }
+.fx-review-purpose { min-width:0; overflow-wrap:anywhere; }
+.fx-review-purpose b { font-size:13px; }
+.fx-review-number { font-size:12px; color:var(--fx-text-3); }
+.fx-review-groups-loading { min-height:160px; padding:18px; color:var(--fx-text-3); }
+.fx-review-empty { padding:18px; color:var(--fx-text-3); }
+.fx-review-request { display:grid; gap:8px; padding:16px; border-top:1px solid var(--fx-line); }
+.fx-review-request textarea { width:100%; min-height:100px; resize:vertical; background:var(--fx-surface); color:var(--fx-text); border:1px solid var(--fx-line); border-radius:4px; padding:8px; font:inherit; }
+.fx-review-secondary { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+@media(max-width:1100px) { .fx-review-page .fx-review-side { order:initial; } }
+@media(max-width:650px) { .fx-review-why { grid-template-columns:1fr; gap:16px; } .fx-review-groups button { grid-template-columns:20px minmax(0,1fr) 52px; gap:8px; padding:12px; } .fx-review-groups button > .fx-faint { display:none; } }
+
+.fx-review-check { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:16px; font-size:12px; }
+.fx-review-check details { flex-basis:100%; }
+.fx-review-check pre { max-height:240px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+
+.fx-review-page { max-width:none; margin:0; width:100%; }
+.fx-review-page .fx-review-head h1, .fx-review-purpose b { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+.fx-review-page .fx-review-notes { padding:16px; }
+.fx-review-path, .fx-review-page .fx-file-name { display:block; direction:rtl; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fx-review-risks span { min-width:0; overflow-wrap:anywhere; }
+.fx-review-more { padding:6px 14px; }
+.fx-review-page .fx-panel-h { min-height:42px; }
+@media(max-width:720px) { .fx-review-page { padding-left:12px; padding-right:12px; } .fx-review-page .fx-panel-h h2 { white-space:normal; } .fx-review-page .fx-btn { min-height:32px; } }
+
+.fx.fx-review-page h1 { font:700 20px/1.25 var(--fx-font-head); letter-spacing:-.015em; margin:6px 0 10px; }
+.fx.fx-review-page .fx-panel-h h2 { font:700 14px/1.3 var(--fx-font-head); letter-spacing:-.015em; margin:0; }
+.fx.fx-review-page .fx-panel-h { padding:10px 14px; }
+
+.fx-review-page .fx-review-head h1 { display:block; -webkit-line-clamp:unset; max-height:none; overflow:visible; overflow-wrap:anywhere; }
+.fx-review-purpose b { display:block; -webkit-line-clamp:unset; line-height:1.45; max-height:2.9em; }
+
+.fx-review-page .fx-files .fx-files-more { display:block; width:100%; white-space:nowrap; overflow-wrap:normal; min-height:32px; text-align:left; }
+.fx-review-page .fx-gates { width:100%; }
+.fx-review-page .fx-gates > li { width:100%; border:0; }
+.fx-review-page .fx-lane-meta { gap:0; }
+.fx-review-page .fx-lane-meta > span + span::before { content:'·'; margin:0 8px; color:var(--fx-text-3); }
+.fx-review-intent-crumb { max-width:min(680px,75vw); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+.fx-review-disposition { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:12px 14px; font-size:13px; }
+
+.fx-review-head > .fx-st { max-width:100%; height:auto; min-height:20px; white-space:normal; overflow-wrap:anywhere; line-height:1.4; }
+
+.fx-review-page .fx-review-side { width:auto; }

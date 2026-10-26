@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Legacy screens' styles live in one cascade layer: they keep their order among themselves, and the
+   cockpit's unlayered styles always win over them, whatever the selector specificity. */
+@layer legacy;
+@import './style.css' layer(legacy);
+@import './experience.css' layer(legacy);
+@import './graph.css' layer(legacy);
+@import './work-clarity.css' layer(legacy);

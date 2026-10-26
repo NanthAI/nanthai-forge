@@ -1,0 +1,4260 @@
+{
+  "schemaVersion": 1,
+  "status": "measured",
+  "generatedAt": "2026-10-04T20:35:00.020Z",
+  "scope": "Separately frozen matched series, one observation per task and condition. Original v1/v2 seven-pair series and, when requested, the finite three-delivery-pair guidance followup remain separately reported. Descriptive, not a statistical or billed-cost claim.",
+  "policy": "All original dispatches and failures retained. Only both arms of the invalid v1 prior670 pair excluded from matched aggregates. Missing usage is null, never zero.",
+  "sourceModes": "Exact bytes and native file/executable class. Native private ordinary files may be0600 and Git working files0644. Raw permission bits do not define equivalent source identities.",
+  "tokenAccounting": "Uncached input = reported total input minus cached input. Reasoning output reported separately, not added again to output. Interrupted v1 Forge prior670 lacks turn.completed usage; aggregate known sums are lower bounds with unavailable counts.",
+  "commandAccounting": "Distinct command_execution item IDs, including incomplete commands. Several shell subcommands in one execution count once. File-change tool items are not command executions. Original tool events remain private receipts.",
+  "historicalProtocols": "Original plans retain predispatch not-run status and hashes. This measured results artifact records their subsequent dispatch. Before any v2 model session, authoritative fixture parity replaced the invalid prior670 bootstrap: preserve original AGENTS and670 tracked files via explicit native Git import; do not apply the frozen plan's older AGENTS-rewrite sentence. The separately frozen guidance plan has3 actual pairs,6 sessions; its copied seven-observation limitation sentence is stale historical text, not an additional dispatched scope.",
+  "limitations": [
+    "One sequential observation per task and condition; cache, model-server latency and OS variance can differ.",
+    "v1 dispatch overlapped other full verification; wall time is descriptive and resource contention is a confound.",
+    "v2 uses narrower skill routing, optional finish, existing configured check pins and short launcher together; changes cannot be causally isolated.",
+    "Cold means no graph index, not cold OS/file caches. Warm preparation is explicitly measured and included.",
+    "Read-only source investigation and complete recorded delivery are separate outcomes. No independent-human acceptance is claimed.",
+    "Git bootstrap is an optional compatibility boundary; native Source and Work remain authoritative in Forge arms.",
+    "No provider, hosted-egress, GitHub publication, new paid service or billed-dollar inference occurs in these trials.",
+    "v2 source agents chose ordinary source/search/Node reads, including the warm graph arm. Cache savings here do not demonstrate graph-context savings.",
+    "External hidden grading and administrative experiment construction are outside participant timings; attributable totals cover measured task, owner/bootstrap/check/warm setup and shared package/skill/launcher installation."
+  ],
+  "invalidPreparation": {
+    "beforeAnyModelDispatch": true,
+    "seconds": 0.837750958,
+    "reason": "Harness used a new explicit checkId as an update; corrected creation before any model dispatch. Original preparation evidence retained."
+  },
+  "unusedPrototype": {
+    "packageSha256": "c96ce5425a1d87d2238dfd364c69fb024a088d72c696128412d839b0331400dc",
+    "installSeconds": 6.290259292,
+    "modelDispatches": 0
+  },
+  "reporterSha256": "d5534d3006ff9955f90b9c6649988ad46157fd8b9898481916621d1354dd82ad",
+  "series": [
+    {
+      "version": "v1",
+      "declaredPairs": 7,
+      "packageSha256": "b5063f5c783cd18ab77723a83b952ddafd870127cc267b969c15839c0d663891",
+      "packageSourceState": "b2292b25d72a4b13007f5b67d0f76e159171cdfe2e52f7d766e221ba048e19eb",
+      "packageViewId": "b623e762-31de-4147-81f2-1142c3cca071",
+      "compiledCodeParity": null,
+      "skillSha256": "d8f0b88a24af9f10a71348f88fe6fe273e9ec1886fddd1be0c02436b645bda05",
+      "skillBytes": 3532,
+      "model": "gpt-6.1-sol",
+      "reasoning": "high",
+      "runtime": "Node24.19.0",
+      "harness": "codex-cli0.159.0-alpha.12.1",
+      "frozenFiles": {
+        "agent-efficiency-trial.mjs": "b9c041b6c53b38a6d5fb5270e7441081c086d9fd7707b71c2cda2c1fb153eb39",
+        "agent-efficiency-trial-fixture.mjs": "4f08df7d1c9ea7a33e9a1eb5c7fd2867c42a20fcf6622df0b76facf91f04dd9a",
+        "agent-efficiency-tasks.json": "9406597f3fd051cb4f72e611302e78fc19b5ad9a2fd86cca86b7b12e26f30f93",
+        "agent-efficiency-trials.md": "263881b6ae03106dfe3403a6e785aabd33a564f21c5edf5fed01466eacad0b67",
+        "SKILL.md": "d8f0b88a24af9f10a71348f88fe6fe273e9ec1886fddd1be0c02436b645bda05",
+        "prior-check.mjs": "da99b5a47767d918cebf19693f2a40a84bdf5c795145f2dcd0fdf97810377f28",
+        "materialize-candidate.mjs": "0e40ec8156de117ec4644bba21532e85fa3490b8dc0729e72aef1a3b05d494e6"
+      },
+      "originalResultsSha256": "d2b2229a09d130d827df7ec1bea0db883ea61c428cc7a6156597415dfaa48ced",
+      "authorityReceiptSha256": "403d42c0da987cfc8ecac276cc1f2aa80a325ccf8e5e19285ac0e2969e8cbf5c",
+      "authorityValidatedAt": "2026-10-04T20:05:11.543Z",
+      "authorityValidationStage": "postdispatch diagnostic: original filesystem comparison missed prior670 authority mismatch",
+      "sharedSetup": {
+        "packageInstallSeconds": 6.047824625,
+        "skillInstallSeconds": 0.000270583,
+        "launcherSetupSeconds": 0,
+        "launcherSha256": null,
+        "totalSeconds": 6.0480952079999994,
+        "allocation": "One installation/skill/launcher per series or standalone first use. Aggregate charges once, never once per observation."
+      },
+      "observations": [
+        {
+          "taskId": "investigate-cold-graph",
+          "outcomeClass": "investigation",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:38:10.043Z",
+          "endedAt": "2026-10-04T19:38:28.662Z",
+          "dispatchSeconds": 18.617791290999996,
+          "ownerPreparationSeconds": 0.06032020799999999,
+          "bootstrapSeconds": 0.05256675,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 18.678111498999996,
+          "tokens": {
+            "input_tokens": 63415,
+            "cached_input_tokens": 39936,
+            "uncached_input_tokens": 23479,
+            "output_tokens": 305,
+            "reasoning_output_tokens": 32
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 2,
+          "commandOutputBytes": 9906,
+          "generatedCommandBytes": 448,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "e7c63b3639cf1ff5039f74affd89c8905427137e",
+            "initialNativeState": "0180e4062ce3d09eddc08bf5112177e7e97c6fc669555cb7ab25aad12c5d95cf",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "59b48d6ebf6dd4f25885c982d50e8ada4acba58aad0daeb3094e7f2d770c8ee3",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "10dc68cb59718e359339c14a037836a837352052735469ff2257e14bd1a6916d",
+            "originalTimingSha256": "f2373b312342176e09da8e32ec4c9a2d72ce2427ded7126cae76802e98acdb75",
+            "originalAnswerSha256": "675d4a7f5b04aed30f09fec85c5f5c5eef321ed70952ea93157be8135264d145"
+          }
+        },
+        {
+          "taskId": "investigate-cold-graph",
+          "outcomeClass": "investigation",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:38:46.635Z",
+          "endedAt": "2026-10-04T19:39:09.525Z",
+          "dispatchSeconds": 22.889578833,
+          "ownerPreparationSeconds": 0.247146291,
+          "bootstrapSeconds": 0.238106958,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 6.0480952079999994,
+          "standaloneFirstUseTotalSeconds": 29.184820332,
+          "tokens": {
+            "input_tokens": 85399,
+            "cached_input_tokens": 62720,
+            "uncached_input_tokens": 22679,
+            "output_tokens": 378,
+            "reasoning_output_tokens": 67
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 3,
+          "commandOutputBytes": 6353,
+          "generatedCommandBytes": 593,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "e7c63b3639cf1ff5039f74affd89c8905427137e",
+            "initialNativeState": "0180e4062ce3d09eddc08bf5112177e7e97c6fc669555cb7ab25aad12c5d95cf",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "bc39a93ac15d49ed967e7e370189faa24f4e4ab59767c7bab2843283d295a993",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "2c3d2a9ddf42206130419992acab40591d1d03f941f3e9b1ee2316e0ac5aa71b",
+            "originalTimingSha256": "f1036a1914ca151ab4e5d7b080b57ed864e96b5ac7ec1968e087f0763d8dd293",
+            "originalAnswerSha256": "675d4a7f5b04aed30f09fec85c5f5c5eef321ed70952ea93157be8135264d145"
+          }
+        },
+        {
+          "taskId": "investigate-warm-graph",
+          "outcomeClass": "investigation",
+          "condition": "forge",
+          "temperature": "warm",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:39:09.611Z",
+          "endedAt": "2026-10-04T19:39:35.808Z",
+          "dispatchSeconds": 26.196251708,
+          "ownerPreparationSeconds": 0.880846417,
+          "bootstrapSeconds": 0.601623458,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0.2726020840000001,
+          "standaloneFirstUseSharedSeconds": 6.0480952079999994,
+          "standaloneFirstUseTotalSeconds": 33.125193333,
+          "tokens": {
+            "input_tokens": 87739,
+            "cached_input_tokens": 62720,
+            "uncached_input_tokens": 25019,
+            "output_tokens": 386,
+            "reasoning_output_tokens": 16
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 3,
+          "commandOutputBytes": 14488,
+          "generatedCommandBytes": 825,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "257470b7b9663b25796ef0832cd38f35cc88fc60",
+            "initialNativeState": "d7a9dc18c4917b88dfa8fe9ec7bdd11ff525c4cfc30cf4fe7ef9841107e9415e",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "53c3e4083e1dd6ea546a2de9ebe79b5a21a5aca3093774c99293a0499fd81d74",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "54e459eec9c4c2ed53282c8f59f7f1ca91732ad310b796f07b4c27afd704ee53",
+            "originalTimingSha256": "6a5090e708c47ff778e5109922d726e4bcda3d7d5c2776c586d9ed613c44fcda",
+            "originalAnswerSha256": "1edf9b5bfd81294c599d0865bc797470e5e8274596b9544b71ce19b7118ec7ef"
+          }
+        },
+        {
+          "taskId": "investigate-warm-graph",
+          "outcomeClass": "investigation",
+          "condition": "git",
+          "temperature": "warm",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:39:35.852Z",
+          "endedAt": "2026-10-04T19:39:58.651Z",
+          "dispatchSeconds": 22.797850750000002,
+          "ownerPreparationSeconds": 0.06392195800000013,
+          "bootstrapSeconds": 0.05044004200000018,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0.006660249999999906,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 22.861772708000004,
+          "tokens": {
+            "input_tokens": 63479,
+            "cached_input_tokens": 39936,
+            "uncached_input_tokens": 23543,
+            "output_tokens": 344,
+            "reasoning_output_tokens": 52
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 2,
+          "commandOutputBytes": 9915,
+          "generatedCommandBytes": 391,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "257470b7b9663b25796ef0832cd38f35cc88fc60",
+            "initialNativeState": "d7a9dc18c4917b88dfa8fe9ec7bdd11ff525c4cfc30cf4fe7ef9841107e9415e",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "b0e2a452e2855862bebcefc61d79230f3dc977b60b6b645d658e5e0397258f0c",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "f88acc94b0a68c5045aa33ab62bb07f95a4cc9a8659858a608aa956551473682",
+            "originalTimingSha256": "b4159cb019f4feae2aaaa7a70b935d09a64cbb2b0e6161a71805f1e31921bd00",
+            "originalAnswerSha256": "1edf9b5bfd81294c599d0865bc797470e5e8274596b9544b71ce19b7118ec7ef"
+          }
+        },
+        {
+          "taskId": "investigate-known-file",
+          "outcomeClass": "investigation",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:39:58.748Z",
+          "endedAt": "2026-10-04T19:40:10.005Z",
+          "dispatchSeconds": 11.255424208,
+          "ownerPreparationSeconds": 0.05558016699999985,
+          "bootstrapSeconds": 0.048412417000000006,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 11.311004375000001,
+          "tokens": {
+            "input_tokens": 40196,
+            "cached_input_tokens": 19840,
+            "uncached_input_tokens": 20356,
+            "output_tokens": 125,
+            "reasoning_output_tokens": 0
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 1,
+          "commandOutputBytes": 249,
+          "generatedCommandBytes": 145,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "257470b7b9663b25796ef0832cd38f35cc88fc60",
+            "initialNativeState": "5241b001197878b22e0c29191c8f1a5273e9124f4500c86e6652b75572e92a1e",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "4cf446de19861970c52d9c03b3e06795be5fa7f19d2725a560d6b4b498b22c01",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "8a01962d51b3d612671723045c9c9edfb6c8d261fc0386ac782c660a6d9354fb",
+            "originalTimingSha256": "aa599bdf542ee45332d787a3ff516d2202a3a261ca284c3b1150aa4df19275b9",
+            "originalAnswerSha256": "a6b1ddd55ea630d96ea5a78674e0b117b1573d53c716d4b83f553e0ab9b69480"
+          }
+        },
+        {
+          "taskId": "investigate-known-file",
+          "outcomeClass": "investigation",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:40:10.044Z",
+          "endedAt": "2026-10-04T19:40:24.978Z",
+          "dispatchSeconds": 14.932723625000001,
+          "ownerPreparationSeconds": 0.5845417090000001,
+          "bootstrapSeconds": 0.5757146660000001,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 6.0480952079999994,
+          "standaloneFirstUseTotalSeconds": 21.565360542,
+          "tokens": {
+            "input_tokens": 41574,
+            "cached_input_tokens": 19968,
+            "uncached_input_tokens": 21606,
+            "output_tokens": 271,
+            "reasoning_output_tokens": 0
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 2,
+          "commandOutputBytes": 3781,
+          "generatedCommandBytes": 380,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "257470b7b9663b25796ef0832cd38f35cc88fc60",
+            "initialNativeState": "5241b001197878b22e0c29191c8f1a5273e9124f4500c86e6652b75572e92a1e",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "f90223ce3ad2dc7f03a0eec13e3cb8c9dea50a83ce3b4feb730dfc5501337378",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "e10b9342e4db31ba33f0415a694006a916f2621428daf21e77db97324cf6072e",
+            "originalTimingSha256": "79569e8a3badb620532e9ae8eb3d85d729c7c1123ac1eaa4ee9396bf07c20dda",
+            "originalAnswerSha256": "a6b1ddd55ea630d96ea5a78674e0b117b1573d53c716d4b83f553e0ab9b69480"
+          }
+        },
+        {
+          "taskId": "deliver-coupon-boundary",
+          "outcomeClass": "delivery",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:40:25.089Z",
+          "endedAt": "2026-10-04T19:43:24.305Z",
+          "dispatchSeconds": 179.24929325000002,
+          "ownerPreparationSeconds": 0.8672979170000001,
+          "bootstrapSeconds": 0.613873,
+          "configuredCheckPreparationSeconds": 0.24370883300000015,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 6.0480952079999994,
+          "standaloneFirstUseTotalSeconds": 186.16468637500003,
+          "tokens": {
+            "input_tokens": 354560,
+            "cached_input_tokens": 310656,
+            "uncached_input_tokens": 43904,
+            "output_tokens": 4506,
+            "reasoning_output_tokens": 292
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 25,
+          "commandOutputBytes": 46393,
+          "generatedCommandBytes": 10710,
+          "failures": [
+            {
+              "commandSha256": "db75dce2c28db7c75cec2e9f3dfbaab930ffc40a6842d8bdae1a982b949632f7",
+              "outputSha256": "d3f2e7a279bf1b2d67b4aee1e628503e896e249bf5218786dc9e59c67508f8fa",
+              "exitCode": 1,
+              "incomplete": false,
+              "structuredError": "WORK_BUSY"
+            },
+            {
+              "commandSha256": "d756f8141ae62685d99dbcd7309d2780ff91ef35f74d5996ef8b846bc77bd29e",
+              "outputSha256": "a978434c16d05f07d0556028a2c266020c93114896ef880dc998ad7ecc91c22e",
+              "exitCode": 1,
+              "incomplete": false,
+              "structuredError": "INTERNAL_ERROR"
+            }
+          ],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 6,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": true,
+          "originalCheckRuns": [
+            {
+              "id": "406da0ab-30fc-42ac-9e2d-596a1baf6f6a",
+              "viewId": "b945dee0-55f2-41cf-89ea-a5d5b330e199",
+              "head": "4d49021e9ee990a01634e0eb7960f3cdc0d4f6e4aa2085d34f410cfbf3d1b99f",
+              "status": "passed",
+              "checkId": "b2a58a86-8c6a-47f1-9890-6bcbcb33b450",
+              "definition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+              "environment": "28388a36d8a65fd1c3497a4cf91f1479ab8325d1dfcc5bd19ee5338f1dbb4db5",
+              "exitCode": 0,
+              "startedAt": "2026-10-04T19:42:16.978Z",
+              "endedAt": "2026-10-04T19:42:17.145Z",
+              "logs": [
+                {
+                  "stream": "stdout",
+                  "sha256": "a914690c0e1e9bf3723c3bc3059d1f983102b0a39c0de526c6e194793828fbae",
+                  "bytes": 153
+                },
+                {
+                  "stream": "stderr",
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "bytes": 0
+                }
+              ]
+            }
+          ],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "91b99282699fc7970bdd95d1825a7446902788fe",
+            "initialNativeState": "f96f9d25b3cddc729bf03ff6b750ae1447e853c5326d68a8d9b4767f4f485877",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "abee724de1a915051d6c8d1fbb37d765de75a9038e1972d1adbd3ea770c66efd",
+            "candidate": "4d49021e9ee990a01634e0eb7960f3cdc0d4f6e4aa2085d34f410cfbf3d1b99f",
+            "viewId": "b945dee0-55f2-41cf-89ea-a5d5b330e199",
+            "checkRunId": "406da0ab-30fc-42ac-9e2d-596a1baf6f6a",
+            "configuredCheckId": "b2a58a86-8c6a-47f1-9890-6bcbcb33b450",
+            "configuredCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckEnvironment": "28388a36d8a65fd1c3497a4cf91f1479ab8325d1dfcc5bd19ee5338f1dbb4db5",
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": "f7ef2b5c-d0c2-4627-9c8d-8811b8d38640",
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T19:42:16.978Z",
+            "actualCheckEndedAt": "2026-10-04T19:42:17.145Z",
+            "checkLogs": [
+              {
+                "stream": "stdout.log",
+                "sha256": "a914690c0e1e9bf3723c3bc3059d1f983102b0a39c0de526c6e194793828fbae",
+                "bytes": 153
+              },
+              {
+                "stream": "stderr.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "bytes": 0
+              }
+            ],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "2e3668097047a9adeda75d184ca9663cf9544d9f3ac28d3ea1cbafde22f775e8",
+            "originalTimingSha256": "77b8100c2ea68c055c27a2cc1837918abaa36386852cb2b733536c1676f9c419",
+            "originalAnswerSha256": "7cafcdaff47cfb7ca3d79af6b9a42efd730e697779ce8b886b53f9a3312c4149"
+          }
+        },
+        {
+          "taskId": "deliver-coupon-boundary",
+          "outcomeClass": "delivery",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:43:24.354Z",
+          "endedAt": "2026-10-04T19:44:32.590Z",
+          "dispatchSeconds": 68.233963292,
+          "ownerPreparationSeconds": 0.0621596669999999,
+          "bootstrapSeconds": 0.05476800000000003,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 68.296122959,
+          "tokens": {
+            "input_tokens": 107425,
+            "cached_input_tokens": 83456,
+            "uncached_input_tokens": 23969,
+            "output_tokens": 1655,
+            "reasoning_output_tokens": 109
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 5,
+          "commandOutputBytes": 4246,
+          "generatedCommandBytes": 3072,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 6,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "91b99282699fc7970bdd95d1825a7446902788fe",
+            "initialNativeState": "f96f9d25b3cddc729bf03ff6b750ae1447e853c5326d68a8d9b4767f4f485877",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "c52081411a9117997b2c29f4c7abca2b2ee20744dded4436d0cf33d7551be9a0",
+            "candidate": "d47f64a88d7ad29148b63542bde6a4ed18be7807",
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": null,
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T19:44:01.177Z",
+            "actualCheckEndedAt": "2026-10-04T19:44:01.356Z",
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": "239e3c906e04b0df0712b62f917be5937141cf1a51ba3c0af6314770da768702",
+            "originalEventsSha256": "e521845034ee8510baafc24f657a0a9cafbc99084d7df09c3b0f3e38b59c81e1",
+            "originalTimingSha256": "a3aa268463b1070c6ed485df80ca3218ffa874a4760d765badf37b7eee7ec9c6",
+            "originalAnswerSha256": "3900a0690763852c1cf5849a0e051e5a276c207377858b4aa2ea694bcc4af378"
+          }
+        },
+        {
+          "taskId": "deliver-tax-rounding",
+          "outcomeClass": "delivery",
+          "condition": "git",
+          "temperature": "warm",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:44:33.231Z",
+          "endedAt": "2026-10-04T19:45:48.573Z",
+          "dispatchSeconds": 75.340535292,
+          "ownerPreparationSeconds": 0.1826798749999998,
+          "bootstrapSeconds": 0.051660292000000024,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0.12173112499999979,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 75.523215167,
+          "tokens": {
+            "input_tokens": 131632,
+            "cached_input_tokens": 106752,
+            "uncached_input_tokens": 24880,
+            "output_tokens": 1730,
+            "reasoning_output_tokens": 86
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 7,
+          "commandOutputBytes": 6702,
+          "generatedCommandBytes": 3104,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 5,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "91b99282699fc7970bdd95d1825a7446902788fe",
+            "initialNativeState": "f9820f614a997df4d90cb622b1ea06ed639f981ef7733c558a28bbf7414a73ab",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "9be93016ea567caca32a831f645f9eff5ddef945bf0bfbc21ff67729049500b3",
+            "candidate": "b5783317ee0f7f0cec719ae5145512240d88ca5d",
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": null,
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T19:45:18.988Z",
+            "actualCheckEndedAt": "2026-10-04T19:45:19.213Z",
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": "bb9a405634f7998a1e0c537551c8eb7f58b7628813f6b4b1bf4cf2eaadefa5de",
+            "originalEventsSha256": "d139480d93dd03de53061f79c9bee7123b3040ec1a14fc8e1f36b715f909e1a4",
+            "originalTimingSha256": "dae4d54efd2d63a8bc8f39c25e319940848c3289e6ca2ef329fa2b1943d63f3f",
+            "originalAnswerSha256": "1208e69d6366e3eac72df480cea69d7aa4bd27ebe0e2a2cc1eb006cf5ea8ddab"
+          }
+        },
+        {
+          "taskId": "deliver-tax-rounding",
+          "outcomeClass": "delivery",
+          "condition": "forge",
+          "temperature": "warm",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:45:48.634Z",
+          "endedAt": "2026-10-04T19:48:44.061Z",
+          "dispatchSeconds": 175.424607958,
+          "ownerPreparationSeconds": 0.9632110000000003,
+          "bootstrapSeconds": 0.5679289589999998,
+          "configuredCheckPreparationSeconds": 0.26952758300000007,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0.11965433399999983,
+          "standaloneFirstUseSharedSeconds": 6.0480952079999994,
+          "standaloneFirstUseTotalSeconds": 182.435914166,
+          "tokens": {
+            "input_tokens": 334882,
+            "cached_input_tokens": 301056,
+            "uncached_input_tokens": 33826,
+            "output_tokens": 3696,
+            "reasoning_output_tokens": 83
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 17,
+          "commandOutputBytes": 21387,
+          "generatedCommandBytes": 7934,
+          "failures": [
+            {
+              "commandSha256": "78b908af86264fa7a7086a47039efd0c3c99b54d049f04be1519939dac82ead3",
+              "outputSha256": "d3f2e7a279bf1b2d67b4aee1e628503e896e249bf5218786dc9e59c67508f8fa",
+              "exitCode": 1,
+              "incomplete": false,
+              "structuredError": "WORK_BUSY"
+            }
+          ],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 5,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": true,
+          "originalCheckRuns": [
+            {
+              "id": "d2f0eeef-87ae-4053-9071-23eb67da85a6",
+              "viewId": "887d8a1d-07d8-47a9-a36a-a917be5f41c9",
+              "head": "41058fc2d362b4dc4eba4a8a66722fa4ab6754fd35272564545c9850e0e24b65",
+              "status": "passed",
+              "checkId": "6885c64f-3271-48c5-82e8-a3b65b36b74c",
+              "definition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+              "environment": "7bd5caf372d4fcc5dc4ac601c18c28313fc5d2ab768f93830d7383f7bd51cdb9",
+              "exitCode": 0,
+              "startedAt": "2026-10-04T19:47:48.369Z",
+              "endedAt": "2026-10-04T19:47:48.982Z",
+              "logs": [
+                {
+                  "stream": "stdout",
+                  "sha256": "86bdea5587af4308d8dffa926d6519b08bc0b62d5e631802e3f26fb07069dbbd",
+                  "bytes": 286
+                },
+                {
+                  "stream": "stderr",
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "bytes": 0
+                }
+              ]
+            }
+          ],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "91b99282699fc7970bdd95d1825a7446902788fe",
+            "initialNativeState": "f9820f614a997df4d90cb622b1ea06ed639f981ef7733c558a28bbf7414a73ab",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "4ba7c66d30e17e60a7484da0481f915cb5b4ee892175d34ce13bd4b9ad9d4ac5",
+            "candidate": "41058fc2d362b4dc4eba4a8a66722fa4ab6754fd35272564545c9850e0e24b65",
+            "viewId": "887d8a1d-07d8-47a9-a36a-a917be5f41c9",
+            "checkRunId": "d2f0eeef-87ae-4053-9071-23eb67da85a6",
+            "configuredCheckId": "6885c64f-3271-48c5-82e8-a3b65b36b74c",
+            "configuredCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckEnvironment": "7bd5caf372d4fcc5dc4ac601c18c28313fc5d2ab768f93830d7383f7bd51cdb9",
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": "3d1f45af-7132-4b39-a6fe-a61d7d53d470",
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T19:47:48.369Z",
+            "actualCheckEndedAt": "2026-10-04T19:47:48.982Z",
+            "checkLogs": [
+              {
+                "stream": "stdout.log",
+                "sha256": "86bdea5587af4308d8dffa926d6519b08bc0b62d5e631802e3f26fb07069dbbd",
+                "bytes": 286
+              },
+              {
+                "stream": "stderr.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "bytes": 0
+              }
+            ],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "6d1fbac228775ac1733e77606eac659b3b7cded1314cb34d77f898786d565230",
+            "originalTimingSha256": "10d93acc890ae310eb6468bc0a512f6e07537724cb6712f08b08b02f03ce6d0d",
+            "originalAnswerSha256": "932c900ecb039b25e85b6018a42e29e5097fc5ee519cd507e33f8fc8e22aaac5"
+          }
+        },
+        {
+          "taskId": "deliver-empty-label",
+          "outcomeClass": "delivery",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:48:45.129Z",
+          "endedAt": "2026-10-04T19:52:07.257Z",
+          "dispatchSeconds": 202.12419404200003,
+          "ownerPreparationSeconds": 0.8506922079999999,
+          "bootstrapSeconds": 0.5849488329999994,
+          "configuredCheckPreparationSeconds": 0.2596179579999998,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 6.0480952079999994,
+          "standaloneFirstUseTotalSeconds": 209.02298145800003,
+          "tokens": {
+            "input_tokens": 517784,
+            "cached_input_tokens": 482176,
+            "uncached_input_tokens": 35608,
+            "output_tokens": 4701,
+            "reasoning_output_tokens": 332
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 21,
+          "commandOutputBytes": 19382,
+          "generatedCommandBytes": 10419,
+          "failures": [
+            {
+              "commandSha256": "e39347c0d2369f2f22b4686a9088ca6d5c91a73803285f01d1f2bd665a3dcedd",
+              "outputSha256": "1cd9947999cc35c30e135a93fbc10da12f967725bdb864fca68758114193657c",
+              "exitCode": 1,
+              "incomplete": false,
+              "structuredError": "LANE_STALE"
+            },
+            {
+              "commandSha256": "121c23b4a3716a4852cb0333d2dd9dafcd8bf5864f174c0ef4a67f5626c754cd",
+              "outputSha256": "d3f2e7a279bf1b2d67b4aee1e628503e896e249bf5218786dc9e59c67508f8fa",
+              "exitCode": 1,
+              "incomplete": false,
+              "structuredError": "WORK_BUSY"
+            }
+          ],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": true,
+          "originalCheckRuns": [
+            {
+              "id": "a9180e85-6ea4-4934-8371-7b491424b358",
+              "viewId": "11e093af-6cde-4531-a5d8-7b089b8b4487",
+              "head": "1c27c65775a0975bbe3c529bcde01eb0eca95d12cbb38c9251dd58f55e8bc47a",
+              "status": "passed",
+              "checkId": "7918852f-aedc-496c-8508-b9bff284149c",
+              "definition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+              "environment": "d37d30cf334c8cd916839426b8d4f86f8ffb9fe3d32375ab8aced5d840d23040",
+              "exitCode": 0,
+              "startedAt": "2026-10-04T19:50:38.871Z",
+              "endedAt": "2026-10-04T19:50:39.180Z",
+              "logs": [
+                {
+                  "stream": "stdout",
+                  "sha256": "6b360ce3a1119d2f1277b676427b29e25bf7a0763a6b4109924723ede4e7e7fd",
+                  "bytes": 154
+                },
+                {
+                  "stream": "stderr",
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "bytes": 0
+                }
+              ]
+            }
+          ],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "83ed7084a2083df167703cadd2304fb8ca604d98",
+            "initialNativeState": "10ccad787c06404adbf7d01cca46923d49b1e311d3be2b121fadc35016bc5414",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "171d8607368e850b06868c121e3bb4956dfd5a9f62ffeb587bd8df3a8f829958",
+            "candidate": "1c27c65775a0975bbe3c529bcde01eb0eca95d12cbb38c9251dd58f55e8bc47a",
+            "viewId": "11e093af-6cde-4531-a5d8-7b089b8b4487",
+            "checkRunId": "a9180e85-6ea4-4934-8371-7b491424b358",
+            "configuredCheckId": "7918852f-aedc-496c-8508-b9bff284149c",
+            "configuredCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckEnvironment": "d37d30cf334c8cd916839426b8d4f86f8ffb9fe3d32375ab8aced5d840d23040",
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": "766b6096-5018-4449-a08e-78f6f9fc7489",
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T19:50:38.871Z",
+            "actualCheckEndedAt": "2026-10-04T19:50:39.180Z",
+            "checkLogs": [
+              {
+                "stream": "stdout.log",
+                "sha256": "6b360ce3a1119d2f1277b676427b29e25bf7a0763a6b4109924723ede4e7e7fd",
+                "bytes": 154
+              },
+              {
+                "stream": "stderr.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "bytes": 0
+              }
+            ],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "fc29a9eed6314fd599689a362ff20041e50e79d4d261acc81932e980a276214b",
+            "originalTimingSha256": "28665df1fe094d8b652104f11f5abc79284b23e9dc0fab9934254cb2fa4deb50",
+            "originalAnswerSha256": "ed74daa93d1fd9435caac68a95486f01a4a6907a31d05c4fcb825ee9e38d24d5"
+          }
+        },
+        {
+          "taskId": "deliver-empty-label",
+          "outcomeClass": "delivery",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T19:52:07.305Z",
+          "endedAt": "2026-10-04T19:53:11.986Z",
+          "dispatchSeconds": 64.679955167,
+          "ownerPreparationSeconds": 0.06161658400000033,
+          "bootstrapSeconds": 0.055266124999999194,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 64.74157175100001,
+          "tokens": {
+            "input_tokens": 106577,
+            "cached_input_tokens": 82816,
+            "uncached_input_tokens": 23761,
+            "output_tokens": 1604,
+            "reasoning_output_tokens": 274
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 6,
+          "commandOutputBytes": 4290,
+          "generatedCommandBytes": 2740,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "83ed7084a2083df167703cadd2304fb8ca604d98",
+            "initialNativeState": "10ccad787c06404adbf7d01cca46923d49b1e311d3be2b121fadc35016bc5414",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "445ad9350b9aa089af39493b05f730b3f5558b407b5dbaeee098d2c8491cef92",
+            "candidate": "f8e9a6f04ffaec338cfc2cf0da60f42d333f2252",
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": null,
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T19:52:38.118Z",
+            "actualCheckEndedAt": "2026-10-04T19:52:38.224Z",
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": "b98479ff22368b577844cf54a8446c8d47b98426295cb879e4f9b0f52834ca3d",
+            "originalEventsSha256": "8ca4f81df51e54f2b1332e086c569ab381036f06518d17b45f9182c705efae86",
+            "originalTimingSha256": "6489e64a2948d49a12892053e537f3f2cc24d854967c38425fe272b20a2ac750",
+            "originalAnswerSha256": "0f6af0e628ac568c0be019fb98cb0588a03310bb1eba8b851f12d2565943e62d"
+          }
+        },
+        {
+          "taskId": "deliver-prior670-portable-path",
+          "outcomeClass": "delivery",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": false,
+          "classification": "invalid-harness",
+          "invalidReason": "The initial authoritative native and Git trees differ; both arms excluded from matched comparison, all costs retained.",
+          "startedAt": "2026-10-04T19:53:12.456Z",
+          "endedAt": "2026-10-04T19:54:56.871Z",
+          "dispatchSeconds": 104.412987625,
+          "ownerPreparationSeconds": 0.5265008749999998,
+          "bootstrapSeconds": 0.318516584,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 104.9394885,
+          "tokens": {
+            "input_tokens": 177765,
+            "cached_input_tokens": 147968,
+            "uncached_input_tokens": 29797,
+            "output_tokens": 2583,
+            "reasoning_output_tokens": 412
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 7,
+          "commandOutputBytes": 17667,
+          "generatedCommandBytes": 3448,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 31,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "69fb8039eba35a09506ca5dae3ad742e33a69cee",
+            "initialNativeState": "8e8b3a28066bf2b7d379d28d0c88f7897e09a0505fbc127e5b06756009840faf",
+            "authoritativeGitFiles": 671,
+            "authoritativeNativeFiles": 665,
+            "exactBytesAndFileExecutableModes": false,
+            "scoredSourceManifestSha256": "086cd9b0d1b18c7925130a7c0906c07247d1594f8922fb69653fbaf8c0ef9e1c",
+            "promptSha256": "91a6537ec0612e04877bb63a8b387175b65c99d865d047441575c8692dd17ea4",
+            "candidate": "59153d154d8f6d87223d88e96cf54efa839a2ea3",
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": null,
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T19:54:14.563Z",
+            "actualCheckEndedAt": "2026-10-04T19:54:16.065Z",
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": "65a8db1bf468c94dfe19308314ed864a840ac888e345ef3460872919b64f44d5",
+            "originalEventsSha256": "6e50ea9aad379061d01865914cdec556af3757b246f3bc6e00ea2b209dc980ca",
+            "originalTimingSha256": "caf2065f1eeb7a44735783747b43ee91272a2baa404056b76f96aada869a5db9",
+            "originalAnswerSha256": "f962ff6e881f650b3c078f72922c5d3b621d7d28ac8feadbf820de16c46ef3b2"
+          }
+        },
+        {
+          "taskId": "deliver-prior670-portable-path",
+          "outcomeClass": "delivery",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "failed",
+          "matched": false,
+          "classification": "invalid-harness",
+          "invalidReason": "The initial authoritative native and Git trees differ; both arms excluded from matched comparison, all costs retained.",
+          "startedAt": "2026-10-04T19:54:56.903Z",
+          "endedAt": "2026-10-04T20:00:34.540Z",
+          "dispatchSeconds": 337.63566841600004,
+          "ownerPreparationSeconds": 4.219498166999999,
+          "bootstrapSeconds": 3.8312527089999993,
+          "configuredCheckPreparationSeconds": 0.263494917,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 6.0480952079999994,
+          "standaloneFirstUseTotalSeconds": 347.90326179100003,
+          "tokens": {
+            "input_tokens": null,
+            "cached_input_tokens": null,
+            "uncached_input_tokens": null,
+            "output_tokens": null,
+            "reasoning_output_tokens": null
+          },
+          "tokenUsageAvailable": false,
+          "commandCalls": 25,
+          "commandOutputBytes": 182335,
+          "generatedCommandBytes": 10992,
+          "failures": [
+            {
+              "commandSha256": "72199e4bac3574fb6d0040056d9acffce0045e70182147b1c64add3fa67ed289",
+              "outputSha256": "3d07aa85b1c842356e0fb4021232246b0708e0d15f2be22ee9da61da1c293e7b",
+              "exitCode": 1,
+              "incomplete": false,
+              "structuredError": null
+            },
+            {
+              "commandSha256": "e57a9ccd38e81a3072efbdfaa790165eecda7bab3ee44927848353a194e5db60",
+              "outputSha256": "1cd9947999cc35c30e135a93fbc10da12f967725bdb864fca68758114193657c",
+              "exitCode": 1,
+              "incomplete": false,
+              "structuredError": "LANE_STALE"
+            }
+          ],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": null,
+          "timedOut": false,
+          "interrupted": true,
+          "hiddenOraclePassed": false,
+          "hiddenOracleCases": null,
+          "recordedWorkflowPassed": false,
+          "checkDefinitionMatchesConfigured": false,
+          "originalCheckRuns": [
+            {
+              "id": "9c7acb3d-0d33-43bc-95c5-7f302bb4b592",
+              "viewId": "116dc8ea-a17d-4fad-8bd3-7d12325dae61",
+              "head": "1e91c5286138d98cf4d4fb08463a959e3ecf7382f81601ffeac4621e00904c70",
+              "status": "failed",
+              "checkId": "bdea0e5e-33bc-42de-b4d3-991800fecb62",
+              "definition": "f8337547f12e40aecd5872d64da4ddf5cce50b2891a73cf38368b7ba70472b50",
+              "environment": "fec2010a0525fc7ef0be2d9d453fb7b8a5c9d75722f352cab6d01ae47d98f16d",
+              "exitCode": 2,
+              "startedAt": "2026-10-04T19:58:45.128Z",
+              "endedAt": "2026-10-04T19:58:47.055Z",
+              "logs": [
+                {
+                  "stream": "stdout",
+                  "sha256": "653bfd41cf415858a4f46c7a747178688c4772c4500795531590d338fa08a645",
+                  "bytes": 279
+                },
+                {
+                  "stream": "stderr",
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "bytes": 0
+                }
+              ]
+            }
+          ],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "69fb8039eba35a09506ca5dae3ad742e33a69cee",
+            "initialNativeState": "8e8b3a28066bf2b7d379d28d0c88f7897e09a0505fbc127e5b06756009840faf",
+            "authoritativeGitFiles": 671,
+            "authoritativeNativeFiles": 665,
+            "exactBytesAndFileExecutableModes": false,
+            "scoredSourceManifestSha256": "086cd9b0d1b18c7925130a7c0906c07247d1594f8922fb69653fbaf8c0ef9e1c",
+            "promptSha256": "6bb2a2f648df3aba974c62ccd4e26092021dd219e3aaabe2736d488e4afebe82",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": "bdea0e5e-33bc-42de-b4d3-991800fecb62",
+            "configuredCheckDefinition": "f8337547f12e40aecd5872d64da4ddf5cce50b2891a73cf38368b7ba70472b50",
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "9761001a2f9b7c48fdd5567caa819ee3a8c91a3dadce3f098facbc36fe19f704",
+            "originalTimingSha256": "cdecc96841ce527c8881055652a32552acf1dd6aa70ddbcd969b182bbaaa1313",
+            "originalAnswerSha256": null
+          }
+        }
+      ],
+      "aggregates": {
+        "matchedSourceThreePairs": {
+          "git": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 167090,
+                "knownSum": 167090,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 99712,
+                "knownSum": 99712,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 67378,
+                "knownSum": 67378,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 774,
+                "knownSum": 774,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 84,
+                "knownSum": 84,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 5,
+            "commandOutputBytes": 20070,
+            "generatedCommandBytes": 984,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 52.671066249,
+            "ownerPreparationSeconds": 0.17982233299999997,
+            "taskAndOwnerPreparationSeconds": 52.850888581999996,
+            "sharedInstallSkillLauncherOnceSeconds": 0,
+            "fullAttributableSeconds": 52.850888581999996
+          },
+          "forge": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 214712,
+                "knownSum": 214712,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 145408,
+                "knownSum": 145408,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 69304,
+                "knownSum": 69304,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 1035,
+                "knownSum": 1035,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 83,
+                "knownSum": 83,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 8,
+            "commandOutputBytes": 24622,
+            "generatedCommandBytes": 1798,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 64.018554166,
+            "ownerPreparationSeconds": 1.712534417,
+            "taskAndOwnerPreparationSeconds": 65.731088583,
+            "sharedInstallSkillLauncherOnceSeconds": 6.0480952079999994,
+            "fullAttributableSeconds": 71.77918379100001
+          },
+          "forgeDividedByGit": {
+            "input_tokens": 1.2850080794781256,
+            "cached_input_tokens": 1.4582798459563544,
+            "uncached_input_tokens": 1.0285849980705868,
+            "output_tokens": 1.3372093023255813,
+            "reasoning_output_tokens": 0.9880952380952381,
+            "commandCalls": 1.6,
+            "dispatchSeconds": 1.2154406342061748,
+            "taskAndOwnerPreparationSeconds": 1.243708296049099,
+            "fullAttributableSeconds": 1.3581452595566506
+          }
+        },
+        "matchedDeliveryPairs": {
+          "git": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 345634,
+                "knownSum": 345634,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 273024,
+                "knownSum": 273024,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 72610,
+                "knownSum": 72610,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 4989,
+                "knownSum": 4989,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 469,
+                "knownSum": 469,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 18,
+            "commandOutputBytes": 15238,
+            "generatedCommandBytes": 8916,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 208.254453751,
+            "ownerPreparationSeconds": 0.306456126,
+            "taskAndOwnerPreparationSeconds": 208.560909877,
+            "sharedInstallSkillLauncherOnceSeconds": 0,
+            "fullAttributableSeconds": 208.560909877
+          },
+          "forge": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 1207226,
+                "knownSum": 1207226,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 1093888,
+                "knownSum": 1093888,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 113338,
+                "knownSum": 113338,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 12903,
+                "knownSum": 12903,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 707,
+                "knownSum": 707,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 63,
+            "commandOutputBytes": 87162,
+            "generatedCommandBytes": 29063,
+            "failedCommands": 5,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 556.7980952500001,
+            "ownerPreparationSeconds": 2.6812011250000003,
+            "taskAndOwnerPreparationSeconds": 559.4792963750001,
+            "sharedInstallSkillLauncherOnceSeconds": 6.0480952079999994,
+            "fullAttributableSeconds": 565.527391583
+          },
+          "forgeDividedByGit": {
+            "input_tokens": 3.492787167929081,
+            "cached_input_tokens": 4.006563525550868,
+            "uncached_input_tokens": 1.5609144745902768,
+            "output_tokens": 2.586289837642814,
+            "reasoning_output_tokens": 1.507462686567164,
+            "commandCalls": 3.5,
+            "dispatchSeconds": 2.673643157306673,
+            "taskAndOwnerPreparationSeconds": 2.6825702702628034,
+            "fullAttributableSeconds": 2.711569449502896
+          }
+        },
+        "matchedAllPairs": {
+          "git": {
+            "observations": 6,
+            "passed": 6,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 512724,
+                "knownSum": 512724,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 372736,
+                "knownSum": 372736,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 139988,
+                "knownSum": 139988,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 5763,
+                "knownSum": 5763,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 553,
+                "knownSum": 553,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 23,
+            "commandOutputBytes": 35308,
+            "generatedCommandBytes": 9900,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 260.92552,
+            "ownerPreparationSeconds": 0.48627845899999994,
+            "taskAndOwnerPreparationSeconds": 261.411798459,
+            "sharedInstallSkillLauncherOnceSeconds": 0,
+            "fullAttributableSeconds": 261.411798459
+          },
+          "forge": {
+            "observations": 6,
+            "passed": 6,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 1421938,
+                "knownSum": 1421938,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 1239296,
+                "knownSum": 1239296,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 182642,
+                "knownSum": 182642,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 13938,
+                "knownSum": 13938,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 790,
+                "knownSum": 790,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 71,
+            "commandOutputBytes": 111784,
+            "generatedCommandBytes": 30861,
+            "failedCommands": 5,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 620.816649416,
+            "ownerPreparationSeconds": 4.393735542,
+            "taskAndOwnerPreparationSeconds": 625.210384958,
+            "sharedInstallSkillLauncherOnceSeconds": 6.0480952079999994,
+            "fullAttributableSeconds": 631.2584801659999
+          },
+          "forgeDividedByGit": {
+            "input_tokens": 2.773301035254835,
+            "cached_input_tokens": 3.3248626373626373,
+            "uncached_input_tokens": 1.3046975455039003,
+            "output_tokens": 2.418532014575742,
+            "reasoning_output_tokens": 1.4285714285714286,
+            "commandCalls": 3.0869565217391304,
+            "dispatchSeconds": 2.3792868149347752,
+            "taskAndOwnerPreparationSeconds": 2.3916685805444176,
+            "fullAttributableSeconds": 2.414804855355474
+          }
+        },
+        "allOriginalObservationsIncludingInvalidHarness": {
+          "git": {
+            "observations": 7,
+            "passed": 7,
+            "failed": 0,
+            "invalidHarness": 1,
+            "tokens": {
+              "input_tokens": {
+                "total": 690489,
+                "knownSum": 690489,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 520704,
+                "knownSum": 520704,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 169785,
+                "knownSum": 169785,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 8346,
+                "knownSum": 8346,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 965,
+                "knownSum": 965,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 30,
+            "commandOutputBytes": 52975,
+            "generatedCommandBytes": 13348,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 365.33850762500003,
+            "ownerPreparationSeconds": 1.0127793339999998,
+            "taskAndOwnerPreparationSeconds": 366.35128695900005,
+            "sharedInstallSkillLauncherOnceSeconds": 0,
+            "fullAttributableSeconds": 366.35128695900005
+          },
+          "forge": {
+            "observations": 7,
+            "passed": 6,
+            "failed": 1,
+            "invalidHarness": 1,
+            "tokens": {
+              "input_tokens": {
+                "total": null,
+                "knownSum": 1421938,
+                "unavailableRuns": 1
+              },
+              "cached_input_tokens": {
+                "total": null,
+                "knownSum": 1239296,
+                "unavailableRuns": 1
+              },
+              "uncached_input_tokens": {
+                "total": null,
+                "knownSum": 182642,
+                "unavailableRuns": 1
+              },
+              "output_tokens": {
+                "total": null,
+                "knownSum": 13938,
+                "unavailableRuns": 1
+              },
+              "reasoning_output_tokens": {
+                "total": null,
+                "knownSum": 790,
+                "unavailableRuns": 1
+              }
+            },
+            "commandCalls": 96,
+            "commandOutputBytes": 294119,
+            "generatedCommandBytes": 41853,
+            "failedCommands": 7,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 958.4523178320001,
+            "ownerPreparationSeconds": 8.613233709,
+            "taskAndOwnerPreparationSeconds": 967.0655515410001,
+            "sharedInstallSkillLauncherOnceSeconds": 6.0480952079999994,
+            "fullAttributableSeconds": 973.113646749
+          },
+          "forgeDividedByGit": {
+            "input_tokens": null,
+            "cached_input_tokens": null,
+            "uncached_input_tokens": null,
+            "output_tokens": null,
+            "reasoning_output_tokens": null,
+            "commandCalls": 3.2,
+            "dispatchSeconds": 2.623463713318167,
+            "taskAndOwnerPreparationSeconds": 2.639721998981891,
+            "fullAttributableSeconds": 2.656231003926855
+          }
+        }
+      }
+    },
+    {
+      "version": "v2",
+      "declaredPairs": 7,
+      "packageSha256": "31af5a5663cf7894f389d5e10043785877ad2b2afdc63358740ae0c365431279",
+      "packageSourceState": "9d41f5d9ceda2bd707f857389ba3556f4f565aea0d0875307a3f3796ea101e78",
+      "packageViewId": "e1aae77a-1617-423f-a102-38f5399b640e",
+      "compiledCodeParity": null,
+      "skillSha256": "7cc32c2cc2f87ddf20931e0865262ea509ac74c32fa2f56917b34ca8cecd8eb5",
+      "skillBytes": 4726,
+      "model": "gpt-6.1-sol",
+      "reasoning": "high",
+      "runtime": "Node24.19.0",
+      "harness": "codex-cli0.159.0-alpha.12.1",
+      "frozenFiles": {
+        "agent-efficiency-trial-followup.mjs": "5ff96b3030ef46d3a8e09c5bfa672e8a24d1b58ab51e47ad4c15828ec5cfa200",
+        "agent-efficiency-trial-fixture.mjs": "4f08df7d1c9ea7a33e9a1eb5c7fd2867c42a20fcf6622df0b76facf91f04dd9a",
+        "agent-efficiency-trial-authority.mjs": "ea754e845510d6642cdba2028c10212bc5d401f06c0272a0317744c3df7bf864",
+        "agent-efficiency-followup-tasks.json": "d95a9eb2d16f496b869e62b331d78ced6d2b4f31ccc21bbb783e345ae819b63c",
+        "SKILL.md": "7cc32c2cc2f87ddf20931e0865262ea509ac74c32fa2f56917b34ca8cecd8eb5",
+        "nforge": "84493340ca971b82a2273273a928830e38f2e5ec3f3e7ec3993cde4e54248680",
+        "prior-check.mjs": "da99b5a47767d918cebf19693f2a40a84bdf5c795145f2dcd0fdf97810377f28",
+        "materialize-candidate-v2.mjs": "0ae345a69808dcdc754b78575230e9c24db814223c91d7d99d2d7655e25247cb"
+      },
+      "originalResultsSha256": "9b7d64e3573dd78271786257100a9edce83b92e2e1a17e66d27b110e1487cbaf",
+      "authorityReceiptSha256": "624eed415d3a25097e6731664db60cb4308538fa483ecf383a1f80e5b9ab53cc",
+      "authorityValidatedAt": "2026-10-04T20:06:23.112Z",
+      "authorityValidationStage": "predispatch actual native objects versus Git blobs and file/executable modes",
+      "sharedSetup": {
+        "packageInstallSeconds": 5.990475416,
+        "skillInstallSeconds": 0.000306083,
+        "launcherSetupSeconds": 0.00021412497153505683,
+        "launcherSha256": "84493340ca971b82a2273273a928830e38f2e5ec3f3e7ec3993cde4e54248680",
+        "totalSeconds": 5.990995623971535,
+        "allocation": "One installation/skill/launcher per series or standalone first use. Aggregate charges once, never once per observation."
+      },
+      "observations": [
+        {
+          "taskId": "investigate-cold-graph",
+          "outcomeClass": "investigation",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:07:09.963Z",
+          "endedAt": "2026-10-04T20:07:31.271Z",
+          "dispatchSeconds": 21.306503499999998,
+          "ownerPreparationSeconds": 0.061292417,
+          "bootstrapSeconds": 0.049944208000000004,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 21.367795917,
+          "tokens": {
+            "input_tokens": 64197,
+            "cached_input_tokens": 40320,
+            "uncached_input_tokens": 23877,
+            "output_tokens": 349,
+            "reasoning_output_tokens": 50
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 3,
+          "commandOutputBytes": 10954,
+          "generatedCommandBytes": 479,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "71bcd9e21b483c2ea97ff2bb2bfde214b6a44915",
+            "initialNativeState": "f96f80731e553ae390c6f624f538405f15ae5741c39fec14e60d7523cbe79a47",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "59b48d6ebf6dd4f25885c982d50e8ada4acba58aad0daeb3094e7f2d770c8ee3",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "5a1c8a56b51c0052acbd028cecfae500599367554018f50c62060c97db0c80b0",
+            "originalTimingSha256": "e6cee33a08755133048acdce67e29c55b7c755f26cf53a6f6434e73dc7bb168f",
+            "originalAnswerSha256": "675d4a7f5b04aed30f09fec85c5f5c5eef321ed70952ea93157be8135264d145"
+          }
+        },
+        {
+          "taskId": "investigate-cold-graph",
+          "outcomeClass": "investigation",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:07:31.313Z",
+          "endedAt": "2026-10-04T20:07:58.787Z",
+          "dispatchSeconds": 27.473150792000002,
+          "ownerPreparationSeconds": 0.661276542,
+          "bootstrapSeconds": 0.6529975419999999,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 5.990995623971535,
+          "standaloneFirstUseTotalSeconds": 34.12542295797154,
+          "tokens": {
+            "input_tokens": 85152,
+            "cached_input_tokens": 62464,
+            "uncached_input_tokens": 22688,
+            "output_tokens": 408,
+            "reasoning_output_tokens": 36
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 3,
+          "commandOutputBytes": 5572,
+          "generatedCommandBytes": 770,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "71bcd9e21b483c2ea97ff2bb2bfde214b6a44915",
+            "initialNativeState": "f96f80731e553ae390c6f624f538405f15ae5741c39fec14e60d7523cbe79a47",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "333ae2230ea62d441ac2ca8b847eda04d52940a0db56a70639eaa9cc1390a31c",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "deb95a75c53c78f820b0a744cc003d7a2446ebe522321961d372b3b516a55e40",
+            "originalTimingSha256": "0c6f8e718821cae908d72bfc57d3d0b511c94b3e6bb6ca95c76a9cb1f84b2088",
+            "originalAnswerSha256": "675d4a7f5b04aed30f09fec85c5f5c5eef321ed70952ea93157be8135264d145"
+          }
+        },
+        {
+          "taskId": "investigate-warm-graph",
+          "outcomeClass": "investigation",
+          "condition": "forge",
+          "temperature": "warm",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:07:58.866Z",
+          "endedAt": "2026-10-04T20:08:25.051Z",
+          "dispatchSeconds": 26.184618458,
+          "ownerPreparationSeconds": 0.902056667,
+          "bootstrapSeconds": 0.611298708,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0.28163599999999994,
+          "standaloneFirstUseSharedSeconds": 5.990995623971535,
+          "standaloneFirstUseTotalSeconds": 33.077670748971535,
+          "tokens": {
+            "input_tokens": 87688,
+            "cached_input_tokens": 63744,
+            "uncached_input_tokens": 23944,
+            "output_tokens": 383,
+            "reasoning_output_tokens": 0
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 3,
+          "commandOutputBytes": 10267,
+          "generatedCommandBytes": 873,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "d61dcce090a1e87fe85587b1d4b871ac6345ef19",
+            "initialNativeState": "313cbdcb56b0e998cae34a23a745f8c80a7d653fd974487890c31fcdbe712757",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "5a8bbf0ade29565497fd892c8dac7b05060716426487d1c0b4120a92bfd890c1",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "98cb9a72e5f944cd418e65eed9937c1735fc090fe13a5f62b27ec6ea3c5fae57",
+            "originalTimingSha256": "4697abb1cc774264dfd70d9d0bdd926201d7dfdc270351f90e1d5560fa2ea1f7",
+            "originalAnswerSha256": "1edf9b5bfd81294c599d0865bc797470e5e8274596b9544b71ce19b7118ec7ef"
+          }
+        },
+        {
+          "taskId": "investigate-warm-graph",
+          "outcomeClass": "investigation",
+          "condition": "git",
+          "temperature": "warm",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:08:25.096Z",
+          "endedAt": "2026-10-04T20:08:52.499Z",
+          "dispatchSeconds": 27.402571875,
+          "ownerPreparationSeconds": 0.0703047079999999,
+          "bootstrapSeconds": 0.0485525419999999,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0.011704459000000042,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 27.472876582999998,
+          "tokens": {
+            "input_tokens": 83089,
+            "cached_input_tokens": 39936,
+            "uncached_input_tokens": 43153,
+            "output_tokens": 408,
+            "reasoning_output_tokens": 0
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 3,
+          "commandOutputBytes": 3655,
+          "generatedCommandBytes": 894,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "d61dcce090a1e87fe85587b1d4b871ac6345ef19",
+            "initialNativeState": "313cbdcb56b0e998cae34a23a745f8c80a7d653fd974487890c31fcdbe712757",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "b0e2a452e2855862bebcefc61d79230f3dc977b60b6b645d658e5e0397258f0c",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "6416b17cf165c3f6f9f1b34da800a213f03b4900559c9c8e156ec901ba0c1582",
+            "originalTimingSha256": "25baeb4489c03934564b57b9266ac311c9799662febec2f1b1a8649237f22152",
+            "originalAnswerSha256": "1edf9b5bfd81294c599d0865bc797470e5e8274596b9544b71ce19b7118ec7ef"
+          }
+        },
+        {
+          "taskId": "investigate-known-file",
+          "outcomeClass": "investigation",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:08:52.597Z",
+          "endedAt": "2026-10-04T20:09:03.913Z",
+          "dispatchSeconds": 11.315349417,
+          "ownerPreparationSeconds": 0.05694008299999996,
+          "bootstrapSeconds": 0.04701420799999983,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 11.3722895,
+          "tokens": {
+            "input_tokens": 40177,
+            "cached_input_tokens": 19840,
+            "uncached_input_tokens": 20337,
+            "output_tokens": 115,
+            "reasoning_output_tokens": 0
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 1,
+          "commandOutputBytes": 249,
+          "generatedCommandBytes": 121,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "d61dcce090a1e87fe85587b1d4b871ac6345ef19",
+            "initialNativeState": "f0c2adcd2328952995c1eb9778238741a7a91374f2d9daeaaca2227487335318",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "4cf446de19861970c52d9c03b3e06795be5fa7f19d2725a560d6b4b498b22c01",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "53f601b8356da9b4f9d5975780a5c8974d1081af41f2d5f85a1776dfb49d21a4",
+            "originalTimingSha256": "e46218901f2f23c5de3d04bc200483988b4160cac91833d15a378648bf9541c1",
+            "originalAnswerSha256": "a6b1ddd55ea630d96ea5a78674e0b117b1573d53c716d4b83f553e0ab9b69480"
+          }
+        },
+        {
+          "taskId": "investigate-known-file",
+          "outcomeClass": "investigation",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:09:03.955Z",
+          "endedAt": "2026-10-04T20:09:14.973Z",
+          "dispatchSeconds": 11.017834083,
+          "ownerPreparationSeconds": 0.6214645830000002,
+          "bootstrapSeconds": 0.611860667,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 5.990995623971535,
+          "standaloneFirstUseTotalSeconds": 17.630294289971534,
+          "tokens": {
+            "input_tokens": 40365,
+            "cached_input_tokens": 19840,
+            "uncached_input_tokens": 20525,
+            "output_tokens": 118,
+            "reasoning_output_tokens": 0
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 1,
+          "commandOutputBytes": 249,
+          "generatedCommandBytes": 126,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": true,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "d61dcce090a1e87fe85587b1d4b871ac6345ef19",
+            "initialNativeState": "f0c2adcd2328952995c1eb9778238741a7a91374f2d9daeaaca2227487335318",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "f20e16f5589846a5034efaf0bb759dfbbf47dc1c8d8e642357c2a0290a287ad3",
+            "candidate": null,
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": null,
+            "acceptanceId": null,
+            "actualCheckExitCode": null,
+            "actualCheckStartedAt": null,
+            "actualCheckEndedAt": null,
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "26442d5509a1149674a94abedcef59489601b33cc4900180e0d0dacdec06efaa",
+            "originalTimingSha256": "790a10dfc0ff8227f641e7b501304afb1e96fa6ccbdf3174f183aebc867a0e7a",
+            "originalAnswerSha256": "a6b1ddd55ea630d96ea5a78674e0b117b1573d53c716d4b83f553e0ab9b69480"
+          }
+        },
+        {
+          "taskId": "deliver-coupon-boundary",
+          "outcomeClass": "delivery",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:09:15.081Z",
+          "endedAt": "2026-10-04T20:10:43.626Z",
+          "dispatchSeconds": 88.545341042,
+          "ownerPreparationSeconds": 0.8399713750000001,
+          "bootstrapSeconds": 0.5786244580000003,
+          "configuredCheckPreparationSeconds": 0.25194799999999984,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 5.990995623971535,
+          "standaloneFirstUseTotalSeconds": 95.37630804097154,
+          "tokens": {
+            "input_tokens": 166180,
+            "cached_input_tokens": 138112,
+            "uncached_input_tokens": 28068,
+            "output_tokens": 2165,
+            "reasoning_output_tokens": 330
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 8,
+          "commandOutputBytes": 14047,
+          "generatedCommandBytes": 2989,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 1
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 6,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": true,
+          "originalCheckRuns": [
+            {
+              "id": "4e186697-e3a4-5409-a718-66f596262102",
+              "viewId": "0d6a2215-c742-48e5-8cd4-6c45bab78d87",
+              "head": "8fb209727fb10f20869f483a0c5f5c757abfab7705333d0a66ccffa70e7c4a30",
+              "status": "passed",
+              "checkId": "eaca0e2e-a7e8-4b37-b955-3b2376b92af9",
+              "definition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+              "environment": "43dc9583056e499b5b36c6328c685dee8d049c58e7da9830fe17233aef54d6b1",
+              "exitCode": 0,
+              "startedAt": "2026-10-04T20:10:37.583Z",
+              "endedAt": "2026-10-04T20:10:37.751Z",
+              "logs": [
+                {
+                  "stream": "stdout",
+                  "sha256": "6e2f502538cc264f0b52fc0ee1512362e3544b422f4fe8959c9f0acffa41e71c",
+                  "bytes": 207
+                },
+                {
+                  "stream": "stderr",
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "bytes": 0
+                }
+              ]
+            }
+          ],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "d9e0ef265ff5d2de0840c5bdb16e635e30aa68b1",
+            "initialNativeState": "09a2baf3d21a664407e124500bb6a27a4d1eb9559b128d98f94811e64047b471",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "d0abd90a9761f89c2efd05551071e5b7785ad01c5d579a68a5925b33e9d9c5ce",
+            "candidate": "8fb209727fb10f20869f483a0c5f5c757abfab7705333d0a66ccffa70e7c4a30",
+            "viewId": "0d6a2215-c742-48e5-8cd4-6c45bab78d87",
+            "checkRunId": "4e186697-e3a4-5409-a718-66f596262102",
+            "configuredCheckId": "eaca0e2e-a7e8-4b37-b955-3b2376b92af9",
+            "configuredCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckEnvironment": "43dc9583056e499b5b36c6328c685dee8d049c58e7da9830fe17233aef54d6b1",
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": "df4fb072-803c-56c8-a99a-cd12e449bfb5",
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:10:37.583Z",
+            "actualCheckEndedAt": "2026-10-04T20:10:37.751Z",
+            "checkLogs": [
+              {
+                "stream": "stdout.log",
+                "sha256": "6e2f502538cc264f0b52fc0ee1512362e3544b422f4fe8959c9f0acffa41e71c",
+                "bytes": 207
+              },
+              {
+                "stream": "stderr.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "bytes": 0
+              }
+            ],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "1f5600cce85a1fc028fe9fb1d7b55a09b47a0ad67ac9b9ff2177bbd5332d2c08",
+            "originalTimingSha256": "bd3937570b19bac127a6a3c46095a3318c3420c95ed10a82237fc5b6d3f9c0d0",
+            "originalAnswerSha256": "adc5afc821f2749a34a831b38760bf5de818c59d6df3f7957e785fa2722386ec"
+          }
+        },
+        {
+          "taskId": "deliver-coupon-boundary",
+          "outcomeClass": "delivery",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:10:43.667Z",
+          "endedAt": "2026-10-04T20:11:57.363Z",
+          "dispatchSeconds": 73.694760375,
+          "ownerPreparationSeconds": 0.06082708300000013,
+          "bootstrapSeconds": 0.05065895799999998,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 73.75558745800001,
+          "tokens": {
+            "input_tokens": 150036,
+            "cached_input_tokens": 116864,
+            "uncached_input_tokens": 33172,
+            "output_tokens": 1631,
+            "reasoning_output_tokens": 108
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 6,
+          "commandOutputBytes": 4054,
+          "generatedCommandBytes": 3026,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 6,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "d9e0ef265ff5d2de0840c5bdb16e635e30aa68b1",
+            "initialNativeState": "09a2baf3d21a664407e124500bb6a27a4d1eb9559b128d98f94811e64047b471",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "c52081411a9117997b2c29f4c7abca2b2ee20744dded4436d0cf33d7551be9a0",
+            "candidate": "3244cff02e5c9d112bb999eb869232fefda93f87",
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": null,
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:11:26.207Z",
+            "actualCheckEndedAt": "2026-10-04T20:11:26.295Z",
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": "ea12561372c8251e6d69fdc6e299d538841939d894d70421938da71731e835b8",
+            "originalEventsSha256": "5d936b6d377190fec1300e8742e8714f06e87ba9180a68d917074228d276ec75",
+            "originalTimingSha256": "b619e95a42bf0f399fb0b8ae87af1c7c00108631188b68c7ab3603f8568c9bf7",
+            "originalAnswerSha256": "86d3046b1d5b3fbf5f01e6a905022cd20b0e75e7b01b237317a6fac8f9885e19"
+          }
+        },
+        {
+          "taskId": "deliver-tax-rounding",
+          "outcomeClass": "delivery",
+          "condition": "git",
+          "temperature": "warm",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:11:57.600Z",
+          "endedAt": "2026-10-04T20:13:04.028Z",
+          "dispatchSeconds": 66.427722125,
+          "ownerPreparationSeconds": 0.184207625,
+          "bootstrapSeconds": 0.04802124999999978,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0.12569591700000002,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 66.61192975,
+          "tokens": {
+            "input_tokens": 130145,
+            "cached_input_tokens": 105600,
+            "uncached_input_tokens": 24545,
+            "output_tokens": 1579,
+            "reasoning_output_tokens": 129
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 5,
+          "commandOutputBytes": 5970,
+          "generatedCommandBytes": 2647,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 5,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "d9e0ef265ff5d2de0840c5bdb16e635e30aa68b1",
+            "initialNativeState": "b013375b4ba764ffe3ad3bd88ee0c9d0dd4a2f1931a178295695c4c1d5952c60",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "9be93016ea567caca32a831f645f9eff5ddef945bf0bfbc21ff67729049500b3",
+            "candidate": "3c58bd8dc3e787170147dbd064f2ff81c818a1e1",
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": null,
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:12:34.439Z",
+            "actualCheckEndedAt": "2026-10-04T20:12:34.531Z",
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": "99b775e074aea0c887b38c2e07338bb1326a4e76e2448d9d2aa2a40c059fd65b",
+            "originalEventsSha256": "8a060946905ce0b626d95907fb2af8b50cd2ecce533e1134f96476668ca4ef76",
+            "originalTimingSha256": "8eff8bde1319ca67cb26e8711c912b83226fc70571bbe4431baf46ca46331888",
+            "originalAnswerSha256": "5e66597632efac72ced2d75241c28dd600ca6f8f8a615d2142088b951c1b93cc"
+          }
+        },
+        {
+          "taskId": "deliver-tax-rounding",
+          "outcomeClass": "delivery",
+          "condition": "forge",
+          "temperature": "warm",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:13:04.069Z",
+          "endedAt": "2026-10-04T20:14:35.634Z",
+          "dispatchSeconds": 91.564517083,
+          "ownerPreparationSeconds": 0.9414506669999996,
+          "bootstrapSeconds": 0.5773843749999996,
+          "configuredCheckPreparationSeconds": 0.24245912499999986,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0.11554533300000003,
+          "standaloneFirstUseSharedSeconds": 5.990995623971535,
+          "standaloneFirstUseTotalSeconds": 98.49696337397152,
+          "tokens": {
+            "input_tokens": 222534,
+            "cached_input_tokens": 192768,
+            "uncached_input_tokens": 29766,
+            "output_tokens": 2215,
+            "reasoning_output_tokens": 256
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 10,
+          "commandOutputBytes": 17175,
+          "generatedCommandBytes": 2767,
+          "failures": [
+            {
+              "commandSha256": "9fa41f626b9536e9f872295997ceb792ad47ae8bd7e4153d2c0177d5ff2f69a7",
+              "outputSha256": "219f6726de8673e192a7b1b91d2a2e08ba526a84777b41fdde784f75c7a4950e",
+              "exitCode": 1,
+              "incomplete": false,
+              "structuredError": null
+            }
+          ],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": true,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 1
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 5,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": true,
+          "originalCheckRuns": [
+            {
+              "id": "574f4de9-764c-5820-8e7c-132a929ee318",
+              "viewId": "b3057e0d-7d15-4bc7-bf2c-546a3a21d4d6",
+              "head": "ad947ee1c88a0a78ccd828cf39ae0b9bd512fdf013ad3763d5475c97be8ce930",
+              "status": "passed",
+              "checkId": "36087f4f-289b-44f5-a3ba-d245633d9eef",
+              "definition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+              "environment": "84a7f58513612a0e35381a540785e1b4ad2136753400eaa47b33b77eeedd4c49",
+              "exitCode": 0,
+              "startedAt": "2026-10-04T20:14:29.461Z",
+              "endedAt": "2026-10-04T20:14:29.620Z",
+              "logs": [
+                {
+                  "stream": "stdout",
+                  "sha256": "bc56a6fbdd9f8c38f579bcbaf84d56e2ba9686d65c88dfcd1158dc4198c57051",
+                  "bytes": 300
+                },
+                {
+                  "stream": "stderr",
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "bytes": 0
+                }
+              ]
+            }
+          ],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "d9e0ef265ff5d2de0840c5bdb16e635e30aa68b1",
+            "initialNativeState": "b013375b4ba764ffe3ad3bd88ee0c9d0dd4a2f1931a178295695c4c1d5952c60",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "48fd2545fa4e8df615a6183f8a17e277c02e00d120bfb36c1d9a14a85e21a41a",
+            "candidate": "ad947ee1c88a0a78ccd828cf39ae0b9bd512fdf013ad3763d5475c97be8ce930",
+            "viewId": "b3057e0d-7d15-4bc7-bf2c-546a3a21d4d6",
+            "checkRunId": "574f4de9-764c-5820-8e7c-132a929ee318",
+            "configuredCheckId": "36087f4f-289b-44f5-a3ba-d245633d9eef",
+            "configuredCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckEnvironment": "84a7f58513612a0e35381a540785e1b4ad2136753400eaa47b33b77eeedd4c49",
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": "bff7daf2-d6ba-5d4d-93aa-f3d0611eb99a",
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:14:29.461Z",
+            "actualCheckEndedAt": "2026-10-04T20:14:29.620Z",
+            "checkLogs": [
+              {
+                "stream": "stdout.log",
+                "sha256": "bc56a6fbdd9f8c38f579bcbaf84d56e2ba9686d65c88dfcd1158dc4198c57051",
+                "bytes": 300
+              },
+              {
+                "stream": "stderr.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "bytes": 0
+              }
+            ],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "b155a94b7f7b7d6c01a689df61ada28b2e344280137d9f3bc373292d6ac60da4",
+            "originalTimingSha256": "203da033e58910c2e512e3d5890e765fbdc66c1f07105c1c43402bfb4fa4de10",
+            "originalAnswerSha256": "d5b7c35f2357e2f1a011327e68e28e2ce17cf56cfba42515f448a5b5f14fd86b"
+          }
+        },
+        {
+          "taskId": "deliver-empty-label",
+          "outcomeClass": "delivery",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:14:35.951Z",
+          "endedAt": "2026-10-04T20:15:56.832Z",
+          "dispatchSeconds": 80.88046545799999,
+          "ownerPreparationSeconds": 0.8143512920000003,
+          "bootstrapSeconds": 0.5531411659999994,
+          "configuredCheckPreparationSeconds": 0.2533852079999997,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 5.990995623971535,
+          "standaloneFirstUseTotalSeconds": 87.68581237397152,
+          "tokens": {
+            "input_tokens": 159803,
+            "cached_input_tokens": 133248,
+            "uncached_input_tokens": 26555,
+            "output_tokens": 1959,
+            "reasoning_output_tokens": 176
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 9,
+          "commandOutputBytes": 10612,
+          "generatedCommandBytes": 3069,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 1
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": true,
+          "originalCheckRuns": [
+            {
+              "id": "2c0a6aee-776c-5cbc-8979-c7331e800d35",
+              "viewId": "20a66e6b-24af-4a16-9862-4f4f28955049",
+              "head": "4ae0106081773290c79329fe066ed118d6efa5d7631acbdffe5254c0be76e1e8",
+              "status": "passed",
+              "checkId": "33d45194-3de5-471b-a161-0c136ef5bec3",
+              "definition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+              "environment": "f3efbb579deeb8f97ed91db559fd0a1d5b849ae2b2c3f2b2f60835e8acf75e23",
+              "exitCode": 0,
+              "startedAt": "2026-10-04T20:15:50.794Z",
+              "endedAt": "2026-10-04T20:15:50.943Z",
+              "logs": [
+                {
+                  "stream": "stdout",
+                  "sha256": "47e93a8feb5beb7fc22fa8fd8af1465cdccd4248ede8917cb6e706ba895c2fda",
+                  "bytes": 215
+                },
+                {
+                  "stream": "stderr",
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "bytes": 0
+                }
+              ]
+            }
+          ],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "140205bc13b7c5bd18983e6efc84eea7c7a92d4f",
+            "initialNativeState": "ef007133283429fa89b7f354cbe20f7e089564cadf77a511e94c0fbf00ac8bd3",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "f9ebd3d07847088b14fc30d18d29ffe30b6a2c96cd51e70da2b02d9464a0017a",
+            "candidate": "4ae0106081773290c79329fe066ed118d6efa5d7631acbdffe5254c0be76e1e8",
+            "viewId": "20a66e6b-24af-4a16-9862-4f4f28955049",
+            "checkRunId": "2c0a6aee-776c-5cbc-8979-c7331e800d35",
+            "configuredCheckId": "33d45194-3de5-471b-a161-0c136ef5bec3",
+            "configuredCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckEnvironment": "f3efbb579deeb8f97ed91db559fd0a1d5b849ae2b2c3f2b2f60835e8acf75e23",
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": "9ce925c3-d6b3-5043-988d-c232e5812bb2",
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:15:50.794Z",
+            "actualCheckEndedAt": "2026-10-04T20:15:50.943Z",
+            "checkLogs": [
+              {
+                "stream": "stdout.log",
+                "sha256": "47e93a8feb5beb7fc22fa8fd8af1465cdccd4248ede8917cb6e706ba895c2fda",
+                "bytes": 215
+              },
+              {
+                "stream": "stderr.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "bytes": 0
+              }
+            ],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "d9b4b8ac79f4c96d41f9ca47d33ab0118b4250dbd226fb61d71a3d1d139d0085",
+            "originalTimingSha256": "00a3bf43f91618552b8d1903b0d3deda00c0f4c99718ebcce4406c664c0981d5",
+            "originalAnswerSha256": "a163538050bccbb6f507e9cb2418a7cf742d9b7bc6eb9970d6ba3654bc4b9111"
+          }
+        },
+        {
+          "taskId": "deliver-empty-label",
+          "outcomeClass": "delivery",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:15:56.876Z",
+          "endedAt": "2026-10-04T20:17:03.751Z",
+          "dispatchSeconds": 66.874324209,
+          "ownerPreparationSeconds": 0.05797595900000033,
+          "bootstrapSeconds": 0.046617792000000005,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 66.932300168,
+          "tokens": {
+            "input_tokens": 128818,
+            "cached_input_tokens": 104960,
+            "uncached_input_tokens": 23858,
+            "output_tokens": 1548,
+            "reasoning_output_tokens": 177
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 6,
+          "commandOutputBytes": 3694,
+          "generatedCommandBytes": 2734,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "140205bc13b7c5bd18983e6efc84eea7c7a92d4f",
+            "initialNativeState": "ef007133283429fa89b7f354cbe20f7e089564cadf77a511e94c0fbf00ac8bd3",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "445ad9350b9aa089af39493b05f730b3f5558b407b5dbaeee098d2c8491cef92",
+            "candidate": "b3bbe14d7e9b969f2f737aca3fa0d7f708011ab8",
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": null,
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:16:27.999Z",
+            "actualCheckEndedAt": "2026-10-04T20:16:28.086Z",
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": "17e66d775d7787534e10ab74b382a7f674c8b227c698904ea018ac69aa6dba30",
+            "originalEventsSha256": "65d982fd976f8dede0e5660ea463b99b3658217ec6721e7eb8a90429e9e80523",
+            "originalTimingSha256": "618ee02f5f01f89d6f70ab2a9ab88026954bca036f5ba9ba294fc7cfb0eb11a3",
+            "originalAnswerSha256": "3a5bd185e6ea2fc94500f4511906ec58795719dd7b895e6ff3a7c20d600a78fc"
+          }
+        },
+        {
+          "taskId": "deliver-prior670-portable-path",
+          "outcomeClass": "delivery",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:17:04.158Z",
+          "endedAt": "2026-10-04T20:19:12.208Z",
+          "dispatchSeconds": 128.049617791,
+          "ownerPreparationSeconds": 0.5359869580000004,
+          "bootstrapSeconds": 0.3196684580000001,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 128.585604749,
+          "tokens": {
+            "input_tokens": 209132,
+            "cached_input_tokens": 191360,
+            "uncached_input_tokens": 17772,
+            "output_tokens": 3225,
+            "reasoning_output_tokens": 619
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 7,
+          "commandOutputBytes": 20143,
+          "generatedCommandBytes": 3148,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 31,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "c2dd23e5dc047ed961ca6447e419f567cede6a46",
+            "initialNativeState": "e1b854e190fc7484c5345a4211d02c42d138d1d64cef72d77ec77056075b8d1e",
+            "authoritativeGitFiles": 670,
+            "authoritativeNativeFiles": 670,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "086cd9b0d1b18c7925130a7c0906c07247d1594f8922fb69653fbaf8c0ef9e1c",
+            "promptSha256": "91a6537ec0612e04877bb63a8b387175b65c99d865d047441575c8692dd17ea4",
+            "candidate": "673bacae1ad2ee111abf13f80eb7d3f08e8b7880",
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": null,
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:18:25.723Z",
+            "actualCheckEndedAt": "2026-10-04T20:18:27.235Z",
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": "bbda92a682f880c478a49d1df0eb9f94c00db44b82459d6f51535ce30b2cf5f3",
+            "originalEventsSha256": "f063c82f9f3734c1364eecb808d09f2f2c2827f7f112c7253afa39d74d16efb3",
+            "originalTimingSha256": "149327a0ece461cef76feb167964f4a703e878cbb25895c7602f97eb43529ec8",
+            "originalAnswerSha256": "1ae6642479088dfdac9e6bbd46506288cf00d302c08d372694c81be75bace915"
+          }
+        },
+        {
+          "taskId": "deliver-prior670-portable-path",
+          "outcomeClass": "delivery",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:19:12.251Z",
+          "endedAt": "2026-10-04T20:20:56.557Z",
+          "dispatchSeconds": 104.304746042,
+          "ownerPreparationSeconds": 6.700829250000001,
+          "bootstrapSeconds": 6.437487416999999,
+          "configuredCheckPreparationSeconds": 0.2392091670000009,
+          "taskLocalLauncherPreparationSeconds": 0,
+          "taskLocalLauncherSha256": null,
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 5.990995623971535,
+          "standaloneFirstUseTotalSeconds": 116.99657091597153,
+          "tokens": {
+            "input_tokens": 180035,
+            "cached_input_tokens": 167552,
+            "uncached_input_tokens": 12483,
+            "output_tokens": 2637,
+            "reasoning_output_tokens": 476
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 8,
+          "commandOutputBytes": 22717,
+          "generatedCommandBytes": 3100,
+          "failures": [
+            {
+              "commandSha256": "40b1cdcd59f58a09cea059a47e7d0445e08847d408ae81301a7b9ea7626a57cf",
+              "outputSha256": "eef6d93a4106ffd2554ff127d73129b469ed7f2d535d893e7ef221ceb9831fc5",
+              "exitCode": 1,
+              "incomplete": false,
+              "structuredError": null
+            }
+          ],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": true,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 1
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 31,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": true,
+          "originalCheckRuns": [
+            {
+              "id": "7fbcdb32-9d01-5165-a783-1d6393504601",
+              "viewId": "c37bff8e-2253-4eea-b286-f1e5ddd8a8b8",
+              "head": "ce9999cfce4134a155078246825552b2d26821d0f724cc9bd42cb00af0041fba",
+              "status": "passed",
+              "checkId": "d83efdd5-30c8-47a3-b636-560e1dac261b",
+              "definition": "f8337547f12e40aecd5872d64da4ddf5cce50b2891a73cf38368b7ba70472b50",
+              "environment": "cafcf76e0923b53bf322ef39072134dfba1e3934e44c77b651f0415cd216ba97",
+              "exitCode": 0,
+              "startedAt": "2026-10-04T20:20:41.778Z",
+              "endedAt": "2026-10-04T20:20:43.658Z",
+              "logs": [
+                {
+                  "stream": "stdout",
+                  "sha256": "db1e7132a4cc2c956cd3a13fce3749a3b6fc1b3c32d13e7f67101f1679f95139",
+                  "bytes": 368
+                },
+                {
+                  "stream": "stderr",
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "bytes": 0
+                }
+              ]
+            }
+          ],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "c2dd23e5dc047ed961ca6447e419f567cede6a46",
+            "initialNativeState": "e1b854e190fc7484c5345a4211d02c42d138d1d64cef72d77ec77056075b8d1e",
+            "authoritativeGitFiles": 670,
+            "authoritativeNativeFiles": 670,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "086cd9b0d1b18c7925130a7c0906c07247d1594f8922fb69653fbaf8c0ef9e1c",
+            "promptSha256": "9434bb46490bad81aeb981c42450266e9acd186a98ad18032f592cbb8568e9bc",
+            "candidate": "ce9999cfce4134a155078246825552b2d26821d0f724cc9bd42cb00af0041fba",
+            "viewId": "c37bff8e-2253-4eea-b286-f1e5ddd8a8b8",
+            "checkRunId": "7fbcdb32-9d01-5165-a783-1d6393504601",
+            "configuredCheckId": "d83efdd5-30c8-47a3-b636-560e1dac261b",
+            "configuredCheckDefinition": "f8337547f12e40aecd5872d64da4ddf5cce50b2891a73cf38368b7ba70472b50",
+            "actualCheckDefinition": "f8337547f12e40aecd5872d64da4ddf5cce50b2891a73cf38368b7ba70472b50",
+            "actualCheckEnvironment": "cafcf76e0923b53bf322ef39072134dfba1e3934e44c77b651f0415cd216ba97",
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": "ab2df741-31d4-557c-95c5-498c293313fa",
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:20:41.778Z",
+            "actualCheckEndedAt": "2026-10-04T20:20:43.658Z",
+            "checkLogs": [
+              {
+                "stream": "stdout.log",
+                "sha256": "db1e7132a4cc2c956cd3a13fce3749a3b6fc1b3c32d13e7f67101f1679f95139",
+                "bytes": 368
+              },
+              {
+                "stream": "stderr.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "bytes": 0
+              }
+            ],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "24f231dd39e5ca367586a0f907e12ed3f1bbdecebb174328873e2a85bae9606a",
+            "originalTimingSha256": "5a96b480b5e35fd1a004c2b1c2ad1e4b0d1236d550b6bc34fd4d46296517f984",
+            "originalAnswerSha256": "ae75174635a7898428ea1f03ef8bf48057a050daaa383f94a3c26a310ba498e8"
+          }
+        }
+      ],
+      "aggregates": {
+        "matchedSourceThreePairs": {
+          "git": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 187463,
+                "knownSum": 187463,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 100096,
+                "knownSum": 100096,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 87367,
+                "knownSum": 87367,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 872,
+                "knownSum": 872,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 50,
+                "knownSum": 50,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 7,
+            "commandOutputBytes": 14858,
+            "generatedCommandBytes": 1494,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 60.024424792,
+            "ownerPreparationSeconds": 0.18853720799999985,
+            "taskAndOwnerPreparationSeconds": 60.212962,
+            "sharedInstallSkillLauncherOnceSeconds": 0,
+            "fullAttributableSeconds": 60.212962
+          },
+          "forge": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 213205,
+                "knownSum": 213205,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 146048,
+                "knownSum": 146048,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 67157,
+                "knownSum": 67157,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 909,
+                "knownSum": 909,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 36,
+                "knownSum": 36,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 7,
+            "commandOutputBytes": 16088,
+            "generatedCommandBytes": 1769,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 64.675603333,
+            "ownerPreparationSeconds": 2.1847977920000003,
+            "taskAndOwnerPreparationSeconds": 66.860401125,
+            "sharedInstallSkillLauncherOnceSeconds": 5.990995623971535,
+            "fullAttributableSeconds": 72.85139674897152
+          },
+          "forgeDividedByGit": {
+            "input_tokens": 1.1373177640387704,
+            "cached_input_tokens": 1.459079283887468,
+            "uncached_input_tokens": 0.7686769604083922,
+            "output_tokens": 1.0424311926605505,
+            "reasoning_output_tokens": 0.72,
+            "commandCalls": 1,
+            "dispatchSeconds": 1.0774880985051922,
+            "taskAndOwnerPreparationSeconds": 1.1103988062404238,
+            "fullAttributableSeconds": 1.2098955827645803
+          }
+        },
+        "matchedDeliveryPairs": {
+          "git": {
+            "observations": 4,
+            "passed": 4,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 618131,
+                "knownSum": 618131,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 518784,
+                "knownSum": 518784,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 99347,
+                "knownSum": 99347,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 7983,
+                "knownSum": 7983,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 1033,
+                "knownSum": 1033,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 24,
+            "commandOutputBytes": 33861,
+            "generatedCommandBytes": 11555,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 335.0464245,
+            "ownerPreparationSeconds": 0.8389976250000009,
+            "taskAndOwnerPreparationSeconds": 335.885422125,
+            "sharedInstallSkillLauncherOnceSeconds": 0,
+            "fullAttributableSeconds": 335.885422125
+          },
+          "forge": {
+            "observations": 4,
+            "passed": 4,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 728552,
+                "knownSum": 728552,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 631680,
+                "knownSum": 631680,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 96872,
+                "knownSum": 96872,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 8976,
+                "knownSum": 8976,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 1238,
+                "knownSum": 1238,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 35,
+            "commandOutputBytes": 64551,
+            "generatedCommandBytes": 11925,
+            "failedCommands": 2,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 365.295069625,
+            "ownerPreparationSeconds": 9.296602584,
+            "taskAndOwnerPreparationSeconds": 374.591672209,
+            "sharedInstallSkillLauncherOnceSeconds": 5.990995623971535,
+            "fullAttributableSeconds": 380.58266783297154
+          },
+          "forgeDividedByGit": {
+            "input_tokens": 1.1786368908855889,
+            "cached_input_tokens": 1.217616580310881,
+            "uncached_input_tokens": 0.9750873202009119,
+            "output_tokens": 1.124389327320556,
+            "reasoning_output_tokens": 1.1984511132623428,
+            "commandCalls": 1.4583333333333333,
+            "dispatchSeconds": 1.0902819517329307,
+            "taskAndOwnerPreparationSeconds": 1.1152364691480878,
+            "fullAttributableSeconds": 1.1330728955880003
+          }
+        },
+        "matchedAllPairs": {
+          "git": {
+            "observations": 7,
+            "passed": 7,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 805594,
+                "knownSum": 805594,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 618880,
+                "knownSum": 618880,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 186714,
+                "knownSum": 186714,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 8855,
+                "knownSum": 8855,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 1083,
+                "knownSum": 1083,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 31,
+            "commandOutputBytes": 48719,
+            "generatedCommandBytes": 13049,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 395.070849292,
+            "ownerPreparationSeconds": 1.0275348330000007,
+            "taskAndOwnerPreparationSeconds": 396.098384125,
+            "sharedInstallSkillLauncherOnceSeconds": 0,
+            "fullAttributableSeconds": 396.098384125
+          },
+          "forge": {
+            "observations": 7,
+            "passed": 7,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 941757,
+                "knownSum": 941757,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 777728,
+                "knownSum": 777728,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 164029,
+                "knownSum": 164029,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 9885,
+                "knownSum": 9885,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 1274,
+                "knownSum": 1274,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 42,
+            "commandOutputBytes": 80639,
+            "generatedCommandBytes": 13694,
+            "failedCommands": 2,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 429.970672958,
+            "ownerPreparationSeconds": 11.481400376000002,
+            "taskAndOwnerPreparationSeconds": 441.45207333400003,
+            "sharedInstallSkillLauncherOnceSeconds": 5.990995623971535,
+            "fullAttributableSeconds": 447.44306895797155
+          },
+          "forgeDividedByGit": {
+            "input_tokens": 1.1690218646117028,
+            "cached_input_tokens": 1.256670113753878,
+            "uncached_input_tokens": 0.8785040221943722,
+            "output_tokens": 1.1163184641445512,
+            "reasoning_output_tokens": 1.1763619575253925,
+            "commandCalls": 1.3548387096774193,
+            "dispatchSeconds": 1.088338139168059,
+            "taskAndOwnerPreparationSeconds": 1.1145010710134262,
+            "fullAttributableSeconds": 1.1296260901098962
+          }
+        },
+        "allOriginalObservationsIncludingInvalidHarness": {
+          "git": {
+            "observations": 7,
+            "passed": 7,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 805594,
+                "knownSum": 805594,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 618880,
+                "knownSum": 618880,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 186714,
+                "knownSum": 186714,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 8855,
+                "knownSum": 8855,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 1083,
+                "knownSum": 1083,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 31,
+            "commandOutputBytes": 48719,
+            "generatedCommandBytes": 13049,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 395.070849292,
+            "ownerPreparationSeconds": 1.0275348330000007,
+            "taskAndOwnerPreparationSeconds": 396.098384125,
+            "sharedInstallSkillLauncherOnceSeconds": 0,
+            "fullAttributableSeconds": 396.098384125
+          },
+          "forge": {
+            "observations": 7,
+            "passed": 7,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 941757,
+                "knownSum": 941757,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 777728,
+                "knownSum": 777728,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 164029,
+                "knownSum": 164029,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 9885,
+                "knownSum": 9885,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 1274,
+                "knownSum": 1274,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 42,
+            "commandOutputBytes": 80639,
+            "generatedCommandBytes": 13694,
+            "failedCommands": 2,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 429.970672958,
+            "ownerPreparationSeconds": 11.481400376000002,
+            "taskAndOwnerPreparationSeconds": 441.45207333400003,
+            "sharedInstallSkillLauncherOnceSeconds": 5.990995623971535,
+            "fullAttributableSeconds": 447.44306895797155
+          },
+          "forgeDividedByGit": {
+            "input_tokens": 1.1690218646117028,
+            "cached_input_tokens": 1.256670113753878,
+            "uncached_input_tokens": 0.8785040221943722,
+            "output_tokens": 1.1163184641445512,
+            "reasoning_output_tokens": 1.1763619575253925,
+            "commandCalls": 1.3548387096774193,
+            "dispatchSeconds": 1.088338139168059,
+            "taskAndOwnerPreparationSeconds": 1.1145010710134262,
+            "fullAttributableSeconds": 1.1296260901098962
+          }
+        }
+      }
+    },
+    {
+      "version": "v3-guidance",
+      "declaredPairs": 3,
+      "packageSha256": "ba84555483baa75370b453493ae4572edf7d2398ad9572c33be4422741c45067",
+      "packageSourceState": "a68f0ba6bda02779f4c627e44566517b8f3f35ada0bbbbd67c7d44e578b080ea",
+      "packageViewId": "a14d0a47-c606-4136-be07-6e36216fadaa",
+      "compiledCodeParity": {
+        "sha256": "7b9105165b9209c8fefa7061ac8a88067cc1ed98c11315d5dfa19ba092373fb9",
+        "compiledAndWebIdentical": true,
+        "previousExecutableSourceState": "9d41f5d9ceda2bd707f857389ba3556f4f565aea0d0875307a3f3796ea101e78"
+      },
+      "skillSha256": "3b6e35cb693f9dfdf45c8189b54541a1f5122b7ba3ffe9b09f9beaa7f33d265c",
+      "skillBytes": 3252,
+      "model": "gpt-6.1-sol",
+      "reasoning": "high",
+      "runtime": "Node24.19.0",
+      "harness": "codex-cli0.159.0-alpha.12.1",
+      "frozenFiles": {
+        "agent-efficiency-trial-guidance.mjs": "5ebd930991433e6fcd9da4dfdb34dfae3d143d33c21638862a32ceb42d1b9013",
+        "agent-efficiency-trial-fixture.mjs": "4f08df7d1c9ea7a33e9a1eb5c7fd2867c42a20fcf6622df0b76facf91f04dd9a",
+        "agent-efficiency-trial-authority.mjs": "ea754e845510d6642cdba2028c10212bc5d401f06c0272a0317744c3df7bf864",
+        "agent-efficiency-guidance-tasks.json": "d410052f939df78c48088836f744b28193af050b01c0b297db36bee7769840e0",
+        "SKILL.md": "3b6e35cb693f9dfdf45c8189b54541a1f5122b7ba3ffe9b09f9beaa7f33d265c",
+        "materialize-candidate-v3-guidance.mjs": "be9364ec448f132e957d86cc0555e8237572c336983978fe30c88a6eb177ea3a",
+        "prior-check.mjs": "da99b5a47767d918cebf19693f2a40a84bdf5c795145f2dcd0fdf97810377f28",
+        "dispatch-all-v3-guidance.mjs": "22d7316fc1b9117d240b16872421bb67df306c1bd23455fa5054e8635b6a4edc"
+      },
+      "originalResultsSha256": "9eff70edc0e657a919756846788a8c12c5d4c533ac38b637ebb991318d3b13e8",
+      "authorityReceiptSha256": "502c9cfa3a6aedfde14e686ec182603ab4f2f67fcf36b4bea520253b4e3bb9e2",
+      "authorityValidatedAt": "2026-10-04T20:25:13.635Z",
+      "authorityValidationStage": "predispatch actual native objects versus Git blobs and file/executable modes",
+      "sharedSetup": {
+        "packageInstallSeconds": 5.765148333,
+        "skillInstallSeconds": 0.000740333,
+        "launcherSetupSeconds": 0,
+        "launcherSha256": null,
+        "totalSeconds": 5.765888666,
+        "allocation": "One installation/skill/launcher per series or standalone first use. Aggregate charges once, never once per observation."
+      },
+      "observations": [
+        {
+          "taskId": "deliver-coupon-boundary",
+          "outcomeClass": "delivery",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:26:02.059Z",
+          "endedAt": "2026-10-04T20:27:28.275Z",
+          "dispatchSeconds": 86.214606416,
+          "ownerPreparationSeconds": 0.842952542,
+          "bootstrapSeconds": 0.5992347910000001,
+          "configuredCheckPreparationSeconds": 0.23600262499999997,
+          "taskLocalLauncherPreparationSeconds": 0.0002057909999999765,
+          "taskLocalLauncherSha256": "3bbaec9cdb7eaf442be00966f508623fd54fec374d85c38e46970da43fbb9d5e",
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 5.765888666,
+          "standaloneFirstUseTotalSeconds": 92.823447624,
+          "tokens": {
+            "input_tokens": 156033,
+            "cached_input_tokens": 130176,
+            "uncached_input_tokens": 25857,
+            "output_tokens": 1849,
+            "reasoning_output_tokens": 283
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 6,
+          "commandOutputBytes": 7444,
+          "generatedCommandBytes": 1645,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": true,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 1
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 6,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": true,
+          "originalCheckRuns": [
+            {
+              "id": "74264335-9d07-52a6-be16-5425826e424d",
+              "viewId": "4375015c-7739-461e-948f-03c196f8a0ad",
+              "head": "d12b21b712829330a92e96d6b30eb044e2c5b00f0723d53040fa84031c05b8f3",
+              "status": "passed",
+              "checkId": "f6d306e8-0155-464b-8eb6-1238957b999c",
+              "definition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+              "environment": "d6dbc0645b585733fa9da05f90372318d9b3f2aaf923960836ef659ccab21d3c",
+              "exitCode": 0,
+              "startedAt": "2026-10-04T20:27:22.045Z",
+              "endedAt": "2026-10-04T20:27:22.213Z",
+              "logs": [
+                {
+                  "stream": "stdout",
+                  "sha256": "2f0013b0d1aac95f7c2b0f7372a7a108e751afc1f467855831b147c8544c5395",
+                  "bytes": 313
+                },
+                {
+                  "stream": "stderr",
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "bytes": 0
+                }
+              ]
+            }
+          ],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "660dfe3ebe0aac7e9ef30226139d93a23a1989b3",
+            "initialNativeState": "794492d70fe20685d06be8d54e04d168a36f002f3df9c4af0f3bc291cc585e40",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "e925029fcc4084b7d919acf6ad80e0c45ac8d486d9f15c615504c2ed20d7133a",
+            "candidate": "d12b21b712829330a92e96d6b30eb044e2c5b00f0723d53040fa84031c05b8f3",
+            "viewId": "4375015c-7739-461e-948f-03c196f8a0ad",
+            "checkRunId": "74264335-9d07-52a6-be16-5425826e424d",
+            "configuredCheckId": "f6d306e8-0155-464b-8eb6-1238957b999c",
+            "configuredCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckEnvironment": "d6dbc0645b585733fa9da05f90372318d9b3f2aaf923960836ef659ccab21d3c",
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": "c8c45461-ee5e-5a57-be2f-ce45089971f5",
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:27:22.045Z",
+            "actualCheckEndedAt": "2026-10-04T20:27:22.213Z",
+            "checkLogs": [
+              {
+                "stream": "stdout.log",
+                "sha256": "2f0013b0d1aac95f7c2b0f7372a7a108e751afc1f467855831b147c8544c5395",
+                "bytes": 313
+              },
+              {
+                "stream": "stderr.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "bytes": 0
+              }
+            ],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "9e57edbe5919181bb1359dbc85b0dd3432359a28f69afb213212762b1323276b",
+            "originalTimingSha256": "4bf2c6a0250e0f43c8c921679918fb53c254156dfc60970c4edab8e852217f72",
+            "originalAnswerSha256": "cb88b90bb2982b1cb07c47483ce838240919c0cf83cc069f7c5598ee983f1ff6"
+          }
+        },
+        {
+          "taskId": "deliver-coupon-boundary",
+          "outcomeClass": "delivery",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:27:28.328Z",
+          "endedAt": "2026-10-04T20:28:30.365Z",
+          "dispatchSeconds": 62.0365345,
+          "ownerPreparationSeconds": 0.0642607089999999,
+          "bootstrapSeconds": 0.053466249999999944,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0.0002497919999999567,
+          "taskLocalLauncherSha256": "3bbaec9cdb7eaf442be00966f508623fd54fec374d85c38e46970da43fbb9d5e",
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 62.100795209000005,
+          "tokens": {
+            "input_tokens": 127927,
+            "cached_input_tokens": 95616,
+            "uncached_input_tokens": 32311,
+            "output_tokens": 1433,
+            "reasoning_output_tokens": 145
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 5,
+          "commandOutputBytes": 4117,
+          "generatedCommandBytes": 2181,
+          "failures": [
+            {
+              "commandSha256": "5c7253363615513804d7ff22a1b9d56061d9597051f741f59b8ac169b366d7fa",
+              "outputSha256": "aaae9fb37a0a905f0fea2114a35ad6f4149db26fd0ed53dc86354e4d9b1d0e3e",
+              "exitCode": 2,
+              "incomplete": false,
+              "structuredError": null
+            }
+          ],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 6,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "660dfe3ebe0aac7e9ef30226139d93a23a1989b3",
+            "initialNativeState": "794492d70fe20685d06be8d54e04d168a36f002f3df9c4af0f3bc291cc585e40",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "ce7fb14ff3235a6397881d2f60bcd28cd71fc12ea8a72c86a3c7b4e6223511f8",
+            "candidate": "57c84eee86d2f91c44f1de726bb8c2bb172f632c",
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": null,
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:28:04.717Z",
+            "actualCheckEndedAt": "2026-10-04T20:28:04.848Z",
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": "fa0aed59bf6069e4697aa4b32bf2784754bc516e638791796d5132a4a0e46931",
+            "originalEventsSha256": "625572f5de51b49a24076c5f180050dbc4d0dbc335635d760e507f38a3971b89",
+            "originalTimingSha256": "9da9567fcc4c779b356a87a60272d7f7260fd2acb235561172fb3d7ca8cae81b",
+            "originalAnswerSha256": "87cf31cc03e74c832ae4d9d80d1f6a9ddd49ec2be77954c0e770b1f42f75bbad"
+          }
+        },
+        {
+          "taskId": "deliver-tax-rounding",
+          "outcomeClass": "delivery",
+          "condition": "git",
+          "temperature": "warm",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:28:30.597Z",
+          "endedAt": "2026-10-04T20:29:40.862Z",
+          "dispatchSeconds": 70.247608958,
+          "ownerPreparationSeconds": 0.16670345899999994,
+          "bootstrapSeconds": 0.04571712500000001,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0.0002446659999999383,
+          "taskLocalLauncherSha256": "3bbaec9cdb7eaf442be00966f508623fd54fec374d85c38e46970da43fbb9d5e",
+          "warmPreparationSeconds": 0.11023658300000011,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 70.414312417,
+          "tokens": {
+            "input_tokens": 130527,
+            "cached_input_tokens": 105984,
+            "uncached_input_tokens": 24543,
+            "output_tokens": 1582,
+            "reasoning_output_tokens": 113
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 5,
+          "commandOutputBytes": 5928,
+          "generatedCommandBytes": 2692,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 5,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "660dfe3ebe0aac7e9ef30226139d93a23a1989b3",
+            "initialNativeState": "26fa0e843debd71642de90874e74020a5cb30862a4e9a69b54a8470532a8487d",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "e1cbc7b9d3172a1f8e1c34c0a5b4010e75eeef13bc7db580c9693735c6ccfdb4",
+            "candidate": "4870d96e0aec38dae3a654efdc492d6c1d7f01e2",
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": null,
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:29:10.318Z",
+            "actualCheckEndedAt": "2026-10-04T20:29:10.449Z",
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": "2f6d3373effde073506be5b49cdb0fd8569aabb9c437ffb4b967b6a91adc70db",
+            "originalEventsSha256": "014caf985470cfff400619909ee713c491fa11bb5819acabe8a9778fbac8397c",
+            "originalTimingSha256": "4766d7e8147a650a199f16c5189abe2f0a13b77eb7ba249a51bc9f2c0de3c2bc",
+            "originalAnswerSha256": "f474884fef9375dd319dbc813e6d122fa04f70c2d5cce67c13e7bf0bfc7b6154"
+          }
+        },
+        {
+          "taskId": "deliver-tax-rounding",
+          "outcomeClass": "delivery",
+          "condition": "forge",
+          "temperature": "warm",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:29:40.910Z",
+          "endedAt": "2026-10-04T20:30:54.821Z",
+          "dispatchSeconds": 73.90805945799998,
+          "ownerPreparationSeconds": 0.9788628340000001,
+          "bootstrapSeconds": 0.6153118339999999,
+          "configuredCheckPreparationSeconds": 0.24680266700000014,
+          "taskLocalLauncherPreparationSeconds": 0.00029495799999995143,
+          "taskLocalLauncherSha256": "3bbaec9cdb7eaf442be00966f508623fd54fec374d85c38e46970da43fbb9d5e",
+          "warmPreparationSeconds": 0.10975345800000014,
+          "standaloneFirstUseSharedSeconds": 5.765888666,
+          "standaloneFirstUseTotalSeconds": 80.65281095799998,
+          "tokens": {
+            "input_tokens": 158136,
+            "cached_input_tokens": 150144,
+            "uncached_input_tokens": 7992,
+            "output_tokens": 1793,
+            "reasoning_output_tokens": 91
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 7,
+          "commandOutputBytes": 9506,
+          "generatedCommandBytes": 1837,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": true,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 1
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 5,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": true,
+          "originalCheckRuns": [
+            {
+              "id": "04fdc7f1-5c82-571a-9081-fa1dd5ca6c01",
+              "viewId": "be6f79d0-2342-4bd0-9363-9333d083e222",
+              "head": "cdd0f34f411560f8a6659fbe934034190497b30919767cb925a02b3946203608",
+              "status": "passed",
+              "checkId": "70d8c207-49c5-42e8-addb-183423f7ccca",
+              "definition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+              "environment": "d6dbc0645b585733fa9da05f90372318d9b3f2aaf923960836ef659ccab21d3c",
+              "exitCode": 0,
+              "startedAt": "2026-10-04T20:30:48.247Z",
+              "endedAt": "2026-10-04T20:30:48.441Z",
+              "logs": [
+                {
+                  "stream": "stdout",
+                  "sha256": "f36eb04b337ad3e6c683104d31bc6b790c63834359b1294cb5622877a53bcab8",
+                  "bytes": 314
+                },
+                {
+                  "stream": "stderr",
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "bytes": 0
+                }
+              ]
+            }
+          ],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "660dfe3ebe0aac7e9ef30226139d93a23a1989b3",
+            "initialNativeState": "26fa0e843debd71642de90874e74020a5cb30862a4e9a69b54a8470532a8487d",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "76cb718b5b1f681650a07b45787b1bfb8c510387c8936e7401db02adcab1e8f8",
+            "candidate": "cdd0f34f411560f8a6659fbe934034190497b30919767cb925a02b3946203608",
+            "viewId": "be6f79d0-2342-4bd0-9363-9333d083e222",
+            "checkRunId": "04fdc7f1-5c82-571a-9081-fa1dd5ca6c01",
+            "configuredCheckId": "70d8c207-49c5-42e8-addb-183423f7ccca",
+            "configuredCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckEnvironment": "d6dbc0645b585733fa9da05f90372318d9b3f2aaf923960836ef659ccab21d3c",
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": "84481fd5-91c2-5d36-bdbe-2a224444aea0",
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:30:48.247Z",
+            "actualCheckEndedAt": "2026-10-04T20:30:48.441Z",
+            "checkLogs": [
+              {
+                "stream": "stdout.log",
+                "sha256": "f36eb04b337ad3e6c683104d31bc6b790c63834359b1294cb5622877a53bcab8",
+                "bytes": 314
+              },
+              {
+                "stream": "stderr.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "bytes": 0
+              }
+            ],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "b170a9e1596ac576ceb3339e0b6322aa19b0a1d0941c379388d18660ef349cdc",
+            "originalTimingSha256": "5862bf4f1826b14df70165a70803aee8a38b164d814cd58147b70831a27b19b7",
+            "originalAnswerSha256": "937229e1e78ce6a89cc74d082b7b078b45c292fb0303859b613e8071667bbe8e"
+          }
+        },
+        {
+          "taskId": "deliver-empty-label",
+          "outcomeClass": "delivery",
+          "condition": "forge",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:30:55.143Z",
+          "endedAt": "2026-10-04T20:31:38.210Z",
+          "dispatchSeconds": 43.06584479199999,
+          "ownerPreparationSeconds": 0.8498773329999999,
+          "bootstrapSeconds": 0.5987653749999999,
+          "configuredCheckPreparationSeconds": 0.24513158300000032,
+          "taskLocalLauncherPreparationSeconds": 0.00020037499999989449,
+          "taskLocalLauncherSha256": "3bbaec9cdb7eaf442be00966f508623fd54fec374d85c38e46970da43fbb9d5e",
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 5.765888666,
+          "standaloneFirstUseTotalSeconds": 49.681610791,
+          "tokens": {
+            "input_tokens": 130654,
+            "cached_input_tokens": 119296,
+            "uncached_input_tokens": 11358,
+            "output_tokens": 864,
+            "reasoning_output_tokens": 0
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 4,
+          "commandOutputBytes": 6277,
+          "generatedCommandBytes": 1132,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 1,
+            "usedShortLauncher": true,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 1
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": true,
+          "originalCheckRuns": [
+            {
+              "id": "d96c942c-bec3-54b4-9ec0-863214d0999b",
+              "viewId": "6703cfa0-16d5-4535-94d7-ce4c75b16ea9",
+              "head": "fb749ab599361948dea2f4fa7b1d14ed2fabeefb13ba6e78f0ca02bb1ddb62b9",
+              "status": "passed",
+              "checkId": "7c98da31-c22e-4826-8af4-8ae486c86fce",
+              "definition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+              "environment": "d6dbc0645b585733fa9da05f90372318d9b3f2aaf923960836ef659ccab21d3c",
+              "exitCode": 0,
+              "startedAt": "2026-10-04T20:31:31.436Z",
+              "endedAt": "2026-10-04T20:31:31.645Z",
+              "logs": [
+                {
+                  "stream": "stdout",
+                  "sha256": "6ccdb138bfe602c428811649bf9747b9cace9573750a15d9ed4e5d04cda5867a",
+                  "bytes": 153
+                },
+                {
+                  "stream": "stderr",
+                  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "bytes": 0
+                }
+              ]
+            }
+          ],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "2a0e93c137d739b57b7511af90e20ff9275637d1",
+            "initialNativeState": "59a9e53e3b71c772cc9219c84378bdc07f238e3fe3b11802faa3e4b342393dd9",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "612b0c5b546c63e115019497279213f03d5ae5d8d1c0be3116e7a5e991f9a7ae",
+            "candidate": "fb749ab599361948dea2f4fa7b1d14ed2fabeefb13ba6e78f0ca02bb1ddb62b9",
+            "viewId": "6703cfa0-16d5-4535-94d7-ce4c75b16ea9",
+            "checkRunId": "d96c942c-bec3-54b4-9ec0-863214d0999b",
+            "configuredCheckId": "7c98da31-c22e-4826-8af4-8ae486c86fce",
+            "configuredCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckDefinition": "3d9fbf40d54c6c97d21e24074298e6ca133345f20f29ab70503c910de262ca46",
+            "actualCheckEnvironment": "d6dbc0645b585733fa9da05f90372318d9b3f2aaf923960836ef659ccab21d3c",
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": "73598e48-d333-58d7-9814-5418fcb0cb50",
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:31:31.436Z",
+            "actualCheckEndedAt": "2026-10-04T20:31:31.645Z",
+            "checkLogs": [
+              {
+                "stream": "stdout.log",
+                "sha256": "6ccdb138bfe602c428811649bf9747b9cace9573750a15d9ed4e5d04cda5867a",
+                "bytes": 153
+              },
+              {
+                "stream": "stderr.log",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "bytes": 0
+              }
+            ],
+            "gitRetainedCheckLogSha256": null,
+            "originalEventsSha256": "60067bf3cb341f6c0bab5765816839d94e5ee4d395756fd6c3dc1f0d1b8d6b14",
+            "originalTimingSha256": "3a2ae4454362883e19a9685415779a1f13d1fc7498c9f6d0977605389779821f",
+            "originalAnswerSha256": "38d34221c1fefcfaddbae7cd12a8b6116130523be90ab81833eb1c07e87fbcfa"
+          }
+        },
+        {
+          "taskId": "deliver-empty-label",
+          "outcomeClass": "delivery",
+          "condition": "git",
+          "temperature": "cold",
+          "outcome": "passed",
+          "matched": true,
+          "classification": "passed",
+          "invalidReason": null,
+          "startedAt": "2026-10-04T20:31:38.258Z",
+          "endedAt": "2026-10-04T20:32:42.973Z",
+          "dispatchSeconds": 64.71428633299999,
+          "ownerPreparationSeconds": 0.05644487500000014,
+          "bootstrapSeconds": 0.04630562499999996,
+          "configuredCheckPreparationSeconds": 0,
+          "taskLocalLauncherPreparationSeconds": 0.00017916699999977935,
+          "taskLocalLauncherSha256": "3bbaec9cdb7eaf442be00966f508623fd54fec374d85c38e46970da43fbb9d5e",
+          "warmPreparationSeconds": 0,
+          "standaloneFirstUseSharedSeconds": 0,
+          "standaloneFirstUseTotalSeconds": 64.77073120799999,
+          "tokens": {
+            "input_tokens": 131054,
+            "cached_input_tokens": 106752,
+            "uncached_input_tokens": 24302,
+            "output_tokens": 1519,
+            "reasoning_output_tokens": 154
+          },
+          "tokenUsageAvailable": true,
+          "commandCalls": 6,
+          "commandOutputBytes": 5365,
+          "generatedCommandBytes": 2771,
+          "failures": [],
+          "interfaceUse": {
+            "skillReadCommands": 0,
+            "usedShortLauncher": false,
+            "sourceGraphCommands": 0,
+            "finishInvocations": 0
+          },
+          "exitCode": 0,
+          "timedOut": false,
+          "interrupted": false,
+          "hiddenOraclePassed": true,
+          "hiddenOracleCases": 4,
+          "recordedWorkflowPassed": true,
+          "checkDefinitionMatchesConfigured": null,
+          "originalCheckRuns": [],
+          "sourceUnchanged": null,
+          "unrelatedSourcePreserved": true,
+          "pins": {
+            "initialGitCommit": "2a0e93c137d739b57b7511af90e20ff9275637d1",
+            "initialNativeState": "59a9e53e3b71c772cc9219c84378bdc07f238e3fe3b11802faa3e4b342393dd9",
+            "authoritativeGitFiles": 74,
+            "authoritativeNativeFiles": 74,
+            "exactBytesAndFileExecutableModes": true,
+            "scoredSourceManifestSha256": "380273a72b9b9a4934a1c136290776095c98aacd2a8dfd10c1c0aaf087f8a7e0",
+            "promptSha256": "8f209479d479205740a3654a403ac6e32d7688a00657c68aed6d67a42dd3500e",
+            "candidate": "59796b1b02bf89c0a2656d0c51fd4dc6048ef856",
+            "viewId": null,
+            "checkRunId": null,
+            "configuredCheckId": null,
+            "configuredCheckDefinition": null,
+            "actualCheckDefinition": null,
+            "actualCheckEnvironment": null,
+            "actualCheckRuntime": "v24.19.0",
+            "acceptanceId": null,
+            "actualCheckExitCode": 0,
+            "actualCheckStartedAt": "2026-10-04T20:32:10.714Z",
+            "actualCheckEndedAt": "2026-10-04T20:32:10.811Z",
+            "checkLogs": [],
+            "gitRetainedCheckLogSha256": "c14bf253b770a0c2101795654c9eb0862f4b0d76aafb7ce3519ef07f19e2fdd7",
+            "originalEventsSha256": "40697ac4704d1646838721c04a9d8e879238c7a8f38d2f12933e052963718306",
+            "originalTimingSha256": "45882c3240381b68c68810c9359f97096d77240419bbb143ea72af25402e3a51",
+            "originalAnswerSha256": "59251be9bf662f2bc17a52da3b9c693462e998069e31cd2e16350992bbb17b69"
+          }
+        }
+      ],
+      "aggregates": {
+        "matchedSourceThreePairs": null,
+        "matchedDeliveryPairs": {
+          "git": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 389508,
+                "knownSum": 389508,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 308352,
+                "knownSum": 308352,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 81156,
+                "knownSum": 81156,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 4534,
+                "knownSum": 4534,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 412,
+                "knownSum": 412,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 16,
+            "commandOutputBytes": 15410,
+            "generatedCommandBytes": 7644,
+            "failedCommands": 1,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 196.998429791,
+            "ownerPreparationSeconds": 0.287409043,
+            "taskAndOwnerPreparationSeconds": 197.285838834,
+            "sharedInstallSkillLauncherOnceSeconds": 0,
+            "fullAttributableSeconds": 197.285838834
+          },
+          "forge": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 444823,
+                "knownSum": 444823,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 399616,
+                "knownSum": 399616,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 45207,
+                "knownSum": 45207,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 4506,
+                "knownSum": 4506,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 374,
+                "knownSum": 374,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 17,
+            "commandOutputBytes": 23227,
+            "generatedCommandBytes": 4614,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 203.18851066599996,
+            "ownerPreparationSeconds": 2.6716927089999998,
+            "taskAndOwnerPreparationSeconds": 205.86020337499997,
+            "sharedInstallSkillLauncherOnceSeconds": 5.765888666,
+            "fullAttributableSeconds": 211.62609204099996
+          },
+          "forgeDividedByGit": {
+            "input_tokens": 1.1420124875483944,
+            "cached_input_tokens": 1.2959734329597343,
+            "uncached_input_tokens": 0.5570382966139288,
+            "output_tokens": 0.9938244375827084,
+            "reasoning_output_tokens": 0.9077669902912622,
+            "commandCalls": 1.0625,
+            "dispatchSeconds": 1.0314219807821166,
+            "taskAndOwnerPreparationSeconds": 1.0434616320749437,
+            "fullAttributableSeconds": 1.0726876966525007
+          }
+        },
+        "matchedAllPairs": {
+          "git": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 389508,
+                "knownSum": 389508,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 308352,
+                "knownSum": 308352,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 81156,
+                "knownSum": 81156,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 4534,
+                "knownSum": 4534,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 412,
+                "knownSum": 412,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 16,
+            "commandOutputBytes": 15410,
+            "generatedCommandBytes": 7644,
+            "failedCommands": 1,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 196.998429791,
+            "ownerPreparationSeconds": 0.287409043,
+            "taskAndOwnerPreparationSeconds": 197.285838834,
+            "sharedInstallSkillLauncherOnceSeconds": 0,
+            "fullAttributableSeconds": 197.285838834
+          },
+          "forge": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 444823,
+                "knownSum": 444823,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 399616,
+                "knownSum": 399616,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 45207,
+                "knownSum": 45207,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 4506,
+                "knownSum": 4506,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 374,
+                "knownSum": 374,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 17,
+            "commandOutputBytes": 23227,
+            "generatedCommandBytes": 4614,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 203.18851066599996,
+            "ownerPreparationSeconds": 2.6716927089999998,
+            "taskAndOwnerPreparationSeconds": 205.86020337499997,
+            "sharedInstallSkillLauncherOnceSeconds": 5.765888666,
+            "fullAttributableSeconds": 211.62609204099996
+          },
+          "forgeDividedByGit": {
+            "input_tokens": 1.1420124875483944,
+            "cached_input_tokens": 1.2959734329597343,
+            "uncached_input_tokens": 0.5570382966139288,
+            "output_tokens": 0.9938244375827084,
+            "reasoning_output_tokens": 0.9077669902912622,
+            "commandCalls": 1.0625,
+            "dispatchSeconds": 1.0314219807821166,
+            "taskAndOwnerPreparationSeconds": 1.0434616320749437,
+            "fullAttributableSeconds": 1.0726876966525007
+          }
+        },
+        "allOriginalObservationsIncludingInvalidHarness": {
+          "git": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 389508,
+                "knownSum": 389508,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 308352,
+                "knownSum": 308352,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 81156,
+                "knownSum": 81156,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 4534,
+                "knownSum": 4534,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 412,
+                "knownSum": 412,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 16,
+            "commandOutputBytes": 15410,
+            "generatedCommandBytes": 7644,
+            "failedCommands": 1,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 196.998429791,
+            "ownerPreparationSeconds": 0.287409043,
+            "taskAndOwnerPreparationSeconds": 197.285838834,
+            "sharedInstallSkillLauncherOnceSeconds": 0,
+            "fullAttributableSeconds": 197.285838834
+          },
+          "forge": {
+            "observations": 3,
+            "passed": 3,
+            "failed": 0,
+            "invalidHarness": 0,
+            "tokens": {
+              "input_tokens": {
+                "total": 444823,
+                "knownSum": 444823,
+                "unavailableRuns": 0
+              },
+              "cached_input_tokens": {
+                "total": 399616,
+                "knownSum": 399616,
+                "unavailableRuns": 0
+              },
+              "uncached_input_tokens": {
+                "total": 45207,
+                "knownSum": 45207,
+                "unavailableRuns": 0
+              },
+              "output_tokens": {
+                "total": 4506,
+                "knownSum": 4506,
+                "unavailableRuns": 0
+              },
+              "reasoning_output_tokens": {
+                "total": 374,
+                "knownSum": 374,
+                "unavailableRuns": 0
+              }
+            },
+            "commandCalls": 17,
+            "commandOutputBytes": 23227,
+            "generatedCommandBytes": 4614,
+            "failedCommands": 0,
+            "incompleteCommands": 0,
+            "dispatchSeconds": 203.18851066599996,
+            "ownerPreparationSeconds": 2.6716927089999998,
+            "taskAndOwnerPreparationSeconds": 205.86020337499997,
+            "sharedInstallSkillLauncherOnceSeconds": 5.765888666,
+            "fullAttributableSeconds": 211.62609204099996
+          },
+          "forgeDividedByGit": {
+            "input_tokens": 1.1420124875483944,
+            "cached_input_tokens": 1.2959734329597343,
+            "uncached_input_tokens": 0.5570382966139288,
+            "output_tokens": 0.9938244375827084,
+            "reasoning_output_tokens": 0.9077669902912622,
+            "commandCalls": 1.0625,
+            "dispatchSeconds": 1.0314219807821166,
+            "taskAndOwnerPreparationSeconds": 1.0434616320749437,
+            "fullAttributableSeconds": 1.0726876966525007
+          }
+        }
+      }
+    }
+  ]
+}
