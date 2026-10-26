@@ -26,6 +26,8 @@ export type Submission = {
   terminal: boolean;
   complete: boolean;
   diagnosis?: LandingDiagnosisReport;
+  stall?: import('./landing-stall.js').LandingStall;
+  message?: string;
   waitingFor?: import('./landing-batch-types.js').LandingWaiting;
   phases?: ReturnType<typeof import('./land-progress.js').readLandingProgress>;
 };

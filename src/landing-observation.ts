@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { LandingStall } from './landing-stall.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 import type { CheckRun } from './work-types.js';
 import type { LandingBatch, LandingEntry } from './landing-batch-types.js';
@@ -105,6 +106,8 @@ export function projectSubmission(
     attemptId,
     ...sourceSubmission(outcome, lane.head, attemptHead),
     ...(lane.head !== attemptHead ? { supersededBy: lane.head } : {}),
+    ...(result.stall ? { stall: result.stall as LandingStall } : {}),
+    ...(typeof result.message === 'string' ? { message: result.message } : {}),
     ...(result.waitingFor
       ? { waitingFor: result.waitingFor as import('./landing-batch-types.js').LandingWaiting }
       : {}),

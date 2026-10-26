@@ -196,3 +196,67 @@ test('identical bytes with a different executable mode still require a checked l
     'executable',
   );
 });
+
+test('a queued superseded head finishes before batch selection and delivers its outcome', async t => {
+  const { readLaneSubmissions } = await import('../dist/landing-submission-read.js');
+  const f = await fixture(t);
+  const old = await f.candidate('superseded.txt', 'old\n');
+  writeFileSync(join(old.lane.path, 'superseded.txt'), 'new\n');
+  await f.agent.dispatch({ action: 'checkpoint', laneId: old.lane.laneId, message: 'New head' });
+  const { nativeSelfMetricsReader } = await import('../dist/self-metrics-native.js');
+  const { calculateSelfMetrics } = await import('../dist/self-metrics.js');
+  const reader = nativeSelfMetricsReader(f.root),
+    records = reader.read();
+  const asOf = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
+  const period = { from: records.coverage.deliveries, to: asOf, asOf };
+  assert.equal(calculateSelfMetrics(records, period).metric3.dropped, 1);
+  const before = counts(f);
+  await drainLandingBatches(f.work, 'main');
+  const entry = f.store.select('landingEntries', old.command.operationId);
+  assert.equal(entry.status, 'interrupted');
+  assert.equal(entry.error.code, 'LANDING_SUPERSEDED');
+  assert.ok(entry.terminalAt);
+  assert.deepEqual(counts(f), before);
+  const receipt = readLaneSubmissions(f.store, old.lane.laneId)[0];
+  assert.equal(receipt.state, 'superseded');
+  assert.match(receipt.message, /Original source is retained/);
+  // Reconnect delivers the terminal receipt through the existing lifecycle wrapper.
+  // A retained outcome alone is not evidence that a disconnected requester read it.
+  const { withLifecycleMetric } = await import('../dist/self-metrics-journal.js');
+  await withLifecycleMetric(
+    f.store.directory,
+    { action: 'land', operationId: old.command.operationId },
+    async () => ({ result: { submissions: [receipt] } }),
+  );
+  assert.equal(calculateSelfMetrics(reader.read(), period).metric3.dropped, 0);
+  t.diagnostic(
+    JSON.stringify({ droppedBefore: 1, droppedAfter: 0, operatorMutationsToSettle: 0, checksAdded: 0 }),
+  );
+});
+
+test('an empty entry against base finishes without a check or Channel move', async t => {
+  const f = await fixture(t);
+  const empty = await f.candidate('empty.txt', 'temporary\n', false);
+  const { unlinkSync } = await import('node:fs');
+  unlinkSync(join(empty.lane.path, 'empty.txt'));
+  const saved = (
+    await f.agent.dispatch({ action: 'checkpoint', laneId: empty.lane.laneId, message: 'Empty delta' })
+  ).result;
+  const composed = (
+    await f.agent.dispatch({
+      action: 'compose',
+      operationId: randomUUID(),
+      intentId: empty.lane.intentId,
+      inputs: [{ laneId: empty.lane.laneId, head: saved.head }],
+      dependencies: [],
+    })
+  ).result;
+  const view = f.store.select('views', composed.viewId);
+  await enqueueLanding(f.work, { ...empty.command, expectedHead: saved.head }, view);
+  const before = counts(f);
+  await drainLandingBatches(f.work, 'main');
+  const entry = f.store.select('landingEntries', empty.command.operationId);
+  assert.equal(entry.status, 'accepted');
+  assert.match(entry.reason, /Empty against base/);
+  assert.deepEqual(counts(f), before);
+});

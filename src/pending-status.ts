@@ -1,5 +1,6 @@
 import type { MetricsHeadline } from './self-metrics-format.js';
 import type { DiskSample } from './self-metrics-disk.js';
+import { entryStall } from './landing-entry-stall.js';
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { batchDiagnosis, diagnosticCause } from './landing-observation.js';
 import type { LandingWorkerStatus } from './landing-worker-status.js';
@@ -142,6 +143,7 @@ export function pendingStatus(
           lane,
           {
             ...queueObservation(queued, queuedRun, diagnosis),
+            stall: now === null ? undefined : entryStall(data, queued, Date.parse(now)),
             ...(queued.status === 'checking' && previous?.waitingFor
               ? { waitingFor: previous.waitingFor }
               : {}),

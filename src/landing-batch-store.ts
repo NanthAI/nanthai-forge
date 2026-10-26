@@ -28,7 +28,13 @@ import type { WorkService } from './work.js';
 import type { CheckRun, WorkData, WorkView } from './work-types.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { LandingBatch, LandingEntry } from './landing-batch-types.js';
-import { entryPins, markAlreadyOnMain, settleCompletedLanes, sameLandingTree } from './landing-noop.js';
+import {
+  entryPins,
+  markAlreadyOnMain,
+  settleCompletedLanes,
+  settleQueuedNoops,
+  sameLandingTree,
+} from './landing-noop.js';
 import { soloCheckAdmission, soloCheckEnvironment } from './landing-solo-check.js';
 const ACTIVE_LANDING = new Set(['queued', 'checking', 'awaiting-review']);
 
@@ -211,6 +217,7 @@ export function selectBatch(
 ): LandingBatch | undefined {
   const source = new NativeSource(work.store.root);
   interruptStaleLandingInputs(data, channel, source);
+  settleQueuedNoops(work, data, channel, source);
   settleCompletedLanes(work, data, channel, acceptedHead(data, channel), source);
   const adopt = (batch: LandingBatch) => {
     recordLandingWaits(work.store, data, channel);

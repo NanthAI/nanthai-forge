@@ -1,3 +1,5 @@
+import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
+import { desiredWatchdogMs } from '../src/hosted-landing-stall';
 import { desiredLanding, scheduleDesired as schedule } from './projectHostedLandingDesiredWake';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
@@ -159,6 +161,7 @@ export const submit = mutation({
         wake: null,
       });
       await schedule(ctx, (await ctx.db.get(key))!, 0);
+      await scheduleLandingAlarm(ctx, state);
       return canonicalPayload(state);
     } catch (error) {
       return report(error);
@@ -173,7 +176,13 @@ export const claim = internalMutation({
   handler: async (ctx, input) => {
     const row = await desiredLanding(ctx, input);
     if (row?.wake?.id !== input.wakeId) return null;
-    return schedule(ctx, row, 30000);
+    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+    if (state.observation.state !== 'pending') {
+      await ctx.scheduler.cancel(row.wake.taskId);
+      await ctx.db.patch(row._id, { wake: null });
+      return null;
+    }
+    return schedule(ctx, row, desiredWatchdogMs(state));
   },
 });
 export const advance = internalMutation({
@@ -233,6 +242,7 @@ export const fail = internalMutation({
       error: { code: input.code, message: input.message },
     };
     await ctx.scheduler.cancel(row.wake.taskId);
+    await scheduleLandingAlarm(ctx, failed);
     await ctx.db.patch(row._id, { value: canonicalPayload(failed), wake: null });
     return canonicalPayload(failed);
   },

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { landingStallSchema } from './landing-stall.js';
 import { landingRuntimeSchema } from './landing-environment-schema.js';
 import { checkEnvironmentSchema } from './check-environment-schema.js';
 const id = z.uuid(),
@@ -24,6 +25,7 @@ export const landingEntrySchema = z.object({
   runtimeSnapshot: landingRuntimeSchema.optional(),
   reason: z.string().optional(),
   waitingFor: landingWaitingSchema.optional(),
+  stall: landingStallSchema.optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
   infrastructureRetries: z.array(z.object({ at: z.string(), code: z.string(), runId: id })).optional(),
   runtimeRepins: z

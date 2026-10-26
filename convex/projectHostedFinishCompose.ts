@@ -47,7 +47,13 @@ export async function reserveFinishRetry(
   await writeLanding(
     ctx,
     landing,
-    { ...state, version: state.version + 1, observation: landingObservation('queued'), error: null },
+    {
+      ...state,
+      version: state.version + 1,
+      timing: { submittedAt: state.at, ...state.timing, composeStartedAt: pending.at },
+      observation: landingObservation('queued'),
+      error: null,
+    },
     false,
   );
   const current = (await ctx.db.get(row._id))!;

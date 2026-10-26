@@ -99,7 +99,7 @@ test('stopped driver watchdog recovers the same attempt/run and fences a late ol
     s = await f.enqueue(f.request({ check: requestCheck(f) }));
   const attempt = (await f.status(s.id)).attempt;
   const old = await f.execute(f.nextTask(), true);
-  assert.equal(f.pendingTasks().length, 1);
+  assert.equal(f.pendingTasks().filter(task => task.name === 'projectHostedLandingDriver:drive').length, 1);
   assert.equal(f.nextTask().scheduledTime, f.now() + HOSTED_LANDING_LEASE_MS);
   f.elapse(HOSTED_LANDING_LEASE_MS + 1);
   const current = await f.execute(f.nextTask(), true);
@@ -115,7 +115,7 @@ test('stopped driver watchdog recovers the same attempt/run and fences a late ol
     [...f.tables.projectHostedCheckRuns.values()].map(r => JSON.parse(r.value))[0].dispatchStarted,
     false,
   );
-  assert.equal(f.pendingTasks().length, 0);
+  assert.equal(f.pendingTasks().filter(task => task.name === 'projectHostedLandingDriver:drive').length, 0);
 });
 
 test('lost claim and advance replies reconcile without lease extension or another attempt', async () => {
@@ -131,7 +131,7 @@ test('lost claim and advance replies reconcile without lease extension or anothe
   assert.deepEqual(await f.advance(claim), result);
   assert.equal(result.attemptId, s.attemptId);
   assert.equal(f.tables.projectHostedLandingAttempts.size, 1);
-  assert.equal(f.pendingTasks().length, 0);
+  assert.equal(f.pendingTasks().filter(task => task.name === 'projectHostedLandingDriver:drive').length, 0);
 });
 
 test('a conflicted head retains its terminal receipt and never hides later runnable work', async () => {

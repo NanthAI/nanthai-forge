@@ -100,6 +100,7 @@ export async function drainLandingBatches(
                 channel,
               ),
           );
+          await completeAlreadyOnMain(work, channel);
           if (batch) for (const span of selectionLocks) recordAttemptLock(work.store, batch.id, span);
         }
         if (

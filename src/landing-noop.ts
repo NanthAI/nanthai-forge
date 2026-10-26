@@ -66,6 +66,46 @@ export function settleCompletedLanes(
     entry.reason = `Every input Lane was completed before this landing ran, and its content is not on ${channel}; nothing landed. ${undo}`;
   }
 }
+/** Reconcile queued no-ops before overlap/capacity selection, even while another
+ * batch owns the train. Canonical main content takes precedence over a later save. */
+export function settleQueuedNoops(work: WorkService, data: WorkData, channel: string, source: NativeSource) {
+  const main =
+    [...data.channelMoves].reverse().find(move => move.channel === channel && move.status === 'accepted')
+      ?.head ?? data.nativeHead;
+  for (const entry of data.landingEntries ?? []) {
+    if (entry.channel !== channel || entry.status !== 'queued') continue;
+    const candidate = data.views.find(view => view.id === entry.viewId);
+    if (!main || candidate?.status !== 'clean' || candidate.head !== entry.head) continue;
+    const result = composeLandingSource(
+      work.store,
+      source,
+      candidate,
+      main,
+      'No-op landing',
+      entry.arrivedAt,
+    );
+    if (result.head && sameLandingTree(source, result.head, main)) {
+      markAlreadyOnMain(entry, main);
+      if (sameLandingTree(source, candidate.head!, candidate.base))
+        entry.reason = `Empty against base; source is already on main at ${main}; no check, acceptance or Channel move was needed.`;
+      delete entry.waitingFor;
+      continue;
+    }
+    const newer = candidate.inputs.flatMap(pin => {
+      const lane = data.lanes.find(lane => lane.id === pin.laneId);
+      return lane && lane.head !== pin.head ? [{ laneId: pin.laneId, head: lane.head }] : [];
+    });
+    if (!newer.length) continue;
+    entry.status = 'interrupted';
+    entry.terminalAt = new Date().toISOString();
+    entry.error = {
+      code: 'LANDING_SUPERSEDED',
+      message: `Desired head superseded by ${newer.map(pin => `Lane ${pin.laneId} head ${pin.head}`).join(', ')}. Original source is retained; submit the newer head to land it.`,
+    };
+    entry.reason = entry.error.message;
+    delete entry.waitingFor;
+  }
+}
 /** Complete the Lanes of entries that were already on main, as acceptance would.
  * Retry-safe: completion of an already completed Lane is a no-op. */
 export async function completeAlreadyOnMain(work: WorkService, channel: string) {

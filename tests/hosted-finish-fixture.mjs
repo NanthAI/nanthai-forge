@@ -14,6 +14,7 @@ export const api = await import(moduleUrl('../convex/projectHostedFinish.ts'));
 export const control = await import(moduleUrl('../convex/projectHostedFinishControl.ts'));
 export const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 export const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
+const stallApi = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
 const sourceJobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 export const maxima = {};
@@ -165,6 +166,8 @@ export async function finishFixture(t, { overlap = false, inputCount = 1 } = {})
           },
           input,
         );
+      } else if (task.name === 'projectHostedLandingStall:alarm') {
+        await tx('landingAlarm', stallApi.alarm, input);
       } else if (task.name === 'projectHostedLandingDesired:drive') {
         await desired.drive._handler(
           {

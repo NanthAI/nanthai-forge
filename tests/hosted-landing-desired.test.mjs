@@ -184,6 +184,84 @@ test('a newer agent Lane head supersedes the goal with the replacement named', a
   assert.equal(f.tables.projectHostedAcceptances.size, 0);
 });
 
+test('a stalled desired composition alarms without a requester and backs off to three calls per hour', async t => {
+  const f = await finishFixture(t),
+    command = request(f),
+    resume = pauseSource(f);
+  const state = await submit(f, command);
+  const start = Date.now();
+  let wakes = 0;
+  while (Date.now() < start + 15 * 60_000) {
+    await f.execute();
+    if (f.metrics.ticks > 100) assert.fail('no hot watchdog loop');
+    wakes++;
+  }
+  const alarmed = (await read(f, state.operationId)).submission;
+  assert.equal(alarmed.observation.stall.step, 'composing');
+  assert.match(alarmed.observation.stall.missingOwner, /source worker.*controller/);
+  const beforeCalls = f.counts.filter(c => c.name.startsWith('desired-')).length;
+  // In steady state each wake is drive + claim + advance, at most once per hour.
+  const next = f.pending().find(task => task.name === 'projectHostedLandingDesired:drive');
+  assert(next.scheduledTime - Date.now() >= 30 * 60_000);
+  await f.execute(next);
+  const later = f.pending().find(task => task.name === 'projectHostedLandingDesired:drive');
+  assert(later.scheduledTime - Date.now() >= 60 * 60_000);
+  const steadyCalls = f.counts.filter(c => c.name.startsWith('desired-')).length - beforeCalls;
+  assert.equal(steadyCalls, 2);
+  resume();
+  const { notifyDesiredCompose } = await import(moduleUrl('../convex/projectHostedLandingDesiredWake.ts'));
+  await f.tx(
+    'sourceEvent',
+    { _handler: ctx => notifyDesiredCompose(ctx, f.projectId, command.composeOperationId) },
+    {},
+  );
+  assert.equal(f.pending()[0].scheduledTime, Date.now(), 'source event bypasses backoff');
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const landed = (await read(f, state.operationId)).submission;
+  assert.equal(landed.phase, 'landed');
+  assert.equal(landed.observation.stall, undefined, 'progress clears the alarm');
+  assert.equal(f.pending().length, 0, 'settled goals have no recurring wake');
+  t.diagnostic(
+    JSON.stringify({ wakesBeforeAlarm: wakes, operatorMutationsToAlarm: 0, steadyControllerCallsPerHour: 3 }),
+  );
+});
+
+test('one alarm transfers from desired preparation, resets on run progress, and is cancelled on settlement', async t => {
+  const f = await finishFixture(t),
+    command = request(f);
+  const state = await submit(f, command);
+  const alarms = () => f.pending().filter(task => task.name === 'projectHostedLandingStall:alarm');
+  assert.equal(alarms().length, 1);
+  await f.execute(); // completed source job admits the same desired identity
+  assert.equal(alarms().length, 1, 'admission replaces preparation alarm');
+  assert.equal([...f.tables.projectHostedLandingDesired.values()][0].alarm, null);
+  await f.drain(); // a deliberately unfinished queued check reaches its alarm
+  let current = (await read(f, command.operationId)).submission;
+  assert.equal(current.observation.stall.step, 'checking');
+  const oldProgress = current.observation.stall.lastProgressAt;
+  f.advanceClock(60_000);
+  const run = [...f.tables.projectHostedCheckRuns.values()][0];
+  const active = await f.rawChecks.activate(JSON.parse(run.value).id);
+  // Only the run's recorded event wakes the controller; stop before the new alarm deadline.
+  for (let n = 0; f.pending()[0]?.name !== 'projectHostedLandingStall:alarm'; n++) {
+    assert(n < 20);
+    await f.execute();
+  }
+  current = (await read(f, command.operationId)).submission;
+  assert.equal(current.phase, 'checking');
+  assert.equal(current.observation.stall, undefined);
+  assert(Date.parse(current.timing.ciProgressAt) > Date.parse(oldProgress));
+  assert.equal(alarms().length, 1);
+  await f.rawChecks.pass(active);
+  await f.drain();
+  current = (await read(f, state.operationId)).submission;
+  assert.equal(current.phase, 'landed');
+  assert.equal(f.pending().length, 0, 'no delayed alarm or watchdog call while idle');
+  assert([...f.tables.projectHostedLandingRequests.values()].every(row => !row.alarm));
+});
+
 test('a reserved desired landing survives main moving before admission and remains visible by Candidate', async t => {
   const f = await finishFixture(t),
     command = request(f),

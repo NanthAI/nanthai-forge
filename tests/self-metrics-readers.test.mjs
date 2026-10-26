@@ -522,3 +522,27 @@ test('M2 workflow saves record path overlaps and response delivery without treat
     await cleanupOwner(root);
   }
 });
+
+test('a delivered superseded presentation retains its actual terminal outcome for metric 3', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-q2-delivery-'));
+  try {
+    const operationId = randomUUID();
+    await withLifecycleMetric(root, { action: 'land', operationId }, async () => ({
+      result: {
+        submissions: [
+          { entryOperationId: 'failed', state: 'superseded', outcome: 'terminal-failed' },
+          { entryOperationId: 'landed', state: 'superseded', outcome: 'landed' },
+          { entryOperationId: 'pending', state: 'superseded', outcome: 'pending' },
+        ],
+      },
+    }));
+    const receipts = readSelfMetricReceipts(root);
+    assert.deepEqual(receipts.at(-1).deliveries, [
+      { entryId: 'failed', state: 'terminal-failed' },
+      { entryId: 'landed', state: 'landed' },
+    ]);
+  } finally {
+    const { rmSync } = await import('node:fs');
+    rmSync(root, { recursive: true, force: true });
+  }
+});

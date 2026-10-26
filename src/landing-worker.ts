@@ -1,3 +1,4 @@
+import { watchLandingStalls } from './landing-stall-watch.js';
 import { landingRecords } from './landing-records.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { resumeLegacyLand } from './landing-worker-journals.js';
@@ -33,7 +34,9 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
     worker = processIdentity();
   let sequence = 0,
     resume: (() => void) | undefined;
+  const stalls = watchLandingStalls(store, signal);
   const wake = () => {
+    stalls.invalidate();
     sequence++;
     resume?.();
   };
@@ -69,6 +72,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
   let agent: AgentWorkflow | undefined;
   let last = '',
     retryMs = 0;
+  const terminalContinuations = new Map<string, string>();
   try {
     publish('recovering');
     await withLandingWorker(signal, async () => {
@@ -191,6 +195,27 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
                     // A peer may still be choosing its bakery ticket. No holding
                     // ticket or Work revision need change when that peer releases it.
                     if ('waiting' in drained) last = '';
+                    // Completion can arrive while the finite sweep is returning
+                    // a waiting result. Reconcile each exact all-passed snapshot
+                    // once even if its filesystem/socket hint was already consumed.
+                    // This is an evidence-driven continuation, never an idle poll.
+                    const after = landingRecords(store, channel);
+                    const ready = (after.landingBatches ?? []).filter(
+                      batch =>
+                        ['composing', 'checking'].includes(batch.status) &&
+                        batch.prefixes.length &&
+                        batch.prefixes.every(prefix =>
+                          after.runs.some(run => run.id === prefix.runId && run.status === 'passed'),
+                        ),
+                    );
+                    const completed = JSON.stringify(
+                      ready.map(batch => [batch.id, batch.prefixes, batch.settlement]),
+                    );
+                    if (ready.length && terminalContinuations.get(channel) !== completed) {
+                      terminalContinuations.set(channel, completed);
+                      last = '';
+                      wake();
+                    } else if (!ready.length) terminalContinuations.delete(channel);
                   } finally {
                     // Releasing a drain slot need not publish Work. Notify peers
                     // explicitly: native filesystem events may be delayed or lost.
@@ -262,6 +287,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
       }
     });
   } finally {
+    stalls.close();
     signal.removeEventListener('abort', wake);
     await watcher.close();
     unsubscribe();

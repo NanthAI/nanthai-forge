@@ -1,3 +1,5 @@
+import { digest } from '../src/portable-hash';
+import { canonicalPayload } from '../src/hosted-source-operation';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import {
@@ -169,6 +171,20 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     } else if (attempt.check) {
       const check = attempt.check;
       const { run } = await loadHostedCheck(ctx, { projectId: claim.projectId, runId: check.runId });
+      const progress = digest(
+        canonicalPayload({
+          id: run.id,
+          status: run.status,
+          counts: run.counts,
+          plan: run.planDigest,
+          execution: run.executionId,
+          terminal: run.terminalDigest,
+        }),
+      );
+      if (state.checkProgress !== progress) {
+        state.checkProgress = progress;
+        state.timing = { submittedAt: state.at, ...state.timing, ciProgressAt: new Date(now).toISOString() };
+      }
       state.timing = {
         submittedAt: state.at,
         ...state.timing,

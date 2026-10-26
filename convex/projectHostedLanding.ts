@@ -1,3 +1,4 @@
+import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
@@ -287,6 +288,7 @@ export async function enqueueHostedLanding(
   await initializeFinish(ctx, state);
   await retainLandingProgress(ctx, state);
   await recordLandingObservation(ctx, state);
+  await scheduleLandingAlarm(ctx, state);
   return state;
 }
 

@@ -14,6 +14,13 @@ export function formatPendingStatus(
 ) {
   const h = value.hosted,
     r = h.recovery;
+  const alarms = value.lanes.flatMap(lane =>
+    lane.submissions.flatMap(submission =>
+      submission.stall
+        ? [`${lane.laneId.slice(0, 8)}: ${submission.stall.step}; missing ${submission.stall.missingOwner}`]
+        : [],
+    ),
+  );
   const handoffs = value.lanes.filter(lane => lane.handoff);
   const handoff = handoffs[0];
   const stacks = value.lanes.filter(lane => lane.stack);
@@ -51,7 +58,7 @@ export function formatPendingStatus(
     `Transfers: ${h.pendingPushes.length} pending · ${h.metadataPending} metadata (source coverage separate)${h.metadataError ? ` · ${oneLine(h.metadataError.code)} seq ${h.metadataError.seq} at ${new Date(h.metadataError.at).toISOString()} attempts ${h.metadataError.attempts}: ${oneLine(h.metadataError.message)}${h.metadataNextAttemptAt ? ` · retry ${new Date(h.metadataNextAttemptAt).toISOString()}` : ''} · ${h.metadataRejected} rejected` : ''}`,
     `Automatic hosted push: ${h.autoExchange?.status ?? 'unknown'}${h.autoExchange?.phase ? ` · ${oneLine(h.autoExchange.phase)} · last progress ${h.autoExchange.lastProgressAt === null ? 'unknown' : new Date(h.autoExchange.lastProgressAt).toISOString()}` : ''} · spend ${h.autoExchange?.spend.availability ?? 'unknown'} · ${h.autoExchange?.spend.reason ?? 'unavailable'} · rolling delta USD ${h.autoExchange?.spend.deltaUsd ?? 'unknown'}${['paused', 'stalled'].includes(h.autoExchange?.status ?? '') ? ` · ${h.autoExchange!.resume}` : ''}`,
     `GitHub main: ${pin(value.github.mainHead)} · ${value.github.source} · ${value.github.status} · age ${elapsed(value.github.ageMs)}`,
-    `Checks: ${value.checks.length} queued/preparing/running${value.queue ? ` · queue ${value.queue.items.length}/${value.queue.total} entries loaded` : ''} · landing worker ${value.landingWorker.status}${value.landingWorker.code ? ` (${oneLine(value.landingWorker.code)})` : ''}${value.landingWorker.affected ? ` · operation ${value.landingWorker.affected.operationId ?? 'unknown'} · Lane ${value.landingWorker.affected.laneIds.join(', ') || 'unknown'}${value.landingWorker.affected.runId ? ` · run ${value.landingWorker.affected.runId}` : ''}` : ''} · ${value.landingWorker.pendingRecovery} pending recovery · ${value.landingWorker.dependencyWaits} dependency waits · last event ${value.landingWorker.observedAt ?? 'unknown'}`,
+    `Checks: ${value.checks.length} queued/preparing/running${alarms.length ? ` · Landing alarms: ${alarms.map(oneLine).join('; ')}` : ''}${value.queue ? ` · queue ${value.queue.items.length}/${value.queue.total} entries loaded` : ''} · landing worker ${value.landingWorker.status}${value.landingWorker.code ? ` (${oneLine(value.landingWorker.code)})` : ''}${value.landingWorker.affected ? ` · operation ${value.landingWorker.affected.operationId ?? 'unknown'} · Lane ${value.landingWorker.affected.laneIds.join(', ') || 'unknown'}${value.landingWorker.affected.runId ? ` · run ${value.landingWorker.affected.runId}` : ''}` : ''} · ${value.landingWorker.pendingRecovery} pending recovery · ${value.landingWorker.dependencyWaits} dependency waits · last event ${value.landingWorker.observedAt ?? 'unknown'}`,
     `Audits: ${value.audits.filter(a => ['pending', 'queued', 'preparing', 'running'].includes(a.status)).length} pending · ${value.audits.filter(a => a.status === 'failed').length} failed`,
     `Deployment: ${pin(value.deployment?.head ?? null)} · ${value.deployment?.source ?? 'unknown'} (last observation); installed source unknown`,
   ];

@@ -27,9 +27,14 @@ const { awayFacts, acceptanceArrival } = await import(moduleUrl('../web/src/cock
 function fixture(notice = 'current') {
   const work = s16Work();
   const notices = [s16Notice(work, notice)];
-  const status = pendingStatus(work, {
-    landingWorker: { status: 'driving', observedAt: '2026-10-23T19:49:00Z', workers: 1, code: null },
-  });
+  // State-table fixtures have no observation clock; elapsed alarms are tested separately.
+  const status = pendingStatus(
+    work,
+    {
+      landingWorker: { status: 'driving', observedAt: '2026-10-23T19:49:00Z', workers: 1, code: null },
+    },
+    null,
+  );
   const facts = queueFacts(status, notices);
   return { work, notices, status, facts, lanes: cockpitLanes(work, facts) };
 }
@@ -288,4 +293,27 @@ test('live acceptance delivery reuses a baseline and suppresses initial or away 
   assert.equal(acceptanceArrival(live.seen, [next, first], 0).arrival, undefined);
   assert.equal(acceptanceArrival(baseline.seen, [next, first], 0, true).arrival, undefined);
   assert.equal(acceptanceArrival(baseline.seen, [next, first], now).arrival, undefined);
+});
+
+test('the landing observation exposes the stalled step and owner while retaining review guidance', () => {
+  const { status } = fixture();
+  const reviewLane = status.lanes.find(lane => lane.laneId === 'review');
+  const review = reviewLane.submission;
+  review.stall = {
+    code: 'LANDING_STALLED',
+    step: 'review',
+    missingOwner: 'reviewer',
+    lastProgressAt: '2026-10-23T19:00:00.000Z',
+    alarmAt: '2026-10-23T19:15:00.000Z',
+    message: 'No landing progress for 15 minutes at review; missing progress from reviewer.',
+  };
+  const fact = queueFacts(
+    status,
+    [],
+    new Map([['review', { head: reviewLane.head, summary: 'Review summary' }]]),
+  ).get('review');
+  assert.match(fact.text, /15 minutes at review.*reviewer/);
+  assert.equal(fact.tip, review.stall.message);
+  assert.equal(fact.step.body, 'Review summary');
+  assert.equal(fact.label, 'Ready');
 });

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+const alarm = v.optional(
+  v.union(v.object({ taskId: v.id('_scheduled_functions'), lastProgressAt: v.string() }), v.null()),
+);
 const phase = v.union(
   v.literal('queued'),
   v.literal('checking'),
@@ -17,6 +20,7 @@ const lease = v.object({
 });
 export const hostedLandingTables = {
   projectHostedLandingDesired: defineTable({
+    alarm,
     projectId: v.id('hostedProjects'),
     actor: v.string(),
     operationId: v.string(),
@@ -61,6 +65,7 @@ export const hostedLandingTables = {
     lease: v.union(lease, v.null()),
   }).index('by_project_and_channel', ['projectId', 'channel']),
   projectHostedLandingRequests: defineTable({
+    alarm,
     projectId: v.id('hostedProjects'),
     channel: v.literal('main'),
     submissionId: v.string(),

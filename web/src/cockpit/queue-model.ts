@@ -238,6 +238,11 @@ export function queueFacts(
           });
           break;
       }
+      if (submission.stall)
+        Object.assign(fact, {
+          text: `${fact.text} · ${submission.stall.message}`,
+          tip: submission.stall.message,
+        });
     } else if (
       notices.some(
         notice =>

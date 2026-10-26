@@ -1,3 +1,5 @@
+import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
+import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -181,6 +183,13 @@ export async function writeLanding(
     'The selected attempt must belong to this original request.',
   );
   if (previous.attemptId !== state.attemptId) await retainLandingProgress(ctx, previous, true);
+  if (
+    state.observation.stall &&
+    (state.observation.state !== 'pending' ||
+      hostedLandingProgressAt(state) !== state.observation.stall.lastProgressAt)
+  )
+    delete state.observation.stall;
+  await scheduleLandingAlarm(ctx, state);
   await retainLandingProgress(ctx, state);
   await recordLandingObservation(ctx, state);
   await ctx.db.patch(row._id, {

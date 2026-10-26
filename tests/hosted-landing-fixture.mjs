@@ -11,6 +11,7 @@ export const control = await import(moduleUrl('../convex/projectHostedLandingCon
 export const store = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
 export const wake = await import(moduleUrl('../convex/projectHostedLandingWake.ts'));
 export const pins = await import(moduleUrl('../convex/projectHostedLandingPins.ts'));
+const alarms = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 export { code };
@@ -153,7 +154,13 @@ export async function landingFixture(source = null) {
     f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
     try {
       let result;
-      if (task.name === 'projectHostedLandingDriver:checkWake')
+      if (task.name === 'projectHostedLandingStall:alarm')
+        result = await run(
+          'landingAlarm',
+          (ctx, input) => alarms.raiseLandingAlarm(ctx, input, now),
+          task.args[0],
+        );
+      else if (task.name === 'projectHostedLandingDriver:checkWake')
         result = await call('landingCheckWake', driver.checkWake, task.args[0]);
       else if (stopAfterClaim) result = await claim(task);
       else {

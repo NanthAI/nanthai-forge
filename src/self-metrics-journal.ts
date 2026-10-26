@@ -189,8 +189,8 @@ export async function withLifecycleMetric<T>(
             submission?: { id?: string; observation?: { state?: string }; error?: { code?: string } };
             code?: string;
             error?: { code?: string };
-            submissions?: { entryOperationId?: string; state?: string }[];
-            entries?: { submissions?: { entryOperationId?: string; state?: string }[] }[];
+            submissions?: { entryOperationId?: string; state?: string; outcome?: string }[];
+            entries?: { submissions?: { entryOperationId?: string; state?: string; outcome?: string }[] }[];
           };
         }
       )?.result;
@@ -218,11 +218,13 @@ export async function withLifecycleMetric<T>(
       deliveries = [
         ...(result?.submissions ?? []),
         ...(result?.entries ?? []).flatMap(entry => entry.submissions ?? []),
-      ].flatMap(item =>
-        item.entryOperationId && (item.state === 'landed' || item.state === 'terminal-failed')
-          ? [{ entryId: item.entryOperationId, state: item.state }]
-          : [],
-      );
+      ].flatMap(item => {
+        // A later save changes presentation, not the original delivered outcome.
+        const state = item.state === 'superseded' ? item.outcome : item.state;
+        return item.entryOperationId && (state === 'landed' || state === 'terminal-failed')
+          ? [{ entryId: item.entryOperationId, state }]
+          : [];
+      });
       const hosted = result?.submission;
       const state = hosted?.observation?.state;
       if (hosted?.id && (state === 'landed' || state === 'terminal-failed'))

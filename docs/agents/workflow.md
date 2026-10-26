@@ -1074,6 +1074,22 @@ job, checking and acceptance without the client or owner Mac. Its controller
 retains a fenced reconciliation wake before advancing. Preparatory upload/save
 receipts remain explicit; they do not claim hosted queue admission.
 
+Queued entries whose content is already on main or empty against their base settle
+without a check or Channel move. A newer saved Lane head settles the older queued
+goal as superseded, naming the replacement and retaining the original source.
+These terminal outcomes are returned through the original requester handle.
+
+After 15 minutes without a recorded run, batch-step or acceptance event, pending
+entries expose `stall:{code,step,missingOwner,lastProgressAt,alarmAt,message}` in
+receipts, `status --pending` and landing observations. A missing wait reason is
+reported as `unrecorded-wait`, with the landing controller named. Native workers
+own one deadline while unalarmed work is pending. Hosted entries retain one alarm
+deadline, transfer it during admission and cancel it at settlement. Reading never drives or repairs the queue. Real progress clears
+the alarm and starts a new deadline. Idle and settled queues have no recurring
+alarm wake. The hosted preparation watchdog grows from 30 seconds to one hour
+while no progress is recorded (three controller calls per hour at that cap);
+source completion still wakes it immediately.
+
 Native receipts include `durable`, `landingWorker` and `observe` commands for
 `landing`, Lane `status`, `pending-status` and `wait`. The caller holds no source or Work lock
 while waiting on checks. Admission does not start or install an owner service.

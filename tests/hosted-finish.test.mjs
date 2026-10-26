@@ -227,7 +227,10 @@ test('stacked dependency waits own no idle timer and resume on the parent receip
   });
   const child = await f.enqueue(childRequest);
   await f.drain();
-  assert.equal((await f.current(child.id)).submission.observation.pendingReason, 'waiting-for-dependency');
+  const waiting = (await f.current(child.id)).submission.observation;
+  assert.equal(waiting.pendingReason, 'waiting-for-dependency');
+  assert.equal(waiting.stall.step, 'dependency');
+  assert.equal(waiting.stall.missingOwner, 'parent landing controller');
   assert.equal(f.pending().length, 0);
   await complete(f); // parent lands; child rebases its original selection onto parent
   await complete(f);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { landingStallSchema } from './landing-stall.js';
 import { mainExpectationSchema } from './hosted-main.js';
 import { hostedCheckRequestSchema, checkNumber } from './hosted-check.js';
 import { autonomyPolicySchema } from './autonomy-policy.js';
@@ -85,6 +86,7 @@ export const hostedLandingAttemptSchema = z
   .strict();
 export const landingObservationSchema = z
   .object({
+    stall: landingStallSchema.optional(),
     state: z.enum(['pending', 'terminal-failed', 'landed', 'superseded']),
     pendingReason: z
       .enum(['queued', 'checking', 'waiting-for-review', 'waiting-for-dependency', 'pending-infra'])
@@ -107,6 +109,7 @@ export const hostedLandingStateSchema = z
     attemptId: z.uuid(),
     phase: z.enum(['composing', 'queued', 'checking', 'ready', 'terminal-failed', 'landed']),
     preparing: z.literal(true).optional(),
+    checkProgress: hash.optional(),
     timing: z
       .object({
         submittedAt: z.iso.datetime(),
@@ -115,6 +118,7 @@ export const hostedLandingStateSchema = z
         composedAt: z.iso.datetime().optional(),
         checkReservedAt: z.iso.datetime().optional(),
         ciObservedAt: z.iso.datetime().optional(),
+        ciProgressAt: z.iso.datetime().optional(),
         ciEndedAt: z.iso.datetime().optional(),
         settlementStartedAt: z.iso.datetime().optional(),
         commitObservedAt: z.iso.datetime().optional(),
