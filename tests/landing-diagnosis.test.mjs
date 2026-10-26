@@ -39,7 +39,10 @@ function assertCheckedMoves(f) {
 
 for (const remote of [false, true])
   test(`A/B interaction retains the failing set and lands only checked A (${remote ? 'parallel' : 'halving'})`, async t => {
-    const f = await fixture(t, { remote, failWhen: "exists('A.txt') && exists('B.txt')" });
+    const f = await fixture(t, {
+      remote,
+      failWhen: "exists('A.txt') && exists('B.txt')",
+    });
     const a = await f.candidate('A.txt'),
       b = await f.candidate('B.txt');
     const bControlId = randomUUID();
@@ -83,7 +86,9 @@ for (const remote of [false, true])
     assert.equal(submission.cause, 'check-failed');
     assert.equal(submission.diagnosis.smallestObservedFailingSet.nodeId, full.id);
     assert.deepEqual(
-      readPendingStatus(f.store).lanes.find(lane => lane.laneId === b.lane.laneId).submission,
+      readPendingStatus(f.store, undefined, undefined, { detail: true }).lanes.find(
+        lane => lane.laneId === b.lane.laneId,
+      ).submission,
       submission,
     );
     const observation = queuedOutcome(f.store, data.landingEntries[1]);
@@ -115,7 +120,9 @@ for (const remote of [false, true])
   });
 
 test('all-passing halves do not license their failed union; second half is recomposed on actual main', async t => {
-  const f = await fixture(t, { failWhen: "exists('A.txt') && exists('C.txt')" });
+  const f = await fixture(t, {
+    failWhen: "exists('A.txt') && exists('C.txt')",
+  });
   let intentId;
   for (const name of ['A', 'B', 'C', 'D']) {
     const input = await f.candidate(`${name}.txt`, `${name}\n`, true, intentId);
@@ -168,7 +175,9 @@ test('all-passing halves do not license their failed union; second half is recom
 });
 
 test('three-way-only failure retains the observed triple even when all pairs pass', async t => {
-  const f = await fixture(t, { failWhen: "exists('A.txt') && exists('B.txt') && exists('C.txt')" });
+  const f = await fixture(t, {
+    failWhen: "exists('A.txt') && exists('B.txt') && exists('C.txt')",
+  });
   const candidates = [];
   for (const name of ['A', 'B', 'C'])
     candidates.push(await f.candidate(`${name}.txt`, `${name}\n`, true, candidates[0]?.lane.intentId));
@@ -334,16 +343,24 @@ test('an evaluated cursor cannot accept stale or incomplete passing evidence', a
   const original = f.store.select.bind(f.store);
   for (const mutation of [
     run => ({ ...run, head: 'f'.repeat(64) }),
-    run => ({ ...run, environment: { ...run.environment, fingerprint: 'f'.repeat(64) } }),
+    run => ({
+      ...run,
+      environment: { ...run.environment, fingerprint: 'f'.repeat(64) },
+    }),
     run => ({ ...run, inputs: [] }),
-    run => ({ ...run, dependencies: [{ kind: 'view', viewId: randomUUID(), head: 'f'.repeat(64) }] }),
+    run => ({
+      ...run,
+      dependencies: [{ kind: 'view', viewId: randomUUID(), head: 'f'.repeat(64) }],
+    }),
     run => ({ ...run, exitCode: null }),
   ]) {
     f.store.select = (collection, id) => {
       const record = original(collection, id);
       return collection === 'runs' && id === prefix.runId ? mutation(record) : record;
     };
-    assert.throws(() => validatePassingPrefix(f.work, saved, prefix), { code: 'EVIDENCE_CHANGED' });
+    assert.throws(() => validatePassingPrefix(f.work, saved, prefix), {
+      code: 'EVIDENCE_CHANGED',
+    });
   }
   f.store.select = original;
   await f.agent.dispatch({
@@ -353,7 +370,9 @@ test('an evaluated cursor cannot accept stale or incomplete passing evidence', a
     executable: process.execPath,
     args: ['-e', 'console.log("changed definition")'],
   });
-  await assert.rejects(advanceLandingBatch(f.work, batch.id, driver), { code: 'EVIDENCE_CHANGED' });
+  await assert.rejects(advanceLandingBatch(f.work, batch.id, driver), {
+    code: 'EVIDENCE_CHANGED',
+  });
   assert.equal(f.store.load().channelMoves.length, 0);
   assert.equal(runs(f).length, 1);
 });
@@ -399,7 +418,10 @@ for (const error of [undefined, { code: 'WORK_BUSY', message: 'Synthetic runner 
     );
     assert.ok(data.landingEntries.every(entry => entry.runId === prefix.runId));
     assert.equal(readLaneSubmissions(f.store, view.inputs[0].laneId)[0].cause, 'infra');
-    assert.equal(readPendingStatus(f.store).lanes[0].submission.cause, 'infra');
+    assert.equal(
+      readPendingStatus(f.store, undefined, undefined, { detail: true }).lanes[0].submission.cause,
+      'infra',
+    );
     assert.equal(retained.diagnosis.nodes.length, 1);
     assert.equal(retained.diagnosis.nodes[0].cause, error ? 'infra' : 'unknown-outcome');
     assert.deepEqual(landingDiagnosis(f.store, data.landingEntries[0]).diagnosis.observedFailingSets, []);

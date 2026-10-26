@@ -237,7 +237,7 @@ test('default local check records cost in durable receipt and status; runner pol
   await agent.dispatch(command);
   assert.equal(agent.work.store.load().policyChanges.length, 1);
   assert.equal((await agent.dispatch({ action: 'policy' })).result.checks.runner, 'github-actions');
-  const status = (await agent.dispatch({ action: 'status' })).result;
+  const status = (await agent.dispatch({ action: 'status', detail: true })).result;
   assert.equal(status.autonomyPolicy.checks.shards, 2);
   assert.equal(status.checkRunner.runner, 'github-actions');
   assert.equal(status.checkCosts.months[0].runner, 'local');

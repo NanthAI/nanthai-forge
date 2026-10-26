@@ -217,12 +217,22 @@ export async function startMcp(
       'forge_work_status',
       {
         description:
-          'Read local Intents, Lanes, exact Candidates and publication observations. pending:true reads the pinned local pending-work/recovery summary without recovery, remote calls or archive export. Optional compact:true defers full review bodies with explicit markers; read-work-detail returns original pinned detail. Reconciles interrupted local journals.',
-        inputSchema: { compact: z.boolean().optional(), pending: z.boolean().optional() },
+          'Read local Intents, Lanes, exact Candidates and publication observations. pending:true reads indexed pending-work/recovery summary pages without the writer lock; offset/limit page records and detail:true includes the named skipped sections. No recovery, remote calls or archive export. Optional compact:true defers full review bodies with explicit markers; read-work-detail returns original pinned detail. Reconciles interrupted local journals.',
+        inputSchema: {
+          compact: z.boolean().optional(),
+          pending: z.boolean().optional(),
+          detail: z.boolean().optional(),
+          offset: z.number().int().nonnegative().optional(),
+          limit: z.number().int().positive().optional(),
+        },
         annotations: { ...read, readOnlyHint: false },
       },
-      ({ compact, pending }) =>
-        result(() => (pending ? readPendingStatus(work.store) : work.status({ compact: compact ?? false }))),
+      ({ compact, pending, detail, offset, limit }) =>
+        result(() =>
+          pending
+            ? readPendingStatus(work.store, undefined, undefined, { detail, offset, limit })
+            : work.status({ compact: compact ?? false }),
+        ),
     );
     server.registerTool(
       'forge_work_command',

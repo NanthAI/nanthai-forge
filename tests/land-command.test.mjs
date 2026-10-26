@@ -222,7 +222,9 @@ for (const batching of [true, false]) {
     };
     await assert.rejects(f.land([a, b], { operationId }), /Synthetic lost reply/);
     const before = f.store.load();
-    const savedSubmissions = readPendingStatus(f.store).lanes.flatMap(lane => lane.submissions);
+    const savedSubmissions = readPendingStatus(f.store, undefined, undefined, { detail: true }).lanes.flatMap(
+      lane => lane.submissions,
+    );
     const selected = JSON.parse(
       readFileSync(join(f.store.directory, 'agent-land', `${operationId}.json`), 'utf8'),
     ).entries;
@@ -577,7 +579,7 @@ test('pending submission and attempt identities survive replay and later driver 
   assert.equal(submission.pendingReason, 'checking');
   assert.ok(submission.attemptId);
   assert.equal(pending.entries[0].operationId, savedId);
-  const status = readPendingStatus(f.store);
+  const status = readPendingStatus(f.store, undefined, undefined, { detail: true });
   assert.deepEqual(status.lanes[0].submission, submission);
   assert.match(formatPendingStatus(status), /pending \(checking\).*submission .*attempt/);
   const laneStatus = (await f.agent.dispatch({ action: 'status', laneId: a.laneId })).result.lane;
@@ -612,7 +614,10 @@ test('a new saved head supersedes the old landed submission without changing its
   assert.equal(old.complete, false);
   assert.equal(replay.complete, false);
   assert.equal(f.store.load().channelMoves.length, 1);
-  assert.equal(readPendingStatus(f.store).lanes[0].submission.state, 'superseded');
+  assert.equal(
+    readPendingStatus(f.store, undefined, undefined, { detail: true }).lanes[0].submission.state,
+    'superseded',
+  );
 });
 
 test('dependency waits expose the same submission before and after its first Candidate', async t => {
@@ -625,7 +630,9 @@ test('dependency waits expose the same submission before and after its first Can
   assert.equal(pending.pendingReason, 'waiting-for-dependency');
   assert.equal(pending.attemptId, null);
   assert.deepEqual(
-    readPendingStatus(f.store).lanes.find(lane => lane.laneId === child.laneId).submission,
+    readPendingStatus(f.store, undefined, undefined, { detail: true }).lanes.find(
+      lane => lane.laneId === child.laneId,
+    ).submission,
     pending,
   );
   await f.land([parent]);
@@ -645,7 +652,7 @@ test('conflict and check failure causes are visible in receipts and pending stat
   assert.ok(submissions.some(item => item.state === 'terminal-failed' && item.cause === 'check-failed'));
   // Finish the detached audit before the fixture's intentional zero-wait status read.
   await drainPostAccept(f.store);
-  const status = readPendingStatus(f.store);
+  const status = readPendingStatus(f.store, undefined, undefined, { detail: true });
   assert.ok(status.lanes.some(lane => lane.submission?.cause === 'conflict'));
   assert.ok(status.lanes.some(lane => lane.submission?.cause === 'check-failed'));
   assert.match(result.summary.join('\n'), /terminal-failed \(conflict\)/);

@@ -64,18 +64,45 @@ async function fixture(t) {
     executable: process.execPath,
     args: ['-e', '0'],
   });
-  await agent.dispatch({ action: 'set-policy', operationId: randomUUID(), checks: { runner: 'local' } });
+  await agent.dispatch({
+    action: 'set-policy',
+    operationId: randomUUID(),
+    checks: { runner: 'local' },
+  });
   t.after(async () => {
     await drainPostAccept(store);
-    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+    rmSync(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 50,
+    });
   });
   const start = async (name, extra = {}) =>
-    (await agent.dispatch({ action: 'start', outcome: name, scope: { paths: docs }, ...extra })).result;
+    (
+      await agent.dispatch({
+        action: 'start',
+        outcome: name,
+        scope: { paths: docs },
+        ...extra,
+      })
+    ).result;
   const save = async lane =>
-    (await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'Save incident edits' }))
-      .result;
+    (
+      await agent.dispatch({
+        action: 'checkpoint',
+        laneId: lane.laneId,
+        message: 'Save incident edits',
+      })
+    ).result;
   const status = async lane =>
-    (await agent.dispatch({ action: 'status', laneId: lane.laneId, detail: true })).result;
+    (
+      await agent.dispatch({
+        action: 'status',
+        laneId: lane.laneId,
+        detail: true,
+      })
+    ).result;
   const journal = new CoordinationJournal(store);
   return { root, agent, store, start, save, status, journal };
 }
@@ -199,7 +226,7 @@ test('overlap notices and pending groups retain the latest handoff context toget
   const peers = (await f.agent.dispatch({ action: 'peers', laneId: a.laneId, detail: true })).result;
   assert.equal(peers.handoff.summary, 'Current delivery');
   assert.ok(peers.inbox.some(item => item.lanes.includes(b.laneId)));
-  const pending = readPendingStatus(f.store);
+  const pending = readPendingStatus(f.store, undefined, undefined, { detail: true });
   assert.equal(pending.lanes.find(lane => lane.laneId === a.laneId).handoff.summary, 'Current delivery');
   assert.ok(
     pending.overlap.groups.some(group => group.order.includes(a.laneId) && group.order.includes(b.laneId)),
@@ -286,13 +313,16 @@ test('pending groups and scheduler agree on ready/smaller ordering with stable t
   const data = f.store.load(),
     plan = savedOverlapPlan(f.store, data.lanes);
   assert.deepEqual(plan.groups[0].order, [c.laneId, b.laneId, a.laneId]);
-  const pending = readPendingStatus(f.store);
+  const pending = readPendingStatus(f.store, undefined, undefined, { detail: true });
   assert.deepEqual(pending.overlap.groups, plan.groups);
   assert.match(
     formatPendingStatus(pending),
     new RegExp(`land ${c.laneId.slice(0, 8)} → ${b.laneId.slice(0, 8)} → ${a.laneId.slice(0, 8)}`),
   );
-  const views = data.lanes.map(lane => ({ id: lane.id, inputs: [{ laneId: lane.id, head: lane.head }] }));
+  const views = data.lanes.map(lane => ({
+    id: lane.id,
+    inputs: [{ laneId: lane.id, head: lane.head }],
+  }));
   const entries = data.lanes.map(lane => ({ id: lane.id, viewId: lane.id }));
   assert.deepEqual(
     landingOverlap(f.store, { ...data, views }, entries).ordered.map(entry => entry.id),
@@ -316,7 +346,11 @@ for (let repeat = 1; repeat <= 5; repeat++)
         );
       }
       if (index) assert.ok(saved.peers.inbox.length, 'saving peer gets reciprocal alert');
-      evidence('save', { repeat, lane: lane.laneId, inbox: saved.peers.inbox ?? [] });
+      evidence('save', {
+        repeat,
+        lane: lane.laneId,
+        inbox: saved.peers.inbox ?? [],
+      });
     }
     assert.equal(f.journal.overlaps().length, 12);
     for (const lane of lanes) {
@@ -326,13 +360,15 @@ for (let repeat = 1; repeat <= 5; repeat++)
     assert.equal(f.journal.overlaps().length, 12);
     const disjoint = [];
     for (const name of ['DisjointA', 'DisjointB']) {
-      const lane = await f.start(name, { scope: { paths: [`src/${name}.ts`] } });
+      const lane = await f.start(name, {
+        scope: { paths: [`src/${name}.ts`] },
+      });
       mkdirSync(join(lane.path, 'src'), { recursive: true });
       writeFileSync(join(lane.path, `src/${name}.ts`), `export const value = '${name}';\n`);
       await f.save(lane);
       disjoint.push(lane);
     }
-    const before = readPendingStatus(f.store);
+    const before = readPendingStatus(f.store, undefined, undefined, { detail: true });
     evidence('pending', { repeat, overlap: before.overlap });
     const command = {
       action: 'land',
@@ -376,7 +412,7 @@ for (let repeat = 1; repeat <= 5; repeat++)
     assert.equal(entry(disjoint[0]).batchId, entry(disjoint[1]).batchId);
     assert.equal(new Set(lanes.map(lane => entry(lane).batchId)).size, 4);
     assert.deepEqual(
-      readPendingStatus(f.store).overlap.groups,
+      readPendingStatus(f.store, undefined, undefined, { detail: true }).overlap.groups,
       [],
       'accepted Lanes leave pending overlap groups',
     );
@@ -408,7 +444,10 @@ test('genuine paragraph rewrites surface one named conflict after the compatible
     lanes.push(lane);
   }
   const result = (
-    await f.agent.dispatch({ action: 'land', laneIds: lanes.map(lane => lane.laneId).reverse() })
+    await f.agent.dispatch({
+      action: 'land',
+      laneIds: lanes.map(lane => lane.laneId).reverse(),
+    })
   ).result;
   evidence('genuine-conflict', { result });
   assert.deepEqual(result.counts, { accepted: 3, conflict: 1 });
@@ -481,7 +520,11 @@ test('remote scheduler waits for high-overlap parent but speculates disjoint wor
   edit(b, 'later', 'insert', 2);
   writeFileSync(join(d.path, 'disjoint.txt'), 'disjoint\n');
   for (const lane of [a, b, d]) await f.save(lane);
-  await f.agent.dispatch({ action: 'set-policy', operationId: randomUUID(), checks: { runner: 'modal' } });
+  await f.agent.dispatch({
+    action: 'set-policy',
+    operationId: randomUUID(),
+    checks: { runner: 'modal' },
+  });
   const enqueue = async lane => {
     const saved = f.store.select('lanes', lane.laneId),
       check = f.store.load().checks[0];
@@ -538,7 +581,11 @@ test('overlapping finish preserves supervised review policy', async t => {
   edit(a, 'alpha');
   edit(b, 'beta', 'insert', 2);
   await f.save(b);
-  await f.agent.dispatch({ action: 'set-policy', operationId: randomUUID(), preset: 'supervised' });
+  await f.agent.dispatch({
+    action: 'set-policy',
+    operationId: randomUUID(),
+    preset: 'supervised',
+  });
   const before = f.store.load().channelMoves.length;
   const result = (
     await f.agent.dispatch({
@@ -574,7 +621,12 @@ test('cancelling an ordered finish selection prevents acceptance after its check
   const result = (
     await land(
       f.agent.work,
-      { action: 'land', operationId: randomUUID(), laneIds: [a.laneId, b.laneId], channel: 'main' },
+      {
+        action: 'land',
+        operationId: randomUUID(),
+        laneIds: [a.laneId, b.laneId],
+        channel: 'main',
+      },
       undefined,
       () => cancelled,
     )
@@ -693,7 +745,12 @@ test('joint finish follows latest main before preflight when accepted edits were
   await f.save(a);
   await f.save(b);
   const landSaved = async (lane, keepOpen = false) => {
-    const command = { action: 'land', operationId: randomUUID(), laneIds: [lane.laneId], keepOpen };
+    const command = {
+      action: 'land',
+      operationId: randomUUID(),
+      laneIds: [lane.laneId],
+      keepOpen,
+    };
     let result;
     for (let pass = 0; pass < 20; pass++) {
       result = (await f.agent.dispatch(command)).result;

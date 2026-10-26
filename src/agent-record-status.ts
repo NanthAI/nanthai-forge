@@ -16,6 +16,7 @@ import { laneReceipt, viewReceipt, runReceipt } from './agent-receipts.js';
 import { annotateLanes } from './agent-lifecycle.js';
 import { invariant } from './errors.js';
 import { autoSnapshotNotices } from './lane-auto-snapshot.js';
+import { agentStatusSummary } from './agent-status-summary.js';
 export function recordApplicability(store: WorkStore, run: CheckRun, tx = store.readRecords()) {
   if (!tx) return runApplicability(store.load(), run, checkEnvironment());
   const data = tx.data(),
@@ -34,6 +35,7 @@ export function agentRecordStatus(
   command: Extract<AgentAction, { action: 'status' }>,
   original: WorkRecordTransaction,
 ) {
+  if (!command.detail && !command.laneId) return agentStatusSummary(store, command, original);
   const tx = original,
     data = tx.data(),
     environment = checkEnvironment();

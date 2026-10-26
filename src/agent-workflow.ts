@@ -50,6 +50,7 @@ import { setLocalGuidance } from './agent-guidance.js';
 import { landReady } from './agent-land-ready.js';
 import { agentFinish } from './agent-finish.js';
 import { agentRecordStatus, recordApplicability } from './agent-record-status.js';
+import { legacyAgentStatusSummary } from './agent-status-summary.js';
 import { waitForAgentRun } from './agent-run-observer.js';
 import { WorkService } from './work.js';
 import { checkEnvironment } from './work-run.js';
@@ -487,6 +488,7 @@ export class AgentWorkflow {
       const records = store.readRecords();
       if (records) return agentRecordStatus(store, command, records);
       const data = store.load();
+      if (!command.detail && !command.laneId) return legacyAgentStatusSummary(store, command, data);
       const submissions = readLaneSubmissions(store);
       const lane = command.laneId ? agentLaneStatus(store, command, undefined, data) : undefined;
       if (lane && !command.detail) return { revision: data.revision, result: { lane } };

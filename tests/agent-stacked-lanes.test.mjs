@@ -20,24 +20,44 @@ async function fixture(t) {
   trustAgents(root);
   const agent = new AgentWorkflow(root);
   const call = async (action, body = {}) => (await agent.dispatch({ action, ...body })).result;
-  await call('define-check', { name: 'verify', executable: process.execPath, args: ['-e', '0'] });
+  await call('define-check', {
+    name: 'verify',
+    executable: process.execPath,
+    args: ['-e', '0'],
+  });
   const start = (outcome, stackOn) =>
     call('start', { outcome, ...(stackOn ? { stackOn: stackOn.laneId } : {}) });
   const edit = (lane, file, bytes) => writeFileSync(join(lane.path, file), bytes);
   const save = lane => call('checkpoint', { laneId: lane.laneId, message: 'Save work' });
   const finish = (lane, extra = {}) =>
-    call('finish', { laneId: lane.laneId, message: 'Land work', accept: true, ...extra });
+    call('finish', {
+      laneId: lane.laneId,
+      message: 'Land work',
+      accept: true,
+      ...extra,
+    });
   const text = (lane, file) => readFileSync(join(lane.path, file), 'utf8');
   const status = async lane => {
     const result = (await call('status', { laneId: lane.laneId })).lane;
-    const project = await call('status');
+    const project = await call('status', { detail: true });
     assert.deepEqual(
       project.lanes.items.find(item => item.laneId === lane.laneId)?.stackStatus,
       result.stackStatus,
     );
     return result;
   };
-  return { root, agent, store: agent.work.store, call, start, edit, save, finish, text, status };
+  return {
+    root,
+    agent,
+    store: agent.work.store,
+    call,
+    start,
+    edit,
+    save,
+    finish,
+    text,
+    status,
+  };
 }
 
 test('depth-three starts from saved heads, carries parent handoff, and reports moved ancestors', async t => {
@@ -45,9 +65,17 @@ test('depth-three starts from saved heads, carries parent handoff, and reports m
     a = await f.start('First');
   f.edit(a, 'first.txt', 'first\n');
   const saved = await f.save(a);
-  await f.call('handoff', { laneId: a.laneId, summary: 'Parent API is ready', next: ['Use the parent API'] });
+  await f.call('handoff', {
+    laneId: a.laneId,
+    summary: 'Parent API is ready',
+    next: ['Use the parent API'],
+  });
   f.edit(a, 'first.txt', 'unsaved parent draft\n');
-  const request = { operationId: randomUUID(), outcome: 'Second', stackOn: a.laneId };
+  const request = {
+    operationId: randomUUID(),
+    outcome: 'Second',
+    stackOn: a.laneId,
+  };
   const b = await f.call('start', request);
   assert.equal(b.base, saved.head);
   assert.deepEqual(b.after, { intentId: a.intentId });
@@ -58,9 +86,15 @@ test('depth-three starts from saved heads, carries parent handoff, and reports m
   assert.equal(f.text(c, 'second.txt'), 'second\n');
   assert.equal((await f.status(c)).stackStatus.depth, 3);
   assert.match((await f.call('peers', { laneId: c.laneId })).stack.summary, / → .* → /);
-  const brief = localBrief(f.store, { situation: 'continue-lane', laneId: b.laneId });
+  const brief = localBrief(f.store, {
+    situation: 'continue-lane',
+    laneId: b.laneId,
+  });
   assert.match(brief.full, /Parent API is ready/);
-  const handoff = await f.call('handoff', { laneId: b.laneId, summary: 'Child ready' });
+  const handoff = await f.call('handoff', {
+    laneId: b.laneId,
+    summary: 'Child ready',
+  });
   assert.equal(handoff.handoff.parentHandoff.summary, 'Parent API is ready');
   assert.deepEqual(handoff.handoff.parentHandoff.next, ['Use the parent API']);
   assert.equal((await f.call('handoff-read', { laneId: b.laneId })).parentHandoff.laneId, a.laneId);
@@ -258,7 +292,11 @@ test('restack interruption pins the old target despite later parent saves; undo 
   const before = f.store.select('lanes', b.laneId);
   f.edit(a, 'a.txt', 'second\n');
   const second = await f.save(a);
-  const sync = { laneId: b.laneId, operationId: randomUUID(), expectedHead: before.head };
+  const sync = {
+    laneId: b.laneId,
+    operationId: randomUUID(),
+    expectedHead: before.head,
+  };
   const { syncTestHooks } = await import('../dist/agent-sync.js');
   syncTestHooks.afterWorkspace = () => {
     throw new Error('Synthetic reply loss');
@@ -273,8 +311,13 @@ test('restack interruption pins the old target despite later parent saves; undo 
   const resumed = await f.call('sync', sync);
   assert.equal(resumed.target, second.head);
   assert.equal(f.text(b, 'a.txt'), 'second\n');
-  await assert.rejects(f.call('sync', { ...sync, ontoMain: true }), { code: 'WORK_OPERATION_CHANGED' });
-  await f.call('undo-sync', { laneId: b.laneId, syncOperationId: sync.operationId });
+  await assert.rejects(f.call('sync', { ...sync, ontoMain: true }), {
+    code: 'WORK_OPERATION_CHANGED',
+  });
+  await f.call('undo-sync', {
+    laneId: b.laneId,
+    syncOperationId: sync.operationId,
+  });
   const undone = f.store.select('lanes', b.laneId);
   assert.equal(undone.head, before.head);
   assert.equal(undone.base, before.base);
@@ -323,7 +366,11 @@ test('same-Intent stack waits for its exact parent, not unrelated siblings, and 
   f.edit(a, 'parent.txt', 'parent\n');
   await f.save(a);
   await f.call('start', { intentId: a.intentId, outcome: 'Unrelated sibling' });
-  const b = await f.call('start', { intentId: a.intentId, outcome: 'Same Intent child', stackOn: a.laneId });
+  const b = await f.call('start', {
+    intentId: a.intentId,
+    outcome: 'Same Intent child',
+    stackOn: a.laneId,
+  });
   f.edit(b, 'child.txt', 'child\n');
   await f.save(b);
   const { pendingStatus } = await import('../dist/pending-status.js');
@@ -332,7 +379,10 @@ test('same-Intent stack waits for its exact parent, not unrelated siblings, and 
   assert.equal(pending.lanes.find(lane => lane.laneId === b.laneId).status, 'waiting');
   assert.match(formatPendingStatus(pending), /Stack: .* → .* · up-to-date/);
   const sync = await f.call('sync', { laneId: b.laneId });
-  await f.call('undo-sync', { laneId: b.laneId, syncOperationId: sync.operationId });
+  await f.call('undo-sync', {
+    laneId: b.laneId,
+    syncOperationId: sync.operationId,
+  });
   assert.equal(f.store.select('lanes', b.laneId).after, undefined);
   assert.equal((await f.finish(b)).status, 'waiting-for-dependency');
   assert.equal((await f.finish(a)).status, 'accepted');

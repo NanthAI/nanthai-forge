@@ -74,12 +74,20 @@ test('CLI handoff delivers a peer notice created after the last checkpoint exact
   const peer = (await agent.dispatch({ action: 'start', outcome: 'Peer edit' })).result;
   writeFileSync(join(lane.path, 'example.txt'), 'my saved change\n');
   const saved = (
-    await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'Last checkpoint' })
+    await agent.dispatch({
+      action: 'checkpoint',
+      laneId: lane.laneId,
+      message: 'Last checkpoint',
+    })
   ).result;
   assert.equal(saved.peers.inbox, undefined);
   writeFileSync(join(peer.path, 'example.txt'), 'peer saved change\n');
   const reciprocal = (
-    await agent.dispatch({ action: 'checkpoint', laneId: peer.laneId, message: 'Later peer save' })
+    await agent.dispatch({
+      action: 'checkpoint',
+      laneId: peer.laneId,
+      message: 'Later peer save',
+    })
   ).result.peers.inbox;
   assert.equal(reciprocal.length, 1);
   const noticeId = reciprocal[0].noticeId;
@@ -112,7 +120,11 @@ test('replay returns original saved source and evidence after later edits and ha
     request = command(lane);
   const first = (await agent.dispatch(request)).result;
   writeFileSync(join(lane.path, 'example.txt'), 'later saved source\n');
-  await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'Later save' });
+  await agent.dispatch({
+    action: 'checkpoint',
+    laneId: lane.laneId,
+    message: 'Later save',
+  });
   await agent.dispatch(command(lane, { summary: 'New handoff' }));
   const revision = agent.work.store.revision();
   assert.deepEqual((await agent.dispatch(request)).result, first);
@@ -124,8 +136,13 @@ test('replay returns original saved source and evidence after later edits and ha
 });
 test('two concurrent CLI writers on sibling Lanes preserve both notes without source conflicts', async t => {
   const { root, agent, lane } = await fixture(t);
-  const sibling = (await agent.dispatch({ action: 'start', intentId: lane.intentId, outcome: 'Sibling' }))
-    .result;
+  const sibling = (
+    await agent.dispatch({
+      action: 'start',
+      intentId: lane.intentId,
+      outcome: 'Sibling',
+    })
+  ).result;
   const a = command(lane),
     b = command(sibling, { summary: 'Sibling delivery' });
   // check-runtime deliberately sets zero lock patience. A racing writer can
@@ -153,10 +170,22 @@ test('matching recorded checks link automatically; prior heads and unrelated Lan
     })
   ).result;
   const compose = async inputs =>
-    (await agent.dispatch({ action: 'compose', operationId: randomUUID(), intentId: lane.intentId, inputs }))
-      .result;
+    (
+      await agent.dispatch({
+        action: 'compose',
+        operationId: randomUUID(),
+        intentId: lane.intentId,
+        inputs,
+      })
+    ).result;
   const view = await compose([{ laneId: lane.laneId, head: lane.head }]);
-  const run = (await agent.dispatch({ action: 'run', viewId: view.viewId, checkId: check.checkId })).result;
+  const run = (
+    await agent.dispatch({
+      action: 'run',
+      viewId: view.viewId,
+      checkId: check.checkId,
+    })
+  ).result;
   const first = (await agent.dispatch(command(lane, { evidence: [run.operationId, 'invented-check-id'] })))
     .result.handoff;
   assert.equal(first.recordedChecks.length, 1);
@@ -164,11 +193,20 @@ test('matching recorded checks link automatically; prior heads and unrelated Lan
   assert.equal(first.recordedChecks[0].operationId, run.operationId);
   assert.equal(first.recordedChecks[0].status, 'passed');
   assert.equal(first.tests[0].source, 'self-reported');
-  const sibling = (await agent.dispatch({ action: 'start', intentId: lane.intentId, outcome: 'Sibling' }))
-    .result;
+  const sibling = (
+    await agent.dispatch({
+      action: 'start',
+      intentId: lane.intentId,
+      outcome: 'Sibling',
+    })
+  ).result;
   assert.deepEqual((await agent.dispatch(command(sibling))).result.handoff.recordedChecks, []);
   writeFileSync(join(lane.path, 'example.txt'), 'new exact source\n');
-  await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'New source' });
+  await agent.dispatch({
+    action: 'checkpoint',
+    laneId: lane.laneId,
+    message: 'New source',
+  });
   const next = (await agent.dispatch(command(lane))).result.handoff;
   assert.notEqual(next.head, first.head);
   assert.deepEqual(next.recordedChecks, []);
@@ -185,7 +223,10 @@ test('portable export and restore preserve delivery payload, replay, and briefin
   const restored = new AgentWorkflow(target);
   assert.deepEqual(await read(restored, lane), first);
   assert.deepEqual((await restored.dispatch(request)).result.handoff, first);
-  const brief = localBrief(restored.work.store, { situation: 'continue-lane', laneId: lane.laneId });
+  const brief = localBrief(restored.work.store, {
+    situation: 'continue-lane',
+    laneId: lane.laneId,
+  });
   assert.deepEqual(brief.context.handoff, first);
 });
 test('status, peers, diff, pending status and next-agent brief show latest delivery', async t => {
@@ -199,12 +240,15 @@ test('status, peers, diff, pending status and next-agent brief show latest deliv
   assert.ok(Buffer.byteLength(JSON.stringify(peers)) <= 1500);
   const diff = (await agent.dispatch({ action: 'diff', laneId: lane.laneId })).result;
   assert.equal(diff.handoff.operationId, last.operationId);
-  const pending = readPendingStatus(agent.work.store);
+  const pending = readPendingStatus(agent.work.store, undefined, undefined, { detail: true });
   assert.equal(pending.lanes[0].handoff.operationId, last.operationId);
   assert.match(formatPendingStatus(pending), /Current delivery.*self-reported.*Forge-recorded/);
   const context = new CoordinationJournal(agent.work.store).context(lane.laneId);
   assert.deepEqual(context.handoffs, [last]);
-  const brief = localBrief(agent.work.store, { situation: 'take-handoff', messageId: last.operationId });
+  const brief = localBrief(agent.work.store, {
+    situation: 'take-handoff',
+    messageId: last.operationId,
+  });
   assert.deepEqual(brief.context.handoff, last);
   assert.match(brief.full, /unrun/);
   assert.match(brief.full, /Lead reviews and lands/);
@@ -216,10 +260,16 @@ test('missing Lanes fail current reads and mutations; invalid counts never persi
   await assert.rejects(agent.dispatch({ action: 'handoff-read', laneId: randomUUID() }), {
     code: 'NOT_FOUND',
   });
-  await assert.rejects(agent.dispatch(command({ laneId: randomUUID() })), { code: 'NOT_FOUND' });
+  await assert.rejects(agent.dispatch(command({ laneId: randomUUID() })), {
+    code: 'NOT_FOUND',
+  });
   const revision = agent.work.store.revision();
   await assert.rejects(
-    agent.dispatch(command(lane, { tests: [{ command: 'invalid', passed: -1, failed: 0, skipped: 0 }] })),
+    agent.dispatch(
+      command(lane, {
+        tests: [{ command: 'invalid', passed: -1, failed: 0, skipped: 0 }],
+      }),
+    ),
     { code: 'BAD_ARGUMENT' },
   );
   assert.equal(agent.work.store.revision(), revision);

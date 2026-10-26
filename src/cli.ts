@@ -19,16 +19,10 @@ import { restoreNativeWork } from './native-backup.js';
 import { initNative } from './native-work.js';
 import { restoreWork } from './work-backup.js';
 import { WorkService } from './work.js';
-import { indexRepository } from './index.js';
-import { RepositoryQuery } from './query.js';
-import { serveRepository } from './http.js';
-import { startMcp } from './mcp.js';
-import { startAgentMcp } from './agent-mcp.js';
 import { doctor, mcpConfig } from './setup.js';
 import { pluginConfig } from './plugin-config.js';
 import { localChecksCli } from './local-checks-cli.js';
 import { ForgeError, invariant } from './errors.js';
-import { maintenanceCli } from './maintenance-cli.js';
 import { hostedWorkCli } from './hosted-work-cli.js';
 import { coordinationCli } from './coordination-cli.js';
 import { startCoordinationMcp } from './coordination-mcp.js';
@@ -37,7 +31,6 @@ import { resolve } from 'node:path';
 import { docsCli } from './docs-cli.js';
 import { describeFailure, recordFailure } from './system-errors.js';
 import { landCli } from './land-cli.js';
-import { maintainerReleaseCli } from './maintainer-release-cli.js';
 import { agentCli } from './agent-cli.js';
 import { readFileSync } from 'node:fs';
 import { nativeOwner } from './native-source.js';
@@ -91,7 +84,7 @@ Usage:
   nforge local-checks ROOT DEPLOYMENT PROJECT_ID [--name NAME]
   nforge doctor <git-worktree-root>
   nforge index <git-worktree-root>
-  nforge status ROOT [--pending] [--json]
+  nforge status ROOT [--pending] [--detail] [--offset N] [--limit N] [--json]
   nforge status <git-worktree-root>   # existing graph JSON; --pending selects owner summary
   nforge context <git-worktree-root> [search] [--limit N]
   nforge inspect <git-worktree-root> <name-or-id> [--limit N]
@@ -157,7 +150,7 @@ async function main(args: string[]): Promise<unknown> {
     );
     return agentCli([args[1], args[0], ...(args[2] ? [args[2]] : [])]);
   }
-  if (args[0] === 'maintenance') return maintenanceCli(args.slice(1));
+  if (args[0] === 'maintenance') return (await import('./maintenance-cli.js')).maintenanceCli(args.slice(1));
   if (args[0] === 'hosted-work') return hostedWorkCli(args.slice(1));
   if (args[0] === 'coordination') return coordinationCli(args.slice(1));
   if (args[0] === 'mcp-coordination') {
@@ -172,7 +165,8 @@ async function main(args: string[]): Promise<unknown> {
   }
   if (args[0] === 'exchange') return exchangeCli(args.slice(1));
   if (args[0] === 'land') return landCli(args.slice(1));
-  if (args[0] === 'release') return maintainerReleaseCli(args.slice(1));
+  if (args[0] === 'release')
+    return (await import('./maintainer-release-cli.js')).maintainerReleaseCli(args.slice(1));
   if (args[0] === 'agent') return agentCli(args.slice(1));
   if (args[0] === 'local-checks') return localChecksCli(args.slice(1));
   if (args[0] === 'plugin-config') {
@@ -189,7 +183,7 @@ async function main(args: string[]): Promise<unknown> {
   }
   if (args[0] === 'mcp-agent') {
     invariant(args.length === 2 && args[1], 'BAD_ARGUMENT', 'Use mcp-agent <forge-convex-deployment-url>.');
-    await startAgentMcp(args[1], process.env.FORGE_AGENT_TOKEN);
+    await (await import('./agent-mcp.js')).startAgentMcp(args[1], process.env.FORGE_AGENT_TOKEN);
     return undefined;
   }
   if (args[0] === 'import-native-git' || args[0] === 'export-native-git') {
@@ -266,7 +260,9 @@ async function main(args: string[]): Promise<unknown> {
       'BAD_ARGUMENT',
       'Use serve <root> [--port N].',
     );
-    const server = await serveRepository(args[1], args[3] === undefined ? 4173 : Number(args[3]));
+    const server = await (
+      await import('./http.js')
+    ).serveRepository(args[1], args[3] === undefined ? 4173 : Number(args[3]));
     process.stdout.write(
       `N:Forge local server: ${server.url}\nGit (/api/git/) and Work (/api/work) accept Authorization: Bearer <token>. Keep it private. Stop with Ctrl+C.\n`,
     );
@@ -289,7 +285,9 @@ async function main(args: string[]): Promise<unknown> {
       'BAD_ARGUMENT',
       'Use mcp <root> [--work | --agent [--url URL --project-id ID]].',
     );
-    await startMcp(
+    await (
+      await import('./mcp.js')
+    ).startMcp(
       args[1],
       args[2] === '--work' || args[2] === '--agent',
       args[2] === '--agent',
@@ -298,12 +296,21 @@ async function main(args: string[]): Promise<unknown> {
     return undefined;
   }
   if (args[0] === 'status' && args[1] && (args.includes('--pending') || !!nativeOwner(resolve(args[1])))) {
-    invariant(
-      args.slice(2).every(arg => ['--pending', '--json'].includes(arg)),
-      'BAD_ARGUMENT',
-      'Use status ROOT [--pending] [--json].',
-    );
-    const status = readPendingStatus(new WorkStore(args[1]));
+    const options: { detail?: boolean; offset?: number; limit?: number } = {};
+    for (let index = 2; index < args.length; index++) {
+      const arg = args[index];
+      if (arg === '--detail') options.detail = true;
+      else if (arg === '--offset' || arg === '--limit') {
+        invariant(/^\d+$/.test(args[index + 1] ?? ''), 'BAD_ARGUMENT', `${arg} requires an integer.`);
+        options[arg === '--offset' ? 'offset' : 'limit'] = Number(args[++index]);
+      } else
+        invariant(
+          ['--pending', '--json'].includes(arg!),
+          'BAD_ARGUMENT',
+          'Use status ROOT [--pending] [--detail] [--offset N] [--limit N] [--json].',
+        );
+    }
+    const status = readPendingStatus(new WorkStore(args[1]), undefined, undefined, options);
     if (args.includes('--json')) return status;
     process.stdout.write(formatPendingStatus(status) + '\n');
     return undefined;
@@ -348,6 +355,7 @@ async function main(args: string[]): Promise<unknown> {
   if (command === 'mcp-config') return mcpConfig(root);
   if (command === 'doctor') return doctor(root);
   if (command === 'index') {
+    const { indexRepository } = await import('./index.js');
     const { pack, elapsedMs, work } = indexRepository(root);
     return {
       artifact: '.forge/index.json',
@@ -366,6 +374,7 @@ async function main(args: string[]): Promise<unknown> {
       excluded: pack.source.excluded,
     };
   }
+  const { RepositoryQuery } = await import('./query.js');
   const query = new RepositoryQuery(root);
   switch (command) {
     case 'status':

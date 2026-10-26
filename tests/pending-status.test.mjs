@@ -278,6 +278,14 @@ test('local read and MCP share pinned JSON without running recovery, exports or 
         registerTool(name, options, callback) {
           if (name === 'forge_work_overview') {
             assert.ok(options.inputSchema.command.safeParse({ action: 'pending-status' }).success);
+            assert.ok(
+              options.inputSchema.command.safeParse({
+                action: 'pending-status',
+                detail: true,
+                offset: 0,
+                limit: 2,
+              }).success,
+            );
             handler = callback;
           }
         },
@@ -287,13 +295,18 @@ test('local read and MCP share pinned JSON without running recovery, exports or 
     const mcp = JSON.parse((await handler({ command: { action: 'pending-status' } })).content[0].text);
     assert.deepEqual(mcp.main, readPendingStatus(store).main);
     assert.equal(mcp.hosted.recovery, null);
+    assert.ok(mcp.sections.skipped.includes('overlap'));
+    const detailed = JSON.parse(
+      (await handler({ command: { action: 'pending-status', detail: true } })).content[0].text,
+    );
+    assert.deepEqual(detailed.sections.skipped, []);
     assert.deepEqual(readFileSync(join(store.directory, 'work.json')), before);
     assert.deepEqual(readdirSync(store.directory).sort(), files);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
-test('native CLI needs no graph index; full JSON and compact text preserve existing status interfaces', t => {
+test('native CLI needs no graph index; paged JSON and compact text preserve existing status interfaces', t => {
   const store = fixture(t);
   const run = (...args) =>
     spawnSync(process.execPath, [resolve('dist/cli.js'), 'status', store.root, ...args], {
@@ -307,6 +320,9 @@ test('native CLI needs no graph index; full JSON and compact text preserve exist
   assert.equal(json.status, 0, json.stderr);
   assert.equal(JSON.parse(json.stdout).snapshot.workRevision, store.revision());
   assert.equal(run('--pending', '--json').status, 0);
+  assert.equal(run('--pending', '--detail', '--json').status, 0);
+  assert.equal(run('--pending', '--offset', '1', '--limit', '2', '--json').status, 0);
+  assert.equal(run('--pending', '--limit', '0').status, 1);
   assert.equal(run('--not-an-option').status, 1);
 });
 test('reader observes new log tails but leaves recorded active runs unchanged', async t => {
@@ -339,7 +355,7 @@ test('reader observes new log tails but leaves recorded active runs unchanged', 
   writeFileSync(path, 'synthetic later output\n');
   utimesSync(path, new Date(now), new Date(now));
   const before = readFileSync(join(store.directory, 'work.json'));
-  const status = readPendingStatus(store, () => capture, now);
+  const status = readPendingStatus(store, () => capture, now, { detail: true });
   assert.equal(status.hosted.evidence, 'pending');
   assert.equal(status.checks[0].status, 'running');
   assert.deepEqual(readFileSync(join(store.directory, 'work.json')), before);

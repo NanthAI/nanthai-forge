@@ -90,7 +90,7 @@ test('overlap delegation keeps the original finish identities through pending, c
       result.submissions.find(after => after.laneId === item.laneId).submissionId,
       item.submissionId,
     );
-  const status = readPendingStatus(store);
+  const status = readPendingStatus(store, undefined, undefined, { detail: true });
   for (const lane of [a, b]) {
     const submissions = readLaneSubmissions(store, lane.laneId);
     assert.equal(submissions.length, 1);

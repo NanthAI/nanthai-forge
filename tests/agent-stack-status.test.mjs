@@ -128,8 +128,8 @@ test('project and Intent status annotate stacked receipts through records and le
   const expected = (await call({ action: 'status', laneId: child.laneId })).lane.stackStatus;
   const check = async () => {
     for (const command of [
-      { action: 'status' },
-      { action: 'status', intentId: child.intentId },
+      { action: 'status', detail: true },
+      { action: 'status', intentId: child.intentId, detail: true },
       { action: 'records', collection: 'lanes' },
       { action: 'records', collection: 'lanes', state: 'active' },
     ]) {

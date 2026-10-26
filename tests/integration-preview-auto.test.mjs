@@ -200,7 +200,7 @@ test('checkpoint replies before background check and both Lanes receive notices;
     assert.match(peers.integration, /^clash/);
     assert.ok(peers.notices.some(notice => notice.text.includes('synthetic pair clash')));
   }
-  const status = readPendingStatus(f.store);
+  const status = readPendingStatus(f.store, undefined, undefined, { detail: true });
   assert.match(formatPendingStatus(status), /Main: .*Integration preview: clash/);
   assert.ok(formatPendingStatus(status).split('\n').length <= 15);
   const child = spawn(process.execPath, [resolve('dist/integration-preview-worker.js'), f.root], {

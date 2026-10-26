@@ -66,7 +66,7 @@ for (const native of [true, false])
     assert.equal(accepted.status, 'accepted');
     assert.deepEqual(accepted.acceptance.completed.lanes, [a.lane.laneId]);
     assert.equal(accepted.acceptance.completed.intent, true);
-    const status = (await dispatch(agent, 'status', { limit: 10 })).result;
+    const status = (await dispatch(agent, 'status', { limit: 10, detail: true })).result;
     const receipt = id => status.lanes.items.find(item => item.laneId === id);
     assert.equal(receipt(a.lane.laneId).state, 'completed');
     assert.equal(receipt(a.lane.laneId).merged, true);

@@ -129,6 +129,10 @@ test('agent MCP profile awaits graph readiness, preserves selectors and legacy t
     'forge_wait',
   ])
     assert.ok(tools.some(tool => tool.name === name));
+  const overviewTool = tools.find(tool => tool.name === 'forge_work_overview');
+  assert.match(overviewTool.description, /metrics \{from\?,to\?\}/);
+  assert.match(overviewTool.description, /one pinned revision without the writer lock/);
+  assert.match(overviewTool.description, /offset\/limit.*detail:true/);
   const call = async (name, arguments_) => {
     const result = await callTool(client, { name, arguments: arguments_ });
     return { isError: result.isError, body: JSON.parse(result.content[0].text) };
