@@ -67,6 +67,13 @@ function ownerWorkers(roots, _workerDirectory, { processAlive }, WorkStore, stop
         workers.set(pid, { pid, startTime, worker, lease: true, runId });
       }
     };
+    // A submitting CLI may have exited before its finite weekly child starts.
+    // The reservation is removed only after all snapshot writes have finished.
+    const metrics = join(directory, 'metrics');
+    if (existsSync(metrics))
+      for (const name of readdirSync(metrics))
+        if (/^\.weekly-.*\.pending$/.test(name))
+          workers.set(join(metrics, name), { worker: 'self-metrics-weekly-worker' });
     queue(join(directory, 'presence-owner'), 'presence-worker');
     queue(join(directory, 'integration-preview-drain'), 'integration-preview-worker');
     queue(join(directory, 'post-accept-main-queue'), 'post-accept-main');

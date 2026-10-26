@@ -84,6 +84,62 @@ Every slice reports against these metrics at landing: the values before and afte
 
 Bet metrics also need one tag: **no-owner incidents**, errors in metrics 2 and 3 whose cause is a run, worker or batch with no live owner of record.
 
+### Reading self-metrics
+
+`nforge metrics ROOT --from DATE --to DATE --json` reports metrics 5.1–5.8,
+red-main minutes and disk observations, per UTC day and for the whole window.
+Windows are half-open: `[from,to)`. The default is the last seven days ending
+now. Each metric includes its source-record count, `partial` flag and named
+coverage gaps; an unknown value is `null`. Context records before the window
+remain available for classification and red-main intervals. Dollar figures
+retain the recorded monthly billing allocation; daily rows are not new invoices.
+JSON is the default for agents and redirected output; a terminal gets a short
+text table (`--text` also selects it explicitly).
+
+`nforge agent ROOT metrics '{"from":"2026-10-14","to":"2026-10-25"}'`
+and MCP `forge_work_overview` action `metrics` expose the same JSON. Owner status
+includes a compact last-seven-day summary. Status reuses its selected Work rows,
+reads at most 256 KiB of receipt history, and never reads source trees or scans
+disk. If that receipt tail omits older records, its summary names the gap; the
+full metrics command reads the retained records. Status reuse keys are omitted
+because they are not a headline metric.
+
+`nforge metrics ROOT --from AFTER --to END --compare BEFORE..AFTER --report FILE.md`
+writes all metrics with before/after values, record counts and coverage gaps.
+Without `--compare`, the report has one value column. Report export writes only
+the named output file; metric reads never wake an owner service or write receipts.
+
+On the first existing committed Work write in a UTC week, Forge queues a detached
+worker to write the previous completed ISO week's report to
+`.forge/work/metrics/weekly-YYYY-Www.json`. Existing snapshots are retained on
+retry. The write does not wait for record collection or hold its writer lock for
+that work. An exclusive `.weekly-YYYY-Www.json.pending` marker admits one worker;
+a failed attempt records its timestamp in `.weekly-YYYY-Www.json.failed`. The
+next write after one hour can retry. There are no timers or idle reads. The file excludes the live revision
+and later observations so its JSON is reproducible from that week's records.
+Remove that generated file to undo the automatic snapshot; a subsequent write
+can regenerate it. Completed snapshots describe retained evidence at collection
+time; newly supplied historical evidence can change a later recomputation.
+
+### Published baseline
+
+The baseline uses UTC `[2026-10-14,2026-10-25)` (through October 24), computed
+read-only from the dogfood owner's Forge records at Work revision 25741. No
+logs, prompts, friction prose or external bills were inferred. All nine rows
+are partial because their historical evidence has the named gaps below.
+
+| Metric | Value | Source records | Coverage |
+| --- | --- | --- | --- |
+| 5.1 Landings by path | 345 (118 first-try, 16 retry, 42 fixer, 169 unknown); reverts unknown, compensating unknown | 345 | partial: Submission history or saved-head/failure ordering is unavailable for unclassified landings. Records do not uniformly distinguish ordinary, revert and compensating main moves; the denominator includes unclassified accepting main moves. |
+| 5.2 Lifecycle errors per 100 finishes | unknown / unknown finishes; rates unknown | 0 | partial: Caller-visible lifecycle receipts and operation IDs were not recorded for the whole period. Argument-validation and incompatible-store refusals have no local lifecycle receipt. |
+| 5.3 Dropped landings | 149 | 455 | partial: Terminal-outcome delivery and timestamped batch progress were not recorded for the whole period; dropped rows are candidates where delivery is unknown. |
+| 5.4 Overlap delivery and acknowledgement | unknown/unknown delivered; acknowledgement unknown; median unknown s | 0 | partial: Overlapping-save collection is partial; historical saves and first-write events were not uniformly recorded. Acknowledgement and routed-around records do not cover the whole period. |
+| 5.5 Interventions per landing | unknown (unknown interventions) | 0 | partial: Requester-attributed owner mutations (including cancel, retry, service restart and queue nudge) were not recorded for the whole period. Manual owner-service restarts outside Forge have no requester record. |
+| 5.6 Check minutes per landing and reuse | 10.173 runner, 43.98 wall; reuse unknown; total 3509.583 runner / 15173.145 wall min | 1080 | partial: Check request/adoption receipts were not recorded for the whole period; reuse rate is unknown. 896 runs lack shard execution durations (local billed-zero cost is not execution time). |
+| 5.7 Authority lag and contradictions | owner-hosted 0 revisions; p50/p95 unknown/unknown s, unknown/unknown revisions; hosted-cache 0 revisions; p50/p95 unknown/unknown s, unknown/unknown revisions; contradictions unknown min | 0 | partial: Revision observations are incomplete or pending; missing catch-up time is unknown, never zero. Revision streams are comparable only within an authority epoch. Cache authority timestamps observed on writes measure a lower bound from observation, not the unobserved hosted commit time. Surface observations do not cover all CLI, MCP and hosted pages for the period. Contradiction minutes are a measured lower bound. |
+| 5.8 Dollars per landing | 2026-10: $unknown billed / $unknown list; estimator error unknown | 0 | partial: Only entered project bills are included. Missing provider/month bills, list prices and estimates stay partial. Run-linked bills join exact saved inputs; unjoined runs and shared services are allocated evenly over the month's ordinary landings. |
+| R Red-main minutes | forge: 805.193; github-verify: unknown | 857 | partial: Forge full-suite results and public GitHub Verify are reported separately. Missing exact-State or mirror-to-State mappings remain partial; no result is inferred from a Candidate status. Culprit descendants count from their accepted main records. |
+
 ### P5-M1. Metric recorder
 
 - **Size:** M. **Depends on:** none. **Stage:** 5.1.

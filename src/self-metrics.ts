@@ -18,10 +18,15 @@ const coverage = (
   field: 'lifecycle' | 'mutations' | 'deliveries' | 'checkRequests',
   from: string,
 ) => !records.coverage?.[field] || instant(records.coverage[field]!) > instant(from);
-function pathFor(records: MetricRecords, inputs: MetricInput[], at: string) {
+function pathFor(
+  inputs: MetricInput[],
+  at: string,
+  histories: Map<string, MetricRecords['submissions']>,
+  badRuns: Map<string, MetricRecords['runs']>,
+) {
   const paths = inputs.map(input => {
-    const history = records.submissions
-      .filter(s => instant(s.at) <= instant(at) && s.inputs.some(i => i.intentId === input.intentId))
+    const history = (histories.get(input.intentId) ?? [])
+      .filter(s => instant(s.at) <= instant(at))
       .sort((a, b) => instant(a.at) - instant(b.at));
     if (!history.length) return 'unknown';
     const same = (s: (typeof history)[number]) =>
@@ -41,7 +46,7 @@ function pathFor(records: MetricRecords, inputs: MetricInput[], at: string) {
       )
     )
       return 'after-retry';
-    const priorBadRun = records.runs.some(
+    const priorBadRun = (badRuns.get(`${input.intentId}:${input.head}`) ?? []).some(
       run =>
         run.endedAt &&
         instant(run.endedAt) < instant(at) &&
@@ -60,7 +65,11 @@ function pathFor(records: MetricRecords, inputs: MetricInput[], at: string) {
         : 'unknown';
 }
 /** Pure calculation. Period is [from,to); days are UTC; asOf fixes the 60-minute stall test. */
-export function calculateSelfMetrics(records: MetricRecords, period: MetricPeriod) {
+export function calculateSelfMetrics(
+  records: MetricRecords,
+  period: MetricPeriod,
+  options: { headline?: boolean } = {},
+) {
   const asOf = period.asOf ?? period.to;
   const incompleteReceiptRecords = records.incompleteReceiptRecords ?? 0;
   const receiptGaps = incompleteReceiptRecords
@@ -78,10 +87,24 @@ export function calculateSelfMetrics(records: MetricRecords, period: MetricPerio
     move => move.id,
   );
   const landings = moves.filter(move => move.kind === 'landing');
+  const histories = new Map<string, MetricRecords['submissions']>(),
+    badRuns = new Map<string, MetricRecords['runs']>();
+  for (const submission of records.submissions)
+    for (const intentId of new Set(submission.inputs.map(input => input.intentId))) {
+      const history = histories.get(intentId) ?? [];
+      history.push(submission);
+      histories.set(intentId, history);
+    }
+  for (const run of records.runs.filter(run => ['failed', 'interrupted'].includes(run.status)))
+    for (const key of new Set(run.inputs.map(input => `${input.intentId}:${input.head}`))) {
+      const history = badRuns.get(key) ?? [];
+      history.push(run);
+      badRuns.set(key, history);
+    }
   const rows = landings.map(move => ({
     id: move.id,
     day: new Date(move.at).toISOString().slice(0, 10),
-    path: pathFor(records, move.inputs, move.at),
+    path: pathFor(move.inputs, move.at, histories, badRuns),
   }));
   const days = [...new Set(rows.map(row => row.day))].sort().map(day => ({
     day,
@@ -120,7 +143,7 @@ export function calculateSelfMetrics(records: MetricRecords, period: MetricPerio
   const delivered = new Map<string, string>();
   for (const receipt of records.receipts.filter(r => instant(r.at) <= instant(asOf)))
     for (const item of receipt.deliveries ?? []) delivered.set(item.entryId, item.state);
-  const dropped = records.submissions
+  const dropped = (options.headline ? [] : records.submissions)
     .filter(s => inPeriod(s.at, period) && instant(s.at) <= instant(asOf))
     .filter(s => {
       if (s.delivered || delivered.has(s.entryId)) return false;
@@ -277,8 +300,18 @@ export function calculateSelfMetrics(records: MetricRecords, period: MetricPerio
       dropped: deliveryGaps.length && !dropped.length ? null : dropped.length,
       rows: dropped,
     },
-    metric4: joined(calculateOverlapMetrics(records, { ...period, asOf })),
-    metric7: joined(calculateAuthorityMetrics(records, { ...period, asOf })),
+    metric4: joined(
+      calculateOverlapMetrics(options.headline ? { ...records, observations: [], receipts: [] } : records, {
+        ...period,
+        asOf,
+      }),
+    ),
+    metric7: joined(
+      calculateAuthorityMetrics(options.headline ? { ...records, observations: [], receipts: [] } : records, {
+        ...period,
+        asOf,
+      }),
+    ),
     metric8: joined(calculateBillingMetrics(records, { ...period, asOf })),
     redMain: joined(calculateRedMainMetrics(records, { ...period, asOf })),
     disk: joined(calculateStorageMetrics(records, { ...period, asOf })),

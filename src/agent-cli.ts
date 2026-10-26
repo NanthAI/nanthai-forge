@@ -55,7 +55,7 @@ composes and submits durable agent landing. Pending is not accepted.
 
 Actions: integrate, wait, handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, save, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
-         making-of, report, friction, friction-triage, improve, decide, decisions.
+         making-of, report, metrics, friction, friction-triage, improve, decide, decisions.
 start stackOn:LANE_ID bases a native Lane on that parent’s latest saved head and waits for its landing.
 sync restacks onto the latest parent; after landing it targets main. ontoMain:true detaches explicitly.
 status/peers/pending show the chain, parent movement and abandonment.
@@ -95,6 +95,7 @@ const examples: Record<string, unknown> = {
   },
   'friction-triage': { frictionIds: ['FRICTION_ID'], status: 'planned', reason: 'Next check-runner slice' },
   improve: {},
+  metrics: { from: '2026-10-14', to: '2026-10-26' },
   decide: {
     target: { kind: 'intent', intentId: 'INTENT_ID' },
     decidedBy: 'Owner',

@@ -3,7 +3,7 @@ import type { MetricObservation } from './self-metrics-observations.js';
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { readWorkFile, recordManifest, readRecordPage } from './work-records.js';
-import { NativeSource } from './native-source.js';
+import { NativeSource, nativeOwner } from './native-source.js';
 import { digest } from './hash.js';
 import { selfMetricReuseKey } from './self-metrics-reuse-key.js';
 import { readSelfMetricJournal } from './self-metrics-journal.js';
@@ -16,14 +16,22 @@ import {
 } from './self-metrics-types.js';
 
 /** Deliberately does not instantiate WorkStore: its constructor wakes owner workers. */
-export function nativeSelfMetricsReader(owner: string): SelfMetricsReader {
+export function nativeSelfMetricsReader(
+  owner: string,
+  options: {
+    data?: Partial<WorkData>;
+    pointer?: Buffer | null;
+    fast?: boolean;
+    journal?: ReturnType<typeof readSelfMetricJournal>;
+  } = {},
+): SelfMetricsReader {
   return {
     read() {
-      owner = realpathSync(owner);
+      owner = nativeOwner(realpathSync(owner)) ?? realpathSync(owner);
       const directory = join(owner, '.forge', 'work');
-      const bytes = readWorkFile(directory);
-      if (!bytes) throw new Error('Owner Work records are unavailable.');
-      const raw = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>;
+      const bytes = options.data ? null : (options.pointer ?? readWorkFile(directory));
+      if (!bytes && !options.data) throw new Error('Owner Work records are unavailable.');
+      const raw = (options.data ?? JSON.parse(bytes!.toString('utf8'))) as Record<string, unknown>;
       const manifest = recordManifest(raw);
       const read = <K extends keyof WorkData>(name: K): WorkData[K] => {
         if (!manifest) return (raw[name] ?? []) as WorkData[K];
@@ -55,6 +63,7 @@ export function nativeSelfMetricsReader(owner: string): SelfMetricsReader {
       const source = new NativeSource(owner);
       const keys = new Map<string, { tree: string; lockfile?: string | undefined } | undefined>();
       const reuseKey = (run: CheckRun) => {
+        if (options.fast) return undefined;
         if (!keys.has(run.head)) {
           try {
             const files = source.state(run.head).files;
@@ -83,7 +92,7 @@ export function nativeSelfMetricsReader(owner: string): SelfMetricsReader {
             : undefined,
         });
       };
-      const { receipts, incompleteTrailingRecords } = readSelfMetricJournal(directory);
+      const { receipts, incompleteTrailingRecords } = options.journal ?? readSelfMetricJournal(directory);
       const supplemental: MetricObservation[] = receipts.flatMap(r =>
         r.kind === 'mutation' && r.revision !== undefined
           ? [
@@ -158,7 +167,7 @@ export function nativeSelfMetricsReader(owner: string): SelfMetricsReader {
             head: move.head,
             ancestorHeads: culpritHeads.filter(head => {
               try {
-                return source.contains(move.head, head);
+                return !options.fast && source.contains(move.head, head);
               } catch {
                 return false;
               }

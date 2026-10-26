@@ -1,3 +1,4 @@
+import { recordStatusMetrics } from './self-metrics-status-records.js';
 import { readLaneSubmissions } from './landing-submission-read.js';
 import { agentLaneStatus } from './agent-lane-status.js';
 import { agentCostSummary } from './agent-cost-summary.js';
@@ -44,7 +45,7 @@ export function agentRecordStatus(
     'Intent not found.',
   );
   const positions = (collection: WorkCollection) =>
-    Array.from({ length: tx.manifest.collections[collection]!.count }, (_, index) => index);
+    Array.from({ length: tx.manifest.collections[collection]?.count ?? 0 }, (_, index) => index);
   const selected = (collection: 'intents' | 'lanes' | 'views') =>
     command.intentId
       ? tx.positions(collection, command.intentId, collection === 'intents' ? 'id' : 'intentId')
@@ -88,6 +89,7 @@ export function agentRecordStatus(
     result: {
       ...(lane ? { lane } : {}),
       ...(unsavedEdits.length ? { unsavedEdits } : {}),
+      metrics: recordStatusMetrics(store.root, tx),
       ...agentCostSummary(store.root, tx),
       autonomyPolicy: readPolicy(store),
       checkRunner: { runner: 'local', ...readPolicy(store).checks },

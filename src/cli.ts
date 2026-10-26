@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { metricsCli } from './metrics-cli.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { improveCli } from './improve-cli.js';
 import { noticeViewAlias } from './candidate-names.js';
@@ -50,6 +51,7 @@ Browse packaged documentation: nforge docs
 
 Usage:
   nforge worker DEPLOYMENT_URL PROJECT_ID MACHINE_UUID
+  nforge metrics ROOT [--from DATE] [--to DATE] [--json] [--report FILE.md] [--compare FROM..TO]
   nforge improve ROOT [--json]
   nforge release ROOT --command-file FILE | --resume UUID | --status UUID
   nforge land ROOT LANE… [--message MESSAGE] [--operation-id UUID] [--wait]
@@ -125,6 +127,7 @@ async function main(args: string[]): Promise<unknown> {
     return undefined;
   }
   if (args[0] === 'worker') return (await import('./worker-cli.js')).workerCli(args.slice(1));
+  if (args[0] === 'metrics') return metricsCli(args.slice(1));
   if (args[0] === 'improve') return improveCli(args.slice(1));
   if (args[0] === 'docs') return docsCli(args.slice(1));
   if (args[0] === '--version') {

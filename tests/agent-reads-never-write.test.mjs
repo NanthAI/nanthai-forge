@@ -1,15 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  mkdtempSync,
-  writeFileSync,
-  rmSync,
-  readdirSync,
-  lstatSync,
-  readFileSync,
-  readlinkSync,
-} from 'node:fs';
+import { mkdtempSync, writeFileSync, readdirSync, lstatSync, readFileSync, readlinkSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -19,6 +11,7 @@ import { READ_ONLY_ACTIONS } from '../dist/agent-read-actions.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 import { initNative } from '../dist/native-work.js';
 import { PRESENCE } from '../dist/presence.js';
+import { cleanupOwner } from './owner-cleanup.mjs';
 
 /** Paths a read may change, each with its reason. Everything else under .forge
  * (work.json, records, objects, receipts, presence in hosted-binding.json, Lane
@@ -53,13 +46,13 @@ function snapshot(root) {
   return files;
 }
 /** Background workers started by the fixture's own writes (check controllers,
- * integration preview, presence) hold transient queue tickets. Wait until the
+ * integration preview, weekly metrics, presence) hold transient queue tickets. Wait until the
  * owner is quiet so every byte measured around a read belongs to that read. */
 async function settled(root) {
   const deadline = performance.now() + 30_000;
   for (let previous; ; await delay(50)) {
     const current = snapshot(root),
-      queued = [...current.keys()].some(path => /\/ticket\.json$/.test(path));
+      queued = [...current.keys()].some(path => /\/ticket\.json$|\/\.weekly-.*\.pending$/.test(path));
     if (!queued && previous && changedPaths(previous, current).length === 0) return current;
     assert.ok(performance.now() < deadline, 'owner background work settled');
     previous = current;
@@ -78,7 +71,7 @@ function changed(before, after, action) {
 
 async function fixture(t, mcp) {
   const root = mkdtempSync(join(tmpdir(), 'forge-reads-never-write-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => cleanupOwner(root));
   writeFileSync(join(root, 'a.txt'), 'one\ntwo\nthree\n');
   writeFileSync(join(root, 'b.txt'), 'b\n');
   initNative(root);
@@ -130,6 +123,7 @@ const reads = f => [
   ],
   ['handoff-read', { laneId: f.first.laneId }],
   ['improve', {}],
+  ['metrics', {}],
   ['decisions', {}],
   ['policy', {}],
   ['link', { laneId: f.first.laneId }],

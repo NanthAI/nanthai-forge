@@ -1,3 +1,4 @@
+import { statusMetrics } from './self-metrics-status.js';
 import { readSelfMetricDisk } from './self-metrics-disk.js';
 import { integrationPreviewStatus } from './integration-preview-auto.js';
 import { readLandingWorkerStatus } from './landing-worker-status.js';
@@ -34,6 +35,10 @@ export function readPendingStatus(
         );
       };
       const runs = records('runs');
+      const lanes = records('lanes'),
+        views = records('views', false),
+        moves = records('channelMoves'),
+        entries = records('landingEntries');
       let evidenceChangedAt: string | null = null;
       // Observe file metadata, never read logs or hash/export an archive. A later
       // mtime can disprove coverage; an earlier mtime does not prove it.
@@ -57,14 +62,19 @@ export function readPendingStatus(
       return pendingStatus(
         {
           ...data,
-          lanes: (observedLanes = records('lanes')),
+          lanes: (observedLanes = lanes),
           intents: records('intents', false),
-          views: records('views', false),
+          views,
           runs,
-          channelMoves: records('channelMoves'),
-          landingEntries: records('landingEntries'),
+          channelMoves: moves,
+          landingEntries: entries,
         },
         {
+          metrics: statusMetrics(
+            store.root,
+            { ...data, lanes, views, runs, channelMoves: moves, landingEntries: entries, landingBatches: [] },
+            now,
+          ),
           integrationPreview: integrationPreviewStatus(store),
           landingWorker: readLandingWorkerStatus(store),
           submissions: readLaneSubmissions(store),

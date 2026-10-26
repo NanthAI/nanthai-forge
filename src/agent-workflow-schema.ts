@@ -37,6 +37,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   frictionInputSchema.extend({ action: z.literal('friction') }),
   frictionTriageSchema.safeExtend({ action: z.literal('friction-triage') }),
   z.object({ action: z.literal('improve') }),
+  z.object({ action: z.literal('metrics'), from: z.string().optional(), to: z.string().optional() }),
   landSchema,
   handoffSchema,
   handoffReadSchema,

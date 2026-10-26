@@ -1,3 +1,5 @@
+import { readMetrics } from './metrics-cli.js';
+import { statusMetrics } from './self-metrics-status.js';
 import { recordDecision, readDecisions } from './decisions.js';
 import { withLifecycleMetric, metricOperationId } from './self-metrics-journal.js';
 import { previewMeasurements } from './preview-accounting.js';
@@ -394,6 +396,10 @@ export class AgentWorkflow {
     if (command.action === 'decisions') return readDecisions(store, command);
     if (command.action === 'friction') return captureFriction(store, command);
     if (command.action === 'friction-triage') return triageFriction(store, command);
+    if (command.action === 'metrics') {
+      const result = await readMetrics(store.root, command, store.pointer());
+      return { revision: Number(result.source?.revision ?? store.revision()), result };
+    }
     if (command.action === 'improve') return readImprovements(store);
     if (command.action === 'land')
       return land(this.work, { ...command, ...(!wait ? { wait: false } : {}) } as LandCommand);
@@ -504,6 +510,7 @@ export class AgentWorkflow {
         revision: data.revision,
         result: {
           ...(lane ? { lane } : {}),
+          metrics: statusMetrics(store.root, data),
           modalCost: modalMonthCost(data.runs),
           checkCosts: (() => {
             const { submissions, ...train } = trainAccounting(data.runs, {

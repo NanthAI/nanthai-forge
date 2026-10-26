@@ -1,3 +1,4 @@
+import { formatMetricsHeadline } from './self-metrics-format.js';
 // SPDX-License-Identifier: Apache-2.0
 import { submissionLine } from './landing-submission.js';
 import type { PendingStatus } from './pending-status.js';
@@ -53,6 +54,8 @@ export function formatPendingStatus(value: PendingStatus) {
     lines.splice(recovery, 1);
   }
   lines.splice(3, 0, ...examples.slice(0, Math.min(3, Math.max(0, 15 - lines.length))));
-  if (value.disk?.warning) lines.push(oneLine(value.disk.warning));
+  if (value.metrics) lines.push(...formatMetricsHeadline(value.metrics).map(oneLine));
+  if (value.disk?.warning && value.disk.warning !== value.metrics?.diskWarning)
+    lines.push(oneLine(value.disk.warning));
   return lines.join('\n');
 }

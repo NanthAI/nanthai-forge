@@ -46,6 +46,7 @@ export type MetricRun = {
   started?: boolean | undefined;
 };
 export type MetricRecords = {
+  surfaceGaps?: string[];
   observations?: MetricObservation[];
   diskSamples?: DiskSample[];
   moves: MetricMove[];

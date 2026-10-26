@@ -1,3 +1,4 @@
+import { snapshotMetricWeek } from './self-metrics-weekly.js';
 // SPDX-License-Identifier: Apache-2.0
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { appendFileSync, readFileSync, openSync, closeSync } from 'node:fs';
@@ -127,7 +128,10 @@ export function recordOwnerMutation(directory: string, revision?: number, name =
     },
     name,
   );
-  if (name === 'self-metrics.jsonl') sampleSelfMetricDisk(directory);
+  if (name === 'self-metrics.jsonl') {
+    sampleSelfMetricDisk(directory);
+    snapshotMetricWeek(directory, new Date().toISOString());
+  }
 }
 export function withMetricRequester<T>(input: unknown, actor: WorkActor, run: () => T): T {
   if (selfMetricsTestHooks.disabled || request.getStore()) return run();

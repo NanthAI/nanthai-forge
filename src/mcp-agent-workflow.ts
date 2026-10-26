@@ -153,6 +153,7 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
       actions: [
         'handoff-read',
         'improve',
+        'metrics',
         'decisions',
         'pending-status',
         'peers',
@@ -164,7 +165,7 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
         'report',
       ],
       description:
-        'decisions {target?} lists all retained decisions or one project/Intent target with status and replacement links. handoff-read {laneId} reads the latest portable delivery note. pending-status reads one pinned local pending-work/recovery summary, including overlapping groups and proposed landing order, without remote calls, process recovery or archive export. Read Forge URLs with link (laneId, viewId or save; optional path/line), policy, concise Work pins and counts, or page one retained collection directly with records without reconstructing all Work history. making-of reads one Intent’s derived record: Lanes, saves, check runs with queued/running time, landings, sessions, wall clock and active time. report records cumulative self-reported harness, model and token totals for a Lane session (advisory). All source and history remain retained.',
+        'metrics {from?,to?} reports all self-metrics per UTC day and window with source counts and named partial gaps. decisions {target?} lists all retained decisions or one project/Intent target with status and replacement links. handoff-read {laneId} reads the latest portable delivery note. pending-status reads one pinned local pending-work/recovery summary, including overlapping groups and proposed landing order, without remote calls, process recovery or archive export. Read Forge URLs with link (laneId, viewId or save; optional path/line), policy, concise Work pins and counts, or page one retained collection directly with records without reconstructing all Work history. making-of reads one Intent’s derived record: Lanes, saves, check runs with queued/running time, landings, sessions, wall clock and active time. report records cumulative self-reported harness, model and token totals for a Lane session (advisory). All source and history remain retained.',
     },
     {
       name: 'forge_review',
@@ -193,6 +194,7 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
             [
               'pending-status',
               'improve',
+              'metrics',
               'tests',
               'link',
               'review',
@@ -209,6 +211,7 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
             [
               'pending-status',
               'improve',
+              'metrics',
               'tests',
               'link',
               'status',
