@@ -142,12 +142,13 @@ export async function recoverOwner(target: string, input: unknown, supplied?: Re
         }
         const latest = recoveryPreparationSchema.parse(await transport.prepare());
         if (!latest.receipt) sameSelection(latest.selection, selected);
-        state.connection = checkedConnection(
-          await transport.reconnect(selected, requestHash, 'owner'),
-          requestHash,
-          'owner',
-          request.operationId,
-        );
+        if (!selected.hostedMain)
+          state.connection = checkedConnection(
+            await transport.reconnect(selected, requestHash, 'owner'),
+            requestHash,
+            'owner',
+            request.operationId,
+          );
       }
       writeRecoveryState(statePath, state);
       if (existsSync(root)) {
@@ -169,7 +170,7 @@ export async function recoverOwner(target: string, input: unknown, supplied?: Re
         );
         const source = new NativeSource(stage);
         for (const id of nativeReachable(store)) source.object(id);
-        bind(stage, state!.connection!, request.url);
+        if (state!.connection) bind(stage, state!.connection, request.url);
         writeRecoveryState(join(store.directory, 'recovery-owner.json'), state);
         // Reserve first, so a concurrent unrelated directory is never replaced.
         mkdirSync(root, { mode: 0o700 });
@@ -186,15 +187,18 @@ export async function recoverOwner(target: string, input: unknown, supplied?: Re
       }
       return {
         restored: true,
-        reconnected: true,
+        reconnected: Boolean(state!.connection),
         root,
         operationId: request.operationId,
-        connection: state!.connection,
+        connection: state!.connection ?? null,
         coverage: state!.coverage,
         staging: directory,
-        message:
-          'Recovered saved work and connected this directory as the existing project’s owner. No commands restarted.',
-        undo: 'Use nforge recover ROOT client with a new operation to return this binding to an independent client role; all saved work is retained.',
+        message: state!.selection.hostedMain
+          ? 'Recovered hosted main, exact Work records and queue receipts as a local recovery copy. Hosted state was read only; no commands restarted.'
+          : 'Recovered saved work and connected this directory as the existing project’s owner. No commands restarted.',
+        undo: state!.selection.hostedMain
+          ? 'The recovery copy is independent; move it aside to undo the local restore. Hosted state is unchanged.'
+          : 'Use nforge recover ROOT client with a new operation to return this binding to an independent client role; all saved work is retained.',
       };
     },
     { anchor: directory },

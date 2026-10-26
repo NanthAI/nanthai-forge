@@ -180,6 +180,15 @@ export function generateSnapshot(root, files = sharedSchemaFiles, version) {
           value[property.name.text] = evaluate(property.name, module);
         else fail(property, 'Unsupported schema object member');
       }
+    } else if (
+      ts.isPropertyAccessExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === 'Number' &&
+      node.name.text === 'MAX_SAFE_INTEGER' &&
+      !module.bindings.has('Number')
+    ) {
+      // One structural constant, never execution of repository/global code.
+      value = Number.MAX_SAFE_INTEGER;
     } else if (ts.isPropertyAccessExpression(node)) {
       const receiver = evaluate(node.expression, module);
       if (receiver === z && node.name.text === 'iso') value = z.iso;

@@ -11,23 +11,32 @@ import {
   sameRecoveryPins,
 } from '../src/recovery-protocol';
 import { hostedProjectRoot } from '../src/project-routes';
+import { hostedStartMain } from './projectHostedChannels';
 import { accountFor } from './urlIdentity';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
 const scope = { projectId: v.id('hostedProjects'), operationId: v.string() };
-async function owned(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
+export async function recoveryOwned(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to recover this existing project.');
   return activeOwnedProject(ctx, projectId, user.subject);
 }
-async function selection(ctx: QueryCtx | MutationCtx, original: Doc<'hostedProjects'>) {
+export async function recoverySelection(ctx: QueryCtx | MutationCtx, original: Doc<'hostedProjects'>) {
   const project = await workProject(ctx, original),
     backup = project.work ? await ctx.db.get(project.work.backupId) : null;
   invariant(
     backup?.projectId === project._id && backup.status === 'stored' && backup.preview.format === 'native',
     'SOURCE_UNAVAILABLE',
     'Select an existing native project with a stored source/Work checkpoint.',
+  );
+  const authority = sourceAuthority(project);
+  const hostedMain = authority.mode === 'server' ? await hostedStartMain(ctx, project._id) : undefined;
+  invariant(
+    !hostedMain ||
+      (hostedMain.authority.mode === authority.mode && hostedMain.authority.epoch === authority.epoch),
+    'SOURCE_AUTHORITY_CHANGED',
+    'Hosted recovery main and project authority differ.',
   );
   return recoverySelectionSchema.parse({
     projectId: project._id,
@@ -37,7 +46,8 @@ async function selection(ctx: QueryCtx | MutationCtx, original: Doc<'hostedProje
     checkpointSize: backup.size,
     manifestSha256: backup.preview.manifestDigest,
     revision: project.work!.revision,
-    authority: sourceAuthority(project),
+    authority,
+    ...(hostedMain ? { hostedMain } : {}),
     transport: backup.transport ?? 'archive',
     completeHistory: backup.historyBackfilling
       ? 'incomplete'
@@ -58,12 +68,12 @@ export const prepare = query({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const project = await owned(ctx, input.projectId),
+      const project = await recoveryOwned(ctx, input.projectId),
         old = await find(ctx, input.projectId, input.operationId);
       return JSON.stringify(
         old
           ? { selection: null, receipt: recoveryConnectionSchema.parse(JSON.parse(old.receipt)) }
-          : { selection: await selection(ctx, project), receipt: null },
+          : { selection: await recoverySelection(ctx, project), receipt: null },
       );
     } catch (error) {
       return report(error);
@@ -82,7 +92,7 @@ export const reconnect = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const project = await owned(ctx, input.projectId),
+      const project = await recoveryOwned(ctx, input.projectId),
         expected = recoverySelectionSchema.parse(JSON.parse(input.selection)),
         request = JSON.stringify({ selection: expected, requestHash: input.requestHash, role: input.role }),
         old = await find(ctx, input.projectId, input.operationId);
@@ -94,7 +104,7 @@ export const reconnect = mutation({
         );
         return old.receipt;
       }
-      const current = await selection(ctx, project);
+      const current = await recoverySelection(ctx, project);
       invariant(
         sameRecoveryPins(current, expected),
         'WORK_STALE',

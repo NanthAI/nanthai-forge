@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedRecoveryObjects } from './recovery-hosted-read.js';
 import { validateNativeContributions } from './native-contribution-objects.js';
 import { NativeSource, parseNativeState } from './native-source.js';
 import { WorkStore } from './work-store.js';
@@ -94,5 +95,10 @@ export function nativeReachable(
         ids.add(id);
       }
     }
+  for (const id of hostedRecoveryObjects(source, data)) {
+    const bytes = source.object(id);
+    onObject?.(id, bytes, false);
+    ids.add(id);
+  }
   return [...ids].sort();
 }

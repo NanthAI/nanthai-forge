@@ -5,6 +5,7 @@ export { checkEnvironmentSchema } from './check-environment-schema.js';
 import { landingEntrySchema, landingBatchSchema } from './landing-batch-types.js';
 import { checkBackendSchema } from './check-backend.js';
 // SPDX-License-Identifier: Apache-2.0
+import { hostedRecoverySchema } from './recovery-hosted-protocol.js';
 import { z } from 'zod';
 import { deliveryHandoffSchema } from './agent-handoff-types.js';
 import { githubSyncSchema, githubSyncHistorySchema, githubAutoPushSchema } from './github-sync-types.js';
@@ -1096,6 +1097,7 @@ export const workSchema = z
     deployments: z.array(deploymentSchema).default([]),
     environmentMoves: z.array(environmentMoveSchema).default([]),
     hostedChannelMoves: z.array(hostedChannelMoveSchema).optional(),
+    hostedRecovery: hostedRecoverySchema.optional(),
   })
   .refine(
     data =>

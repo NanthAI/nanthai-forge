@@ -26,6 +26,37 @@ recovery and reconnects an existing project using current owner authority. The
 request contains `{operationId,url,projectId,archivePath?,cacheRoot?}` without
 credentials. Keep the operation ID and destination for retry. Saved main/Lanes,
 journal revision, exact evidence hashes and unavailable evidence are reported.
+For a project under server source authority, recovery also reads the hosted
+record versions/bodies/heads, source registrations, operations, finish/landing
+queue and observations, acceptance receipts/events/snapshot deltas, completion
+plans/pages, lifecycle overlays, check outcomes and source-return supersessions.
+The selected hosted main head, receipt, snapshot and revision are pinned alongside
+the seed checkpoint. Every page rechecks current owner access and those pins.
+Reads use project-prefixed indexes, at most 64 rows and a 128 KiB provider read
+window per page (one existing oversized document remains readable). A second
+paged pass compares exact row hashes and detects changes observed during capture;
+this is a verified paged export, not a database-wide transactional snapshot.
+If a table or source pin changes, staging is retained and the command reports
+`WORK_STALE`; it never silently selects newer work.
+
+Private staging retains the original page cursor across interruption. The fold
+stores exact canonical hosted document strings in content-addressed pages, rooted
+at `Work.hostedRecovery`, plus the accepted source and referenced object closure.
+It checks H14 snapshot lineage and ordered completion-page roots without applying
+pending completions. Queue outcomes, original operation IDs, acceptance receipts,
+completion cursors and stale source-return supersession receipts remain exact;
+no acceptance is replayed and no check or queued command restarts. Existing
+`export-work` archive and native restore machinery retain this overlay and its
+objects. Internal `hostedRecoveryRows` streams one table's retained documents;
+the recovery result reports the hosted main and page/row/byte coverage.
+
+This hosted-authority path makes an independent recovery copy and does not write
+to hosted or register a new accepting owner. The native seed Work and its local
+Channel history remain the baseline; newer hosted Work is retained separately in
+the portable overlay, with its original provenance. The runner/cache Route B
+reconnection and cutover qualification remain separate work. Legacy native-owner
+recovery continues to use its existing explicit reconnect receipt.
+
 See the [recovery drill](operations/recovery-drill.md) for both the weekly
 deployment ZIP and surviving-hosted routes, independent native archives, runner
 configuration, and returning the old machine as a source client.

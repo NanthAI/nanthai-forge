@@ -2,6 +2,7 @@
 import { makeFunctionReference } from 'convex/server';
 import { ConvexExchange } from './exchange-client.js';
 import { downloadExchangeFile } from './exchange-download-file.js';
+import { hostedRecoveryPageSchema, type RecoveryTable } from './recovery-hosted-protocol.js';
 import { invariant } from './errors.js';
 import type { RecoveryRequest, RecoverySelection } from './recovery-protocol.js';
 import type { RecoveryTransport } from './recovery-source.js';
@@ -19,6 +20,17 @@ export function recoveryTransport(request: RecoveryRequest): RecoveryTransport {
     prepare: async () =>
       JSON.parse(
         await exchange.client.query(makeFunctionReference<'query'>('projectRecovery:prepare'), scope),
+      ),
+    hostedPage: async (selection: RecoverySelection, table: RecoveryTable, cursor: string | null) =>
+      hostedRecoveryPageSchema.parse(
+        JSON.parse(
+          await exchange.client.query(makeFunctionReference<'query'>('projectRecoveryHosted:page'), {
+            projectId: request.projectId,
+            selection: JSON.stringify(selection),
+            table,
+            cursor,
+          }),
+        ),
       ),
     reconnect: async (selection: RecoverySelection, requestHash: string, role: 'owner' | 'client') =>
       JSON.parse(

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { hostedMainV2Schema } from './hosted-main.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
@@ -14,6 +15,7 @@ export const recoverySelectionSchema = z
     revision: z.number().safe().nonnegative(),
     authority: sourceAuthoritySchema,
     transport: z.enum(['objects', 'archive']),
+    hostedMain: hostedMainV2Schema.optional(),
     completeHistory: z.enum(['complete', 'incomplete', 'unknown']),
   })
   .strict();

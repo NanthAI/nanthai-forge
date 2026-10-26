@@ -1,3 +1,6 @@
+import { foldHostedRecovery } from './recovery-hosted.js';
+import type { HostedRecoveryPage, RecoveryTable } from './recovery-hosted-protocol.js';
+import type { ContentPin } from './native-exchange.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -19,6 +22,12 @@ import { NativeSource } from './native-source.js';
 
 export interface RecoveryTransport extends ExchangeTransport {
   prepare(): Promise<unknown>;
+  hostedPage?(
+    selection: RecoverySelection,
+    table: RecoveryTable,
+    cursor: string | null,
+  ): Promise<HostedRecoveryPage>;
+  objects?(ids: string[]): Promise<ContentPin[]>;
   journal(): Promise<string>;
   reconnect(selection: RecoverySelection, requestHash: string, role: 'owner' | 'client'): Promise<unknown>;
   archive(selection: RecoverySelection, path: string): Promise<void>;
@@ -51,6 +60,11 @@ export async function restoreRecoverySource(
       'INVALID_WORK_JOURNAL',
       'The retained recovery journal differs from its original bytes.',
     );
+    if (selected.hostedMain) {
+      await foldHostedRecovery(directory, target, selected, transport);
+      retained.workSha256 = digest(new WorkStore(target).snapshotBytes());
+      writeRecoveryState(path, retained);
+    }
     return recoveryCoverage(
       target,
       nativeManifestSchema.parse(retained.manifest),
@@ -118,6 +132,10 @@ export async function restoreRecoverySource(
     });
   }
   invariant(manifest, 'INVALID_WORK_BACKUP', 'The native recovery manifest is unavailable.');
+  if (selected.hostedMain) {
+    await foldHostedRecovery(directory, target, selected, transport);
+    beforePublish(target);
+  }
   return recoveryCoverage(
     target,
     manifest,
@@ -158,7 +176,15 @@ async function recoveryCoverage(
   }
   return {
     rootHead: data.nativeHead,
-    main: nativeChannels(data).find(c => c.name === 'main') ?? null,
+    main: data.hostedRecovery
+      ? {
+          name: 'main',
+          head: data.hostedRecovery.main.head,
+          moveId: data.hostedRecovery.main.receipt.id,
+          diagnostic: null,
+        }
+      : (nativeChannels(data).find(c => c.name === 'main') ?? null),
+    ...(data.hostedRecovery ? { hosted: data.hostedRecovery } : {}),
     revision: data.revision,
     journalRevision: selected.revision,
     journalSha256,

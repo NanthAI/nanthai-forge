@@ -194,3 +194,12 @@ test('unresolved references fail instead of claiming compatibility', () => {
   const snapshot = { format: 1, schemas: { example: { $ref: 'missing' } } };
   assert.throws(() => compareSnapshots(snapshot, snapshot), /Unresolved schema reference/);
 });
+
+test('safe integer schema bounds are interpreted as a constant without evaluating global calls', t => {
+  const f = fixture(t, 'z.object({ sequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })');
+  assert.deepEqual(checkSchemaCompatibility(f.root).undeclared, []);
+  f.schema('z.object({ sequence: z.number().max(Number.MAX_VALUE) })');
+  assert.throws(() => generateSnapshot(f.root), /Unsupported schema identifier Number/);
+  f.schema('z.object({ sequence: z.number().max(Number(42)) })');
+  assert.throws(() => generateSnapshot(f.root), /Unsupported schema expression CallExpression/);
+});
