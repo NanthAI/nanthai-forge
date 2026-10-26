@@ -16,6 +16,8 @@ const actionDispatcher = new LongActionAgent();
 // Reads, content-addressed commits, and pinned publication pages are replay-safe.
 const replaySafe = new Set([
   'projectMain:current',
+  'projectHostedChannels:current',
+  'projectHostedAgent:capabilities',
   'projectHostedLanes:select',
   'projectMain:objects',
   'projectObjects:missing',

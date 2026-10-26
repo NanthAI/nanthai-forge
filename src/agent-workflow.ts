@@ -73,6 +73,7 @@ import type { CheckRun, WorkView, WorkData } from './work-types.js';
 export { agentActionSchema, type AgentAction } from './agent-workflow-schema.js';
 import type { AgentAction } from './agent-workflow-schema.js';
 import { SNAPSHOT_READ_ACTIONS } from './agent-read-actions.js';
+import { boundAgentCache } from './hosted-agent-cache.js';
 import { boundAgentSubmission } from './hosted-agent-bound.js';
 export class AgentWorkflow {
   readonly work: WorkService;
@@ -83,8 +84,29 @@ export class AgentWorkflow {
     this.work = new WorkService(root, localAgent(), liveMcp);
   }
   async dispatch(input: unknown) {
-    // Only finish and land can route to hosted; other actions validate before any Work read.
+    // Bound server source operations use hosted records; local Work is a cache.
+    if (input && typeof input === 'object' && (input as { action?: unknown }).action === 'save')
+      input = { ...input, action: 'checkpoint' };
     const action = input && typeof input === 'object' ? (input as { action?: unknown }).action : undefined;
+    if (action === 'start' || action === 'checkpoint') {
+      // Validate before constructing/reading Work. A UUID replay may omit fields
+      // already pinned in its cache journal; supplied values still validate.
+      const replay = (input as { operationId?: unknown }).operationId !== undefined;
+      parseAgentAction(
+        replay
+          ? {
+              ...(action === 'start'
+                ? { outcome: 'Retained start' }
+                : {
+                    laneId: '00000000-0000-4000-8000-000000000000',
+                    message: 'Retained checkpoint',
+                  }),
+              ...(input as object),
+            }
+          : input,
+      );
+      return boundAgentCache(this.work.store, input, selected => this.dispatchRequest(selected));
+    }
     if (action !== 'finish' && action !== 'land') return this.dispatchRequest(input);
     return boundAgentSubmission(this.work.store, input, selected => this.dispatchRequest(selected));
   }

@@ -328,3 +328,53 @@ test('main checkout preserves symlinks as links, including dangling and non-UTF8
   assert(lstatSync(join(s.root, 'binary')).mode & 0o111);
   assert.equal((await checkoutHostedMain(s.root, s.request(), s.transport)).downloadedObjects, 0);
 });
+
+test('schema-2 checkout uses authoritative hosted Channels and the legacy main API refuses server mode', async t => {
+  const { ConvexExchange } = await import('../dist/exchange-client.js');
+  const { agentFixture } = await import('./hosted-agent-fixture.mjs');
+  const f = agentFixture(t);
+  const transport = {
+    ...f.exchange,
+    current: expected =>
+      ConvexExchange.prototype.current.call(
+        { client: f.exchange.client, projectId: f.address.projectId },
+        expected,
+      ),
+  };
+  const request = { ...f.address, operationId: randomUUID() };
+  const result = await checkoutHostedMain(f.root, request, transport);
+  assert.equal(result.schema, 2);
+  assert.equal(result.head, f.main.head);
+  assert(f.calls.some(call => call.name === 'projectHostedChannels:current'));
+  assert(!f.calls.some(call => call.name === 'projectMain:current'));
+  await assert.rejects(transport.current({ head: f.main.head, receiptId: 'same-head-wrong-receipt' }), {
+    code: 'CHANNEL_CHANGED',
+  });
+  const { s } = hostedFixture();
+  s.tables.hostedProjects.get('project').sourceAuthority = { mode: 'server', epoch: 1 };
+  await assert.rejects(
+    main.current._handler(s.ctx, { projectId: 'project', maxSchema: 2 }),
+    /SOURCE_UNAVAILABLE/,
+  );
+});
+
+test('server main unavailable or revoked never falls back to an uploaded native seed', async t => {
+  const { ConvexExchange } = await import('../dist/exchange-client.js');
+  const { getFunctionName } = await import('convex/server');
+  const calls = [];
+  const current = () =>
+    ConvexExchange.prototype.current.call({
+      projectId: 'project',
+      client: {
+        async query(ref) {
+          const name = getFunctionName(ref);
+          calls.push(name);
+          if (name === 'projectHostedAgent:capabilities')
+            return JSON.stringify({ authority: { mode: 'server', epoch: 1 } });
+          throw Object.assign(new Error('Main not seeded'), { code: 'SOURCE_UNAVAILABLE' });
+        },
+      },
+    });
+  await assert.rejects(current(), { code: 'SOURCE_UNAVAILABLE' });
+  assert.deepEqual(calls, ['projectHostedAgent:capabilities', 'projectHostedChannels:current']);
+});

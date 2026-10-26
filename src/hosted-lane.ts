@@ -20,6 +20,7 @@ export const hostedStartSchema = z
     operationId: z.uuid(),
     authorityEpoch: sourceAuthoritySchema.shape.epoch,
     expectedMain: mainExpectationSchema,
+    initialHead: mainExpectationSchema.shape.head.optional(),
     intent: hostedIntentInputSchema,
   })
   .strict();

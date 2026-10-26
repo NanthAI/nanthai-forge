@@ -63,6 +63,7 @@ export const hostedAgentCommandSchemas = {
       outcome: z.string().min(1).optional(),
       constraints: z.string().optional(),
       intentId: uuid.optional(),
+      initialHead: hash.optional(),
     })
     .strict(),
   open: z

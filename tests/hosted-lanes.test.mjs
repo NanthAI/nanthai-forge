@@ -453,3 +453,26 @@ test.after(() => {
     );
   }
 });
+
+test('explicit initial source is committed before hosted start; main receipt CAS and original replay remain intact', async () => {
+  const s = await setup(),
+    input = { ...s.input(), initialHead: nextHead };
+  await assert.rejects(s.begin(input), code('SOURCE_UNAVAILABLE'));
+  s.insert('projectObjects', {
+    projectId: s.projectId,
+    digest: nextHead,
+    size: 100,
+    removed: false,
+    nonce: randomUUID(),
+    location: 'r2',
+    r2Committed: true,
+    r2Key: `v1/p/${s.projectId}/o/${nextHead}`,
+  });
+  const result = await s.begin(input);
+  assert.equal(result.lane.head, nextHead);
+  assert.deepEqual(result.lane.base, input.expectedMain);
+  s.move('c'.repeat(64), 'main-1');
+  assert.deepEqual(await s.begin(input), result);
+  await assert.rejects(s.begin({ ...input, initialHead: 'd'.repeat(64) }), code('WORK_OPERATION_CHANGED'));
+  await assert.rejects(s.begin({ ...input, operationId: randomUUID() }), code('CHANNEL_CHANGED'));
+});

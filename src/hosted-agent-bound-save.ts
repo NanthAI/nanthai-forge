@@ -2,6 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { NativeSource } from './native-source.js';
+import { HostedObjectStore } from './hosted-object-store.js';
 import { durableReplace } from './native-durability.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { hostedLaneCheckoutMarkerSchema } from './hosted-lane-checkout-marker.js';
@@ -15,6 +16,28 @@ import type { RetainedBoundSubmission } from './hosted-agent-bound.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { z } from 'zod';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+
+/** A cold Mac has only selected States. Resolve ancestry through verified objects
+ * on demand instead of treating an absent local parent as a divergent Lane. */
+async function containsSavedState(
+  source: NativeSource,
+  objects: HostedObjectStore,
+  head: string,
+  ancestor: string,
+) {
+  const pending = [head],
+    seen = new Set<string>();
+  while (pending.length) {
+    const id = pending.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (!existsSync(join(source.directory, id))) source.put(await objects.get(id));
+    const state = source.state(id);
+    if (id === ancestor) return true;
+    pending.push(...state.parents);
+  }
+  return false;
+}
 
 /** Save immutable captured bytes through H16. The staging checkout is private
  * retry data; saving never overwrites the agent's Lane or advances native main. */
@@ -34,21 +57,24 @@ export async function saveBoundInput(
       await transport.query('projectHostedLanes:select', { laneId: input.laneId }),
     );
     if (selection.authority.mode !== 'server') throw new SourceAuthorityStaleError(selection.authority);
+    invariant(
+      selection.projectId === transport.address.projectId && selection.laneId === input.laneId,
+      'PROJECT_UNAVAILABLE',
+      'Select this hosted Lane.',
+    );
+    const objects = new HostedObjectStore(join(store.directory, 'hosted-objects'), transport.exchange);
     const previous = join(store.directory, 'hosted-bound-lanes', `${input.laneId}.json`);
     const last = existsSync(previous) ? JSON.parse(readFileSync(previous, 'utf8')) : null;
     invariant(
       selection.head === input.baseline ||
         selection.head === last?.hostedHead ||
-        source.contains(input.baseline, selection.head),
+        (await containsSavedState(source, objects, input.baseline, selection.head)),
       'LANE_STALE',
       'The hosted Lane has newer saved work. Reconcile that source before submitting this retained input.',
     );
     if (!existsSync(join(source.directory, selection.head))) {
-      const [pin] = await transport.exchange.objects([selection.head]);
-      invariant(pin, 'SOURCE_UNAVAILABLE', 'Hosted Lane baseline is unavailable.');
-      const [bytes] = await transport.exchange.downloadBatch([pin]);
       invariant(
-        bytes && source.put(bytes) === selection.head,
+        source.put(await objects.get(selection.head)) === selection.head,
         'SOURCE_HASH_MISMATCH',
         'Hosted Lane baseline differs from its pin.',
       );

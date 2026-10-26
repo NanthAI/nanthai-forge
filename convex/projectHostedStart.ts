@@ -15,12 +15,14 @@ import {
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { isStored } from './projectObjectFields';
 
 const args = {
   projectId: v.id('hostedProjects'),
   operationId: v.string(),
   authorityEpoch: v.number(),
   expectedMain: v.object({ head: v.string(), receiptId: v.string() }),
+  initialHead: v.optional(v.string()),
   intent: v.union(
     v.object({ kind: v.literal('new'), outcome: v.string(), constraints: v.optional(v.string()) }),
     v.object({ kind: v.literal('existing'), intentId: v.string() }),
@@ -31,6 +33,7 @@ type Input = {
   operationId: string;
   authorityEpoch: number;
   expectedMain: { head: string; receiptId: string };
+  initialHead?: string;
   intent: { kind: 'new'; outcome: string; constraints?: string } | { kind: 'existing'; intentId: string };
 };
 
@@ -115,6 +118,20 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     'CHANNEL_CHANGED',
     'Hosted main changed from the expected head and receipt.',
   );
+  if (payload.initialHead) {
+    const object = await ctx.db
+      .query('projectObjects')
+      .withIndex('by_project_and_digest', q =>
+        q.eq('projectId', projectId).eq('digest', payload.initialHead!),
+      )
+      .unique();
+    invariant(
+      object && !object.removed && isStored(object),
+      'SOURCE_UNAVAILABLE',
+      'Commit the selected initial State before starting its hosted Lane.',
+    );
+  }
+  const initialHead = payload.initialHead ?? main.head;
   const first = prepared.operation.firstAttempt,
     intentId = first.ids.intent!,
     laneId = first.ids.lane!;
@@ -146,7 +163,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
           laneId,
           intentId,
           base,
-          head: main.head,
+          head: initialHead,
           version: 0,
           sourceVersion: 0,
           lifecycleVersion: 0,
@@ -168,7 +185,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
         version: 0,
         at: first.at,
         base,
-        head: main.head,
+        head: initialHead,
         sourceVersion: 0,
         lifecycleVersion: 0,
         state: 'active',

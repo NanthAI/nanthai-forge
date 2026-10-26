@@ -3,6 +3,7 @@ import { lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { makeFunctionReference } from 'convex/server';
+import { hostedObjectWriter } from './hosted-object-store.js';
 import { captureHostedSave } from './hosted-save-capture.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { durableReplace } from './native-durability.js';
@@ -12,7 +13,7 @@ import { stateSchema } from './native-state-format.js';
 import { workLocked } from './work-lock.js';
 import { saveResultSchema } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { buildSavePages, saveRequestSchema, saveBytes, savePin } from './hosted-save.js';
+import { buildSavePages, saveRequestSchema, saveBytes } from './hosted-save.js';
 import { invariant } from './errors.js';
 import type { ConvexExchange } from './exchange-client.js';
 import type { SaveChange, SaveRequest } from './hosted-save.js';
@@ -120,6 +121,7 @@ export async function saveHostedLane(
       return request;
     });
   }
+  const objects = hostedObjectWriter(exchange);
   const args = { projectId: exchange.projectId, operationId: command.operationId };
   const prepared = JSON.parse(
     await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaves:prepare'), {
@@ -135,7 +137,7 @@ export async function saveHostedLane(
     readFileSync(join(directory, 'pages.json'), 'utf8'),
   );
   for (const [index, page] of pages.entries()) {
-    await exchange.upload(page.pin, Buffer.from(saveBytes(page.value)));
+    await objects.put(Buffer.from(saveBytes(page.value)));
     await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaves:stage'), {
       ...args,
       index,
@@ -149,7 +151,7 @@ export async function saveHostedLane(
     applyHostedSaveReceipt(root, capture, request, progress.terminal);
     return progress.terminal;
   }
-  if (progress.input) await exchange.upload(savePin(progress.input), Buffer.from(saveBytes(progress.input)));
+  if (progress.input) await objects.put(Buffer.from(saveBytes(progress.input)));
   const result = JSON.parse(
     await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaveJobs:submit'), args),
   );

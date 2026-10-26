@@ -9,6 +9,7 @@ import {
 import { cachedExchangeMetadata, retainExchangeMetadata } from './exchange-receive-cache.js';
 import { ExchangeDownloadCache } from './exchange-download-cache.js';
 import { SignedDownloadCache, type SignedObject } from './exchange-r2-read.js';
+import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { hostedMainSchema, type MainExpectation } from './hosted-main.js';
 import { exchangeConvexFetch } from './exchange-convex-fetch.js';
 import { retryExchange } from './exchange-retry.js';
@@ -90,15 +91,35 @@ export class ConvexExchange implements ExchangeTransport {
     this.client.setAuth(token);
   }
   async current(expected?: MainExpectation) {
-    return hostedMainSchema.parse(
-      JSON.parse(
-        await this.client.query(query('projectMain:current'), {
-          projectId: this.projectId,
-          maxSchema: 2,
-          ...(expected ? { expected } : {}),
-        }),
-      ),
+    // Authority discovery selects the source API; server main never falls back
+    // to the uploaded owner's historical generation.
+    const value = await this.client.query(query('projectHostedAgent:capabilities'), {
+      projectId: this.projectId,
+    });
+    const discovery = typeof value === 'string' ? JSON.parse(value) : value;
+    const authority = sourceAuthoritySchema.parse(discovery.authority);
+    const server = authority.mode === 'server';
+    const selected = await this.client.query(
+      query(server ? 'projectHostedChannels:current' : 'projectMain:current'),
+      {
+        projectId: this.projectId,
+        ...(server ? {} : { maxSchema: 2, ...(expected ? { expected } : {}) }),
+      },
     );
+    const main = hostedMainSchema.parse(typeof selected === 'string' ? JSON.parse(selected) : selected);
+    invariant(
+      !server ||
+        (main.schema === 2 && main.authority.mode === 'server' && main.authority.epoch === authority.epoch),
+      'SOURCE_AUTHORITY_CHANGED',
+      'Hosted main and discovered authority differ.',
+    );
+    invariant(main.projectId === this.projectId, 'PROJECT_UNAVAILABLE', 'Select this hosted project.');
+    invariant(
+      !expected || (expected.head === main.head && expected.receiptId === main.receipt.id),
+      'CHANNEL_CHANGED',
+      'Hosted main changed from the expected head and receipt.',
+    );
+    return main;
   }
   async objects(digests: string[]): Promise<ContentPin[]> {
     return this.client.query(query('projectMain:objects'), { projectId: this.projectId, digests });

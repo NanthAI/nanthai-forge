@@ -99,6 +99,7 @@ export async function executeHostedAgent(
         operationId,
         authorityEpoch: epoch,
         expectedMain: { head: main.head, receiptId: main.receipt.id },
+        ...(command.initialHead ? { initialHead: command.initialHead } : {}),
         intent: command.intentId
           ? { kind: 'existing', intentId: command.intentId }
           : {

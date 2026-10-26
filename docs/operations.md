@@ -438,6 +438,35 @@ does not request acceptance, and `keepOpen` remains part of the accepting reques
 Provider OCC exhaustion retries the original payload without selecting newer
 source. Native-owner and server-shadow bindings keep their native landing path.
 
+### B1.4b: command-driven Mac source cache
+
+A server-authoritative bound native project starts Lanes from hosted records and
+R2 source objects. Hosted main reads discover current authority and select
+`projectHostedChannels:current` for schema 2; failure never substitutes the
+historical `projectMain:current` seed. Native-owner and shadow bindings retain
+their existing source selection. The local source adapter exposes `get(id)` and
+`put(bytes)` over existing content identities and R2 keys. Concurrent cold reads
+use the existing batched download cache, with byte and size verification before
+installation. Lane materialisation reuses the verified B1.4a tree cache and APFS
+clone/copy fallback.
+
+Bound `checkpoint` (also `save`) captures immutable retry bytes, uploads changed
+objects directly through R2 presigning, then uses the existing hosted save
+worker and head/version CAS. Local Work acknowledges a head only after the
+hosted save completes. Interrupted upload leaves the prior head selected; a lost
+commit reply replays the original save, including after the agent edits again.
+Pending hosted work returns pending without advancing the local saved head.
+Explicit workspace, named-channel and stacked starts retain their selected
+State and upload it before hosted start publishes a pointer; default starts use
+hosted main. No source exchange push, pull or open runs in this lifecycle path.
+Compatibility exchange commands remain available until B1.6.
+
+Cache observations record hosted source revision and the revision actually
+materialised on existing commands. Refresh starts no timer, poller or idle
+worker. This supplies metric 7 observations; fleet p50/p95 lag and contradiction
+minutes still require observed post-cutover operation. This path creates no
+check run and changes no check reuse key or runner configuration (metrics 6/8).
+
 ### Ordered cutover and forced upgrade
 
 1. **B1.2a — transition and all-writer fencing.** The authenticated mutation in

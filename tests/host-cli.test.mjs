@@ -29,7 +29,12 @@ const hosting = await import(moduleUrl('../convex/projectHosting.ts'));
 const devices = await import(moduleUrl('../convex/deviceStore.ts'));
 const projectMain = await import(moduleUrl('../convex/projectMain.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
-for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
+for (const name of [
+  'projectHostedSeed',
+  'projectHostedSeedActions',
+  'projectHostedAgent',
+  'projectHostedChannels',
+])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const { activeProject } = await import(moduleUrl('../convex/projectAuthority.ts'));
 const privateOwner = immutableDirectorySync('forge-host-', (directory, key) => {

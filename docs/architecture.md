@@ -33,6 +33,15 @@ For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [co
 
 The local native owner is canonical for Forge's own development. A hosted project holds checkpoints you send it plus its own metadata journal. Source synchronization is explicit unless the owner enables the separate `autoExchange` policy. Its saved-mutation driver shares bound-push serialization and retained-operation reconciliation, with no idle polling. Bound owners also send advisory agent presence and lifecycle metadata automatically, with a binding opt-out; these updates do not transfer source or check artifacts.
 
+For a server-authoritative binding, hosted Channel and Lane records select
+source. Bound start materialises verified hosted/R2 objects into the existing
+native Lane clone cache; bound checkpoint uploads the exact captured delta and
+commits hosted head CAS before acknowledging it locally. The Mac retains
+regenerable source/Work cache and retry journals, with no exchange publication
+in that path. The two-method source object interface keeps content identity
+separate from current R2 storage keys. Reads and cache-lag observations occur on
+commands, with no additional idle polling. See the [cutover procedure](operations.md#one-authority-cutover).
+
 ## Local filesystem watching
 
 All native filesystem hints use `src/local-watcher.ts`. Processes attached to the
