@@ -10,10 +10,10 @@ import { actionsJobLogEvidence } from './github-actions-job-evidence.js';
 import { actionsCost, actionsRate } from './check-cost.js';
 import { invariant } from './errors.js';
 import { PENDING_ACTIONS_INFRA } from './github-actions-infra.js';
+import { failedTestFiles } from './check-failure-files.js';
 
-// Runner "exit code 137", a SIGKILL/OOM error annotation, or the kernel OOM killer.
-const oomSignal =
-  /Process completed with exit code 137|##\[error\][^\n]*(SIGKILL|out of memory)|Killed process \d+/i;
+// Only an observed exit 137 or kill signal supports a likely-OOM summary.
+const oomSignal = /Process completed with (?:exit code 137\b|signal SIGKILL\b)/i;
 // GitHub's timing API reports `jobs` as a count and per-job durations in `job_runs`.
 type Cost = {
   billable?: Record<string, { jobs?: number; job_runs?: { job_id: number; duration_ms: number }[] }>;
@@ -265,10 +265,27 @@ export async function controlActions(
       jobStatusSummary: summaries.join('\n'),
       failureSummary: [...latest.values()]
         .filter(job => job.conclusion !== 'success' && !recovered.has(job.id))
-        .map(
-          job =>
-            `${job.name}: ${job.conclusion}; job ${job.id}; inspect retained shard log (exit 137/SIGKILL indicates likely OOM).`,
-        )
+        .map(job => {
+          const shard =
+            job.name === 'forge-static' ? plan.groups.length : Number(job.name.slice('forge-shard-'.length));
+          const attempt =
+            journal.retrySources[shard] !== undefined && journal.retrySources[shard] !== job.id ? 2 : 1;
+          let text = '';
+          try {
+            text = readFileSync(
+              join(
+                plan.output,
+                'shards',
+                shardLogName(shard === plan.groups.length ? 'static' : shard, attempt),
+              ),
+              'utf8',
+            );
+          } catch {
+            /* Logs may be unavailable; retain the observed job verdict. */
+          }
+          const files = failedTestFiles(text);
+          return `${job.name}: ${job.conclusion}; job ${job.id}; ${oom.has(job.id) ? 'exit 137/SIGKILL (likely OOM); ' : ''}${files.length ? `failing tests: ${files.join(', ')}` : 'inspect retained shard log'}.`;
+        })
         .join('\n'),
     };
   }

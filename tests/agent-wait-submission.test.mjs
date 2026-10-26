@@ -202,10 +202,13 @@ test('one wait follows multiple operations across owner worker shutdown and rest
       },
     );
     assert.ok(events.some(e => e.type === 'check' && e.id === run.id && e.status === 'running'));
-    for (const c of [a, b])
+    for (const c of [a])
       assert.ok(
         events.some(e => e.type === 'operation' && e.id === c.command.operationId && e.status === 'checking'),
       );
+    assert.ok(
+      events.some(e => e.type === 'operation' && e.id === b.command.operationId && e.status === 'queued'),
+    );
     await stop();
     assert.equal(f.store.select('runs', run.id).status, 'running');
     assert.equal(f.store.select('runs', run.id).cancellation, undefined);
@@ -242,8 +245,16 @@ test('one wait follows multiple operations across owner worker shutdown and rest
     for (const c of [a, b]) {
       const entry = f.store.select('landingEntries', c.command.operationId);
       assert.equal(entry.status, 'accepted');
-      assert.equal(entry.runId, run.id);
+      const acceptedRun = f.store.select('runs', entry.runId);
+      assert.equal(acceptedRun.status, 'passed');
+      assert.equal(acceptedRun.inputs.length, 2, 'green inputs share the final combined gate');
+      assert.equal(acceptedRun.head, f.store.select('channelMoves', entry.acceptanceId).head);
     }
+    assert.equal(
+      f.store.load().runs.filter(r => !r.mainCheck).length,
+      3,
+      'two solo checks and a combined check',
+    );
     assert.equal(
       new Set(events.filter(e => e.type === 'submission' && e.status === 'landed').map(e => e.id)).size,
       2,

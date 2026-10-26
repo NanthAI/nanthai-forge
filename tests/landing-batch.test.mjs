@@ -43,11 +43,12 @@ async function fixture(t, options) {
 test('four ready entries land with one exact combined check and one Channel move', async t => {
   const f = await fixture(t);
   for (let i = 0; i < 4; i++) await f.candidate(`${i}.txt`);
+  await f.checkCandidates();
   await drainLandingBatches(f.work, 'main');
   const data = f.store.load();
   assert.equal(data.schema, 17);
   assert.equal(data.landingBatches.length, 1);
-  assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
+  assert.equal(data.runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
   assert.equal(data.channelMoves.length, 1);
   assert.equal(data.views.find(view => view.id === f.main().viewId).inputs.length, 4);
   assert.ok(data.landingEntries.every(entry => entry.status === 'accepted'));
@@ -87,15 +88,20 @@ test('compose conflict ejects only its entry and retains the conflict View', asy
   assert.equal(f.store.select('views', entry.conflictViewId).status, 'conflict');
   assert.equal(f.content('same.txt'), 'first\n');
   assert.equal(f.content('later.txt'), 'later.txt\n');
-  assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
+  assert.equal(
+    f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length,
+    3,
+    'two solo checks and the compatible combined gate',
+  );
 });
 
 for (const remote of [true, false])
   test(`${remote ? 'Modal parallel' : 'local halving'} failure lands checked prefix, records failing combination, preserves later age`, async t => {
-    const f = await fixture(t, { remote });
+    const f = await fixture(t, { remote, failWhen: "exists('good.txt') && exists('bad.txt')" });
     const entries = [];
     for (const path of ['good.txt', 'bad.txt', 'third.txt', 'fourth.txt'])
       entries.push(await f.candidate(path));
+    await f.checkCandidates();
     const ages = f.store.load().landingEntries.map(entry => entry.arrivedAt);
     await drainLandingBatches(f.work, 'main');
     const data = f.store.load(),
@@ -120,7 +126,7 @@ for (const remote of [true, false])
       ['accepted', 'failed', 'accepted', 'accepted'],
       JSON.stringify(
         data.runs
-          .filter(run => !run.mainCheck)
+          .filter(run => !run.mainCheck && !f.soloRuns.has(run.id))
           .map(({ id, status, exitCode, signal, details, error, inputs, head, failureSummary }) => ({
             id,
             status,
@@ -142,6 +148,7 @@ for (const remote of [true, false])
 test('restarted driver adopts the persisted batch and acceptance after a lost reply', async t => {
   const f = await fixture(t);
   for (const path of ['first.txt', 'second.txt']) await f.candidate(path);
+  await f.checkCandidates();
   const batch = await batchEdit(f.work, 'select', data => selectBatch(f.work, data, 'main'));
   await composeBatch(f.work, batch);
   const dispatch = f.work.dispatch.bind(f.work);
@@ -160,7 +167,7 @@ test('restarted driver adopts the persisted batch and acceptance after a lost re
   const data = f.store.load();
   assert.equal(data.channelMoves.length, 1);
   assert.equal(data.landingBatches.length, 1);
-  assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
+  assert.equal(data.runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
   assert.ok(data.landingEntries.every(entry => entry.status === 'accepted'));
 });
 
@@ -181,7 +188,7 @@ test('a lone finish runs immediately and terminal replay does not rerun it', asy
   // Replay the filled pins returned by the workflow.
   const replay = (await f.agent.dispatch({ ...command, ...first.resolved })).result;
   assert.equal(replay.acceptance.acceptanceId, first.acceptance.acceptanceId);
-  assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
+  assert.equal(f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
 });
 
 test('parallel failure checks all proper prefixes concurrently, and keeps a nonmonotonic longest pass', async t => {
@@ -248,6 +255,7 @@ test('Work17 requires its version, survives portable serialization and rejects f
 test('queued cancellation retains and checks the prefix before that entry', async t => {
   const f = await fixture(t);
   for (const path of ['before.txt', 'cancel.txt', 'after.txt']) await f.candidate(path);
+  await f.checkCandidates();
   const dispatch = f.work.dispatch.bind(f.work);
   let cancelled = false;
   f.work.dispatch = async (...args) => {
@@ -315,7 +323,7 @@ test('main can overtake a checking batch with manifest-disjoint evidence', async
   assert.equal(f.content('batch.txt'), 'batch.txt\n');
   assert.equal(f.content('rival.txt'), 'rival\n');
   assert.equal(f.main().fastPath.kind, 'disjoint-fast-path');
-  assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
+  assert.equal(f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
 });
 
 test('priority and submitter fairness only change ordering and keep original age', () => {
@@ -364,14 +372,17 @@ test('synthetic four-entry wall time uses the same runner and harness for serial
     }
     const ms = performance.now() - started;
     assert.equal(f.store.load().landingEntries.length, 4);
-    return { ms: Math.round(ms), runs: f.store.load().runs.filter(run => !run.mainCheck).length };
+    return {
+      ms: Math.round(ms),
+      runs: f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length,
+    };
   };
   const before = await measure(1),
     after = await measure(4);
   assert.equal(before.runs, 4);
-  assert.equal(after.runs, 1);
+  assert.equal(after.runs, 5, 'four singleton admission checks plus the combined gate');
   t.diagnostic(
-    `SYNTHETIC serial=${before.ms}ms (${before.runs} runs), batch=${after.ms}ms (${after.runs} run); mock Modal 80ms/check; no real Modal`,
+    `SYNTHETIC serial=${before.ms}ms (${before.runs} runs), batch=${after.ms}ms (${after.runs} runs including admission); mock Modal 80ms/check; no real Modal`,
   );
 });
 
@@ -453,6 +464,7 @@ test('two finish processes with different PATH share the owner execution environ
   const f = await fixture(t);
   const a = await f.candidate('path-a.txt', 'a\n', false);
   const b = await f.candidate('path-b.txt', 'b\n', false);
+  await f.checkCandidates([a, b]);
   const script = `import { AgentWorkflow } from ${JSON.stringify(new URL('../dist/agent-workflow.js', import.meta.url).href)};
 const result = await new AgentWorkflow(process.argv[1]).dispatch({action:'finish',laneId:process.argv[2],message:'Synthetic process finish',accept:true,waitMs:1});
 console.log(JSON.stringify(result.result));`;
@@ -477,11 +489,11 @@ console.log(JSON.stringify(result.result));`;
   );
   assert.equal(f.content('path-a.txt'), 'a\n');
   assert.equal(f.content('path-b.txt'), 'b\n');
-  assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
-  assert.equal(data.runs.find(run => !run.mainCheck).status, 'passed');
+  assert.equal(data.runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
+  assert.equal(data.runs.find(run => !run.mainCheck && !f.soloRuns.has(run.id)).status, 'passed');
   assert.equal(
     data.landingBatches[0].environment.fingerprint,
-    data.runs.find(run => !run.mainCheck).environment.fingerprint,
+    data.runs.find(run => !run.mainCheck && !f.soloRuns.has(run.id)).environment.fingerprint,
   );
 });
 
@@ -497,7 +509,7 @@ test('a retained batch executes and accepts with its recorded runtime after driv
     process.env.PATH = path;
   }
   const data = f.store.load();
-  const run = data.runs.find(run => !run.mainCheck);
+  const run = data.runs.find(run => !run.mainCheck && !f.soloRuns.has(run.id));
   assert.equal(run.status, 'passed');
   assert.deepEqual(run.environment, batch.environment);
   assert.equal(data.landingEntries[0].status, 'accepted');
@@ -627,7 +639,7 @@ for (const checked of [false, true])
     const data = f.store.load();
     assert.equal(data.landingEntries[0].status, 'accepted');
     assert.equal(data.landingBatches[0].status, checked ? 'completed' : 'superseded');
-    assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
+    assert.equal(data.runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
   });
 
 test('format17 batches migrate to unified format18 and keep working without downgrade', async t => {
@@ -657,6 +669,7 @@ for (const unifiedFirst of [false, true])
   test(`eight-entry remote batch promotes ${unifiedFirst ? 'unified format18 to 20' : 'legacy format17 to 19'} and survives migration/restart`, async t => {
     const f = await fixture(t);
     for (let i = 0; i < 8; i++) await f.candidate(`eight-${i}.txt`);
+    await f.checkCandidates();
     if (unifiedFirst) migrateIntentWork(f.store);
     assert.equal(f.store.load().schema, unifiedFirst ? 18 : 17);
     const batch = await batchEdit(f.work, 'select-eight', data => selectBatch(f.work, data, 'main'));
@@ -682,7 +695,7 @@ for (const unifiedFirst of [false, true])
     assert.equal(data.landingBatches.length, 1);
     assert.equal(data.landingBatches[0].entryIds.length, 8);
     assert.equal(data.landingBatches[0].status, 'completed');
-    assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
+    assert.equal(data.runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
     assert.ok(data.landingEntries.every(entry => entry.status === 'accepted'));
     assert.equal(data.channelMoves.length, 1);
     for (let i = 0; i < 8; i++) assert.equal(f.content(`eight-${i}.txt`), `eight-${i}.txt\n`);
@@ -744,7 +757,7 @@ test('a replacement CLI preserves an unstarted retained batch', async t => {
   const data = f.store.load();
   assert.equal(data.landingBatches[0].status, 'completed');
   assert.equal(data.landingEntries[0].status, 'accepted');
-  assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
+  assert.equal(data.runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
 });
 
 test('explicit PATH passthrough remains a check-relevant submission pin', async t => {
@@ -787,7 +800,7 @@ test('pending infra keeps the original batch and submission resumable without at
     inputs: view.inputs,
     dependencies: view.dependencies,
     check: f.store.load().checks[0],
-    environment: checkEnvironment(),
+    environment: saved.environment,
     status: 'interrupted',
     startedAt: new Date().toISOString(),
     runner: { pid: process.pid, host: 'synthetic' },

@@ -3,6 +3,7 @@ import { runReceipt } from './agent-receipts.js';
 import { runWork } from './work-run.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
+import { failedTestFiles } from './check-failure-files.js';
 
 const CAP = 4096,
   MATCH = /✖|not ok|Error/;
@@ -25,8 +26,11 @@ export function failureSummary(store: WorkStore, run: CheckRun): string {
   const last = err.filter(line => line.trim()).slice(-40);
   const seen = new Set(last);
   const marked = [...out, ...err].filter(line => MATCH.test(line) && !seen.has(line)).slice(-40);
+  const files = failedTestFiles([...out, ...err].join('\n'));
+  const names = files.length ? `Failing tests: ${files.join(', ')}\n`.slice(0, CAP / 2) : '';
   const text = [...marked, ...last].join('\n');
-  return text.length > CAP ? `…${text.slice(-(CAP - 1))}` : text;
+  const remaining = CAP - names.length;
+  return names + (text.length > remaining ? `…${text.slice(-(remaining - 1))}` : text);
 }
 /** Run receipt, with a failure summary when the run failed. */
 export function runReceiptWithFailure(store: WorkStore, run: CheckRun) {

@@ -349,6 +349,8 @@ test('actual queue batch catches independent submissions and respects skip for a
         dependencies: [],
       })
     ).result;
+    // The combined preview is exercised after each input has its solo gate.
+    await f.agent.dispatch({ action: 'run', viewId: view.viewId });
     await enqueueLanding(
       f.agent.work,
       {
@@ -376,7 +378,7 @@ test('actual queue batch catches independent submissions and respects skip for a
   assert.match(entries[0].previewDiagnostic.errors.join('\n'), /synthetic pair clash/);
   assert.equal(entries[1].status, 'checking');
   assert.equal(entries[1].preview, 'skip');
-  assert.equal(f.store.load().runs.length, 0);
+  assert.equal(f.store.load().runs.length, 2, 'only the two solo checks ran');
 });
 
 test('built-in Convex source validation catches a merge-only duplicate without configured commands', async t => {

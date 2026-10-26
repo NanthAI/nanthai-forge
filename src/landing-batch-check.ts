@@ -8,6 +8,7 @@ import {
   diagnosticStatus,
 } from './landing-diagnosis.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
+import { evaluateSoloAdmission } from './landing-solo-evaluation.js';
 // SPDX-License-Identifier: Apache-2.0
 import { waitForAgentRun } from './agent-run-observer.js';
 import { batchEdit } from './landing-batch-store.js';
@@ -82,6 +83,7 @@ export async function evaluateBatch(
   driver: LandingDriver,
   waitMs?: number,
 ) {
+  if (batch.admission) return evaluateSoloAdmission(work, batch, driver, waitMs);
   const cancelledAt = cancellationBoundary(work, batch);
   let settled = false;
   const outcome = await passingPrefix(

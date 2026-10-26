@@ -16,7 +16,7 @@ import { landingBatchSchema } from '../dist/landing-batch-types.js';
 import { preserveFields } from '../dist/work-normalization.js';
 
 const select = f => batchEdit(f.work, 'test-select', data => selectBatch(f.work, data, 'main'));
-const runs = f => f.store.load().runs.filter(run => !run.mainCheck);
+const runs = f => f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id));
 const snapshot = f => ({
   batches: f.store.load().landingBatches,
   runs: runs(f),
@@ -343,6 +343,7 @@ test('cancellation after durable evaluation invalidates that cursor and accepts 
   const f = await fixture(t);
   const first = await f.candidate('cancel-before.txt');
   const cancelled = await f.candidate('cancel-after.txt');
+  await f.checkCandidates();
   const batch = await select(f),
     driver = await claimLandingDriver(f.work, 'main');
   await advanceLandingBatch(f.work, batch.id, driver);
@@ -390,9 +391,10 @@ for (const kind of ['failed', 'review'])
   });
 
 test('legacy shorter-prefix acceptance without an evaluation cursor retains its exact failed successor', async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, { failWhen: "exists('legacy-good.txt') && exists('bad.txt')" });
   const good = await f.candidate('legacy-good.txt'),
     bad = await f.candidate('bad.txt');
+  await f.checkCandidates();
   const batch = await select(f);
   const dispatch = f.work.dispatch.bind(f.work);
   f.work.dispatch = async (...args) => {

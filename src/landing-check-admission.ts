@@ -62,7 +62,7 @@ export async function admitLandingCheck(
   if (recorded) recorded = (await reuse()) ?? recorded;
   if (recorded && recorded.status !== 'interrupted') {
     validatePrefixRun(work, batch, prefix, recorded);
-    await retainDiagnosisNode(work, batch, prefix, parent, driver);
+    if (!batch.admission) await retainDiagnosisNode(work, batch, prefix, parent, driver);
     return true;
   }
   const environment = batch.environment ?? checkEnvironment();
@@ -157,7 +157,7 @@ export async function admitLandingCheck(
         }
       }
       if (run) validatePrefixRun(work, batch, prefix, run);
-      await retainDiagnosisNode(work, batch, prefix, parent, driver);
+      if (!batch.admission) await retainDiagnosisNode(work, batch, prefix, parent, driver);
       if (!run || run.status === 'interrupted') {
         durableReplace(
           reservation,

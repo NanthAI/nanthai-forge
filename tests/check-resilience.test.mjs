@@ -45,7 +45,7 @@ async function reserve(t, backend) {
     inputs: view.inputs,
     dependencies: view.dependencies,
     check: f.store.load().checks[0],
-    environment: checkEnvironment(),
+    environment: saved.environment,
     status: 'queued',
     startedAt: new Date().toISOString(),
     runner: { ...processIdentity(), host: hostname() },

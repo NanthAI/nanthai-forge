@@ -39,13 +39,14 @@ const setup = async t => {
 const plan = f => planLandingTrain(f.store, f.store.load(), 'main');
 const trainEvent = (f, laneId) =>
   waitObservation(f.store, 'lane', laneId).events.find(e => e.type === 'train');
-const runs = f => f.store.load().runs.filter(run => !run.mainCheck);
+const runs = f => f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id));
 
 test('four overlapping docs submissions use the shared plan, sync before checks and batch independent code', async t => {
   const f = await setup(t),
     docs = [];
   for (let i = 0; i < 4; i++) docs.push(await f.candidate('shared.md', text(i)));
   const code = [await f.candidate('alpha.ts'), await f.candidate('beta.ts')];
+  await f.checkCandidates([docs[0], ...code]);
   const initial = plan(f),
     data = f.store.load();
   const expected = savedOverlapPlan(f.store, data.lanes);
@@ -203,6 +204,7 @@ test('a replacement submission derives a fresh disjoint plan and wait cursors de
     resumed.map(e => e.type),
     ['summary'],
   );
+  await f.checkCandidates();
   const batch = await batchEdit(f.work, 'select', data => selectBatch(f.work, data, 'main'));
   assert.deepEqual(batch.entryIds, [a.command.operationId, replacement.id]);
   await drainLandingBatches(f.work, 'main');

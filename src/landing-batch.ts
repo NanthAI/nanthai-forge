@@ -116,7 +116,9 @@ export async function drainLandingBatches(
           );
         if (batch) {
           observeWorkProgress();
-          launched++;
+          // A solo admission returns the same entry to selection. It is not
+          // one of this sweep's bounded acceptance attempts.
+          if (!batch.admission) launched++;
           started.add(batch.id);
           const parent = batch.parentId ? running.get(batch.parentId) : undefined,
             id = batch.id;

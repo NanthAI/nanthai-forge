@@ -5,7 +5,7 @@ The installed package includes `skills/forge-agent/SKILL.md`. Install it in your
 ## Working on Forge, not GitHub
 
 - Run only the tests your change affects, plus typecheck, lint and format checks on touched files. Never run the full suite locally: `finish` runs the project's check on the project's runner for the combined work of concurrent Lanes.
-- Let `finish` compose concurrent Lanes into one check. If a Lane fails, Forge drops it from the batch and the others still land after passing; a failed candidate never turns main red. Do not rebase, babysit a merge queue or rerun CI per PR. Configured native runners batch code changes; other paths retain ordinary checks and project acceptance policy.
+- Use check-only `finish` to check your saved work, then `land` to combine ready Lanes. Batching requires a passed full solo gate for the exact saved head or the same Q3 reuse key on the same base main. An unchecked entry runs alone first; a solo failure returns directly to its author with failing test files, without batch prefix diagnosis. Configured native runners batch code changes; other paths retain ordinary checks and project acceptance policy.
 - Read peers and presence before editing to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
 
 For a known-file question, search and read the selected directory normally. Do not create Work or index simply to read source. For symbol/dependency investigation, `nforge mcp ROOT --agent` supplies the eight existing source tools and four concise workflow tools. It awaits the existing index worker when a source query needs missing/stale analysis. CLI graph queries still use explicit `nforge index ROOT`. Partial analysis never establishes complete independence.
@@ -13,6 +13,16 @@ For a known-file question, search and read the selected directory normally. Do n
 For a change, run `nforge agent ROOT start '{"outcome":"Describe the change"}'`. The receipt gives the Lane `laneId` and `path`; edit only that path. Start uses accepted main when present; `channel:null` uses workspace source. Start and checkpoint return their source/Work receipt as soon as the Lane activation or save is durable. Their responses include queued hosted activity, start warnings, friction and peers from existing indexes and planned claims, plus pending overlap delivery, without taking the owner writer lock. Peer coverage is `local-incomplete` because live source is not rescanned. CLI and MCP schedule a finite detached refresh of source indexes, overlap analysis and enabled integration previews; failure or delay of that refresh cannot hold or invalidate the receipt. Embedders may skip that refresh. Existing `peers`, `status` and `link` reads provide current optional observations. Original-operation replay retains saved source and the returned local observations without recapturing newer edits; new start receipts retain their original source metadata in portable Work, with local paths derived on read. Stacked start replay preserves its original head and base, while `currentHead` names the Lane’s latest saved head.
 
 Then run `nforge agent ROOT finish '{"laneId":"LANE_ID","message":"Describe the change","accept":true}'`. finish checkpoints, updates from main when policy permits, composes a Candidate, runs the `verify` check (or the only check) and requests acceptance under the project policy. New supervised projects return `awaiting-review`, `terminal:false`, `complete:false`, `readyToReview:true` and “Waiting for review by a person; not in main yet”. The Intent is ready; the Candidate and passing run remain available for a person to accept. Read `policy` and the policy section of `brief` before delivery. Omit `accept` for check-only work. With no new edits (for example right after `sync`) finish reuses the Lane head. From inside a Lane directory the CLI fills `laneId`.
+
+Recommended reviewed flow:
+
+1. Run `nforge agent ROOT finish '{"laneId":"LANE_ID","message":"Describe the change"}'` without `accept` and retain the returned checked Candidate and run.
+2. Have the reviewer read that exact checked Candidate, using `review` with its `viewId` and `head`.
+3. Run `nforge agent ROOT land '{"laneIds":["LANE_ID"],"operationId":"UUID","wait":true}'` to land the reviewed saved head.
+
+A passed full check-only finish supplies solo admission evidence. A later land of the same head or Q3 key on the same main does not run another solo check; compatible green entries receive their combined Candidate check. Explicit test-list runs never count. A different base main requires applicable solo evidence again. A lone unchecked entry can land directly after its own full check passes.
+
+`run {"laneId":"LANE_ID"}` also composes and checks the saved Lane without a prior finish. An applicable latest clean Candidate is reused; otherwise native composition pins accepted main and the saved input before dispatch. Metadata contention retries `WORK_STALE` up to three times with fresh observation pins, while published Candidate/run identities remain stable on replay. Source conflicts and changed selected inputs remain explicit.
 
 Multi-Lane work: `start` with `intentId` adds a Lane to an open Intent and returns `siblingLanes`; checkpoint each sibling, then `finish` with `with:["SIBLING_LANE_ID"]` composes their current recorded heads and the finishing Lane into one Candidate/check/acceptance through the same landing queue and autonomy policy (unsaved sibling edits are not included; conflicts stop at compose). `resolved.withInputs` pins those heads for retries. `start` or `finish` accepts `after:{intentId}` or `after:{viewId}`; the Lane retains this dependency, and finish returns `waiting-for-dependency`, `terminal:false` until the dependency lands in the destination Channel. An Intent dependency waits for all its current Lane heads to land; a Candidate dependency waits for that exact Candidate acceptance. Replay the original finish plus `resolved`, or run `nforge agent ROOT land-ready` on the same owner, to refresh main, check and request acceptance. Preserve `agent-finish/` for resumable waits; dependency links remain portable in Work format12. `brief` situations `add-lane` and `land-together` include sibling context; `status` and Intent `records` list Lanes, Candidate receipts list input pins, and hosted Lane summaries include `after`.
 
@@ -37,7 +47,7 @@ request for the same Lane/head while the first is still in progress is refused
 with `LANDING_ALREADY_SUBMITTED` and the original operation identity; replay it.
 Once it has finished, the same head can be submitted again (e.g. after a flake). Omitted wait preserves a finite sweep;
 `wait:false` durably submits for the owner worker.
- Inputs
+Inputs
 from the same Intent share a Candidate (the same grouping as `finish with`);
 compatible cross-Intent entries enter the existing landing batch before its check
 starts. Existing runner compatibility and batch sizes still apply. Dependency
@@ -89,7 +99,7 @@ Agent `status`, `tests`, `peers`, `review`, `diff`, `show` and `brief` pin the a
 
 Start prepares its reservation and activation pages outside the owner lock and materializes the Lane between those commits. Native and Git checkpoint/sync prepare source and record pages under the Lane lock, then validate and publish against the current Work pointer in short owner commits. Unrelated metadata CAS conflicts repeat record publication, retaining the prepared source and concurrent Lane metadata. Sync restoration of collected prepared objects happens outside the lock, followed by object-identity checks at publication. Lifecycle activity summaries also prepare pinned records and path differences outside the owner lock, retaining those differences across unrelated metadata races. Run registration likewise prepares declared-input observations, interaction proofs and run pages before validating and committing its exact snapshot; command execution holds no owner lock. Legacy record migration retains its one-time locked validation path.
 
-Finish's native composition prepares its pinned source merge outside the owner lock. Publication revalidates the selected Lane heads, Intent base/dependencies and dependency source pins against current Work, restores any newly merged objects collected during preparation, and writes the Candidate in the owner critical section. Unrelated checkpoints, check progress and landing admissions do not invalidate the prepared merge or overwrite concurrent metadata. Changed selected inputs still stop publication. Direct composition retains its initial and final Work revision preconditions. Finish observes composition revisions without taking a writer ticket; receipt-reconciled metadata retries use bounded jittered backoff with their original operation IDs. While the runner's configured batch capacity is full, the landing driver observes running checks without repeatedly publishing unchanged batch-selection metadata. Persisted unstarted batches remain recoverable.
+Finish's native composition prepares its pinned source merge outside the owner lock. Publication revalidates the selected Lane heads, Intent base/dependencies and dependency source pins against current Work, restores any newly merged objects collected during preparation, and writes the Candidate in the owner critical section. Unrelated checkpoints, check progress and landing admissions do not invalidate the prepared merge or overwrite concurrent metadata. Changed selected inputs still stop publication. Lane run composition retries metadata revision contention up to three times; explicit compose and Candidate run requests retain their revision preconditions, and source/check pin changes remain errors. Finish observes composition revisions without taking a writer ticket; receipt-reconciled metadata retries use bounded jittered backoff with their original operation IDs. While the runner's configured batch capacity is full, the landing driver observes running checks without repeatedly publishing unchanged batch-selection metadata. Persisted unstarted batches remain recoverable.
 
 Concurrent agents: if another Lane was accepted after yours started, under `laneUpdates:"auto"`, finish merges main into your Lane first (a `Sync main` checkpoint with two parents). Overlapping edits stop finish with `phase:"sync"`, `status:"conflict"` and Git-style markers (`<<<<<<< lane`, `=======`, `>>>>>>> main`) in the listed files; binary conflicts keep the Lane version. Checkpoint refuses files that still contain markers (`CONFLICT_MARKERS`). Resolve, then finish again. When every conflict is a text conflict in Markdown documentation (`*.md` at the root or under `docs/`), finish resolves it instead of stopping: see [Markdown conflict resolution](#markdown-conflict-resolution-on-finish). `sync` (`{"laneId":"LANE_ID"}`) does the merge on its own and returns `up-to-date`, `merged` or `conflict`; it needs a checkpointed Lane (`LANE_DIRTY`). sync writes files before recording the new head, so an interrupted sync can simply be repeated. Acceptance refuses any Candidate that does not contain the Channel's current head (`CHANNEL_DIVERGED`), with earlier accepted-head rollback available only to a person. Each automatic successful sync records its changed paths and undo instructions; `undo-sync` takes `laneId` and `syncOperationId`, refusing newer edits unless explicitly forced. `laneUpdates:"ask"` stops with `sync-required`: run sync, then start a new finish operation. Git-backed Lanes also sync and retain both merge parents after staged conflict resolution.
 
@@ -172,7 +182,6 @@ updates still obey `laneUpdates`, saved-head and dirty-work guards; `ask` remain
 an explicit sync decision. Ordinary undo refuses newer dirty work. An explicitly
 forced undo retains those bytes before restoring the working copy. Original
 base/left/right objects and old check evidence remain available as history.
-
 
 Start, checkpoint, sync, finish and Lane-specific status include an advisory local `peers` digest. Start and checkpoint use existing peer indexes and planned claims, reporting incomplete coverage rather than waiting for a source refresh. `scope.paths` declares relevance for the call; start also retains planned path claims until the Lane closes. Use `peers {"laneId":"…","detail":true}` or `forge_peers` for detailed observations. A clean checkpoint returns its unchanged retained head, including after an up-to-date sync. Save edits before sync; the sync receipt itself identifies the resulting saved head.
 
@@ -261,7 +270,26 @@ When a hosted project and an existing owner/contributor credential are supplied,
 Announce a distinct session UUID for each environment/task, with increasing sequence and accurate `working`, `waiting`, `observing` or `completed` status. Link the actual Intent, Lane and source head and the paths/dependencies you intend to touch. This is an observation, not a lock or a verified claim of independence:
 
 ```json
-{"action":"publish","operationId":"NEW_UUID","command":{"kind":"activity","sessionId":"SESSION_UUID","sequence":1,"name":"Source worker","environment":"Local Lane","status":"working","summary":"Implementing incremental source exchange","context":{"intentId":"INTENT_ID","laneId":"LANE_ID","head":"HEAD","paths":["src/example.ts"],"dependsOn":[]}}}
+{
+  "action": "publish",
+  "operationId": "NEW_UUID",
+  "command": {
+    "kind": "activity",
+    "sessionId": "SESSION_UUID",
+    "sequence": 1,
+    "name": "Source worker",
+    "environment": "Local Lane",
+    "status": "working",
+    "summary": "Implementing incremental source exchange",
+    "context": {
+      "intentId": "INTENT_ID",
+      "laneId": "LANE_ID",
+      "head": "HEAD",
+      "paths": ["src/example.ts"],
+      "dependsOn": []
+    }
+  }
+}
 ```
 
 Read `{"action":"feed","cursor":null,"pageSize":50}` before related edits and when changing work phase. Read additional pages while `isDone` is false. Keep `continueCursor` and seen operation IDs across reconnects; `cursorReset:true` means an older opaque cursor was restarted, so deduplicate replayed operation IDs; replay an original mutation UUID/payload after an unknown outcome. The feed is append-only and separate from the archived Work revision. `sessions` reads current observations, and `recent` reads newest events first, using the same paging fields.
@@ -306,9 +334,7 @@ and `viewFiles`, dependency `kind:"view"`, automation event `clean-view`, Git
 refs, error codes and hosted API identifiers also remain unchanged. The Work
 format does not change.
 
-
 The browser Intent page shows a work map of Lane saves and composed Candidates. Superseded Candidates stay grey; accepted Candidates land on main. Each Candidate opens its pinned composition, record, changed files and expandable provenance. File details show contributing Lanes, save actors/messages, linked Intent rationale, and optional line-range attribution. A Lane's “Part of these Candidates” section links to every recorded participation, with its pinned save and acceptance. Local Intent actions can add a Lane or combine selected saved Lanes; hosted controls appear only when a command adapter is available.
-
 
 `nforge agent ROOT candidate '{"viewId":"UUID","offset":0,"limit":20}'` returns `{revision,result:{viewId,intentId,base,head,inputs:[{laneId,head,saveIndex}],dependencies,status,sourceStatus,supersededBy,accepted:[{id,channel,head,at,actor}],runs,files:{items:[{path,status,additions,deletions}],total,nextOffset}}}`. Status is `ready`, `conflict`, `superseded` or `accepted`; accepted Candidates retain their supersession link. Input identities for supersession are the Intent and unordered Lane IDs; heads may advance. A save index of `-1` means the input has no save at that head.
 
@@ -522,7 +548,6 @@ accepts an explicit `tests` list for a failed-file-only retry and records partia
 evidence; Modal also retries failed shards while retaining completed shards.
 Check-only commands and `assess-check-inputs` retain their existing behavior.
 
-
 The acceptance receipt's structured `fastPath` records the policy, checked
 Candidate/head/run, definition, runtime, previous and composed main, both path sets and
 the required full post-accept check. The accepted Candidate pins the resulting source;
@@ -590,7 +615,6 @@ checkpoint, note and policy writes against format 14 without changing retained
 bytes. Its low-level embedding API `WorkStore.records().commit()` can publish a
 revision without parsing the Work schema; it is not a safe legacy writer after
 enabling. Current CLI record transactions guard the format on construction.
-
 
 ### Markdown conflict resolution on finish
 

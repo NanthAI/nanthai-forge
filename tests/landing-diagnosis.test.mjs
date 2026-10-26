@@ -21,7 +21,7 @@ import { promisify } from 'node:util';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 
 const select = f => batchEdit(f.work, 'select', data => selectBatch(f.work, data, 'main'));
-const runs = f => f.store.load().runs.filter(run => !run.mainCheck);
+const runs = f => f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id));
 function assertCheckedMoves(f) {
   const data = f.store.load();
   assert.ok(data.channelMoves.some(move => move.status === 'accepted'));
@@ -60,6 +60,7 @@ for (const remote of [false, true])
     );
     await waitForAgentRun(f.store, bControlId);
     assert.equal(f.store.select('runs', bControlId).status, 'passed');
+    await f.checkCandidates();
     await drainLandingBatches(f.work, 'main');
     const data = f.store.load(),
       first = data.landingBatches[0];
@@ -101,9 +102,10 @@ for (const remote of [false, true])
   test(`non-monotone prefixes retain observed failures without claiming minimality (${remote ? 'parallel' : 'halving'})`, async t => {
     const f = await fixture(t, {
       remote,
-      failWhen: "(exists('B.txt') && !exists('C.txt')) || exists('D.txt')",
+      failWhen: "exists('A.txt') && ((exists('B.txt') && !exists('C.txt')) || exists('D.txt'))",
     });
     for (const name of ['A', 'B', 'C', 'D']) await f.candidate(`${name}.txt`);
+    await f.checkCandidates();
     await drainLandingBatches(f.work, 'main');
     const first = f.store.load().landingBatches[0];
     const observed = new Map(first.diagnosis.nodes.map(node => [node.entryIds.length, node.status]));
@@ -128,6 +130,7 @@ test('all-passing halves do not license their failed union; second half is recom
     const input = await f.candidate(`${name}.txt`, `${name}\n`, true, intentId);
     intentId ??= input.lane.intentId;
   }
+  await f.checkCandidates();
   // Check both independent halves on the original base through the same runner.
   const initial = f.store.load().landingEntries;
   const halves = [];
@@ -181,6 +184,7 @@ test('three-way-only failure retains the observed triple even when all pairs pas
   const candidates = [];
   for (const name of ['A', 'B', 'C'])
     candidates.push(await f.candidate(`${name}.txt`, `${name}\n`, true, candidates[0]?.lane.intentId));
+  await f.checkCandidates();
   for (const pair of [
     [0, 1],
     [0, 2],
@@ -227,8 +231,9 @@ test('three-way-only failure retains the observed triple even when all pairs pas
 });
 
 test('restart mid-split retains reserved child and adopts completed evidence without another dispatch', async t => {
-  const f = await fixture(t, { remote: false });
+  const f = await fixture(t, { remote: false, failWhen: "exists('A.txt') && exists('bad.txt')" });
   for (const name of ['A.txt', 'bad.txt', 'C.txt', 'D.txt']) await f.candidate(name);
+  await f.checkCandidates();
   const batch = await select(f),
     driver = await claimLandingDriver(f.work, 'main');
   await composeBatch(f.work, batch, driver.beforePublish);
@@ -384,6 +389,7 @@ for (const error of [undefined, { code: 'WORK_BUSY', message: 'Synthetic runner 
     const f = await fixture(t, { remote: false });
     await f.candidate('A.txt');
     await f.candidate('B.txt');
+    await f.checkCandidates();
     const batch = await select(f),
       driver = await claimLandingDriver(f.work, 'main');
     await composeBatch(f.work, batch, driver.beforePublish);

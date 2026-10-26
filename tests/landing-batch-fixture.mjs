@@ -84,6 +84,18 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
     rmSync(credentialRoot, { recursive: true, force: true });
   });
   const pending = [];
+  const soloRuns = new Set();
+  // Real full singleton evidence for tests whose subject is combined checking.
+  async function checkCandidates(candidates) {
+    const views =
+      candidates?.map(item => item.view) ??
+      store.load().landingEntries.map(entry => store.select('views', entry.viewId));
+    for (const view of views) {
+      const run = (await agent.dispatch({ action: 'run', viewId: view.id })).result;
+      if (run.status !== 'passed') throw new Error(`Fixture solo check failed: ${run.status}`);
+      soloRuns.add(run.runId);
+    }
+  }
   async function candidate(path, text = `${path}\n`, enqueue = true, intentId) {
     const lane = (
       await agent.dispatch({
@@ -135,5 +147,5 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
       file = source.state(main().head).files.find(file => file.path === path);
     return file && source.object(file.blob).toString();
   };
-  return { root, agent, work, store, check, candidate, main, content, pending };
+  return { root, agent, work, store, check, candidate, main, content, pending, checkCandidates, soloRuns };
 }

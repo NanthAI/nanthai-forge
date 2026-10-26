@@ -142,7 +142,7 @@ test('cross-Intent saved Lanes share one combined check, acceptance and stable r
   assert.equal(f.contents('b.txt'), 'b.txt\n');
   assert.equal(readFileSync(join(b.path, 'b.txt'), 'utf8'), 'unsaved sibling edit\n');
   const data = f.store.load();
-  assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
+  assert.equal(data.runs.filter(run => !run.mainCheck).length, 3, 'two solo gates and one combined check');
   assert.equal(data.channelMoves.length, 1);
   assert.deepEqual((await f.land([a, b], { operationId })).result.entries, result.entries);
   assert.equal(f.store.load().runs.length, data.runs.length);
@@ -248,7 +248,7 @@ for (const batching of [true, false]) {
       selected.map(entry => entry.command.operationId),
     );
     const data = f.store.load();
-    assert.equal(data.runs.filter(run => !run.mainCheck).length, batching ? 1 : 2);
+    assert.equal(data.runs.filter(run => !run.mainCheck).length, batching ? 3 : 2);
     assert.equal(data.channelMoves.length, batching ? 1 : 2);
   });
 }

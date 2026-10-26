@@ -119,6 +119,8 @@ export const landingBatchSchema = z.object({
   entryIds: z.array(id).min(1).max(8),
   /** Speculative stack: this batch's base is the projected head of the parent batch. */
   parentId: id.optional(),
+  /** A solo admission check returns green entries to selection before acceptance. */
+  admission: z.literal(true).optional(),
   mode: z.enum(['parallel', 'halving']),
   status: z.enum(['composing', 'checking', 'completed', 'superseded']),
   prefixes: z.array(batchPrefixSchema),

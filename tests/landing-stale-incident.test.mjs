@@ -42,7 +42,7 @@ async function orphanRun(f, backend) {
     expectedHead: prefix.head,
     checkId: f.check.checkId,
     expectedDefinition: f.check.definition,
-    expectedEnvironment: checkEnvironment().fingerprint,
+    expectedEnvironment: batch.environment.fingerprint,
   });
   assert.ok(preparation?.run);
   const run = preparation.run;
@@ -95,7 +95,7 @@ for (const selected of [false, true, 'composed'])
       assert.equal(f.store.select('lanes', a.lane.laneId).head, b.head);
       assert.equal(f.store.select('landingEntries', peer.command.operationId).status, 'accepted');
       assert.equal(f.content('peer.txt'), 'peer.txt\n');
-      assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
+      assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 3);
       assert.notEqual(readPendingStatus(f.store).landingWorker.status, 'error');
     });
   });
@@ -157,7 +157,7 @@ for (const selected of [false, true, 'composed'])
         assert.equal(f.store.select('landingEntries', peer.command.operationId).status, 'accepted');
         assert.equal(f.content('peer.txt'), 'peer.txt\n');
       }
-      assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, peer ? 2 : 1);
+      assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, peer ? 3 : 1);
       assert.notEqual(readPendingStatus(f.store).landingWorker.status, 'error');
     });
   });

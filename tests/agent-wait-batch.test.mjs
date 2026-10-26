@@ -20,6 +20,7 @@ async function batchFixture(t) {
   const f = await fixture(t, { remote: false });
   const a = await f.candidate('a.txt'),
     b = await f.candidate('b.txt');
+  await f.checkCandidates();
   const selected = await batchEdit(f.work, 'main', data => selectBatch(f.work, data, 'main'));
   const batch = await composeBatch(f.work, selected);
   const full = batch.prefixes.at(-1);
@@ -129,7 +130,7 @@ test('a reserved batch probe never substitutes a run with different source pins'
   const f = await batchFixture(t);
   await f.addRun(f.full);
   await f.edit(data => {
-    data.runs[0].viewId = randomUUID();
+    data.runs.find(run => run.id === f.full.runId).viewId = randomUUID();
   });
   const observed = waitObservation(f.store, 'operation', f.a.command.operationId);
   assert.deepEqual(observed.runIds, []);

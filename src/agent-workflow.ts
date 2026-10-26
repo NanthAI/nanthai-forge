@@ -19,6 +19,8 @@ import { readLaneSubmissions } from './landing-submission-read.js';
 import { land } from './land.js';
 import type { LandCommand } from './land-schema.js';
 import { agentLaneTests } from './agent-lane-tests.js';
+import { prepareLaneRun, retryRunPublication } from './agent-lane-run.js';
+import { landingRecords } from './landing-records.js';
 import { agentLaneStatus } from './agent-lane-status.js';
 import { runnerMonthCosts } from './check-cost.js';
 import { candidateCommand } from './candidate-names.js';
@@ -206,9 +208,19 @@ export class AgentWorkflow {
     const wait = !('wait' in identity && identity.wait === false);
     if (identity.action === 'finish') delete identity.wait;
     const store = this.work.store,
-      { command, resolved: defaultResolved } = resolveAgentDefaults(store, identity);
+      prepared = identity.action === 'run' ? await prepareLaneRun(this.work, identity) : identity,
+      { command, resolved: defaultResolved } = resolveAgentDefaults(store, prepared);
     if ('operationId' in command && command.operationId) metricOperationId(command.operationId);
-    const filled = { ...retainedResolved, ...defaultResolved };
+    const filled = {
+      ...retainedResolved,
+      ...(identity.action === 'run' && prepared.action === 'run'
+        ? {
+            ...(!identity.viewId && prepared.viewId ? { viewId: prepared.viewId } : {}),
+            ...(!identity.operationId && prepared.operationId ? { operationId: prepared.operationId } : {}),
+          }
+        : {}),
+      ...defaultResolved,
+    };
     const resolved = Object.keys(filled).length ? filled : undefined;
     if (command.action === 'tests') return agentLaneTests(store, command.laneId);
     // A cleaned Lane is restored before an action needs its source.
@@ -261,7 +273,8 @@ export class AgentWorkflow {
               retries,
               evidence: [operationId],
             }),
-          () => this.action(command, wait),
+          () =>
+            this.action(command, wait, identity.action === 'run' && !!identity.laneId && !identity.viewId),
         ),
     );
     if (command.action === 'start' || command.action === 'checkpoint') {
@@ -279,7 +292,11 @@ export class AgentWorkflow {
     }
     return agentResponseAdvisory(store, command, response, resolved, warnings, this.liveMcp, true, wait);
   }
-  private async action(command: AgentAction, wait = true): Promise<{ revision: number; result: unknown }> {
+  private async action(
+    command: AgentAction,
+    wait = true,
+    laneRun = false,
+  ): Promise<{ revision: number; result: unknown }> {
     const store = this.work.store;
     if (command.action === 'handoff')
       return recordHandoff(store, { ...command, operationId: command.operationId! });
@@ -496,20 +513,32 @@ export class AgentWorkflow {
       const definition = input.expectedDefinition ?? original?.check.definition ?? check?.definition;
       invariant(definition, 'NOT_FOUND', 'Check definition not found.');
       const environment =
-        input.expectedEnvironment ?? original?.environment.fingerprint ?? checkEnvironment().fingerprint;
-      await this.work.dispatch(
-        {
-          action: 'run-check',
-          ...(input.tests !== undefined ? { tests: input.tests } : {}),
-          operationId: input.operationId,
-          viewId: input.viewId,
-          expectedHead: input.expectedHead,
-          checkId: input.checkId,
-          expectedDefinition: definition,
-          expectedEnvironment: environment,
-        },
-        revision,
-      );
+        input.expectedEnvironment ??
+        original?.environment.fingerprint ??
+        (store.native
+          ? landingRecords(store).landingBatches?.find(batch =>
+              batch.prefixes.some(
+                prefix => prefix.viewId === input.viewId && prefix.runId === input.operationId,
+              ),
+            )?.environment?.fingerprint
+          : undefined) ??
+        checkEnvironment().fingerprint;
+      const publish = () =>
+        this.work.dispatch(
+          {
+            action: 'run-check',
+            ...(input.tests !== undefined ? { tests: input.tests } : {}),
+            operationId: input.operationId,
+            viewId: input.viewId,
+            expectedHead: input.expectedHead,
+            checkId: input.checkId,
+            expectedDefinition: definition,
+            expectedEnvironment: environment,
+          },
+          laneRun ? store.revision() : revision,
+        );
+      if (laneRun) await retryRunPublication(publish);
+      else await publish();
       if (input.wait) await this.wait(input.operationId!);
       const run = store.select('runs', input.operationId!)!;
       return { revision: store.revision(), result: runReceiptWithFailure(store, run) };

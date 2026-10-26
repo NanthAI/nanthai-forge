@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { digest } from './hash.js';
+import { diagnosticCause } from './landing-observation.js';
 import { noticeParticipant, type ConflictNotice } from './agent-conflict-notice.js';
 import { PeersSource } from './agent-peers-source.js';
 import type { WorkStore } from './work-store.js';
@@ -75,6 +76,27 @@ export function landingRepairNotices(store: WorkStore, laneId?: string): Conflic
   for (const batch of Array.from({ length: tx.manifest.collections.landingBatches?.count ?? 0 }, (_, index) =>
     tx.at('landingBatches', index),
   )) {
+    // A terminal solo admission retains repair evidence without starting a
+    // prefix diagnosis or manufacturing a failing combination.
+    if (batch.admission && batch.status === 'completed') {
+      const entry = tx.find('landingEntries', batch.entryIds[0]!)?.record;
+      const prefix = batch.prefixes[0];
+      const run = prefix && entry?.runId === prefix.runId ? tx.find('runs', prefix.runId)?.record : undefined;
+      if (
+        run &&
+        ['failed', 'interrupted'].includes(entry!.status) &&
+        run.viewId === prefix!.viewId &&
+        run.head === prefix!.head
+      ) {
+        const cause = diagnosticCause(run);
+        add(
+          run,
+          batch.base,
+          { ...evidence(run, batch.base), ...(cause ? { cause } : {}) },
+          currentMain(batch.channel) === batch.previous,
+        );
+      }
+    }
     for (const node of batch.diagnosis?.nodes ?? []) {
       if (!['failed', 'interrupted', 'runner-unavailable', 'runner-budget-exhausted'].includes(node.status))
         continue;

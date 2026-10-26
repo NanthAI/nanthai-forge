@@ -130,6 +130,7 @@ test('Node-only version upgrades keep entry identities, order and immutable sour
   const f = await fixture(t, { remote: false });
   await f.candidate('first.txt');
   await f.candidate('second.txt');
+  await f.checkCandidates();
   const original = f.store.load().landingEntries;
   await batchEdit(f.work, 'old-node', data => {
     for (const entry of data.landingEntries) {

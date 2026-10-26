@@ -45,6 +45,7 @@ test('capacity and batch-size omissions have recorded selection rules', async t 
   const f = await fixture(t, { remote: false });
   const candidates = [];
   for (let i = 0; i < 5; i++) candidates.push(await f.candidate(`${i}.txt`));
+  await f.checkCandidates();
   const batch = await select(f);
   assert.equal(batch.entryIds.length, 4);
   assert.equal(entry(f, candidates[4]).waitingFor.rule, 'batch-size');
@@ -79,7 +80,7 @@ test('a passed batch with no live run names settlement before publication and re
   assert.equal(f.store.revision(), revision, 'visibility reads never publish progress');
   await drainLandingBatches(new AgentWorkflow(f.root).work, 'main');
   assert.equal(entry(f, candidate).status, 'accepted');
-  assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
+  assert.equal(f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
 });
 
 test('canonical acceptance cannot remain a stale overlapping blocker while entry settlement waits', async t => {
@@ -108,13 +109,14 @@ for (const flaky of [true, false])
     const scratch = mkdtempSync(join(tmpdir(), 'forge-confirm-'));
     const marker = join(scratch, 'failed-once');
     const failWhen = flaky
-      ? `exists('C.txt') && (()=>{const marker=${JSON.stringify(marker)};if(fs.existsSync(marker))return false;fs.writeFileSync(marker,'once');return true})()`
-      : "exists('C.txt')";
+      ? `exists('A.txt') && exists('C.txt') && (()=>{const marker=${JSON.stringify(marker)};if(fs.existsSync(marker))return false;fs.writeFileSync(marker,'once');return true})()`
+      : "exists('A.txt') && exists('C.txt')";
     const f = await fixture(t, { failWhen });
     // Keep the one-shot marker until the fixture has drained its detached audit.
     t.after(() => rmSync(scratch, { recursive: true, force: true }));
     const candidates = [];
     for (const name of ['A', 'B', 'C']) candidates.push(await f.candidate(`${name}.txt`));
+    await f.checkCandidates();
     const dispatch = f.work.dispatch.bind(f.work);
     f.work.dispatch = async (...args) => {
       const result = await dispatch(...args);
@@ -144,17 +146,18 @@ for (const flaky of [true, false])
     assert.equal(final.state, flaky ? 'landed' : 'terminal-failed');
     assert.equal(final.diagnosis.confirmation.verdict, flaky ? 'flake' : 'confirmed');
     if (!flaky) assert.match(entry(f, candidates[2]).reason, /Confirmation run .* failed again/);
-    const runs = f.store.load().runs.filter(run => !run.mainCheck).length;
+    const runs = f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length;
     assert.equal(runs, 4);
     await drainLandingBatches(new AgentWorkflow(f.root).work, 'main');
-    assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, runs);
+    assert.equal(f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, runs);
   });
 
 for (const lostAfterDispatch of [false, true])
   test(`confirmation restart adopts its one operation after loss ${lostAfterDispatch ? 'after' : 'before'} dispatch`, async t => {
-    const f = await fixture(t, { failWhen: "exists('B.txt')" });
+    const f = await fixture(t, { failWhen: "exists('A.txt') && exists('B.txt')" });
     await f.candidate('A.txt');
     const b = await f.candidate('B.txt');
+    await f.checkCandidates();
     const dispatch = f.work.dispatch.bind(f.work);
     let lost = false;
     f.work.dispatch = async (...args) => {
@@ -177,7 +180,7 @@ for (const lostAfterDispatch of [false, true])
     assert.equal(batch.confirmation.runId, confirmation.runId);
     assert.equal(batch.confirmation.verdict, 'confirmed');
     assert.equal(entry(f, b).status, 'failed');
-    assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 3);
+    assert.equal(f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 3);
     assert.equal(batch.diagnosis.nodes.filter(node => node.id === confirmation.runId).length, 1);
   });
 

@@ -14,17 +14,19 @@ test('every synthetic workload replays deterministically for serial and train re
     }
 });
 
-test('clean eight-arrival replay reports executed checks, rounded cost and distinct audit cost', async () => {
+test('unchecked eight-arrival replay reports singleton checks, rounded cost and distinct audit cost', async () => {
   const workload = syntheticWorkloads()[0];
   const serial = await replayLanding(workload, 'serial'),
     train = await replayLanding(workload, 'train');
   assert.equal(serial.checkExecutions, 9);
-  assert.equal(train.checkExecutions, 2);
+  // This reference planner has no retained solo receipts. The production
+  // selector therefore checks these unverified inputs as singletons.
+  assert.equal(train.checkExecutions, 9);
   assert.ok(Math.abs(serial.total.knownGrossCostUsd - 1.584) < 1e-12);
-  assert.ok(Math.abs(train.total.knownGrossCostUsd - 0.352) < 1e-12);
+  assert.ok(Math.abs(train.total.knownGrossCostUsd - 1.584) < 1e-12);
   assert.equal(train.byCategory.audit.checks, 1);
   assert.equal(serial.submitToOutcome.p95Ms, 2400000);
-  assert.equal(train.submitToOutcome.p95Ms, 300000);
+  assert.equal(train.submitToOutcome.p95Ms, 2400000);
 });
 
 test('fault workloads preserve unknown dispatch adoption, invalidated speculation and conflict outcomes', async () => {

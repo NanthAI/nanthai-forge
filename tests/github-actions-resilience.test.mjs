@@ -301,14 +301,16 @@ test('test names mentioning SIGKILL are not an OOM diagnosis; only failed jobs r
   assert.equal(outcome.exitCode, 1);
   assert.deepEqual(journal.oom, []);
 
-  const second = setup(t);
-  const oom = fakeApi(second.plan, second.journal, {
-    jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0', 'completed', 'failure')],
-    logs: { 2: '##[error]Process completed with exit code 137.\n' },
-  });
-  const killed = await control(second.plan, second.journal, oom.api);
-  assert.equal(killed.exitCode, 137);
-  assert.deepEqual(second.journal.oom, [2]);
+  for (const outcome of ['exit code 137', 'signal SIGKILL']) {
+    const second = setup(t);
+    const oom = fakeApi(second.plan, second.journal, {
+      jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0', 'completed', 'failure')],
+      logs: { 2: `##[error]Process completed with ${outcome}.\n` },
+    });
+    const killed = await control(second.plan, second.journal, oom.api);
+    assert.equal(killed.exitCode, 137);
+    assert.deepEqual(second.journal.oom, [2]);
+  }
 });
 
 test('gh transport classifies rate-limit stderr without exposing it', async t => {
@@ -440,11 +442,28 @@ test('test failure and likely OOM keep failure evidence while only the lost sibl
   const result = await control(plan, journal, api);
   assert.equal(result.status, 'failed');
   assert.equal(result.exitCode, 137);
+  assert.match(result.failureSummary, /exit 137\/SIGKILL \(likely OOM\)/);
   assert.deepEqual(journal.retrySources, { 1: 3 });
   assert.deepEqual(
     calls.filter(call => call.endpoint.endsWith('/rerun')).map(call => call.endpoint),
     ['repos/synthetic/checks/actions/jobs/3/rerun'],
   );
+});
+
+test('exit-1 shard summary names failing files without suggesting OOM', async t => {
+  const { plan, journal } = setup(t, [['tests/failure.test.mjs', 'tests/green.test.mjs']]);
+  journal.runId = 10;
+  const { api } = fakeApi(plan, journal, {
+    conclusion: 'failure',
+    jobs: () => [job(1, 'forge-static'), job(2, 'forge-shard-0', 'completed', 'failure')],
+    logs: {
+      2: '# Failed test file: tests/failure.test.mjs\nKilled process 123 in a synthetic test\n##[error]Expected SIGKILL handling assertion failed\n##[error]Process completed with exit code 1.\n',
+    },
+  });
+  const result = await control(plan, journal, api);
+  assert.equal(result.exitCode, 1);
+  assert.match(result.failureSummary, /failing tests: tests\/failure.test.mjs/);
+  assert.doesNotMatch(result.failureSummary, /OOM|SIGKILL|tests\/green/);
 });
 
 test('cancelling while a replacement is undiscovered never reopens or reruns it', async t => {

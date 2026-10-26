@@ -4,6 +4,7 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { durableReplace } from './native-durability.js';
 import type { ModalEvent } from './modal-client.js';
+import { failedTestFiles } from './check-failure-files.js';
 
 type Execution = NonNullable<Extract<ModalEvent, { kind: 'result' }>['executions']>[number];
 export function shardLogName(shard: number | 'static', attempt = 1) {
@@ -87,6 +88,14 @@ export class ModalShardLogs {
     )) {
       const filename = this.filename(execution);
       const lines = readFileSync(join(this.path, filename), 'utf8').split('\n');
+      const failedFiles = [
+        ...new Set([
+          ...failedTestFiles(lines.join('\n')),
+          ...Object.values(execution.tests ?? {})
+            .filter(report => report.results.some(test => !test.passed))
+            .map(report => report.file),
+        ]),
+      ];
       const failures: string[] = [];
       for (let i = 0; i < lines.length; i++) {
         if (!/^\s*not ok(?:\s|$)/.test(lines[i]!)) continue;
@@ -109,7 +118,7 @@ export class ModalShardLogs {
         )
         .join('\n');
       summaries.push(
-        `Shard ${execution.index}${execution.index === this.staticIndex ? ' (static)' : ''}, attempt ${execution.attempt + 1}${execution.exitCode === undefined ? '' : `, exit ${execution.exitCode}`}: ${basename(this.path)}/${filename}\n${
+        `Shard ${execution.index}${execution.index === this.staticIndex ? ' (static)' : ''}, attempt ${execution.attempt + 1}${execution.exitCode === undefined ? '' : execution.exitCode === 137 ? ', exit 137/SIGKILL (likely OOM)' : `, exit ${execution.exitCode}`}: ${basename(this.path)}/${filename}\n${failedFiles.length ? `Failing tests: ${failedFiles.join(', ')}\n` : ''}${
           failures.join('\n') ||
           namedResults ||
           lines

@@ -26,7 +26,7 @@ const privateFixture = immutableDirectory('forge-batch-', root => {
   trustAgents(root);
 });
 
-async function fixture(t, { delay = 300, window = 120, concurrency } = {}) {
+async function fixture(t, { delay = 300, window = 120, concurrency, failWhen = "exists('bad.txt')" } = {}) {
   const { root } = await privateFixture();
   const credentialRoot = mkdtempSync(join(tmpdir(), 'forge-batch-credentials-'));
   const credentialsRef = { kind: 'file', path: join(credentialRoot, 'modal.json') };
@@ -70,9 +70,10 @@ async function fixture(t, { delay = 300, window = 120, concurrency } = {}) {
     mock,
     `#!${process.execPath}\nimport fs from 'node:fs';import path from 'node:path';import net from 'node:net';
 const plan=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
+const exists=name=>fs.existsSync(path.join(plan.source,name));
 const released=new Promise((resolve,reject)=>net.createConnection(${JSON.stringify(endpoint)}).on('end',resolve).on('error',reject).resume());
 await Promise.all([released,new Promise(resolve=>setTimeout(resolve,${delay}))]);
-console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.head,definition:plan.definition,exitCode:fs.existsSync(path.join(plan.source,'bad.txt'))?1:0,estimatedCostUsd:0}));\n`,
+console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.head,definition:plan.definition,exitCode:(${failWhen})?1:0,estimatedCostUsd:0}));\n`,
   );
   chmodSync(mock, 0o700);
   process.env.FORGE_MODAL_PYTHON = mock;
@@ -81,7 +82,10 @@ console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.head,definition
       action: 'define-check',
       name: 'verify',
       executable: process.execPath,
-      args: ['-e', `setTimeout(()=>process.exit(require('fs').existsSync('bad.txt')?1:0),${delay})`],
+      args: [
+        '-e',
+        `const exists=name=>require('fs').existsSync(name);setTimeout(()=>process.exit((${failWhen})?1:0),${delay})`,
+      ],
     })
   ).result;
   await agent.dispatch({
@@ -106,6 +110,7 @@ console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.head,definition
     rmSync(credentialRoot, { recursive: true, force: true });
   });
   const pending = [];
+  const soloRuns = new Set();
   async function candidate(path, text = `${path}\n`, enqueue = true) {
     const lane = (await agent.dispatch({ action: 'start', outcome: `Synthetic ${path}` })).result;
     writeFileSync(join(lane.path, path), text);
@@ -161,10 +166,12 @@ console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.head,definition
     main,
     content,
     pending,
+    soloRuns,
     window,
     concurrency,
     holdFirst: () => {
       hold = true;
+      first = true;
     },
     releaseFirst,
   };
@@ -172,10 +179,18 @@ console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.head,definition
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 /** Preserve finisher workloads while establishing the intended durable arrival cohorts. */
-async function burst(f, arrivals, { admitBeforeDrain = false } = {}) {
+async function burst(f, arrivals, { admitBeforeDrain = false, green = false } = {}) {
   const ready = [];
   for (const arrival of arrivals)
     ready.push({ ...arrival, ...(await f.candidate(arrival.path, `${arrival.path}\n`, false)) });
+  // These timing/stacking cases measure the already-green queue. Singleton
+  // preparation uses the real runner and is excluded from that measured phase.
+  if (green)
+    for (const item of ready) {
+      const run = (await f.agent.dispatch({ action: 'run', viewId: item.view.id })).result;
+      assert.equal(run.status, 'passed');
+      f.soloRuns.add(run.runId);
+    }
   const started = performance.now();
   if (admitBeforeDrain) {
     // The batch-count contract applies to a durable queued wave. Filesystem
@@ -237,7 +252,7 @@ async function burst(f, arrivals, { admitBeforeDrain = false } = {}) {
   }
   return { ms: performance.now() - started, ready };
 }
-const checkRuns = f => f.store.load().runs.filter(run => !run.mainCheck);
+const checkRuns = f => f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id));
 /** Every Channel move is the exact head of a passed run on that View: main was never unchecked. */
 function neverRed(f) {
   const data = f.store.load();
@@ -260,12 +275,14 @@ for (const size of [4, 8])
   test(`queued wave of ${size} independent changes lands with one exact combined check`, async t => {
     // Keep the original 1.5 s synthetic check and 600 ms window. The helper
     // makes the cohort durable without requiring OS scheduling to fit that window.
-    const lone = (await burst(await fixture(t, { delay: 1500, window: 600 }), [{ path: 'one.txt' }])).ms;
+    const lone = (
+      await burst(await fixture(t, { delay: 1500, window: 600 }), [{ path: 'one.txt' }], { green: true })
+    ).ms;
     const f = await fixture(t, { delay: 1500, window: 600 });
     const { ms } = await burst(
       f,
       Array.from({ length: size }, (_, i) => ({ path: `b${i}.txt`, at: i * 10 })),
-      { admitBeforeDrain: true },
+      { admitBeforeDrain: true, green: true },
     );
     // Old shape (no window, nothing stacked) for comparison: first change checks alone, the rest queue behind it.
     const old = await fixture(t, { delay: 1500, window: 0, concurrency: 1 });
@@ -273,10 +290,11 @@ for (const size of [4, 8])
       await burst(
         old,
         Array.from({ length: size }, (_, i) => ({ path: `b${i}.txt`, at: i * 10 })),
+        { green: true },
       )
     ).ms;
     t.diagnostic(
-      `SYNTHETIC burst ${size}: lone ${Math.round(lone)}ms; stacked+window ${Math.round(ms)}ms (${checkRuns(f).length} check); window 0 / concurrency 1 ${Math.round(before)}ms (${checkRuns(old).length} checks); mock remote 1500ms/check, no real runner`,
+      `SYNTHETIC burst ${size}: lone ${Math.round(lone)}ms; already-green stacked+window ${Math.round(ms)}ms (${checkRuns(f).length} check); window 0 / concurrency 1 ${Math.round(before)}ms (${checkRuns(old).length} checks); mock remote 1500ms/check, no real runner`,
     );
     assert.deepEqual(statuses(f), Array(size).fill('accepted'));
     assert.equal(checkRuns(f).length, 1, 'one combined exact check');
@@ -305,11 +323,15 @@ test('one failing change in the middle does not land, the others do, and main is
 test('a late arrival during an in-flight check is checked concurrently, stacked, and lands after its parent', async t => {
   // The late arrival follows the actual first check; its gate preserves in-flight ordering.
   const f = await fixture(t, { delay: 1500, window: 60 });
-  const { ms } = await burst(f, [
-    { path: 'a.txt', at: 0 },
-    { path: 'b.txt', at: 10 },
-    { path: 'late.txt', at: 300 },
-  ]);
+  const { ms } = await burst(
+    f,
+    [
+      { path: 'a.txt', at: 0 },
+      { path: 'b.txt', at: 10 },
+      { path: 'late.txt', at: 300 },
+    ],
+    { green: true },
+  );
   const data = f.store.load(),
     runs = checkRuns(f);
   assert.deepEqual(statuses(f), ['accepted', 'accepted', 'accepted']);
@@ -326,13 +348,18 @@ test('a late arrival during an in-flight check is checked concurrently, stacked,
 
 test('a failing parent batch supersedes the stacked batch, which is requeued and checked on real main', async t => {
   // The late arrival follows the actual first check; its gate preserves in-flight ordering.
-  const f = await fixture(t, { delay: 1500, window: 60 });
-  await burst(f, [
-    { path: 'bad.txt', at: 0 },
-    { path: 'late.txt', at: 300 },
-  ]);
+  const f = await fixture(t, { delay: 1500, window: 60, failWhen: "exists('a.txt') && exists('bad.txt')" });
+  await burst(
+    f,
+    [
+      { path: 'a.txt', at: 0 },
+      { path: 'bad.txt', at: 10 },
+      { path: 'late.txt', at: 300 },
+    ],
+    { green: true },
+  );
   const data = f.store.load();
-  assert.deepEqual(statuses(f), ['failed', 'accepted']);
+  assert.deepEqual(statuses(f), ['accepted', 'failed', 'accepted']);
   assert.equal(data.landingBatches[1].status, 'superseded');
   assert.equal(f.content('bad.txt'), undefined);
   assert.equal(f.content('late.txt'), 'late.txt\n');
@@ -368,7 +395,7 @@ test('a driver lost mid-burst is adopted: stacked batches resume in order withou
     { path: 'b.txt', at: 10 },
     { path: 'late.txt', at: 200 },
   ];
-  await assert.rejects(burst(f, arrivals), { code: 'SOURCE_CHANGED' });
+  await assert.rejects(burst(f, arrivals, { green: true }), { code: 'SOURCE_CHANGED' });
   assert.ok(f.store.load().landingBatches.some(batch => ['checking', 'completed'].includes(batch.status)));
   neverRed(f);
   await drainLandingBatches(new AgentWorkflow(f.root).work, 'main');

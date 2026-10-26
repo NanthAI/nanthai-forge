@@ -46,8 +46,8 @@ test('a failed singleton publishes terminal evidence and dispatches the next que
     assert.ok(delay >= -1 && delay < 10000, `result to terminal: ${delay}ms`);
     const batch = f.store.select('landingBatches', entry.batchId);
     assert.equal(batch.status, 'completed');
-    assert.equal(batch.diagnosis.nodes.length, 1);
-    assert.equal(batch.diagnosis.nodes[0].status, 'failed');
+    assert.equal(batch.admission, true);
+    assert.equal(batch.diagnosis, undefined, 'solo failure never starts batch diagnosis');
     t.diagnostic(`result-to-terminal ${Math.round(delay)}ms`);
   }
   const nextRun = f.store.select('runs', entries[1].runId);

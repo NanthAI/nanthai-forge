@@ -92,10 +92,11 @@ test('duplicate entries for one Lane/head run one check and one acceptance', asy
     for (let i = 0; i < 3; i++) data.landingEntries.push({ ...original, id: randomUUID() });
   });
   const other = await f.candidate('other.txt', 'other\n');
+  await f.checkCandidates([first, other]);
   await drainLandingBatches(f.work, 'main');
   await drainPostAccept(f.store);
   const data = f.store.load();
-  assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
+  assert.equal(data.runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
   assert.equal(data.channelMoves.length, 1);
   assert.equal(data.landingBatches[0].prefixes.length, 2);
   assert.ok(data.landingEntries.every(entry => entry.status === 'accepted'));

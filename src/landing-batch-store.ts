@@ -29,6 +29,7 @@ import type { CheckRun, WorkData, WorkView } from './work-types.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { LandingBatch, LandingEntry } from './landing-batch-types.js';
 import { entryPins, markAlreadyOnMain, settleCompletedLanes, sameLandingTree } from './landing-noop.js';
+import { soloCheckAdmission, soloCheckEnvironment } from './landing-solo-check.js';
 const ACTIVE_LANDING = new Set(['queued', 'checking', 'awaiting-review']);
 
 export const batchDirectory = (work: WorkService, channel: string) =>
@@ -312,12 +313,31 @@ export function selectBatch(
   const train = recordLandingWaits(work.store, data, channel);
   const pending = train.pending;
   // Original insertion order breaks equal timestamp ties and survives requeue/restart.
-  const first = pending[0];
+  let first = pending[0];
   if (!first) return;
-  const check = data.checks.find(check => check.id === first.checkId)!;
-  const shape = landingShape(work, check);
   const actives = activeBatches(data, channel),
     parent = actives.at(-1);
+  const main = acceptedHead(data, channel) ?? data.nativeHead!;
+  const admitted = soloCheckAdmission(work.store, data, main, soloCheckEnvironment(environment));
+  const ready = new Map(pending.map(entry => [entry.id, admitted(entry)]));
+  // Prefer unchecked eligible work before consuming the ready wave. Solo checks
+  // never use a speculative main: their result must apply to accepted main.
+  const unchecked =
+    !parent &&
+    pending.find(entry => !ready.get(entry.id) && !train.waits.some(wait => wait.entryId === entry.id));
+  const admission = !!unchecked;
+  if (unchecked) {
+    first = unchecked;
+  }
+  if (parent) {
+    const green = pending.find(
+      entry => ready.get(entry.id) && !train.waits.some(wait => wait.entryId === entry.id),
+    );
+    if (!green) return;
+    first = green;
+  }
+  const check = data.checks.find(check => check.id === first.checkId)!;
+  const shape = landingShape(work, check);
   if (parent) {
     // Only an unstarted-free driver stacks: speculation needs a composed parent of the same pins.
     const lead = data.landingEntries?.find(entry => entry.id === parent.entryIds[0]);
@@ -353,7 +373,7 @@ export function selectBatch(
       .filter(entry => entry.channel === channel && ['checking', 'awaiting-review'].includes(entry.status))
       .map(entry => entryPins(data, entry)),
   );
-  for (const entry of pending) {
+  for (const entry of admission ? [first] : pending) {
     const pins = entryPins(data, entry);
     if (claimed.has(pins)) {
       entry.waitingFor = landingWait(
@@ -378,6 +398,7 @@ export function selectBatch(
     )
       break;
     if (train.waits.some(wait => wait.entryId === entry.id)) continue;
+    if (!admission && !ready.get(entry.id)) continue;
     selected.push(entry);
   }
   for (const entry of pending)
@@ -401,12 +422,13 @@ export function selectBatch(
   const batch: LandingBatch = {
     id: finishChild(first.id, `batch:${ordinal}`),
     channel,
-    environment,
+    environment: admission ? soloCheckEnvironment(environment) : environment,
     base,
     previous,
     arrivedAt: first.arrivedAt,
     entryIds: selected.map(entry => entry.id),
     ...(parent ? { parentId: parent.id } : {}),
+    ...(admission ? { admission: true as const } : {}),
     mode: shape.remote ? 'parallel' : 'halving',
     status: 'composing',
     prefixes: [],

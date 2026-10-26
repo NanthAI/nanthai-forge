@@ -23,7 +23,9 @@ export async function finishQueuedBatch(
   const candidate = store.select('views', attempt.view!.viewId as string)!;
   if (!queued && prepareOptimistic(work, command, candidate)) return;
   if (!queued && !(command.accept && batchEligible(work, command, candidate))) return;
-  await enqueueLanding(work, command, candidate, pins);
+  // Replays follow the canonical submitted Candidate even after the attempt
+  // receipt has advanced to its admission/combined run's Candidate.
+  if (!queued) await enqueueLanding(work, command, candidate, pins);
   await drainLandingBatches(work, command.accept!.channel, command.waitMs);
   const entry = store.select('landingEntries', command.operationId)!;
   if (entry.runId) {

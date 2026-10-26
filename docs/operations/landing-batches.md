@@ -15,6 +15,10 @@ two entries from one submitter, later entries yield one position per round to
 other submitters in that priority class. This changes order without imposing a
 quota. Requeued entries retain their arrival timestamps.
 
+Before combining entries, the controller requires a passed full solo gate for each exact submitted head or the same Q3 reuse key on that base main. Check-only `finish` and Lane `run` supply this evidence. An unchecked entry receives a singleton admission check with the full-test override; green entries return to selection for batching. With no other entry waiting, that checked singleton can land directly. Explicit partial test lists and multi-entry combined results never supply solo evidence for one of their inputs.
+
+A failing solo check settles its entry as terminal-failed with the reported failing test files. It does not enter prefix diagnosis. Its retained result remains visible in the existing repair-lineage notices. Prefix diagnosis remains available when individually green entries fail only in combination. Gate evidence is re-observed against the current definition, declared inputs and accepted main. Already-green entries can still join speculative combined batches; unchecked entries wait for an admission check on accepted main. Acceptance still requires an applicable exact-Candidate check.
+
 The batch retains its base, ordered entries, cumulative prefix Candidates, conflict
 Candidates, deterministic run IDs, diagnostic observations and acceptance receipt. Source pins
 are immutable even if an input Lane advances. A composition conflict ejects that

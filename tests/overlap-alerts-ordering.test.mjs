@@ -524,6 +524,19 @@ test('remote scheduler waits for high-overlap parent but speculates disjoint wor
   edit(b, 'later', 'insert', 2);
   writeFileSync(join(d.path, 'disjoint.txt'), 'disjoint\n');
   for (const lane of [a, b, d]) await f.save(lane);
+  for (const lane of [a, b, d]) {
+    const saved = f.store.select('lanes', lane.laneId);
+    const view = (
+      await f.agent.dispatch({
+        action: 'compose',
+        operationId: randomUUID(),
+        intentId: lane.intentId,
+        inputs: [{ laneId: lane.laneId, head: saved.head }],
+        dependencies: [],
+      })
+    ).result;
+    await f.agent.dispatch({ action: 'run', viewId: view.viewId });
+  }
   await f.agent.dispatch({
     action: 'set-policy',
     operationId: randomUUID(),
