@@ -30,6 +30,16 @@ export function defaultCheck(store: WorkStore): Check {
   );
   return selected;
 }
+function checkpointParent(store: WorkStore, laneId: string, operationId?: string) {
+  if (!operationId) return undefined;
+  const tx = store.readRecords();
+  const original = tx
+    ? (tx.fieldFind('lanes', laneId, 'checkpoints', operationId, 'operation') as
+        | { parent: string }
+        | undefined)
+    : store.select('lanes', laneId)?.checkpoints.find(checkpoint => checkpoint.operation?.id === operationId);
+  return original?.parent;
+}
 function laneHead(store: WorkStore, laneId: string) {
   const lane = store.select('lanes', laneId, 'id', true);
   invariant(lane, 'NOT_FOUND', 'Lane not found.');
@@ -85,18 +95,11 @@ export function resolveAgentDefaults(
         ...command,
         operationId: pin('operationId', command.operationId, randomUUID),
         expectedHead: pin('expectedHead', command.expectedHead, () => {
-          if (command.action === 'checkpoint' && command.operationId) {
-            const tx = store.readRecords();
-            const original = tx
-              ? (tx.fieldFind('lanes', command.laneId, 'checkpoints', command.operationId, 'operation') as
-                  | { parent: string }
-                  | undefined)
-              : store
-                  .select('lanes', command.laneId)
-                  ?.checkpoints.find(checkpoint => checkpoint.operation?.id === command.operationId);
-            if (original) return original.parent;
-          }
-          return laneHead(store, command.laneId);
+          return (
+            (command.action === 'checkpoint'
+              ? checkpointParent(store, command.laneId, command.operationId)
+              : undefined) ?? laneHead(store, command.laneId)
+          );
         }),
       };
       break;
@@ -144,7 +147,14 @@ export function resolveAgentDefaults(
         ...(withInputs ? { withInputs } : {}),
         ...(after ? { after } : {}),
         operationId: pin('operationId', command.operationId, randomUUID),
-        expectedHead: pin('expectedHead', command.expectedHead, () => laneHead(store, command.laneId)),
+        // A concurrent identical admission may resolve after the original save but
+        // before its finish journal exists. That operation still owns its parent.
+        expectedHead: pin(
+          'expectedHead',
+          command.expectedHead,
+          () =>
+            checkpointParent(store, command.laneId, command.operationId) ?? laneHead(store, command.laneId),
+        ),
         checkId,
         expectedDefinition: pin('expectedDefinition', command.expectedDefinition, () => {
           const check = store.select('checks', checkId);

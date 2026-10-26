@@ -1068,6 +1068,23 @@ handle and outcome. Mixed selections reuse existing entries and submit only the
 new heads. `wait` is excluded from the request identity. Synchronous `finish`
 retains its existing protocol.
 
+For a bound project under either native owner or hosted source authority, a
+short `finish` request without an `operationId` reuses the original operation
+while its outcome is pending or unknown. After a terminal outcome, it reuses the
+operation only if its saved Lane heads and the primary Lane bytes that finish
+would capture are unchanged. Changed source starts a new operation; its receipt
+names the previous operation in `supersedes`. A lost reply with unchanged source
+still reconciles the original work without another checkpoint or check.
+An explicit UUID always retains its exact request, regardless of later edits.
+Reconnects may supply the original resolved source/check/dependency pins; the
+owner compares them with the retained finish, rather than treating filled
+defaults as changed caller inputs. Later unsaved bytes stay out of pending or
+explicit replay. The owner worker resumes check-only submissions through the same
+native admission boundary. A pending check-only receipt includes `waitingOn`:
+the owner root and worker observation before execution, the exact declared
+landing dependency, or the run ID, status and observed controller while checking.
+These observations do not start another run or accept source.
+
 For a bound project under hosted source authority, uploaded source preparation
 precedes hosted admission. The hosted goal then survives the initial composition
 job, checking and acceptance without the client or owner Mac. Its controller

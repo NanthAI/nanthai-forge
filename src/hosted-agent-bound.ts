@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { boundLandingStatus, watchBoundLanding } from './hosted-agent-bound-read.js';
+import { automaticFinishId, indexedFinish, nativeFinishReplay } from './native-finish-replay.js';
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -13,7 +14,6 @@ import { withQueueSlot } from './landing-queue.js';
 import { prepareBoundHostedCommands, captureBoundInputs } from './hosted-agent-bound-save.js';
 import { invariant } from './errors.js';
 import { ForgeError } from './errors.js';
-import { digest } from './hash.js';
 import { observeHostedRun } from './hosted-agent-observe.js';
 import { terminalOwnerResult } from './hosted-agent-owner-drain.js';
 import { rememberSourceAuthorityError } from './source-authority-client.js';
@@ -28,6 +28,7 @@ export type RetainedBoundSubmission = {
   command: Command;
   inputs: Pin[];
   captured?: boolean;
+  supersedes?: string;
   aliasOf?: string;
   admitted?: boolean;
   hosted?: Command[];
@@ -48,6 +49,25 @@ const read = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8'));
  * the owner lock; any request admitted before the marker must drain under its
  * original native IDs. Requests after it retain exact bytes for hosted routing. */
 export async function boundAgentSubmission(
+  store: WorkStore,
+  input: unknown,
+  native: (input: unknown) => Promise<Response>,
+  supplied?: HostedAgentTransport,
+): Promise<Response> {
+  const response = await submitBoundAgent(store, input, native, supplied);
+  const result = response.result as Command | null;
+  if (result && z.uuid().safeParse(result.operationId).success) {
+    for (const directory of ['native-submissions', 'hosted-submissions']) {
+      const path = join(store.directory, directory, `${result.operationId}.json`);
+      if (!existsSync(path)) continue;
+      const supersedes = read<Retained>(path).supersedes;
+      if (supersedes) return { ...response, result: { ...result, supersedes } };
+    }
+  }
+  return response;
+}
+
+async function submitBoundAgent(
   store: WorkStore,
   input: unknown,
   native: (input: unknown) => Promise<Response>,
@@ -86,25 +106,53 @@ export async function boundAgentSubmission(
         supplied,
       );
   }
-  const nativeDirectory = join(store.directory, 'native-submissions'),
-    nativePath = join(nativeDirectory, `${operationId}.json`);
+  // Resolve server terminality before admission, without holding the owner lock.
+  // Explicit replay reconciles lost save/compose/check replies using their IDs.
+  if (!raw.operationId && raw.action === 'finish') {
+    const indexed = indexedFinish(directory, identity(raw));
+    const previousPath = indexed && join(directory, `${indexed.operationId}.json`);
+    const previous = previousPath && existsSync(previousPath) ? read<Retained>(previousPath) : undefined;
+    if (previous && !terminalOwnerResult(previous.result)) {
+      const observed = await boundAgentSubmission(
+        store,
+        { ...raw, operationId: indexed!.operationId, wait: true, waitMs: 0 },
+        native,
+        supplied,
+      );
+      if (terminalOwnerResult(observed.result as Command))
+        store.locked(() => {
+          const current = read<Retained>(previousPath!);
+          current.result = observed.result as Command;
+          durableReplace(previousPath!, canonicalPayload(current));
+        });
+    }
+  }
+  const nativeDirectory = join(store.directory, 'native-submissions');
+  let nativePath = join(nativeDirectory, `${operationId}.json`);
   const selection = store.locked(() => {
     const state = readHostState(store);
-    if (
-      !raw.operationId &&
-      (sourceAuthority(state.binding ?? {}).mode === 'server' || state.authorityTransition?.mode === 'server')
-    ) {
-      mkdirSync(directory, { recursive: true });
-      const index = join(directory, `auto-${digest(canonicalPayload(identity(raw)))}.json`);
-      if (existsSync(index)) operationId = z.uuid().parse(read(index));
-      else durableReplace(index, JSON.stringify(operationId));
-      path = join(directory, `${operationId}.json`);
+    let supersedes: string | undefined;
+    if (!raw.operationId) {
+      const hosted =
+        sourceAuthority(state.binding ?? {}).mode === 'server' ||
+        state.authorityTransition?.mode === 'server';
+      if (hosted || raw.action === 'finish') {
+        const selected = automaticFinishId(store, identity(raw), operationId, hosted);
+        operationId = selected.operationId;
+        supersedes = selected.supersedes;
+        path = join(directory, `${operationId}.json`);
+      }
     }
+    nativePath = join(nativeDirectory, `${operationId}.json`);
     const prior = existsSync(path) ? read<Retained>(path) : undefined;
     const nativePrior = existsSync(nativePath)
       ? read<{ command: Command; result?: Command }>(nativePath)
       : undefined;
-    const command: Command = { ...(prior?.command ?? nativePrior?.command), ...identity(raw), operationId };
+    const replay =
+      !prior && nativePrior
+        ? nativeFinishReplay(store, nativePrior.command, identity(raw), operationId)
+        : undefined;
+    const command: Command = replay?.command ?? { ...prior?.command, ...identity(raw), operationId };
     if (prior) {
       invariant(
         !prior.address ||
@@ -121,7 +169,7 @@ export async function boundAgentSubmission(
     }
     if (nativePrior) {
       invariant(
-        canonicalPayload(command) === canonicalPayload(nativePrior.command),
+        canonicalPayload(command) === canonicalPayload(replay!.retained),
         'WORK_OPERATION_CHANGED',
         'Replay the original native submission.',
       );
@@ -137,8 +185,19 @@ export async function boundAgentSubmission(
     const handover = state.authorityTransition?.mode === 'server';
     if (nativePrior || oldJournal || (sourceAuthority(state.binding ?? {}).mode !== 'server' && !handover)) {
       mkdirSync(nativeDirectory, { recursive: true });
-      if (!nativePrior) durableReplace(nativePath, canonicalPayload({ command }));
-      return { native: command };
+      if (!nativePrior) {
+        const inputs = [command.laneId, ...((command.with as string[] | undefined) ?? [])].flatMap(id => {
+          const lane = typeof id === 'string' ? store.select('lanes', id) : undefined;
+          return lane
+            ? [{ laneId: lane.id, head: lane.head, baseline: lane.head, intentId: lane.intentId }]
+            : [];
+        });
+        durableReplace(
+          nativePath,
+          canonicalPayload({ command, inputs, ...(supersedes ? { supersedes } : {}) }),
+        );
+      }
+      return { native: command, nativeIdentity: nativePrior?.command ?? command };
     }
     invariant(
       channel === 'main',
@@ -207,6 +266,7 @@ export async function boundAgentSubmission(
     const retained: Retained = {
       command,
       inputs,
+      ...(supersedes ? { supersedes } : {}),
       ...(duplicate ? { aliasOf: String(duplicate.command.operationId) } : {}),
       captured: raw.action !== 'finish',
       address: { url: binding.deployment, projectId: binding.projectId },
@@ -224,7 +284,15 @@ export async function boundAgentSubmission(
     store.locked(() =>
       durableReplace(
         nativePath,
-        canonicalPayload(JSON.parse(JSON.stringify({ command: selection.native, result: response.result }))),
+        canonicalPayload(
+          JSON.parse(
+            JSON.stringify({
+              ...read<Retained>(nativePath),
+              command: selection.nativeIdentity,
+              result: response.result,
+            }),
+          ),
+        ),
       ),
     );
     return response;
@@ -240,6 +308,7 @@ export async function boundAgentSubmission(
       );
     return boundLandingStatus(store, { operationId }, () => native(input), supplied);
   }
+  if (retained.result) return { revision: store.revision(), result: retained.result };
   if (retained.admitted) {
     if (raw.wait === true)
       return watchBoundLanding(
@@ -250,7 +319,6 @@ export async function boundAgentSubmission(
       );
     return boundLandingStatus(store, { operationId }, () => native(input), supplied);
   }
-  if (retained.result) return { revision: store.revision(), result: retained.result };
   const pending = (phase: string, progress?: unknown): Response => ({
     revision: store.revision(),
     result: {
@@ -348,7 +416,12 @@ export async function boundAgentSubmission(
             if (state.binding?.projectId === binding.projectId) state.binding.sourceAuthority = authority;
           });
         }
-        return await drive();
+        const response = await drive();
+        if (terminalOwnerResult(response.result as Command)) {
+          retained.result = response.result as Command;
+          store.locked(() => durableReplace(path, canonicalPayload(retained)));
+        }
+        return response;
       } catch (error) {
         rememberSourceAuthorityError(store, error, binding.projectId);
         if (

@@ -1,4 +1,7 @@
 import { wakeLandingWorker } from './landing-worker-wake.js';
+import { waitingDependencies } from './agent-dependencies.js';
+import { readLandCheckController } from './land-check-progress.js';
+import { runReceiptWithFailure } from './agent-run-failure.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -39,14 +42,17 @@ export async function admitFinish(
   const observe = (journal: FinishJournal, saved?: Record<string, unknown>) => {
     wakeLandingWorker(store);
     const attempt = journal.state.attempts.at(-1)!;
+    const run = !command.accept ? store.select('runs', attempt.operations.run) : undefined;
     const fields = journal.state.result ?? {
       operationId: command.operationId,
       phase: 'submission',
       status:
+        run?.status ??
         attempt.status ??
         (attempt.run?.status === 'passed' && command.accept
           ? 'waiting to land'
           : (attempt.run?.status ?? 'queued')),
+      ...(run ? { run: runReceiptWithFailure(store, run), view: attempt.view ?? null } : {}),
       checkpoint: saved ?? { laneId: command.laneId, head: journal.state.attempts[0]!.head },
       attempts: journal.state.attempts,
       terminal: false,
@@ -55,6 +61,29 @@ export async function admitFinish(
     const submissions = command.accept
       ? finishSubmissions(store, command, journal.state.attempts, fields)
       : undefined;
+    const admission = landingAdmission(store, command.operationId, [command.laneId, ...(command.with ?? [])]);
+    const dependencies =
+      !command.accept && !fields.terminal
+        ? waitingDependencies(store, [command.laneId, ...(command.with ?? [])])
+        : [];
+    const waitingOn =
+      command.accept || fields.terminal
+        ? undefined
+        : run && ['queued', 'preparing', 'running'].includes(run.status)
+          ? {
+              kind: 'run',
+              runId: run.id,
+              status: run.status,
+              controller: readLandCheckController(store, run),
+            }
+          : dependencies.length
+            ? { kind: 'dependency', dependencies }
+            : {
+                kind: 'owner',
+                root: store.root,
+                operationId: command.operationId,
+                worker: admission.landingWorker,
+              };
     return {
       revision: store.revision(),
       result: {
@@ -66,7 +95,8 @@ export async function admitFinish(
               complete: submissions.every(item => item.complete),
             }
           : {}),
-        ...landingAdmission(store, command.operationId, [command.laneId, ...(command.with ?? [])]),
+        ...admission,
+        ...(waitingOn ? { waitingOn } : {}),
         ...(typeof fields.message === 'string' ? { message: fields.message } : {}),
       },
     };

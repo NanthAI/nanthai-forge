@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
@@ -570,4 +570,223 @@ test('bound land duplicates return the original handle and admitted watches only
     ).length,
     writes,
   );
+});
+
+// Real bound save/capture and transport retries, with local fake save/check services.
+function shorthandChecks(t, f, checkOnly = true) {
+  const mutation = f.exchange.client.mutation;
+  const statuses = new Map();
+  const checks = new Map();
+  let lose = false;
+  f.exchange.client.mutation = async (ref, args) => {
+    const name = getFunctionName(ref);
+    if (name === 'projectObjectDownloads:describe')
+      return args.digests.map(digest => ({ digest, size: f.source.object(digest).length, location: 'r2' }));
+    if (name === 'projectHostedSaves:prepare') {
+      const request = JSON.parse(args.request);
+      if (!f.operations.has(request.operationId)) {
+        const root = join(f.store.directory, 'hosted-inputs');
+        const parent = (await import('node:fs'))
+          .readdirSync(root)
+          .find(id =>
+            existsSync(join(root, id, `${f.lane.laneId}.forge-client`, 'saves', request.operationId)),
+          );
+        const files = f.source.capture(join(root, parent, f.lane.laneId), true, request.expected.head);
+        const unchanged = f.source.tree(files) === f.source.tree(f.source.state(request.expected.head).files);
+        const at = '2026-01-01T00:00:00.000Z';
+        const head = unchanged
+          ? request.expected.head
+          : f.source.writeState(files, [request.expected.head], request.message, at);
+        f.objects.set(head, f.source.object(head));
+        Object.assign(f.lane, { head, version: f.lane.version + 1, sourceVersion: f.lane.sourceVersion + 1 });
+        f.operations.set(request.operationId, {
+          terminal: {
+            attemptId: randomUUID(),
+            at,
+            outcome: {
+              status: 'completed',
+              result: {
+                schema: 1,
+                operationId: request.operationId,
+                laneId: f.lane.laneId,
+                saveId: randomUUID(),
+                head,
+                version: f.lane.version,
+                sourceVersion: f.lane.sourceVersion,
+                unchanged,
+                at,
+              },
+            },
+          },
+        });
+      }
+      return canonicalPayload(f.operations.get(request.operationId));
+    }
+    return mutation(ref, args);
+  };
+  const transport = f.transport();
+  const dispatch = transport.dispatch.bind(transport);
+  t.mock.method(transport, 'dispatch', async (action, command) => {
+    if (action === 'finish' && checkOnly) {
+      if (!checks.has(command.operationId)) {
+        const id = randomUUID();
+        checks.set(command.operationId, { id, command });
+        statuses.set(id, 'running');
+      }
+      if (lose) {
+        lose = false;
+        throw new Error('synthetic lost check reply');
+      }
+      return { result: { run: { id: checks.get(command.operationId).id } } };
+    }
+    if (action === 'observe')
+      return {
+        result: {
+          id: command.runId,
+          projectId: f.address.projectId,
+          status: statuses.get(command.runId),
+        },
+      };
+    return dispatch(action, command);
+  });
+  return {
+    transport,
+    checks,
+    complete: () => {
+      for (const id of statuses.keys()) statuses.set(id, 'passed');
+    },
+    lose: () => {
+      lose = true;
+    },
+  };
+}
+
+for (const saved of [false, true])
+  test(`server shorthand starts a new check for ${saved ? 'checkpointed' : 'unsaved'} source after a terminal check`, async t => {
+    const f = fixture(t);
+    const c = shorthandChecks(t, f);
+    const command = { action: 'finish', laneId: f.lane.laneId, message: 'Same check message', wait: false };
+    const firstHead = f.lane.head;
+    const first = await boundAgentSubmission(f.store, command, noNative, c.transport);
+    c.complete();
+    const unchanged = await boundAgentSubmission(f.store, command, noNative, c.transport);
+    assert.equal(unchanged.result.operationId, first.result.operationId);
+    assert.equal(unchanged.result.complete, true);
+    assert.equal(c.checks.size, 1);
+    const lanePath = f.store.path(f.lane.laneId);
+    writeFileSync(join(lanePath, 'new.txt'), 'new source to check\n');
+    let newHead;
+    if (saved) {
+      newHead = f.source.writeState(
+        f.source.capture(lanePath, true, f.lane.head),
+        [f.lane.head],
+        'New saved head',
+        '2026-01-02T00:00:00.000Z',
+      );
+      f.store.locked(() => {
+        const data = f.store.load();
+        data.lanes.find(lane => lane.id === f.lane.laneId).head = newHead;
+        data.revision++;
+        f.store.save(data);
+      });
+    }
+    const fresh = await boundAgentSubmission(f.store, command, noNative, c.transport);
+    assert.notEqual(fresh.result.operationId, first.result.operationId);
+    assert.equal(fresh.result.supersedes, first.result.operationId);
+    assert.equal(fresh.result.complete, false);
+    assert.equal(c.checks.size, 2);
+    const retained = JSON.parse(
+      readFileSync(join(f.store.directory, 'hosted-submissions', `${fresh.result.operationId}.json`), 'utf8'),
+    );
+    assert.notEqual(retained.inputs[0].head, firstHead);
+    if (saved) assert.equal(retained.inputs[0].head, newHead);
+    assert.equal(
+      readFileSync(
+        join(f.store.directory, 'hosted-inputs', fresh.result.operationId, f.lane.laneId, 'new.txt'),
+        'utf8',
+      ),
+      'new source to check\n',
+    );
+    assert.equal(c.checks.get(fresh.result.operationId).command.inputs[0].expected.head, f.lane.head);
+    const replay = await boundAgentSubmission(f.store, command, noNative, c.transport);
+    assert.equal(replay.result.operationId, fresh.result.operationId);
+    assert.equal(replay.result.supersedes, first.result.operationId);
+    c.complete();
+    const completed = await boundAgentSubmission(f.store, command, noNative, c.transport);
+    assert.equal(completed.result.operationId, fresh.result.operationId);
+    assert.equal(completed.result.complete, true);
+    assert.equal(c.checks.size, 2);
+    const old = await boundAgentSubmission(
+      f.store,
+      { ...command, operationId: first.result.operationId },
+      noNative,
+      c.transport,
+    );
+    assert.equal(old.result.operationId, first.result.operationId);
+    assert.equal(old.result.complete, true);
+  });
+
+test('server shorthand reconciles a lost reply with newer drafts before the original is terminal', async t => {
+  const f = fixture(t);
+  const c = shorthandChecks(t, f);
+  const command = { action: 'finish', laneId: f.lane.laneId, message: 'Same check message', wait: false };
+  c.lose();
+  await assert.rejects(
+    boundAgentSubmission(f.store, command, noNative, c.transport),
+    /synthetic lost check reply/,
+  );
+  const [operationId] = c.checks.keys();
+  writeFileSync(join(f.store.path(f.lane.laneId), 'later.txt'), 'keep later draft out\n');
+  const again = await boundAgentSubmission(f.store, command, noNative, c.transport);
+  assert.equal(again.result.operationId, operationId);
+  assert.equal(c.checks.size, 1);
+  assert.equal(f.operations.size, 1, 'one captured save despite the unknown reply');
+  assert(!existsSync(join(f.store.directory, 'hosted-inputs', operationId, f.lane.laneId, 'later.txt')));
+});
+
+test('server accepting shorthand observes terminality before superseding with a new captured head', async t => {
+  const f = fixture(t);
+  const c = shorthandChecks(t, f, false);
+  const { operationId: _operationId, ...command } = f.command;
+  const first = await boundAgentSubmission(f.store, command, noNative, c.transport);
+  const originalHead = f.lane.head;
+  const submission = f.operations.get(first.result.operationId);
+  f.operations.set(first.result.operationId, {
+    ...submission,
+    phase: 'landed',
+    version: 1,
+    observation: { state: 'landed', pendingReason: null, cause: null },
+    acceptance: { receiptId: randomUUID(), head: originalHead },
+  });
+  const unchanged = await boundAgentSubmission(f.store, command, noNative, c.transport);
+  assert.equal(unchanged.result.operationId, first.result.operationId);
+  assert.equal(unchanged.result.complete, true);
+  assert.equal(f.operations.size, 3);
+  writeFileSync(join(f.store.path(f.lane.laneId), 'new.txt'), 'new accepting source\n');
+  const fresh = await boundAgentSubmission(f.store, command, noNative, c.transport);
+  assert.notEqual(fresh.result.operationId, first.result.operationId);
+  assert.equal(fresh.result.supersedes, first.result.operationId);
+  assert.equal(fresh.result.terminal, false);
+  assert.equal(f.operations.size, 6);
+  assert.notEqual(f.lane.head, originalHead);
+  const latestCompose = [...f.requests.values()].at(-1);
+  const inputs = JSON.parse(f.objects.get(latestCompose.inputs.root.sha256).toString('utf8'));
+  assert.equal(inputs.entries[0].head, f.lane.head);
+});
+
+test('server shorthand lost enqueue reply replays the original with newer unsaved bytes excluded', async t => {
+  const f = fixture(t);
+  const { operationId: _operationId, ...command } = f.command;
+  f.lose('projectHostedLanding:enqueue');
+  await assert.rejects(
+    boundAgentSubmission(f.store, command, noNative, f.transport()),
+    code('HOSTED_ACTION_FAILED'),
+  );
+  const queued = f.calls.filter(call => call.name === 'projectHostedLanding:enqueue').at(-1);
+  const operationId = JSON.parse(queued.args.request).operationId;
+  writeFileSync(join(f.store.path(f.lane.laneId), 'later.txt'), 'new unsaved draft\n');
+  const replay = await boundAgentSubmission(f.store, command, noNative, f.transport());
+  assert.equal(replay.result.operationId, operationId);
+  assert.equal(f.operations.size, 3);
+  assert(!existsSync(join(f.store.directory, 'hosted-inputs', operationId, f.lane.laneId, 'later.txt')));
 });
