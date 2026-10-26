@@ -98,6 +98,8 @@ Concurrent operations wait in a FIFO lock queue instead of immediately failing `
 
 Once a finish has checkpointed and retained its driver journal, `nforge agent ROOT finish '{"operationId":"ORIGINAL_FINISH_UUID"}'` resumes that exact request, including its original source, check and Channel pins. Use the parent finish operation ID from the request or receipt, rather than an attempt's child operation ID. Explicit fields are still validated against the retained request; a changed payload does not start a new finish under the old ID. Before the journal exists, retry the original full request and pins.
 
+Owner startup and subsequent recovery wakes settle permanently unavailable finish/land journals under their original operation IDs. Deleted Lane records, cleaned closed Lane directories, missing pinned native States, explicit cancellation and a later finish checkpoint for the same Lane and destination retain a terminal receipt with the reason. A newer save alone does not end a resolvable finish, and canonical queued work or acceptance receipts remain authoritative. Replaying a settled finish returns that receipt without restoring or checkpointing the Lane; a new finish uses a new operation ID. Transient recovery failures use exponential cooldown from 100 ms to at most one minute outside the Work writer lock, including resumable `source-changed` receipts. Only an outstanding failure owns a retry timer; idle recovery has no poller.
+
 Checkpoint, sync and Lane metadata serialize within one Lane. Different Lanes can capture/checkpoint/sync while a finish check runs. Native sync publishes its Lane against its original source fields into current Work, retaining unrelated concurrent metadata. Checks, including rechecks after main moves, hold no Work/Lane/Channel lock; a busy final pre-spawn lock retries with the same run ID, prepared workspace/logs and machine-capacity ticket, checking cancellation before execution; only final acceptance joins the Channel queue and uses expected-head CAS. For diagnostics, `FORGE_WORK_LOCK_TRACE=/absolute/file.jsonl` records each lock's operation, actor, wait and hold milliseconds.
 
 Agent `status`, `tests`, `peers`, `review`, `diff`, `show` and `brief` pin the atomically replaced Work pointer and read its immutable records without the owner writer lock. Their receipt revision names that observation, including when another writer commits during the read. Live Lane review still reports its separately pinned working-copy tree. Status reports committed run records without adopting runners or writing recovery; `observe` and mutating actions reconcile durable run results. Project status reads newest indexed pages by default and reports skipped sections and how to request them. `status {"detail":true}` includes costs, submission journals, merged ancestry and recovered-edit notices; `laneId` explicitly selects Lane detail. Exact cost totals reuse cached summaries keyed by immutable run pages and month; cold or missing summaries rebuild only when detail is requested.
@@ -1241,3 +1243,38 @@ growth and 1 GiB free-space reserve, with a one-day forecast.
 status at 90% of a size/growth budget or within 10% of the free-space reserve,
 including forecast growth; it never blocks a write. Status reads only the retained
 sample and does not scan, poll storage or schedule work.
+
+## Intent proving-test contracts
+
+`agent tests {"candidateId":"CANDIDATE_ID"}` proposes the new/changed tests
+and derived affected set for that clean Candidate. `laneId` still reads the saved
+Lane selection before composition in native-owner mode. Proposals include per-file
+timing estimates from native timing history where available; unknown timings are
+`null`. Add `runId` to use complete measured reports from an existing run on the
+exact Candidate. Hosted mode reads the same machine reports from verified, sealed
+check output. Proposal reads never run project code.
+
+Confirm or edit with one CLI command (MCP: `forge_check`, action `confirm-tests`):
+
+```sh
+nforge agent ROOT confirm-tests '{"operationId":"UUID","candidateId":"CANDIDATE_ID","expectedHead":"HEAD","expectedVersion":0,"runId":"RUN_ID","tests":["tests/example.test.mjs"]}'
+```
+
+Omit `tests` to confirm the proposal, or supply the exact edited list. Confirmation
+requires complete timing measurements from a completed run on that Candidate;
+historical estimates alone cannot confirm. Missing measurements return
+`CONTRACT_TIMING_MISSING`. A summed measured duration of 90,000 ms or more returns
+`CONTRACT_OVER_BUDGET` with the measured total and slowest tests. The sum is test
+file execution time, not parallel wall time. Measure missing files through the
+existing Candidate check path, then confirm with its run ID.
+
+The Intent retains versioned contracts with the proposed and confirmed tests,
+per-file durations, total, Candidate, measured-on head and run. Reuse the original
+operation ID and parameters after an unknown outcome. Edits name the current
+contract version; earlier versions and their receipts remain available. CLI and
+MCP receipts and the Intent/Review pages show the contract and exact measurement
+pins. A later Candidate does not inherit measurements from an earlier head.
+
+Contracts currently supply metadata only. Both contract-bearing and contract-less
+Intents retain the existing acceptance policy and complete check gate. This slice
+does not authorize contract-only acceptance.

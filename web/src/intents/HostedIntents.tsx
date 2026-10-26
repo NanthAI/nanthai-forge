@@ -1,3 +1,5 @@
+import { readTestContract } from '../lane/test-contract-api';
+import type { IntentTestContract } from '../../../src/intent-test-contract';
 import { planningVersionLabel } from '../../../src/work-planning-lifecycle';
 import { usePlanningActors } from '../planning/usePlanningActors';
 import type { AttributedPlanningItem } from '../planning/attribution';
@@ -77,6 +79,7 @@ export default function HostedIntents({
   combine?: (intentId: string, inputs: { laneId: string; head: string }[]) => Promise<string | null>;
 }) {
   const now = useNow();
+  const canonicalContract = useQuery(readTestContract, intentId ? { projectId, intentId } : 'skip');
   const ownerStatus = useQuery(api.ownerAcceptance.status, {
     projectId,
     viewId: intentId ?? '',
@@ -175,7 +178,11 @@ export default function HostedIntents({
   const records = useMemo(
     () => ({
       planningItems: planning.records,
-      intents: intents.records,
+      intents: intents.records.map(intent => {
+        if (!canonicalContract || intent.id !== intentId) return intent;
+        const { contract } = JSON.parse(canonicalContract) as { contract: IntentTestContract | null };
+        return { ...intent, testContracts: contract ? [contract] : [] };
+      }),
       lanes: lanes.records,
       views: views.records,
       runs: runs.records,
@@ -186,6 +193,8 @@ export default function HostedIntents({
     }),
     [
       planning.records,
+      canonicalContract,
+      intentId,
       intents.records,
       lanes.records,
       views.records,

@@ -1,3 +1,4 @@
+import { candidateTestContract } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
 import type { WorkData, WorkView, Lane } from './work-types.js';
 
@@ -88,6 +89,7 @@ export function viewReadModels(data: WorkData, selection?: number) {
       sourceStatus: view.status,
       supersededBy: supersededBy === view.id ? null : supersededBy,
       accepted,
+      contract: candidateTestContract(intent, view.id, view.head),
       why: { intentId: view.intentId, outcome: intent?.outcome ?? null },
       whyIntentIds: viewWhyIntents(data, view),
     };

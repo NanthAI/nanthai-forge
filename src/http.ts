@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retainOwnerRuntime } from './release-owner-runtime.js';
 import { startOwnerAcceptanceListener } from './owner-acceptance-consumer.js';
 import { startOwnerPresence } from './presence-worker-start.js';
 import { createServer, type ServerResponse } from 'node:http';
@@ -64,6 +65,11 @@ export async function serveRepository(requestedRoot: string, port = 4173) {
         'UNAUTHORIZED',
         'Use the token printed by Forge at startup.',
       );
+      if (url.pathname === '/api/owner') {
+        invariant(ownerRuntime, 'OWNER_RUNTIME_UNAVAILABLE', 'Owner runtime discovery is unavailable.');
+        json(res, 200, ownerRuntime.runtime);
+        return;
+      }
       if (url.pathname.startsWith('/api/git/')) {
         await gitHttp(root, url, req, res);
         return;
@@ -112,6 +118,15 @@ export async function serveRepository(requestedRoot: string, port = 4173) {
   const address = server.address();
   invariant(address && typeof address !== 'string', 'SERVER_FAILED', 'Could not bind local server.');
   boundPort = address.port;
+  const ownerRuntime = (() => {
+    try {
+      return retainOwnerRuntime(new WorkStore(root).directory, root, boundPort, token);
+    } catch {
+      // Release discovery must not make the existing serve APIs depend on a
+      // writable discovery file or an available kernel start-time inspector.
+      return undefined;
+    }
+  })();
   const stopAcceptance = startOwnerAcceptanceListener(new WorkStore(root));
   const url = `http://127.0.0.1:${boundPort}/#token=${token}`;
   return {
@@ -119,6 +134,7 @@ export async function serveRepository(requestedRoot: string, port = 4173) {
     port: boundPort,
     token,
     async close() {
+      ownerRuntime?.close();
       await stopAcceptance();
       await stopPresence?.();
       server.closeAllConnections();

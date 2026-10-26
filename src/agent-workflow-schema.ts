@@ -1,3 +1,4 @@
+import { contractTestsInput } from './intent-test-contract.js';
 import { decideInputSchema, decisionsInputSchema } from './decision-types.js';
 import { handoffSchema, handoffReadSchema } from './agent-handoff-types.js';
 import { frictionInputSchema, frictionTriageSchema } from './friction-types.js';
@@ -59,7 +60,8 @@ export const agentActionSchema = z.discriminatedUnion('action', [
     path: z.string().min(1).optional(),
     line: z.number().int().positive().safe().optional(),
   }),
-  z.object({ action: z.literal('tests'), laneId: id }),
+  contractTestsInput.extend({ action: z.literal('tests') }),
+  contractTestsInput.extend({ action: z.literal('confirm-tests'), operationId: id }),
   z.object({ action: z.literal('policy') }),
   z.object({ action: z.literal('land-ready') }),
   z.object({ action: z.literal('undo-revert'), operationId: id, acceptanceId: id }),

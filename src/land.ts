@@ -1,3 +1,4 @@
+import { resolveLandEntry } from './land-request-identity.js';
 import { prepareLandingRecords } from './landing-records-index.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { waitForLand, retrySingleInfrastructure, recoverLandInfrastructure } from './land-wait.js';
@@ -70,10 +71,13 @@ async function landOnce(
       await prepareObservation();
       if (wait === false) return admitted();
       const journal = new LandJournal(store, command, selection);
+      if (journal.state.entries.every(entry => entry.result?.settled))
+        return observeLandReceipt(store, command, journal);
       journal.preflight(store, command);
       for (const entry of journal.state.entries) {
         const queued = store.select('landingEntries', entry.command.operationId);
         if (
+          !entry.result?.settled &&
           entry.result?.status === 'interrupted' &&
           queued &&
           ['queued', 'checking'].includes(queued.status)
@@ -87,7 +91,11 @@ async function landOnce(
           .map(entry => entry.command.operationId),
       );
       const pins = new Map(
-        journal.state.entries.flatMap(entry => entry.inputs).map(pin => [pin.laneId, pin.head]),
+        journal.state.entries
+          .map(entry => resolveLandEntry(store, entry))
+          .filter(entry => !entry.result?.settled)
+          .flatMap(entry => entry.inputs)
+          .map(pin => [pin.laneId, pin.head]),
       );
       const overlap = savedOverlapPlan(
         store,
@@ -294,6 +302,7 @@ async function landOnce(
         for (const entry of journal.state.entries) {
           const queued = store.select('landingEntries', entry.command.operationId);
           if (
+            !entry.result?.settled &&
             entry.result?.status === 'interrupted' &&
             queued &&
             ['queued', 'checking'].includes(queued.status)

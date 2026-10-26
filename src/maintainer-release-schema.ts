@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 
-export const releaseStages = ['export', 'build', 'backend', 'web', 'package', 'install', 'select'] as const;
+export const releaseStages = [
+  'export',
+  'build',
+  'backend',
+  'web',
+  'package',
+  'install',
+  'select',
+  'owner',
+] as const;
 export const releaseStageSchema = z.enum(releaseStages);
 export type ReleaseStage = z.infer<typeof releaseStageSchema>;
 export const releaseRequestSchema = z

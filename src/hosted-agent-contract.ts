@@ -1,3 +1,4 @@
+import { contractTestsInput } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
@@ -6,6 +7,8 @@ import { saveExpectedSchema } from './hosted-save.js';
 import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
 export const hostedAgentActions = [
+  'tests',
+  'confirm-tests',
   'start',
   'open',
   'save',
@@ -58,6 +61,11 @@ const check = z
   })
   .strict();
 export const hostedAgentCommandSchemas = {
+  tests: contractTestsInput.omit({ operationId: true, laneId: true }).extend({ candidateId: uuid }).strict(),
+  'confirm-tests': contractTestsInput
+    .omit({ operationId: true, laneId: true })
+    .extend({ candidateId: uuid })
+    .strict(),
   start: z
     .object({
       outcome: z.string().min(1).optional(),

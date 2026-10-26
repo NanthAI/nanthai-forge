@@ -1,3 +1,4 @@
+import { TestContract } from '../lane/TestContract';
 import { OwnerDecisionsPanel } from '../decisions/OwnerDecisionsPanel';
 import { useOwnerDecisions } from '../decisions/context';
 import { decisionTimeline } from '../decisions/model';
@@ -394,6 +395,7 @@ export function IntentDetailView({
       }
     >
       {details}
+      <TestContract contract={row.contract} />
       <OwnerDecisionsPanel intentId={row.id} />
       {row.lanes.length > 0 && (
         <WorkMap

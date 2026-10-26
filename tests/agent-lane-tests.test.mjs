@@ -97,7 +97,26 @@ for (const native of [true, false])
       throw new Error('read must not lock');
     };
     const reply = await agent.dispatch({ action: 'tests', laneId: lane.laneId });
-    const { scope, reason, tests, command, coverage, ...pins } = reply.result;
+    const {
+      scope,
+      reason,
+      tests,
+      command,
+      coverage,
+      available,
+      intentId,
+      candidateId,
+      contractVersion,
+      contract,
+      contractProposal,
+      ...pins
+    } = reply.result;
+    assert.equal(intentId, lane.intentId);
+    assert.equal(candidateId, null);
+    assert.equal(contractVersion, 0);
+    assert.equal(contract, null);
+    assert.ok(available.includes('tests/leaf.test.mjs'));
+    assert.equal(contractProposal.timingBasis, 'historical-estimate');
     assert.deepEqual(
       { scope, reason, tests },
       { scope: expected.scope, reason: expected.reason, tests: expected.tests },

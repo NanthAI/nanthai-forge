@@ -1,3 +1,4 @@
+import { latestTestContract } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
 import { handoffSummary, latestHandoff } from './agent-handoff-types.js';
 import { sourceTreeEntries } from './source-tree-index.js';
@@ -57,6 +58,9 @@ export function intentHeader(intent: WorkData['intents'][number]) {
     id,
     outcome,
     constraints,
+    ...(intent.testContracts
+      ? { testContracts: latestTestContract(intent) ? [latestTestContract(intent)!] : [] }
+      : {}),
     base,
     status,
     createdAt,

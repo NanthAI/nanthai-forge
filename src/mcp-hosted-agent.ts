@@ -67,9 +67,9 @@ export function registerHostedAgentWorkflow(
     },
     {
       name: 'forge_check',
-      actions: ['check', 'run', 'observe'],
+      actions: ['check', 'run', 'observe', 'tests', 'confirm-tests'],
       description:
-        'Check a pinned hosted Candidate or observe one run/source operation/submission. run aliases check. Observation is one finite authorized read; it starts no compute or subscription. Use forge_wait for explicitly requested live run or submission observation.',
+        'tests proposes proving tests for a Candidate; confirm-tests stores the under-90-second contract using complete timings from an exact-Candidate runId, expectedHead and expectedVersion. Optional tests replaces the proposed list. Acceptance gates are unchanged. Check a pinned hosted Candidate or observe one run/source operation/submission. run aliases check. Observation is one finite authorized read; it starts no compute or subscription. Use forge_wait for explicitly requested live run or submission observation.',
     },
     {
       name: 'forge_work_overview',

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { detachedWorker } from './detached-worker-shutdown.js';
 import { existsSync } from 'node:fs';
 import { watchLocal } from './local-watcher.js';
 import { join } from 'node:path';
@@ -275,35 +276,20 @@ export async function watchOwnerPresence(
   );
 }
 if (process.argv[1]?.endsWith('/presence-worker.js') && process.argv[2]) {
-  const store = new WorkStore(process.argv[2]);
-  const controller = new AbortController();
-  const guard = guardOwnerWorker(
-    store,
-    reason => {
-      // A gone or replaced owner is not ours to touch: no flush, no ticket or marker cleanup. Deleting
-      // entries while someone's `rm -r` runs can make it stop early (Node's rmSync on Linux gives up when
-      // an entry vanishes under it). Dead-process tickets and markers are reaped by the next scan.
-      if (reason === 'owner-gone' || reason === 'owner-replaced') process.exit(0);
-      controller.abort();
-      // Backstop: a stuck watcher (Linux inotify closes can lag) must not keep an unowned process alive.
-      // Presence is advisory and nothing is mid-write here, so a short grace is enough.
-      setTimeout(() => process.exit(0), 1_000).unref();
-    },
-    { runtime: process.argv[1] },
-  );
-  const shutdown = () => {
-    controller.abort();
-    setTimeout(() => process.exit(0), 1_000).unref();
-  };
-  process.once('SIGTERM', shutdown);
-  process.once('SIGINT', shutdown);
-  // The guard signal unrefs the observers, so this keeps the process alive until the guard ends it.
-  const keepAlive = setInterval(() => undefined, 60_000);
-  await watchOwnerPresence(store, controller.signal, guard.touch, async signal => {
-    const { watchLandingWorker } = await import('./landing-worker.js');
-    await watchLandingWorker(store, signal);
+  await detachedWorker(async signal => {
+    const store = new WorkStore(process.argv[2]!);
+    const guard = guardOwnerWorker(store, () => process.exit(0), { runtime: process.argv[1] });
+    // Observers are unreferenced; the process owns them until shutdown.
+    const keepAlive = setInterval(() => undefined, 60_000);
+    try {
+      await watchOwnerPresence(store, signal, guard.touch, async lifecycleSignal => {
+        const { watchLandingWorker } = await import('./landing-worker.js');
+        await watchLandingWorker(store, lifecycleSignal);
+      });
+    } finally {
+      clearInterval(keepAlive);
+      guard.close();
+    }
   }).catch(() => undefined);
-  clearInterval(keepAlive);
-  guard.close();
   process.exit(0);
 }

@@ -107,6 +107,13 @@ const examples: Record<string, unknown> = {
   wait: { laneIds: ['LANE_ID'], operationIds: [], until: 'terminal', timeoutSeconds: 600 },
   integrate: { laneIds: ['LANE_ID', 'OTHER_LANE_ID'] },
   tests: { laneId: 'LANE_ID' },
+  'confirm-tests': {
+    candidateId: 'CANDIDATE_ID',
+    runId: 'RUN_ID',
+    expectedHead: 'HEAD',
+    expectedVersion: 0,
+    operationId: 'UUID',
+  },
   peers: { laneId: 'LANE_ID', detail: true },
   'peer-ack': { laneId: 'LANE_ID', noticeId: 'NOTICE_ID', choice: 'accept-order' },
   take: { laneId: 'LANE_ID', takeover: true },
@@ -208,9 +215,12 @@ function actionHelp(action: string): string {
   if (action === 'land')
     result +=
       'land records a desired state and returns a handle {operationId,entryIds} by default. wait:true watches that handle; disconnecting never cancels or drives it. landing {operationId} reads its current phase and outcome. An unbound owner service drives native work; hosted authority drives bound submissions after source preparation. A duplicate Lane/head returns the existing handle. Land selected recorded heads (unsaved edits remain untouched). Same-Intent inputs share a Candidate; compatible cross-Intent entries share a batch. Keep the operationId and replay the original request after a lost reply. Outcomes: accepted, failed, conflict, review-needed, waiting, preview-excluded. When integrationPreview.auto is enabled, exact saved inputs are previewed before checking. A new request with preview:"skip" overrides local preview exclusions.\n';
+  if (action === 'confirm-tests')
+    result +=
+      'Confirm the proposed proving tests for a clean Candidate. Send candidateId, runId of a completed run on that exact source, expectedHead, expectedVersion and operationId. Optional tests replaces the proposed list. Complete measurements must total under 90000 ms. Missing timings and over-budget contracts are refused explicitly. The acceptance gate remains unchanged.\n';
   if (action === 'tests')
     result +=
-      'Read the scoped landing test selection for the Lane saved head versus current main. Returns scope, reason, tests, command and source pins; command is null when no test files are selected. Run it in the Lane after building. Checkpoint edits and ask again after sync or main changes. Read-only; no check is started.\n';
+      'Read the scoped landing test selection for the Lane saved head versus current main. Returns scope, reason, tests, command and source pins; command is null when no test files are selected. Run it in the Lane after building. Checkpoint edits and ask again after sync or main changes. Includes contractProposal with per-file historical estimates (unknown timings are null), current contract and version. candidateId selects exact composed source; runId reads its complete measured timing reports. Read-only; no check is started.\n';
   if (action === 'status')
     result +=
       'laneId returns one compact Lane: state, saved head/base, save count, paged Candidates, last check, saved changed-path count and local peers advice. High region overlap also prints compact stderr lines; peers detail:true includes low/disjoint regions. detail:true also includes the existing owner overview. Omit laneId for that overview; intentId filters it. Candidate pages use offset/limit. Unsaved changes are available through review.\n';
@@ -247,6 +257,8 @@ function actionHelp(action: string): string {
       'status',
       'observe',
       'capabilities',
+      'tests',
+      'confirm-tests',
     ].includes(action)
   )
     result +=

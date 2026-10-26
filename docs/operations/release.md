@@ -2,7 +2,7 @@
 
 `nforge release` explicitly releases accepted native `main`: native Git export
 (with optional reuse), build, development backend, matching web, CLI package,
-local install, and atomic CLI wrapper selection. It never lands a Lane, changes
+local install, atomic CLI wrapper selection, and supervised owner runtime selection. It never lands a Lane, changes
 acceptance policy, pushes source recovery, or publishes a GitHub mirror. A failed
 release does not undo a successful landing or establish recovery coverage.
 
@@ -73,7 +73,7 @@ success, known child failure, pending stages, and unknown outcomes. An incomplet
 release exits nonzero. CLI installation is selected only after all previous stages
 succeed. Per-stage IDs remain stable; each explicit retry of a failed stage gets
 a new attempt ID and fresh output directory. Earlier successful stages are skipped.
-Completed operations replay their retained receipt without selecting the CLI again.
+Completed operations replay their retained receipt without selecting the CLI or restarting the owner again.
 `installedHead` is the release's successful selection observation, not a current
 probe of a wrapper somebody may have changed later. Remote provider versions are
 observed only through the successful child exit; no independent live compatibility
@@ -119,6 +119,62 @@ because later stages require its exact output paths. Keep the original UUID,
 attempt ID, source and observation. No additional confirmation is part of the
 successful release path.
 
+## Select and verify the owner runtime
+
+After CLI selection, the `owner` stage discovers the current user's launchd
+`com.nanthai.forge-owner` service and checks that its `serve` owner matches this
+release. A missing service (including platforms without this supervisor adapter)
+is a successful skip with an explicit receipt note; it does not install a service.
+The supervisor interface keeps discovery, restart and PID observation separate
+from selection and retirement.
+
+The service's configured CLI entry point must be inside `runtimeDirectory`.
+Release atomically replaces that file or symlink with a symlink to the new
+installation's exact `dist/cli.js`. Node resolves that entry point into the new
+package, so imports and newly started workers use the new runtime. This also
+works with an existing real `installed-owner` directory: no directory is moved,
+removed or copied over. Previous entry-point bytes or link text, mode and digest
+are retained as `previous-owner-cli` in the release directory; the rest of every
+previous installation remains available.
+
+The stage restarts through launchd and verifies its reported PID, kernel start
+time, exact installed CLI path and authenticated local response. `serve` retains
+private discovery in `OWNER/.forge/work/owner-runtime.json` (mode 0600), including
+its existing local bearer token. If discovery cannot be retained, existing serve
+APIs remain available and release reports an unverified owner. `/api/owner` uses the existing bearer/host/origin
+checks and returns only owner, port and process identity. Tokens, environment
+values, supervisor output and process arguments never enter release receipts.
+
+The release-owned `owner-selection.json` retains the original service and process
+identity before selection and restart. Resume first observes a requested restart;
+a responding new process is adopted without another restart. A replacement
+process that has not verified is preserved and reported as
+`RELEASE_OWNER_UNVERIFIED`; resume can verify it later. An owner already answering
+from the selected install needs no restart. Failed attempts share this plan, and
+a dead stage child can resume it after a lost reply. Historical release receipts
+created before this stage remain historical receipts.
+
+After verification, release retires detached `local-watcher-worker.js`,
+`auto-exchange.js`, `presence-worker.js` and `post-accept-main.js` processes, plus detached check controllers, advisory,
+GitHub push, integration preview and weekly metrics workers in previous runtime
+installations. It matches the install path and kernel start
+identity, rechecks both before each signal, and excludes the current install,
+paths outside the runtime directory and all agent MCP `cli.js` processes. Each
+worker gets SIGTERM, up to ten seconds to exit, then SIGKILL only if that same
+process remains. The receipt records each PID, start time, script path, attempted signals
+and observed exit. Resume can repeat an interrupted signal attempt after rechecking
+identity; it never applies that attempt to a reused PID. Presence and main-audit workers use nonblocking Work-lock
+admission so signal delivery cannot be trapped in a synchronous lock wait;
+shutdown aborts their observers and has a one-second exit backstop.
+
+To undo owner selection, first check `selectionPath` still resolves to the
+receipt's `executablePath`. Atomically restore `previousOwnerCli` as a file with
+`previousOwnerMode`, or recreate its saved link text for
+`previousOwnerKind: "symlink"`, then restart the same supervisor. This restores
+the previous runtime without discarding either install. Retired advisory workers
+are recreated by ordinary owner activity. Owner rollback does not roll back
+backend/web deployments or the CLI wrapper.
+
 ## Restore the prior CLI selection
 
 Before any stage runs, the journal saves the prior wrapper's exact bytes (or symlink target),
@@ -140,6 +196,7 @@ Restoring the wrapper does not roll back backend or web deployments.
 Fixture tests fake exporters, builders, package installers and providers. They
 exercise failed stages, actual child exits/signals, unknown replies, durable
 receipt reconciliation, exact source resume, existing directories, package
-integrity and previous CLI selection. Fixture success is not evidence that a live
+integrity, previous CLI selection, fake supervised owner restarts, runtime verification,
+crash/resume, identity-fenced worker retirement and both workers’ SIGTERM shutdown. Fixture success is not evidence that a live
 development release, account login, provider reconciliation or cross-version
 backend/client compatibility has been exercised.

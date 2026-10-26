@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { ForgeError } from './errors.js';
 import { join } from 'node:path';
 import { releaseJson, releaseSave } from './maintainer-release-files.js';
 import {
@@ -25,7 +26,7 @@ try {
     exitCode: error instanceof ReleaseChildFailure ? error.exitCode : 1,
     signal: error instanceof ReleaseChildFailure ? error.signal : null,
     result: {},
-    code: 'RELEASE_STAGE_FAILED',
+    code: error instanceof ForgeError ? error.code : 'RELEASE_STAGE_FAILED',
   };
 }
 releaseSave(join(input.directory, 'receipt.json'), receipt);

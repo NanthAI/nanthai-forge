@@ -1,3 +1,4 @@
+import { latestTestContract, type IntentTestContract } from '../../../src/intent-test-contract';
 // SPDX-License-Identifier: Apache-2.0
 import { intentProgress } from '../../../src/work-intent-progress';
 import type { CockpitLane } from '../cockpit/model';
@@ -5,6 +6,7 @@ import { attentionRank, toneLabel, type Tone } from '../ui/status';
 
 export type IntentStatus = 'proposed' | 'active' | 'ready' | 'abandoned' | 'completed';
 export type IntentRow = {
+  contract?: IntentTestContract | null;
   id: string;
   outcome: string;
   constraints: string;
@@ -25,6 +27,7 @@ export type IntentRow = {
 };
 
 type IntentInput = {
+  testContracts?: IntentTestContract[] | undefined;
   id: string;
   outcome: string;
   constraints?: string;
@@ -71,6 +74,7 @@ export function intentRows(intents: readonly IntentInput[], lanes: readonly Cock
       .sort();
     return {
       id: intent.id,
+      contract: latestTestContract(intent),
       outcome: intent.outcome,
       constraints: intent.constraints ?? '',
       status: intent.status,

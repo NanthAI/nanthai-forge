@@ -245,3 +245,31 @@ test('finish with explicit saved inputs preserves local drafts without starting 
   assert(!s.calls.some(call => call.name === 'projectHostedSaves:prepare'));
   assert.equal(readFileSync(join(s.root, 'draft.txt'), 'utf8'), 'Unselected local draft');
 });
+
+test('tests and confirm-tests use the shared hosted action with retained operation pins', async t => {
+  const s = agentFixture(t),
+    requests = [];
+  s.exchange.client.action = async (_ref, input) => {
+    const command = JSON.parse(input.request);
+    requests.push(command);
+    return JSON.stringify({ contract: null, contractVersion: 0, action: command.action });
+  };
+  const operationId = randomUUID(),
+    candidateId = s.candidate.id;
+  const command = {
+    operationId,
+    candidateId,
+    runId: randomUUID(),
+    expectedHead: s.candidate.result.head,
+    expectedVersion: 0,
+    tests: [],
+  };
+  const proposal = await s.transport().dispatch('tests', { candidateId });
+  assert.equal(proposal.result.action, 'tests');
+  const first = await s.transport().dispatch('confirm-tests', command);
+  assert.equal(first.result.action, 'confirm-tests');
+  assert.deepEqual(await s.transport().dispatch('confirm-tests', command), first);
+  assert.equal(requests[1].operationId, operationId);
+  assert.deepEqual(requests[1], requests[2]);
+  assert.ok(!existsSync(join(s.root, '.forge', 'native.json')));
+});

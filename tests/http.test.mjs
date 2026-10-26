@@ -85,3 +85,61 @@ test('local serve offers Git transport and /api/work but serves no browser UI or
   }
   assert.equal((await request('/api/reindex', { method: 'POST' })).status, 404);
 });
+
+test('owner runtime probe authenticates and exposes only process identity, retaining private discovery until close', async t => {
+  const { readFileSync, statSync, existsSync } = await import('node:fs');
+  const { root, server, origin, request } = await local(t);
+  const path = join(root, '.forge/work/owner-runtime.json');
+  const retained = JSON.parse(readFileSync(path, 'utf8'));
+  assert.equal(retained.token, server.token);
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.equal((await fetch(`${origin}/api/owner`)).status, 401);
+  const response = await request('/api/owner');
+  assert.equal(response.status, 200);
+  const observed = await response.json();
+  assert.equal(observed.pid, process.pid);
+  assert.equal(observed.startTime, retained.startTime);
+  assert.equal(observed.executablePath, retained.executablePath);
+  assert.equal(observed.token, undefined);
+  await server.close();
+  assert.equal(existsSync(path), false);
+});
+
+test('unwritable runtime discovery preserves the existing serve APIs', async t => {
+  const fs = await import('node:fs');
+  const { syncBuiltinESMExports } = await import('node:module');
+  const original = fs.default.openSync;
+  t.mock.method(fs.default, 'openSync', (path, ...args) => {
+    if (String(path).includes('owner-runtime.json.'))
+      throw Object.assign(new Error('Synthetic unwritable discovery'), { code: 'EACCES' });
+    return original(path, ...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  const { request } = await local(t);
+  assert.equal((await request('/api/work?compact=true')).status, 200);
+  const probe = await request('/api/owner');
+  assert.equal((await probe.json()).error.code, 'OWNER_RUNTIME_UNAVAILABLE');
+});
+
+test('discovery cleanup failure cannot prevent server shutdown', async t => {
+  const fs = await import('node:fs');
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { server, origin } = await local(t);
+  const original = fs.default.rmSync;
+  t.mock.method(fs.default, 'rmSync', (path, ...args) => {
+    if (String(path).endsWith('/owner-runtime.json'))
+      throw Object.assign(new Error('Synthetic unwritable discovery cleanup'), { code: 'EACCES' });
+    return original(path, ...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  await server.close();
+  await assert.rejects(fetch(`${origin}/api/work`));
+});

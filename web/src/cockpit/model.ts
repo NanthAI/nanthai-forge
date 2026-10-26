@@ -66,6 +66,7 @@ export type CockpitWork = {
 
   channelMoves?: readonly { channel: string; status?: string; head?: string; viewId: string; at?: string }[];
   intents: readonly {
+    testContracts?: WorkData['intents'][number]['testContracts'];
     id: string;
     outcome: string;
     status?: string;

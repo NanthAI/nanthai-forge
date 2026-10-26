@@ -1,3 +1,4 @@
+import { intentTestContractSchema } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -15,6 +16,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
     .object({
       ...common,
       kind: z.literal('intent'),
+      testContracts: z.array(intentTestContractSchema).optional(),
       outcome: z.string().trim().min(1).max(500),
       constraints: z.string().max(4000),
       creatorAccountId: z.string().min(1),

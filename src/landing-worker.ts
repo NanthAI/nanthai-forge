@@ -1,3 +1,5 @@
+import { settleFinish, settleLand, requireRecoveryProgress } from './landing-journal-settle.js';
+import type { FinishAction } from './agent-workflow-schema.js';
 import { shareLandingRecords, landingPositions, prepareLandingRecords } from './landing-records-index.js';
 import { observeLandingQueue } from './landing-records.js';
 import { watchLandingStalls } from './landing-stall-watch.js';
@@ -227,6 +229,11 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
                   operationId: retained.operationId,
                   laneIds: retained.state.entries.flatMap(entry => entry.inputs.map(pin => pin.laneId)),
                 };
+                let settled = false;
+                await attempt(async () => {
+                  settled = !!(await settleLand(store, retained.operationId));
+                });
+                if (settled) continue;
                 if (!retained.command) {
                   await attempt(() => resumeLegacyLand(agent!.work, retained.operationId));
                   continue;
@@ -234,7 +241,9 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
                 // A blocked request remains quiet until a durable dependency change.
                 if (waitingDependencies(store, retained.command.laneIds, retained.command.channel).length)
                   continue;
-                await attempt(() => land(agent!.work, retained.command!, retained.selection));
+                await attempt(async () => {
+                  requireRecoveryProgress(await land(agent!.work, retained.command!, retained.selection));
+                });
               }
               for (const command of finishes) {
                 assertLandingWorkerActive();
@@ -247,8 +256,15 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
                   laneIds,
                   ...(channel ? { channel } : {}),
                 };
-                if (waitingDependencies(store, laneIds, channel).length) continue;
-                await attempt(() => agent!.dispatch(command));
+                await attempt(async () => {
+                  if (await settleFinish(store, command as FinishAction)) return;
+                  if (waitingDependencies(store, laneIds, channel).length) return;
+                  try {
+                    requireRecoveryProgress(await agent!.dispatch(command));
+                  } catch (error) {
+                    if (!(await settleFinish(store, command as FinishAction, error))) throw error;
+                  }
+                });
               }
               if (!failed) publish('idle');
             } catch (error) {
@@ -266,7 +282,8 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
           // Retain wake invalidations during cooldown. Error retries own their
           // timer, so missed filesystem/socket hints cannot park the controller
           // and self-generated publication wakes cannot create a hot loop. A
-          // persistently failing entry settles at one retry (and log line) a minute.
+          // persistently failing entry retries at most once a minute; permanent
+          // journals have already retained their terminal receipts.
           retryMs = Math.min(retryMs ? retryMs * 2 : 100, 60_000);
           await delay(retryMs, undefined, { signal }).catch(error => {
             if (!signal.aborted) throw error;

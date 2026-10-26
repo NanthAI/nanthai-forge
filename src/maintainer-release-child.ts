@@ -21,7 +21,8 @@ export function releaseChild(journal: ReleaseJournal, name: ReleaseStage, direct
   }
   if (stage.attempts.at(-1)!.directory !== directory) throw new Error('Release attempt differs.');
   const input = join(directory, 'input.json');
-  // A persisted input means the child may have started. Never launch it twice.
+  // A persisted input means the child may have started. Only the owner stage
+  // has a serialized, resumable plan; other stages must never launch twice.
   try {
     releaseJson(input);
     let running = false;
@@ -32,14 +33,15 @@ export function releaseChild(journal: ReleaseJournal, name: ReleaseStage, direct
     } catch {
       /* Unknown process. */
     }
-    return {
-      attemptId: attempt.id,
-      status: 'unknown' as const,
-      exitCode: null,
-      signal: null,
-      result: {},
-      code: running ? 'RELEASE_RUNNING' : 'RELEASE_OUTCOME_UNKNOWN',
-    };
+    if (name !== 'owner' || running)
+      return {
+        attemptId: attempt.id,
+        status: 'unknown' as const,
+        exitCode: null,
+        signal: null,
+        result: {},
+        code: running ? 'RELEASE_RUNNING' : 'RELEASE_OUTCOME_UNKNOWN',
+      };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }

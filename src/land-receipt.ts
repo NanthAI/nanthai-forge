@@ -48,9 +48,14 @@ function landingSnapshot(
   wait?: boolean,
 ) {
   const replay = wait === false ? { ...command, wait: false } : command;
-  const entries = journal.state.entries.map(retained => {
-    const entry = resolveLandEntry(store, retained);
-    const submissions = landSubmissions(store, entry);
+  const resolved = journal.state.entries.map(entry => resolveLandEntry(store, entry));
+  const entries = resolved.map(entry => {
+    // A settled deleted-Lane receipt still carries its selected inputs/reason;
+    // no current Lane remains from which to derive a submission presentation.
+    const submissions =
+      entry.result?.settled && entry.inputs.some(pin => !store.select('lanes', pin.laneId))
+        ? []
+        : landSubmissions(store, entry);
     const outcome = entryOutcome(store, entry);
     const phases =
       submissions[0]?.phases ??
@@ -60,15 +65,28 @@ function landingSnapshot(
       message: entry.command.message,
       inputs: entry.inputs,
       ...outcome,
-      status: submissions.every(item => item.state === 'superseded')
-        ? 'superseded'
-        : submissions.every(item => item.complete)
-          ? 'accepted'
-          : String(outcome.status ?? 'waiting'),
+      status: entry.result?.settled
+        ? String(outcome.status)
+        : submissions.every(item => item.state === 'superseded')
+          ? 'superseded'
+          : submissions.every(item => item.complete)
+            ? 'accepted'
+            : String(outcome.status ?? 'waiting'),
       phases,
       submissions,
     };
   });
+  const settlements = new Map(
+    resolved.filter(entry => entry.result?.settled).map(entry => [entry.command.operationId, entry.result!]),
+  );
+  const complete = (entry: (typeof entries)[number]) =>
+    settlements.has(entry.operationId)
+      ? settlements.get(entry.operationId)!.complete === true
+      : entry.submissions.every(item => item.complete);
+  const terminal = (entry: (typeof entries)[number]) =>
+    settlements.has(entry.operationId)
+      ? settlements.get(entry.operationId)!.terminal === true
+      : entry.submissions.every(item => item.terminal);
   const counts: Record<string, number> = {};
   for (const entry of entries) {
     const status = String(entry.status);
@@ -90,16 +108,16 @@ function landingSnapshot(
           : command.operationId,
         entryIds: [...new Set(entries.map(entry => entry.operationId))],
       },
-      phase: entries.every(entry => entry.submissions.every(item => item.complete))
+      phase: entries.every(complete)
         ? 'landed'
-        : entries.every(entry => entry.submissions.every(item => item.terminal))
-          ? entries.every(entry => entry.submissions.every(item => item.state === 'superseded'))
+        : entries.every(terminal)
+          ? entries.every(entry => entry.status === 'superseded')
             ? 'superseded'
             : 'terminal-failed'
           : (entries.find(entry => entry.submissions.some(item => !item.terminal))?.phases.current ??
             'queued'),
-      complete: entries.every(entry => entry.submissions.every(submission => submission.complete)),
-      terminal: entries.every(entry => entry.submissions.every(submission => submission.terminal)),
+      complete: entries.every(complete),
+      terminal: entries.every(terminal),
       summary: entries.flatMap(entry =>
         entry.submissions.map(
           submission => `${submission.laneId.slice(0, 8)}: ${submissionLine(submission)}`,

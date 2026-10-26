@@ -1,3 +1,5 @@
+import { readTestContract } from './test-contract-api';
+import { candidateTestContract, type IntentTestContract } from '../../../src/intent-test-contract';
 import { OwnerDecisionsDisclosure } from '../decisions/OwnerDecisionsPanel';
 import { Breadcrumbs, workHref } from '../shell/Breadcrumbs';
 import { useReadRetry } from '../ui/read-retry';
@@ -58,6 +60,12 @@ export function HostedReview({
   act,
 }: Props) {
   const readAttempt = useReadRetry();
+  const canonicalContract = useQuery(readTestContract, {
+    projectId,
+    intentId: view.intentId,
+    candidateId: view.id,
+    ...(view.head ? { head: view.head } : {}),
+  });
   const client = useConvex(),
     read = useAction(api.projectViewActions.read);
   const briefs = useMemo(() => hostedBriefs(client, projectId), [client, projectId]);
@@ -253,7 +261,16 @@ export function HostedReview({
         <div className="fx-review-grid">
           <div className="fx-lane-col">
             <ReviewStory
-              data={story}
+              data={
+                story
+                  ? {
+                      ...story,
+                      contract: canonicalContract
+                        ? (JSON.parse(canonicalContract) as { contract: IntentTestContract | null }).contract
+                        : (candidateTestContract(intent, view.id, view.head) ?? story.contract),
+                    }
+                  : null
+              }
               error={error}
               outcome={story?.why.outcome ?? intent?.outcome ?? 'Intent'}
               intentHref={hostedHref({ projectTab: 'intent', intent: view.intentId })}

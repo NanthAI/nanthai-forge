@@ -400,7 +400,7 @@ test('resume adopts an original child receipt when the driver lost its reply', t
   });
   assert.equal(result.complete, true);
   assert.equal(result.stages.find(stage => stage.name === 'build').attempts.length, 1);
-  assert.deepEqual(calls, ['build', 'backend', 'web', 'package', 'install', 'select']);
+  assert.deepEqual(calls, ['build', 'backend', 'web', 'package', 'install', 'select', 'owner']);
 });
 
 test('packaging uses the existing tool and requires exactly one archive', async t => {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { intentTestContractSchema } from './intent-test-contract.js';
 import { decisionRecordSchema } from './decision-types.js';
 import { frictionEventSchema } from './friction-types.js';
 import { checkEnvironmentSchema } from './check-environment-schema.js';
@@ -252,6 +253,7 @@ export const laneSchema = z.object({
     .optional(),
 });
 export const intentSchema = z.object({
+  testContracts: z.array(intentTestContractSchema).optional(),
   id,
   mainCheckFailure: z.object({ channel: z.string(), head: oid, landingId: id, runId: id }).optional(),
   agentStart: agentOperationSchema.extend({ laneId: id }).optional(),

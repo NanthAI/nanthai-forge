@@ -1,3 +1,4 @@
+import { settleFinish } from './landing-journal-settle.js';
 import { readLandingHandle } from './land-receipt.js';
 import { boundLandingStatus } from './hosted-agent-bound-read.js';
 import { readMetrics } from './metrics-cli.js';
@@ -211,6 +212,10 @@ export class AgentWorkflow {
       delete (identity as { waitMs?: number }).waitMs;
     const wait = !('wait' in identity && identity.wait === false);
     if (identity.action === 'finish') delete identity.wait;
+    if (identity.action === 'finish' && identity.operationId) {
+      const settled = await settleFinish(this.work.store, identity as FinishAction);
+      if (settled) return { revision: this.work.store.revision(), result: settled };
+    }
     const store = this.work.store,
       prepared = identity.action === 'run' ? await prepareLaneRun(this.work, identity) : identity,
       { command, resolved: defaultResolved } = resolveAgentDefaults(store, prepared);
@@ -226,7 +231,8 @@ export class AgentWorkflow {
       ...defaultResolved,
     };
     const resolved = Object.keys(filled).length ? filled : undefined;
-    if (command.action === 'tests') return agentLaneTests(store, command.laneId);
+    if (command.action === 'tests' || command.action === 'confirm-tests')
+      return agentLaneTests(store, command);
     // A cleaned Lane is restored before an action needs its source.
     const needed =
       command.action === 'diff'
@@ -256,10 +262,19 @@ export class AgentWorkflow {
         ));
       }
     }
-    if (needed && !closedFinishReplay && !savedCheckpointReplay)
-      ensureLaneDirectory(store, needed, observed => {
-        warnings = observed;
-      });
+    if (needed && !closedFinishReplay && !savedCheckpointReplay) {
+      try {
+        ensureLaneDirectory(store, needed, observed => {
+          warnings = observed;
+        });
+      } catch (error) {
+        if (command.action === 'finish') {
+          const settled = await settleFinish(store, command as FinishAction, error);
+          if (settled) return { revision: store.revision(), result: settled };
+        }
+        throw error;
+      }
+    }
     if (command.action === 'finish') queueAgentSync(store, command, {}, true);
     const response = await withWorkProgress(
       'operationId' in command && typeof command.operationId === 'string'
@@ -317,7 +332,8 @@ export class AgentWorkflow {
     if (command.action === 'landing') return readLandingHandle(store, command.operationId);
     if (command.action === 'land')
       return land(this.work, { ...command, ...(!wait ? { wait: false } : {}) } as LandCommand);
-    if (command.action === 'tests') return agentLaneTests(store, command.laneId);
+    if (command.action === 'tests' || command.action === 'confirm-tests')
+      return agentLaneTests(store, command);
     if (command.action === 'take') return agentTake(store, command);
     if (command.action === 'peer-ack') {
       const journal = new CoordinationJournal(store),

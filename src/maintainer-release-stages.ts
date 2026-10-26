@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { withQueueSlot } from './landing-queue.js';
+import { selectReleaseOwner } from './maintainer-release-owner.js';
 import { childEnv } from '../scripts/child-env.mjs';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -159,6 +161,17 @@ export async function executeReleaseStage(
     return { path: directory, cli, head: journal.head };
   }
   const installed = releaseResult(journal, 'install');
+  if (name === 'owner') {
+    // A lost child start marker may leave a survivor: serialize the resumable
+    // owner plan across stage processes before any selection or supervisor IO.
+    const result = await withQueueSlot(
+      join(journal.directory, 'owner-stage-queue'),
+      () => selectReleaseOwner(journal, installed.path!, installed.cli!),
+      { anchor: journal.directory },
+    );
+    invariant('value' in result, 'RELEASE_RUNNING', 'Owner selection is still running.');
+    return result.value;
+  }
   const wrapper = `#!/bin/sh\nexport FORGE_CHECK_SCOPED=1\nexec ${releaseQuote(journal.node)} ${releaseQuote(installed.cli!)} "$@"\n`;
   const selected = journal.request.cliPath;
   // Reconcile a lost reply after the rename before checking the previous selection.

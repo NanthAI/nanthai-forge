@@ -145,9 +145,9 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
     },
     {
       name: 'forge_check',
-      actions: ['tests', 'define-check', 'run', 'observe', 'log', 'cancel'],
+      actions: ['tests', 'confirm-tests', 'define-check', 'run', 'observe', 'log', 'cancel'],
       description:
-        'Read the scoped landing test selection for a Lane saved head versus main with tests {laneId} (scope, reason, tests, shell command and source pins; no check started). Configure and run exact-Candidate local checks, observe the original run, read a log page or cancel. Runs use a clean environment with private HOME/XDG/temp. Define env/credentials variable names for explicit passthrough; values are not retained. Runs are local OS processes, not sandboxes.',
+        'confirm-tests stores an Intent proving-test contract for candidateId using completed exact-Candidate timing runId, expectedHead, expectedVersion and operationId. tests proposes the contract; optional tests replaces the proposed list. No gate changes. Read the scoped landing test selection for a Lane saved head versus main with tests {laneId} (scope, reason, tests, shell command and source pins; no check started). Configure and run exact-Candidate local checks, observe the original run, read a log page or cancel. Runs use a clean environment with private HOME/XDG/temp. Define env/credentials variable names for explicit passthrough; values are not retained. Runs are local OS processes, not sandboxes.',
     },
     {
       name: 'forge_work_overview',

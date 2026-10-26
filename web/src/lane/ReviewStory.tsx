@@ -1,3 +1,4 @@
+import { TestContract } from './TestContract';
 import { ErrorToast } from '../ui/Toast';
 // SPDX-License-Identifier: Apache-2.0
 import { useMemo, useState, type ReactNode } from 'react';
@@ -42,6 +43,7 @@ export function ReviewStory({
     .slice(0, 3);
   return (
     <>
+      <TestContract contract={data?.contract} />
       {(notes.length > 0 || Boolean(overlaps?.size) || protectedPaths.length > 0) && (
         <Panel title="What this does and why" actions={<a href={intentHref}>Open Intent</a>}>
           {notes.length > 0 && (

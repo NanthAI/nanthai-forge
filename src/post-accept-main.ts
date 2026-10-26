@@ -1,3 +1,4 @@
+import { detachedWorker } from './detached-worker-shutdown.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { withDetachedChecks } from './check-execution-context.js';
 import { withWorkLockOptions, workQueueWaitMs } from './work-lock.js';
@@ -213,18 +214,16 @@ export async function drainPostAccept(
   );
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const controller = new AbortController();
-  const stop = () => {
-    controller.abort();
-    setTimeout(() => process.exit(0), 1000).unref();
-  };
-  process.once('SIGTERM', stop);
-  process.once('SIGINT', stop);
-  const push = process.argv[3]
-    ? (JSON.parse(process.argv[3]) as { channel: string; checkId: string })
-    : undefined;
-  drainPostAccept(new WorkStore(process.argv[2]!), push, { signal: controller.signal }).catch(error => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 1;
-  });
+  void detachedWorker(async signal => {
+    const push = process.argv[3]
+      ? (JSON.parse(process.argv[3]) as { channel: string; checkId: string })
+      : undefined;
+    await drainPostAccept(new WorkStore(process.argv[2]!), push, { signal });
+  }).then(
+    () => process.exit(0),
+    error => {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exit(1);
+    },
+  );
 }

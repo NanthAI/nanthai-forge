@@ -1,6 +1,7 @@
 import { hostedLandingDesiredSchema } from './hosted-landing-desired.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { makeFunctionReference } from 'convex/server';
 import { hostedAgentCommandSchemas, type HostedAgentAction } from './hosted-agent-contract.js';
 import { hostedStartSchema, hostedStartResultSchema } from './hosted-lane.js';
 import { checkoutHostedLane } from './hosted-lane-checkout.js';
@@ -92,6 +93,19 @@ export async function executeHostedAgent(
 ): Promise<unknown> {
   const operationId = session.journal.operationId,
     epoch = session.capabilities.authority.epoch;
+  if (action === 'tests' || action === 'confirm-tests') {
+    const command = hostedAgentCommandSchemas[action].parse(input);
+    const request = await session.journal.retain('test-contract-request', () => ({
+      ...command,
+      action,
+      operationId,
+    }));
+    const result = await session.exchange.client.action(
+      makeFunctionReference<'action'>('projectIntentTests:execute'),
+      { projectId: session.address.projectId, request: canonicalPayload(request) },
+    );
+    return typeof result === 'string' ? JSON.parse(result) : result;
+  }
   if (action === 'start') {
     const command = hostedAgentCommandSchemas.start.parse(input);
     const request = await session.journal.retain('start-request', async () => {

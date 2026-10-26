@@ -59,7 +59,11 @@ export async function viewContext(
     const pin = catalogs.get('intents')?.find(r => r.key === id);
     if (pin) {
       const value = await readRecord(pin, e.read, 'intents');
-      data.intents.push({ id: value.id, outcome: value.outcome } as WorkData['intents'][number]);
+      data.intents.push({
+        id: value.id,
+        outcome: value.outcome,
+        ...(value.testContracts ? { testContracts: value.testContracts } : {}),
+      } as WorkData['intents'][number]);
     }
   }
   for (const [collection, scratch] of [
