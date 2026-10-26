@@ -12,11 +12,13 @@ import { createHook } from 'node:async_hooks';
 import { fixture } from './landing-batch-fixture.mjs';
 import { until, childWorker, gatedFixture } from './landing-worker-fixture.mjs';
 import { watchLandingWorker } from '../dist/landing-worker.js';
+import { watcherRuntime } from '../dist/local-watcher.js';
+import { FakeWatchWorker } from './local-watcher-fixture.mjs';
 import { landingWorkerStates, readLandingWorkerStatus } from '../dist/landing-worker-status.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
 import { startOwnerPresence } from '../dist/presence-worker-start.js';
-import { land } from '../dist/land.js';
+import { driveLand as land } from '../dist/land.js';
 import { WorkStore } from '../dist/work-store.js';
 import { ForgeError } from '../dist/errors.js';
 import { notifyAutoExchange } from '../dist/auto-exchange-notify.js';
@@ -61,6 +63,32 @@ test('durable enqueue wakes an already idle owner lifecycle after its observer d
     await stop();
   }
 });
+
+for (const action of ['land', 'finish'])
+  test(`a new ${action} submission wakes an idle driver without filesystem events`, async t => {
+    const f = await fixture(t, { remote: false });
+    const input = await f.candidate(`wake-${action}.txt`, undefined, false);
+    const owner = await childWorker(f, { filesystem: false });
+    try {
+      const operationId = randomUUID();
+      const submitted = await f.agent.dispatch(
+        action === 'land'
+          ? { action, operationId, laneIds: [input.lane.laneId], wait: false }
+          : { ...input.command, operationId, wait: false },
+      );
+      assert.equal(submitted.result.durable, true);
+      await until(
+        f,
+        () => entries(f).some(entry => entry.status === 'accepted'),
+        'submission wakes socket driver',
+      );
+      assert.equal(runs(f).length, 1);
+      assert.equal(f.store.load().channelMoves.length, 1);
+      assert.equal(f.content(`wake-${action}.txt`), `wake-${action}.txt\n`);
+    } finally {
+      await owner.stop();
+    }
+  });
 
 test('two worker processes retain one check, batch, and acceptance', async t => {
   const f = await gatedFixture(t);
@@ -107,7 +135,14 @@ await withQueueSlot(batchDirectory(w,'main'),async()=>{const b=await batchEdit(w
     await until(f, () => entries(f)[0]?.status === 'accepted', 'restart adopts');
     const after = f.store.load().landingBatches[0];
     assert.equal(after.id, before.id);
-    assert.deepEqual(after.prefixes, before.prefixes);
+    assert.deepEqual(
+      after.prefixes.map(({ reservedAt, ...pins }) => pins),
+      before.prefixes,
+    );
+    assert(
+      after.prefixes.every(prefix => Number.isFinite(Date.parse(prefix.reservedAt))),
+      'check reservation time is added by the recovered attempt',
+    );
     assert.equal(runs(f)[0].id, before.prefixes[0].runId);
     assert.equal(f.store.load().channelMoves.length, 1);
   } finally {
@@ -308,9 +343,13 @@ test('managed owner drives while another lifecycle owns advisory presence', asyn
   }
 });
 
-test('a wake retries a transient observation failure without a new Work revision', async t => {
+test('the controller retries a transient observation failure without an external wake or Work revision', async t => {
   const f = await fixture(t, { remote: false });
   await f.candidate('retry-observation.txt');
+  // Flush admission before registering the worker, and suppress even the
+  // watcher's startup-ready hint: no notification can rescue the failed sweep.
+  await new Promise(resolve => setImmediate(resolve));
+  t.mock.method(watcherRuntime, 'createWorker', () => new FakeWatchWorker({ hangStartup: true }));
   const readRecords = WorkStore.prototype.readRecords;
   let injected = false;
   let acknowledge;
@@ -332,9 +371,7 @@ test('a wake retries a transient observation failure without a new Work revision
   try {
     await failed;
     assert.equal(injected, true);
-    const state = landingWorkerStates(f.store)[0];
-    // No enqueue, edit, or result receipt: replay an explicit lifecycle wake.
-    notifyAutoExchange(state.endpoint);
+    // No enqueue, explicit wake, edit, or result receipt is needed for retry.
     await until(f, () => entries(f)[0]?.status === 'accepted', 'same revision is retried');
     assert.ok(f.store.revision() > revision);
     assert.equal(runs(f).length, 1);

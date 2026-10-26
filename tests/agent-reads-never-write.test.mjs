@@ -113,11 +113,13 @@ async function fixture(t, mcp) {
   writeFileSync(join(second.path, 'a.txt'), 'one\nSECOND\nthree\n');
   await act('checkpoint', { laneId: second.laneId, message: 'Peer notice for read-only receipts' });
   writeFileSync(join(first.path, 'a.txt'), 'one\nFIRST live\nthree\n');
-  return { root, agent, act, first, second, saved, view, run };
+  const landing = await act('land', { operationId: randomUUID(), laneIds: [first.laneId] });
+  return { root, agent, act, first, second, saved, view, run, landing };
 }
 
 const reads = f => [
   ['status', {}],
+  ['landing', { operationId: f.landing.operationId }],
   ['status', { laneId: f.first.laneId }],
   ['status', { laneId: f.first.laneId, detail: true }],
   ['peers', { laneId: f.first.laneId }],

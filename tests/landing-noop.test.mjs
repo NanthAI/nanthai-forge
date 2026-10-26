@@ -2,6 +2,7 @@
 // Incident 2026-10-24: after an outage ~40 old entries whose content was already on main
 // each ran a pre-accept check, a head == previous acceptance and a post-accept full check.
 import test from 'node:test';
+import { withLandingController } from '../dist/landing-worker-context.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, writeFileSync } from 'node:fs';
@@ -139,7 +140,9 @@ test('identical content with independent States lands once and only its exact re
   await enqueueLanding(f.work, sibling.command, sibling.view);
   await drainLandingBatches(f.work, 'main');
   assert.deepEqual(waitingDependencies(f.store, [byIntent.laneId]), []);
-  const childLanding = (await f.agent.dispatch({ action: 'land', laneIds: [child.laneId] })).result;
+  const childLanding = (
+    await withLandingController(() => f.agent.dispatch({ action: 'land', laneIds: [child.laneId] }))
+  ).result;
   assert.equal(childLanding.entries[0].status, 'accepted');
   assert.equal(f.content('identical.txt'), 'child\n');
 });

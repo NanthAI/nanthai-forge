@@ -104,6 +104,7 @@ export function projectSubmission(
     attemptHead,
     attemptId,
     ...sourceSubmission(outcome, lane.head, attemptHead),
+    ...(lane.head !== attemptHead ? { supersededBy: lane.head } : {}),
     ...(result.waitingFor
       ? { waitingFor: result.waitingFor as import('./landing-batch-types.js').LandingWaiting }
       : {}),

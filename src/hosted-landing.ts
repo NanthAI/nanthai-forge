@@ -105,7 +105,24 @@ export const hostedLandingStateSchema = z
     version: checkNumber,
     firstAttemptId: z.uuid(),
     attemptId: z.uuid(),
-    phase: z.enum(['queued', 'checking', 'ready', 'terminal-failed', 'landed']),
+    phase: z.enum(['composing', 'queued', 'checking', 'ready', 'terminal-failed', 'landed']),
+    preparing: z.literal(true).optional(),
+    timing: z
+      .object({
+        submittedAt: z.iso.datetime(),
+        selectedAt: z.iso.datetime().optional(),
+        composeStartedAt: z.iso.datetime().optional(),
+        composedAt: z.iso.datetime().optional(),
+        checkReservedAt: z.iso.datetime().optional(),
+        ciObservedAt: z.iso.datetime().optional(),
+        ciEndedAt: z.iso.datetime().optional(),
+        settlementStartedAt: z.iso.datetime().optional(),
+        commitObservedAt: z.iso.datetime().optional(),
+        committedAt: z.iso.datetime().optional(),
+        settledAt: z.iso.datetime().optional(),
+      })
+      .strict()
+      .optional(),
     observation: landingObservationSchema,
     acceptance: z.object({ receiptId: z.uuid(), head: hash }).strict().optional(),
     error: z
@@ -120,6 +137,7 @@ export const hostedLandingProgressSchema = hostedLandingStateSchema
     phase: true,
     error: true,
     version: true,
+    timing: true,
   })
   .extend({
     acceptance: hostedLandingStateSchema.shape.acceptance.unwrap().nullable(),

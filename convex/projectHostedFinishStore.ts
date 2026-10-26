@@ -146,7 +146,10 @@ export async function failFinish(ctx: MutationCtx, input: LandingIdentity, code:
     ...state,
     version: state.version + 1,
     phase: 'terminal-failed' as const,
-    observation: landingObservation(code === 'COMPOSITION_CONFLICT' ? 'conflict' : 'failed', code),
+    observation:
+      code === 'LANDING_SUPERSEDED'
+        ? { state: 'superseded' as const, pendingReason: null, cause: null }
+        : landingObservation(code === 'COMPOSITION_CONFLICT' ? 'conflict' : 'failed', code),
     error: { code, message },
   };
   await writeLanding(ctx, row, next, false);

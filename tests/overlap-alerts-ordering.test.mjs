@@ -6,11 +6,13 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { AgentWorkflow } from './agent-advisory-fixture.mjs';
+import { AgentWorkflow as AdvisoryWorkflow } from './agent-advisory-fixture.mjs';
+import { withLandingController } from '../dist/landing-worker-context.js';
+import { childWorker } from './landing-worker-fixture.mjs';
 import { CoordinationJournal } from '../dist/agent-coordination-journal.js';
 import { ForgeError } from '../dist/errors.js';
 import { digest } from '../dist/hash.js';
-import { land } from '../dist/land.js';
+import { driveLand as land } from '../dist/land.js';
 import { overlapRegions } from '../dist/agent-overlap-alerts.js';
 import { batchEdit, enqueueLanding, selectBatch, composeBatch } from '../dist/landing-batch-store.js';
 import { checkEnvironment } from '../dist/work-run.js';
@@ -24,6 +26,15 @@ import { NativeSource } from '../dist/native-source.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { trustAgents } from './autonomy-fixture.mjs';
 import { immutableDirectory } from './helpers/immutable-directory.mjs';
+// These ordering cases exercise the controller. Product CLI submissions below
+// use an independent child owner, and requester-only behavior has its own tests.
+class AgentWorkflow extends AdvisoryWorkflow {
+  dispatch(command) {
+    return command.action === 'land'
+      ? withLandingController(() => super.dispatch(command))
+      : super.dispatch(command);
+  }
+}
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const base = '# Document\n\nShared paragraph.\nAnother paragraph.\n\nEnd.\n';
 const docs = ['docs/one.md', 'docs/two.md'];
@@ -127,15 +138,6 @@ const evidence = (kind, value) => {
   if (process.env.FORGE_OVERLAP_EVIDENCE)
     appendFileSync(process.env.FORGE_OVERLAP_EVIDENCE, JSON.stringify({ kind, ...value }) + '\n');
 };
-// Progress is an observation: a post-accept audit can finish between replies.
-// Compare every retained receipt field while checking the replay's live phases
-// against a second settled observation below.
-const receiptEntries = entries =>
-  entries.map(({ phases: _phases, submissions, ...entry }) => ({
-    ...entry,
-    submissions: submissions.map(({ phases: _phases, ...submission }) => submission),
-  }));
-
 test('planned scope is visible before saves; canonical alerts deduplicate heads and grow with regions', async t => {
   const f = await fixture(t),
     a = await f.start('Alpha'),
@@ -389,61 +391,96 @@ for (let repeat = 1; repeat <= 5; repeat++)
         .concat(disjoint)
         .map(lane => lane.laneId),
     };
-    let result;
-    for (let replay = 0; replay < 20; replay++) {
-      const response = spawnSync(
-        process.execPath,
-        [resolve('dist/cli.js'), 'land', f.root, ...command.laneIds, '--operation-id', command.operationId],
-        { encoding: 'utf8' },
+    const controller = await childWorker(f);
+    try {
+      let result;
+      for (let replay = 0; replay < 20; replay++) {
+        const response = spawnSync(
+          process.execPath,
+          [
+            resolve('dist/cli.js'),
+            'land',
+            f.root,
+            ...command.laneIds,
+            '--operation-id',
+            command.operationId,
+            '--wait',
+          ],
+          { encoding: 'utf8' },
+        );
+        assert.equal(response.status, 0, response.stderr);
+        result = JSON.parse(response.stdout).result;
+        // Inspect returned lifecycle outcomes. Live owner progress can report
+        // a recoverable metadata race while settling the same desired goal.
+        assert.notEqual(result.code, 'WORK_STALE');
+        assert(result.entries.every(entry => entry.code !== 'WORK_STALE'));
+        evidence('land', { repeat, replay, result });
+        assert.equal(result.counts.conflict ?? 0, 0, JSON.stringify(result));
+        if (result.terminal) break;
+      }
+      assert.deepEqual(result.counts, { accepted: 6 }, JSON.stringify(result));
+      await drainPostAccept(f.store); // Join known audit writers before observing pending groups.
+      const data = f.store.load(),
+        moves = data.channelMoves.filter(
+          move => move.status === 'accepted' && data.views.some(view => view.id === move.viewId),
+        );
+      assert.equal(moves.length, 4);
+      assert.deepEqual(
+        moves.map(move =>
+          data.views
+            .find(view => view.id === move.viewId)
+            .inputs.filter(pin => lanes.some(lane => lane.laneId === pin.laneId))
+            .map(pin => pin.laneId),
+        ),
+        lanes.map(lane => [lane.laneId]),
       );
-      assert.equal(response.status, 0, response.stderr);
-      assert.doesNotMatch(response.stdout + response.stderr, /WORK_STALE/);
-      result = JSON.parse(response.stdout).result;
-      evidence('land', { repeat, replay, result });
-      assert.equal(result.counts.conflict ?? 0, 0, JSON.stringify(result));
-      if (result.terminal) break;
-    }
-    assert.deepEqual(result.counts, { accepted: 6 }, JSON.stringify(result));
-    await drainPostAccept(f.store); // Join known audit writers before observing pending groups.
-    const data = f.store.load(),
-      moves = data.channelMoves.filter(
-        move => move.status === 'accepted' && data.views.some(view => view.id === move.viewId),
+      const entry = lane =>
+        result.entries.find(entry => entry.inputs.some(pin => pin.laneId === lane.laneId));
+      assert.equal(entry(disjoint[0]).batchId, entry(disjoint[1]).batchId);
+      assert.equal(new Set(lanes.map(lane => entry(lane).batchId)).size, 4);
+      assert.deepEqual(
+        readPendingStatus(f.store, undefined, undefined, { detail: true }).overlap.groups,
+        [],
+        'accepted Lanes leave pending overlap groups',
       );
-    assert.equal(moves.length, 4);
-    assert.deepEqual(
-      moves.map(move =>
-        data.views
-          .find(view => view.id === move.viewId)
-          .inputs.filter(pin => lanes.some(lane => lane.laneId === pin.laneId))
-          .map(pin => pin.laneId),
-      ),
-      lanes.map(lane => [lane.laneId]),
-    );
-    const entry = lane => result.entries.find(entry => entry.inputs.some(pin => pin.laneId === lane.laneId));
-    assert.equal(entry(disjoint[0]).batchId, entry(disjoint[1]).batchId);
-    assert.equal(new Set(lanes.map(lane => entry(lane).batchId)).size, 4);
-    assert.deepEqual(
-      readPendingStatus(f.store, undefined, undefined, { detail: true }).overlap.groups,
-      [],
-      'accepted Lanes leave pending overlap groups',
-    );
-    for (let i = 1; i < moves.length; i++) {
-      const view = data.views.find(view => view.id === moves[i].viewId);
-      assert.equal(view.composedMain, moves[i - 1].head, 'later check is on actual new main');
+      for (let i = 1; i < moves.length; i++) {
+        const view = data.views.find(view => view.id === moves[i].viewId);
+        assert.equal(view.composedMain, moves[i - 1].head, 'later check is on actual new main');
+      }
+      const source = new NativeSource(f.root),
+        main = source.state(moves.at(-1).head);
+      for (const path of docs) {
+        const text = source.object(main.files.find(file => file.path === path).blob).toString();
+        for (const name of ['r1', 'r4', 'r5', 'r7']) assert.ok(text.includes(`${name} addition.`));
+      }
+      const replay = (await f.agent.dispatch(command)).result;
+      // A watcher may see acceptance before the controller appends its final
+      // diagnosis/timing observation. Stable replay means the saved inputs,
+      // exact runs, acceptances and per-Lane outcome identities never change.
+      const identities = entries =>
+        entries.map(entry => ({
+          operationId: entry.operationId,
+          inputs: entry.inputs,
+          status: entry.status,
+          runId: entry.runId,
+          acceptanceId: entry.acceptanceId,
+          viewId: entry.viewId,
+          submissions: entry.submissions.map(({ phases, diagnosis, waitingFor, ...identity }) => identity),
+        }));
+      assert.equal(replay.complete, true);
+      assert.deepEqual(identities(replay.entries), identities(result.entries));
+      // A second replay after settlement keeps the same retained identities.
+      assert.deepEqual(
+        identities((await f.agent.dispatch(command)).result.entries),
+        identities(replay.entries),
+      );
+      assert.equal(
+        f.store.load().runs.filter(run => !run.mainCheck).length,
+        data.runs.filter(run => !run.mainCheck).length,
+      );
+    } finally {
+      await controller.stop();
     }
-    const source = new NativeSource(f.root),
-      main = source.state(moves.at(-1).head);
-    for (const path of docs) {
-      const text = source.object(main.files.find(file => file.path === path).blob).toString();
-      for (const name of ['r1', 'r4', 'r5', 'r7']) assert.ok(text.includes(`${name} addition.`));
-    }
-    const replay = (await f.agent.dispatch(command)).result;
-    assert.deepEqual(receiptEntries(replay.entries), receiptEntries(result.entries));
-    assert.deepEqual((await f.agent.dispatch(command)).result.entries, replay.entries);
-    assert.equal(
-      f.store.load().runs.filter(run => !run.mainCheck).length,
-      data.runs.filter(run => !run.mainCheck).length,
-    );
   });
 
 test('genuine paragraph rewrites surface one named conflict after the compatible predecessors land', async t => {

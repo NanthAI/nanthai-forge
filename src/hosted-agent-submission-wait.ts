@@ -26,6 +26,7 @@ const eventSchema = z.object({
 const pageSchema = z.object({
   projectId: z.string(),
   operationId: z.uuid(),
+  canonicalOperationId: z.uuid().optional(),
   authority: sourceAuthoritySchema,
   submission: hostedLandingStateSchema,
   pendingAttempt: hostedFinishSchema.shape.pending,
@@ -49,6 +50,7 @@ export async function observeHostedSubmissions(
   const discovery = await transport.dispatch('capabilities', {});
   const actor = z.object({ actor: z.string() }).parse(discovery.result).actor;
   const cursor = new HostedSubmissionWaitCursor(transport.address, actor, operations, command.cursor);
+  const canonicalOperations = new Map<string, string>();
   const current = new Map<string, z.infer<typeof eventSchema>>();
   const sourceTerminal = new Map<string, boolean>();
   const terminal = () =>
@@ -64,6 +66,7 @@ export async function observeHostedSubmissions(
   const readInputs = async (operationId: string) => {
     const observed = current.get(operationId)!;
     const selected = observed.submission;
+    if (selected.preparing) return;
     for (const [key, unsubscribe] of inputSubscriptions) {
       if (key.startsWith(`${operationId}:`) && !key.startsWith(`${operationId}:${selected.attemptId}:`)) {
         unsubscribe();
@@ -128,7 +131,7 @@ export async function observeHostedSubmissions(
       for (const entry of page.entries) {
         invariant(
           entry.submissionId === selected.id &&
-            entry.operationId === operationId &&
+            entry.operationId === selected.operationId &&
             entry.attemptId === selected.attemptId,
           'HOSTED_PROTOCOL_INVALID',
           'Input observation differs from the selected submission/attempt.',
@@ -159,7 +162,8 @@ export async function observeHostedSubmissions(
   const publish = (operationId: string, event: z.infer<typeof eventSchema>, snapshot: boolean) => {
     const state = event.submission;
     invariant(
-      state.projectId === transport.address.projectId && state.operationId === operationId,
+      state.projectId === transport.address.projectId &&
+        state.operationId === (canonicalOperations.get(operationId) ?? operationId),
       'HOSTED_PROTOCOL_INVALID',
       'Submission observation differs from the selected project/operation.',
     );
@@ -191,11 +195,12 @@ export async function observeHostedSubmissions(
         page.projectId === transport.address.projectId &&
           page.operationId === operationId &&
           page.submission.projectId === page.projectId &&
-          page.submission.operationId === operationId,
+          page.submission.operationId === (page.canonicalOperationId ?? operationId),
         'HOSTED_PROTOCOL_INVALID',
         'Submission page differs from the selected project/operation.',
       );
       if (stopped) return;
+      canonicalOperations.set(operationId, page.canonicalOperationId ?? operationId);
       const authority = JSON.stringify(page.authority);
       if (cursor.authority && cursor.authority !== authority) {
         cursor.authority = authority;

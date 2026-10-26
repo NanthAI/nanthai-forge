@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { withLandingController } from '../dist/landing-worker-context.js';
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { stackStatus, stackSyncTarget } from '../dist/agent-stack.js';
@@ -30,7 +31,8 @@ async function fixture(t) {
     rmSync(root, { recursive: true, force: true });
   });
   const call = async (action, body = {}) =>
-    (await agent.dispatch({ action, operationId: randomUUID(), ...body })).result;
+    (await withLandingController(() => agent.dispatch({ action, operationId: randomUUID(), ...body })))
+      .result;
   await call('define-check', { name: 'verify', executable: process.execPath, args: ['-e', '0'] });
   await call('set-policy', { checks: { runner: 'local' } });
   const start = (outcome, options = {}) => call('start', { outcome, ...options });

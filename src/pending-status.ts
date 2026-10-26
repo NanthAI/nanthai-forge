@@ -162,6 +162,7 @@ export function pendingStatus(
         submissions.set(submission.submissionId, {
           ...submission,
           entryOperationId: queued.id,
+          ...(previous?.handle ? { handle: previous.handle } : {}),
           ...(previous?.phases ? { phases: previous.phases } : {}),
         });
       }

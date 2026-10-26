@@ -16,6 +16,28 @@ const lease = v.object({
   attemptId: v.string(),
 });
 export const hostedLandingTables = {
+  projectHostedLandingDesired: defineTable({
+    projectId: v.id('hostedProjects'),
+    actor: v.string(),
+    operationId: v.string(),
+    submissionId: v.string(),
+    composeOperationId: v.string(),
+    selectionKey: v.string(),
+    request: v.string(),
+    value: v.string(),
+    wake: v.union(v.object({ id: v.string(), taskId: v.id('_scheduled_functions') }), v.null()),
+  })
+    .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
+    .index('by_project_and_submission', ['projectId', 'submissionId'])
+    .index('by_project_and_selection', ['projectId', 'selectionKey'])
+    .index('by_project_and_compose', ['projectId', 'composeOperationId']),
+  projectHostedLandingAliases: defineTable({
+    projectId: v.id('hostedProjects'),
+    actor: v.string(),
+    operationId: v.string(),
+    requestHash: v.string(),
+    submissionId: v.string(),
+  }).index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId']),
   projectHostedLandingObservations: defineTable({
     projectId: v.id('hostedProjects'),
     submissionId: v.string(),
@@ -47,6 +69,7 @@ export const hostedLandingTables = {
     revertOf: v.optional(v.string()),
     actor: v.string(),
     sequence: v.number(),
+    selectionKey: v.optional(v.string()),
     runnable: v.boolean(),
     phase,
     runId: v.union(v.string(), v.null()),
@@ -56,6 +79,7 @@ export const hostedLandingTables = {
     .index('by_project_and_submission', ['projectId', 'submissionId'])
     .index('by_project_and_revert_and_sequence', ['projectId', 'revertOf', 'sequence'])
     .index('by_project_and_candidate_and_sequence', ['projectId', 'candidateId', 'sequence'])
+    .index('by_project_and_selection', ['projectId', 'selectionKey'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
     .index('by_project_and_channel_and_runnable_and_sequence', [

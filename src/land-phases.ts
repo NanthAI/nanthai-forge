@@ -4,6 +4,7 @@ export const landingPhaseNames = [
   'composing',
   'dispatching',
   'ci-running',
+  'diagnosing',
   'recording-accepting',
   'accepted',
   'main-audit',
@@ -23,6 +24,9 @@ export type PhaseRecords = {
   queuedAt?: string | undefined;
   selectedAt?: string | undefined;
   dispatchAt?: string | undefined;
+  composedAt?: string | undefined;
+  diagnosisAt?: string | undefined;
+  settlementAt?: string | undefined;
   ciAt?: string | undefined;
   checkedAt?: string | undefined;
   acceptedAt?: string | undefined;
@@ -49,10 +53,19 @@ export function phaseDuration(start?: string, end?: string): number | 'unknown' 
 export function deriveLandingPhases(records: PhaseRecords) {
   const bounds: [LandingPhaseName, string | undefined, string | undefined][] = [
     ['queued', records.queuedAt, records.selectedAt],
-    ['composing', records.selectedAt, records.dispatchAt],
-    ['dispatching', records.dispatchAt, records.ciAt],
+    ['composing', records.selectedAt, records.composedAt ?? records.dispatchAt],
+    ['dispatching', records.composedAt ?? records.dispatchAt, records.ciAt],
     ['ci-running', records.ciAt, records.checkedAt],
-    ['recording-accepting', records.checkedAt, records.acceptedAt],
+    ...(records.diagnosisAt
+      ? [
+          ['diagnosing', records.diagnosisAt, records.settlementAt] as [
+            LandingPhaseName,
+            string | undefined,
+            string | undefined,
+          ],
+        ]
+      : []),
+    ['recording-accepting', records.settlementAt ?? records.checkedAt, records.acceptedAt],
     ['accepted', records.acceptedAt, records.acceptedAt],
     ...(records.audit
       ? [

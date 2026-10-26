@@ -112,6 +112,7 @@ export const inputs = query({
           intentId: lane.intentId,
           head: pin.head,
           attemptHead: pin.head,
+          ...(lane.head !== pin.head ? { supersededBy: lane.head } : {}),
           attemptId: attempt.id,
           error: progress?.error ?? null,
           acceptance: progress?.acceptance ?? null,

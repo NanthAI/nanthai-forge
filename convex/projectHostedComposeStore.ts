@@ -1,3 +1,4 @@
+import { notifyDesiredCompose } from './projectHostedLandingDesiredWake';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -57,6 +58,7 @@ export async function writeComposeState(
   if (state.status === 'completed' || state.status === 'failed') {
     const row = (await ctx.db.get(id))!;
     await notifyFinishCompose(ctx, row.projectId, row.operationId);
+    await notifyDesiredCompose(ctx, row.projectId, row.operationId);
   }
 }
 export function hostedComposeInput(state: ComposeState, at: string) {

@@ -111,13 +111,6 @@ export async function waitForLand(
         }
         report();
         const result = response.result;
-        if (
-          await recoverLandInfrastructure(
-            work,
-            result.entries.map(entry => entry.operationId),
-          )
-        )
-          continue;
         if (result.terminal) return response;
         report();
         await new Promise(resolve => setTimeout(resolve, 250));
@@ -138,7 +131,9 @@ export function retrySingleInfrastructure(work: WorkService, entry: LandEntry) {
   )
     return;
   (entry.infrastructureRetries ??= []).push({ code, runId: run.id });
+  (entry.singleAttempts ??= []).push(entry.single);
   entry.single = {
+    timing: { selectedAt: new Date().toISOString() },
     attempt: entry.single.attempt + 1,
     previous: currentChannelHead(work.store, entry.command.accept!.channel),
   };

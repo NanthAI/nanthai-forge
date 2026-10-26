@@ -1,3 +1,4 @@
+import { withPeerLanding } from './peer-landing.js';
 import { retainIndexedPeers } from './agent-receipt-peers.js';
 import { integrationPreviewStatus } from './integration-preview-auto.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -111,7 +112,10 @@ export function agentPeers(
 ): PeersDigest {
   const command = peersInputSchema.parse(input);
   return store.observing(() => {
-    const peers = readPeers(store, command, options.receipt);
+    const peers = boundPeers(
+      withPeerLanding(store, readPeers(store, command, options.receipt)),
+      command.detail,
+    );
     try {
       retainIndexedPeers(store, command.laneId, peers);
     } catch {

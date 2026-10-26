@@ -1,5 +1,5 @@
 import { observeWorkProgress } from './work-progress.js';
-import { requireNewLandSelection } from './land-request-identity.js';
+import { reuseLandSelection } from './land-request-identity.js';
 import {
   previewLanding,
   previewExclusionMessage,
@@ -32,13 +32,23 @@ import type { WorkStore } from './work-store.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { LandCommand } from './land-schema.js';
 import type { WorkView } from './work-types.js';
+export type SingleLandingAttempt = {
+  attempt: number;
+  viewId?: string;
+  previous: string | null;
+  timing?: import('./landing-attempt-timing.js').AttemptTiming;
+};
 export type LandEntry = {
+  requestOperationId?: string;
+  sourceOperationId?: string;
+  sharedOperationId?: string;
   submissionOperationId?: string;
   command: FinishAction;
   inputs: WorkView['inputs'];
   viewId?: string;
   queued?: boolean;
-  single?: { attempt: number; viewId?: string; previous: string | null };
+  single?: SingleLandingAttempt;
+  singleAttempts?: SingleLandingAttempt[];
   infrastructureRetries?: { code: string; runId: string }[];
   result?: Record<string, unknown>;
 };
@@ -65,11 +75,15 @@ export class LandJournal {
     const directory = join(store.directory, 'agent-land');
     mkdirBelow(store.directory, directory);
     this.path = join(directory, `${command.operationId}.json`);
-    const request = digest(JSON.stringify(selection ? { command, selection } : command));
+    const { waitMs: _waitMs, ...identity } = command;
+    void _waitMs;
+    const request = digest(JSON.stringify(selection ? { command: identity, selection } : identity));
     if (existsSync(this.path)) {
       this.state = JSON.parse(readFileSync(this.path, 'utf8')) as State;
       invariant(
-        this.state.schema === 1 && this.state.request === request,
+        this.state.schema === 1 &&
+          (this.state.request === request ||
+            this.state.request === digest(JSON.stringify(selection ? { command, selection } : command))),
         'WORK_OPERATION_CHANGED',
         'Replay the original land request.',
       );
@@ -134,6 +148,7 @@ export class LandJournal {
       for (const inputs of compatible) {
         const first = inputs[0]!;
         entries.push({
+          requestOperationId: command.operationId,
           ...(selection ? { submissionOperationId: selection.finish.operationId } : {}),
           inputs,
           command: {
@@ -172,7 +187,12 @@ export class LandJournal {
       pins: pinned,
     };
     store.locked(() => {
-      requireNewLandSelection(store, command.operationId, command.channel, entries);
+      this.state.entries = reuseLandSelection(
+        store,
+        command.operationId,
+        command.channel,
+        this.state.entries,
+      );
       this.save();
     });
   }
@@ -181,7 +201,12 @@ export class LandJournal {
     // never reselects live Lane heads or changes an already submitted entry.
     if (
       this.state.preview !== undefined ||
-      this.state.entries.some(entry => entry.viewId || entry.queued || entry.result)
+      this.state.entries.some(
+        entry =>
+          !entry.sourceOperationId &&
+          !entry.sharedOperationId &&
+          (entry.viewId || entry.queued || entry.result),
+      )
     )
       return;
     const preview =
@@ -193,6 +218,7 @@ export class LandJournal {
     this.state.preview = preview ?? null;
     if (preview?.excluded.length)
       this.state.entries = this.state.entries.flatMap(entry => {
+        if (entry.sourceOperationId || entry.sharedOperationId) return [entry];
         const safe = entry.inputs.filter(pin => !preview.excluded.some(item => item.laneId === pin.laneId));
         const rejected = entry.inputs.filter(pin =>
           preview.excluded.some(item => item.laneId === pin.laneId),
@@ -240,7 +266,9 @@ export function pendingLands(store: WorkStore) {
     .flatMap(name => {
       const state = JSON.parse(readFileSync(join(directory, name), 'utf8')) as State;
       invariant(state.schema === 1, 'INVALID_WORK_STORE', 'Invalid retained land journal.');
-      return state.entries.some(entry => !entry.result || entry.result.status === 'waiting')
+      return state.entries.some(
+        entry => !entry.sourceOperationId && (!entry.result || entry.result.status === 'waiting'),
+      )
         ? [
             {
               operationId: name.slice(0, -5),

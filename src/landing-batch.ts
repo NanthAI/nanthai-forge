@@ -1,3 +1,5 @@
+import { withLandingAttempt, recordAttemptLock } from './landing-attempt-timing.js';
+import { observeWorkLocks, type WorkLockSpan } from './work-lock.js';
 import { recordLandingWaits } from './landing-waiting.js';
 import { landingRecords } from './landing-records.js';
 import { observeWorkProgress } from './work-progress.js';
@@ -86,13 +88,19 @@ export async function drainLandingBatches(
         // after a crash in composition/cancellation. Adopt that batch as well.
         if (!halted && (recoverable || launched < seen.size) && canSelect) {
           if (!running.size) await batchWindow(work, channel);
-          batch = await batchEdit(
-            work,
-            channel,
-            data => selectBatch(work, data, channel, started),
-            driver.beforePublish,
-            channel,
+          const selectionLocks: WorkLockSpan[] = [];
+          batch = await observeWorkLocks(
+            span => selectionLocks.push(span),
+            () =>
+              batchEdit(
+                work,
+                channel,
+                data => selectBatch(work, data, channel, started),
+                driver.beforePublish,
+                channel,
+              ),
           );
+          if (batch) for (const span of selectionLocks) recordAttemptLock(work.store, batch.id, span);
         }
         if (
           !canSelect &&
@@ -124,7 +132,9 @@ export async function drainLandingBatches(
             id = batch.id;
           const compose =
             batch.status === 'composing'
-              ? composeBatch(work, batch, driver.beforePublish)
+              ? withLandingAttempt(work.store, batch.id, () =>
+                  composeBatch(work, batch!, driver.beforePublish),
+                )
               : Promise.resolve(batch);
           // Compose serially (a child needs its parent's prefixes), then check concurrently.
           const selected = batch;
@@ -141,7 +151,9 @@ export async function drainLandingBatches(
             id,
             (async () => {
               for (;;) {
-                const step = await advanceLandingBatch(work, id, driver, { waitMs, parent, beforeAccept });
+                const step = await withLandingAttempt(work.store, id, () =>
+                  advanceLandingBatch(work, id, driver, { waitMs, parent, beforeAccept }),
+                );
                 if (step === 'settled') onSettled?.();
                 if (step !== 'advanced') return step === 'settled';
               }

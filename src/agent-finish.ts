@@ -476,7 +476,8 @@ class FinishRunner {
           () => this.control.cancelled(),
           runId => this.control.update({ runId, phase: 'check' }),
         );
-        const result = response.result;
+        const { phase: _landingPhase, ...result } = response.result;
+        void _landingPhase;
         const exhausted = result.entries.find(entry => entry.status === 'retry-exhausted') as
           | Record<string, unknown>
           | undefined;

@@ -53,7 +53,7 @@ retry identical parameters after a lost reply. A new explicit operationId starts
 Hosted start returns Lane pins; open materializes it; finish saves an opened Lane,
 composes and submits durable agent landing. Pending is not accepted.
 
-Actions: integrate, wait, handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, land-ready, checkpoint, save, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
+Actions: integrate, wait, handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, landing, land-ready, checkpoint, save, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
          log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
          making-of, report, metrics, friction, friction-triage, improve, decide, decisions.
 start stackOn:LANE_ID bases a native Lane on that parent’s latest saved head and waits for its landing.
@@ -121,6 +121,7 @@ const examples: Record<string, unknown> = {
   guidance: { operationId: 'UUID', scope: 'project', agentGuidance: 'How agents should work' },
   'land-ready': {},
   start: { outcome: 'Describe the intended change' },
+  landing: { operationId: 'UUID' },
   land: { operationId: 'UUID', laneIds: ['LANE_ID', 'OTHER_LANE_ID'] },
   checkpoint: { laneId: 'LANE_ID', message: 'Describe the checkpoint' },
   sync: { laneId: 'LANE_ID' },
@@ -206,7 +207,7 @@ function actionHelp(action: string): string {
       'wait:false returns after durable submission; the owner worker drives it. If offline, work stays pending. Observe status, pending-status or wait with the returned operationId. Omit wait (or true) for synchronous compatibility; changing wait replays the same work. preview:"skip" overrides enabled local integration exclusions for a new finish operation. with:[LANE_ID] includes saved sibling heads. Acceptance groups compatible heads and checks high overlaps separately in order on current main. after:{intentId} or after:{viewId} records a dependency; rerun the same request or land-ready after it lands. Omit accept to check only. accept:true means main at its current head. If main moved, finish syncs first; a sync conflict stops with phase "sync" and markers in the Lane. CHANNEL_CHANGED automatically retries sync/check/accept under the landing queue (maxRetries:3 by default, 0 disables retries). Receipts include attempts and queue positions. CHANNEL_DIVERGED means the Candidate lacks the Channel head: sync and finish again. CONTRACT_RESYNC_REQUIRED means main changed an export or schema your edits use; finish retries it like CHANNEL_CHANGED.\n';
   if (action === 'land')
     result +=
-      'wait:false returns after durable submission; the owner worker drives it, and offline work stays pending. Observe status, pending-status or wait. wait:true drives and waits until every selected input is terminal; infrastructure interruptions retry using retained identities, while check failures and conflicts stop. Omit wait for a finite synchronous sweep. Land selected recorded heads (unsaved edits remain untouched). Same-Intent inputs share a Candidate; compatible cross-Intent entries share a batch. Keep the operationId and replay the original request after a lost reply. Outcomes: accepted, failed, conflict, review-needed, waiting, preview-excluded. When integrationPreview.auto is enabled, exact saved inputs are previewed before checking. A new request with preview:"skip" overrides local preview exclusions.\n';
+      'land records a desired state and returns a handle {operationId,entryIds} by default. wait:true watches that handle; disconnecting never cancels or drives it. landing {operationId} reads its current phase and outcome. An unbound owner service drives native work; hosted authority drives bound submissions after source preparation. A duplicate Lane/head returns the existing handle. Land selected recorded heads (unsaved edits remain untouched). Same-Intent inputs share a Candidate; compatible cross-Intent entries share a batch. Keep the operationId and replay the original request after a lost reply. Outcomes: accepted, failed, conflict, review-needed, waiting, preview-excluded. When integrationPreview.auto is enabled, exact saved inputs are previewed before checking. A new request with preview:"skip" overrides local preview exclusions.\n';
   if (action === 'tests')
     result +=
       'Read the scoped landing test selection for the Lane saved head versus current main. Returns scope, reason, tests, command and source pins; command is null when no test files are selected. Run it in the Lane after building. Checkpoint edits and ask again after sync or main changes. Read-only; no check is started.\n';

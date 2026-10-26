@@ -155,7 +155,8 @@ export const hostedAgentCommandSchemas = {
 };
 export type HostedAgentAction = keyof typeof hostedAgentCommandSchemas;
 export function hostedAgentAction(action: string): HostedAgentAction {
-  const value = action === 'checkpoint' ? 'save' : action === 'run' ? 'check' : action;
+  const value =
+    action === 'checkpoint' ? 'save' : action === 'run' ? 'check' : action === 'landing' ? 'observe' : action;
   invariant(
     Object.hasOwn(hostedAgentCommandSchemas, value),
     'HOSTED_ACTION_UNSUPPORTED',

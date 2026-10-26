@@ -1,3 +1,4 @@
+import { wakeLandingWorker } from './landing-worker-wake.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,6 +22,7 @@ export function landingAdmission(store: WorkStore, operationId: string, laneIds:
     message,
     next: message,
     observe: {
+      landing: { action: 'landing', operationId },
       status: { action: 'status', laneId: laneIds[0] },
       pending: { action: 'pending-status' },
       wait: { action: 'wait', laneIds, operationIds: [operationId], until: 'terminal' },
@@ -35,6 +37,7 @@ export async function admitFinish(
 ) {
   const path = join(store.directory, 'agent-finish', `${command.operationId}.json`);
   const observe = (journal: FinishJournal, saved?: Record<string, unknown>) => {
+    wakeLandingWorker(store);
     const attempt = journal.state.attempts.at(-1)!;
     const fields = journal.state.result ?? {
       operationId: command.operationId,

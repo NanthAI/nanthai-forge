@@ -162,7 +162,11 @@ test('new saves supersede live predictions and notice applicability without chan
   assert.equal(f.store.revision(), revision);
   await drainLandingBatches(f.work, 'main');
   assert.equal(f.store.select('lanes', b.lane.laneId).head, newer.head);
-  assert.ok(f.content('shared.md').includes('docs-1 addition.'));
+  assert.ok(f.content('shared.md').includes('docs-0 addition.'));
+  assert.ok(!f.content('shared.md').includes('docs-1 addition.'));
+  const superseded = f.store.select('landingEntries', b.command.operationId);
+  assert.equal(superseded.status, 'interrupted');
+  assert.ok(superseded.reason.includes(newer.head));
   assert.equal(f.content('new-code.ts'), undefined);
 });
 

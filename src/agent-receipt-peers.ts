@@ -1,3 +1,4 @@
+import { withPeerLanding } from './peer-landing.js';
 // SPDX-License-Identifier: Apache-2.0
 import { recordMetricOverlapSave } from './self-metrics-overlap.js';
 import { changedPaths } from './agent-sync.js';
@@ -202,7 +203,7 @@ export function indexedReceiptPeers(
       }
       const ownership = laneOwnership(store, lane);
       if (ownership) result.ownership = ownership;
-      return boundPeers(result, command.detail);
+      return boundPeers(withPeerLanding(store, result), command.detail);
     });
   } catch {
     return { v: 1, coverage: 'local-incomplete' };

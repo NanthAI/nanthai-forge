@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { boundLandingStatus, watchBoundLanding } from './hosted-agent-bound-read.js';
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -8,7 +9,6 @@ import { sourceAuthority } from './hosted-source-authority.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { durableReplace } from './native-durability.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
 import { withQueueSlot } from './landing-queue.js';
 import { prepareBoundHostedCommands, captureBoundInputs } from './hosted-agent-bound-save.js';
 import { invariant } from './errors.js';
@@ -28,6 +28,8 @@ export type RetainedBoundSubmission = {
   command: Command;
   inputs: Pin[];
   captured?: boolean;
+  aliasOf?: string;
+  admitted?: boolean;
   hosted?: Command[];
   result?: Command;
 };
@@ -56,9 +58,34 @@ export async function boundAgentSubmission(
   if (!['finish', 'land'].includes(String(raw.action))) return native(input);
   const binding = readHostState(store).binding;
   if (!binding || !store.native) return native(input);
+  // Landing is asynchronous unless the caller explicitly asks to watch.
+  if (raw.action === 'land' && raw.wait === undefined)
+    return boundAgentSubmission(store, { ...raw, wait: false }, native, supplied);
   let operationId = z.uuid().parse(raw.operationId ?? randomUUID());
   const directory = join(store.directory, 'hosted-submissions');
   let path = join(directory, `${operationId}.json`);
+  if (raw.wait === true && existsSync(path)) {
+    const retained = read<Retained>(path);
+    invariant(
+      canonicalPayload({ ...retained.command, ...identity(raw), operationId }) ===
+        canonicalPayload(retained.command),
+      'WORK_OPERATION_CHANGED',
+      'Replay the original bound submission.',
+    );
+    invariant(
+      !retained.address ||
+        (retained.address.url === binding.deployment && retained.address.projectId === binding.projectId),
+      'WORK_OPERATION_CHANGED',
+      'The binding changed; observe the original project.',
+    );
+    if (retained.admitted || retained.aliasOf)
+      return watchBoundLanding(
+        store,
+        operationId,
+        typeof raw.waitMs === 'number' ? raw.waitMs : undefined,
+        supplied,
+      );
+  }
   const nativeDirectory = join(store.directory, 'native-submissions'),
     nativePath = join(nativeDirectory, `${operationId}.json`);
   const selection = store.locked(() => {
@@ -159,9 +186,28 @@ export async function boundAgentSubmission(
       'BAD_ARGUMENT',
       'Joint finish requires sibling Lanes of the same Intent.',
     );
+    const duplicate =
+      raw.action === 'land' && existsSync(directory)
+        ? readdirSync(directory)
+            .filter(name => /^[0-9a-f-]+\.json$/.test(name))
+            .map(name => read<Retained>(join(directory, name)))
+            .find(
+              old =>
+                old.command.action === 'land' &&
+                !old.aliasOf &&
+                old.command.channel === command.channel &&
+                old.command.checkId === command.checkId &&
+                old.command.preview === command.preview &&
+                old.inputs.length === inputs.length &&
+                old.inputs.every(pin =>
+                  inputs.some(current => current.laneId === pin.laneId && current.head === pin.head),
+                ),
+            )
+        : undefined;
     const retained: Retained = {
       command,
       inputs,
+      ...(duplicate ? { aliasOf: String(duplicate.command.operationId) } : {}),
       captured: raw.action !== 'finish',
       address: { url: binding.deployment, projectId: binding.projectId },
     };
@@ -184,6 +230,26 @@ export async function boundAgentSubmission(
     return response;
   }
   const retained = selection.retained!;
+  if (retained.aliasOf) {
+    if (raw.wait === true)
+      return watchBoundLanding(
+        store,
+        operationId,
+        typeof raw.waitMs === 'number' ? raw.waitMs : undefined,
+        supplied,
+      );
+    return boundLandingStatus(store, { operationId }, () => native(input), supplied);
+  }
+  if (retained.admitted) {
+    if (raw.wait === true)
+      return watchBoundLanding(
+        store,
+        operationId,
+        typeof raw.waitMs === 'number' ? raw.waitMs : undefined,
+        supplied,
+      );
+    return boundLandingStatus(store, { operationId }, () => native(input), supplied);
+  }
   if (retained.result) return { revision: store.revision(), result: retained.result };
   const pending = (phase: string, progress?: unknown): Response => ({
     revision: store.revision(),
@@ -249,42 +315,16 @@ export async function boundAgentSubmission(
     }
     if (responses.some(r => !(r.result as { submission?: unknown }).submission))
       return pending('prepare', responses);
-    if (raw.wait === false) {
-      const submissions = responses.map(
-        r => (r.result as { submission: { id: string; observation: { state: string } } }).submission,
-      );
-      const terminal = submissions.every(s => s.observation.state !== 'pending');
-      const complete = submissions.every(s => s.observation.state === 'landed');
-      return {
-        revision: store.revision(),
-        result: {
+    retained.admitted = true;
+    store.locked(() => durableReplace(path, canonicalPayload(retained)));
+    return raw.wait === false
+      ? boundLandingStatus(store, { operationId }, () => native(input), transport)
+      : watchBoundLanding(
+          store,
           operationId,
-          transport: 'hosted',
-          terminal,
-          complete,
-          status: complete ? 'landed' : terminal ? 'terminal-failed' : 'queued',
-          table: submissions.map(s => `${s.id}: ${s.observation.state}`).join('\n'),
-          submissions: responses.map(r => r.result),
-        },
-      };
-    }
-    const observed = await observeHostedSubmissions(transport, {
-      operationIds: retained.hosted!.map(c => c.operationId),
-      timeoutSeconds: typeof raw.waitMs === 'number' ? raw.waitMs / 1000 : 60,
-    });
-    return {
-      revision: store.revision(),
-      result: {
-        ...observed.result,
-        operationId,
-        transport: 'hosted',
-        table: observed.result.submissions
-          .map(s => `${s.submission.id}: ${s.submission.observation.state}`)
-          .join('\n'),
-        terminal: observed.result.status === 'terminal',
-        complete: observed.result.successful,
-      },
-    };
+          typeof raw.waitMs === 'number' ? raw.waitMs : undefined,
+          transport,
+        );
   };
   const result = await withQueueSlot(
     join(store.directory, 'hosted-submission-locks', operationId),

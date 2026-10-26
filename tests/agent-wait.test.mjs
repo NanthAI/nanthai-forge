@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { ControllerAgentWorkflow as AgentWorkflow } from './landing-controller-fixture.mjs';
 import { agentWait, waitText } from '../dist/agent-wait.js';
 import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 import { initNative } from '../dist/native-work.js';

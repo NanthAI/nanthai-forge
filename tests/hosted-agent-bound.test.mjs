@@ -429,7 +429,7 @@ test('async reconnect returns an existing hosted landing receipt rather than rep
   await boundAgentSubmission(f.store, f.command, noNative, f.transport());
   const submission = f.operations.get(f.command.operationId);
   submission.phase = 'landed';
-  submission.observation = { state: 'landed' };
+  submission.observation = { state: 'landed', pendingReason: null, cause: null };
   const replay = await boundAgentSubmission(
     f.store,
     { action: 'finish', operationId: f.command.operationId, wait: false },
@@ -524,4 +524,50 @@ test('reconnect never redirects a retained operation to a changed hosted binding
     code('WORK_OPERATION_CHANGED'),
   );
   assert.equal(f.calls.length, before);
+});
+
+test('bound land duplicates return the original handle and admitted watches only read', async t => {
+  const f = fixture(t);
+  const command = { action: 'land', operationId: randomUUID(), laneIds: [f.lane.laneId] };
+  const submitted = await boundAgentSubmission(f.store, command, noNative, f.transport());
+  const duplicateId = randomUUID();
+  const duplicate = await boundAgentSubmission(
+    f.store,
+    { ...command, operationId: duplicateId },
+    noNative,
+    f.transport(),
+  );
+  assert.deepEqual(duplicate.result.handle, submitted.result.handle);
+  assert.equal(f.calls.filter(call => call.name === 'projectHostedLanding:enqueue').length, 1);
+  const writes = f.calls.filter(call =>
+    ['projectHostedCompose:prepare', 'projectHostedLanding:enqueue'].includes(call.name),
+  ).length;
+  const locked = f.store.locked;
+  f.store.locked = () => assert.fail('an admitted watch does not enter the owner writer queue');
+  try {
+    const observed = await boundAgentSubmission(
+      f.store,
+      { action: 'land', operationId: duplicateId, wait: true, waitMs: 0 },
+      noNative,
+      f.transport(),
+    );
+    assert.deepEqual(observed.result.handle, submitted.result.handle);
+    await assert.rejects(
+      boundAgentSubmission(
+        f.store,
+        { ...command, message: 'changed request', wait: true },
+        noNative,
+        f.transport(),
+      ),
+      code('WORK_OPERATION_CHANGED'),
+    );
+  } finally {
+    f.store.locked = locked;
+  }
+  assert.equal(
+    f.calls.filter(call =>
+      ['projectHostedCompose:prepare', 'projectHostedLanding:enqueue'].includes(call.name),
+    ).length,
+    writes,
+  );
 });

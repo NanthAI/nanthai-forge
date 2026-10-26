@@ -1,3 +1,4 @@
+import { withLandingAttempt } from './landing-attempt-timing.js';
 import { pendingActionsInfra, PENDING_ACTIONS_INFRA } from './github-actions-infra.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -12,7 +13,7 @@ import type { LandCommand } from './land-schema.js';
 import type { WorkService } from './work.js';
 import type { ChannelMove } from './work-types.js';
 /** Ineligible entries use ordinary exact-check/policy-bound acceptance. No Lane files are written. */
-export async function landSingle(
+async function landSingleOnce(
   work: WorkService,
   entry: LandEntry,
   command: LandCommand,
@@ -22,11 +23,16 @@ export async function landSingle(
 ): Promise<Record<string, unknown>> {
   if (options.cancelled?.()) return { status: 'cancelled' };
   const store = work.store;
-  entry.single ??= { attempt: 0, previous: currentChannelHead(store, command.channel) };
+  entry.single ??= {
+    attempt: 0,
+    previous: currentChannelHead(store, command.channel),
+    timing: { selectedAt: new Date().toISOString() },
+  };
   const single = entry.single;
   const child = (phase: string) =>
     finishChild(entry.command.operationId, `single:${single.attempt}:${phase}`);
   if (!single.viewId) {
+    if (single.timing) single.timing.composeStartedAt ??= new Date().toISOString();
     save(); // Pin main and attempt before composing or checking.
     const view = await composeSavedMain(
       work,
@@ -35,6 +41,7 @@ export async function landSingle(
       child('compose'),
     );
     single.viewId = view.id;
+    if (single.timing) single.timing.composedAt ??= new Date().toISOString();
     save();
   }
   const view = store.select('views', single.viewId)!;
@@ -54,6 +61,10 @@ export async function landSingle(
         message: previewExclusionMessage,
         preview,
       };
+  }
+  if (single.timing && !single.timing.checkReservedAt) {
+    single.timing.checkReservedAt = new Date().toISOString();
+    save();
   }
   await phase({
     action: 'run-check',
@@ -76,6 +87,10 @@ export async function landSingle(
       checkStatus: run.status,
     };
   if (options.cancelled?.()) return { status: 'cancelled', runId, viewId: view.id };
+  if (single.timing) {
+    single.timing.settlementStartedAt ??= new Date().toISOString();
+    save();
+  }
   try {
     const move = (
       await phase({
@@ -88,6 +103,10 @@ export async function landSingle(
         expectedPrevious: single.previous,
       })
     ).result as ChannelMove;
+    if (single.timing) {
+      single.timing.commitObservedAt ??= new Date().toISOString();
+      save();
+    }
     const lifecycle = await acceptedLifecycle(work, move, command.keepOpen);
     return { status: 'accepted', runId, viewId: view.id, acceptanceId: move.id, ...lifecycle };
   } catch (error) {
@@ -106,10 +125,35 @@ export async function landSingle(
           message: 'Finish retry budget exhausted; start a new finish operation to choose a new attempt.',
         };
 
-      entry.single = { attempt: single.attempt + 1, previous: currentChannelHead(store, command.channel) };
+      (entry.singleAttempts ??= []).push(single);
+      entry.single = {
+        attempt: single.attempt + 1,
+        previous: currentChannelHead(store, command.channel),
+        timing: { selectedAt: new Date().toISOString() },
+      };
       save();
       return { status: 'waiting', code: error.code, runId, viewId: view.id, message: error.message };
     }
     throw error;
   }
+}
+
+export async function landSingle(...args: Parameters<typeof landSingleOnce>) {
+  const [work, entry, command, , save] = args;
+  entry.single ??= {
+    attempt: 0,
+    previous: currentChannelHead(work.store, command.channel),
+    timing: { selectedAt: new Date().toISOString() },
+  };
+  const selected = entry.single;
+  const result = await withLandingAttempt(
+    work.store,
+    finishChild(entry.command.operationId, `single:${selected.attempt}:attempt`),
+    () => landSingleOnce(...args),
+  );
+  if (result.status !== 'waiting' && selected.timing) {
+    selected.timing.settledAt ??= new Date().toISOString();
+    save();
+  }
+  return result;
 }

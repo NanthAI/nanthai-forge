@@ -42,6 +42,16 @@ in that path. The two-method source object interface keeps content identity
 separate from current R2 storage keys. Reads and cache-lag observations occur on
 commands, with no additional idle polling. See the [cutover procedure](operations.md#one-authority-cutover).
 
+Landing clients submit a durable goal and observe its handle. Native `land`
+returns by default; only the owner controller composes, checks and settles it.
+The read-only `landing` action reconciles no work and starts no service. Native
+operation aliases share original queue entries. Under hosted source authority,
+a goal registered while the first composition runs owns a fenced server wake;
+source completion resumes that goal into the existing hosted check/acceptance
+controller. Domain failures roll back admission before a separate terminal
+failure publication. Upload/save preparation remains an explicit pre-admission
+phase. Hosted aliases and observations recheck current project access.
+
 ## Local filesystem watching
 
 All native filesystem hints use `src/local-watcher.ts`. Processes attached to the
@@ -1195,6 +1205,16 @@ the generated workflow command must run under that trusted supervisor. These
 modules do not install or deploy those services or register an App.
 
 ### Hosted landing request queue
+
+Agent finish/land can register `projectHostedLandingDesired:submit` while its
+staged source job is still composing. This desired goal retains the original
+operation, check settings and stable submission handle before the requester exits.
+A fenced scheduler/watchdog advances the completed source job into the ordinary
+landing queue, or records its structured terminal failure. Source publication
+wakes the goal transactionally. Duplicate saved input/dependency selections reuse
+the canonical handle through operation aliases; current access is checked on every
+observation. `projectHostedFinishObserve:page` returns preparing, queued and terminal
+versions through the same selected-operation read without scheduling work.
 
 `projectHostedLanding:enqueue` records a durable submission, immutable first attempt,
 original H01 operation and coalesced Channel wake in one transaction. The request

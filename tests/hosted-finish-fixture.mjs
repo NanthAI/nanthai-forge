@@ -8,6 +8,7 @@ import { driver as landingDriver, control as landingControl } from './hosted-lan
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { digest } from '../dist/hash.js';
+export const desired = await import(moduleUrl('../convex/projectHostedLandingDesired.ts'));
 export const driver = await import(moduleUrl('../convex/projectHostedFinishDriver.ts'));
 export const api = await import(moduleUrl('../convex/projectHostedFinish.ts'));
 export const control = await import(moduleUrl('../convex/projectHostedFinishControl.ts'));
@@ -160,6 +161,16 @@ export async function finishFixture(t, { overlap = false, inputCount = 1 } = {})
                 metrics.uploadBytes += bytes.length;
                 return id;
               },
+            },
+          },
+          input,
+        );
+      } else if (task.name === 'projectHostedLandingDesired:drive') {
+        await desired.drive._handler(
+          {
+            runMutation: (ref, args) => {
+              const name = getFunctionName(ref).split(':').at(-1);
+              return tx(`desired-${name}`, desired[name], args);
             },
           },
           input,

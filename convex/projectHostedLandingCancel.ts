@@ -91,7 +91,7 @@ export async function cancelHostedLanding(
         observation: landingObservation('cancelled'),
         error: { code: 'LANDING_CANCELLED', message: 'The hosted landing request was cancelled.' },
       };
-      await writeLanding(ctx, row, result, false);
+      result = await writeLanding(ctx, row, result, false);
       await settleLandingOperation(ctx, result);
       // Invalidate in-flight metadata IO without cancelling shared source/check
       // executions. Late callbacks can retain their evidence but cannot land.

@@ -1,9 +1,10 @@
-import { waitForLand, retrySingleInfrastructure } from './land-wait.js';
-import { landingWorkerSignal } from './landing-worker-context.js';
+import { wakeLandingWorker } from './landing-worker-wake.js';
+import { waitForLand, retrySingleInfrastructure, recoverLandInfrastructure } from './land-wait.js';
+import { landingWorkerSignal, landingController } from './landing-worker-context.js';
 import { staleLandingResult } from './landing-stale.js';
 import { landingDiagnosis } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
-import { landReceipt } from './land-receipt.js';
+import { landReceipt, readLandingHandle } from './land-receipt.js';
 import { landingAdmission } from './landing-admission.js';
 import { existsSync } from 'node:fs';
 import { savedOverlapPlan, highOverlap } from './agent-overlap-plan.js';
@@ -43,6 +44,7 @@ async function landOnce(
   const admitted = () => {
     const journal = new LandJournal(store, command, selection);
     const response = landReceipt(store, command, journal, false);
+    wakeLandingWorker(store);
     return {
       ...response,
       result: { ...response.result, ...landingAdmission(store, command.operationId, command.laneIds) },
@@ -66,6 +68,12 @@ async function landOnce(
         )
           entry.result = { status: 'waiting' };
       }
+      await recoverLandInfrastructure(
+        work,
+        journal.state.entries
+          .filter(entry => !entry.sourceOperationId)
+          .map(entry => entry.command.operationId),
+      );
       const pins = new Map(
         journal.state.entries.flatMap(entry => entry.inputs).map(pin => [pin.laneId, pin.head]),
       );
@@ -108,7 +116,7 @@ async function landOnce(
       const recordSettled = () => {
         let changed = false;
         for (const entry of journal.state.entries) {
-          if (!entry.queued || (entry.result && !waiting(entry.result))) continue;
+          if (entry.sourceOperationId || !entry.queued || (entry.result && !waiting(entry.result))) continue;
           const queued = store.select('landingEntries', entry.command.operationId);
           if (!queued || ['queued', 'checking'].includes(queued.status)) continue;
           entry.result = queuedResult(entry);
@@ -119,7 +127,7 @@ async function landOnce(
       const cancelSelected = async () => {
         if (!cancelled?.()) return;
         for (const entry of journal.state.entries) {
-          if (entry.result && !waiting(entry.result)) continue;
+          if (entry.sourceOperationId || (entry.result && !waiting(entry.result))) continue;
           const queued = store.select('landingEntries', entry.command.operationId);
           if (queued && ['queued', 'checking'].includes(queued.status))
             await cancelLandingEntry(work, queued.id);
@@ -162,8 +170,21 @@ async function landOnce(
         let submitted = false;
         const deferred = new Set<string>();
         for (const [index, entry] of journal.state.entries.entries()) {
-          if (entry.result && !waiting(entry.result)) continue;
+          if (entry.sourceOperationId || (entry.result && !waiting(entry.result))) continue;
           if (entry.queued) continue;
+          const newer = entry.inputs.flatMap(pin => {
+            const lane = store.select('lanes', pin.laneId);
+            return lane && lane.head !== pin.head ? [{ laneId: pin.laneId, head: lane.head }] : [];
+          });
+          if (newer.length) {
+            entry.result = {
+              status: 'superseded',
+              code: 'LANDING_SUPERSEDED',
+              message: `Desired head superseded by ${newer.map(pin => `Lane ${pin.laneId} head ${pin.head}`).join(', ')}.`,
+            };
+            journal.save();
+            continue;
+          }
           const dependencies = waitingDependencies(
             store,
             entry.inputs.map(pin => pin.laneId),
@@ -252,9 +273,24 @@ async function landOnce(
             drainIssue = error;
           }
         }
+        await recoverLandInfrastructure(
+          work,
+          journal.state.entries
+            .filter(entry => !entry.sourceOperationId)
+            .map(entry => entry.command.operationId),
+        );
+        for (const entry of journal.state.entries) {
+          const queued = store.select('landingEntries', entry.command.operationId);
+          if (
+            entry.result?.status === 'interrupted' &&
+            queued &&
+            ['queued', 'checking'].includes(queued.status)
+          )
+            entry.result = { status: 'waiting' };
+        }
         let progressed = false;
         for (const [index, entry] of journal.state.entries.entries()) {
-          if (entry.result && !waiting(entry.result)) continue;
+          if (entry.sourceOperationId || (entry.result && !waiting(entry.result))) continue;
           const exhausted =
             selection &&
             journal.state.entries.find(prior => prior.result?.status === 'retry-exhausted')?.result;
@@ -297,7 +333,7 @@ async function landOnce(
                     (selection.finish.maxRetries ?? 3),
               });
             }
-            if (wait === true && !entry.queued) retrySingleInfrastructure(work, entry);
+            if (landingController() && !entry.queued) retrySingleInfrastructure(work, entry);
             if (entry.result && !waiting(entry.result)) progressed = true;
             journal.save();
           } catch (error) {
@@ -318,9 +354,19 @@ async function landOnce(
   );
 }
 
-/** Explicit wait keeps driving the retained request; omitted wait preserves a finite sweep. */
+export const driveLand = landOnce;
+
+/** Controllers alone execute the retained state machine. A waiting client only
+ * reads the same durable handle and may disappear without changing its outcome. */
 export async function land(...args: Parameters<typeof landOnce>) {
-  const [work, command] = args;
-  if (command.wait !== true || landingWorkerSignal()) return landOnce(...args);
-  return waitForLand(work, () => landOnce(...args), command.operationId);
+  const [work, command, selection] = args;
+  if (landingController() || selection) {
+    if (command.wait === true && !landingWorkerSignal())
+      return waitForLand(work, () => landOnce(...args), command.operationId);
+    return landOnce(...args);
+  }
+  await landOnce(work, { ...command, wait: false });
+  const observe = () => readLandingHandle(work.store, command.operationId);
+  if (command.wait === true) return waitForLand(work, observe, command.operationId);
+  return observe();
 }

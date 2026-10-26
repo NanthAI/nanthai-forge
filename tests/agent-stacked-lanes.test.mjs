@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { withLandingController } from '../dist/landing-worker-context.js';
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { localBrief } from '../dist/agent-brief-local.js';
@@ -19,7 +20,8 @@ async function fixture(t) {
   initNative(root);
   trustAgents(root);
   const agent = new AgentWorkflow(root);
-  const call = async (action, body = {}) => (await agent.dispatch({ action, ...body })).result;
+  const call = async (action, body = {}) =>
+    (await withLandingController(() => agent.dispatch({ action, ...body }))).result;
   await call('define-check', {
     name: 'verify',
     executable: process.execPath,

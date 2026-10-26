@@ -130,6 +130,10 @@ export async function evaluateBatch(
             }
             saved.settlement = { cancelledAt, failingViewId: prefix.viewId, culpritViewId: prefix.viewId };
             saved.status = 'completed';
+            if (saved.timing) {
+              saved.timing.settlementStartedAt ??= new Date().toISOString();
+              saved.timing.settledAt ??= new Date().toISOString();
+            }
             saved.culpritId = entry.id;
             entry.status = 'failed';
             entry.terminalAt = new Date().toISOString();
@@ -197,6 +201,7 @@ export async function evaluateBatch(
               ? 'confirmed'
               : 'inconclusive';
       }
+      if (saved.timing) saved.timing.settlementStartedAt ??= new Date().toISOString();
       saved.settlement = {
         cancelledAt,
         ...(outcome.passing ? { passingViewId: outcome.passing.viewId } : {}),

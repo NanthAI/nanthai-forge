@@ -68,7 +68,8 @@ complete selected wave instead of a shell resubmission loop. The JSON result
 includes a per-Lane `table`; stderr prints it too. Failures exit nonzero. Replaying
 the same operation preserves failed checks and conflicts. New parent journals
 serialize duplicate Lane/head admission, including ordinary non-batch work; batch
-enqueue also refuses duplicate pinned inputs across finish/land operations.
+land admission reuses existing handles for duplicate pinned inputs; the low-level
+finish queue retains its original request identity checks.
 An entry whose composed files and modes are already on main ends as `accepted`
 with `alreadyOnMain` (the containing main head), no check, no acceptance and no Channel move or
 post-accept audit; its Lanes complete under the usual completion policy. Different
@@ -285,7 +286,7 @@ replaying that operation preserves the identity and selected `head`. `land`
 uses the retained per-entry child operation; `finish` uses its parent operation,
 including when overlap ordering delegates to child landing entries.
 `entryOperationId` identifies that child without replacing the submission's
-operation identity. A new request has a new submission identity. Changing a payload under
+operation identity. A duplicate land request references the existing submission identity. Changing a payload under
 the same operation remains `WORK_OPERATION_CHANGED`.
 
 `attemptId` identifies a particular landing try, separately from its check run
@@ -308,9 +309,9 @@ with `complete:false`; `outcome` retains its original pending, failed or landed
 observation. The original `head`, operation, attempt and acceptance evidence stay
 unchanged. Unsaved edits do not change this saved-head observation. Finish's
 recorded sync head (`attemptHead`) belongs to its attempt, so syncing within that request alone
-does not supersede it. Supersession is observational: it never cancels a driver,
-discards source, or marks the newer save landed. The original pinned request may
-still progress. Explicit review acceptance settles the reviewed Candidate.
+does not supersede it. Outstanding agent goals end as superseded with the newer head named. Shared
+checks and all source evidence remain retained; the newer save is never marked
+landed by that outcome. Explicit person review retains its exact Candidate.
 
 Lane `status` and pending-status JSON expose these same submissions, including
 pre-Candidate dependency waits retained in local journals. Compact pending text
@@ -338,6 +339,8 @@ These are invalidations: saved records and original operation IDs are the author
 Startup repairs missed notifications. New land journals retain their exact parent
 request and selection so dependency waits replay the original pins. Retained finish
 dependency waits also resume without a person invoking `land-ready`.
+
+Worker errors retain the affected operation and write one structured `landing-worker-error` line to the owner's stdout log with the error code and available operation, Lane, Channel and run IDs. The controller retries failed sweeps itself with exponential backoff from 100 ms to a one-minute cap, so a persistently failing entry costs one retry and one log line a minute; retries do not expire or require a new submission. New `land` and `finish` submissions explicitly wake the registered driver. Notifications received during error backoff remain pending for the next sweep.
 
 Idle landing workers have no polling timers, hosted subscriptions, Work writes
 or hosted writes. Local service observations live beside the driver journals in
@@ -393,21 +396,42 @@ commands are lead installation steps, not actions performed by a finite agent.
 
 ### Durable client admission
 
-CLI and MCP `finish`/`land` accept `wait:false`. The caller publishes the existing
-owner-local journal, with immutable source pins, before returning. The worker
+`land` submits desired state by default; `wait:true` only watches its durable
+handle. CLI and MCP `finish` also accept `wait:false`. The native caller publishes
+the owner-local journal, with immutable source pins, before returning. The worker
 reconciles that same journal and canonical Work evidence; no second queue or
 acceptance authority is created. First-use finish saves source before admission.
 
 Async replays read atomically published journal snapshots without taking the
 long-lived per-operation driver slot. They validate the original request digest
-and report canonical submission outcomes. Omitted/true `wait` keeps synchronous
-compatibility, including replay of an asynchronously submitted operation.
+and report canonical submission outcomes. `landing {operationId}` reads a
+selected handle without admission, recovery or writer locks. `land wait:true`
+observes this same handle; synchronous finish retains its existing protocol.
 The observation flag is not part of the retained request digest.
 
 An absent worker is explicit in the receipt and leaves work pending. Use the
 returned status/pending/wait selectors to observe progress; client disconnect
 does not cancel submitted work. A check-only async finish is also retained for
 worker recovery and never requests acceptance.
+
+### Attempt-local timing
+
+Progress includes `attempts`, one per selected batch/requeue, with its own
+selection, composition start/end, check reservations, CI evidence, diagnosis
+probe reservations, settlement, commit observation and completion. Writer-lock
+spans retain request, acquisition and release times plus wait/hold milliseconds
+under the attempt that actually acquired them. A requeued entry starts from its
+new batch selection; diagnosis probes never extend its composition interval.
+`commitObservedAt` is the controller's observation after durable publication,
+not the earlier ChannelMove timestamp. Missing historical/provider times remain
+unknown. Owner-local lock evidence is retained alongside landing journals.
+
+Hosted progress retains timing with each attempt's progress, including source
+preparation, selected check reservations and CI end evidence. A current run's
+observed running time is labelled `ciObservedAt`; it is not a provider start time.
+Recompositions freeze the old attempt and its settlement time before installing
+fresh timing. Hosted `committedAt` is recorded in the atomic acceptance transaction;
+it is distinct from a later controller observation of publication.
 
 ## Cost and latency observations
 

@@ -73,7 +73,23 @@ export async function claimLandingQueue(
     submissionId: row.submissionId,
     attemptId: row.attemptId,
   };
-  await ctx.db.patch(row._id, { runnable: false });
+  const selectedState = (
+    await loadLanding(ctx, { projectId: input.projectId, submissionId: row.submissionId })
+  ).state;
+  await writeLanding(
+    ctx,
+    row,
+    {
+      ...selectedState,
+      version: selectedState.version + 1,
+      timing: {
+        submittedAt: selectedState.at,
+        ...selectedState.timing,
+        selectedAt: selectedState.timing?.selectedAt ?? new Date(now).toISOString(),
+      },
+    },
+    false,
+  );
   await ctx.db.patch(queue._id, { fence: lease.token, lease, wake: null });
   await scheduleLandingWake(ctx, { ...queue, fence: lease.token, lease, wake: null }, lease.until, now);
   return {
@@ -153,6 +169,15 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     } else if (attempt.check) {
       const check = attempt.check;
       const { run } = await loadHostedCheck(ctx, { projectId: claim.projectId, runId: check.runId });
+      state.timing = {
+        submittedAt: state.at,
+        ...state.timing,
+        checkReservedAt: run.at,
+        ...(run.endedAt ? { ciEndedAt: run.endedAt } : {}),
+        ...(run.status === 'running' && !state.timing?.ciObservedAt
+          ? { ciObservedAt: new Date(now).toISOString() }
+          : {}),
+      };
       if (!hostedCheckTerminal(run)) {
         phase = 'checking';
         observation = landingObservation('checking');
@@ -186,6 +211,14 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     observation = landingObservation('failed', cause.code);
     error = { code: cause.code, message: cause.message };
   }
+  if (phase === 'ready')
+    state.timing = {
+      submittedAt: state.at,
+      ...state.timing,
+      settlementStartedAt: state.timing?.settlementStartedAt ?? new Date(now).toISOString(),
+    };
+  if (phase === 'terminal-failed')
+    state.timing = { submittedAt: state.at, ...state.timing, settledAt: new Date(now).toISOString() };
   const next = { ...state, version: state.version + 1, phase, observation, error };
   await writeLanding(ctx, row, next, false);
   if (phase === 'terminal-failed') await settleLandingOperation(ctx, next);

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { withLandingController } from '../dist/landing-worker-context.js';
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { enqueueLanding, composeBatch, selectBatch, batchEdit } from '../dist/landing-batch-store.js';
@@ -30,7 +31,8 @@ async function fixture(t, batch) {
     rmSync(root, { recursive: true, force: true });
   });
   const call = async (action, body = {}) =>
-    (await agent.dispatch({ action, operationId: randomUUID(), ...body })).result;
+    (await withLandingController(() => agent.dispatch({ action, operationId: randomUUID(), ...body })))
+      .result;
   const check = await call('define-check', {
     name: 'verify',
     executable: process.execPath,
@@ -167,7 +169,7 @@ for (const batch of [false, true]) {
   });
 }
 
-test('queued saved Candidate retargets in composer and replays the same prefix after a later child sync', async t => {
+test('queued saved Candidate replays its exact prefix and supersedes the goal after a later child sync', async t => {
   const f = await fixture(t, true),
     parent = await f.start('Parent');
   f.edit(parent, 'shared.txt', 'parent\n');
@@ -208,11 +210,15 @@ test('queued saved Candidate retargets in composer and replays the same prefix a
   const prefix = first.prefixes[0];
   const run = await f.call('run', { operationId: prefix.runId, viewId: prefix.viewId, wait: true });
   assert.equal(run.status, 'passed');
-  await f.call('sync', { laneId: child.laneId });
+  const synced = await f.call('sync', { laneId: child.laneId });
   const replay = await composeBatch(f.agent.work, batch);
   assert.equal(replay.prefixes[0].head, first.prefixes[0].head);
   await drainLandingBatches(f.agent.work, 'main');
-  assert.equal(f.content('shared.txt'), 'child\n');
+  const superseded = f.store.select('landingEntries', batch.entryIds[0]);
+  assert.equal(superseded.status, 'interrupted');
+  assert.equal(superseded.error.code, 'LANDING_SUPERSEDED');
+  assert.ok(superseded.reason.includes(synced.head));
+  assert.equal(f.content('shared.txt'), 'parent\n');
   assert.equal(f.content('peer.txt'), 'peer\n');
 });
 

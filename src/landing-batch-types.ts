@@ -76,10 +76,12 @@ export const batchPrefixSchema = z.object({
   viewId: id,
   head,
   runId: id,
+  reservedAt: z.string().optional(),
 });
 /** A diagnostic attempt is one exact prefix check, never a proof of minimal blame. */
 export const landingDiagnosisNodeSchema = batchPrefixSchema.extend({
   id,
+  probeAt: z.string().optional(),
   inputs: z.array(z.object({ laneId: id, head: z.string().regex(/^[a-f0-9]{40,64}$/) })),
   parentId: id.optional(),
   base: head,
@@ -116,6 +118,16 @@ export const landingBatchSchema = z.object({
   base: head,
   previous: head.nullable(),
   arrivedAt: z.string(),
+  timing: z
+    .object({
+      selectedAt: z.string(),
+      composeStartedAt: z.string().optional(),
+      composedAt: z.string().optional(),
+      settlementStartedAt: z.string().optional(),
+      commitObservedAt: z.string().optional(),
+      settledAt: z.string().optional(),
+    })
+    .optional(),
   entryIds: z.array(id).min(1).max(8),
   /** Speculative stack: this batch's base is the projected head of the parent batch. */
   parentId: id.optional(),

@@ -47,7 +47,13 @@ process.exit(79);`;
       final = readLaneSubmissions(f.store, input.lane.laneId)[0];
     assert.equal(data.landingBatches.length, 1);
     assert.equal(data.landingBatches[0].id, selected.id);
-    if (phase === 'compose') assert.deepEqual(data.landingBatches[0].prefixes, selected.prefixes);
+    if (phase === 'compose') {
+      assert.deepEqual(
+        data.landingBatches[0].prefixes.map(({ reservedAt, ...pins }) => pins),
+        selected.prefixes,
+      );
+      assert(data.landingBatches[0].prefixes.every(prefix => Number.isFinite(Date.parse(prefix.reservedAt))));
+    }
     assert.equal(runs(f).length, 1);
     assert.equal(data.channelMoves.length, 1);
     assert.equal(final.submissionId, submission.submissionId);
@@ -446,10 +452,11 @@ test('a newer Lane save remains superseded when its original evaluated submissio
   assert.equal(final.attemptId, initial.attemptId);
   assert.equal(final.head, initial.head);
   assert.equal(final.state, 'superseded');
-  assert.equal(final.outcome, 'landed');
+  assert.equal(final.outcome, 'terminal-failed');
+  assert.equal(f.store.load().channelMoves.length, 0);
   assert.equal(final.complete, false);
   assert.equal(f.store.select('lanes', input.lane.laneId).head, newer.head);
-  assert.equal(f.content('pinned.txt'), 'pinned.txt\n');
+  assert.equal(f.store.select('landingEntries', input.command.operationId).reason.includes(newer.head), true);
   assert.equal(runs(f).length, 1);
 });
 

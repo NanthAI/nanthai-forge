@@ -11,7 +11,7 @@ import { batchEdit, selectBatch, composeBatch, enqueueLanding } from '../dist/la
 import { drainLandingBatches } from '../dist/landing-batch.js';
 import { landingRecords, landingCheckPrefix } from '../dist/landing-records.js';
 import { composeLandingInputs } from '../dist/landing-compose-inputs.js';
-import { land } from '../dist/land.js';
+import { driveLand as land } from '../dist/land.js';
 import { checkEnvironment } from '../dist/check-environment.js';
 import { LandJournal } from '../dist/land-journal.js';
 

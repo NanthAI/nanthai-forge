@@ -140,8 +140,22 @@ export async function writeLanding(
   input: HostedLandingState,
   runnable: boolean,
 ) {
+  invariant(
+    input.phase !== 'composing',
+    'WORK_OPERATION_CHANGED',
+    'Composition goals publish through desired-state admission.',
+  );
   const state = hostedLandingStateSchema.parse(input),
     previous = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  if (state.phase === 'landed' || state.phase === 'terminal-failed') {
+    const at = new Date().toISOString();
+    state.timing = {
+      submittedAt: state.at,
+      ...state.timing,
+      ...(state.phase === 'landed' ? { committedAt: state.timing?.committedAt ?? at } : {}),
+      settledAt: state.timing?.settledAt ?? at,
+    };
+  }
   invariant(
     state.id === previous.id &&
       state.projectId === previous.projectId &&
@@ -172,11 +186,12 @@ export async function writeLanding(
   await ctx.db.patch(row._id, {
     attemptId: state.attemptId,
     runId: attempt.check?.runId ?? null,
-    phase: state.phase,
+    phase: state.phase as LandingRow['phase'],
     runnable,
     value: canonicalPayload(state),
   });
   await notifyFinish(ctx, state);
+  return state;
 }
 /** Internal queue bookkeeping can retain a rejected outcome after actor revocation.
  * This never reads/returns source or grants the revoked actor publication authority. */
@@ -232,6 +247,15 @@ export async function retainLandingProgress(ctx: MutationCtx, state: HostedLandi
       acceptance: state.acceptance ?? null,
       settled: replaced || state.phase === 'landed' || state.phase === 'terminal-failed',
       version: state.version,
+      ...(state.timing || replaced
+        ? {
+            timing: {
+              submittedAt: state.at,
+              ...state.timing,
+              ...(replaced ? { settledAt: new Date().toISOString() } : {}),
+            },
+          }
+        : {}),
     }),
   });
 }
@@ -246,6 +270,7 @@ export function landingAttemptProgress(row: Doc<'projectHostedLandingAttempts'>,
         acceptance: state.acceptance ?? null,
         settled: state.phase === 'landed' || state.phase === 'terminal-failed',
         version: state.version,
+        ...(state.timing ? { timing: state.timing } : {}),
       }
     : null;
 }

@@ -182,7 +182,7 @@ test('MCP existing task registration admits finish and land without running chec
 });
 
 for (const action of ['finish', 'land']) {
-  test(`${action} synchronous observer resumes an admitted request without a worker`, async t => {
+  test(`${action} synchronous observer reads an admitted request while a worker drives`, async t => {
     const f = await fixture(t, { remote: false });
     const { lane, command: finish } = await input(f);
     if (action === 'land')
@@ -192,7 +192,15 @@ for (const action of ['finish', 'land']) {
         ? finish
         : { action, operationId: randomUUID(), laneIds: [lane.laneId], wait: false };
     const admitted = (await f.agent.dispatch(request)).result;
-    const settled = (await f.agent.dispatch({ ...request, wait: true })).result;
+    const controller = new AbortController();
+    const worker = watchLandingWorker(f.store, controller.signal);
+    let settled;
+    try {
+      settled = (await f.agent.dispatch({ ...request, wait: true })).result;
+    } finally {
+      controller.abort();
+      await worker;
+    }
     assert.equal(settled.complete, true);
     const pin = result => (action === 'finish' ? result.submissions[0] : result.entries[0].submissions[0]);
     assert.equal(pin(settled).submissionId, pin(admitted).submissionId);

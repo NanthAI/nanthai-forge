@@ -1,15 +1,54 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { invariant } from './errors.js';
+import { landingAdmission } from './landing-admission.js';
+import { resolveLandEntry } from './land-request-identity.js';
 import { readLandingProgress } from './land-progress.js';
 import { phaseSummary } from './land-phases.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landSubmissions } from './landing-submission-read.js';
-import { submissionLine } from './landing-submission.js';
+import { submissionLine, queuedOutcome } from './landing-submission.js';
+import type { LandEntry } from './land-journal.js';
 import type { LandJournal } from './land-journal.js';
 import type { LandCommand } from './land-schema.js';
 import type { WorkStore } from './work-store.js';
-export function landReceipt(store: WorkStore, command: LandCommand, journal: LandJournal, wait?: boolean) {
+/** Work can publish acceptance before its parent journal observes settlement.
+ * Never combine a terminal submission with stale queue/check diagnostics. */
+function entryOutcome(store: WorkStore, entry: LandEntry): Record<string, unknown> {
+  const queued = store.select('landingEntries', entry.command.operationId);
+  if (!queued) return entry.result ?? {};
+  const { checkStatus, ...current } = queuedOutcome(store, queued);
+  const conflict = queued.conflictViewId ? store.select('views', queued.conflictViewId)?.details : undefined;
+  const pending = ['queued', 'checking'].includes(queued.status);
+  return {
+    ...(pending && ['WORK_BUSY', 'WORK_STALE', 'SOURCE_CHANGED'].includes(String(entry.result?.code))
+      ? { code: entry.result!.code, message: entry.result!.message }
+      : {}),
+    ...current,
+    ...(checkStatus ? { checkStatus } : {}),
+    ...(queued.batchId ? { batchId: queued.batchId } : {}),
+    ...(queued.runId ? { runId: queued.runId } : {}),
+    ...(queued.acceptanceId ? { acceptanceId: queued.acceptanceId } : {}),
+    viewId: queued.conflictViewId ?? queued.viewId,
+    ...(conflict === undefined ? {} : { conflict }),
+    ...(queued.previewDiagnostic
+      ? { code: 'INTEGRATION_PREVIEW_EXCLUDED', preview: queued.previewDiagnostic }
+      : {}),
+    status: pending ? 'waiting' : queued.status === 'awaiting-review' ? 'review-needed' : current.status,
+  };
+}
+
+function landingSnapshot(
+  store: WorkStore,
+  command: LandCommand,
+  journal: Pick<LandJournal, 'state'>,
+  wait?: boolean,
+) {
   const replay = wait === false ? { ...command, wait: false } : command;
-  const entries = journal.state.entries.map(entry => {
+  const entries = journal.state.entries.map(retained => {
+    const entry = resolveLandEntry(store, retained);
     const submissions = landSubmissions(store, entry);
+    const outcome = entryOutcome(store, entry);
     const phases =
       submissions[0]?.phases ??
       readLandingProgress(store, entry.command.operationId, entry, undefined, false);
@@ -17,8 +56,12 @@ export function landReceipt(store: WorkStore, command: LandCommand, journal: Lan
       operationId: entry.command.operationId,
       message: entry.command.message,
       inputs: entry.inputs,
-      status: String(entry.result?.status ?? 'waiting'),
-      ...(entry.result ?? { status: 'waiting' }),
+      ...outcome,
+      status: submissions.every(item => item.state === 'superseded')
+        ? 'superseded'
+        : submissions.every(item => item.complete)
+          ? 'accepted'
+          : String(outcome.status ?? 'waiting'),
       phases,
       submissions,
     };
@@ -32,6 +75,26 @@ export function landReceipt(store: WorkStore, command: LandCommand, journal: Lan
     revision: store.revision(),
     result: {
       operationId: command.operationId,
+      handle: {
+        operationId: journal.state.entries.every(
+          entry =>
+            (entry.sourceOperationId ?? entry.sharedOperationId) ===
+            (journal.state.entries[0]?.sourceOperationId ?? journal.state.entries[0]?.sharedOperationId),
+        )
+          ? (journal.state.entries[0]?.sourceOperationId ??
+            journal.state.entries[0]?.sharedOperationId ??
+            command.operationId)
+          : command.operationId,
+        entryIds: [...new Set(entries.map(entry => entry.operationId))],
+      },
+      phase: entries.every(entry => entry.submissions.every(item => item.complete))
+        ? 'landed'
+        : entries.every(entry => entry.submissions.every(item => item.terminal))
+          ? entries.every(entry => entry.submissions.every(item => item.state === 'superseded'))
+            ? 'superseded'
+            : 'terminal-failed'
+          : (entries.find(entry => entry.submissions.some(item => !item.terminal))?.phases.current ??
+            'queued'),
       complete: entries.every(entry => entry.submissions.every(submission => submission.complete)),
       terminal: entries.every(entry => entry.submissions.every(submission => submission.terminal)),
       summary: entries.flatMap(entry =>
@@ -55,5 +118,25 @@ export function landReceipt(store: WorkStore, command: LandCommand, journal: Lan
         shell: `nforge agent '${store.root.replaceAll("'", "'\\''")}' land '${JSON.stringify(replay).replaceAll("'", "'\\''")}'`,
       },
     },
+  };
+}
+
+/** All queue, check, acceptance and submission projections share one immutable
+ * Work pointer even when a controller publishes during a client observation. */
+export function landReceipt(...args: Parameters<typeof landingSnapshot>) {
+  return args[0].observing(() => landingSnapshot(...args));
+}
+
+/** Reconnect by operation id without recreating a journal, capturing source,
+ * repairing scheduling or entering the writer queue. */
+export function readLandingHandle(store: WorkStore, operationId: string) {
+  const path = join(store.directory, 'agent-land', `${operationId}.json`);
+  invariant(existsSync(path), 'NOT_FOUND', 'Landing operation not found.');
+  const state = JSON.parse(readFileSync(path, 'utf8')) as LandJournal['state'];
+  invariant(state.schema === 1 && state.command, 'INVALID_WORK_STORE', 'Landing request is unavailable.');
+  const response = landReceipt(store, state.command, { state }, false);
+  return {
+    ...response,
+    result: { ...response.result, ...landingAdmission(store, operationId, state.command.laneIds) },
   };
 }

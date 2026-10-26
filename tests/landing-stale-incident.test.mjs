@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fixture as createFixture } from './landing-batch-fixture.mjs';
 import { stopOwnerCheckControllers } from './owner-cleanup.mjs';
@@ -16,6 +16,7 @@ import { prepareRunRegistration } from '../dist/work-run-preparation.js';
 import { checkEnvironment, adoptModalRun } from '../dist/work-run.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { WorkService } from '../dist/work.js';
+import { WorkStore } from '../dist/work-store.js';
 import { ForgeError } from '../dist/errors.js';
 import { landingWorkerStates } from '../dist/landing-worker-status.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
@@ -73,7 +74,7 @@ async function changeHead(f, input) {
 }
 
 for (const selected of [false, true, 'composed'])
-  test(`a newer save preserves the resolvable ${selected === 'composed' ? 'composed but unchecked' : selected ? 'selected' : 'queued'} Candidate`, async t => {
+  test(`a newer save supersedes the outstanding desired head in the resolvable ${selected === 'composed' ? 'composed but unchecked' : selected ? 'selected' : 'queued'} Candidate`, async t => {
     const f = await fixture(t, { remote: false });
     const a = await f.candidate('incident.txt', 'head A\n');
     const peer = await f.candidate('peer.txt');
@@ -85,17 +86,22 @@ for (const selected of [false, true, 'composed'])
     await drive(f, async () => {
       await until(
         f,
-        () => f.store.select('landingEntries', a.command.operationId)?.status === 'accepted',
-        'original Candidate lands',
+        () =>
+          f.store.select('landingEntries', a.command.operationId)?.error?.code === 'LANDING_SUPERSEDED' &&
+          f.store.select('landingEntries', peer.command.operationId)?.status === 'accepted',
+        'old goal supersedes and peer lands',
       );
       const entry = f.store.select('landingEntries', a.command.operationId);
       assert.equal(entry.head, a.view.head);
       assert.deepEqual(f.store.select('views', entry.viewId).inputs, a.view.inputs);
-      assert.equal(f.content('incident.txt'), 'head A\n');
+      assert.notEqual(f.content('incident.txt'), 'head A\n');
+      assert.match(entry.reason, new RegExp(b.head));
       assert.equal(f.store.select('lanes', a.lane.laneId).head, b.head);
       assert.equal(f.store.select('landingEntries', peer.command.operationId).status, 'accepted');
       assert.equal(f.content('peer.txt'), 'peer.txt\n');
-      assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 3);
+      const checked = f.store.load().runs.filter(run => !run.mainCheck);
+      assert.equal(checked.length, 1, 'the superseded goal never consumes a check');
+      assert.deepEqual(f.store.select('views', checked[0].viewId).inputs, peer.view.inputs);
       assert.notEqual(readPendingStatus(f.store).landingWorker.status, 'error');
     });
   });
@@ -241,10 +247,18 @@ for (const failure of ['spawn', 'bootstrap'])
     }
   });
 
-test('a worker error names its Lane and operation and an explicit wake retries the same revision', async t => {
+test('a worker error names its Lane and operation and retries the same revision without a wake', async t => {
   const f = await fixture(t, { remote: false });
   const input = await f.candidate('incident.txt', 'input\n', false);
   await f.agent.dispatch({ ...input.command, wait: false });
+  let snapshot;
+  const log = console.log;
+  t.mock.method(console, 'log', (...args) => {
+    if (typeof args[0] === 'string' && args[0].includes('landing-worker-error')) {
+      const line = JSON.parse(args[0]);
+      if (line.code === 'SYNTHETIC_WORKER_ERROR') snapshot = readPendingStatus(f.store);
+    } else log(...args);
+  });
   const dispatch = AgentWorkflow.prototype.dispatch;
   let failed = false;
   t.mock.method(AgentWorkflow.prototype, 'dispatch', function (command, ...args) {
@@ -255,12 +269,8 @@ test('a worker error names its Lane and operation and an explicit wake retries t
     return dispatch.call(this, command, ...args);
   });
   await drive(f, async () => {
-    await until(
-      f,
-      () => readPendingStatus(f.store).landingWorker.status === 'error',
-      'worker error recorded',
-    );
-    const status = readPendingStatus(f.store);
+    await until(f, () => snapshot, 'worker error recorded');
+    const status = snapshot;
     assert.equal(status.landingWorker.code, 'SYNTHETIC_WORKER_ERROR');
     assert.equal(status.landingWorker.affected.operationId, input.command.operationId);
     assert.deepEqual(status.landingWorker.affected.laneIds, [input.lane.laneId]);
@@ -268,13 +278,87 @@ test('a worker error names its Lane and operation and an explicit wake retries t
     assert.ok(text.includes(input.command.operationId));
     assert.ok(text.includes(input.lane.laneId));
     const revision = f.store.revision();
-    notifyAutoExchange(landingWorkerStates(f.store)[0].endpoint);
     await until(
       f,
       () => f.store.select('landingEntries', input.command.operationId)?.status === 'accepted',
       'same revision retries',
     );
     assert.ok(f.store.revision() > revision);
+  });
+});
+
+test('incident replay: settlement WORK_STALE retries itself and a later land reaches terminal without a restart', async t => {
+  const f = await fixture(t, { remote: false });
+  const first = await f.candidate('settlement-first.txt');
+  const second = await f.candidate('settlement-second.txt', undefined, false);
+  const lines = [];
+  const log = console.log;
+  t.mock.method(console, 'log', (...args) => {
+    if (typeof args[0] === 'string' && args[0].includes('landing-worker-error')) {
+      const line = JSON.parse(args[0]);
+      lines.push(line);
+    } else log(...args);
+  });
+  const select = WorkStore.prototype.select;
+  const owner = realpathSync(f.root);
+  let injected = false;
+  t.mock.method(WorkStore.prototype, 'select', function (collection, ...args) {
+    const record = select.call(this, collection, ...args);
+    // The next state-machine step observes evaluated settlement outside the
+    // acceptance publication's own revision-retry loop.
+    if (
+      collection === 'landingBatches' &&
+      record?.status === 'checking' &&
+      record.settlement?.passingViewId &&
+      !injected &&
+      this !== f.store &&
+      realpathSync(this.root) === owner
+    ) {
+      injected = true;
+      throw new ForgeError('WORK_STALE', 'Synthetic settlement revision race');
+    }
+    return record;
+  });
+  await drive(f, async () => {
+    const line = await until(
+      f,
+      () => lines.find(line => line.code === 'WORK_STALE'),
+      'settlement error logged',
+    );
+    const batch = f.store.load().landingBatches[0];
+    const state = landingWorkerStates(f.store)[0];
+    const originalRun = f.store.select('runs', batch.prefixes[0].runId);
+    assert.equal(originalRun.status, 'passed');
+    assert.equal(line.operationId, batch.id);
+    assert.equal(line.runId, originalRun.id);
+    assert.deepEqual(line.laneIds, [first.lane.laneId]);
+    const operationId = randomUUID();
+    const submitted = await f.agent.dispatch({
+      action: 'land',
+      operationId,
+      laneIds: [second.lane.laneId],
+      wait: false,
+    });
+    assert.equal(submitted.result.durable, true);
+    const secondId = read(journalPath(f, 'land', operationId)).entries[0].command.operationId;
+    await until(
+      f,
+      () => f.store.select('landingEntries', first.command.operationId)?.status === 'accepted',
+      'retained checked goal lands',
+    );
+    await until(
+      f,
+      () => f.store.select('landingEntries', secondId)?.status === 'accepted',
+      'new desired goal lands',
+    );
+    const after = landingWorkerStates(f.store)[0];
+    assert.equal(after.id, state.id, 'same worker recovers without a restart');
+    assert.equal(lines.filter(line => line.code === 'WORK_STALE').length, 1, 'one owner-log line per error');
+    assert.equal(f.store.select('landingEntries', first.command.operationId).runId, originalRun.id);
+    assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 2);
+    assert.equal(f.store.load().channelMoves.filter(move => move.status === 'accepted').length, 2);
+    assert.equal(f.content('settlement-first.txt'), 'settlement-first.txt\n');
+    assert.equal(f.content('settlement-second.txt'), 'settlement-second.txt\n');
   });
 });
 
@@ -380,8 +464,12 @@ for (const kind of ['finish', 'land', 'legacy-land'])
       );
       const state = read(path),
         result = kind === 'finish' ? state.result : state.entries[0].result;
-      assert.equal(result.code, 'LANE_STALE');
-      assert.match(result.message, /resubmit at current head/i);
+      assert.equal(result.code, kind === 'land' ? 'LANDING_SUPERSEDED' : 'LANE_STALE');
+      assert.match(
+        result.message,
+        kind === 'land' ? /Desired head superseded by Lane/ : /resubmit at current head/i,
+      );
+      if (kind === 'land') assert.ok(result.message.includes(f.store.select('lanes', a.lane.laneId).head));
       assert.equal(f.content('incident.txt'), 'head B\n');
       assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
       assert.notEqual(readPendingStatus(f.store).landingWorker.status, 'error');

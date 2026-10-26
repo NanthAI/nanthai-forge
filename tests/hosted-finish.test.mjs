@@ -115,6 +115,12 @@ test('disjoint main movement during check recomposes and rechecks with named IDs
   assert.equal(history.page[0].observation.cause, 'stale-head');
   assert.equal(history.page[0].progress.error.code, 'CHANNEL_CHANGED');
   assert.equal(history.page[1].observation.state, 'landed');
+  assert(history.page[0].progress.timing.settledAt, 'replacement freezes its own settlement');
+  assert.equal(history.page[0].progress.timing.committedAt, undefined);
+  assert(history.page[1].progress.timing.composeStartedAt);
+  assert(history.page[1].progress.timing.composedAt);
+  assert(history.page[1].progress.timing.committedAt);
+  assert(history.page[1].progress.timing.settledAt);
   assert.equal(history.page[0].progress.acceptance, null);
   assert.equal(
     history.page[1].progress.acceptance.receiptId,
@@ -601,6 +607,20 @@ test('unchecked person finish stays available without adding a check obligation'
   assert.equal((await f.current(person.state.id)).submission.phase, 'landed');
   assert.equal(f.tables.projectHostedCheckRuns.size, 0);
   assert.equal(f.pending().length, 0);
+});
+
+test('reviewed person finish requests keep independent selections for the same saved head', async t => {
+  const f = await finishFixture(t);
+  const first = await f.enqueue(f.request({ agent: false, check: null }));
+  const secondRequest = f.request({ agent: false, check: null });
+  const second = await f.enqueue(secondRequest);
+  assert.notEqual(second.id, first.id);
+  assert.notEqual(second.operationId, first.operationId);
+  assert.equal(f.tables.projectHostedLandingRequests.size, 2);
+  await f.drain();
+  assert.equal((await f.current(first.id)).submission.phase, 'landed');
+  assert.deepEqual((await f.current(second.id)).submission.request, secondRequest);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 0);
 });
 
 test('a prepared but uncommitted metadata binding reconciles to the verified plan without replacing the pending job', async t => {

@@ -6,7 +6,7 @@ import { landSchema } from './land-schema.js';
 export async function landCli(args: string[]) {
   if (!args.length || args[0] === '--help') {
     process.stdout.write(
-      'nforge land ROOT LANE… [--message MESSAGE] [--operation-id UUID] [--wait]\nLands recorded heads, leaving unsaved edits untouched. Retain the operation id for replay.\n',
+      'nforge land ROOT LANE… [--message MESSAGE] [--operation-id UUID] [--wait]\nSubmits recorded heads and returns a durable landing handle. --wait watches it; disconnecting leaves the controller running. Read it with agent ROOT landing {operationId}.\n',
     );
     return;
   }

@@ -1,3 +1,4 @@
+import { hostedLandingDesiredSchema } from './hosted-landing-desired.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { hostedAgentCommandSchemas, type HostedAgentAction } from './hosted-agent-contract.js';
@@ -252,6 +253,15 @@ export async function executeHostedAgent(
       return { phase: 'save', saveOperationId, progress: saved };
   }
   const composeOperationId = command.composeOperationId ?? (await session.journal.id('compose'));
+  const desired = session.journal.get<z.infer<typeof hostedLandingDesiredSchema>>('desired-landing');
+  if (desired)
+    return {
+      phase: 'finish',
+      composeOperationId,
+      submission: await session.mutation('projectHostedLandingDesired:submit', {
+        request: canonicalPayload(desired),
+      }),
+    };
   let candidateId = command.candidateId;
   if (!candidateId) {
     const progress = await composeAgentSource(
@@ -266,7 +276,26 @@ export async function executeHostedAgent(
       composeOperationId,
     );
     const completed = agentSourceOutcome(progress);
-    if (completed?.status !== 'completed') return { phase: 'compose', composeOperationId, progress };
+    if (completed?.status !== 'completed') {
+      if (command.accept === false) return { phase: 'compose', composeOperationId, progress };
+      const desired = await session.journal.retain('desired-landing', async () =>
+        hostedLandingDesiredSchema.parse({
+          operationId,
+          authorityEpoch: epoch,
+          composeOperationId,
+          after: command.after,
+          check: await checkSelection(session, command.check),
+          ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
+        }),
+      );
+      return {
+        phase: 'finish',
+        composeOperationId,
+        submission: await session.mutation('projectHostedLandingDesired:submit', {
+          request: canonicalPayload(desired),
+        }),
+      };
+    }
     candidateId = hostedRecordSchema.options[3].parse(completed.result).id;
   } else
     invariant(

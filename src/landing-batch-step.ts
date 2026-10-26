@@ -1,3 +1,4 @@
+import { settleSupersededLanding, supersededLandingInputs } from './landing-superseded.js';
 import { reserveBoundaryConfirmation } from './landing-confirmation.js';
 import { currentChannelHead } from './agent-defaults.js';
 import { validatePassingPrefix, diagnosticStatus } from './landing-diagnosis.js';
@@ -42,6 +43,7 @@ export async function advanceLandingBatch(
   );
   const receipt =
     acceptedPrefix && work.store.select('channelMoves', batchAcceptanceId(batch, acceptedPrefix.viewId));
+  if (!receipt && (await settleSupersededLanding(work, batch, driver))) return 'settled';
   if (!batch.settlement && !receipt)
     return (await evaluateBatch(work, batch, driver, options.waitMs)) ? 'advanced' : 'waiting';
   // An older driver may have accepted a shorter prefix before it could save
@@ -103,7 +105,14 @@ export async function advanceLandingBatch(
           // Validate source/evidence on a committed snapshot outside writer
           // admission. The same pointer must still be current at publication.
           const validation = work.store.observing(() => {
-            if (!receipt) validatePassingPrefix(work, batch, passing);
+            if (!receipt) {
+              invariant(
+                !supersededLandingInputs(work, batch).length,
+                'LANDING_SUPERSEDED',
+                'A newer saved head supersedes this desired landing.',
+              );
+              validatePassingPrefix(work, batch, passing);
+            }
             return { pointer: work.store.pointer(), revision: work.store.revision() };
           });
           return work.dispatch(
@@ -133,6 +142,10 @@ export async function advanceLandingBatch(
       ).result as ChannelMove;
     } catch (error) {
       if (!(error instanceof ForgeError)) throw error;
+      if (error.code === 'LANDING_SUPERSEDED') {
+        await settleSupersededLanding(work, batch, driver);
+        return 'settled';
+      }
       if (error.code === 'LANDING_CANCELLED') {
         await edit(data => {
           delete data.landingBatches!.find(item => item.id === batch.id)!.settlement;
@@ -159,6 +172,10 @@ export async function advanceLandingBatch(
   await edit(data => {
     const saved = data.landingBatches!.find(item => item.id === batch.id)!;
     saved.status = 'completed';
+    if (saved.timing) {
+      saved.timing.settledAt ??= new Date().toISOString();
+      if (move) saved.timing.commitObservedAt ??= new Date().toISOString();
+    }
     if (move) saved.acceptanceId = move.id;
     // Preserve the legacy boundary id for readers, without asserting standalone blame.
     const boundaryId = failing?.entryIds.at(-1);

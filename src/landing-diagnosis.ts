@@ -95,6 +95,7 @@ export function recordDiagnosisNode(
     node = {
       ...prefix,
       id: prefix.runId,
+      ...(parent ? { probeAt: new Date().toISOString() } : {}),
       inputs: view.inputs,
       ...(parent ? { parentId: parent.runId } : {}),
       base: batch.base,

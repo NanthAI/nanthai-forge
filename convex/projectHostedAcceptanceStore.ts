@@ -87,7 +87,7 @@ export async function stageAcceptance(
   },
 ) {
   const plan = await prepareAcceptance(ctx, input);
-  const { attempt } = await acceptanceSelection(ctx, input);
+  const { attempt, state } = await acceptanceSelection(ctx, input);
   const page = validateComposePage(input.page),
     pin = savePin(page);
   const key = { projectId: input.projectId, receiptId: plan.receiptId, kind: input.kind, index: input.index };
@@ -114,6 +114,20 @@ export async function stageAcceptance(
   for (const value of page.entries) {
     if (input.kind === 'inputs') {
       const entry = composeLaneSchema.parse(value);
+      if (state.request.agent && state.request.finish) {
+        const current = await readHostedRecord(ctx, {
+          projectId: input.projectId,
+          actor: plan.actor,
+          kind: 'lane',
+          key: entry.laneId,
+        });
+        const latest = current ? hostedLaneSchema.parse(JSON.parse(current.value)) : null;
+        invariant(
+          !latest || latest.head === entry.head,
+          'LANDING_SUPERSEDED',
+          `Lane ${entry.laneId} desired head ${entry.head} was superseded by ${latest?.head}.`,
+        );
+      }
       // Read the immutable selected version, not a newer save. H08 has already
       // validated the composition; this verifies the completion ledger binding.
       const row = await readHostedRecord(ctx, {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { withLandingController } from '../dist/landing-worker-context.js';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -328,7 +329,9 @@ test('Lane status exposes an estimate from completed owner landing history', asy
   writeFileSync(join(old.path, 'file.txt'), 'history change\n');
   await agent.dispatch({ action: 'checkpoint', laneId: old.laneId, message: 'History fixture' });
   const landed = (
-    await agent.dispatch({ action: 'land', operationId: randomUUID(), laneIds: [old.laneId], wait: true })
+    await withLandingController(() =>
+      agent.dispatch({ action: 'land', operationId: randomUUID(), laneIds: [old.laneId], wait: true }),
+    )
   ).result;
   assert.equal(landed.complete, true);
   // Join the prior landing's audit writer before the fixture's zero-wait mutations.

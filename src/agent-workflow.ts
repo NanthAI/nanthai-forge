@@ -1,3 +1,5 @@
+import { readLandingHandle } from './land-receipt.js';
+import { boundLandingStatus } from './hosted-agent-bound-read.js';
 import { readMetrics } from './metrics-cli.js';
 import { statusMetrics } from './self-metrics-status.js';
 import { agentResponseAdvisory } from './agent-response-advisory.js';
@@ -109,6 +111,8 @@ export class AgentWorkflow {
       );
       return boundAgentCache(this.work.store, input, selected => this.dispatchRequest(selected));
     }
+    if (action === 'landing')
+      return boundLandingStatus(this.work.store, input, () => this.dispatchRequest(input));
     if (action !== 'finish' && action !== 'land') return this.dispatchRequest(input);
     return boundAgentSubmission(this.work.store, input, selected => this.dispatchRequest(selected));
   }
@@ -310,6 +314,7 @@ export class AgentWorkflow {
       return { revision: Number(result.source?.revision ?? store.revision()), result };
     }
     if (command.action === 'improve') return readImprovements(store);
+    if (command.action === 'landing') return readLandingHandle(store, command.operationId);
     if (command.action === 'land')
       return land(this.work, { ...command, ...(!wait ? { wait: false } : {}) } as LandCommand);
     if (command.action === 'tests') return agentLaneTests(store, command.laneId);

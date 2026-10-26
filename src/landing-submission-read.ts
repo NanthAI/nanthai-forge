@@ -1,3 +1,4 @@
+import { resolveLandEntry } from './land-request-identity.js';
 import { readLandingProgress } from './land-progress.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -14,7 +15,8 @@ import type { LandEntry } from './land-journal.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { WorkStore } from './work-store.js';
 
-export function landSubmissions(store: WorkStore, entry: LandEntry) {
+export function landSubmissions(store: WorkStore, retained: LandEntry, includePhases = true) {
+  const entry = resolveLandEntry(store, retained);
   const queued = store.select('landingEntries', entry.command.operationId);
   const result = queued
     ? queuedOutcome(store, queued)
@@ -34,7 +36,9 @@ export function landSubmissions(store: WorkStore, entry: LandEntry) {
         ? finishChild(entry.command.operationId, 'land-compose')
         : null;
   // Receipt phases end at acceptance; later audit/mirror timings belong to live status.
-  const phases = readLandingProgress(store, entry.command.operationId, entry, undefined, false);
+  const phases = includePhases
+    ? readLandingProgress(store, entry.command.operationId, entry, undefined, false)
+    : undefined;
   return entry.inputs.map(pin => ({
     ...landingSubmission(
       store,
@@ -44,11 +48,24 @@ export function landSubmissions(store: WorkStore, entry: LandEntry) {
       attemptId,
     ),
     entryOperationId: entry.command.operationId,
-    phases,
+    handle: {
+      operationId:
+        entry.requestOperationId ??
+        entry.sourceOperationId ??
+        entry.sharedOperationId ??
+        entry.command.operationId,
+      entryIds: [entry.command.operationId],
+    },
+    ...(phases ? { phases } : {}),
   }));
 }
 /** Read-only local driver adapters. Work remains the authority for queued outcomes. */
-export function readLaneSubmissions(store: WorkStore, laneId?: string, operationId?: string): Submission[] {
+export function readLaneSubmissions(
+  store: WorkStore,
+  laneId?: string,
+  operationId?: string,
+  includePhases = true,
+): Submission[] {
   const submissions = new Map<string, Submission>();
   const journals = new Map<string, LandEntry>();
   const operationIds = new Set(operationId ? [operationId] : []);
@@ -68,7 +85,7 @@ export function readLaneSubmissions(store: WorkStore, laneId?: string, operation
           (!laneId || entry.inputs.some(pin => pin.laneId === laneId)) &&
           entry.inputs.every(pin => store.select('lanes', pin.laneId))
         )
-          for (const submission of landSubmissions(store, entry))
+          for (const submission of landSubmissions(store, entry, includePhases))
             if (!laneId || submission.laneId === laneId) add(submission);
       }
     }
@@ -92,6 +109,7 @@ export function readLaneSubmissions(store: WorkStore, laneId?: string, operation
       finish.command as FinishAction,
       finish.attempts,
       result,
+      includePhases,
     ))
       if (!laneId || submission.laneId === laneId) {
         const delegated = submissions.get(submission.submissionId);
@@ -135,9 +153,14 @@ export function readLaneSubmissions(store: WorkStore, laneId?: string, operation
           landingAttemptId(entry),
           pin.head,
         );
-        add({ ...submission, entryOperationId: entry.id });
+        add({
+          ...submission,
+          entryOperationId: entry.id,
+          ...(previous?.handle ? { handle: previous.handle } : {}),
+        });
       }
   }
+  if (!includePhases) return [...submissions.values()];
   return [...submissions.values()].map(submission => ({
     ...submission,
     phases: readLandingProgress(
@@ -153,6 +176,7 @@ export function finishSubmissions(
   command: FinishAction,
   attempts: FinishAttempt[],
   result: Record<string, unknown>,
+  includePhases = true,
 ) {
   if (Array.isArray(result.entries)) {
     const entries = result.entries as {
@@ -161,18 +185,25 @@ export function finishSubmissions(
       submissions?: Submission[];
     }[];
     return entries.flatMap(entry =>
-      landSubmissions(store, {
-        command: { operationId: entry.operationId, accept: command.accept } as FinishAction,
-        submissionOperationId: command.operationId,
-        inputs: entry.inputs,
-        result: entry,
-      }).map((submission, index) => ({
+      landSubmissions(
+        store,
+        {
+          command: { operationId: entry.operationId, accept: command.accept } as FinishAction,
+          submissionOperationId: command.operationId,
+          inputs: entry.inputs,
+          result: entry,
+        },
+        includePhases,
+      ).map((submission, index) => ({
         ...submission,
         head:
           submission.laneId === command.laneId
             ? attempts[0]!.head
             : (command.withInputs?.find(pin => pin.laneId === submission.laneId)?.head ?? submission.head),
         attemptId: submission.attemptId ?? entry.submissions?.[index]?.attemptId ?? null,
+        ...(includePhases && entry.submissions?.[index]?.phases
+          ? { phases: entry.submissions[index]!.phases }
+          : {}),
       })),
     );
   }

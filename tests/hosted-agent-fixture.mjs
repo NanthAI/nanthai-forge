@@ -161,14 +161,61 @@ export function agentFixture(t) {
     else if (name === 'projectHostedCompose:candidate') result = candidate;
     else if (name === 'projectHostedChecks:enqueue')
       result = once(id, () => ({ id: randomUUID(), request, status: 'queued' }));
-    else if (name === 'projectHostedLanding:enqueue') {
+    else if (name === 'projectHostedLandingDesired:submit') {
+      const source = requests.get(request.composeOperationId);
+      assert(source, 'desired landing retains an already-submitted source job');
+      result = once(id, () => {
+        const attemptId = randomUUID();
+        return {
+          schema: 1,
+          projectId: address.projectId,
+          actor: 'owner',
+          at,
+          id: randomUUID(),
+          operationId: id,
+          sequence: 0,
+          version: 0,
+          firstAttemptId: attemptId,
+          attemptId,
+          phase: 'composing',
+          preparing: true,
+          observation: { state: 'pending', pendingReason: 'queued', cause: null },
+          error: null,
+          request: {
+            operationId: id,
+            authorityEpoch: request.authorityEpoch,
+            channel: 'main',
+            expectedMain: source.expectedMain,
+            candidateId: candidate.id,
+            expectedHead: null,
+            agent: true,
+            check: request.check,
+            finish: { composeOperationId: request.composeOperationId, after: request.after },
+            ...(request.keepOpen === undefined ? {} : { keepOpen: request.keepOpen }),
+          },
+        };
+      });
+    } else if (name === 'projectHostedLanding:enqueue') {
       assert.equal(request.agent, true);
-      result = once(id, () => ({
-        id: randomUUID(),
-        request,
-        phase: 'queued',
-        observation: { state: 'pending' },
-      }));
+      result = once(id, () => {
+        const attemptId = randomUUID();
+        return {
+          schema: 1,
+          projectId: address.projectId,
+          actor: 'owner',
+          at,
+          id: randomUUID(),
+          operationId: id,
+          request,
+          sequence: 1,
+          version: 0,
+          firstAttemptId: attemptId,
+          attemptId,
+          phase: 'queued',
+          observation: { state: 'pending', pendingReason: 'queued', cause: null },
+          error: null,
+        };
+      });
     } else if (name === 'projectHostedLanding:cancel')
       result = once(id, () => ({
         id: request.submissionId,
@@ -200,7 +247,22 @@ export function agentFixture(t) {
               }
             : null,
       }));
-    else if (
+    else if (name === 'projectHostedFinish:inputs') result = { entries: [], staged: false, nextIndex: 0 };
+    else if (name === 'projectHostedFinishObserve:page') {
+      const submission = operations.get(args.operationId);
+      assert(submission?.observation, 'a hosted landing was admitted before observation');
+      result = {
+        projectId: address.projectId,
+        operationId: args.operationId,
+        authority: main.authority,
+        submission,
+        pendingAttempt: null,
+        events: args.nextVersion <= submission.version ? [{ submission, pendingAttempt: null }] : [],
+        nextVersion: submission.version + 1,
+        isDone: true,
+        resnapshot: false,
+      };
+    } else if (
       name === 'projectHostedFinish:status' ||
       name === 'projectHostedCheckRead:status' ||
       name === 'projectHostedSaves:progress' ||

@@ -144,7 +144,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
   }
 }
 /** One exact IO completion; duplicate or delayed generations do nothing. */
-export async function resumeFinishIO(
+async function resumeFinishIOOnce(
   ctx: MutationCtx,
   input: FinishIdentity & { command: FinishCommand; page?: unknown; storageId?: string },
 ) {
@@ -208,4 +208,18 @@ export async function resumeFinishIO(
   if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
   await ctx.db.patch(row._id, { wake: null });
   if (input.command.kind === 'page') await scheduleFinish(ctx, (await ctx.db.get(row._id))!);
+}
+
+/** A controller observing a newer saved head settles the goal rather than
+ * repeating the same acceptance-page request after every watchdog wake. */
+export async function resumeFinishIO(...args: Parameters<typeof resumeFinishIOOnce>) {
+  try {
+    return await resumeFinishIOOnce(...args);
+  } catch (error) {
+    if (!(error instanceof ForgeError) || error.code !== 'LANDING_SUPERSEDED') throw error;
+    const [ctx, input] = args;
+    await failFinish(ctx, input, error.code, error.message);
+    const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
+    if (queue?.lease?.submissionId === input.submissionId) await releaseLandingQueue(ctx, queue);
+  }
 }

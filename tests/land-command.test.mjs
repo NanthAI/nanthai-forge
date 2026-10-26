@@ -1,3 +1,4 @@
+import { childWorker } from './landing-worker-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ import { initNative } from '../dist/native-work.js';
 import { ForgeError } from '../dist/errors.js';
 import { NativeSource } from '../dist/native-source.js';
 import { WorkStore } from '../dist/work-store.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { ControllerAgentWorkflow as AgentWorkflow } from './landing-controller-fixture.mjs';
 import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
@@ -135,7 +136,7 @@ test('cross-Intent saved Lanes share one combined check, acceptance and stable r
   writeFileSync(join(b.path, 'b.txt'), 'unsaved sibling edit\n');
   const operationId = randomUUID(),
     result = (await f.land([a, b], { operationId })).result;
-  assert.equal(result.complete, true);
+  assert.equal(result.complete, true, JSON.stringify(result));
   assert.deepEqual(result.counts, { accepted: 2 });
   assert.equal(result.entries[0].batchId, result.entries[1].batchId);
   assert.equal(result.entries[0].message, 'Change a.txt');
@@ -268,7 +269,7 @@ test('head changing after selection fails the pinned entry and preserves partial
     return dispatch(...args);
   };
   const result = (await f.land([a, b])).result;
-  assert.deepEqual(result.counts, { failed: 1, accepted: 1 });
+  assert.deepEqual(result.counts, { superseded: 1, accepted: 1 });
   assert.equal(result.entries[0].code, 'LANE_STALE');
   assert.equal(result.entries[0].inputs[0].head, a.head);
   assert.equal(f.contents('a.txt'), undefined);
@@ -368,6 +369,10 @@ test('CLI prints replay identity before landing and accepts --message / --operat
     assert.equal(resumed.status, 0, resumed.stderr);
     result = JSON.parse(resumed.stdout).result;
   }
+  assert.equal(result.durable, true);
+  assert.equal(result.complete, false);
+  await f.agent.dispatch({ ...result.replay.command, wait: true });
+  result = (await f.agent.dispatch({ ...result.replay.command, wait: true })).result;
   assert.deepEqual(result.counts, { accepted: 2 });
   assert.equal(result.entries[0].message, 'CLI selection');
   const replay = spawnSync(process.execPath, args, { encoding: 'utf8' });
@@ -397,6 +402,9 @@ test('MCP forge_task exposes the selected-Lane land action and aggregate result'
     result = JSON.parse(response.content[0].text).result;
     if (!transientWaiting(result)) break;
   }
+  assert.equal(result.durable, true);
+  assert.equal(result.complete, false);
+  result = (await f.agent.dispatch(command)).result;
   assert.deepEqual(result.counts, { accepted: 2 });
 });
 
@@ -536,7 +544,7 @@ for (const changed of ['unrelated metadata', 'Lane head', 'Intent base'])
       assert.equal(f.store.load().runs.length, before.runs.length);
       assert.equal(f.store.load().channelMoves.length, 1);
     } else {
-      assert.deepEqual(result.counts, { failed: 1 });
+      assert.deepEqual(result.counts, changed === 'Lane head' ? { superseded: 1 } : { failed: 1 });
       assert.equal(result.entries[0].code, changed === 'Lane head' ? 'LANE_STALE' : 'COMPOSITION_STALE');
       assert.equal(f.store.load().views.length, 0);
       assert.equal(f.store.load().runs.length, 0);
@@ -697,22 +705,22 @@ test('explicit wait settles bounded observations and never retries a check failu
       .map(r => r.id),
     before,
   );
-  // Finished requests release their Lane/head: resubmitting the failed Lane is a new attempt.
+  // The same desired head reuses its terminal handle, even with a fresh client operation.
   const retry = (await f.agent.dispatch({ ...command, operationId: randomUUID(), laneIds: [bad.laneId] }))
     .result;
   assert.equal(retry.terminal, true);
   assert.deepEqual(retry.counts, { failed: 1 });
-  assert.equal(f.store.load().landingEntries.length, 3);
+  assert.equal(f.store.load().landingEntries.length, 2);
 });
 
-test('two parent operations cannot reserve the same pending Lane/head, including non-batch work', async t => {
+test('two parent operations share the same pending Lane/head handle, including non-batch work', async t => {
   const f = await fixture(t, { batching: false }),
     a = await f.lane('a.txt');
   const request = { action: 'land', operationId: randomUUID(), laneIds: [a.laneId], wait: false };
   await f.agent.dispatch(request);
-  await assert.rejects(f.agent.dispatch({ ...request, operationId: randomUUID() }), {
-    code: 'LANDING_ALREADY_SUBMITTED',
-  });
+  const original = (await f.agent.dispatch(request)).result;
+  const duplicate = (await f.agent.dispatch({ ...request, operationId: randomUUID() })).result;
+  assert.deepEqual(duplicate.handle, original.handle);
   assert.equal(f.store.load().runs.length, 0);
   assert.equal((await f.agent.dispatch({ ...request, wait: true })).result.complete, true);
 });
@@ -753,6 +761,8 @@ for (const batching of [true, false])
 test('land --wait prints a per-Lane table and exits nonzero for a real failed check', async t => {
   const f = await fixture(t),
     bad = await f.lane('bad.txt');
+  const worker = await childWorker(f);
+  t.after(() => worker.stop());
   const child = spawnSync(process.execPath, [resolve('dist/cli.js'), 'land', f.root, bad.laneId, '--wait'], {
     encoding: 'utf8',
   });
@@ -773,6 +783,7 @@ test('land --wait prints a per-Lane table and exits nonzero for a real failed ch
   assert.equal(agent.status, 1, agent.stderr);
   assert.match(agent.stderr, /Lane\tHead\tResult/);
   assert.equal(f.store.load().runs.filter(r => !r.mainCheck).length, 1);
+  await worker.stop();
 });
 
 test('native save infers its Lane and checkpoint replays the identical mutation', async t => {

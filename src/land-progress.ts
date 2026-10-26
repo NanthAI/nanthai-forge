@@ -1,3 +1,4 @@
+import { readLandingAttempts } from './land-attempts.js';
 // SPDX-License-Identifier: Apache-2.0
 import { allRecords } from './agent-lifecycle.js';
 import { finishChild } from './agent-finish-journal.js';
@@ -40,27 +41,35 @@ function runRecords(
   move: ChannelMove | undefined,
   includeFiles = true,
 ): PhaseRecords {
+  const batch = entry?.batchId ? store.select('landingBatches', entry.batchId) : undefined;
+  const full = batch?.prefixes.at(-1);
+  const fullRun = full ? store.select('runs', full.runId) : undefined;
+  run = fullRun ?? run;
   const check = run ? readLandCheckProgress(store.directory, run.id, includeFiles) : undefined;
   const remote = run?.backend?.actual === 'github-actions' || run?.backend?.actual === 'modal';
   const ciAt =
     check?.ciAt ??
     (!remote && run?.status !== 'queued' && run?.status !== 'preparing' ? run?.startedAt : undefined);
   const checkedAt = check?.checkedAt ?? run?.endedAt;
-  const batch = entry?.batchId ? store.select('landingBatches', entry.batchId) : undefined;
-  const current = move
-    ? 'accepted'
-    : checkedAt
-      ? 'recording-accepting'
-      : ciAt ||
-          check?.dispatched ||
-          run?.backend?.executionIds?.length ||
-          (!remote && run?.status === 'running')
-        ? 'ci-running'
-        : run || (batch?.status === 'checking' && batch.prefixes.length)
-          ? 'dispatching'
-          : batch?.status === 'composing' || entry?.firstSelectedAt
-            ? 'composing'
-            : 'queued';
+  const requeued = entry?.status === 'queued' && batch && ['completed', 'superseded'].includes(batch.status);
+  const current = requeued
+    ? 'queued'
+    : move
+      ? 'accepted'
+      : checkedAt
+        ? batch?.diagnosis?.nodes.some(node => node.parentId) && !batch.timing?.settlementStartedAt
+          ? 'diagnosing'
+          : 'recording-accepting'
+        : ciAt ||
+            check?.dispatched ||
+            run?.backend?.executionIds?.length ||
+            (!remote && run?.status === 'running')
+          ? 'ci-running'
+          : run || (batch?.status === 'checking' && batch.prefixes.length)
+            ? 'dispatching'
+            : batch?.status === 'composing' || entry?.firstSelectedAt
+              ? 'composing'
+              : 'queued';
   const readmittedAt = [...(entry?.infrastructureRetries ?? []), ...(entry?.runtimeRepins ?? [])]
     .map(item => item.at)
     .sort()
@@ -73,8 +82,11 @@ function runRecords(
     selectedAt:
       readmittedAt && (!entry?.firstSelectedAt || entry.firstSelectedAt < readmittedAt)
         ? undefined
-        : entry?.firstSelectedAt,
+        : (batch?.timing?.selectedAt ?? entry?.firstSelectedAt),
     // A run reservation is the recorded end of composition/start of dispatch preparation.
+    composedAt: batch?.timing?.composedAt,
+    diagnosisAt: batch?.diagnosis?.nodes.some(node => node.parentId) ? checkedAt : undefined,
+    settlementAt: batch?.timing?.settlementStartedAt,
     dispatchAt: run?.queuedAt ?? run?.startedAt ?? check?.dispatchAt,
     ciAt,
     checkedAt,
@@ -111,6 +123,11 @@ export function readLandingProgress(
     item => item.status === 'accepted' && (acceptanceId ? item.id === acceptanceId : item.viewId === viewId),
   );
   const result = runRecords(store, entry, run, move);
+  if (!entry && journal?.single?.timing) {
+    result.selectedAt = journal.single.timing.selectedAt;
+    result.composedAt = journal.single.timing.composedAt;
+    result.settlementAt = journal.single.timing.settlementStartedAt;
+  }
   if (!entry && !run && journal?.viewId)
     result.current = journal.single?.viewId ? 'dispatching' : 'composing';
   if (journal?.result?.status && journal.result.status !== 'waiting')
@@ -218,6 +235,7 @@ export function readLandingProgress(
       : undefined;
   return {
     ...phases,
+    attempts: readLandingAttempts(store, operationId, journal),
     ...(eta ? { eta } : {}),
     ...(check ? { check } : {}),
     ...(workerError ? { workerError } : {}),

@@ -25,6 +25,20 @@ export type WorkLockOptions = {
   operation?: string | undefined;
   actor?: string | undefined;
 };
+export type WorkLockSpan = {
+  operation?: string | undefined;
+  operationId?: string | undefined;
+  phase?: string | undefined;
+  path: string;
+  requestedAt: string;
+  acquiredAt: string;
+  releasedAt: string;
+  waitMs: number;
+  holdMs: number;
+};
+const lockObservers = new AsyncLocalStorage<(span: WorkLockSpan) => void>();
+export const observeWorkLocks = <T>(observe: (span: WorkLockSpan) => void, run: () => T) =>
+  lockObservers.run(observe, run);
 const context = new AsyncLocalStorage<WorkLockOptions>();
 export const withWorkLockOptions = <T>(options: WorkLockOptions, run: () => T) =>
   context.run({ ...context.getStore(), ...options }, run);
@@ -160,6 +174,22 @@ export function workLocked<T>(path: string, run: () => T, options: WorkLockOptio
       closeSync(fd);
       fd = undefined;
       unlinkSync(path);
+      const released = Date.now();
+      try {
+        lockObservers.getStore()?.({
+          operation: owner.operation,
+          operationId: owner.operationId,
+          phase: owner.phase,
+          path,
+          requestedAt: new Date(began).toISOString(),
+          acquiredAt: new Date(started).toISOString(),
+          releasedAt: new Date(released).toISOString(),
+          waitMs: started - began,
+          holdMs: released - started,
+        });
+      } catch {
+        /* Diagnostics never invalidate an already committed mutation. */
+      }
       if (process.env.FORGE_WORK_LOCK_TRACE) {
         // Diagnostics must never turn an already committed mutation into a failure.
         try {

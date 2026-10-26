@@ -37,18 +37,21 @@ nforge land ROOT LANE_ID OTHER_LANE_ID --operation-id UUID --wait --message "Lan
 ```
 
 `land` pins each recorded head once and leaves unsaved files untouched.
-`--wait` drives the retained request until every selected input is terminal, prints
+`--wait` watches the retained handle until every selected input is terminal, prints
 a per-Lane result table to stderr (also in JSON), and exits nonzero if any input
 did not land. The agent equivalent is `land {laneIds:[...],wait:true}`. Check
 failures and conflicts are terminal and are never retried. Definite infrastructure
 interruptions retry the same entry; ambiguous Actions
 dispatches reconcile the original run without allocating a duplicate. A second
-request for the same Lane/head while the first is still in progress is refused
-with `LANDING_ALREADY_SUBMITTED` and the original operation identity; replay it.
-Once it has finished, the same head can be submitted again (e.g. after a flake). Omitted wait preserves a finite sweep;
-`wait:false` durably submits for the owner worker.
-Inputs
-from the same Intent share a Candidate (the same grouping as `finish with`);
+request for the same saved Lane/head returns the existing landing handle, including
+its terminal outcome. The handle contains the canonical operationId and entryIds.
+Omitted wait and `wait:false` durably submit and return the current phase immediately.
+The owner `serve` controller drives unbound native requests; bound server-authority
+projects submit to the hosted controller. Requester death does not cancel the goal.
+`nforge agent ROOT landing '{"operationId":"UUID"}'` reads its current phase and
+outcome without driving it or taking the owner writer lock.
+
+Inputs from the same Intent share a Candidate (the same grouping as `finish with`);
 compatible cross-Intent entries enter the existing landing batch before its check
 starts. Existing runner compatibility and batch sizes still apply. Dependency
 chains advance in waves; unselected or unresolved dependencies return `waiting`.
@@ -71,16 +74,18 @@ A changed recorded head before composition fails that entry; it never silently
 selects a newer save. Checks and acceptance use the existing project authority.
 
 The CLI prints a replay request to stderr before starting. Retain its operation
-UUID: replaying the original request resumes waiting entries and reconciles
-unknown outcomes without repeating recorded checks or acceptances. Transient
+UUID: reconnecting with it returns the same handle and reconciles unknown
+submission replies without repeating recorded checks or acceptances. Transient
 lock contention or source observation changes return `waiting` with their code;
-replay the same request to continue. A terminal
-failure stays original; use a new operation after resolving it. Review is pending,
+the controller resumes the same request. A terminal
+failure stays original; submit a newly saved head after resolving it. Review is pending,
 with `terminal:false`; replay observes the retained checked Candidate without
 rerunning its check.
 Parent selection/driver state lives in local `agent-land/`; canonical source,
 Candidates, runs and acceptances remain in Work. Preserve that directory for
 parent replay; copying portable Work alone does not retain this local driver.
+Hosted requests retain source preparation and the desired goal on the server;
+clients only observe their versioned progress after admission.
 Deployment and installation remain separate explicit workflows. Existing
 acceptance automations still follow project policy.
 
@@ -827,9 +832,10 @@ not register a landing worker or drive unrelated queued landings. The owner serv
 or the existing detached owner process drives those; commands wake an existing
 worker instead of spawning another when one is live.
 
-Saved queued Candidates keep their original submitted inputs after a new Lane
-save; the existing composer retargets those saved inputs without landing the
-newer save. A new save supersedes live observations, not that retained landing.
+A newer saved Lane head supersedes an outstanding agent landing goal. The
+terminal observation names the newer head and retains the original source, runs
+and any earlier acceptance evidence. Other selected Lanes continue. A person
+reviewing an exact hosted Candidate retains that reviewed selection.
 Unstarted entries whose changed Lane inputs can no longer be resolved end
 individually as interrupted with `LANE_STALE` (submission cause `stale-head`) and
 “Resubmit at current head.”
@@ -924,6 +930,12 @@ Stacked owners use Work format 21 (legacy Intents) or 22 (unified Intents).
 Readers capped at 20 reject these owners before writing, preserving stack pins.
 Ordinary owners keep their existing format. These formats and commands concern
 native owners; Git compatibility Lanes retain their existing workflow.
+
+Peer Lane observations include `landing` advice from the retained handle and
+indexed check records: `editing`, `checked-green`, `queued`, `in-batch`, `failed`
+or `landed`, the latest check for that saved head, and `suggestedAction`.
+The same projection decorates lifecycle peers, MCP peers and status peers without
+joining the owner writer queue. A later save never borrows a prior head's green run.
 
 ## Overlap alerts and landing order
 
@@ -1038,23 +1050,32 @@ inputs and diagnostic. Safe inputs in `land` continue; a grouped `finish` stops
 with `preview-excluded`. To override, submit a new `finish` or `land` operation
 with `preview:"skip"`; this preserves the ordinary check and acceptance policy.
 
-### Asynchronous finish and land
+### Desired landing and asynchronous finish
 
-Pass `wait:false` to `finish` or `land` through the CLI or the existing MCP task
-tool to return once the selected request and source pins are durable. Finish
-checkpoints first; land selects saved heads and leaves unsaved edits alone.
+`land` returns after recording the desired saved heads, with
+`handle:{operationId,entryIds}` and the current `phase`. `wait:true` or CLI `--wait`
+watches that handle; the caller never becomes its controller. `finish` also
+supports durable submission with `wait:false`. Finish checkpoints first; land
+selects saved heads and leaves unsaved edits alone.
 The owner worker then drives the retained request. Disconnecting the caller does
 not cancel submitted work. If no owner worker is running, the receipt says so;
 the submission stays pending until the owner service starts.
 
-Keep the original operation ID after a lost response. Replaying it with
-`wait:false` reads the same submitted work, including terminal outcomes. Omitted
-`wait` or `wait:true` retains synchronous behavior and can drive/observe that same
-request. The observation choice is excluded from the request identity. Changing
-source inputs or other request fields still requires a new operation.
+Read `nforge agent OWNER landing '{"operationId":"UUID"}'` after reconnecting.
+This is read-only, including for completed work. Replaying the submission keeps
+its source pins; a different operation for the same Lane/head reuses its existing
+handle and outcome. Mixed selections reuse existing entries and submit only the
+new heads. `wait` is excluded from the request identity. Synchronous `finish`
+retains its existing protocol.
 
-Receipts include `durable`, `landingWorker` and `observe` commands for Lane
-`status`, `pending-status` and `wait`. The caller holds no source or Work lock
+For a bound project under hosted source authority, uploaded source preparation
+precedes hosted admission. The hosted goal then survives the initial composition
+job, checking and acceptance without the client or owner Mac. Its controller
+retains a fenced reconciliation wake before advancing. Preparatory upload/save
+receipts remain explicit; they do not claim hosted queue admission.
+
+Native receipts include `durable`, `landingWorker` and `observe` commands for
+`landing`, Lane `status`, `pending-status` and `wait`. The caller holds no source or Work lock
 while waiting on checks. Admission does not start or install an owner service.
 
 ## Owner decisions

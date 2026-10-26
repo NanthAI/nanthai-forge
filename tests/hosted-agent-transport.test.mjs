@@ -75,7 +75,9 @@ test('pending source and finish steps return promptly and retain all child opera
     command = { laneId: s.lane.laneId };
   s.pending(true);
   const first = await s.transport().dispatch('finish', command);
-  assert.equal(first.result.phase, 'compose');
+  assert.equal(first.result.phase, 'finish');
+  assert.equal(first.result.submission.phase, 'composing');
+  assert.equal(first.result.submission.preparing, true);
   const count = s.calls.length;
   assert(!s.calls.some(call => call.name === 'projectHostedLanding:enqueue'));
   s.pending(false);
@@ -83,7 +85,9 @@ test('pending source and finish steps return promptly and retain all child opera
   assert.equal(next.operationId, first.operationId);
   assert.equal(next.result.composeOperationId, first.result.composeOperationId);
   assert.equal(next.result.phase, 'finish');
-  assert.equal(s.calls.length - count, 10); // One finite source drive plus configured-check discovery.
+  assert.equal(s.calls.length - count, 2); // Discovery plus replay of the same server-owned goal.
+  assert.deepEqual(next.result.submission, first.result.submission);
+  assert(!s.calls.slice(count).some(call => /Compose|Checks:enqueue/.test(call.name)));
   assert.equal(next.result.submission.request.finish.composeOperationId, first.result.composeOperationId);
 });
 

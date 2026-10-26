@@ -64,7 +64,7 @@ export class HostedAgentTransport {
     ),
   ) {}
   async dispatch(requestedAction: string, input: Record<string, unknown>): Promise<HostedAgentResponse> {
-    if (['capabilities', 'status', 'observe'].includes(requestedAction))
+    if (['capabilities', 'status', 'observe', 'landing'].includes(requestedAction))
       return this.dispatchRequest(requestedAction, input);
     const metricRoot = resolve(this.root);
     return withLifecycleMetric(
@@ -235,7 +235,7 @@ export class HostedAgentTransport {
       });
     if (runId) return this.query('projectHostedCheckRead:status', { runId });
     if (laneId) return this.query('projectHostedLanes:head', { laneId });
-    invariant(kind, 'BAD_ARGUMENT', 'Select the source operation kind.');
+    if (!kind) return this.query('projectHostedFinishObserve:page', { operationId, nextVersion: 0 });
     const api = { save: 'Saves', compose: 'Compose', sync: 'Sync', revert: 'Sync', lifecycle: 'Lifecycle' }[
       kind
     ];

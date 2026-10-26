@@ -39,6 +39,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('improve') }),
   z.object({ action: z.literal('metrics'), from: z.string().optional(), to: z.string().optional() }),
   landSchema,
+  z.object({ action: z.literal('landing'), operationId: id }),
   handoffSchema,
   handoffReadSchema,
   peerAckSchema,

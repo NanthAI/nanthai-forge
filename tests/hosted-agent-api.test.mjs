@@ -20,6 +20,7 @@ const names = [
   'projectHostedSync',
   'projectHostedSyncJobs',
   'projectHostedLanding',
+  'projectHostedLandingDesired',
   'projectHostedFinish',
   'projectHostedCheckDefinitions',
   'projectHostedChecks',
@@ -100,11 +101,12 @@ test('transport stages real composition pages, resumes original source work and 
   const s = await setup(t),
     command = { laneId: s.f.lane.laneId, check: { checkId: s.f.rawChecks.checkId } };
   const first = await s.transport().dispatch('finish', command);
-  assert.equal(first.result.phase, 'compose');
+  assert.equal(first.result.phase, 'finish');
+  assert.equal(first.result.submission.preparing, true);
   const composeOperationId = first.result.composeOperationId;
-  const output = await s.f.c.work({ request: { operationId: composeOperationId } });
-  await s.f.c.publish(output);
-  s.lose('projectHostedLanding:enqueue');
+  // The scheduled controller owns source completion after this requester disconnects.
+  await s.f.drain();
+  s.lose('projectHostedLandingDesired:submit');
   await assert.rejects(
     s.transport().dispatch('finish', command),
     error => error.code === 'HOSTED_ACTION_FAILED',

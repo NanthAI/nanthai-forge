@@ -31,6 +31,7 @@ export async function pinLandingAttempt(
     number: number;
     at: string;
     operations: { check: string; accept: string };
+    allowStaleMain?: boolean;
     retainedSelection?: HostedLandingAttempt['candidate'];
   },
 ) {
@@ -48,7 +49,8 @@ export async function pinLandingAttempt(
     'Main and current project source authority differ.',
   );
   invariant(
-    input.retainedSelection !== undefined ||
+    input.allowStaleMain ||
+      input.retainedSelection !== undefined ||
       (input.actor.kind === 'person' && r.finish !== undefined) ||
       (main.head === r.expectedMain.head && main.receipt.id === r.expectedMain.receiptId),
     'CHANNEL_CHANGED',

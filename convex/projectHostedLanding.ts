@@ -1,3 +1,4 @@
+import { reuseHostedLanding } from './projectHostedLandingIdentity';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
@@ -59,101 +60,7 @@ export const enqueue = mutation({
     try {
       const request = hostedLandingRequestSchema.parse(JSON.parse(input.request));
       const actor = await acceptanceActor(ctx, request.agent);
-      await activeProject(ctx, input.projectId, actor.id);
-      const expected = {
-        authorityEpoch: request.authorityEpoch,
-        ...request.expectedMain,
-        resourceId: request.candidateId,
-      };
-      const payload = { kind: 'hosted-landing', request, actorKind: actor.kind };
-      const prepared = await beginHostedOperation(ctx, {
-        projectId: input.projectId,
-        actor: actor.id,
-        payload,
-        request: {
-          schema: 1,
-          projectId: input.projectId,
-          actor: actor.id,
-          operationId: request.operationId,
-          expected,
-          payloadHash: hostedPayloadHash(payload, expected),
-        },
-        firstAttempt: {
-          projectId: input.projectId,
-          operationId: request.operationId,
-          id: crypto.randomUUID(),
-          parentAttemptId: null,
-          at: new Date().toISOString(),
-          expected,
-          ids: { submission: crypto.randomUUID(), check: crypto.randomUUID(), accept: crypto.randomUUID() },
-        },
-      });
-      const first = prepared.operation.firstAttempt;
-      if (prepared.replayed) {
-        const { row, state } = await loadLanding(ctx, {
-          projectId: input.projectId,
-          submissionId: first.ids.submission!,
-        });
-        // Retrying a lost wake repairs scheduling, never replaces immutable pins.
-        if (row.runnable)
-          await wakeLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
-        else if (state.phase === 'checking' && row.runId)
-          await notifyLandingCheck(ctx, { projectId: input.projectId, runId: row.runId });
-        await initializeFinish(ctx, state);
-        return canonicalPayload(state);
-      }
-      const submissionId = first.ids.submission!;
-      const attempt = await pinLandingAttempt(ctx, {
-        projectId: input.projectId,
-        actor,
-        request,
-        submissionId,
-        attemptId: first.id,
-        parentAttemptId: null,
-        number: 0,
-        at: first.at,
-        operations: { check: first.ids.check!, accept: first.ids.accept! },
-      });
-      const queue = await ensureLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
-      const sequence = queue.sequence + 1;
-      const state = hostedLandingStateSchema.parse({
-        schema: 1,
-        projectId: input.projectId,
-        id: submissionId,
-        operationId: request.operationId,
-        actor: actor.id,
-        at: first.at,
-        request,
-        sequence,
-        version: 0,
-        firstAttemptId: attempt.id,
-        attemptId: attempt.id,
-        phase: 'queued',
-        observation: landingObservation('queued'),
-        error: null,
-      });
-      await insertLandingAttempt(ctx, attempt);
-      await ctx.db.insert('projectHostedLandingRequests', {
-        projectId: input.projectId,
-        channel: request.channel,
-        submissionId,
-        operationId: request.operationId,
-        candidateId: request.candidateId,
-        ...(request.revertOf ? { revertOf: request.revertOf } : {}),
-        actor: actor.id,
-        sequence,
-        runnable: true,
-        phase: state.phase,
-        runId: attempt.check?.runId ?? null,
-        attemptId: attempt.id,
-        value: canonicalPayload(state),
-      });
-      await ctx.db.patch(queue._id, { sequence });
-      await wakeLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
-      await initializeFinish(ctx, state);
-      await retainLandingProgress(ctx, state);
-      await recordLandingObservation(ctx, state);
-      return canonicalPayload(state);
+      return canonicalPayload(await enqueueHostedLanding(ctx, input, request, actor));
     } catch (error) {
       return report(error);
     }
@@ -265,6 +172,123 @@ export const attempts = query({
     }
   },
 });
+
+export async function enqueueHostedLanding(
+  ctx: import('./_generated/server').MutationCtx,
+  input: { projectId: import('./_generated/dataModel').Id<'hostedProjects'> },
+  request: import('../src/hosted-landing').HostedLandingRequest,
+  actor: import('../src/autonomy-policy').AcceptanceActor,
+  reserved?: {
+    submissionId: string;
+    attemptId: string;
+    at?: string;
+    timing?: import('../src/hosted-landing').HostedLandingState['timing'];
+  },
+) {
+  await activeProject(ctx, input.projectId, actor.id);
+  const reused = await reuseHostedLanding(ctx, { projectId: input.projectId, actor: actor.id, request });
+  if (reused.state) return reused.state;
+  const expected = {
+    authorityEpoch: request.authorityEpoch,
+    ...request.expectedMain,
+    resourceId: request.candidateId,
+  };
+  const payload = { kind: 'hosted-landing', request, actorKind: actor.kind };
+  const prepared = await beginHostedOperation(ctx, {
+    projectId: input.projectId,
+    actor: actor.id,
+    payload,
+    request: {
+      schema: 1,
+      projectId: input.projectId,
+      actor: actor.id,
+      operationId: request.operationId,
+      expected,
+      payloadHash: hostedPayloadHash(payload, expected),
+    },
+    firstAttempt: {
+      projectId: input.projectId,
+      operationId: request.operationId,
+      id: reserved?.attemptId ?? crypto.randomUUID(),
+      parentAttemptId: null,
+      at: reserved?.at ?? new Date().toISOString(),
+      expected,
+      ids: {
+        submission: reserved?.submissionId ?? crypto.randomUUID(),
+        check: crypto.randomUUID(),
+        accept: crypto.randomUUID(),
+      },
+    },
+  });
+  const first = prepared.operation.firstAttempt;
+  if (prepared.replayed) {
+    const { row, state } = await loadLanding(ctx, {
+      projectId: input.projectId,
+      submissionId: first.ids.submission!,
+    });
+    // Retrying a lost wake repairs scheduling, never replaces immutable pins.
+    if (row.runnable) await wakeLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
+    else if (state.phase === 'checking' && row.runId)
+      await notifyLandingCheck(ctx, { projectId: input.projectId, runId: row.runId });
+    await initializeFinish(ctx, state);
+    return state;
+  }
+  const submissionId = first.ids.submission!;
+  const attempt = await pinLandingAttempt(ctx, {
+    projectId: input.projectId,
+    actor,
+    allowStaleMain: reserved !== undefined,
+    request,
+    submissionId,
+    attemptId: first.id,
+    parentAttemptId: null,
+    number: 0,
+    at: first.at,
+    operations: { check: first.ids.check!, accept: first.ids.accept! },
+  });
+  const queue = await ensureLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
+  const sequence = queue.sequence + 1;
+  const state = hostedLandingStateSchema.parse({
+    schema: 1,
+    projectId: input.projectId,
+    id: submissionId,
+    operationId: request.operationId,
+    actor: actor.id,
+    at: first.at,
+    request,
+    sequence,
+    version: reserved ? 1 : 0,
+    firstAttemptId: attempt.id,
+    attemptId: attempt.id,
+    phase: 'queued',
+    timing: { submittedAt: first.at, ...reserved?.timing, composedAt: new Date().toISOString() },
+    observation: landingObservation('queued'),
+    error: null,
+  });
+  await insertLandingAttempt(ctx, attempt);
+  await ctx.db.insert('projectHostedLandingRequests', {
+    projectId: input.projectId,
+    channel: request.channel,
+    submissionId,
+    operationId: request.operationId,
+    candidateId: request.candidateId,
+    ...(request.revertOf ? { revertOf: request.revertOf } : {}),
+    actor: actor.id,
+    sequence,
+    ...(reused.selectionKey ? { selectionKey: reused.selectionKey } : {}),
+    runnable: true,
+    phase: state.phase as import('./projectHostedLandingStore').LandingRow['phase'],
+    runId: attempt.check?.runId ?? null,
+    attemptId: attempt.id,
+    value: canonicalPayload(state),
+  });
+  await ctx.db.patch(queue._id, { sequence });
+  await wakeLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
+  await initializeFinish(ctx, state);
+  await retainLandingProgress(ctx, state);
+  await recordLandingObservation(ctx, state);
+  return state;
+}
 
 /** One Candidate subscription, no project queue scan or observer-driven work. */
 export const candidate = query({

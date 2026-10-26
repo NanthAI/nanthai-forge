@@ -12,10 +12,12 @@ export type Submission = {
   submissionId: string;
   operationId: string;
   entryOperationId: string;
+  handle?: { operationId: string; entryIds: string[] };
   laneId: string;
   intentId: string;
   head: string;
   attemptHead: string;
+  supersededBy?: string;
   attemptId: string | null;
   state: SubmissionState;
   outcome: Exclude<SubmissionState, 'superseded'>;
@@ -63,6 +65,7 @@ export function submissionOutcome(result: Record<string, unknown> = {}): {
       ? 'conflict'
       : [
             'LANE_STALE',
+            'LANDING_SUPERSEDED',
             'COMPOSITION_STALE',
             'CHANNEL_CHANGED',
             'CHANNEL_DIVERGED',

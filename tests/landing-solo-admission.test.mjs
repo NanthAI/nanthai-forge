@@ -9,6 +9,8 @@ import { batchEdit, selectBatch, composeBatch, enqueueLanding } from '../dist/la
 import { evaluateBatch } from '../dist/landing-batch-check.js';
 import { drainLandingBatches } from '../dist/landing-batch.js';
 import { readLaneSubmissions } from '../dist/landing-submission-read.js';
+import { withLandingController } from '../dist/landing-worker-context.js';
+const land = (f, command) => withLandingController(() => f.agent.dispatch({ action: 'land', ...command }));
 
 const driver = { beforePublish() {} };
 const select = f => batchEdit(f.work, randomUUID(), data => selectBatch(f.work, data, 'main'));
@@ -62,8 +64,7 @@ test('land after passed check-only finishes batches without another solo executi
   await checkOnly(f, b);
   const before = physical(f).map(run => run.id);
   const result = (
-    await f.agent.dispatch({
-      action: 'land',
+    await land(f, {
       operationId: randomUUID(),
       laneIds: [a.lane.laneId, b.lane.laneId],
       wait: true,
@@ -90,8 +91,7 @@ test('a full solo run on the same Q3 key admits a changed saved head without a s
   ).result;
   assert.notEqual(saved.head, a.checkpoint.head);
   const before = physical(f).map(run => run.id);
-  await f.agent.dispatch({
-    action: 'land',
+  await land(f, {
     operationId: randomUUID(),
     laneIds: [a.lane.laneId, b.lane.laneId],
     wait: true,

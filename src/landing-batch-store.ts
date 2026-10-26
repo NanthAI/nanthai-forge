@@ -431,6 +431,7 @@ export function selectBatch(
     ...(admission ? { admission: true as const } : {}),
     mode: shape.remote ? 'parallel' : 'halving',
     status: 'composing',
+    timing: { selectedAt: new Date().toISOString() },
     prefixes: [],
     conflicts: [],
   };
@@ -450,6 +451,16 @@ export function selectBatch(
 }
 /** Prefix Views carry every pinned Lane and dependency, across Intent boundaries. */
 export async function composeBatch(work: WorkService, batch: LandingBatch, beforePublish?: () => void) {
+  await batchEdit(
+    work,
+    batch.id,
+    data => {
+      const current = data.landingBatches!.find(item => item.id === batch.id)!;
+      if (current.timing) current.timing.composeStartedAt ??= new Date().toISOString();
+    },
+    beforePublish,
+    batch.channel,
+  );
   const entries = batch.entryIds.map(id => work.store.select('landingEntries', id)!);
   const preview =
     batch.channel === 'main'
@@ -555,6 +566,7 @@ export async function composeBatch(work: WorkService, batch: LandingBatch, befor
       saved.prefixes = prefixes;
       saved.conflicts = conflicts;
       saved.status = 'checking';
+      if (saved.timing) saved.timing.composedAt ??= new Date().toISOString();
       for (const [id, diagnostic] of rejected) {
         const entry = data.landingEntries!.find(entry => entry.id === id)!;
         entry.status = 'failed';

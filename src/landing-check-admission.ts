@@ -56,6 +56,22 @@ export async function admitLandingCheck(
   parent?: BatchPrefix,
 ) {
   const store = work.store;
+  const reservationAt =
+    store.select('runs', prefix.runId)?.queuedAt ??
+    (!store.select('runs', prefix.runId) ? new Date().toISOString() : undefined);
+  if (!prefix.reservedAt && reservationAt)
+    await batchEdit(
+      work,
+      batch.id,
+      data => {
+        const saved = data
+          .landingBatches!.find(item => item.id === batch.id)!
+          .prefixes.find(item => item.viewId === prefix.viewId);
+        if (saved) prefix.reservedAt = saved.reservedAt ??= reservationAt;
+      },
+      driver.beforePublish,
+      batch.channel,
+    );
   const fresh = batch.confirmation?.runId === prefix.runId;
   const reuse = () => (fresh ? undefined : reuseLandingCheck(work, batch, prefix, driver));
   let recorded = store.select('runs', prefix.runId);

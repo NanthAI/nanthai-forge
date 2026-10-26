@@ -7,6 +7,7 @@ import { tmpdir, hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { deriveLandingPhases, landingEta, phaseDuration, phaseSummary } from '../dist/land-phases.js';
 import { readLandingProgress } from '../dist/land-progress.js';
+import { readLandingAttempts } from '../dist/land-attempts.js';
 import { readLandCheckController, readLandCheckProgress } from '../dist/land-check-progress.js';
 import { withQueueSlot } from '../dist/landing-queue.js';
 import { processIdentity } from '../dist/local-process.js';
@@ -152,6 +153,7 @@ function fixture(t) {
     root: directory,
     directory,
     revision: () => revision++,
+    observing: read => read(),
     readRecords: () => undefined,
     load: () => data,
     page: collection => ({ records: data[collection], nextOffset: null }),
@@ -181,7 +183,7 @@ test('local records project queue, composition, dispatch, CI, recording and acce
   entry.status = 'checking';
   entry.firstSelectedAt = at(10);
   entry.batchId = 'batch';
-  data.landingBatches.push({ id: 'batch', status: 'composing', prefixes: [] });
+  data.landingBatches.push({ id: 'batch', entryIds: ['entry'], status: 'composing', prefixes: [] });
   assert.equal(read().current, 'composing');
   entry.runId = 'run';
   const run = {
@@ -299,7 +301,19 @@ test('landing and delegated finish receipts stay identical while live follow-up 
   const receipt = () => landReceipt(store, command, journal).result;
   const delegated = result =>
     JSON.parse(JSON.stringify(finishSubmissions(store, finish, [{ head: pin.head }], result)));
+  journal.state.entries[0].result = {
+    status: 'waiting',
+    queueStatus: 'checking',
+    code: 'WORK_BUSY',
+    message: 'stale journal',
+    diagnosis: { applicability: 'provisional' },
+  };
   const original = receipt();
+  assert.equal(original.entries[0].queueStatus, 'accepted');
+  assert.equal(original.entries[0].runId, 'r');
+  assert.equal(original.entries[0].acceptanceId, 'm');
+  assert.equal(original.entries[0].code, undefined);
+  assert.equal(original.entries[0].diagnosis, undefined);
   const saved = delegated(original);
   assert.equal(original.entries[0].phases.current, 'accepted');
   assert.equal(original.entries[0].phases.timeline.length, 6);
@@ -603,4 +617,19 @@ test('worker errors retain affected Lane, operation and run identities only in l
   assert.ok(line.includes(state.code));
   assert.deepEqual(readLandingProgress(store, operationId, undefined, undefined, false), receipt);
   assert.equal(readLandingProgress(store, 'unrelated').workerError, undefined);
+});
+
+test('attempt timing without historical run evidence survives the CLI JSON boundary', t => {
+  const { store, data } = fixture(t);
+  data.landingBatches.push({
+    id: randomUUID(),
+    entryIds: ['entry'],
+    status: 'completed',
+    prefixes: [{ entryIds: ['entry'], runId: randomUUID(), viewId: randomUUID() }],
+  });
+  const attempts = readLandingAttempts(store, 'entry');
+  assert.deepEqual(attempts, JSON.parse(JSON.stringify(attempts)));
+  assert.equal(attempts[0].checks[0].reservationAt, undefined);
+  assert.equal(attempts[0].checks[0].ciStartedAt, undefined);
+  assert.equal(attempts[0].checks[0].ciEndedAt, undefined);
 });

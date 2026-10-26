@@ -3,6 +3,7 @@
  * or presence; tests/agent-reads-never-write.test.mjs hashes the owner around each. */
 export const SNAPSHOT_READ_ACTIONS: ReadonlySet<string> = new Set([
   'status',
+  'landing',
   'tests',
   'peers',
   'review',

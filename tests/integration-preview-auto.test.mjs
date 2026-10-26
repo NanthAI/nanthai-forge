@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { withLandingController } from '../dist/landing-worker-context.js';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -266,7 +267,9 @@ test('land excludes a clashing Lane with pinned diagnostic and checks only the s
   const f = await fixture(t);
   await f.policy({ preset: 'trusted', checks: { runner: 'local' }, integrationPreview: { auto: true } });
   const result = (
-    await f.agent.dispatch({ action: 'land', laneIds: [f.a.laneId, f.b.laneId], keepOpen: true })
+    await withLandingController(() =>
+      f.agent.dispatch({ action: 'land', laneIds: [f.a.laneId, f.b.laneId], keepOpen: true }),
+    )
   ).result;
   assert.equal(result.counts.accepted, 1);
   assert.equal(result.counts['preview-excluded'], 1);
@@ -276,7 +279,9 @@ test('land excludes a clashing Lane with pinned diagnostic and checks only the s
   assert.match(rejected.preview.excluded[0].errors.join('\n'), /synthetic pair clash/);
   assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
   const overridden = (
-    await f.agent.dispatch({ action: 'land', laneIds: [f.b.laneId], preview: 'skip', keepOpen: true })
+    await withLandingController(() =>
+      f.agent.dispatch({ action: 'land', laneIds: [f.b.laneId], preview: 'skip', keepOpen: true }),
+    )
   ).result;
   assert.equal(overridden.entries[0].status, 'failed');
   assert.notEqual(overridden.entries[0].code, 'INTEGRATION_PREVIEW_EXCLUDED');

@@ -153,6 +153,7 @@ export async function installFinishCompose(
       version: state.version + 1,
       attemptId: attempt.id,
       phase: 'queued',
+      timing: { submittedAt: state.at, composeStartedAt: pending.at, composedAt: new Date().toISOString() },
       observation: landingObservation('queued'),
       error: null,
     },

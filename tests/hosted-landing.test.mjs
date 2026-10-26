@@ -28,6 +28,8 @@ test('concurrent original retries retain one request, attempt, check and atomic 
   const results = await Promise.all([f.enqueue(r), f.enqueue(r), f.enqueue(r)]);
   assert(results.every(s => canonicalPayload(s) === canonicalPayload(results[0])));
   assert.equal(f.tables.projectHostedLandingRequests.size, 1);
+  const [row] = f.tables.projectHostedLandingRequests.values();
+  assert.equal(row.candidateId, r.candidateId);
   assert.equal(f.tables.projectHostedLandingAttempts.size, 1);
   assert.equal(f.tables.projectHostedCheckRuns.size, 1);
   assert.equal(driverTasks(f).length, 1);
