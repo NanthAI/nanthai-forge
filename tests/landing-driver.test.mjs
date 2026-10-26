@@ -300,7 +300,8 @@ test('at runner capacity repeated drain observations publish no unchanged Work',
     await gate;
   });
   await ready;
-  await f.candidate('capacity-next.txt');
+  const next = await f.candidate('capacity-next.txt');
+  assert.equal(f.store.select('landingEntries', next.command.operationId).waitingFor.rule, 'capacity');
   const revision = f.store.revision(),
     readRecords = f.store.readRecords.bind(f.store),
     save = f.store.save.bind(f.store),
@@ -414,7 +415,8 @@ test('legacy shorter-prefix acceptance without an evaluation cursor retains its 
   assert.equal(f.store.select('landingEntries', good.command.operationId).status, 'accepted');
   assert.equal(f.store.select('landingEntries', bad.command.operationId).status, 'failed');
   assert.equal(f.store.select('landingBatches', batch.id).culpritId, bad.command.operationId);
-  assert.equal(runs(f).length, 2);
+  assert.equal(f.store.select('landingBatches', batch.id).confirmation.verdict, 'confirmed');
+  assert.equal(runs(f).length, 3);
   assert.equal(f.store.load().channelMoves.length, 1);
 });
 

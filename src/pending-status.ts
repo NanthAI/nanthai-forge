@@ -142,6 +142,9 @@ export function pendingStatus(
           lane,
           {
             ...queueObservation(queued, queuedRun, diagnosis),
+            ...(queued.status === 'checking' && previous?.waitingFor
+              ? { waitingFor: previous.waitingFor }
+              : {}),
             status:
               queued.status === 'awaiting-review' &&
               data.channelMoves.some(

@@ -1,3 +1,4 @@
+import { recordLandingWaits } from './landing-waiting.js';
 import { landingRecords } from './landing-records.js';
 import { observeWorkProgress } from './work-progress.js';
 import { landingWorkerSignal } from './landing-worker-context.js';
@@ -93,6 +94,26 @@ export async function drainLandingBatches(
             channel,
           );
         }
+        if (
+          !canSelect &&
+          observed.landingEntries?.some(entry => entry.status === 'queued' && !entry.waitingFor)
+        )
+          await batchEdit(
+            work,
+            channel,
+            data => {
+              const train = recordLandingWaits(work.store, data, channel);
+              for (const entry of train.pending)
+                if (entry.waitingFor?.rule !== 'overlap')
+                  entry.waitingFor = {
+                    ...entry.waitingFor!,
+                    rule: 'capacity',
+                    reason: 'Waiting for active batches to free check capacity.',
+                  };
+            },
+            driver.beforePublish,
+            channel,
+          );
         if (batch) {
           observeWorkProgress();
           launched++;

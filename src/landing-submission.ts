@@ -1,3 +1,4 @@
+import { checkingWait } from './landing-waiting.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landingDiagnosis } from './landing-diagnosis.js';
 import { projectSubmission, queueObservation } from './landing-observation.js';
@@ -11,9 +12,25 @@ import { submissionOutcome, type Submission } from './landing-submission-state.j
 export * from './landing-submission-state.js';
 export function queuedOutcome(store: WorkStore, entry: LandingEntry) {
   const run = entry.runId ? store.select('runs', entry.runId) : undefined;
+  const batch = entry.batchId ? store.select('landingBatches', entry.batchId) : undefined;
+  const waitingFor =
+    entry.status === 'checking'
+      ? checkingWait(
+          {
+            landingBatches: batch ? [batch] : [],
+            runs: batch?.prefixes.flatMap(prefix => store.select('runs', prefix.runId) ?? []) ?? [],
+          },
+          entry,
+        )
+      : entry.status === 'queued'
+        ? entry.waitingFor
+        : undefined;
   return reviewedOutcome(
     store,
-    queueObservation(entry, run, landingDiagnosis(store, entry)),
+    {
+      ...queueObservation(entry, run, landingDiagnosis(store, entry)),
+      ...(waitingFor ? { waitingFor } : {}),
+    },
     run?.viewId ?? entry.viewId,
     entry.channel,
   );

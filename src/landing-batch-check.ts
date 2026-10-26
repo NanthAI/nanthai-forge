@@ -1,3 +1,5 @@
+import { reserveBoundaryConfirmation } from './landing-confirmation.js';
+import { checkingWait } from './landing-waiting.js';
 import { admitLandingCheck } from './landing-check-admission.js';
 import {
   retainDiagnosisNode,
@@ -115,6 +117,15 @@ export async function evaluateBatch(
             )
               return false;
             recordDiagnosisNode(data, batch, prefix, parent, run);
+            if (saved.confirmation) {
+              const run = data.runs.find(run => run.id === saved.confirmation!.runId);
+              saved.confirmation.verdict =
+                run?.status === 'passed'
+                  ? 'flake'
+                  : run && diagnosticStatus(run) === 'failed'
+                    ? 'confirmed'
+                    : 'inconclusive';
+            }
             saved.settlement = { cancelledAt, failingViewId: prefix.viewId, culpritViewId: prefix.viewId };
             saved.status = 'completed';
             saved.culpritId = entry.id;
@@ -146,6 +157,7 @@ export async function evaluateBatch(
     },
   );
   if (settled) return true;
+  if (await reserveBoundaryConfirmation(work, batch, outcome.failing?.viewId, driver)) return true;
   const infraRun = batch.prefixes
     .map(prefix => work.store.select('runs', prefix.runId))
     .find(run => run && pendingActionsInfra(run));
@@ -174,6 +186,15 @@ export async function evaluateBatch(
       const saved = data.landingBatches!.find(item => item.id === batch.id)!;
       // A concurrent cancellation changes the applicable prefix; evaluate it again.
       if (cancellationBoundary(work, saved) !== cancelledAt) return;
+      if (saved.confirmation) {
+        const run = data.runs.find(run => run.id === saved.confirmation!.runId);
+        saved.confirmation.verdict =
+          run?.status === 'passed'
+            ? 'flake'
+            : run && diagnosticStatus(run) === 'failed'
+              ? 'confirmed'
+              : 'inconclusive';
+      }
       saved.settlement = {
         cancelledAt,
         ...(outcome.passing ? { passingViewId: outcome.passing.viewId } : {}),
@@ -182,6 +203,9 @@ export async function evaluateBatch(
           : {}),
         ...(stopped && stopped !== 'passed' ? { stopped } : {}),
       };
+      for (const entry of data.landingEntries ?? [])
+        if (entry.batchId === batch.id && entry.status === 'checking')
+          entry.waitingFor = checkingWait(data, entry);
     },
     driver.beforePublish,
     batch.channel,

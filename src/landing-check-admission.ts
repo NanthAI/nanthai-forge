@@ -56,8 +56,10 @@ export async function admitLandingCheck(
   parent?: BatchPrefix,
 ) {
   const store = work.store;
+  const fresh = batch.confirmation?.runId === prefix.runId;
+  const reuse = () => (fresh ? undefined : reuseLandingCheck(work, batch, prefix, driver));
   let recorded = store.select('runs', prefix.runId);
-  if (recorded) recorded = (await reuseLandingCheck(work, batch, prefix, driver)) ?? recorded;
+  if (recorded) recorded = (await reuse()) ?? recorded;
   if (recorded && recorded.status !== 'interrupted') {
     validatePrefixRun(work, batch, prefix, recorded);
     await retainDiagnosisNode(work, batch, prefix, parent, driver);
@@ -94,8 +96,8 @@ export async function admitLandingCheck(
   const admitted = await withQueueSlot(
     directory,
     async () => {
-      let run = store.select('runs', prefix.runId) ?? (await reuseLandingCheck(work, batch, prefix, driver));
-      if (!run) {
+      let run = store.select('runs', prefix.runId) ?? (await reuse());
+      if (!run && !fresh) {
         let pending: CheckRun | undefined;
         try {
           const bytes = readSource(directory, 'reservation.json', 4096);

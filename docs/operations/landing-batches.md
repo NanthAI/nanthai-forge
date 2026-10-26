@@ -91,6 +91,20 @@ reserved under that original run ID before execution. Evaluation retains an opti
 A resumed evaluated batch continues at acceptance without dispatching checks again.
 Older batches without a cursor recover from their existing Candidates and run evidence.
 
+Every queued entry omitted from selection retains `waitingFor`: the blocking rule,
+reason, predecessor entry IDs and their exact Lane/head inputs when applicable.
+Overlap, duplicate inputs, active check capacity, batch size and incompatible batch
+pins are distinct rules. The next selection refreshes these observations; arrival
+age stays unchanged. Admission records initial overlap and capacity waits in its
+existing transaction, so unchanged wait observations do not publish Work. Canonically accepted prefixes stop acting as overlap blockers
+even before their entry-settlement publication completes.
+
+Checking entries expose the batch and run IDs they wait for. Once checks have
+observations but publication is pending, `waitingFor.rule` is `settlement`.
+Status reads derive this from canonical batch/run records, so lock contention
+cannot disguise a settlement wait as a live check. Reads do not publish progress
+or restart a run. Existing driver adoption handles retained batches.
+
 Acceptance keeps its original deterministic operation ID and expected-previous CAS.
 Recovery reconciles that canonical receipt before comparing speculative parents or
 current main, including when main advanced again after the lost reply. Acceptance
@@ -200,6 +214,20 @@ Structured runner/preparation errors and failed non-executions without an exit
 or signal remain inconclusive instead of triggering source bisection. Signal
 failures and exit 137 remain failed checks; they do not prove transient infra.
 
+When a remote full prefix fails and every shorter prefix passed, attribution waits
+for one fresh check of the same full Candidate. Rechecking the whole selection
+includes the failing files and preserves the existing exact-Candidate acceptance
+gate, including interactions with earlier entries. `confirmation` retains the
+original failed run, the deterministic confirmation run, known failing file names
+(or the selected files when per-file verdicts are unavailable), and its verdict.
+Custom checks without file evidence retain an empty file list. A passing rerun
+records `flake` for that observation and lands the full checked prefix; another
+failure records `confirmed` before the boundary entry ends failed. Infrastructure
+or cancellation remains inconclusive. Reservation precedes dispatch; restarting
+adopts the same confirmation operation and never schedules a third observation.
+Original failed diagnostic nodes remain visible. This confirmation also applies
+to retained evaluated batches before they attribute the boundary.
+
 Finish and land receipts expose `diagnosis`, including observed failing sets,
 the smallest **observed** failing set and `minimization: "incomplete"`. The legacy
 `culpritId`/`culpritViewId` fields identify a boundary entry/prefix only; they do
@@ -288,7 +316,6 @@ entry statuses and counts remain available for compatibility; automation should
 use submission state/reason/cause to distinguish waiting from failure. Canonical
 Work records override stale local batch observations. These adapters do not start
 a worker, run checks, or change acceptance policy.
-
 
 ## Managed owner lifecycle
 

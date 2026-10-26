@@ -560,6 +560,11 @@ test('remote scheduler waits for high-overlap parent but speculates disjoint wor
   await composeBatch(f.agent.work, parent);
   const later = await enqueue(b),
     revision = f.store.revision();
+  assert.equal(later.waitingFor.rule, 'overlap');
+  assert.deepEqual(
+    later.waitingFor.entries.map(entry => entry.entryId),
+    [first.id],
+  );
   const blocked = await batchEdit(f.agent.work, 'select', data =>
     selectBatch(f.agent.work, data, 'main', new Set([parent.id])),
   );

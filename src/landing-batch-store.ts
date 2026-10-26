@@ -1,11 +1,11 @@
 import { editWork } from './work-edit.js';
+import { recordLandingWaits, landingWait, checkingWait } from './landing-waiting.js';
 import { editLandingRecords } from './landing-records.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 import { assertLandingWorkerActive } from './landing-worker-context.js';
 import { interruptStaleLandingInputs } from './landing-stale.js';
 // SPDX-License-Identifier: Apache-2.0
 import { landingConflictPeers } from './landing-conflict-peers.js';
-import { planLandingTrain } from './landing-train-plan.js';
 import { composeLandingSource } from './landing-compose-source.js';
 import { join } from 'node:path';
 import { digest } from './hash.js';
@@ -147,7 +147,33 @@ export async function enqueueLanding(
         keepOpen: command.keepOpen ?? false,
         status: 'queued',
       };
+      const active = activeBatches(data, entry.channel);
+      const check = work.store.select('checks', entry.checkId);
       (data.landingEntries ??= []).push(entry);
+      // Publish the initial overlap reason with admission, not a later no-op
+      // selection. The new Candidate is not yet in the queue projection.
+      const admission = {
+        ...data,
+        views: data.views.some(item => item.id === view.id) ? data.views : [...data.views, view],
+        lanes: [
+          ...data.lanes,
+          ...view.inputs
+            .filter(pin => !data.lanes.some(lane => lane.id === pin.laneId))
+            .flatMap(pin => work.store.select('lanes', pin.laneId) ?? []),
+        ],
+      };
+      recordLandingWaits(work.store, admission, entry.channel);
+      if (
+        check &&
+        active.length >= landingShape(work, check).concurrency &&
+        entry.waitingFor?.rule !== 'overlap'
+      )
+        entry.waitingFor = landingWait(
+          data,
+          'capacity',
+          'Waiting for active batches to free check capacity.',
+          active.flatMap(batch => data.landingEntries?.find(entry => entry.id === batch.entryIds[0]) ?? []),
+        );
       return entry;
     },
     undefined,
@@ -185,6 +211,10 @@ export function selectBatch(
   const source = new NativeSource(work.store.root);
   interruptStaleLandingInputs(data, channel, source);
   settleCompletedLanes(work, data, channel, acceptedHead(data, channel), source);
+  const adopt = (batch: LandingBatch) => {
+    recordLandingWaits(work.store, data, channel);
+    return batch;
+  };
   const environment = checkEnvironment();
   // The submitting CLI does not execute the check. The owner uses the pinned
   // definition/environment and runner recipe; its CLI build is not an input.
@@ -202,7 +232,7 @@ export function selectBatch(
         move => move.id === finishChild(active.id, `accept:${prefix.viewId}`) && move.status === 'accepted',
       ),
     );
-    if (active.environment && accepted) return active;
+    if (active.environment && accepted) return adopt(active);
     // An already reserved execution owns its original runtime. Observe it to
     // completion rather than superseding it into a second physical check.
     if (
@@ -213,7 +243,7 @@ export function selectBatch(
         ),
       )
     )
-      return active;
+      return adopt(active);
     // Recorded environment variables can be replayed; the host/Node runtime
     // cannot. Also catch an in-place Node upgrade at the same executable path.
     const incompatible: string[] = active.environment
@@ -229,7 +259,7 @@ export function selectBatch(
           : [];
       }),
     );
-    if (active.environment && !incompatible.length) return active;
+    if (active.environment && !incompatible.length) return adopt(active);
     active.status = 'superseded';
     for (const entry of data.landingEntries ?? [])
       if (entry.batchId === active.id && entry.status === 'checking') entry.status = 'queued';
@@ -279,7 +309,7 @@ export function selectBatch(
       entry.reason = landingPinsChanged(fields);
     }
   }
-  const train = planLandingTrain(work.store, data, channel);
+  const train = recordLandingWaits(work.store, data, channel);
   const pending = train.pending;
   // Original insertion order breaks equal timestamp ties and survives requeue/restart.
   const first = pending[0];
@@ -301,8 +331,20 @@ export function selectBatch(
       lead.definition !== first.definition ||
       parent.environment?.fingerprint !== environment.fingerprint ||
       lead.keepOpen !== first.keepOpen
-    )
+    ) {
+      for (const entry of pending)
+        if (entry.waitingFor?.rule !== 'overlap')
+          entry.waitingFor = {
+            ...landingWait(
+              data,
+              actives.length >= shape.concurrency ? 'capacity' : 'batch-pins',
+              'Waiting for active batches to free compatible check capacity.',
+              lead ? [lead] : [],
+            ),
+            batchId: parent.id,
+          };
       return;
+    }
   }
   const selected: LandingEntry[] = [];
   // One Lane/head lands once: a duplicate waits for the earlier entry, then is already on main.
@@ -313,7 +355,20 @@ export function selectBatch(
   );
   for (const entry of pending) {
     const pins = entryPins(data, entry);
-    if (claimed.has(pins)) continue;
+    if (claimed.has(pins)) {
+      entry.waitingFor = landingWait(
+        data,
+        'duplicate',
+        'Waiting for the earlier submission of these exact inputs.',
+        (data.landingEntries ?? []).filter(
+          other =>
+            other !== entry &&
+            entryPins(data, other) === pins &&
+            (selected.includes(other) || ['checking', 'awaiting-review'].includes(other.status)),
+        ),
+      );
+      continue;
+    }
     claimed.add(pins);
     if (
       selected.length === shape.maxBatch ||
@@ -325,6 +380,14 @@ export function selectBatch(
     if (train.waits.some(wait => wait.entryId === entry.id)) continue;
     selected.push(entry);
   }
+  for (const entry of pending)
+    if (!selected.includes(entry) && entry.waitingFor?.rule === 'batch-order')
+      entry.waitingFor = landingWait(
+        data,
+        selected.length === shape.maxBatch ? 'batch-size' : 'batch-pins',
+        'Waiting for the next compatible batch after the selected entries.',
+        selected.length ? selected : [first],
+      );
   if (!selected.length) return;
   const projected = parent ? (parent.prefixes.at(-1)?.head ?? parent.base) : undefined;
   const previous = parent
@@ -351,6 +414,12 @@ export function selectBatch(
   };
   for (const entry of selected) {
     entry.status = 'checking';
+    entry.waitingFor = {
+      rule: 'composition',
+      reason: 'Waiting for batch composition.',
+      entries: [],
+      batchId: batch.id,
+    };
     entry.firstSelectedAt ??= new Date().toISOString();
     entry.batchId = batch.id;
   }
@@ -483,6 +552,11 @@ export async function composeBatch(work: WorkService, batch: LandingBatch, befor
         entry.terminalAt = new Date().toISOString();
         entry.conflictViewId = conflict.viewId;
       }
+      for (const entry of data.landingEntries ?? [])
+        if (entry.batchId === saved.id) {
+          if (entry.status === 'checking') entry.waitingFor = checkingWait(data, entry);
+          else delete entry.waitingFor;
+        }
       return saved;
     },
     beforePublish,

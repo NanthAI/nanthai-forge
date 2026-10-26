@@ -24,6 +24,7 @@ export type Submission = {
   terminal: boolean;
   complete: boolean;
   diagnosis?: LandingDiagnosisReport;
+  waitingFor?: import('./landing-batch-types.js').LandingWaiting;
   phases?: ReturnType<typeof import('./land-progress.js').readLandingProgress>;
 };
 const busy = ['queued', 'preparing', 'running', 'checking', 'waiting', 'waiting to land', 'source-changed'];

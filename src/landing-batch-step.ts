@@ -1,3 +1,4 @@
+import { reserveBoundaryConfirmation } from './landing-confirmation.js';
 import { currentChannelHead } from './agent-defaults.js';
 import { validatePassingPrefix, diagnosticStatus } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -56,6 +57,11 @@ export async function advanceLandingBatch(
           ...(legacyFailure ? { failingViewId: legacyFailure.viewId } : {}),
         }
       : undefined);
+  if (
+    !receipt &&
+    (await reserveBoundaryConfirmation(work, batch, outcome?.failingViewId ?? outcome?.culpritViewId, driver))
+  )
+    return 'advanced';
   const passing = batch.prefixes.find(
     prefix => prefix.viewId === (acceptedPrefix?.viewId ?? outcome?.passingViewId),
   );
@@ -160,6 +166,7 @@ export async function advanceLandingBatch(
     for (const entry of data.landingEntries!.filter(
       entry => entry.batchId === batch.id && entry.status === 'checking',
     )) {
+      delete entry.waitingFor;
       if (move && passing!.entryIds.includes(entry.id)) {
         entry.status = 'accepted';
         entry.terminalAt = move.at;
@@ -169,7 +176,7 @@ export async function advanceLandingBatch(
         entry.status = 'failed';
         entry.terminalAt = new Date().toISOString();
         entry.runId = failing!.runId;
-        entry.reason = `Observed failing prefix of ${failing!.entryIds.length} landing entries on base ${batch.base}; run ${failing!.runId}. This does not establish a standalone or minimal failing Lane.`;
+        entry.reason = `Observed failing prefix of ${failing!.entryIds.length} landing entries on base ${batch.base}; run ${failing!.runId}. ${saved.confirmation?.verdict === 'confirmed' ? ` Confirmation run ${saved.confirmation.runId} failed again.` : ''} This does not establish a standalone or minimal failing Lane.`;
       } else if (outcome?.stopped) {
         entry.status = outcome.stopped === 'cancelled' ? 'cancelled' : 'interrupted';
         entry.terminalAt = new Date().toISOString();

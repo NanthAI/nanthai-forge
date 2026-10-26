@@ -4,6 +4,13 @@ import { landingRuntimeSchema } from './landing-environment-schema.js';
 import { checkEnvironmentSchema } from './check-environment-schema.js';
 const id = z.uuid(),
   head = z.string().regex(/^[a-f0-9]{64}$/);
+export const landingWaitingSchema = z.object({
+  rule: z.string(),
+  reason: z.string(),
+  entries: z.array(z.object({ entryId: id, inputs: z.array(z.object({ laneId: id, head })) })),
+  batchId: id.optional(),
+  runIds: z.array(id).optional(),
+});
 export const landingEntrySchema = z.object({
   id,
   request: head,
@@ -16,6 +23,7 @@ export const landingEntrySchema = z.object({
   environmentSnapshot: checkEnvironmentSchema.optional(),
   runtimeSnapshot: landingRuntimeSchema.optional(),
   reason: z.string().optional(),
+  waitingFor: landingWaitingSchema.optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
   infrastructureRetries: z.array(z.object({ at: z.string(), code: z.string(), runId: id })).optional(),
   runtimeRepins: z
@@ -126,6 +134,15 @@ export const landingBatchSchema = z.object({
       nodes: z.array(landingDiagnosisNodeSchema),
     })
     .optional(),
+  /** One fresh exact-Candidate confirmation; original failed evidence stays in diagnosis. */
+  confirmation: z
+    .object({
+      failedRunId: id,
+      runId: id,
+      tests: z.array(z.string()),
+      verdict: z.enum(['flake', 'confirmed', 'inconclusive']).optional(),
+    })
+    .optional(),
   /** Optional restart cursor; canonical Candidates/runs/Channel receipts remain authoritative. */
   settlement: z
     .object({
@@ -142,3 +159,5 @@ export const landingBatchSchema = z.object({
 export type LandingEntry = z.infer<typeof landingEntrySchema>;
 export type LandingBatch = z.infer<typeof landingBatchSchema>;
 export type BatchPrefix = z.infer<typeof batchPrefixSchema>;
+
+export type LandingWaiting = z.infer<typeof landingWaitingSchema>;

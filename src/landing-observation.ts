@@ -41,6 +41,7 @@ export function batchDiagnosis(batch: LandingBatch | undefined) {
     diagnosis: {
       batchId: batch.id,
       ...batch.diagnosis,
+      ...(batch.confirmation ? { confirmation: batch.confirmation } : {}),
       applicability:
         batch.status === 'superseded'
           ? 'historical'
@@ -67,6 +68,9 @@ export function queueObservation(
     status: entry.status,
     queueStatus: entry.status,
     ...diagnosis,
+    ...(['queued', 'checking'].includes(entry.status) && entry.waitingFor
+      ? { waitingFor: entry.waitingFor }
+      : {}),
     checkStatus: run ? diagnosticStatus(run) : undefined,
     ...(entry.error ? { code: entry.error.code, message: entry.error.message } : {}),
     ...(run?.reusedFrom ? { checkReuse: run.reusedFrom, message: run.details } : {}),
@@ -100,6 +104,9 @@ export function projectSubmission(
     attemptHead,
     attemptId,
     ...sourceSubmission(outcome, lane.head, attemptHead),
+    ...(result.waitingFor
+      ? { waitingFor: result.waitingFor as import('./landing-batch-types.js').LandingWaiting }
+      : {}),
     ...(result.diagnosis ? { diagnosis: result.diagnosis as LandingDiagnosisReport } : {}),
   };
 }

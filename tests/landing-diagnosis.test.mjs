@@ -216,8 +216,10 @@ test('three-way-only failure retains the observed triple even when all pairs pas
   const observation = landingDiagnosis(f.store, f.store.load().landingEntries[2]).diagnosis;
   assert.deepEqual(
     observation.observedFailingSets.map(node => node.entryIds.length),
-    [3],
+    [3, 3],
   );
+  assert.equal(first.confirmation.verdict, 'confirmed');
+  assert.equal(new Set(observation.observedFailingSets.map(node => node.runId)).size, 2);
   assert.equal(observation.minimization, 'incomplete');
   assert.equal(first.diagnosis.nodes.find(node => node.entryIds.length === 2).status, 'passed');
   assert.equal(f.content('C.txt'), undefined);
