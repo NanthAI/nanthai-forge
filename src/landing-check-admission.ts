@@ -21,6 +21,7 @@ import type { WorkService } from './work.js';
 import type { CheckRun } from './work-types.js';
 import type { LandingBatch, BatchPrefix } from './landing-batch-types.js';
 import type { LandingDriver } from './landing-driver.js';
+import { recoverLandingCheck } from './landing-check-recovery.js';
 
 const reservationSchema = z.object({ runId: z.uuid(), viewId: z.uuid(), head: z.string() });
 const active = (run: CheckRun) => ['queued', 'preparing', 'running'].includes(run.status);
@@ -75,7 +76,11 @@ export async function admitLandingCheck(
   const fresh = batch.confirmation?.runId === prefix.runId;
   const reuse = () => (fresh ? undefined : reuseLandingCheck(work, batch, prefix, driver));
   let recorded = store.select('runs', prefix.runId);
-  if (recorded) recorded = (await reuse()) ?? recorded;
+  if (recorded) {
+    recorded = (await reuse()) ?? recorded;
+    await recoverLandingCheck(work, batch, prefix, driver);
+    recorded = store.select('runs', prefix.runId);
+  }
   if (recorded && recorded.status !== 'interrupted') {
     validatePrefixRun(work, batch, prefix, recorded);
     if (!batch.admission) await retainDiagnosisNode(work, batch, prefix, parent, driver);

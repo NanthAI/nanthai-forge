@@ -26,13 +26,15 @@ import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import { processAlive } from '../dist/local-process.js';
 import { runCheckController } from '../dist/check-controller.js';
+import { finishChild } from '../dist/finish-child.js';
 
 const read = path => JSON.parse(readFileSync(path));
 const journalPath = (f, kind, operationId) => join(f.store.directory, `agent-${kind}`, `${operationId}.json`);
 const moduleUrl = name => new URL(`../dist/${name}.js`, import.meta.url).href;
 const fixture = (t, options) => createFixture(t, { ...options, stopChecks: true });
-async function orphanRun(f, backend) {
-  await f.candidate('incident.txt', 'retained input\n');
+async function orphanRun(f, backend, passedTwin = false) {
+  const input = await f.candidate('incident.txt', 'retained input\n');
+  if (passedTwin) await f.checkCandidates([input]);
   const batch = await batchEdit(f.work, 'select', data => selectBatch(f.work, data, 'main'));
   await composeBatch(f.work, batch);
   const prefix = f.store.select('landingBatches', batch.id).prefixes[0];
@@ -168,13 +170,24 @@ for (const selected of [false, true, 'composed'])
     });
   });
 
-for (const remote of [false, true])
-  test(`startup reconciles a running ${remote ? 'remote' : 'local'} check with a dead controller`, async t => {
+for (const { remote, passedTwin } of [
+  { remote: false, passedTwin: false },
+  { remote: true, passedTwin: false },
+  { remote: false, passedTwin: true },
+])
+  test(`startup reconciles a running ${remote ? 'remote' : 'local'} check with a dead controller${passedTwin ? ' and a passed twin' : ''}`, async t => {
     const f = await fixture(t, { remote });
     const obsolete = await f.candidate('obsolete.txt', 'obsolete input\n', false);
     await f.agent.dispatch({ ...obsolete.command, wait: false });
     await changeHead(f, obsolete);
-    const run = await orphanRun(f);
+    const run = await orphanRun(f, undefined, passedTwin);
+    const entryIds = f.store
+      .load()
+      .landingEntries.map(entry => entry.id)
+      .sort();
+    const entry = f.store.load().landingEntries.find(entry => entry.id !== obsolete.command.operationId);
+    const passed = f.store.load().runs.find(run => run.status === 'passed');
+    if (passedTwin) assert.ok(passed?.reuseKey, 'seed eligible passed evidence');
     await drive(f, async () => {
       await until(
         f,
@@ -186,8 +199,59 @@ for (const remote of [false, true])
       const recovered = f.store.select('runs', run.id);
       assert.equal(recovered.status, remote ? 'passed' : 'interrupted');
       assert.ok(recovered.endedAt);
-      assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
       assert.equal(recovered.id, run.id);
+      for (const pin of ['viewId', 'head', 'base', 'inputs', 'dependencies', 'check', 'environment'])
+        assert.deepEqual(recovered[pin], run[pin], `original ${pin} retained`);
+      await until(
+        f,
+        () => f.store.select('landingEntries', entry.id)?.status === 'accepted',
+        'original entry lands without resubmission',
+      );
+      const settled = f.store.select('landingEntries', entry.id);
+      assert.deepEqual(
+        f.store
+          .load()
+          .landingEntries.map(entry => entry.id)
+          .sort(),
+        entryIds,
+        'no replacement submission',
+      );
+      for (const pin of [
+        'id',
+        'request',
+        'viewId',
+        'head',
+        'channel',
+        'checkId',
+        'definition',
+        'environment',
+      ])
+        assert.deepEqual(settled[pin], entry[pin], `original entry ${pin} retained`);
+      assert.deepEqual(f.store.select('runs', run.id), recovered, 'terminal original run stays immutable');
+      const runs = f.store.load().runs.filter(run => !run.mainCheck);
+      const replacementId = finishChild(run.id, passedTwin ? 'passed-twin' : 'controller-recovery');
+      const expectedIds = remote ? [run.id] : [run.id, replacementId, ...(passed ? [passed.id] : [])];
+      assert.deepEqual(runs.map(run => run.id).sort(), expectedIds.sort(), 'exactly the intended runs');
+      if (!remote) {
+        const replacement = f.store.select('runs', replacementId);
+        assert.equal(replacement.status, 'passed');
+        assert.equal(replacement.viewId, run.viewId);
+        assert.equal(replacement.head, run.head);
+        assert.equal(settled.runId, replacement.id);
+        if (passedTwin) {
+          assert.equal(replacement.reusedFrom.runId, passed.id);
+          assert.deepEqual(f.store.select('runs', passed.id), passed, 'passed twin stays immutable');
+          assert.equal(f.store.select('runs', finishChild(run.id, 'controller-recovery')), undefined);
+          assert.equal(settled.infrastructureRetries?.length ?? 0, 0, 'reuse precedes controller recovery');
+        } else {
+          assert.equal(replacement.reusedFrom, undefined, 'one replacement execution');
+          assert.deepEqual(
+            settled.infrastructureRetries.map(retry => retry.runId),
+            [run.id],
+          );
+        }
+      }
+      assert.equal(f.content('incident.txt'), 'retained input\n');
     });
   });
 

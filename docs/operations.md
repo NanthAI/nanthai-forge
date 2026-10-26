@@ -444,6 +444,65 @@ Queue holders and runs record PID plus process start identity. Status, observe, 
 
 Before Lane/check materialization and check execution, Forge probes free space on the owner's filesystem. At ≤5 GB free, receipts include a warning; below 2 GB, preparation refuses with `DISK_LOW` and points to `nforge agent ROOT clean` (dry run). A drop while queued produces a failed run with a structured `error` rather than executing. Configure decimal-GB thresholds with `FORGE_DISK_WARN_GB` and `FORGE_DISK_BLOCK_GB` (non-negative; `0` disables that threshold). Forge never deletes files because of low disk space.
 
+### Landing lifecycle drill
+
+Run the Q4 drill from a prepared checkout (Node 24.22.1+, dependencies installed
+with `npm ci --ignore-scripts`, then `npm run build:core`):
+
+```sh
+node --import ./tests/check-runtime.mjs --test --test-concurrency=2 \
+  tests/landing-lifecycle.test.mjs \
+  tests/hosted-landing-lifecycle.test.mjs \
+  tests/landing-check-recovery.test.mjs \
+  tests/hosted-mac-runner.test.mjs
+```
+
+The restart cases create disposable native owners and real gated check processes.
+They seed keyed passed checks, stop the owner controller with SIGTERM or SIGKILL
+mid-check, and start a replacement controller. Both solo admission and combined
+checks must land the original entries without resubmission. A dead local
+controller or a service-stop signal retains the old run and reserves one
+deterministic replacement operation for its unfinished check. Its diagnosis and
+entry `infrastructureRetries` record the original run. Passed content-keyed evidence
+is tried first. Explicit cancellation, failed source checks and preparation errors
+retain their normal outcomes. A surviving orphan process group keeps its check
+capacity until it exits. Cancel the original landing entry to stop its recovery.
+Standalone `run` operations still retain their original interrupted outcome.
+
+The hosted cases use in-memory backend transactions, a fake provider and fake R2
+objects. They keep one remote check running across a 30-minute client clock jump
+or a 10-minute transport outage, then deliver its retained signed completion.
+Previously passed shard records, the run and the landing handle must retain their
+identities; the original submission must reach `landed`. The Mac-runner tests also
+exercise lease expiry, fencing, the existing one-requeue behavior, late callbacks,
+and terminal delivery when no runner returns. These are deterministic simulations;
+they do not sleep the test Mac, disable Wi-Fi or contact a live service.
+
+Each lifecycle case prints JSON with simulated outage duration, elapsed wall time,
+passed-check re-runs, stranded entries and recovery mutations. The initial restart
+replay ended one in-flight entry as `cancelled` (SIGTERM) or `interrupted` (SIGKILL),
+requiring resubmission to continue. The measured recovery cases all landed with
+zero re-runs of passed checks, zero stranded entries and zero requester mutations
+to settle:
+
+| Case | Simulated outage | Measured wall time |
+| --- | --- | --- |
+| Solo check, SIGTERM restart | Service stop/start | 20.018 s |
+| Solo check, SIGKILL restart | Service stop/start | 19.426 s |
+| Combined check, SIGTERM restart | Service stop/start | 18.651 s |
+| Combined check, SIGKILL restart | Service stop/start | 16.061 s |
+| Hosted remote check, sleep | 30 minutes | 0.485 s |
+| Hosted remote check, network loss | 10 minutes | 0.489 s |
+
+These are synthetic drill times, not production latency or
+runner-billing measurements; fault injection and starting the replacement service
+are excluded from recovery-mutation counts. Repeat output gives current timings.
+
+For Phase 5 metrics, this qualifies metric 5's recovery path without a manual retry
+and metric 6's preservation of passed work; production interventions per landing,
+check minutes and reuse rate remain unmeasured by this drill. Metric 3 is checked
+by requiring every original submission to settle, with no pending queue work.
+
 ## Local cleanup
 
 `nforge agent ROOT clean` (MCP `forge_task` action `clean`) reclaims regenerable local disk. It is a dry run unless you send `{"apply":true}`; the dry run lists candidates grouped by kind with bytes and the reason each is safe, plus totals and every skipped item with its reason. Apply recomputes the set under the owner lock and re-validates each item (pass `items` ids from a dry run to limit it; anything that changed is skipped). `kinds` filters:

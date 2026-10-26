@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { batchEntries, lostLandingCheckController } from './landing-check-recovery.js';
 import { admitLandingCheck } from './landing-check-admission.js';
 import { waitForAgentRun } from './agent-run-observer.js';
 import { validatePrefixRun, diagnosticStatus } from './landing-diagnosis.js';
@@ -40,6 +41,7 @@ export async function evaluateSoloAdmission(
     run = work.store.select('runs', prefix.runId)!;
   }
   validatePrefixRun(work, batch, prefix, run);
+  if (lostLandingCheckController(run, batchEntries(work, batch))) return false;
   if (['queued', 'preparing', 'running'].includes(run.status) || pendingActionsInfra(run)) {
     await batchEdit(
       work,

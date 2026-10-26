@@ -1,3 +1,4 @@
+import { batchEntries, lostLandingCheckController } from './landing-check-recovery.js';
 import { reserveBoundaryConfirmation } from './landing-confirmation.js';
 import { checkingWait } from './landing-waiting.js';
 import { admitLandingCheck } from './landing-check-admission.js';
@@ -96,6 +97,8 @@ export async function evaluateBatch(
         await waitForAgentRun(work.store, prefix.runId, waitMs);
       const run = work.store.select('runs', prefix.runId)!;
       validatePrefixRun(work, batch, prefix, run);
+      // Recovery runs on the next admission, after checking for a passed twin.
+      if (lostLandingCheckController(run, batchEntries(work, batch))) return 'queued';
       // A sole failed Candidate has no proper prefix to diagnose or accept.
       // Publish its exact evidence and terminal entry together, freeing the
       // queue before unrelated acceptance/lifecycle work can delay it.
