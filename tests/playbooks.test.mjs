@@ -7,6 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { WorkService } from '../dist/work.js';
+import { processAlive } from '../dist/local-process.js';
+import { pollUntil } from './mcp-runtime.mjs';
 import { serveRepository } from '../dist/http.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
@@ -272,6 +274,25 @@ test(
         define(append('not after death')),
       ]),
     );
+    let ownedStep;
+    const stopStep = () => {
+      // Read the current fixture-owned step even if readiness timed out.
+      const step = ownedStep ?? work.store.load().runs.find(r => r.playbookRunId === input.operationId);
+      if (!step) return;
+      assert.notEqual(step.runner.pid, process.pid);
+      // Both identities belong to this fixture. Fence PID reuse before signalling.
+      for (const [identity, group] of [
+        [step.runner, false],
+        [{ pid: step.childPid, startTime: step.childStartTime }, true],
+      ]) {
+        if (!identity.pid || !processAlive(identity)) continue;
+        try {
+          process.kill(group && process.platform !== 'win32' ? -identity.pid : identity.pid, 'SIGKILL');
+        } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+        }
+      }
+    };
     const child = spawn(
       process.execPath,
       [resolve('dist/cli.js'), 'work', root, JSON.stringify(input), String(work.status().revision)],
@@ -284,15 +305,7 @@ test(
     });
     cleanup = () => {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-      try {
-        const step = work.store
-          .load()
-          .runs.find(r => r.playbookRunId === input.operationId && r.runner.pid === child.pid);
-        if (step?.childPid)
-          process.kill(process.platform === 'win32' ? step.childPid : -step.childPid, 'SIGKILL');
-      } catch {
-        /* Only this test's original child/group is owned; it may already have exited. */
-      }
+      stopStep();
       child.stdout.removeAllListeners('data');
     };
     // CLI readiness is an actual complete response, not a five-second machine-speed assumption.
@@ -311,18 +324,29 @@ test(
       );
     });
     assert.ok(launched);
+    // The CLI response acknowledges registration, not physical runner readiness.
+    // Wait for the detached controller's running journal before testing its death.
+    ownedStep = await pollUntil({
+      label: 'the detached Playbook step is running',
+      observe: () => work.store.select('runs', launched.steps[0].runId),
+      ready: step => step?.status === 'running' && !!step.childPid && step.runner.pid !== child.pid,
+      describe: step => ({ status: step?.status, runnerPid: step?.runner.pid, childPid: step?.childPid }),
+      timeout: 10_000,
+      interval: 25,
+    });
+    assert.notEqual(ownedStep.runner.pid, process.pid);
     const closed = once(child, 'close');
     child.kill('SIGKILL');
     await closed;
-    const step = work.store.load().runs.find(r => r.id === launched.steps[0].runId);
-    // This child/group was started by this disposable test, never by a user Lane.
-    if (step.childPid) {
-      try {
-        process.kill(process.platform === 'win32' ? step.childPid : -step.childPid, 'SIGKILL');
-      } catch {
-        /* Already exited. */
-      }
-    }
+    stopStep();
+    await pollUntil({
+      label: 'the physical step runner exited',
+      observe: () => processAlive(ownedStep.runner),
+      ready: alive => !alive,
+      describe: alive => ({ alive }),
+      timeout: 10_000,
+      interval: 25,
+    });
     cleanup = () => {
       child.stdout.removeAllListeners('data');
     };

@@ -73,7 +73,10 @@ const start = (t, root, env = {}, controlled = false) => {
     env: { ...process.env, FORGE_PRESENCE_GUARD_MS: '100', ...env },
   });
   const exited = once(child, 'exit');
-  const running = { child, exited };
+  const running = { child, exited, watching: false };
+  child.on('message', message => {
+    if (message.watching) running.watching = true;
+  });
   workers.set(t, [...(workers.get(t) ?? []), running]);
   return running;
 };
@@ -213,6 +216,7 @@ test('a worker leaves a half-deleted owner untouched (Linux rm -r timing)', asyn
   const running = start(t, root, { FORGE_PRESENCE_TOUCH_MS: '50' }, true);
   const { child } = running;
   await ready(root, child);
+  await waitFor(() => running.watching, 'owner, Lane and landing watchers finished attaching');
   const work = join(root, '.forge', 'work');
   for (const name of readdirSync(work))
     if (/^lane-|^hosted-binding\.json$/.test(name))

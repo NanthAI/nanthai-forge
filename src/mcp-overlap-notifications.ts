@@ -60,6 +60,9 @@ export function overlapNotifications(server: McpServer, store: WorkStore) {
     const off = onOverlapPublication(store, publish);
     stop = off;
     try {
+      // Watcher election writes owner-local leases asynchronously. Reject newer
+      // Work before creating directories or scheduling any helper startup.
+      store.revision();
       const directory = join(store.directory, 'coordination');
       mkdirBelow(store.directory, directory);
       const watcher = watchLocal(directory, { persistent: false }, (_event, name) => {

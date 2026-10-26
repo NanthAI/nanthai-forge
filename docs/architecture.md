@@ -41,7 +41,10 @@ under the owner's `.forge/work` directory is elected under a recoverable lock;
 a dead lease can be replaced without reclaiming a live or reused PID. Identical
 path/recursive subscriptions share a native watcher and route events to every
 attached client. Socket disconnect releases that client's subscriptions, and the
-last disconnect exits the helper. Unowned diagnostic paths use a private helper.
+last disconnect exits the helper. MCP overlap notifications validate the Work
+format before creating coordination directories or scheduling helper election,
+so unsupported owners retain their bytes even if asynchronous startup would
+outlive the rejecting request. Unowned diagnostic paths use a private helper.
 Native open and close run only in the helper, so a synchronous FSEvents hang
 cannot block the owner or agent event loop or shutdown. Worker threads can still
 wait in native teardown during Node shutdown.

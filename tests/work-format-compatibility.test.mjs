@@ -14,6 +14,9 @@ import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { convertWork15To16, convertWorkTo18 } from '../dist/work-intent-converter.js';
 import { WorkStore } from '../dist/work-store.js';
+import { ForgeError } from '../dist/errors.js';
+import { overlapNotifications } from '../dist/mcp-overlap-notifications.js';
+import { watcherRuntime } from '../dist/local-watcher.js';
 import { latestWorkFormat } from '../dist/work-format.js';
 import { parseWork } from '../dist/work-unified-types.js';
 import { callTool, mcpTestEnvironment } from './mcp-runtime.mjs';
@@ -130,6 +133,21 @@ test('format-14 compatibility probe rejects format15 CLI reads/writes and bare c
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /upgrade nforge/);
   assert.deepEqual(f.retained(), before);
+});
+
+test('unsupported Work never schedules an overlap watcher or writes its control directory', async t => {
+  const f = await fixture(t),
+    before = readdirSync(f.store.directory, { recursive: true }).sort();
+  t.mock.method(f.store, 'revision', () => {
+    throw new ForgeError('WORK_UPGRADE_REQUIRED', 'upgrade nforge');
+  });
+  const create = t.mock.method(watcherRuntime, 'createWorker', () => {
+    throw new Error('Unsupported Work must not start a helper');
+  });
+  const notifications = overlapNotifications({ server: { registerCapabilities() {} } }, f.store);
+  notifications.close();
+  assert.equal(create.mock.callCount(), 0);
+  assert.deepEqual(readdirSync(f.store.directory, { recursive: true }).sort(), before);
 });
 
 test('format-14 compatibility probe rejects format15 MCP mutation without changing retained bytes', async t => {
