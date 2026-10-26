@@ -20,6 +20,8 @@ import { pendingGithubPush } from '../dist/github-auto-push-state.js';
 import { checkEnvironment } from '../dist/work-run.js';
 import { githubSyncCli } from '../dist/github-sync-cli.js';
 import { git, write, code } from './helpers.mjs';
+import { immutableDirectorySync } from './helpers/immutable-directory.mjs';
+import { waitForState } from './helpers/wait-for-state.mjs';
 
 const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 const shellQuote = value => "'" + value.replaceAll("'", "'\"'\"'") + "'";
@@ -43,26 +45,9 @@ after(() => {
   if (seedDirectory) rmSync(seedDirectory, { recursive: true, force: true });
 });
 
-function fixture(t, flags = {}) {
-  const temporary = mkdtempSync(join(tmpdir(), 'forge-github-sync-'));
-  t.after(async () => {
-    await cleanupOwner(owner, undefined, { stopChecks: true });
-    rmSync(temporary, { recursive: true, force: true });
-  });
-  const remote = join(temporary, 'remote.git'),
-    owner = join(temporary, 'forge-native');
-  cpSync(seedRepository(), remote, { recursive: true });
-  mkdirSync(owner);
-  write(owner, 'a.txt', 'Accepted source\n');
-  write(owner, '.env.local', 'synthetic secret');
-  write(owner, '.gitignore', 'ignored.txt\n');
-  write(owner, 'ignored.txt', 'not captured');
-  write(owner, '.ssh/id_rsa', 'synthetic key');
-  write(owner, '.github/workflows/ci.yml', 'name: synthetic\n');
-  initNative(owner);
-  const work = new WorkService(owner);
+function acceptor(work) {
   const local = command => work.execute(command, work.store.load().revision).result;
-  const accept = (outcome, files = {}, acceptedBy, earlierFiles = []) => {
+  return (outcome, files = {}, acceptedBy, earlierFiles = []) => {
     const base = work.store
       .load()
       .channelMoves.filter(move => move.channel === 'main' && move.status === 'accepted')
@@ -131,6 +116,23 @@ function fixture(t, flags = {}) {
     }
     return { view, move, intent };
   };
+}
+
+const privateFixture = immutableDirectorySync('forge-github-sync-', temporary => {
+  const remote = join(temporary, 'remote.git'),
+    owner = join(temporary, 'forge-native');
+  cpSync(seedRepository(), remote, { recursive: true });
+  mkdirSync(owner);
+  write(owner, 'a.txt', 'Accepted source\n');
+  write(owner, '.env.local', 'synthetic secret');
+  write(owner, '.gitignore', 'ignored.txt\n');
+  write(owner, 'ignored.txt', 'not captured');
+  write(owner, '.ssh/id_rsa', 'synthetic key');
+  write(owner, '.github/workflows/ci.yml', 'name: synthetic\n');
+  initNative(owner);
+  const work = new WorkService(owner);
+  const local = command => work.execute(command, work.store.load().revision).result;
+  const accept = acceptor(work);
   local({
     action: 'define-check',
     name: 'verify',
@@ -138,6 +140,22 @@ function fixture(t, flags = {}) {
     args: ['-e', 'process.exit(0)'],
   });
   const first = accept('Initial accepted main', { 'acceptance.txt': 'First acceptance\n' });
+  return { first };
+});
+
+function fixture(t, flags = {}) {
+  const {
+    root: temporary,
+    value: { first },
+  } = privateFixture();
+  t.after(async () => {
+    await cleanupOwner(owner, undefined, { stopChecks: true });
+    rmSync(temporary, { recursive: true, force: true });
+  });
+  const remote = join(temporary, 'remote.git'),
+    owner = join(temporary, 'forge-native');
+  const work = new WorkService(owner),
+    accept = acceptor(work);
   const bin = join(temporary, 'bin'),
     control = join(temporary, 'control.json');
   mkdirSync(bin);
@@ -492,19 +510,20 @@ async function green(f, view = f.first.view) {
     },
     f.work.store.revision(),
   );
-  await until(() => f.work.store.load().runs.find(run => run.id === result.result.id)?.status === 'passed');
+  await until(
+    f,
+    () => f.work.store.load().runs.find(run => run.id === result.result.id)?.status === 'passed',
+  );
 }
-async function until(predicate) {
-  for (let i = 0; i < 600; i++) {
-    try {
-      if (predicate()) return;
-    } catch (error) {
-      if (error.code !== 'SOURCE_CHANGED') throw error;
-    }
-    await new Promise(resolve => setTimeout(resolve, 20));
+async function until(f, predicate) {
+  try {
+    await waitForState(f.work.store, predicate, 12000);
+  } catch (error) {
+    if (error.code !== 'TEST_STATE_TIMEOUT') throw error;
+    assert.fail('Timed out waiting for local mirror worker');
   }
-  assert.fail('Timed out waiting for local mirror worker');
 }
+
 async function mirrorPolicy(f, autoPush = true) {
   return f.work.dispatch(
     {
@@ -533,7 +552,7 @@ test('green main acceptance starts a detached push without waiting for Git', asy
     f.work.store.revision(),
   ).result;
   assert.equal(move.status, 'accepted');
-  await until(() => {
+  await until(f, () => {
     const status = f.work.store.load().githubAutoPush;
     return status?.status === 'pushed' && !status.worker;
   });
@@ -1287,7 +1306,7 @@ test('auto-push resumes a paused mirror when native main contains the external m
   const latest = f.accept('Same security fix in main', { 'a.txt': 'Security fix\n' });
   await green(f, latest.view);
   await drain(f);
-  await until(() => f.work.store.load().githubAutoPush.status === 'pushed');
+  await until(f, () => f.work.store.load().githubAutoPush.status === 'pushed');
   assert.equal(git(f.remote, ['rev-parse', 'main^']).trim(), outside);
   assert.equal(git(f.remote, ['show', 'main:a.txt']), 'Security fix\n');
   assert.equal(git(f.remote, ['show', 'main:native.txt']), 'Native\n');
@@ -1508,6 +1527,14 @@ test('--wait-audit timeout exits while its newly started audit continues under t
     assert.ok(['preparing', 'running'].includes(retained.status));
     assert.equal(retained.endedAt, undefined);
     assert.ok(!retained.cancelRequested);
+    // The socket can connect before the controller publishes its running record.
+    // Keep the command gated until that independent publication is observed.
+    await untilWorker(
+      { store: f.work.store },
+      () => f.work.store.load().runs.find(run => run.id === runId)?.status === 'running',
+      'retained audit publishes running',
+    );
+    assert.equal(f.work.store.load().runs.find(run => run.id === runId).status, 'running');
     for (const socket of sockets) socket.end();
     await drainPostAccept(f.work.store);
     assert.equal(f.work.store.load().runs.filter(run => run.mainCheck).length, 1);

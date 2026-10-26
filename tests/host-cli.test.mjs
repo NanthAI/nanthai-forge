@@ -23,6 +23,7 @@ import { readHostState, updateHostState, requireHostedBinding } from '../dist/ho
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { pushAttemptId } from '../dist/bound-exchange.js';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
+import { immutableDirectorySync } from './helpers/immutable-directory.mjs';
 const { default: schema } = await import(moduleUrl('../convex/schema.ts'));
 const hosting = await import(moduleUrl('../convex/projectHosting.ts'));
 const devices = await import(moduleUrl('../convex/deviceStore.ts'));
@@ -31,12 +32,11 @@ const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const { activeProject } = await import(moduleUrl('../convex/projectAuthority.ts'));
-function setup(t, git = false, empty = false) {
-  const directory = mkdtempSync(join(tmpdir(), 'forge-host-')),
-    root = join(directory, 'owner');
+const privateOwner = immutableDirectorySync('forge-host-', (directory, key) => {
+  const { git, empty } = JSON.parse(key);
+  const root = join(directory, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'hello.ts'), 'export const hello = 7;\n');
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
   if (git) {
     workGit(root, ['init', '--template=', '--initial-branch=main']);
     workGit(root, ['add', '.']);
@@ -55,6 +55,17 @@ function setup(t, git = false, empty = false) {
   const intent = empty
     ? null
     : service.execute({ action: 'intent', outcome: 'Synthetic hosted task' }, store.revision()).result;
+  return { intent };
+});
+
+function setup(t, git = false, empty = false) {
+  const {
+    root: directory,
+    value: { intent },
+  } = privateOwner(JSON.stringify({ git, empty }));
+  const root = join(directory, 'owner');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const store = new WorkStore(root);
   const s = fixture();
   s.tables.hostedProjects.clear();
   for (const table of ['projectHostedSeeds', 'projectHostedSeedPages', 'projectHostedChannels'])
@@ -379,6 +390,7 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
   let losePublishReply = false,
     loseReturnReply = false,
     delayJournal = false,
+    releaseJournal = null,
     rejectReturn = 0,
     rejectPublish = 0,
     writeDuring = null,
@@ -427,7 +439,17 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
       }
       if (body.path === 'projectWorkJournal:page' && delayJournal) {
         delayJournal = false;
-        await new Promise(resolve => setTimeout(resolve, 10500));
+        // Release only after the real CLI emits its elapsed heartbeat.
+        await new Promise(resolve => {
+          const deadline = setTimeout(() => {
+            releaseJournal = null;
+            resolve();
+          }, 10500);
+          releaseJournal = () => {
+            clearTimeout(deadline);
+            resolve();
+          };
+        });
       }
       // A concurrent local writer (e.g. a post-accept audit) while the push is on the network.
       if (writeDuring?.path === body.path) {
@@ -534,7 +556,21 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
   delete env.FORGE_DEPLOYMENT_URL;
   const cli = (...args) => {
     const callsite = new Error('CLI callsite');
-    return promisify(execFile)(process.execPath, [resolve('dist/cli.js'), ...args], { env }).catch(error => {
+    const pending = promisify(execFile)(process.execPath, [resolve('dist/cli.js'), ...args], { env });
+    let progress = '';
+    pending.child.stderr.on('data', bytes => {
+      progress += bytes;
+      if (
+        releaseJournal &&
+        /receiving and reconciling hosted Work journal:[^\n]*journal delta; waiting on projectWorkJournal:page[^\n]*elapsed=[1-9]\d*s/.test(
+          progress,
+        )
+      ) {
+        releaseJournal();
+        releaseJournal = null;
+      }
+    });
+    return pending.catch(error => {
       error.stack += '\n' + callsite.stack;
       throw error;
     });

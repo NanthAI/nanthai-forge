@@ -110,6 +110,10 @@ Goal: open Forge to public use with a free core and sustainable hosting.
   and path before optional peer analysis so a builder can safely use its own Lane
   without retrying or guessing among other builders' new directories.
 
+- Agent `start` can activate a Lane but hang before returning its receipt. Recovering the exact Lane requires manual discovery; return the durable activation receipt promptly.
+
+- Overlap incident replays can interrupt a check with only `CHECK_RECOVERY_FAILED`, hiding the controller startup error. Diagnosing it currently requires instrumenting a generated build.
+
 - Repeating sync on a Lane with a pending merge returns `MERGE_PENDING` without listing its conflicting paths. Include the pending sync target and conflicting paths in that diagnostic so a merge agent can resume from the receipt.
 
 - Core finish/publication edits select 217 of 349 test files, including hosted and UI suites. Finite implementation agents need a phase-focused validation selection alongside the conservative landing selection; the broad local run competes with concurrent Lanes for check capacity and disk writes.

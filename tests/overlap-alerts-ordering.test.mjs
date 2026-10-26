@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  rmSync,
-  readdirSync,
-  appendFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync, appendFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
@@ -31,11 +23,11 @@ import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { trustAgents } from './autonomy-fixture.mjs';
+import { immutableDirectory } from './helpers/immutable-directory.mjs';
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const base = '# Document\n\nShared paragraph.\nAnother paragraph.\n\nEnd.\n';
 const docs = ['docs/one.md', 'docs/two.md'];
-async function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-overlap-order-'));
+const privateFixture = immutableDirectory('forge-overlap-order-', async root => {
   mkdirSync(join(root, 'docs'));
   mkdirSync(join(root, 'src'));
   for (const path of docs) writeFileSync(join(root, path), base);
@@ -64,19 +56,29 @@ async function fixture(t) {
     executable: process.execPath,
     args: ['-e', '0'],
   });
-  await agent.dispatch({
-    action: 'set-policy',
-    operationId: randomUUID(),
-    checks: { runner: 'local' },
-  });
+  await agent.dispatch({ action: 'set-policy', operationId: randomUUID(), checks: { runner: 'local' } });
+});
+
+async function fixture(t) {
+  const { root } = await privateFixture();
+  const agent = new AgentWorkflow(root),
+    store = agent.work.store;
   t.after(async () => {
     await drainPostAccept(store);
-    rmSync(root, {
-      recursive: true,
-      force: true,
-      maxRetries: 20,
-      retryDelay: 50,
-    });
+    const unexpected = store.load().runs.filter(run => run.status !== 'passed' && run.status !== 'cancelled');
+    if (unexpected.length)
+      t.diagnostic(
+        JSON.stringify({
+          fixtureRuns: unexpected.map(({ id, status, error, failureSummary, exitCode }) => ({
+            id,
+            status,
+            error,
+            failureSummary,
+            exitCode,
+          })),
+        }),
+      );
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
   });
   const start = async (name, extra = {}) =>
     (
@@ -446,6 +448,8 @@ test('genuine paragraph rewrites surface one named conflict after the compatible
   const result = (
     await f.agent.dispatch({
       action: 'land',
+      // A finite sweep may yield after predecessors land; assert the terminal conflict.
+      wait: true,
       laneIds: lanes.map(lane => lane.laneId).reverse(),
     })
   ).result;

@@ -15,9 +15,19 @@ import { drainLandingBatches } from '../dist/landing-batch.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { ForgeError } from '../dist/errors.js';
 import { trustAgents } from './autonomy-fixture.mjs';
+import { immutableDirectory } from './helpers/immutable-directory.mjs';
+import { waitForState } from './helpers/wait-for-state.mjs';
+import { createServer } from 'node:net';
+import { once } from 'node:events';
+
+const privateFixture = immutableDirectory('forge-batch-', root => {
+  writeFileSync(join(root, 'same.txt'), 'original\n');
+  initNative(root);
+  trustAgents(root);
+});
 
 async function fixture(t, { delay = 300, window = 120, concurrency } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-batch-'));
+  const { root } = await privateFixture();
   const credentialRoot = mkdtempSync(join(tmpdir(), 'forge-batch-credentials-'));
   const credentialsRef = { kind: 'file', path: join(credentialRoot, 'modal.json') };
   writeFileSync(
@@ -25,9 +35,6 @@ async function fixture(t, { delay = 300, window = 120, concurrency } = {}) {
     JSON.stringify({ tokenId: 'synthetic-project-id', tokenSecret: 'synthetic-project-secret' }),
     { mode: 0o600 },
   );
-  writeFileSync(join(root, 'same.txt'), 'original\n');
-  initNative(root);
-  trustAgents(root);
   const agent = new AgentWorkflow(root),
     work = agent.work,
     store = work.store;
@@ -39,12 +46,33 @@ async function fixture(t, { delay = 300, window = 120, concurrency } = {}) {
   // Detached audits and parallel controllers legitimately write the same synthetic owner.
   process.env.FORGE_WORK_LOCK_WAIT_MS = '10000';
   process.env.FORGE_CHECK_QUEUE_DIR = join(store.directory, 'fixture-queue');
+  // A held first check makes late-arrival ordering causal even if publishing
+  // the later queue entry takes longer than the synthetic command delay.
+  const sockets = new Set();
+  let hold = false,
+    first = true;
+  const gate = createServer(socket => {
+    sockets.add(socket);
+    socket.on('error', () => {});
+    socket.on('close', () => sockets.delete(socket));
+    if (!hold || !first) socket.end();
+    first = false;
+  });
+  const endpoint = join(store.directory, 'check-gate');
+  gate.listen(endpoint);
+  await once(gate, 'listening');
+  const releaseFirst = () => {
+    hold = false;
+    for (const socket of sockets) socket.end();
+  };
   const mock = join(store.directory, 'mock-modal.mjs');
   writeFileSync(
     mock,
-    `#!${process.execPath}\nimport fs from 'node:fs';import path from 'node:path';
+    `#!${process.execPath}\nimport fs from 'node:fs';import path from 'node:path';import net from 'node:net';
 const plan=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
-setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.head,definition:plan.definition,exitCode:fs.existsSync(path.join(plan.source,'bad.txt'))?1:0,estimatedCostUsd:0})),${delay});\n`,
+const released=new Promise((resolve,reject)=>net.createConnection(${JSON.stringify(endpoint)}).on('end',resolve).on('error',reject).resume());
+await Promise.all([released,new Promise(resolve=>setTimeout(resolve,${delay}))]);
+console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.head,definition:plan.definition,exitCode:fs.existsSync(path.join(plan.source,'bad.txt'))?1:0,estimatedCostUsd:0}));\n`,
   );
   chmodSync(mock, 0o700);
   process.env.FORGE_MODAL_PYTHON = mock;
@@ -63,11 +91,13 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
     acceptance: { batchWindowMs: window },
   });
   t.after(async () => {
+    releaseFirst();
     // All remote calls, including detached audits, use the synthetic client above.
     process.env.FORGE_WORK_LOCK_WAIT_MS = '10000';
     process.env.FORGE_MODAL_PYTHON = mock;
     process.env.FORGE_CHECK_QUEUE_DIR = join(store.directory, 'fixture-queue');
     await drainPostAccept(store);
+    await new Promise(resolve => gate.close(resolve));
     for (const [name, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
@@ -121,11 +151,27 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
       file = source.state(main().head).files.find(file => file.path === path);
     return file && source.object(file.blob).toString();
   };
-  return { root, agent, work, store, check, candidate, main, content, pending };
+  return {
+    root,
+    agent,
+    work,
+    store,
+    check,
+    candidate,
+    main,
+    content,
+    pending,
+    window,
+    concurrency,
+    holdFirst: () => {
+      hold = true;
+    },
+    releaseFirst,
+  };
 }
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-/** Each arrival is a finisher: it enqueues at its time, then drains like `finish` does. */
+/** Preserve finisher workloads while establishing the intended durable arrival cohorts. */
 async function burst(f, arrivals, { admitBeforeDrain = false } = {}) {
   const ready = [];
   for (const arrival of arrivals)
@@ -142,13 +188,52 @@ async function burst(f, arrivals, { admitBeforeDrain = false } = {}) {
     );
     await drainLandingBatches(f.work, 'main');
   } else {
-    await Promise.all(
-      ready.map(async item => {
-        await sleep(item.at ?? 0);
-        await enqueueLanding(f.work, item.command, item.view);
-        await drainLandingBatches(f.work, 'main');
-      }),
-    );
+    // Window-zero is the original serial control, with its original timer arrivals.
+    // Positive-window cohorts are all durably present before a driver starts;
+    // publishing N independent entries cannot be guaranteed to fit 600 ms.
+    const initial = ready.filter(item => (item.at ?? 0) < f.window || (item.at ?? 0) === 0);
+    const ordered = f.window > 0;
+    const hasLate = ordered && initial.length < ready.length;
+    const controller = new AbortController();
+    let releaseInitial,
+      queuedInitial = 0,
+      queued = 0;
+    const initialReady = new Promise(resolve => {
+      releaseInitial = resolve;
+    });
+    if (hasLate) f.holdFirst();
+    const firstQueued = hasLate
+      ? initialReady.then(() =>
+          waitForState(f.store, () => checkRuns(f).length > 0, 20000, controller.signal),
+        )
+      : Promise.resolve();
+    const secondQueued =
+      hasLate && f.concurrency !== 1
+        ? firstQueued
+            .then(() => waitForState(f.store, () => checkRuns(f).length > 1, 20000, controller.signal))
+            .then(f.releaseFirst)
+        : Promise.resolve();
+    try {
+      await Promise.all([
+        secondQueued,
+        ...ready.map(async item => {
+          const early = initial.includes(item);
+          if (hasLate && !early) await firstQueued;
+          await sleep(item.at ?? 0);
+          await enqueueLanding(f.work, item.command, item.view);
+          queued++;
+          if (early && ++queuedInitial === initial.length) releaseInitial();
+          if (hasLate && f.concurrency === 1 && queued === ready.length) f.releaseFirst();
+          if (ordered && early) await initialReady;
+          controller.signal.throwIfAborted();
+          await drainLandingBatches(f.work, 'main');
+        }),
+      ]);
+    } finally {
+      f.releaseFirst();
+      releaseInitial();
+      controller.abort(new Error('Burst observation settled'));
+    }
   }
   return { ms: performance.now() - started, ready };
 }
@@ -173,17 +258,31 @@ test('baseline: a lone change costs one check time T', async t => {
 
 for (const size of [4, 8])
   test(`queued wave of ${size} independent changes lands with one exact combined check`, async t => {
+    // Keep the original 1.5 s synthetic check and 600 ms window. The helper
+    // makes the cohort durable without requiring OS scheduling to fit that window.
+    const lone = (await burst(await fixture(t, { delay: 1500, window: 600 }), [{ path: 'one.txt' }])).ms;
     const f = await fixture(t, { delay: 1500, window: 600 });
     const { ms } = await burst(
       f,
       Array.from({ length: size }, (_, i) => ({ path: `b${i}.txt`, at: i * 10 })),
       { admitBeforeDrain: true },
     );
+    // Old shape (no window, nothing stacked) for comparison: first change checks alone, the rest queue behind it.
+    const old = await fixture(t, { delay: 1500, window: 0, concurrency: 1 });
+    const before = (
+      await burst(
+        old,
+        Array.from({ length: size }, (_, i) => ({ path: `b${i}.txt`, at: i * 10 })),
+      )
+    ).ms;
     t.diagnostic(
-      `SYNTHETIC queued wave ${size}: ${Math.round(ms)}ms; ${checkRuns(f).length} check; no real runner`,
+      `SYNTHETIC burst ${size}: lone ${Math.round(lone)}ms; stacked+window ${Math.round(ms)}ms (${checkRuns(f).length} check); window 0 / concurrency 1 ${Math.round(before)}ms (${checkRuns(old).length} checks); mock remote 1500ms/check, no real runner`,
     );
     assert.deepEqual(statuses(f), Array(size).fill('accepted'));
     assert.equal(checkRuns(f).length, 1, 'one combined exact check');
+    // Loose bound (serial is size x lone) so a loaded or slow CI machine cannot flake it; the single
+    // combined check above is the exact claim.
+    assert.ok(ms < lone * size, `burst took ${ms}ms, lone ${lone}ms`);
     neverRed(f);
     for (let i = 0; i < size; i++) assert.equal(f.content(`b${i}.txt`), `b${i}.txt\n`);
   });
@@ -204,7 +303,7 @@ test('one failing change in the middle does not land, the others do, and main is
 });
 
 test('a late arrival during an in-flight check is checked concurrently, stacked, and lands after its parent', async t => {
-  // A 1.5 s check keeps the first one in flight well past the 300 ms late arrival on a slow runner.
+  // The late arrival follows the actual first check; its gate preserves in-flight ordering.
   const f = await fixture(t, { delay: 1500, window: 60 });
   const { ms } = await burst(f, [
     { path: 'a.txt', at: 0 },
@@ -226,7 +325,7 @@ test('a late arrival during an in-flight check is checked concurrently, stacked,
 });
 
 test('a failing parent batch supersedes the stacked batch, which is requeued and checked on real main', async t => {
-  // A 1.5 s check keeps the first one in flight well past the 300 ms late arrival on a slow runner.
+  // The late arrival follows the actual first check; its gate preserves in-flight ordering.
   const f = await fixture(t, { delay: 1500, window: 60 });
   await burst(f, [
     { path: 'bad.txt', at: 0 },

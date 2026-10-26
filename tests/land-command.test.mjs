@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -19,6 +18,7 @@ import { waitForAgentRun } from '../dist/agent-run-observer.js';
 import { batchEdit } from '../dist/landing-batch-store.js';
 import { LandJournal } from '../dist/land-journal.js';
 import { trustAgents } from './autonomy-fixture.mjs';
+import { immutableDirectory } from './helpers/immutable-directory.mjs';
 
 const git = (root, args) =>
   execFileSync('git', ['-C', root, ...args], {
@@ -37,8 +37,8 @@ const transientWaiting = result =>
     entry => entry.status === 'waiting' && ['WORK_BUSY', 'SOURCE_CHANGED', 'WORK_STALE'].includes(entry.code),
   );
 
-async function fixture(t, { batching = true, supervised = false, protectedPaths = [], native = true } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-land-'));
+const privateFixture = immutableDirectory('forge-land-', async (root, key) => {
+  const { batching, supervised, protectedPaths, native } = JSON.parse(key);
   writeFileSync(join(root, 'same.txt'), 'base\n');
   if (native) initNative(root);
   else {
@@ -47,8 +47,7 @@ async function fixture(t, { batching = true, supervised = false, protectedPaths 
     git(root, ['commit', '-qm', 'Fixture']);
   }
   if (!supervised) trustAgents(root);
-  const agent = new AgentWorkflow(root),
-    store = agent.work.store;
+  const agent = new AgentWorkflow(root);
   await agent.dispatch({
     action: 'define-check',
     name: 'verify',
@@ -62,6 +61,12 @@ async function fixture(t, { batching = true, supervised = false, protectedPaths 
       ...(batching ? { checks: { runner: 'local' } } : {}),
       ...(protectedPaths.length ? { acceptance: { protectedPaths } } : {}),
     });
+});
+
+async function fixture(t, { batching = true, supervised = false, protectedPaths = [], native = true } = {}) {
+  const { root } = await privateFixture(JSON.stringify({ batching, supervised, protectedPaths, native }));
+  const agent = new AgentWorkflow(root),
+    store = agent.work.store;
   t.after(async () => {
     if (native) await drainPostAccept(store);
     rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });

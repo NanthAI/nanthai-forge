@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { ConvexError } from 'convex/values';
@@ -12,12 +12,19 @@ import { land } from './source-landings-fixture.mjs';
 import { workBytes } from '../dist/work-metadata.js';
 import { sourceReturnChunks, validateSourceReturnChunk } from '../dist/work-source-return-chunks.js';
 import { validateSourceReturn } from '../dist/work-source-return.js';
+import { immutableDirectory } from './helpers/immutable-directory.mjs';
+import { hostedSnapshot, restoreHosted } from './helpers/hosted-snapshot.mjs';
+import { WorkStore } from '../dist/work-store.js';
+import { initNative } from '../dist/native-work.js';
 const index = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const prepare = await import(moduleUrl('../convex/projectSourceReturnPrepare.ts'));
 const code = expected => e => e.data?.code === expected || e.code === expected;
-async function setup(t, records = true) {
-  const s = fixture(),
-    first = await checkpoint(t, s);
+const snapshots = new Map();
+const privateInput = immutableDirectory('forge-return-prepare-', async (root, records) => {
+  const s = fixture();
+  writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
+  initNative(root);
+  const first = await preparedCheckpoint(s, new WorkStore(root));
   land(first.store, 6);
   const data = first.store.load();
   // Independent records make retained Work large without a giant indivisible record.
@@ -69,12 +76,18 @@ async function setup(t, records = true) {
   });
   candidate.input.previous = backupId;
   const candidateId = await modules.projectExchangeActions.publish._handler(s.ctx, candidate.input);
+  snapshots.set(records, await hostedSnapshot(s));
   return {
-    s,
-    first,
-    data,
-    baseline,
-    candidate,
+    // Tests inspect the candidate's layout and journal delta, not its cached
+    // WorkStore or the other immutable upload bodies.
+    candidate: {
+      tree: {
+        root: candidate.tree.root,
+        objects: new Map(
+          [...candidate.tree.objects].filter(([hash]) => hash === candidate.tree.root.delta?.sha256),
+        ),
+      },
+    },
     input: {
       projectId: 'project',
       backupId: candidateId,
@@ -83,6 +96,17 @@ async function setup(t, records = true) {
       operationId: randomUUID(),
       continuation: true,
     },
+  };
+});
+
+async function setup(t, records = true) {
+  const { root, value } = await privateInput(records);
+  value.input.operationId = randomUUID();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  return {
+    ...value,
+    s: await restoreHosted(fixture(), snapshots.get(records)),
+    first: { store: new WorkStore(root) },
   };
 }
 

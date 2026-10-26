@@ -6,12 +6,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { digest } from '../dist/hash.js';
 import { NativeSource } from '../dist/native-source.js';
-import { fixture, checkpoint, preparedCheckpoint, modules } from './project-exchange-fixture.mjs';
+import { WorkStore } from '../dist/work-store.js';
+import { initNative } from '../dist/native-work.js';
+import { fixture, preparedCheckpoint, modules } from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const index = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const memo = existsSync(new URL('../convex/projectSourceReturnCursor.ts', import.meta.url))
@@ -138,8 +141,14 @@ function virtualClock(s) {
 }
 
 async function push(t, { cold }) {
+  // The initial upload was never published or read. Keep fresh source hashes
+  // for each warm/cold case so process-wide raw-byte caches cannot mask reads.
   const s = fixture(),
-    first = await checkpoint(t, s);
+    root = mkdtempSync(join(tmpdir(), 'forge-return-egress-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
+  initNative(root);
+  const first = { store: new WorkStore(root) };
   landWide(first.store, 25, 40, 300);
   const seed = await preparedCheckpoint(s, first.store);
   const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, seed.input);
