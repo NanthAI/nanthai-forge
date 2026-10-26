@@ -7,6 +7,7 @@ import { saveObjectSchema } from './hosted-save.js';
 export const RECOVERY_PAGE_ROWS = 64;
 export const RECOVERY_PAGE_BYTES = 128 * 1024;
 export const recoveryTables = [
+  'projectSourceCutovers',
   'projectHostedRecordBodies',
   'projectHostedRecords',
   'projectHostedRecordHeads',

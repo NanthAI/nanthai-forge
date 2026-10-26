@@ -8,6 +8,7 @@ import {
 } from './self-metrics-journal.js';
 // SPDX-License-Identifier: Apache-2.0
 import { SourceAuthorityStaleError } from './hosted-source-authority.js';
+import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { nativeOwner } from './native-source.js';
 import { WorkStore } from './work-store.js';
@@ -98,7 +99,9 @@ export class HostedAgentTransport {
         invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'operationId must be a UUID.');
       let discovery: unknown;
       try {
-        discovery = await this.query('projectHostedAgent:capabilities', {});
+        discovery = await this.query('projectHostedAgent:capabilities', {
+          clientVersion: CUTOVER_CLI_VERSION,
+        });
       } catch (error) {
         const safe = hostedActionError(error, 'agent capability discovery');
         if (safe.code !== 'HOSTED_ACTION_FAILED') throw safe;

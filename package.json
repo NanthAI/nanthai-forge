@@ -1,6 +1,6 @@
 {
   "name": "@nanthai/forge",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Local native source, Intent/Lane workflows and source context for NanthAi:Forge",
   "type": "module",

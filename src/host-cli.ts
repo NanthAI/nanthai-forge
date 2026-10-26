@@ -18,6 +18,8 @@ export const HOST_HELP = `nforge host ROOT [--deployment URL] [--name NAME] [--v
 nforge host ROOT --delete-project PROJECT_ID --confirm SLUG [--deployment URL] [--allow-bound-project] [--json]
 nforge host ROOT --listen
 nforge host ROOT --status
+nforge host ROOT --cutover-file REQUEST.json --dry-run|--apply
+nforge host ROOT --cutover-pins
 nforge host ROOT --source-authority '{"operationId":"UUID","expected":{"mode":"native-owner","epoch":0},"mode":"server"}'
 nforge host ROOT --no-auto-sync | --auto-sync
 nforge host ROOT --spend-command /absolute/executable | --no-spend-command

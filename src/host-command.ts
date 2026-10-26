@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { transitionBoundSourceAuthority } from './source-authority-client.js';
+import { cutoverBoundProject, boundCutoverPins } from './source-cutover-client.js';
+import { readFileSync } from 'node:fs';
 import { deleteHostedProject, parseDeleteProjectOptions } from './host-delete.js';
 import { checkServiceEnv } from './worker-environment.js';
 import { effectivePolicy as childPolicy } from './autonomy-policy.js';
@@ -24,6 +26,19 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
   const json = args.includes('--json');
   const [root, ...flags] = args.filter(arg => arg !== '--json');
   invariant(root && !root.startsWith('-'), 'BAD_ARGUMENT', HOST_HELP);
+  if (flags.length === 1 && flags[0] === '--cutover-pins') return boundCutoverPins(new WorkStore(root));
+  if (flags[0] === '--cutover-file') {
+    invariant(
+      flags[1] && flags.length === 3 && ['--dry-run', '--apply'].includes(flags[2]!),
+      'BAD_ARGUMENT',
+      'Use --cutover-file REQUEST.json --dry-run or --apply.',
+    );
+    return cutoverBoundProject(
+      new WorkStore(root),
+      JSON.parse(readFileSync(flags[1], 'utf8')),
+      flags[2] === '--dry-run',
+    );
+  }
   if (flags.length === 2 && flags[0] === '--source-authority')
     return transitionBoundSourceAuthority(new WorkStore(root), JSON.parse(flags[1]!));
   if (flags.includes('--delete-project')) {

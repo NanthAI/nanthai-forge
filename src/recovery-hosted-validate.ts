@@ -84,7 +84,7 @@ export function validateRecoveryAcceptances(directory: string, main: HostedMainV
           lanes += value.entries.length;
           if (index === plan.appliedPage)
             invariant(
-              plan.appliedEntry < value.entries.length,
+              value.entries.length === 0 ? plan.appliedEntry === 0 : plan.appliedEntry < value.entries.length,
               'INVALID_WORK_BACKUP',
               'Hosted completion entry cursor is invalid.',
             );

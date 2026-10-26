@@ -8,6 +8,12 @@ export const sourceAuthority = v.object({
 });
 
 export const sourceAuthorityTables = {
+  projectSourceCutovers: defineTable({
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    request: v.string(),
+    receipt: v.string(),
+  }).index('by_project_and_operation', ['projectId', 'operationId']),
   projectSourceAuthorityTransitions: defineTable({
     projectId: v.id('hostedProjects'),
     operationId: v.string(),

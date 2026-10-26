@@ -8,16 +8,18 @@ import { hostedAgentActions, hostedAgentCapabilitiesSchema } from '../src/hosted
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { requireCutoverVersion } from '../src/cutover-version';
 /** Discovery is a current-authority read, never a worker wake or an availability promise. */
 export const capabilities = query({
-  args: { projectId: v.id('hostedProjects') },
+  args: { projectId: v.id('hostedProjects'), clientVersion: v.optional(v.string()) },
   returns: v.string(),
-  handler: async (ctx, { projectId }) => {
+  handler: async (ctx, { projectId, clientVersion }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to discover hosted agent capabilities.');
       const project = await accessibleProject(ctx, projectId, user.subject),
         authority = sourceAuthority(project);
+      if (project.sourceCutover && authority.mode === 'server') requireCutoverVersion(clientVersion);
       return canonicalPayload(
         hostedAgentCapabilitiesSchema.parse({
           schema: 1,

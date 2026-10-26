@@ -287,6 +287,7 @@ const projectFields = {
     v.object({ generation: v.number(), cursor: v.union(v.string(), v.null()), failures: v.number() }),
   ),
   sourceAuthority: v.optional(sourceAuthority),
+  sourceCutover: v.optional(v.object({ minimumCliVersion: v.string(), at: v.string() })),
   visibility: v.optional(v.union(v.literal('private'), v.literal('public'))),
   hostingRequest: v.optional(v.string()),
   autonomyPolicy: v.optional(autonomyPolicy),

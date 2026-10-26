@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { MutationCtx } from './_generated/server';
+import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { selectedGeneration, recordPartition } from './projectWorkIndexStore';
 import { invariant } from '../src/errors';
@@ -7,7 +7,7 @@ import { invariant } from '../src/errors';
 /** Current indexed predicates are OCC reads in the same transaction as the
  * authority CAS. Terminal history is not scanned or rewritten. */
 export async function requireHostedOwnerDrained(
-  ctx: MutationCtx,
+  ctx: MutationCtx | QueryCtx,
   project: Doc<'hostedProjects'>,
   drain?: { revision: number; fingerprint: string },
 ) {

@@ -62,6 +62,11 @@ export const transition = mutation({
         return old.authority;
       }
       const current = requireSourceAuthority(project, input.expected);
+      invariant(
+        !project.sourceCutover,
+        'SOURCE_AUTHORITY_PIN_REQUIRED',
+        'Use nforge host ROOT --cutover-file REQUEST.json with current main, receipt and recovery pins.',
+      );
       if (input.mode === 'server' && current.mode !== 'server')
         await requireHostedOwnerDrained(ctx, project, input.ownerDrain);
       const authority = nextSourceAuthority(current, input.expected, input.mode);

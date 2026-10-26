@@ -1,3 +1,4 @@
+import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 // SPDX-License-Identifier: Apache-2.0
 import { deliverMacCallback } from './hosted-mac-delivery.js';
 import { randomUUID } from 'node:crypto';
@@ -42,8 +43,10 @@ export async function workerCli(args: string[]) {
   });
   const capabilities: { authority: { epoch: number } } = JSON.parse(
     await exchange.client.query(
-      makeFunctionReference<'query', { projectId: string }, string>('projectHostedAgent:capabilities'),
-      { projectId },
+      makeFunctionReference<'query', { projectId: string; clientVersion: string }, string>(
+        'projectHostedAgent:capabilities',
+      ),
+      { projectId, clientVersion: CUTOVER_CLI_VERSION },
     ),
   );
   const registered = await mutation('projectHostedCheckWorker:register', {

@@ -1,4 +1,5 @@
 import { pendingProgressGuard } from './long-action.js';
+import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
   METADATA_PUBLICATION,
@@ -95,6 +96,7 @@ export class ConvexExchange implements ExchangeTransport {
     // to the uploaded owner's historical generation.
     const value = await this.client.query(query('projectHostedAgent:capabilities'), {
       projectId: this.projectId,
+      clientVersion: CUTOVER_CLI_VERSION,
     });
     const discovery = typeof value === 'string' ? JSON.parse(value) : value;
     const authority = sourceAuthoritySchema.parse(discovery.authority);

@@ -28,6 +28,11 @@ async function readPage(
     maximumBytesRead: RECOVERY_PAGE_BYTES,
   };
   switch (table) {
+    case 'projectSourceCutovers':
+      return ctx.db
+        .query('projectSourceCutovers')
+        .withIndex('by_project_and_operation', q => q.eq('projectId', projectId))
+        .paginate(options);
     case 'projectHostedRecordBodies':
       return ctx.db
         .query('projectHostedRecordBodies')

@@ -13,6 +13,7 @@ import {
 import { isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
+import { cutoverPinsSchema } from './source-cutover.js';
 import { z } from 'zod';
 import { pushProgressSchema } from './push-progress-state.js';
 import { autoExchangeStateSchema } from './auto-exchange-state.js';
@@ -105,6 +106,7 @@ const schema = z.object({
       operationId: z.uuid(),
       expected: sourceAuthoritySchema,
       mode: sourceAuthoritySchema.shape.mode,
+      cutover: cutoverPinsSchema.optional(),
       ownerDrain: z.object({ revision: z.number().int().nonnegative(), fingerprint: z.string() }).optional(),
     })
     .optional(),

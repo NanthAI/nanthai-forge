@@ -476,7 +476,7 @@ Inspection counts objects and lists verified unreferenced candidates, and change
 This is the Bet 1 cutover procedure for [Phase 5](phase5-plan.md#bet-1-one-authority-then-delete),
 not a claim that the project has switched. The authority transition mutation,
 epoch fences and journaled native client are implemented and qualified locally
-below. The complete pinned hosted recovery/cutover still needs B1.5a/B1.5b. Follow the
+below. The pinned cutover command and lead checklist are described below. Follow the
 [migration invariants](operations/hosted-landing-contract.md#migration-invariants-deferred-implementation)
 throughout. No deployment, account operation or real-owner cutover was performed
 for this document.
@@ -638,6 +638,136 @@ login/consent step is implied beyond current authentication.
 writer to downgrade an upgraded owner; restore its matching backup into a new
 folder with compatible tools.
 
+### B1.5b: pinned cutover command and lead checklist
+
+The cutover release is **nforge 0.3.1** (source contract 2). Install the matching
+package on every CLI/MCP host and deploy its server code before switching. The
+builder's synthetic drill does not change the dogfood owner or deployment. Only
+the lead performs the following real-owner procedure.
+
+1. Stop starting owner-mutating commands for the handover. Verify no agent is
+   mid-command; checkpoint its drafts without choosing newer saves for an
+   existing submission. Reconcile the native queue, batches, acceptance requests
+   and finish/land journals to actual receipts or delivered terminal outcomes.
+   The native and hosted queues must be empty, including review/check/dependency
+   waits and unknown replies. Keep the saved operation IDs. Do not cancel work
+   to make the predicate pass. The apply command records the existing handover
+   marker before checking the local drain, so new native finishes retain their
+   exact inputs for hosted admission.
+2. Capture the rollback package described below, the matching package/lockfile,
+   a deployment export and all referenced object closures off-owner. Qualify the
+   source worker, runner evidence and server-mode local acceptance fence. Complete
+   the B1.2c validated final seed at the drained owner's exact main **head and
+   receipt**, source/Work revision and object closure. An old push-era checkpoint
+   alone is insufficient. Remain native-owner if these prerequisites are absent.
+3. Read fresh server pins with `nforge host "$FORGE_OWNER" --cutover-pins`.
+   Save a private, credential-free request containing
+   `{operationId:"<new UUID>",mode:"server",pins:<that exact result>}`.
+   `pins` contains authority/epoch, complete schema-2 main selection, backup ID
+   and digest, project revision, journal revision and seeded owner revision.
+   Keep this file unchanged for retries.
+
+   ```sh
+   nforge host "$FORGE_OWNER" --cutover-file cutover.json --dry-run
+   nforge host "$FORGE_OWNER" --cutover-file cutover.json --apply > cutover-receipt.json
+   ```
+
+   Dry-run performs authenticated reads only. It reports all server and local
+   changes and does not reserve an epoch, create a receipt or close admission.
+   Apply rechecks local main/receipt/revision and drain after recording the
+   handover marker. Its single server transaction rechecks the exact pins and
+   both queues, advances authority by one epoch, updates main's authority pin
+   **without changing its head or receipt**, and retains an immutable receipt.
+   A same-head/new-receipt race fails too. The receipt's `at` is the UTC metric-7
+   boundary; `metric7` changes from `owner-ahead-of-hosted` to
+   `cache-behind-hosted`. Historical replay returns that same timestamp and
+   receipt after later transitions. A changed request under the same UUID fails.
+   A lost reply leaves the local marker and request intact; replay reconciles
+   before selecting new work. A known stale-pin failure clears only its own
+   marker so the lead can prepare fresh pins under a new operation. No cache pin is rewound by a historical receipt.
+4. Check server capabilities and schema-2 main at the returned epoch. Resume held
+   submissions with their original IDs. Shut down the Macs for one deliberate
+   hosted landing and retain its H14 CAS receipt. An old CLI's capability request
+   (missing version or below 0.3.1) gets one `CLI_UPGRADE_REQUIRED` with the
+   compatible nforge version, package-install command and hosted resume path.
+   Legacy native publication attempts get the same upgrade response on the
+   cut-over project. Modern clients advertise their supported version. Merely
+   binding a native-owner or shadow project does not activate this gate.
+5. On a clean machine, follow [Route B](operations/recovery-drill.md#route-b-surviving-hosted-copy).
+   Compare the hosted-only landing's exact head, receipt and source bytes, saved
+   work and pending completion/queue outcomes. Verify the result is a runner and
+   cache, with no local accepting owner. Re-register existing runner references
+   through the ordinary worker path. Recovery must not repeat an acceptance.
+6. **R2 push-era object purge:** inventory the exact candidate object keys and
+   subtract the complete transitive closures of **every kept backup**, the
+   rollback package and all still-selected source/Work/evidence. Include shared
+   recipe/chunk objects, historical State parents and referenced hosted receipt
+   pages; do not infer reachability from a filename prefix, current main alone,
+   or a missing graph edge. Retain the inventory, keep-set and dry-run difference
+   with the private cutover receipt. Apply only that explicit unreferenced
+   push-era set under the existing approved purge scope. The R2 backfill tool's
+   Convex-copy purge is a separate operation and is not this object deletion.
+   Restore the newest kept weekly backup with **Route A after the purge**, check
+   its object closure and publish the measured time here. No builder runs the
+   purge and this command creates no new retention/deletion behavior.
+7. Watch **seven UTC days** from the receipt: join every main move to its H14
+   hosted CAS receipt and epoch; account separately for compensation/reverts.
+   Record metric 3's queued/landed/terminal/pending counts (dropped target zero),
+   metric 5's operator interventions per landing, and metric 7's cache-lag p50/
+   p95 plus contradiction minutes across CLI/MCP/web. Compare with the retained
+   before-cutover baseline. Keep missing samples partial, never zero. Inspect
+   these on existing lifecycle reads/writes; no timer or background poller is
+   introduced. The real cutover is qualified only after this observation period.
+
+Rollback uses a **new** request with `mode:"native-owner"` and freshly read pins,
+after draining hosted requests and folding/restoring/verifying all later hosted
+work as described below. Apply preserves current main/receipt and advances to
+another higher epoch; a stale owner copy cannot regain acceptance by editing its
+binding. Once cut over, the older mode-only transition command refuses fresh
+transitions and names the pinned command. Existing completed transition receipts
+remain replayable.
+
+Run the credential-free qualification from the source Lane:
+
+```sh
+export PATH=/usr/local/bin:$PATH
+npm ci --ignore-scripts
+npm run build:core
+node scripts/phase5-cutover-drill.mjs
+```
+
+It uses only synthetic owners and indexed hosted fixtures. The actual H14 receipt
+from the Macs-offline landing is the receipt supplied to the clean-machine
+recovery, rather than an independently invented recovery receipt. It times each
+step, verifies exact recovery, and exercises reverse CAS and original-operation
+replay. A pending empty input completion page is valid at entry zero; nonempty
+page cursors retain their original bounds checks.
+
+The synthetic cutover phases below were observed with Node 24.22.1. The
+runner/cache qualification is **blocked until B1.5a2 is on main**: the older
+recovery entry point returned a native recovery copy rather than `runner-cache`.
+The test fails on that contract; it does not skip the recovery assertion.
+
+| Synthetic step | Seconds | Result |
+| --- | ---: | --- |
+| Cutover dry-run | 0.009 | Read-only plan |
+| Cutover apply | 0.006 | Atomic project/main epoch and receipt |
+| Hosted CAS landing, all Macs offline | 0.073 | One actual H14 receipt |
+| Old CLI refusal | 0.003 | Structured upgrade error |
+| Clean-machine recovery invocation | 2.972 | Legacy copy; runner/cache qualification failed |
+| Post-recovery rollback in the linked drill | — | Unrun after the dependency failure |
+
+The separate bound-client/transaction tests exercise reverse CAS at epoch 2,
+receipt/head preservation and historical replay. The linked post-recovery
+rollback and a clean runner/cache result still require the prerequisite. The
+measured synthetic landing had one queued submission and one delivered landing
+receipt (metric 3: zero dropped); no queue nudge, restart or landing retry was
+needed. Production interventions per landing (metric 5) remain unmeasured. The
+receipt records the metric-7 boundary and after-cutover form; fleet cache-lag
+p50/p95 and contradiction minutes remain unknown. Real Route A after the R2
+purge, real Route B and the seven-day watch remain **unrun** by this builder.
+These are not production RPO/RTO measurements.
+
 ### Rollback point and return to owner authority
 
 The rollback point is the **fully drained, validated final owner snapshot immediately
@@ -691,9 +821,8 @@ pins. Retain the matching package/lockfile and these private inputs off-owner:
 local edits and original operation IDs, then reconcile when hosted returns. If
 hosted cannot execute the CAS or its latest records cannot be folded, rollback
 cannot complete. There is no emergency override, epoch rewind or local file-copy
-failover. The full source/Work-pinned reverse path still needs B1.5a/B1.5b
-qualification before the real switch; the local mode/epoch drill below does not
-establish that path.
+failover. Qualify the full source/Work-pinned reverse path before the real switch; the
+local mode/epoch drill below does not establish production recoverability.
 
 Deleting the old owner stack in B1.6 narrows software rollback. Retain the
 compatible pre-deletion package and a lossless folded snapshot. Historical
