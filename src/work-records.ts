@@ -1,3 +1,4 @@
+import { readWorkPointer } from './work-pointer.js';
 import { pendingRecordWriter } from './work-record-staging.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
@@ -20,7 +21,7 @@ import { z } from 'zod';
 import { digest } from './hash.js';
 import { readSource } from './files.js';
 import { assertWorkFormat } from './work-format.js';
-import { ForgeError, invariant } from './errors.js';
+import { invariant } from './errors.js';
 import { indexBuild, recordKeys, validateIndex, type IndexIO } from './work-record-index.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 export const collectionSchema = z.object({
@@ -51,23 +52,6 @@ export function jsonValue(value: unknown): unknown {
   return bytes === undefined ? null : JSON.parse(bytes);
 }
 const code = 'INVALID_WORK_STORE';
-/** work.json is only ever replaced by atomic rename, so a read that sees the
- * inode swap mid-flight (SOURCE_CHANGED) holds a stale view of a still-valid
- * pointer: re-read the new one. Lock-free readers race commits by design. */
-const workFileReadAttempts = 50;
-function readWorkPointer(directory: string) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return readSource(directory, 'work.json', Number.MAX_SAFE_INTEGER);
-    } catch (error) {
-      if (
-        !(error instanceof ForgeError && error.code === 'SOURCE_CHANGED') ||
-        attempt >= workFileReadAttempts
-      )
-        throw error;
-    }
-  }
-}
 export function readWorkFile(directory: string) {
   const bytes = readWorkPointer(directory);
   if (bytes) {

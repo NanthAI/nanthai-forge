@@ -15,6 +15,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -69,13 +70,17 @@ const owner = async (t, name) => {
 };
 const start = (t, root, env = {}, controlled = false) => {
   const child = spawn(process.execPath, [...(controlled ? ['--import', clock] : []), worker, root], {
-    stdio: controlled ? ['ignore', 'ignore', 'ignore', 'ipc'] : 'ignore',
+    stdio: controlled ? ['ignore', 'ignore', 'pipe', 'ipc'] : ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, FORGE_PRESENCE_GUARD_MS: '100', ...env },
   });
   const exited = once(child, 'exit');
-  const running = { child, exited, watching: false };
+  const running = { child, exited, watching: false, edits: 0, errors: '' };
+  child.stderr.on('data', bytes => {
+    running.errors += bytes;
+  });
   child.on('message', message => {
     if (message.watching) running.watching = true;
+    if (message.edited) running.edits++;
   });
   workers.set(t, [...(workers.get(t) ?? []), running]);
   return running;
@@ -140,9 +145,9 @@ const ended = async ({ child, exited }, absentRoot) => {
   );
   assert.deepEqual(await exited, [0, null], 'worker exited normally');
 };
-const advance = async (child, ms) => {
+const advance = async (child, ms, now) => {
   const advanced = once(child, 'message');
-  child.send({ ms });
+  child.send({ ms, ...(now === undefined ? {} : { now }) });
   assert.equal(await within(advanced, 5000), true, 'worker completed the requested interval callbacks');
   assert.deepEqual((await advanced)[0], { advanced: ms });
 };
@@ -169,26 +174,16 @@ test('a presence worker exits when its owner directory is deleted', async t => {
 
 test('a presence worker exits when its owner is replaced by a new directory', async t => {
   const root = await owner(t, 'worker-replaced');
-  const debug = join(temp(t, 'worker-replaced-debug'), 'guard.jsonl');
-  const { child, exited } = start(t, root, { FORGE_PRESENCE_DEBUG_FILE: debug });
-  await ready(root, child);
+  const running = start(t, root, {}, true);
+  await ready(root, running.child);
+  await waitFor(() => running.watching, 'native watchers finished attaching');
+  // Publish an already-initialized replacement. Building Work at the live path
+  // races the old worker's final observations and can fail init with WORK_BUSY.
+  const replacement = await owner(t, 'worker-replacement');
   removeOwner(t, root);
-  mkdirSync(root);
-  initNative(root);
-  await new AgentWorkflow(root).dispatch({ action: 'start', outcome: 'Replacement' });
-  const ended = await within(exited, 5000);
-  const ticks = existsSync(debug) ? readFileSync(debug, 'utf8').trim().split('\n') : [];
-  // A replaced owner directory cannot contain this worker's marker. Some sandboxes (seen in Modal check
-  // containers) keep showing the old directory, marker included, after rm -r + mkdir; no check can
-  // detect a replacement the filesystem does not show, so the case is untestable there.
-  const staleView = !ended && ticks.length > 0 && JSON.parse(ticks.at(-1)).marked === true;
-  if (staleView) return t.skip('this sandbox shows the worker a deleted directory');
-  assert.equal(
-    ended,
-    true,
-    `a worker never serves a different owner at the same path; exit=${child.exitCode} ticks=${ticks.length} first=${ticks[0]} last=${ticks.at(-1)}`,
-  );
-  assert.deepEqual(await exited, [0, null], 'replacement ends the worker normally');
+  renameSync(replacement, root);
+  running.child.send({ ms: 100 });
+  await ended(running);
 });
 
 test('a deleted owner is never recreated by its running worker', async t => {
@@ -269,19 +264,40 @@ test('queues and locks under a deleted owner fail instead of recreating it', asy
 
 test('an idle presence worker exits after the idle limit, an active one stays', async t => {
   const idle = await owner(t, 'worker-idle');
-  const quiet = start(t, idle, { FORGE_PRESENCE_IDLE_MS: '1500' });
+  const env = { FORGE_PRESENCE_IDLE_MS: '1500', FORGE_TEST_CONTROL_DATE: '1' };
+  const quiet = start(t, idle, env, true);
   const busy = await owner(t, 'worker-busy');
-  const active = start(t, busy, { FORGE_PRESENCE_IDLE_MS: '1500' });
+  const active = start(t, busy, env, true);
+  await ready(idle, quiet.child);
+  await ready(busy, active.child);
+  await waitFor(() => quiet.watching && active.watching, 'both workers subscribed to their edit hints');
+  // Start at an explicit durable activity boundary after asynchronous startup.
+  // Real filesystem mtimes and the workers' clocks now share this baseline.
+  const now = Math.ceil(Date.now() / 1000) * 1000;
+  for (const root of [idle, busy])
+    utimesSync(join(root, '.forge', 'work', 'work.json'), now / 1000, now / 1000);
+  await advance(quiet.child, 1499, now);
+  assert.equal(quiet.child.exitCode, null, 'idle worker stays before the idle limit');
+  // Guard ticks sample the idle clock every 100 ms; their phase starts at
+  // process startup, so cross the deadline and the next sample explicitly.
+  quiet.child.send({ ms: 100 });
+  await ended(quiet);
+
+  await advance(active.child, 0, now);
   const lane = readdirSync(join(busy, '.forge', 'work')).find(name => name.startsWith('lane-'));
-  const ticker = setInterval(
-    () => writeFileSync(join(busy, '.forge', 'work', lane, 'edit.txt'), `${Date.now()}`),
-    300,
-  );
-  t.after(() => clearInterval(ticker));
-  assert.equal(await within(quiet.exited, 6000), true, 'idle worker exits');
-  assert.deepEqual(await quiet.exited, [0, null]);
-  assert.equal(active.child.exitCode, null, 'a worker with Lane edits keeps running');
-  assert.equal(active.child.signalCode, null);
+  for (let i = 0; i < 3; i++) {
+    await advance(active.child, 1000);
+    const edits = active.edits;
+    const path = join(busy, '.forge', 'work', lane);
+    writeFileSync(join(path, 'edit.txt'), `edit ${i}`);
+    active.child.send({ editPath: path });
+    await waitFor(() => active.edits > edits, 'Lane edit hint delivered to the real idle guard');
+    assert.equal(active.child.exitCode, null, 'acknowledged Lane edits keep the worker running');
+    assert.equal(active.child.signalCode, null);
+  }
+  // The active worker also exits once activity actually stops.
+  active.child.send({ ms: 1500 });
+  await ended(active);
 });
 
 test('a second worker for the same owner exits at once', async t => {

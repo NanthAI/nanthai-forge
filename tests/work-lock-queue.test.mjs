@@ -596,7 +596,12 @@ test('four parallel CLI finishes queue behind an owner writer, report check/land
       },
     ),
   );
-  await until(() => readdirSync(join(store.directory, 'lock-queue')).length >= 4);
+  // Queue admission precedes progress delivery; the holder also owns a ticket.
+  // Keep it held until every requester has actually reported the wait that the
+  // final assertions require, rather than counting a partly published queue.
+  await until(() =>
+    processes.every(p => /waiting for lock:.*queue position=\d+.*elapsed=\d+s/.test(p.stderr())),
+  );
   writeFileSync(release, 'go');
   assert.equal((await holder.done).code, 0);
   try {

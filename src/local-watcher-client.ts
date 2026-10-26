@@ -19,6 +19,7 @@ export function sharedWatcher(directory: string) {
     persistent = true;
   let retry: NodeJS.Timeout | undefined;
   const began = Date.now();
+  let startupDone = Promise.resolve();
   const failed = () => {
     if (stopped) return;
     if (Date.now() - began >= 2500) events.emit('error', new Error('WATCH_CONNECT_FAILED'));
@@ -52,6 +53,12 @@ export function sharedWatcher(directory: string) {
       stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     });
     const current = candidate;
+    let started!: () => void;
+    startupDone = new Promise<void>(resolve => {
+      started = resolve;
+    });
+    current.once('error', () => started());
+    current.once('exit', () => started());
     let received = false;
     current.once('error', failed);
     current.once('exit', () => {
@@ -59,6 +66,7 @@ export function sharedWatcher(directory: string) {
     });
     current.once('message', (value: WatchLease) => {
       received = true;
+      started();
       if (current.connected) current.disconnect();
       current.unref();
       if (stopped) return;
@@ -107,11 +115,15 @@ export function sharedWatcher(directory: string) {
     stopped = true;
     clearTimeout(retry);
     socket?.destroy();
-    // A starter may already serve peers before its IPC reply reaches us.
-    // Detach; the helper's finite startup deadline owns orphan cleanup.
-    if (candidate?.connected) candidate.disconnect();
-    candidate?.unref();
-    return Promise.resolve();
+    // Election can still write the owner's lease after subscriptions close.
+    // Join its publication/exit before allowing owner teardown, while leaving
+    // a helper already serving peers alive. Native watcher teardown is separate.
+    candidate?.ref();
+    candidate?.channel?.ref();
+    return startupDone.then(() => {
+      if (candidate?.connected) candidate.disconnect();
+      candidate?.unref();
+    });
   };
   return Object.assign(events, {
     postMessage(message: object) {
@@ -139,6 +151,11 @@ export function sharedWatcher(directory: string) {
           /* Already exited. */
         }
       }
+    },
+    drainStartup: () => {
+      candidate?.ref();
+      candidate?.channel?.ref();
+      return startupDone.finally(() => candidate?.unref());
     },
     terminate,
   });

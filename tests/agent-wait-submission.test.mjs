@@ -201,14 +201,19 @@ test('one wait follows multiple operations across owner worker shutdown and rest
         waitError = error;
       },
     );
-    assert.ok(events.some(e => e.type === 'check' && e.id === run.id && e.status === 'running'));
-    for (const c of [a])
-      assert.ok(
-        events.some(e => e.type === 'operation' && e.id === c.command.operationId && e.status === 'checking'),
+    // Starting the command precedes publication of every entry's run pins.
+    // Keep the command gated until this one observer has delivered both states;
+    // no scheduler can guarantee they already existed on its first snapshot.
+    await until(() => {
+      if (waitError) throw waitError;
+      const has = (type, id, status) =>
+        events.some(e => e.type === type && e.id === id && e.status === status);
+      return (
+        has('check', run.id, 'running') &&
+        has('operation', a.command.operationId, 'checking') &&
+        has('operation', b.command.operationId, 'queued')
       );
-    assert.ok(
-      events.some(e => e.type === 'operation' && e.id === b.command.operationId && e.status === 'queued'),
-    );
+    }, diagnostic('single observer delivered the running check and both operations'));
     await stop();
     assert.equal(f.store.select('runs', run.id).status, 'running');
     assert.equal(f.store.select('runs', run.id).cancellation, undefined);
@@ -231,6 +236,10 @@ test('one wait follows multiple operations across owner worker shutdown and rest
       () => f.store.select('runs', run.id).status === 'passed',
       diagnostic('gated command completed'),
     );
+    // Then b's solo check and the combined gate run; each is its own durable step.
+    const passed = () => f.store.load().runs.filter(r => !r.mainCheck && r.status === 'passed').length;
+    await until(() => passed() >= 2, diagnostic('second solo check completed'));
+    await until(() => passed() >= 3, diagnostic('combined check completed'));
     await until(
       () => [a, b].every(c => f.store.select('landingEntries', c.command.operationId).status === 'accepted'),
       diagnostic('replacement worker published acceptance'),

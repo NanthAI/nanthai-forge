@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fork, spawnSync } from 'node:child_process';
-import { once } from 'node:events';
+import childProcess, { fork, spawnSync } from 'node:child_process';
+import { once, EventEmitter } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
+import { watchLocal } from '../dist/local-watcher.js';
 import { createConnection } from 'node:net';
 import {
   mkdtempSync,
@@ -95,6 +97,15 @@ test(
       () => messages.some(m => m.type === 'closed') && messages.filter(m => m.type === 'opened').length === 2,
       Boolean,
     );
+    // An open acknowledgement only means fs.watch returned. Use the same
+    // private-probe readiness protocol as real clients before the first write;
+    // FSEvents can otherwise miss it while its new stream is still arming.
+    socket.write(JSON.stringify({ id: 1, type: 'probe', probe: 1, recursive: false }) + '\n');
+    await eventually(
+      'reopened route completes its native probe',
+      () => messages.some(m => m.type === 'healthy' && m.id === 1 && m.probe === 1),
+      Boolean,
+    );
     writeFileSync(join(rawPath, 'reopened.ts'), 'export const reopened = true;\n');
     await eventually(
       'reopened route still receives events',
@@ -183,3 +194,45 @@ test(
     );
   },
 );
+
+test('closing the last subscription joins an in-flight helper election without killing peer service', async t => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-watch-startup-close-')));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const directory = join(root, '.forge', 'work');
+  mkdirSync(directory, { recursive: true });
+  let kills = 0;
+  const candidate = Object.assign(new EventEmitter(), {
+    connected: true,
+    channel: { ref() {}, unref() {} },
+    ref() {},
+    unref() {},
+    disconnect() {
+      this.connected = false;
+    },
+    kill() {
+      kills++;
+    },
+  });
+  t.mock.method(childProcess, 'fork', () => candidate);
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  const watcher = watchLocal(root, {}, () => {});
+  // The helper has been forked but has not finished its owner writes or replied.
+  await new Promise(resolve => setImmediate(resolve));
+  let closed = false;
+  const closing = watcher.close().then(() => {
+    closed = true;
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(closed, false, 'owner teardown must wait for the election publication');
+  writeFileSync(join(directory, 'local-watcher.json'), '{}');
+  candidate.emit('message', { pid: 1, startTime: 'synthetic', socket: 'unused' });
+  await closing;
+  assert.equal(candidate.connected, false);
+  assert.equal(kills, 0, 'a helper may already be serving another process');
+  rmSync(root, { recursive: true, force: true });
+  assert.equal(existsSync(root), false);
+});

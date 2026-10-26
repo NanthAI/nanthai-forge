@@ -142,8 +142,7 @@ export function watchLocal(
         const bound = setTimeout(() => connection?.fail('WATCH_CLOSE_TIMEOUT'), closeMs);
         resolveClose = () => {
           clearTimeout(bound);
-          connection?.release();
-          resolve();
+          void Promise.resolve(connection?.release()).then(() => resolve());
         };
         if (!opened && !opening) resolveClose();
         else connection?.send({ type: 'close' });

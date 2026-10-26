@@ -40,6 +40,7 @@ export const watcherRuntime = {
         child.channel?.ref();
         ref();
       },
+      drainStartup: () => Promise.resolve(),
       terminate() {
         if (!child.pid || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
         const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
@@ -226,7 +227,9 @@ function createRuntime(directory?: string) {
         subscriptions.delete(id);
         if (!subscriptions.size) {
           restartRequested = false;
+          const current = worker;
           drop();
+          return current?.drainStartup?.();
         } else references();
       },
     };
