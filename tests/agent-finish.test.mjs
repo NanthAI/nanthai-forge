@@ -1,5 +1,5 @@
 import { cleanupOwner, waitForOwnerChildren } from './owner-cleanup.mjs';
-import { processAlive } from '../dist/local-process.js';
+import { processAlive, processStartTime } from '../dist/local-process.js';
 import { trustAgents } from './autonomy-fixture.mjs';
 // SPDX-License-Identifier: Apache-2.0
 import { readWorkBytes } from './work-store-fixture.mjs';
@@ -17,6 +17,8 @@ import { NativeSource } from '../dist/native-source.js';
 import { PeersSource } from '../dist/agent-peers-source.js';
 import { initNative } from '../dist/native-work.js';
 import { ForgeError } from '../dist/errors.js';
+import { workLocked } from '../dist/work-lock.js';
+import { checkQueueDirectory } from '../dist/check-queue.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 const git = (root, args) =>
@@ -735,29 +737,69 @@ for (const native of [true, false])
     ]);
     let child, run;
     try {
-      const request = { ...command, accept: { expectedPrevious: null } },
-        cli = join(process.cwd(), 'dist/cli.js');
-      child = spawn(process.execPath, [cli, 'agent', root, 'finish', JSON.stringify(request)], {
+      const request = { ...command, accept: { expectedPrevious: null } };
+      // Own the real API runner directly. CLI/MCP parity is covered above;
+      // this crash must not also kill an unrelated CLI transport publisher.
+      const script = `import { AgentWorkflow } from ${JSON.stringify(new URL('../dist/agent-workflow.js', import.meta.url).href)}; await new AgentWorkflow(process.argv[1]).dispatch(JSON.parse(process.argv[2]));`;
+      child = spawn(process.execPath, ['--input-type=module', '-e', script, root, JSON.stringify(request)], {
         stdio: 'ignore',
       });
-      // Readiness follows the recorded spawn, with room for shared-machine contention.
+      // A published spawn does not prove that its runner/observer is outside
+      // Work, capacity admission or transport metadata. Own their mutexes while
+      // stopping execution so no unrelated lock-holder publication is killed.
       const deadline = Date.now() + 60000;
+      let stopped = false,
+        observerExited;
       while (Date.now() < deadline) {
         run = readRunWhileStarting(agent.work.store);
-        if (run?.status === 'running' && run.childPid) break;
+        if (run?.status === 'running' && run.childPid) {
+          try {
+            workLocked(
+              join(checkQueueDirectory(), 'admission.lock'),
+              () => {
+                agent.work.store.locked(
+                  () => {
+                    workLocked(
+                      join(agent.work.store.directory, 'hosted-binding.lock'),
+                      () => {
+                        assert.ok(run.runner.pid > 0 && run.runner.pid !== process.pid);
+                        const targets = [
+                          run.runner,
+                          { pid: child.pid, startTime: processStartTime(child.pid) },
+                        ];
+                        if (run.runner.pid !== child.pid && processAlive(run.runner))
+                          process.kill(run.runner.pid, 'SIGKILL');
+                        if (child.exitCode === null && child.signalCode === null) {
+                          observerExited = once(child, 'exit');
+                          child.kill('SIGKILL');
+                        }
+                        // Signal delivery is not an acknowledgement: retain the
+                        // mutexes until neither process can publish more bytes.
+                        while (targets.some(processAlive)) {
+                          assert.ok(Date.now() < deadline, 'interrupted processes did not stop');
+                          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+                        }
+                        stopped = true;
+                      },
+                      { waitMs: 0 },
+                    );
+                  },
+                  { waitMs: 0 },
+                );
+              },
+              { waitMs: 0 },
+            );
+          } catch (error) {
+            if (!(error instanceof ForgeError && error.code === 'WORK_BUSY')) throw error;
+          }
+          if (stopped) break;
+        }
         await new Promise(resolve => setTimeout(resolve, 20));
       }
       assert.equal(run?.status, 'running');
-      assert.ok(run.runner.pid > 0 && run.runner.pid !== process.pid);
       assert.ok(run.childPid);
-      // The managed owner may adopt after the submitting CLI exits on contention.
-      // Kill the recorded runner, rather than assume the observer owns execution.
-      if (run.runner.pid !== child.pid && processAlive(run.runner)) process.kill(run.runner.pid, 'SIGKILL');
-      if (child.exitCode === null && child.signalCode === null) {
-        const exited = once(child, 'exit');
-        child.kill('SIGKILL');
-        await exited;
-      }
+      assert.equal(stopped, true, 'interrupted the recorded runner outside its Work publication');
+      if (observerExited) await observerExited;
       const runnerDeadline = Date.now() + 60000;
       let runnerAlive = processAlive(run.runner);
       while (runnerAlive && Date.now() < runnerDeadline) {

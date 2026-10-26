@@ -369,6 +369,23 @@ test('actual queue batch catches independent submissions and respects skip for a
       f.store.select('views', view.viewId),
     );
   }
+  // auto:true makes each run wake the background preview worker. While it holds the
+  // preview lock, the landing preview is (correctly) unavailable advice, so wait for
+  // the worker to record the current request and release the lock first.
+  const json = name => {
+    try {
+      return JSON.parse(readFileSync(join(f.store.directory, name), 'utf8'));
+    } catch {
+      return undefined;
+    }
+  };
+  await until(() => {
+    const request = json('integration-preview-request.json');
+    return (
+      (!request || json('integration-preview-status.json')?.token === request.token) &&
+      !existsSync(join(f.store.directory, 'integration-preview.lock'))
+    );
+  });
   const batch = await batchEdit(f.agent.work, 'fixture', data => selectBatch(f.agent.work, data, 'main'));
   const composed = await composeBatch(f.agent.work, batch);
   assert.equal(composed.prefixes.length, 1);

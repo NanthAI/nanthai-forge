@@ -12,6 +12,7 @@ import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { WorkStore } from '../dist/work-store.js';
 import { checkRow, laneChecks } from '../dist/gh-cli-reads.js';
 import { trustAgents } from './autonomy-fixture.mjs';
+import { cleanupOwner, waitForOwnerChildren } from './owner-cleanup.mjs';
 const cli = new URL('../dist/cli.js', import.meta.url).pathname;
 function run(args, cwd, extra = {}) {
   return new Promise((resolve, reject) => {
@@ -33,11 +34,18 @@ function run(args, cwd, extra = {}) {
 }
 async function project(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-gh-cli-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => cleanupOwner(root));
   writeFileSync(join(root, 'a.txt'), 'original\n');
   initNative(root);
   trustAgents(root);
   const agent = new AgentWorkflow(root);
+  const dispatch = agent.dispatch.bind(agent);
+  agent.dispatch = async command => {
+    // CLI lifecycle replies can precede their finite advisory writers. Join
+    // those writers before this fixture's zero-patience direct mutations.
+    await waitForOwnerChildren(root);
+    return dispatch(command);
+  };
   await agent.dispatch({
     action: 'define-check',
     name: 'verify',

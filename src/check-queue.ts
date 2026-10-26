@@ -314,7 +314,10 @@ function cancelEntry(item: ReturnType<typeof queueEntries>[number]) {
     try {
       process.kill(process.platform === 'win32' ? ticket.childPid! : -ticket.childPid!, 'SIGKILL');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      // A denied signal does not fail an unrelated foreground check. The
+      // durable cancel marker lets the audit controller stop its own child;
+      // its live process group still holds capacity until that happens.
+      if (!['ESRCH', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
     }
   }
 }

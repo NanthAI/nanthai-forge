@@ -28,18 +28,34 @@ const ALLOWED = [
 /** Relative path -> content hash for every file under .forge, Lane sources included. */
 function snapshot(root) {
   const files = new Map();
+  // Background workers rename temporary files away while we walk. A path that
+  // vanished between readdir and read is simply absent from this snapshot;
+  // settled() and the before/after comparison still see the change.
+  const absent = error => {
+    if (error?.code !== 'ENOENT') throw error;
+  };
   const walk = dir => {
-    for (const name of readdirSync(dir)) {
-      const path = join(dir, name),
-        stat = lstatSync(path);
-      if (stat.isDirectory()) walk(path);
-      else
-        files.set(
-          relative(root, path),
-          createHash('sha256')
-            .update(stat.isSymbolicLink() ? readlinkSync(path) : readFileSync(path))
-            .digest('hex'),
-        );
+    let names;
+    try {
+      names = readdirSync(dir);
+    } catch (error) {
+      return absent(error);
+    }
+    for (const name of names) {
+      const path = join(dir, name);
+      try {
+        const stat = lstatSync(path);
+        if (stat.isDirectory()) walk(path);
+        else
+          files.set(
+            relative(root, path),
+            createHash('sha256')
+              .update(stat.isSymbolicLink() ? readlinkSync(path) : readFileSync(path))
+              .digest('hex'),
+          );
+      } catch (error) {
+        absent(error);
+      }
     }
   };
   walk(join(root, '.forge'));

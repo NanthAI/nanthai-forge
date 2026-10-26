@@ -69,12 +69,13 @@ async function fixture(t) {
     if (unexpected.length)
       t.diagnostic(
         JSON.stringify({
-          fixtureRuns: unexpected.map(({ id, status, error, failureSummary, exitCode }) => ({
+          fixtureRuns: unexpected.map(({ id, status, error, failureSummary, exitCode, details }) => ({
             id,
             status,
             error,
             failureSummary,
             exitCode,
+            details,
           })),
         }),
       );
@@ -126,6 +127,14 @@ const evidence = (kind, value) => {
   if (process.env.FORGE_OVERLAP_EVIDENCE)
     appendFileSync(process.env.FORGE_OVERLAP_EVIDENCE, JSON.stringify({ kind, ...value }) + '\n');
 };
+// Progress is an observation: a post-accept audit can finish between replies.
+// Compare every retained receipt field while checking the replay's live phases
+// against a second settled observation below.
+const receiptEntries = entries =>
+  entries.map(({ phases: _phases, submissions, ...entry }) => ({
+    ...entry,
+    submissions: submissions.map(({ phases: _phases, ...submission }) => submission),
+  }));
 
 test('planned scope is visible before saves; canonical alerts deduplicate heads and grow with regions', async t => {
   const f = await fixture(t),
@@ -429,7 +438,8 @@ for (let repeat = 1; repeat <= 5; repeat++)
       for (const name of ['r1', 'r4', 'r5', 'r7']) assert.ok(text.includes(`${name} addition.`));
     }
     const replay = (await f.agent.dispatch(command)).result;
-    assert.deepEqual(replay.entries, result.entries);
+    assert.deepEqual(receiptEntries(replay.entries), receiptEntries(result.entries));
+    assert.deepEqual((await f.agent.dispatch(command)).result.entries, replay.entries);
     assert.equal(
       f.store.load().runs.filter(run => !run.mainCheck).length,
       data.runs.filter(run => !run.mainCheck).length,
