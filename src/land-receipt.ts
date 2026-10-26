@@ -1,3 +1,6 @@
+import { setImmediate as yieldTurn } from 'node:timers/promises';
+import { landingMatch, prepareLandingRecords } from './landing-records-index.js';
+import { assertLandingWorkerActive } from './landing-worker-context.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { invariant } from './errors.js';
@@ -125,6 +128,58 @@ function landingSnapshot(
  * Work pointer even when a controller publishes during a client observation. */
 export function landReceipt(...args: Parameters<typeof landingSnapshot>) {
   return args[0].observing(() => landingSnapshot(...args));
+}
+
+/** Drivers prime only this request's selected evidence between event-loop turns.
+ * The final receipt shares those immutable reads under the same pinned pointer. */
+export async function observeLandReceipt(...args: Parameters<typeof landingSnapshot>) {
+  const [store, , journal] = args;
+  return store.observing(async () => {
+    const tx = store.readRecords();
+    try {
+      if (tx) await prepareLandingRecords(store, tx);
+      const pause = async () => {
+        await yieldTurn();
+        assertLandingWorkerActive();
+      };
+      for (const retained of journal.state.entries) {
+        const entry = resolveLandEntry(store, retained);
+        const queued = store.select('landingEntries', entry.command.operationId);
+        await pause();
+        if (queued?.viewId) store.select('views', queued.viewId);
+        for (const pin of entry.inputs) {
+          store.select('lanes', pin.laneId);
+          await pause();
+        }
+        if (queued?.batchId) {
+          store.select('landingBatches', queued.batchId);
+          await pause();
+        }
+        if (queued?.runId) {
+          store.select('runs', queued.runId);
+          await pause();
+        }
+        if (tx)
+          for (const position of landingMatch(
+            store,
+            tx,
+            'landingBatches',
+            'entryId',
+            entry.command.operationId,
+          )) {
+            const batch = tx.at('landingBatches', position);
+            await pause();
+            for (const prefix of batch.prefixes) {
+              store.select('runs', prefix.runId);
+              await pause();
+            }
+          }
+      }
+      return landReceipt(...args);
+    } finally {
+      tx?.dispose();
+    }
+  });
 }
 
 /** Reconnect by operation id without recreating a journal, capturing source,

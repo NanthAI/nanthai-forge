@@ -104,7 +104,20 @@ Agent `status`, `tests`, `peers`, `review`, `diff`, `show` and `brief` pin the a
 
 Start prepares its reservation and activation pages outside the owner lock and materializes the Lane between those commits. Native and Git checkpoint/sync prepare source and record pages under the Lane lock, then validate and publish against the current Work pointer in short owner commits. Unrelated metadata CAS conflicts repeat record publication, retaining the prepared source and concurrent Lane metadata. Sync restoration of collected prepared objects happens outside the lock, followed by object-identity checks at publication. Lifecycle activity summaries also prepare pinned records and path differences outside the owner lock, retaining those differences across unrelated metadata races. Run registration likewise prepares declared-input observations, interaction proofs and run pages before validating and committing its exact snapshot; command execution holds no owner lock. Legacy record migration retains its one-time locked validation path.
 
-Finish's native composition prepares its pinned source merge outside the owner lock. Publication revalidates the selected Lane heads, Intent base/dependencies and dependency source pins against current Work, restores any newly merged objects collected during preparation, and writes the Candidate in the owner critical section. Unrelated checkpoints, check progress and landing admissions do not invalidate the prepared merge or overwrite concurrent metadata. Changed selected inputs still stop publication. Lane run composition retries metadata revision contention up to three times; explicit compose and Candidate run requests retain their revision preconditions, and source/check pin changes remain errors. Finish observes composition revisions without taking a writer ticket; receipt-reconciled metadata retries use bounded jittered backoff with their original operation IDs. While the runner's configured batch capacity is full, the landing driver observes running checks without repeatedly publishing unchanged batch-selection metadata. Persisted unstarted batches remain recoverable.
+Finish's native composition prepares its pinned source merge outside the owner lock. Publication revalidates the selected Lane heads, Intent base/dependencies and dependency source pins against current Work, restores any newly merged objects collected during preparation, and writes the Candidate in the owner critical section. Unrelated checkpoints, check progress and landing admissions do not invalidate the prepared merge or overwrite concurrent metadata. Changed selected inputs still stop publication. Lane run composition retries metadata revision contention up to three times; explicit compose and Candidate run requests retain their revision preconditions, and source/check pin changes remain errors. Finish observes composition revisions without taking a writer ticket; receipt-reconciled metadata retries use bounded jittered backoff with their original operation IDs. While the runner's configured batch capacity is full, the landing driver observes running checks without repeatedly publishing unchanged batch-selection metadata. Persisted unstarted batches remain recoverable. Landing observations select only live entries and batches from a disposable
+immutable-header index; cold discovery yields between short chunks. Already-on-main
+completion runs when its records change. Driver publications retain their FIFO
+Work-lock ticket while waiting asynchronously; synchronous compatibility phases
+in the owner return contention to their receipt-reconciled retry. GitHub landing
+checks are observed by detached check controllers, independently of driver turns.
+Presence-hosted drivers use the same provider detachment and cooperative reads.
+Local landing checks stay in their long-lived owner process, including when the
+service is started through the CLI. Losing that process uses controller recovery
+to settle the original entries while retaining passed evidence.
+Receipt phases select only the submission's attempts and recent acceptance
+history; unchanged finish/land journals reuse their validated snapshots. An
+unchanged land journal is not rewritten. Stopping the presence worker aborts its
+driver while detached provider checks continue in their controllers.
 
 Concurrent agents: if another Lane was accepted after yours started, under `laneUpdates:"auto"`, finish merges main into your Lane first (a `Sync main` checkpoint with two parents). Overlapping edits stop finish with `phase:"sync"`, `status:"conflict"` and Git-style markers (`<<<<<<< lane`, `=======`, `>>>>>>> main`) in the listed files; binary conflicts keep the Lane version. Checkpoint refuses files that still contain markers (`CONFLICT_MARKERS`). Resolve, then finish again. When every conflict is a text conflict in Markdown documentation (`*.md` at the root or under `docs/`), finish resolves it instead of stopping: see [Markdown conflict resolution](#markdown-conflict-resolution-on-finish). `sync` (`{"laneId":"LANE_ID"}`) does the merge on its own and returns `up-to-date`, `merged` or `conflict`; it needs a checkpointed Lane (`LANE_DIRTY`). sync writes files before recording the new head, so an interrupted sync can simply be repeated. Acceptance refuses any Candidate that does not contain the Channel's current head (`CHANNEL_DIVERGED`), with earlier accepted-head rollback available only to a person. Each automatic successful sync records its changed paths and undo instructions; `undo-sync` takes `laneId` and `syncOperationId`, refusing newer edits unless explicitly forced. `laneUpdates:"ask"` stops with `sync-required`: run sync, then start a new finish operation. Git-backed Lanes also sync and retain both merge parents after staged conflict resolution.
 
@@ -577,6 +590,20 @@ Fast-path acceptances and acceptances checked with a scoped or docs-only standar
 check enqueue full main verification. Pending requests coalesce onto the newest
 accepted main. One owner worker serializes these main checks through the normal
 machine check queue with `FORGE_CHECK_FULL=1`; no landing lock spans a check.
+Audit scheduling reads selected main/request/run records. Writer admission never
+reconstructs the complete Work history; landing edits also use selected records
+on their final under-lock retry. Contended audit drivers back off from one second
+to 30 seconds. After 15 minutes without audit progress the driver releases its
+slot with `MAIN_AUDIT_STALLED` and writes `post-accept-main-state.json` in the
+owner metadata directory. Source, pending requests and run evidence remain
+retained, including an unfinished optimistic recovery without a conclusive verdict.
+Provider job/log changes and local command output count as progress; GitHub
+controller failure/rate-limit diagnostics and unrelated owner commits do not.
+A wake received during audit observation triggers another observation before
+the pending wake clears. A later wake or explicit retry resumes the same pending
+work. Checks execute in detached controllers so a stopped driver cannot starve
+completion observation.
+
 Audits have the lowest priority: foreground check admission cancels a running
 audit's process group before claiming its capacity. Cancelled or interrupted
 audits retain their evidence and are requeued with a new execution identity for
@@ -1095,6 +1122,11 @@ Queued entries whose content is already on main or empty against their base sett
 without a check or Channel move. A newer saved Lane head settles the older queued
 goal as superseded, naming the replacement and retaining the original source.
 These terminal outcomes are returned through the original requester handle.
+Native queue observations reuse no-op composition for unchanged submitted source and
+accepted main. View or saved stack changes invalidate that result; stacked entries
+also revalidate retained parent and landing evidence. Stall deadlines read live
+entry headers and selected batch/run progress; terminal continuations follow each
+prefix's exact run ID without hydrating unrelated run evidence.
 
 After 15 minutes without a recorded run, batch-step or acceptance event, pending
 entries expose `stall:{code,step,missingOwner,lastProgressAt,alarmAt,message}` in

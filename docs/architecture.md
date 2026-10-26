@@ -48,7 +48,21 @@ The read-only `landing` action reconciles no work and starts no service. Native
 operation aliases share original queue entries. Under hosted source authority,
 a goal registered while the first composition runs owns a fenced server wake;
 source completion resumes that goal into the existing hosted check/acceptance
-controller. Domain failures roll back admission before a separate terminal
+controller. The owner driver builds a disposable index of immutable landing
+headers cooperatively, then observes queued/checking entries and live batches
+through selected, freshly validated reads. It recovers already-on-main Lane
+completion when the relevant records change. Work publication waits asynchronously
+in the existing FIFO queue; legacy synchronous driver phases return contention to
+their asynchronous retry instead of blocking the owner event loop. GitHub landing
+checks use detached check controllers, isolating provider polling from driver work.
+Receipt progress selects the submitted entry's batch history and recent Channel
+moves, rather than hydrating all landing records. One pinned observation shares
+immutable selected-record reads. Worker journal discovery yields while checking
+file identities and only decodes changed journals; unchanged journal saves do not
+fsync or wake the driver. These paths are shared by owner services and detached
+presence workers. Presence-worker termination aborts its driver without cancelling
+submitted checks, with a one-second exit backstop.
+Domain failures roll back admission before a separate terminal
 failure publication. Upload/save preparation remains an explicit pre-admission
 phase. Hosted aliases and observations recheck current project access.
 

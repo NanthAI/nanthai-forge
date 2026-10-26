@@ -53,3 +53,28 @@ test(
     assert.equal(calls, 4);
   },
 );
+
+test('positive liveness cache avoids repeated process snapshots and still detects ESRCH immediately', async t => {
+  const { processesAliveCached } = await import('../dist/local-process.js');
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)']);
+  t.after(() => child.kill());
+  await once(child, 'spawn');
+  const peer = processIdentity(child.pid),
+    original = childProcess.execFileSync;
+  let calls = 0;
+  childProcess.execFileSync = (...args) => {
+    calls++;
+    return original(...args);
+  };
+  syncBuiltinESMExports();
+  t.after(() => {
+    childProcess.execFileSync = original;
+    syncBuiltinESMExports();
+  });
+  for (let i = 0; i < 8; i++) assert.deepEqual(processesAliveCached([peer]), [true]);
+  if (process.platform !== 'linux') assert.equal(calls, 1);
+  const exited = once(child, 'exit');
+  child.kill();
+  await exited;
+  assert.deepEqual(processesAliveCached([peer]), [false]);
+});

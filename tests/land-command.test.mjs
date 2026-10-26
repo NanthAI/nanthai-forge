@@ -736,12 +736,20 @@ for (const batching of [true, false])
       if (args[0].action === 'run-check' && !interrupted) {
         interrupted = true;
         await waitForAgentRun(f.store, args[0].operationId);
-        await batchEdit(f.agent.work, 'synthetic-infra', data => {
-          const run = data.runs.find(r => r.id === args[0].operationId);
-          run.status = 'interrupted';
-          run.exitCode = null;
-          run.error = { code: 'SYNTHETIC_INFRA', message: 'Local test interruption' };
-        });
+        await batchEdit(
+          f.agent.work,
+          'synthetic-infra',
+          data => {
+            const run = data.runs.find(r => r.id === args[0].operationId);
+            assert.ok(run, 'the exact terminal non-batch run is selected for the edit');
+            run.status = 'interrupted';
+            run.exitCode = null;
+            run.error = { code: 'SYNTHETIC_INFRA', message: 'Local test interruption' };
+          },
+          undefined,
+          undefined,
+          { runs: [args[0].operationId] },
+        );
       }
       return response;
     };

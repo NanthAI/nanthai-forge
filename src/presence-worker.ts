@@ -12,9 +12,7 @@ import { PeersSource } from './agent-peers-source.js';
 import { changedPaths } from './agent-sync.js';
 import { readHostState } from './host-binding.js';
 import { guardOwnerWorker } from './presence-worker-guard.js';
-import { allRecords } from './agent-lifecycle.js';
 import { laneAutoSnapshots } from './lane-auto-snapshot.js';
-import type { CheckRun, Lane } from './work-types.js';
 
 /** Timer period for presence observation; the env override exists so tests can make timers certain to fire. */
 const touchMs = () => Number(process.env.FORGE_PRESENCE_TOUCH_MS) || PRESENCE.touchMs;
@@ -131,7 +129,11 @@ export async function watchLanePresence(
               session => session.context.laneId === laneId,
             );
             if (sessions.length && sessions.every(session => session.status === 'completed')) return close();
-            const run = allRecords<CheckRun>(store, 'runs').find(
+            const tx = store.readRecords();
+            const runs = tx
+              ? ['queued', 'preparing', 'running'].flatMap(status => tx.all('runs', status, 'status'))
+              : store.load().runs;
+            const run = runs.find(
               run =>
                 ['queued', 'preparing', 'running'].includes(run.status) &&
                 store.select('views', run.viewId)?.inputs.some(input => input.laneId === laneId),
@@ -201,7 +203,14 @@ export async function watchOwnerPresence(
           try {
             const sessions = collapseSessions(Object.values(readHostState(store).presence ?? {}));
             let vanished = false;
-            const active = allRecords<Lane>(store, 'lanes').filter(lane => {
+            const tx = store.readRecords();
+            const retained = tx
+              ? Array.from(
+                  { length: tx.manifest.collections.lanes?.count ?? 0 },
+                  (_, i) => tx.fieldsAt('lanes', i).record,
+                )
+              : store.load().lanes;
+            const active = retained.filter(lane => {
               const observed = sessions.filter(session => session.context.laneId === lane.id);
               const live =
                 lane.state !== 'completed' &&
@@ -282,6 +291,12 @@ if (process.argv[1]?.endsWith('/presence-worker.js') && process.argv[2]) {
     },
     { runtime: process.argv[1] },
   );
+  const shutdown = () => {
+    controller.abort();
+    setTimeout(() => process.exit(0), 1_000).unref();
+  };
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
   // The guard signal unrefs the observers, so this keeps the process alive until the guard ends it.
   const keepAlive = setInterval(() => undefined, 60_000);
   await watchOwnerPresence(store, controller.signal, guard.touch, async signal => {

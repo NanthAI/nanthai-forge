@@ -1,16 +1,24 @@
+import { editRecordProjection } from './work-record-edit.js';
+import type { z } from 'zod';
+import { landingPositions, prepareLandingRecords } from './landing-records-index.js';
 import { finishChild } from './finish-child.js';
 import { invariant } from './errors.js';
 // SPDX-License-Identifier: Apache-2.0
-import { readFragment, pageHashes, pageSize } from './work-records.js';
-import { landingBatchSchema, landingEntrySchema, batchPrefixSchema } from './landing-batch-types.js';
+import { readFragment } from './work-records.js';
+import { batchPrefixSchema, landingEntrySchema, landingBatchSchema } from './landing-batch-types.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 
+export type LandingRecordSelection = {
+  selectedOnly?: boolean;
+  entries?: string[];
+  batches?: string[];
+  runs?: string[];
+  views?: string[];
+  checks?: string[];
+};
 const writable = ['landingEntries', 'landingBatches', 'views', 'runs'] as const;
-// Only scalar scheduling hints are cached by immutable record hash. Selected
-// records are still read/validated afresh; retain just the current snapshot's keys.
-const headerCache = new WeakMap<WorkStore, Map<string, Record<string, unknown>>>();
 /** A pinned queue projection, not a portable Work snapshot. Historical Lane
  * conversations, saves and unrelated runs cannot delay queue admission/settlement.
  * Header status only selects records; every selected record is fully validated. */
@@ -19,74 +27,59 @@ export function landingRecords(
   channel?: string,
   tx = store.readRecords?.(),
   selectedId?: string,
+  selection: LandingRecordSelection = {},
 ) {
   if (!tx) return store.load();
   const data = tx.data();
-  const pages = new Map<string, string[]>();
-  const previous = headerCache.get(store),
-    current = new Map<string, Record<string, unknown>>();
-  const header = (collection: 'landingEntries' | 'landingBatches', position: number) => {
-    const page = tx.manifest.collections[collection]!.pages[Math.floor(position / pageSize)]!;
-    let hashes = pages.get(page);
-    if (!hashes) {
-      hashes = pageHashes(store.directory, page);
-      pages.set(page, hashes);
-    }
-    const hash = hashes[position % pageSize]!;
-    let fields = previous?.get(hash);
-    if (!fields) {
-      const raw = readFragment(store.directory, hash).fields;
-      fields = Object.fromEntries(
-        ['id', 'channel', 'status', 'alreadyOnMain', 'keepOpen'].map(key => [key, raw[key]]),
-      );
-    }
-    current.set(hash, fields);
-    const retained = { fields };
-    invariant(
-      channel === undefined || retained.fields.channel === channel,
-      'INVALID_WORK_STORE',
-      'Landing channel lookup differs from its retained record.',
-    );
-    return retained;
-  };
-  const positions = (collection: 'landingEntries' | 'landingBatches') =>
-    channel === undefined
-      ? Array.from({ length: tx.manifest.collections[collection]?.count ?? 0 }, (_, i) => i)
-      : tx.positions(collection, channel, 'channel');
-  data.landingBatches = positions('landingBatches').flatMap(position => {
-    // fieldsAt cannot represent a batch's required nonempty entryIds array.
-    const retained = header('landingBatches', position);
-    const parsed = landingBatchSchema.shape.status.safeParse(retained.fields.status);
-    invariant(parsed.success, 'INVALID_WORK_STORE', 'Landing batch status is invalid.');
-    const status = parsed.data;
-    return ['composing', 'checking'].includes(status) || retained.fields.id === selectedId
-      ? [tx.at('landingBatches', position)]
-      : [];
-  });
+  const batchPositions = new Set(
+    landingPositions(
+      store,
+      tx,
+      'landingBatches',
+      selection.selectedOnly ? [] : ['composing', 'checking'],
+      channel,
+    ),
+  );
+  for (const id of [...(selection.batches ?? []), ...(selectedId ? [selectedId] : [])])
+    for (const position of tx.positions('landingBatches', id)) batchPositions.add(position);
+  for (const id of [...(selection.entries ?? []), ...(selectedId ? [selectedId] : [])]) {
+    const entry = tx.find('landingEntries', id)?.record;
+    if (entry?.batchId)
+      for (const position of tx.positions('landingBatches', entry.batchId)) batchPositions.add(position);
+  }
+  data.landingBatches = [...batchPositions]
+    .sort((a, b) => a - b)
+    .map(position => tx.at('landingBatches', position));
   const included = new Set([
     ...data.landingBatches.flatMap(batch => batch.entryIds),
+    ...(selection.entries ?? []),
     ...(selectedId ? [selectedId] : []),
   ]);
-  data.landingEntries = positions('landingEntries').flatMap(position => {
-    const retained = header('landingEntries', position);
-    const parsed = landingEntrySchema.shape.status.safeParse(retained.fields.status);
-    invariant(parsed.success, 'INVALID_WORK_STORE', 'Landing entry status is invalid.');
-    const status = parsed.data;
-    if (
-      included.has(String(retained.fields.id)) ||
-      ['queued', 'checking', 'awaiting-review'].includes(status)
-    )
-      return [tx.at('landingEntries', position)];
-    if (!retained.fields.alreadyOnMain || retained.fields.keepOpen) return [];
-    const entry = tx.at('landingEntries', position),
-      view = tx.find('views', entry.viewId)?.record;
-    const incomplete = view?.inputs.some(pin => {
-      const lane = tx.fields('lanes', pin.laneId)?.record;
-      return lane && lane.head === pin.head && ['active', 'paused', 'ready'].includes(lane.state);
+  const entryPositions = new Set(
+    landingPositions(
+      store,
+      tx,
+      'landingEntries',
+      selection.selectedOnly ? [] : ['queued', 'checking', 'awaiting-review'],
+      channel,
+    ),
+  );
+  for (const id of included)
+    for (const position of tx.positions('landingEntries', id)) entryPositions.add(position);
+  data.landingEntries = [...entryPositions]
+    .sort((a, b) => a - b)
+    .flatMap(position => {
+      const entry = tx.at('landingEntries', position);
+      if (channel !== undefined && entry.channel !== channel) return [];
+      if (included.has(entry.id) || ['queued', 'checking', 'awaiting-review'].includes(entry.status))
+        return [entry];
+      return [];
     });
-    return incomplete ? [entry] : [];
-  });
+  data.checks = [
+    ...new Set([...data.landingEntries.map(entry => entry.checkId), ...(selection.checks ?? [])]),
+  ].flatMap(id => tx.find('checks', id)?.record ?? []);
   const views = new Set([
+    ...(selection.views ?? []),
     ...data.landingEntries.map(entry => entry.viewId),
     ...data.landingBatches.flatMap(batch => batch.prefixes.map(prefix => prefix.viewId)),
   ]);
@@ -94,13 +87,12 @@ export function landingRecords(
   data.lanes = [...new Set(data.views.flatMap(view => view.inputs.map(pin => pin.laneId)))].flatMap(
     id => tx.find('lanes', id)?.record ?? [],
   );
-  data.checks = [...new Set(data.landingEntries.map(entry => entry.checkId))].flatMap(
-    id => tx.find('checks', id)?.record ?? [],
-  );
   data.runs = [
     ...new Set([
+      ...(selection.runs ?? []),
+      ...data.landingEntries.flatMap(entry => (entry.runId ? [entry.runId] : [])),
       ...data.landingBatches.flatMap(batch => batch.prefixes.map(prefix => prefix.runId)),
-      ...(channel === undefined
+      ...(channel === undefined && !selection.selectedOnly
         ? ['queued', 'preparing', 'running'].flatMap(status =>
             tx.all('runs', status, 'status').map(run => run.id),
           )
@@ -108,79 +100,126 @@ export function landingRecords(
     ]),
   ].flatMap(id => tx.find('runs', id)?.record ?? []);
   const moves = new Map<number, WorkData['channelMoves'][number]>();
-  if (channel !== undefined) {
-    for (const position of tx.positions('channelMoves', channel, 'channel').reverse()) {
+  const channels =
+    channel === undefined
+      ? [
+          ...new Set([
+            ...data.landingEntries.map(entry => entry.channel),
+            ...data.landingBatches.map(batch => batch.channel),
+          ]),
+        ]
+      : [channel];
+  for (const name of channels)
+    for (const position of tx.positions('channelMoves', name, 'channel').reverse()) {
       const move = tx.at('channelMoves', position);
       if (move.status === 'accepted') {
         moves.set(position, move);
         break;
       }
     }
-    // Lost acceptance replies may precede a later main move. Keep those exact
-    // receipts as well as current main so recovery never rechecks accepted work.
-    for (const batch of data.landingBatches)
-      for (const prefix of batch.prefixes) {
-        const receipt = tx.find('channelMoves', finishChild(batch.id, `accept:${prefix.viewId}`));
-        if (receipt) moves.set(receipt.position, receipt.record);
-      }
-  }
+  // Recover exact receipts even if later main moves overtook a lost reply.
+  for (const batch of data.landingBatches)
+    for (const prefix of batch.prefixes) {
+      const receipt = tx.find('channelMoves', finishChild(batch.id, `accept:${prefix.viewId}`));
+      if (receipt) moves.set(receipt.position, receipt.record);
+    }
   data.channelMoves = [...moves].sort(([a], [b]) => a - b).map(([, move]) => move);
-  headerCache.set(store, current);
   return data;
+}
+
+function selectedObservation<T>(schema: z.ZodType<T>, fields: unknown): T {
+  const parsed = schema.safeParse(fields);
+  invariant(parsed.success, 'INVALID_WORK_STORE', 'Selected landing header is invalid.');
+  return parsed.data;
+}
+const entryObservation = landingEntrySchema.pick({
+  id: true,
+  channel: true,
+  status: true,
+  checkId: true,
+  viewId: true,
+  runId: true,
+  arrivedAt: true,
+  waitingFor: true,
+});
+const batchObservation = landingBatchSchema.pick({ id: true, channel: true, status: true });
+/** Scheduling needs no prefix histories, Lane saves, Views or run evidence.
+ * Select scalar headers and validate them afresh on every observation. */
+export async function observeLandingQueue(store: WorkStore, channel?: string) {
+  const tx = store.readRecords?.();
+  if (!tx) return landingRecords(store, channel);
+  try {
+    await prepareLandingRecords(store, tx);
+    const landingEntries = landingPositions(store, tx, 'landingEntries', ['queued', 'checking'], channel).map(
+      position =>
+        selectedObservation(
+          entryObservation,
+          readFragment(store.directory, tx.versionAt('landingEntries', position)).fields,
+        ),
+    );
+    const landingBatches = landingPositions(
+      store,
+      tx,
+      'landingBatches',
+      ['composing', 'checking'],
+      channel,
+    ).map(position =>
+      selectedObservation(
+        batchObservation,
+        readFragment(store.directory, tx.versionAt('landingBatches', position)).fields,
+      ),
+    );
+    const checks = [...new Set(landingEntries.map(entry => entry.checkId))].flatMap(
+      id => tx.find('checks', id)?.record ?? [],
+    );
+    const runs =
+      channel === undefined
+        ? ['queued', 'preparing', 'running'].flatMap(status => tx.all('runs', status, 'status'))
+        : [];
+    return { revision: tx.revision, landingEntries, landingBatches, checks, runs };
+  } finally {
+    tx.dispose();
+  }
 }
 
 /** Prepare only changed queue records outside the writer lock, then publish
  * under the driver fence and exact-pointer CAS. Never save a projection as whole Work. */
 export function editLandingRecords<T>(
   store: WorkStore,
-  channel: string,
+  channel: string | undefined,
   edit: (data: WorkData) => T,
   tx: WorkRecordTransaction,
   selectedId: string,
   beforePublish?: () => void,
+  selection: LandingRecordSelection = {},
+  underLock = false,
 ) {
-  const data = landingRecords(store, channel, tx, selectedId);
-  const before = new Map(
-    writable.map(collection => [
-      collection,
-      new Map((data[collection] ?? []).map(record => [record.id, JSON.stringify(record)])),
-    ]),
-  );
-  const result = edit(data);
-  const changes = writable.flatMap(collection =>
-    (data[collection] ?? []).flatMap(record =>
-      before.get(collection)!.get(record.id) === JSON.stringify(record) ? [] : [{ collection, record }],
-    ),
-  );
-  if (!changes.length)
-    return store.locked(() => {
-      beforePublish?.();
-      tx.assertCurrent();
+  const data = landingRecords(store, channel, tx, selectedId, selection);
+  return editRecordProjection(
+    store,
+    tx,
+    data,
+    writable,
+    current => {
+      const result = edit(current);
+      const expanded =
+        Number(current.schema) >= 19 || current.landingBatches?.some(batch => batch.entryIds.length > 4);
+      current.schema = (
+        Number(current.schema) >= 21
+          ? current.schema
+          : [16, 18, 20].includes(Number(current.schema))
+            ? expanded
+              ? 20
+              : 18
+            : expanded
+              ? 19
+              : 17
+      ) as WorkData['schema'];
       return result;
-    });
-  const expanded = Number(data.schema) >= 19 || data.landingBatches?.some(batch => batch.entryIds.length > 4);
-  tx.setSchema(
-    (Number(data.schema) >= 21
-      ? data.schema
-      : [16, 18, 20].includes(Number(data.schema))
-        ? expanded
-          ? 20
-          : 18
-        : expanded
-          ? 19
-          : 17) as WorkData['schema'],
+    },
+    beforePublish,
+    underLock,
   );
-  for (const { collection, record } of changes) {
-    const position = tx.positions(collection, record.id)[0];
-    if (position === undefined) tx.append(collection, record);
-    else tx.replace(collection, position, record);
-  }
-  store.prepareCommitRecords(tx);
-  return store.locked(() => {
-    beforePublish?.();
-    store.commitRecords(tx, undefined, { prepared: true });
-    return result;
-  });
 }
 
 /** Locate a runner's exact prefix without hydrating completed diagnoses or Work.

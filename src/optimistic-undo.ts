@@ -61,9 +61,13 @@ export async function undoOptimisticRevert(
       recovery: { auditRunId: audit.id, phase: 'retry' },
     } satisfies WorkView;
     await retryWorkPhase(command.operationId, () =>
-      recoveryEdit(store, data => {
-        if (!data.views.some(item => item.id === view!.id)) data.views.push(view!);
-      }),
+      recoveryEdit(
+        store,
+        data => {
+          if (!data.views.some(item => item.id === view!.id)) data.views.push(view!);
+        },
+        [view!.id],
+      ),
     );
   }
   const selectedView = view;

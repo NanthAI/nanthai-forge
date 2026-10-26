@@ -7,7 +7,12 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fixture } from './landing-batch-fixture.mjs';
-import { batchEdit, selectBatch, composeBatch, enqueueLanding } from '../dist/landing-batch-store.js';
+import {
+  batchEdit as editSelectedBatch,
+  selectBatch,
+  composeBatch,
+  enqueueLanding,
+} from '../dist/landing-batch-store.js';
 import { evaluateBatch } from '../dist/landing-batch-check.js';
 import { advanceLandingBatch } from '../dist/landing-batch-step.js';
 import { reuseLandingCheck, validateReusedCheck } from '../dist/landing-check-reuse.js';
@@ -20,6 +25,18 @@ import { runReceipt } from '../dist/agent-receipts.js';
 import { waitRun } from '../dist/agent-wait-run.js';
 import { trainAccounting } from '../dist/train-accounting.js';
 
+// Fixture mutations deliberately address historical rows. Production callers
+// supply exact selection IDs and never load complete retained Work.
+function batchEdit(work, id, edit, fence, channel) {
+  const data = work.store.load();
+  return editSelectedBatch(work, id, edit, fence, channel, {
+    entries: data.landingEntries?.map(row => row.id),
+    batches: data.landingBatches?.map(row => row.id),
+    runs: data.runs.map(row => row.id),
+    views: data.views.map(row => row.id),
+    checks: data.checks.map(row => row.id),
+  });
+}
 const driver = { beforePublish() {} };
 async function prepared(t, options = {}, definition) {
   const f = await fixture(t, options);
@@ -978,4 +995,18 @@ test('finish adopts a keyed pass across owner fingerprints while preserving expl
     };
   });
   assert.equal(adoptFinishRun(f.store, command, viewId), undefined);
+});
+
+test('reusing a retained passing check never loads complete Work', async t => {
+  const f = await prepared(t, { remote: false });
+  const { WorkStore } = await import('../dist/work-store.js');
+  const noLoad = t.mock.method(WorkStore.prototype, 'load', () =>
+    assert.fail('reuseCheck must select exact records'),
+  );
+  try {
+    const reused = await reuseLandingCheck(f.work, f.batch, f.prefix, driver);
+    assert.equal(reused.reusedFrom.runId, f.original.id);
+  } finally {
+    noLoad.mock.restore();
+  }
 });

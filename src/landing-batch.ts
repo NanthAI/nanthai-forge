@@ -1,9 +1,9 @@
 import { withLandingAttempt, recordAttemptLock } from './landing-attempt-timing.js';
 import { observeWorkLocks, type WorkLockSpan } from './work-lock.js';
 import { recordLandingWaits } from './landing-waiting.js';
-import { landingRecords } from './landing-records.js';
-import { observeWorkProgress } from './work-progress.js';
+import { observeLandingQueue } from './landing-records.js';
 import { landingWorkerSignal } from './landing-worker-context.js';
+import { observeWorkProgress } from './work-progress.js';
 // SPDX-License-Identifier: Apache-2.0
 import { withQueueSlot } from './landing-queue.js';
 import { batchDirectory, batchEdit, composeBatch, landingShape, selectBatch } from './landing-batch-store.js';
@@ -18,7 +18,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /** Give a burst a moment to arrive before the first remote check starts. */
 async function batchWindow(work: WorkService, channel: string) {
   for (;;) {
-    const data = landingRecords(work.store, channel);
+    const data = await observeLandingQueue(work.store, channel);
     if (
       data.landingBatches?.some(
         batch => batch.channel === channel && ['composing', 'checking'].includes(batch.status),
@@ -51,13 +51,30 @@ export async function drainLandingBatches(
     batchDirectory(work, channel),
     async () => {
       const driver = await claimLandingDriver(work, channel);
-      // Recover Lane completion of entries found already on main before a restart.
-      await completeAlreadyOnMain(work, channel);
+      // Recover completion only when its source records or policy change. A
+      // provider poll must never rehydrate terminal history on an unchanged turn.
+      let completedSnapshot = '';
+      const completeChanged = async () => {
+        const tx = work.store.readRecords();
+        const snapshot =
+          tx &&
+          JSON.stringify([
+            tx.manifest.collections.landingEntries?.pages,
+            tx.manifest.collections.views?.pages,
+            tx.manifest.collections.lanes?.pages,
+            tx.manifest.fields.autonomyPolicy,
+          ]);
+        tx?.dispose();
+        if (snapshot && snapshot === completedSnapshot) return;
+        await completeAlreadyOnMain(work, channel);
+        completedSnapshot = snapshot ?? '';
+      };
+      await completeChanged();
       const seen = new Set<string>(),
         started = new Set<string>(),
         running = new Map<string, Promise<boolean>>();
-      const observe = () => {
-        const data = landingRecords(work.store, channel);
+      const observe = async () => {
+        const data = await observeLandingQueue(work.store, channel);
         for (const entry of data.landingEntries ?? [])
           if (entry.channel === channel && ['queued', 'checking'].includes(entry.status)) seen.add(entry.id);
         return data;
@@ -65,9 +82,8 @@ export async function drainLandingBatches(
       let halted = false,
         failure: { error: unknown; batch: LandingBatch } | undefined,
         launched = 0;
-      observe();
       for (;;) {
-        const observed = observe();
+        const observed = await observe();
         const pending = observed.landingEntries?.find(
           entry => entry.channel === channel && entry.status === 'queued',
         );
@@ -147,7 +163,7 @@ export async function drainLandingBatches(
             halted = true;
             continue;
           }
-          await completeAlreadyOnMain(work, channel);
+          await completeChanged();
           running.set(
             id,
             (async () => {

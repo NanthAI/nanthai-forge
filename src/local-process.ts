@@ -124,3 +124,35 @@ export function processGroupAlive(pid?: number, startTime?: string): boolean {
     return true;
   }
 }
+
+// Cache only positive identity observations. ESRCH is checked every time; stale
+// positives may delay recovery briefly but never reclaim a live/reused process.
+const liveObservations = new Map<string, number>();
+export function processesAliveCached(identities: { pid: number; startTime?: string | undefined }[]) {
+  const now = performance.now();
+  for (const [key, until] of liveObservations) if (until <= now) liveObservations.delete(key);
+  const pending: number[] = [];
+  const alive = identities.map((identity, index) => {
+    const key = `${identity.pid}.${identity.startTime}`;
+    try {
+      process.kill(identity.pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+        liveObservations.delete(key);
+        return false;
+      }
+    }
+    if (!liveObservations.has(key)) pending.push(index);
+    return true;
+  });
+  const sampled = processesAlive(pending.map(index => identities[index]!));
+  sampled.forEach((value, offset) => {
+    const index = pending[offset]!,
+      identity = identities[index]!;
+    alive[index] = value;
+    if (value) liveObservations.set(`${identity.pid}.${identity.startTime}`, performance.now() + 250);
+  });
+  return alive;
+}
+export const processAliveCached = (identity: { pid: number; startTime?: string | undefined }) =>
+  processesAliveCached([identity])[0]!;

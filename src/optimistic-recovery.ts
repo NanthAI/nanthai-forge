@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { recoveryEdit } from './optimistic-recovery-edit.js';
+export { recoveryEdit } from './optimistic-recovery-edit.js';
+import { observeRecoveryRecords } from './post-accept-records.js';
 import { failedAuditTests } from './optimistic-evidence.js';
 import { optimisticLanding } from './autonomy-policy.js';
 import { finishChild } from './agent-finish-journal.js';
@@ -16,22 +19,19 @@ export const recoveryAllowed = (data: WorkData) =>
 export const recoveryResult = (data: WorkData, run: CheckRun) =>
   data.channelMoves.find(move => move.optimisticRecovery?.auditRunId === run.id)?.optimisticRecovery;
 
-export function recoveryEdit<T>(store: WorkStore, edit: (data: WorkData) => T): T {
-  return store.locked(() => {
-    const data = store.load(),
-      result = edit(data);
-    data.revision++;
-    store.save(data);
-    return result;
-  });
-}
 /** Reuse completed exact subset evidence, including after a worker restart.
  * Interrupted executions get distinct retained operation IDs. */
-export async function recoveryCheck(store: WorkStore, audit: CheckRun, view: WorkView) {
-  recoveryEdit(store, data => {
-    if (!data.views.some(item => item.id === view.id)) data.views.push(view);
-  });
-  const previous = store.load().runs.filter(run => run.viewId === view.id);
+export async function recoveryCheck(store: WorkStore, audit: CheckRun, view: WorkView, observe?: () => void) {
+  await recoveryEdit(
+    store,
+    data => {
+      if (!data.views.some(item => item.id === view.id)) data.views.push(view);
+    },
+    [view.id],
+  );
+  const previous =
+    store.readRecords()?.all('runs', view.id, 'viewId') ??
+    store.load().runs.filter(run => run.viewId === view.id);
   let run = previous.at(-1);
   if (run && ['passed', 'failed'].includes(run.status)) {
     invariant(
@@ -63,7 +63,10 @@ export async function recoveryCheck(store: WorkStore, audit: CheckRun, view: Wor
     },
     store.revision(),
   );
-  await waitForAgentRun(store, runId);
+  do {
+    observe?.();
+    await waitForAgentRun(store, runId, 1000, false);
+  } while (['queued', 'preparing', 'running'].includes(store.select('runs', runId)!.status));
   run = store.select('runs', runId)!;
   return run;
 }
@@ -89,54 +92,59 @@ function recoveryView(
     ...(phase === 'retry' ? { mainCheck: audit.mainCheck! } : {}),
   };
 }
-function settleRecovery(
+async function settleRecovery(
   store: WorkStore,
   audit: CheckRun,
   status: 'flaky' | 'fix-forward' | 'reverted',
   culprits: ChannelMove[] = [],
   accepted?: ChannelMove,
 ) {
-  recoveryEdit(store, data => {
-    const landing = data.channelMoves.find(
-      move => move.head === audit.head && move.channel === audit.mainCheck!.channel,
-    )!;
-    if (landing.optimisticRecovery) return;
-    landing.optimisticRecovery = {
-      auditRunId: audit.id,
-      status,
-      culpritIds: culprits.map(move => move.id),
-      ...(accepted ? { acceptanceId: accepted.id } : {}),
-    };
-    if (!accepted) return;
-    accepted = data.channelMoves.find(move => move.id === accepted!.id)!;
-    const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-    const undo = `nforge agent ${quote(store.root)} undo-revert ${quote(JSON.stringify({ acceptanceId: accepted.id, operationId: finishChild(accepted.id, 'undo') }))}`;
-    accepted.automatic = {
-      ...accepted.automatic!,
-      summary: `Automatically reverted ${culprits.map(move => move.id).join(', ')} after audit ${audit.id}`,
-      undo,
-    };
-    for (const culprit of culprits) {
-      const view = data.views.find(view => view.id === culprit.viewId)!;
-      for (const pin of view.inputs) {
-        const lane = data.lanes.find(lane => lane.id === pin.laneId);
-        if (!lane) continue;
-        lane.state = 'active';
-        const intent = data.intents.find(intent => intent.id === lane.intentId)!;
-        intent.status = 'active';
-        intent.notes.push({
-          kind: 'decision',
-          at: accepted.at,
-          text: `Automatic compensating revert ${accepted.id} on ${accepted.channel}. Your Lane and edits are retained. Failing audit ${audit.id}: ${audit.failureSummary ?? audit.details}. ${undo}`,
-        });
+  await recoveryEdit(
+    store,
+    data => {
+      const landing = data.channelMoves.find(
+        move => move.head === audit.head && move.channel === audit.mainCheck!.channel,
+      )!;
+      if (landing.optimisticRecovery) return;
+      landing.optimisticRecovery = {
+        auditRunId: audit.id,
+        status,
+        culpritIds: culprits.map(move => move.id),
+        ...(accepted ? { acceptanceId: accepted.id } : {}),
+      };
+      if (!accepted) return;
+      accepted = data.channelMoves.find(move => move.id === accepted!.id)!;
+      const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+      const undo = `nforge agent ${quote(store.root)} undo-revert ${quote(JSON.stringify({ acceptanceId: accepted.id, operationId: finishChild(accepted.id, 'undo') }))}`;
+      accepted.automatic = {
+        ...accepted.automatic!,
+        summary: `Automatically reverted ${culprits.map(move => move.id).join(', ')} after audit ${audit.id}`,
+        undo,
+      };
+      for (const culprit of culprits) {
+        const view = data.views.find(view => view.id === culprit.viewId)!;
+        for (const pin of view.inputs) {
+          const lane = data.lanes.find(lane => lane.id === pin.laneId);
+          if (!lane) continue;
+          lane.state = 'active';
+          const intent = data.intents.find(intent => intent.id === lane.intentId)!;
+          intent.status = 'active';
+          intent.notes.push({
+            kind: 'decision',
+            at: accepted.at,
+            text: `Automatic compensating revert ${accepted.id} on ${accepted.channel}. Your Lane and edits are retained. Failing audit ${audit.id}: ${audit.failureSummary ?? audit.details}. ${undo}`,
+          });
+        }
       }
-    }
-  });
+    },
+    culprits.map(move => move.viewId),
+    [...culprits.map(move => move.id), ...(accepted ? [accepted.id] : [])],
+  );
 }
 
 /** Run under the post-accept worker slot, never a Work/landing lock during checks. */
-export async function recoverOptimisticMain(store: WorkStore, audit: CheckRun) {
-  let data = store.load();
+export async function recoverOptimisticMain(store: WorkStore, audit: CheckRun, observe?: () => void) {
+  let data = await observeRecoveryRecords(store, audit.mainCheck!.channel);
   if (!store.native || !recoveryAllowed(data) || recoveryResult(data, audit)) return;
   const moves = data.channelMoves.filter(
     move => move.status === 'accepted' && move.channel === audit.mainCheck!.channel,
@@ -152,7 +160,7 @@ export async function recoverOptimisticMain(store: WorkStore, audit: CheckRun) {
         moves.some((move, index) => index > end && move.head === run.head),
     )
   ) {
-    settleRecovery(store, audit, 'flaky');
+    await settleRecovery(store, audit, 'flaky');
     return;
   }
   const original = data.views.find(view => view.id === audit.viewId)!;
@@ -195,11 +203,11 @@ export async function recoverOptimisticMain(store: WorkStore, audit: CheckRun) {
       });
     });
   if (data.views.find(view => view.id === moves[end]!.viewId)?.recovery) {
-    settleRecovery(store, audit, 'fix-forward');
+    await settleRecovery(store, audit, 'fix-forward');
     return;
   }
   if (!window.length || window.some(move => !move.previous)) {
-    settleRecovery(store, audit, 'fix-forward');
+    await settleRecovery(store, audit, 'fix-forward');
     return;
   }
   const make = (head: string, base: string, key: string, phase: 'retry' | 'bisect' | 'revert') => ({
@@ -210,9 +218,9 @@ export async function recoverOptimisticMain(store: WorkStore, audit: CheckRun) {
       : {}),
   });
   try {
-    const retry = await recoveryCheck(store, audit, make(audit.head, audit.head, 'retry', 'retry'));
+    const retry = await recoveryCheck(store, audit, make(audit.head, audit.head, 'retry', 'retry'), observe);
     if (retry.status === 'passed') {
-      settleRecovery(store, audit, 'flaky');
+      await settleRecovery(store, audit, 'flaky');
       return;
     }
     if (retry.status !== 'failed') throw new ForgeError('CANCELLED', 'Main retry inconclusive.');
@@ -228,39 +236,39 @@ export async function recoverOptimisticMain(store: WorkStore, audit: CheckRun) {
       );
       if (!head) throw new ForgeError('RECOVERY_CONFLICT', 'Subset composition conflicts; fix forward.');
       const key = `subset:${subset.map(move => move.id).join(':')}`;
-      return (await recoveryCheck(store, audit, make(head, base, key, 'bisect'))).status;
+      return (await recoveryCheck(store, audit, make(head, base, key, 'bisect'), observe)).status;
     };
     if (!prior && (await checkSubset([])) !== 'passed') {
-      settleRecovery(store, audit, 'fix-forward');
+      await settleRecovery(store, audit, 'fix-forward');
       return;
     }
     const culprits = await bisectLandings(window, checkSubset);
     if (!culprits.length) {
-      settleRecovery(store, audit, 'fix-forward');
+      await settleRecovery(store, audit, 'fix-forward');
       return;
     }
     if (prior) {
-      settleRecovery(store, audit, 'reverted', culprits, prior);
+      await settleRecovery(store, audit, 'reverted', culprits, prior);
       return;
     }
-    data = store.load();
+    data = await observeRecoveryRecords(store, audit.mainCheck!.channel);
     const current = data.channelMoves
       .filter(move => move.status === 'accepted' && move.channel === audit.mainCheck!.channel)
       .at(-1)!;
     const head = reverseLandings(source, current.head, culprits, audit.startedAt);
     if (!head) {
-      settleRecovery(store, audit, 'fix-forward');
+      await settleRecovery(store, audit, 'fix-forward');
       return;
     }
     const view = make(head, current.head, `revert:${current.id}`, 'revert');
-    const verified = await recoveryCheck(store, audit, view);
+    const verified = await recoveryCheck(store, audit, view, observe);
     if (verified.status !== 'passed') {
-      settleRecovery(store, audit, 'fix-forward');
+      await settleRecovery(store, audit, 'fix-forward');
       return;
     }
     // Recheck live policy immediately before ordinary acceptance enforces paths, actor and exact evidence.
-    if (!recoveryAllowed(store.load())) {
-      settleRecovery(store, audit, 'fix-forward');
+    if (!recoveryAllowed(store.readRecords()?.data() ?? store.load())) {
+      await settleRecovery(store, audit, 'fix-forward');
       return;
     }
     const { WorkService } = await import('./work.js');
@@ -281,14 +289,21 @@ export async function recoverOptimisticMain(store: WorkStore, audit: CheckRun) {
         ),
       )
     ).result as ChannelMove;
-    settleRecovery(store, audit, 'reverted', culprits, accepted);
+    await settleRecovery(store, audit, 'reverted', culprits, accepted);
   } catch (error) {
     if (
       error instanceof ForgeError &&
-      ['WORK_BUSY', 'WORK_STALE', 'CHANNEL_CHANGED', 'CANCELLED', 'SOURCE_CHANGED'].includes(error.code)
+      [
+        'WORK_BUSY',
+        'WORK_STALE',
+        'CHANNEL_CHANGED',
+        'CANCELLED',
+        'SOURCE_CHANGED',
+        'MAIN_AUDIT_STALLED',
+      ].includes(error.code)
     )
       throw error;
     if (!(error instanceof ForgeError)) throw error;
-    settleRecovery(store, audit, 'fix-forward');
+    await settleRecovery(store, audit, 'fix-forward');
   }
 }

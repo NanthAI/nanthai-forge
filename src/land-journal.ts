@@ -1,3 +1,4 @@
+import { readLandingJournals, observeLandingJournals } from './landing-journal-reads.js';
 import { observeWorkProgress } from './work-progress.js';
 import { reuseLandSelection } from './land-request-identity.js';
 import {
@@ -10,16 +11,7 @@ import { wakeLandingWorker } from './landing-worker-wake.js';
 import { landFrictionCounts } from './friction-auto.js';
 // SPDX-License-Identifier: Apache-2.0
 import { savedOverlapPlan, highOverlap, orderOverlapGroups } from './agent-overlap-plan.js';
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  writeFileSync,
-} from 'node:fs';
+import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { mkdirBelow } from './mkdir-below.js';
@@ -67,6 +59,7 @@ type State = {
 export class LandJournal {
   readonly path: string;
   readonly state: State;
+  private saved = '';
   constructor(
     private readonly store: WorkStore,
     command: LandCommand,
@@ -80,6 +73,7 @@ export class LandJournal {
     const request = digest(JSON.stringify(selection ? { command: identity, selection } : identity));
     if (existsSync(this.path)) {
       this.state = JSON.parse(readFileSync(this.path, 'utf8')) as State;
+      this.saved = JSON.stringify(this.state);
       invariant(
         this.state.schema === 1 &&
           (this.state.request === request ||
@@ -251,35 +245,38 @@ export class LandJournal {
     this.save();
   }
   save() {
+    const next = JSON.stringify(this.state);
+    if (next === this.saved) return;
     saveLandJournal(this.store, this.path, this.state);
+    this.saved = next;
     observeWorkProgress();
   }
 }
 
 /** Retain and replay the original parent request, including its immutable input pins.
  * Older journals recover through their retained child commands and exact input pins. */
+const parseLand = (text: string) => {
+  const state = JSON.parse(text) as State;
+  invariant(state.schema === 1, 'INVALID_WORK_STORE', 'Invalid retained land journal.');
+  return state;
+};
+const pendingLand = (state: State, name: string) =>
+  state.entries.some(
+    entry => !entry.sourceOperationId && (!entry.result || entry.result.status === 'waiting'),
+  )
+    ? { operationId: name.slice(0, -5), command: state.command, selection: state.selection, state }
+    : undefined;
 export function pendingLands(store: WorkStore) {
-  const directory = join(store.directory, 'agent-land');
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory)
-    .filter(name => /^[0-9a-f-]+\.json$/.test(name))
-    .flatMap(name => {
-      const state = JSON.parse(readFileSync(join(directory, name), 'utf8')) as State;
-      invariant(state.schema === 1, 'INVALID_WORK_STORE', 'Invalid retained land journal.');
-      return state.entries.some(
-        entry => !entry.sourceOperationId && (!entry.result || entry.result.status === 'waiting'),
-      )
-        ? [
-            {
-              operationId: name.slice(0, -5),
-              command: state.command,
-              selection: state.selection,
-              state,
-              path: join(directory, name),
-            },
-          ]
-        : [];
-    });
+  return readLandingJournals(store, 'agent-land', parseLand, (state, name) => {
+    const pending = pendingLand(state, name);
+    return pending && { ...pending, path: join(store.directory, 'agent-land', name) };
+  });
+}
+export function observePendingLands(store: WorkStore) {
+  return observeLandingJournals(store, 'agent-land', parseLand, (state, name) => {
+    const pending = pendingLand(state, name);
+    return pending && { ...pending, path: join(store.directory, 'agent-land', name) };
+  });
 }
 
 export function saveLandJournal(store: WorkStore, path: string, state: State) {

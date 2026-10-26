@@ -81,7 +81,9 @@ export class ActionsApiError extends ForgeError {
           ? 'unprocessable'
           : undefined;
     this.outcome = outcome;
-    this.response = response;
+    this.response = Object.keys(response).length
+      ? response
+      : { message: 'No HTTP response received (transport failure or timeout).' };
   }
 }
 // Rate-limit detection retains the existing primary/secondary-budget handling.
@@ -186,6 +188,10 @@ export async function observe<T>(
         await waitForBudget(api, progress);
         continue;
       }
+      const status = error instanceof ActionsApiError ? error.httpStatus : undefined;
+      progress?.(
+        `GitHub API observation failed (${status === undefined ? 'no HTTP response' : `HTTP ${status}`}); ${attempt === 5 ? 'retry window exhausted; retained execution remains reconcilable' : 'retrying retained execution'}.`,
+      );
       if (attempt === 5) throw error;
       await api.sleep(Math.min(60_000, 5_000 * 2 ** attempt++));
     }

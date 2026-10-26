@@ -16,7 +16,7 @@ import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { workProgress, workProgressIdentity } from './work-progress.js';
 import { CheckQueue, queueHolder } from './check-queue.js';
-import { processAlive, processIdentity } from './local-process.js';
+import { processAliveCached, processIdentity } from './local-process.js';
 import { ForgeError, invariant } from './errors.js';
 
 export type WorkLockOptions = {
@@ -24,6 +24,8 @@ export type WorkLockOptions = {
   waitMs?: number | undefined;
   operation?: string | undefined;
   actor?: string | undefined;
+  /** Long-lived drivers retry legacy synchronous call sites without blocking. */
+  nonblocking?: boolean | undefined;
 };
 export type WorkLockSpan = {
   operation?: string | undefined;
@@ -84,7 +86,7 @@ function recover(path: string) {
     owner.host !== hostname() ||
     !Number.isInteger(owner.pid) ||
     owner.pid <= 0 ||
-    processAlive(owner)
+    processAliveCached(owner)
   )
     return;
   const recovery = `${path}-recovery`;
@@ -100,7 +102,7 @@ function recover(path: string) {
       current.host === hostname() &&
       Number.isInteger(current.pid) &&
       current.pid > 0 &&
-      !processAlive(current)
+      !processAliveCached(current)
     )
       unlinkSync(path);
   } finally {
@@ -109,7 +111,7 @@ function recover(path: string) {
 }
 /** FIFO admission plus the legacy exclusive file: old writers and ambiguous locks
  * remain respected. Dead queue tickets use kernel process identities, never age. */
-export function workLocked<T>(path: string, run: () => T, options: WorkLockOptions = {}): T {
+function* lockAdmission<T>(path: string, run: () => T, options: WorkLockOptions): Generator<number, T, void> {
   const settings = { ...context.getStore(), ...options },
     waitMs = settings.waitMs ?? workLockWaitMs();
   invariant(
@@ -149,12 +151,7 @@ export function workLocked<T>(path: string, run: () => T, options: WorkLockOptio
           'WORK_BUSY',
           `Timed out after ${waitMs}ms: ${details}. Existing work and lock are preserved. Retry the original operation ${workProgressIdentity().operationId ?? 'ID'} or increase lockWaitMs/FORGE_WORK_LOCK_WAIT_MS.`,
         );
-      Atomics.wait(
-        new Int32Array(new SharedArrayBuffer(4)),
-        0,
-        0,
-        Math.min(25, Math.max(1, waitMs - (Date.now() - began))),
-      );
+      yield Math.min(25, Math.max(1, waitMs - (Date.now() - began)));
     }
     const started = Date.now(),
       identity = processIdentity(),
@@ -209,5 +206,54 @@ export function workLocked<T>(path: string, run: () => T, options: WorkLockOptio
       unlinkSync(path);
     }
     queue.release();
+  }
+}
+
+/** Compatibility for finite synchronous commands. Driver call sites use asynchronous admission. */
+export function workLocked<T>(path: string, run: () => T, options: WorkLockOptions = {}): T {
+  const nonblocking = options.nonblocking ?? context.getStore()?.nonblocking;
+  if (nonblocking && existsSync(path)) {
+    invariant(
+      !(options.cancelled ?? context.getStore()?.cancelled)?.(),
+      'CANCELLED',
+      'Finish cancelled while waiting for a Work lock.',
+    );
+    recover(path);
+    if (existsSync(path)) {
+      const details = `waiting for ${description(holder(path))}; queue admission pending`;
+      workProgress('waiting for lock', details, path);
+      throw new ForgeError(
+        'WORK_BUSY',
+        `Timed out after 0ms: ${details}. Existing work and lock are preserved. Retry the original operation ${workProgressIdentity().operationId ?? 'ID'}.`,
+      );
+    }
+  }
+  const admission = lockAdmission(path, run, nonblocking ? { ...options, waitMs: 0 } : options);
+  try {
+    for (;;) {
+      const next = admission.next();
+      if (next.done) return next.value;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, next.value);
+    }
+  } finally {
+    admission.return(undefined as T);
+  }
+}
+/** Keep the same FIFO ticket and legacy-file recovery while yielding between attempts.
+ * The callback is synchronous: only admission waits, never a writer critical section. */
+export async function workLockedAsync<T>(
+  path: string,
+  run: () => T,
+  options: WorkLockOptions = {},
+): Promise<T> {
+  const admission = lockAdmission(path, run, options);
+  try {
+    for (;;) {
+      const next = admission.next();
+      if (next.done) return next.value;
+      await new Promise(resolve => setTimeout(resolve, next.value));
+    }
+  } finally {
+    admission.return(undefined as T);
   }
 }

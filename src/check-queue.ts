@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { invariant, ForgeError } from './errors.js';
 import { workLocked } from './work-lock.js';
 import { workProgressIdentity } from './work-progress.js';
-import { processesAlive, processGroupAlive, processIdentity } from './local-process.js';
+import { processesAliveCached, processGroupAlive, processIdentity } from './local-process.js';
 
 const ticketSchema = z.object({
   number: z.number().int().positive().safe(),
@@ -226,37 +226,6 @@ export function queueHolder(holder?: {
   return `${holder.actor ?? `pid ${holder.pid}`} ${holder.operationId ? `operation=${holder.operationId} ` : ''}${holder.runId ? `run=${holder.runId} ` : ''}${holder.phase ? `phase=${holder.phase}` : ''}`.trim();
 }
 
-// Polling waiters must not fork ps on every 25ms tick. Reuse only conservative
-// positive observations briefly, checking ESRCH on every scan. A cached positive
-// can postpone recovery, never authorize deleting a live/reused process's ticket.
-const liveObservations = new Map<string, number>();
-function queueProcessesAlive(identities: { pid: number; startTime?: string | undefined }[]) {
-  const now = performance.now();
-  for (const [key, until] of liveObservations) if (until <= now) liveObservations.delete(key);
-  const pending: number[] = [];
-  const alive = identities.map((identity, index) => {
-    const key = `${identity.pid}.${identity.startTime}`;
-    try {
-      process.kill(identity.pid, 0);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
-        liveObservations.delete(key);
-        return false;
-      }
-    }
-    if (liveObservations.has(key)) return true;
-    pending.push(index);
-    return true;
-  });
-  const sampled = processesAlive(pending.map(index => identities[index]!));
-  sampled.forEach((value, offset) => {
-    const index = pending[offset]!,
-      identity = identities[index]!;
-    alive[index] = value;
-    if (value) liveObservations.set(`${identity.pid}.${identity.startTime}`, performance.now() + 250);
-  });
-  return alive;
-}
 export function queueEntries(directory = checkQueueDirectory()) {
   if (!existsSync(directory)) return [];
   const entries = readdirSync(directory).flatMap(name => {
@@ -272,7 +241,7 @@ export function queueEntries(directory = checkQueueDirectory()) {
     const identity = { pid: Number(match[1]), startTime: Buffer.from(match[2]!, 'base64url').toString() };
     return [{ path, ticket, pid: identity.pid, identity }];
   });
-  const alive = queueProcessesAlive(entries.map(item => item.identity));
+  const alive = processesAliveCached(entries.map(item => item.identity));
   return entries.flatMap(({ path, ticket, pid }, index) => {
     if ((!alive[index] || ticket?.released) && !processGroupAlive(ticket?.childPid, ticket?.childStartTime)) {
       rmSync(path, { recursive: true, force: true });

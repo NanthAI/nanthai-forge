@@ -1,3 +1,4 @@
+import { readLandingJournals, observeLandingJournals } from './landing-journal-reads.js';
 import { landingPins, landingPinsSchema } from './landing-environment.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -151,17 +152,14 @@ export function waitingFinishes(store: WorkStore) {
 
 /** Startup recovery also adopts drivers that exited between durable phases.
  * A check-only finish is not a submitted landing; terminal results stay terminal. */
+const parseFinish = (text: string) => schema.parse(JSON.parse(text));
+const unfinishedFinish = (state: ReturnType<typeof parseFinish>) =>
+  !state.result && state.command && (state.command.accept || state.submitted) ? state.command : undefined;
 export function unfinishedFinishes(store: WorkStore) {
-  const directory = join(store.directory, 'agent-finish');
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory)
-    .filter(name => /^[0-9a-f-]+\.json$/.test(name))
-    .flatMap(name => {
-      const state = schema.parse(JSON.parse(readFileSync(join(directory, name), 'utf8')));
-      return !state.result && state.command && (state.command.accept || state.submitted)
-        ? [state.command]
-        : [];
-    });
+  return readLandingJournals(store, 'agent-finish', parseFinish, unfinishedFinish);
+}
+export function observeUnfinishedFinishes(store: WorkStore) {
+  return observeLandingJournals(store, 'agent-finish', parseFinish, unfinishedFinish);
 }
 
 /** Reuse the original pinned finish command for CLI aliases after an unknown reply. */

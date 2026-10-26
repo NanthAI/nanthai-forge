@@ -180,9 +180,11 @@ test('detached GitHub auto-push drops unrelated secrets while preserving gh auth
   assert.equal(calls[0].options.env.GH_TOKEN, 'fake-test-secret');
   assert.equal(calls[0].options.env.FORGE_CHECK_QUEUE_DIR, process.env.FORGE_CHECK_QUEUE_DIR);
 });
-test('detached post-accept audit drops unrelated secrets and keeps its full-check setting', t => {
+test('detached post-accept audit drops unrelated secrets and keeps its full-check setting', async t => {
   const calls = capture(t);
   wakePostAccept(stub(t, { channelMoves: [{ postAccept: { checkId: 'verify' } }], checks: [] }));
+  // Cooperative selected observation publishes the wake asynchronously.
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(calls.length, 1);
   clean(calls[0].options.env);
   assert.equal(calls[0].options.env.FORGE_CHECK_FULL, '1');

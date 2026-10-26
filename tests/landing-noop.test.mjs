@@ -260,3 +260,64 @@ test('an empty entry against base finishes without a check or Channel move', asy
   assert.match(entry.reason, /Empty against base/);
   assert.deepEqual(counts(f), before);
 });
+
+test('queued no-op composition reuses unchanged pins and invalidates on View, main and stack changes', async t => {
+  const { settleQueuedNoops } = await import('../dist/landing-noop.js');
+  const f = await fixture(t);
+  const queued = await f.candidate('memo.txt');
+  const peer = await f.candidate('peer.txt', 'peer\n', false);
+  const data = f.store.load(),
+    source = new NativeSource(f.root);
+  const entry = data.landingEntries.find(entry => entry.id === queued.command.operationId);
+  const view = data.views.find(view => view.id === entry.viewId);
+  let compositions = 0;
+  const compose = source.compose.bind(source);
+  t.mock.method(source, 'compose', (...args) => {
+    compositions++;
+    return compose(...args);
+  });
+  const { composeLandingSource } = await import('../dist/landing-compose-source.js');
+  for (let i = 0; i < 5; i++)
+    composeLandingSource(f.store, source, view, data.nativeHead, 'No-op landing', entry.arrivedAt);
+  const uncached = compositions;
+  assert.equal(uncached, 5);
+  compositions = 0;
+  settleQueuedNoops(f.work, data, 'main', source);
+  assert.equal(compositions, 1);
+  for (let i = 0; i < 4; i++) {
+    data.revision++;
+    entry.waitingFor = { rule: 'capacity', reason: 'Synthetic wait', entries: [] };
+    settleQueuedNoops(f.work, data, 'main', source);
+  }
+  assert.equal(compositions, 1, 'unrelated observations do not recompose unchanged source');
+  data.nativeHead = peer.view.head;
+  settleQueuedNoops(f.work, data, 'main', source);
+  assert.equal(compositions, 2, 'accepted main is a source pin');
+  view.composedMain = peer.view.head;
+  settleQueuedNoops(f.work, data, 'main', source);
+  assert.equal(compositions, 3, 'View retargeting is a source pin');
+  f.store.locked(() => {
+    const tx = f.store.records(),
+      found = tx.find('lanes', queued.lane.laneId);
+    // Stack metadata requires Work 21/22, as a real stacked start records.
+    tx.setSchema(data.schema % 2 === 0 ? 22 : 21);
+    found.record.stack = {
+      laneId: peer.lane.laneId,
+      startHead: peer.view.head,
+      head: peer.view.head,
+      channel: 'main',
+      detached: true,
+    };
+    tx.replace('lanes', found.position, found.record);
+    f.store.commitRecords(tx);
+  });
+  settleQueuedNoops(f.work, data, 'main', source);
+  assert.equal(compositions, 4, 'saved stack changes invalidate even when entry head and main do not');
+  view.head = entry.head = peer.view.head;
+  settleQueuedNoops(f.work, data, 'main', source);
+  assert.equal(entry.status, 'accepted', 'changed input head is recomposed and settles as already on main');
+  assert.equal(entry.alreadyOnMain, peer.view.head);
+  t.diagnostic(
+    `5 unchanged-pin observations: source compositions ${uncached} without memoization, 1 with memoization; main/View/stack/head changes all recomposed`,
+  );
+});

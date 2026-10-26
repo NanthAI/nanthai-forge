@@ -486,3 +486,35 @@ test('cancelling while a replacement is undiscovered never reopens or reruns it'
   assert.equal(result.error, undefined);
   assert.equal(calls.filter(call => call.endpoint.endsWith('/rerun')).length, 0);
 });
+
+test('ambiguous observations retry and retain HTTP status or explicit transport failure diagnostics', async () => {
+  const { ActionsApiError, recordActionsFailures } = await import('../dist/github-actions-api.js');
+  const failures = [],
+    progress = [],
+    waits = [];
+  let requests = 0;
+  const api = recordActionsFailures(
+    {
+      async request() {
+        if (++requests === 1) throw new ActionsApiError(503);
+        if (requests === 2) throw new ActionsApiError();
+        return { status: 'completed' };
+      },
+      sleep: async ms => waits.push(ms),
+    },
+    error => failures.push(error.response),
+  );
+  assert.deepEqual(
+    await observe(
+      api,
+      () => api.request('synthetic'),
+      line => progress.push(line),
+    ),
+    { status: 'completed' },
+  );
+  assert.deepEqual(waits, [5000, 10000]);
+  assert.equal(failures[0].status, 503);
+  assert.match(failures[1].message, /No HTTP response.*transport failure or timeout/);
+  assert.match(progress[0], /HTTP 503.*retrying/);
+  assert.match(progress[1], /no HTTP response.*retrying/);
+});

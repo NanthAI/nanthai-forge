@@ -965,10 +965,18 @@ test('finish returns a resumable result for a changed check observation and repl
   t.after(() => cleanupOwner(root));
   const store = agent.work.store,
     original = store.select.bind(store);
+  // Registration may inspect a passed run and retry transient reads. Inject at
+  // the final observation after wait, where failure must prevent acceptance.
+  const wait = agent.wait.bind(agent);
+  let observing = false;
+  agent.wait = async (...args) => {
+    await wait(...args);
+    observing = true;
+  };
   let changed = false;
   store.select = (...args) => {
     const record = original(...args);
-    if (args[0] === 'runs' && record?.status === 'passed' && !changed) {
+    if (observing && args[0] === 'runs' && record?.status === 'passed' && !changed) {
       changed = true;
       throw new ForgeError('SOURCE_CHANGED', 'Work changed after the check completed');
     }

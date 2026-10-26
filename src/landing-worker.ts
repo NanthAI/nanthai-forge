@@ -1,5 +1,6 @@
+import { shareLandingRecords, landingPositions, prepareLandingRecords } from './landing-records-index.js';
+import { observeLandingQueue } from './landing-records.js';
 import { watchLandingStalls } from './landing-stall-watch.js';
-import { landingRecords } from './landing-records.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { resumeLegacyLand } from './landing-worker-journals.js';
 import type { AgentWorkflow } from './agent-workflow.js';
@@ -11,8 +12,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { watchLocal } from './local-watcher.js';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { unfinishedFinishes } from './agent-finish-journal.js';
-import { pendingLands } from './land-journal.js';
+import { observeUnfinishedFinishes } from './agent-finish-journal.js';
+import { observePendingLands } from './land-journal.js';
 import { openAutoExchangeNotifications } from './auto-exchange-notify.js';
 import { waitingDependencies } from './agent-dependencies.js';
 import { processIdentity, processAlive } from './local-process.js';
@@ -96,9 +97,12 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
         };
         affected = undefined;
         try {
-          const data = landingRecords(store),
-            finishes = unfinishedFinishes(store),
-            lands = pendingLands(store);
+          const data = await observeLandingQueue(store);
+          const [finishes, lands] = await Promise.all([
+            observeUnfinishedFinishes(store),
+            observePendingLands(store),
+          ]);
+          if (signal.aborted) break;
           // An exact result receipt can change without a Work publication. Peer
           // releases retry unsuccessful admission, never a handled snapshot.
           const activeChannels = new Set(
@@ -116,6 +120,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
           ) {
             const { AgentWorkflow } = await import('./agent-workflow.js');
             agent = new AgentWorkflow(store.root);
+            shareLandingRecords(store, agent.work.store);
           }
           const receipts = data.runs
             .filter(run => ['queued', 'preparing', 'running'].includes(run.status))
@@ -149,7 +154,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
               // Recovery precedes journal replay, even when that journal fails.
               // Remote controllers adopt original IDs; dead local commands end.
               // Idle/terminal-only observations must not compete with Lane writes.
-              if (receipts.length) store.locked(() => recoverRecordRuns(store, store.records()));
+              if (receipts.length) await store.lockedAsync(() => recoverRecordRuns(store, store.records()));
               const channels = new Set([
                 ...(data.landingEntries ?? [])
                   .filter(e => ['queued', 'checking'].includes(e.status))
@@ -168,7 +173,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
                   channel,
                   ...(entry ? { operationId: entry.id } : {}),
                   laneIds: entry
-                    ? (data.views.find(view => view.id === entry.viewId)?.inputs.map(pin => pin.laneId) ?? [])
+                    ? (store.select('views', entry.viewId)?.inputs.map(pin => pin.laneId) ?? [])
                     : [],
                   ...(entry?.runId ? { runId: entry.runId } : {}),
                 };
@@ -199,15 +204,7 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
                     // a waiting result. Reconcile each exact all-passed snapshot
                     // once even if its filesystem/socket hint was already consumed.
                     // This is an evidence-driven continuation, never an idle poll.
-                    const after = landingRecords(store, channel);
-                    const ready = (after.landingBatches ?? []).filter(
-                      batch =>
-                        ['composing', 'checking'].includes(batch.status) &&
-                        batch.prefixes.length &&
-                        batch.prefixes.every(prefix =>
-                          after.runs.some(run => run.id === prefix.runId && run.status === 'passed'),
-                        ),
-                    );
+                    const ready = await terminalLandingBatches(store, channel);
                     const completed = JSON.stringify(
                       ready.map(batch => [batch.id, batch.prefixes, batch.settlement]),
                     );
@@ -293,5 +290,33 @@ export async function watchLandingWorker(store: WorkStore, signal: AbortSignal) 
     unsubscribe();
     await notifications.close();
     publish('stopped');
+  }
+}
+
+/** A terminal continuation follows only exact prefix run identities. */
+export async function terminalLandingBatches(store: WorkStore, channel: string) {
+  const tx = store.readRecords();
+  if (!tx) {
+    const data = store.load(),
+      runs = new Map(data.runs.map(run => [run.id, run]));
+    return (data.landingBatches ?? []).filter(
+      batch =>
+        batch.channel === channel &&
+        ['composing', 'checking'].includes(batch.status) &&
+        batch.prefixes.length &&
+        batch.prefixes.every(prefix => runs.get(prefix.runId)?.status === 'passed'),
+    );
+  }
+  try {
+    await prepareLandingRecords(store, tx);
+    return landingPositions(store, tx, 'landingBatches', ['composing', 'checking'], channel)
+      .map(position => tx.at('landingBatches', position))
+      .filter(
+        batch =>
+          batch.prefixes.length &&
+          batch.prefixes.every(prefix => tx.fields('runs', prefix.runId)?.record.status === 'passed'),
+      );
+  } finally {
+    tx.dispose();
   }
 }

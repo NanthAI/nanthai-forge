@@ -1,3 +1,4 @@
+import { passedReuseCandidates } from './landing-check-reuse-records.js';
 // SPDX-License-Identifier: Apache-2.0
 import { checkToolFence } from './check-tool-fence.js';
 import { validatePrefixRun } from './landing-diagnosis.js';
@@ -135,7 +136,7 @@ async function reuseCheck(
   };
   draft.reuseKey = checkReuseKey(store, draft);
   if (!draft.reuseKey || !reusableCheckInputs(draft)) return;
-  const candidates = (store.readRecords()?.all('runs', 'passed', 'status') ?? store.load().runs).filter(
+  const candidates = (await passedReuseCandidates(store, draft.reuseKey)).filter(
     run =>
       successful(run) &&
       !run.reusedFrom &&
@@ -308,6 +309,13 @@ async function reuseCheck(
             if (!publishingReuse) return;
             driver.beforePublish();
             if (!toolsCurrent()) throw toolsChanged;
+          },
+          batch?.channel,
+          {
+            selectedOnly: true,
+            runs: [draft.id, original.id, ...(replaced ? [replaced.id] : [])],
+            views: [view.id],
+            checks: [check.id],
           },
         );
       } catch (error) {

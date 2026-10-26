@@ -27,19 +27,37 @@ export type WorkCollection = {
   [K in keyof WorkData]-?: NonNullable<WorkData[K]> extends unknown[] ? K : never;
 }[keyof WorkData];
 export type WorkRecord<K extends WorkCollection> = NonNullable<WorkData[K]> extends (infer T)[] ? T : never;
+export type WorkRecordReadMemo = {
+  pages: Map<string, string[]>;
+  records: Map<string, unknown>;
+  json: Map<string, string>;
+  collections: Map<string, unknown[]>;
+};
+// Keep compact provenance across ordinary object copies, without persisting it
+// in JSON or treating these scheduling summaries as writable full records.
+const compactRecords = new WeakSet<object>();
+export const isCompactWorkRecord = (record: object) =>
+  compactRecords.has(record) ||
+  Object.values(record).some(value => Array.isArray(value) && compactRecords.has(value));
+
 export class WorkRecordTransaction {
   private readonly io;
   private readonly original: string;
   private readonly initial: string;
+  private readonly pages: Map<string, string[]>;
+  private readonly recordsByHash: Map<string, unknown>;
   private prepared?: { revision: number; publish: () => void };
 
   constructor(
     readonly directory: string,
     readonly manifest: RecordManifest,
     bytes: Buffer,
+    memo?: WorkRecordReadMemo,
   ) {
     assertWorkFormat(manifest.fields);
-    this.io = recordIO(directory, false, undefined, true);
+    this.pages = memo?.pages ?? new Map();
+    this.recordsByHash = memo?.records ?? new Map();
+    this.io = recordIO(directory, false, memo ?? { json: new Map(), collections: new Map() }, true);
     this.original = digest(bytes);
     this.initial = JSON.stringify(manifest);
   }
@@ -73,7 +91,12 @@ export class WorkRecordTransaction {
       'INVALID_WORK_STORE',
       'Work lookup points outside its collection.',
     );
-    const hashes = pageHashes(this.directory, index.pages[Math.floor(position / pageSize)]!);
+    const page = index.pages[Math.floor(position / pageSize)]!;
+    let hashes = this.pages.get(page);
+    if (!hashes) {
+      hashes = pageHashes(this.directory, page);
+      this.pages.set(page, hashes);
+    }
     invariant(
       hashes.length === Math.min(pageSize, index.count - Math.floor(position / pageSize) * pageSize),
       'INVALID_WORK_STORE',
@@ -102,7 +125,16 @@ export class WorkRecordTransaction {
     return preserveFields((parsed[collection] as unknown[])[0], raw) as WorkRecord<K>;
   }
   at<K extends WorkCollection>(collection: K, position: number): WorkRecord<K> {
-    return this.validate(collection, readRecordValue(this.directory, this.hash(collection, position), true));
+    const hash = this.hash(collection, position),
+      key = `${this.manifest.fields.schema}:${collection}:${hash}`;
+    let record = this.recordsByHash.get(key);
+    if (record === undefined) {
+      record = this.validate(collection, readRecordValue(this.directory, hash, true));
+      this.recordsByHash.set(key, record);
+    }
+    // Callers edit their selected copy; immutable read memos never carry edits
+    // across selections or transactions.
+    return structuredClone(record) as WorkRecord<K>;
   }
   find<K extends WorkCollection>(
     collection: K,
@@ -234,6 +266,8 @@ export class WorkRecordTransaction {
         header.keys.map(key => [key, Object.hasOwn(header.arrays, key) ? [] : header.fields[key]]),
       ),
     );
+    compactRecords.add(record as object);
+    for (const value of Object.values(record as object)) if (Array.isArray(value)) compactRecords.add(value);
     return {
       position,
       record,

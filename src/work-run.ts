@@ -1,3 +1,4 @@
+import { withoutLandingWorker } from './landing-worker-context.js';
 import { checkReuseKey } from './check-reuse-key.js';
 import { prepareRunRegistration } from './work-run-preparation.js';
 import { retryWorkPhase } from './work-retry.js';
@@ -252,6 +253,10 @@ function saveCompletion(store: WorkStore, id: string, complete?: (error?: unknow
     });
     if (store.native) automaticCleanup(store, `check:${id}`, 'check runner', { runId: id });
     wakeGithubPush(store);
+    if (store.select('runs', id)?.mainCheck)
+      void import('./post-accept-main.js')
+        .then(({ wakePostAccept }) => wakePostAccept(store))
+        .catch(() => undefined);
     complete?.();
   } catch (error) {
     if (error instanceof ForgeError && error.code === 'WORK_BUSY')
@@ -905,7 +910,11 @@ export function runWork(
   if (started) {
     // A cancelled finish must not prevent its runner from publishing the terminal receipt.
     if (detachedChecksRequired()) {
-      void executeOwnedRun(store, started, launchDetachedCheck);
+      void withoutLandingWorker(() =>
+        withWorkLockOptions({ nonblocking: true, waitMs: undefined, cancelled: () => false }, () =>
+          executeOwnedRun(store, started!, launchDetachedCheck),
+        ),
+      );
       if (sequence) {
         void import('./agent-run-observer.js')
           .then(({ waitForAgentRun }) => waitForAgentRun(store, started!.id, undefined, false))

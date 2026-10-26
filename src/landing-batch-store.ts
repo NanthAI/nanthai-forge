@@ -1,6 +1,7 @@
+import { prepareLandingRecords } from './landing-records-index.js';
 import { editWork } from './work-edit.js';
 import { recordLandingWaits, landingWait, checkingWait } from './landing-waiting.js';
-import { editLandingRecords } from './landing-records.js';
+import { editLandingRecords, type LandingRecordSelection } from './landing-records.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 import { assertLandingWorkerActive } from './landing-worker-context.js';
 import { interruptStaleLandingInputs } from './landing-stale.js';
@@ -9,7 +10,7 @@ import { landingConflictPeers } from './landing-conflict-peers.js';
 import { composeLandingSource } from './landing-compose-source.js';
 import { join } from 'node:path';
 import { digest } from './hash.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { retryWorkPhase } from './work-retry.js';
 import { finishChild } from './agent-finish-journal.js';
 import { checkEnvironment } from './check-environment.js';
@@ -46,21 +47,41 @@ export function batchEdit<T>(
   edit: (data: WorkData) => T,
   beforePublish?: () => void,
   channel?: string,
+  selection: LandingRecordSelection = {},
 ) {
-  return retryWorkPhase(id, () => {
+  let stalePreparations = 0;
+  return retryWorkPhase(id, async () => {
     const fence = () => {
       assertLandingWorkerActive();
       beforePublish?.();
     };
     assertLandingWorkerActive();
-    const tx = channel === undefined ? undefined : work.store.readRecords();
+    const tx = work.store.readRecords();
     if (tx) {
       try {
-        return editLandingRecords(work.store, channel!, edit, tx, id, fence);
+        await prepareLandingRecords(work.store, tx);
+        if (stalePreparations < 2)
+          return await editLandingRecords(work.store, channel, edit, tx, id, fence, selection);
+        // FIFO admission eventually owns one current pointer. The fallback
+        // prepares only this selected projection, never complete Work.
+        return await work.store.lockedAsync(() => {
+          const current = work.store.readRecords();
+          invariant(current, 'INVALID_WORK_STORE', 'Landing record lookup became unavailable.');
+          try {
+            return editLandingRecords(work.store, channel, edit, current, id, fence, selection, true);
+          } finally {
+            current.dispose();
+          }
+        });
+      } catch (error) {
+        if (error instanceof ForgeError && error.code === 'WORK_STALE') stalePreparations++;
+        throw error;
       } finally {
         tx.dispose();
       }
     }
+    // Legacy journals retain their existing validation/migration behavior.
+    // Omitting channel never selects this path for indexed owners.
     return editWork(
       work.store,
       data => {

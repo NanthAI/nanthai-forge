@@ -1,4 +1,10 @@
-import { editWork } from './work-edit.js';
+import { setTimeout as delay } from 'node:timers/promises';
+import { withDetachedChecks } from './check-execution-context.js';
+import { withWorkLockOptions, workQueueWaitMs } from './work-lock.js';
+import { readMainAuditState } from './post-accept-state.js';
+import { MainAuditWatchdog } from './post-accept-watchdog.js';
+import { selectPostAccept } from './post-accept-edit.js';
+import { observePostAcceptRecords } from './post-accept-records.js';
 // SPDX-License-Identifier: Apache-2.0
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { WorkService } from './work.js';
@@ -6,7 +12,7 @@ import { reuseMainCheck } from './landing-check-reuse.js';
 import { checkServiceEnv } from './worker-environment.js';
 import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { workProgress } from './work-progress.js';
-import { recoverOptimisticMain, recoveryResult } from './optimistic-recovery.js';
+import { recoverOptimisticMain, recoveryResult, recoveryAllowed } from './optimistic-recovery.js';
 import { wakeGithubPush } from './github-auto-push.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -17,15 +23,38 @@ import { selectMainAudit } from './post-accept-selection.js';
 import { checkEnvironment, recoverRuns, runWork, runInterruption } from './work-run.js';
 import { foregroundQueued } from './check-queue.js';
 import { ForgeError } from './errors.js';
-import { failedMainCheck, fixMainIntentId, recordFixForward } from './post-accept-fix-forward.js';
+import { failedMainCheck, fixMainIntentId } from './post-accept-fix-forward.js';
 
-/** The acceptance itself is the durable queue entry. Lost wakeups are recovered
- * by the next acceptance/status; run IDs are stable across worker restarts. */
+/** The acceptance is the durable queue entry. Coalesced wakes invalidate an
+ * in-flight snapshot so newly accepted requests receive another observation. */
+const waking = new WeakMap<WorkStore, { dirty: boolean }>();
 export function wakePostAccept(store: WorkStore) {
-  const moves = store.page('channelMoves', 0, Number.MAX_SAFE_INTEGER).records as ReturnType<
-    WorkStore['load']
-  >['channelMoves'];
+  const pending = waking.get(store);
+  if (pending) {
+    pending.dirty = true;
+    return;
+  }
+  const state = { dirty: true };
+  waking.set(store, state);
+  void (async () => {
+    try {
+      do {
+        state.dirty = false;
+        try {
+          publishAuditWake(store, await observePostAcceptRecords(store));
+        } catch {
+          // Durable requests survive an observation/spawn failure for a later wake.
+        }
+      } while (state.dirty);
+    } finally {
+      waking.delete(store);
+    }
+  })();
+}
+function publishAuditWake(store: WorkStore, data: import('./work-types.js').WorkData) {
+  const moves = data.channelMoves;
   if (
+    readMainAuditState(store)?.status !== 'stalled' &&
     !postAcceptMoves(moves).some(move => {
       if (!move.postAccept) return false;
       const run = move.postAcceptRunId && store.select('runs', move.postAcceptRunId);
@@ -47,12 +76,7 @@ export function wakePostAccept(store: WorkStore) {
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), store.root], {
     detached: true,
     stdio: 'ignore',
-    env: checkServiceEnv(
-      store.page('checks', 0, Number.MAX_SAFE_INTEGER).records,
-      childPolicy(store.readRecords()?.data() ?? store.load()),
-      ['FORGE_AUTH_TOKEN'],
-      { FORGE_CHECK_FULL: '1' },
-    ),
+    env: checkServiceEnv(data.checks, childPolicy(data), ['FORGE_AUTH_TOKEN'], { FORGE_CHECK_FULL: '1' }),
   });
   child.on('error', () => {
     /* Durable acceptance remains queued for the next owner observation. */
@@ -63,140 +87,143 @@ export function wakePostAccept(store: WorkStore) {
 export async function drainPostAccept(
   store: WorkStore,
   push?: { channel: string; checkId: string },
-  options: { waitMs?: number; timeoutMs?: number; progress?: boolean } = {},
+  options: {
+    waitMs?: number;
+    timeoutMs?: number;
+    progress?: boolean;
+    stallMs?: number;
+    signal?: AbortSignal;
+    sleep?: (ms: number) => Promise<unknown>;
+  } = {},
 ) {
+  const signal = options.signal ?? runInterruption.signal;
+  const queueWaitMs = options.waitMs ?? workQueueWaitMs();
   const end = options.timeoutMs === undefined ? Infinity : Date.now() + options.timeoutMs;
-  let reportedAt = -Infinity;
+  const watchdog = new MainAuditWatchdog(store, options.stallMs ?? 15 * 60_000);
+  let reportedAt = -Infinity,
+    contention = 0;
   const observe = () => {
+    if (signal.aborted)
+      throw new ForgeError(
+        'CANCELLED',
+        'Main audit driver stopped; accepted source and pending checks are retained.',
+      );
     if (Date.now() >= end)
       throw new ForgeError(
         'GITHUB_SYNC_AUDIT_TIMEOUT',
         'Main audit wait expired; its original run is retained. Retry github-sync --push --wait-audit.',
       );
-    if (options.progress && Date.now() - reportedAt >= 5000) {
-      const run = store.load().runs.find(run => run.mainCheck && !run.endedAt);
-      workProgress(
-        'waiting for main audit',
-        run ? `run=${run.id} status=${run.status}` : 'Waiting for audit admission',
-      );
-      reportedAt = Date.now();
-    }
+    watchdog.updateRuns();
   };
-  const response = await withQueueSlot(
-    join(store.directory, 'post-accept-main-queue'),
-    async () => {
-      for (;;) {
-        observe();
-        if (runInterruption.signal.aborted)
-          throw new ForgeError(
-            'CANCELLED',
-            'Main audit interrupted by a termination signal; accepted source and pending audit are retained.',
-          );
-        try {
-          const pending = store.load();
-          const failed = pending.runs.find(
-            run =>
-              failedMainCheck(run) &&
-              !recoveryResult(pending, run) &&
-              !pending.intents.some(intent => intent.id === fixMainIntentId(run)),
-          );
-          // A detached wake can arrive after another driver completed the audit.
-          // Select on this private snapshot before waiting or taking the writer
-          // lock: an idle worker must not race a zero-patience checkpoint. Any
-          // actual selection is repeated against fresh Work under the lock below.
-          if (!failed && !selectMainAudit(pending, push)) {
-            wakeGithubPush(store);
-            return;
-          }
-          if (foregroundQueued()) {
-            // Keep the idle probe from repeatedly loading Work while an audit
-            // yields its machine capacity to foreground checks.
-            do {
-              observe();
-              await new Promise(resolve => setTimeout(resolve, 250));
-            } while (!runInterruption.signal.aborted && foregroundQueued());
-            continue;
-          }
-          wakeGithubPush(store);
-          if (failed) await recoverOptimisticMain(store, failed);
-          const selected = editWork(store, data => {
-            // Recheck before loading Work: foreground arrivals never make a waiting
-            // audit repeatedly deserialize owner history or contend on its lock.
-            if (foregroundQueued()) return { wait: true as const };
-            // Preparation must not start adopters that inherit its pinned pointer.
-            const recovered = recoverRuns(store, data, false);
-            if (recordFixForward(data) || recovered) {
-              data.revision++;
-            }
-            const before = JSON.stringify(data);
-            const selected = selectMainAudit(data, push);
-            if (JSON.stringify(data) !== before) {
-              data.revision++;
-            }
-            if (!selected) return;
-            if ('wait' in selected) return { wait: true as const };
-            // The owner may publish finish/lifecycle changes as soon as this lock
-            // releases. Carry these pins with the selection rather than rereading
-            // the mutable Work pointer before the run has been reserved.
-            return {
-              ...selected,
-              check: data.checks.find(check => check.id === selected.checkId)!,
-              revision: data.revision,
-            };
-          });
-          if (!selected) return;
-          if ('wait' in selected) {
-            // Launch recovery only after successful publication, outside the
-            // observation context, so adopters claim current committed records.
-            const records = store.readRecords();
-            recoverRuns(store, {
-              runs: records
-                ? ['queued', 'preparing', 'running'].flatMap(status => records.all('runs', status, 'status'))
-                : store.load().runs,
-            });
-            await new Promise(resolve => setTimeout(resolve, 250));
-            continue;
-          }
-          const { view, runId, checkId, check, revision } = selected;
-          if (await reuseMainCheck(new WorkService(store.root), view, runId, check)) continue;
-          runWork(
-            store,
-            {
-              action: 'run-check',
-              operationId: runId,
-              viewId: view.id,
-              expectedHead: view.head!,
-              checkId,
-              expectedDefinition: check.definition,
-              expectedEnvironment: checkEnvironment().fingerprint,
-            },
-            revision,
-          );
-        } catch (error) {
-          if (!(error instanceof ForgeError && ['WORK_BUSY', 'WORK_STALE'].includes(error.code))) throw error;
-        }
-        await new Promise(resolve => setTimeout(resolve, 250));
-      }
-    },
-    {
-      anchor: store.directory,
-      ...(options.waitMs === undefined ? {} : { waitMs: options.waitMs }),
-      ...(options.progress ? { observe: () => observe(), phase: 'waiting for main audit' } : {}),
-    },
-  );
-  if ('waiting' in response) {
+  const sleep = async (ms: number) => {
     observe();
-    throw new ForgeError(
-      'WORK_BUSY',
-      'Main audit worker is still active; retry to observe its retained run before GitHub push.',
-    );
-  }
+    if (options.sleep) await options.sleep(ms);
+    else
+      await delay(Math.min(ms, Math.max(1, end - Date.now())), undefined, { signal }).catch(error => {
+        if (!signal.aborted) throw error;
+      });
+    observe();
+  };
+  return withDetachedChecks(() =>
+    withWorkLockOptions({ nonblocking: true, waitMs: 0, cancelled: () => signal.aborted }, async () => {
+      const response = await withQueueSlot(
+        join(store.directory, 'post-accept-main-queue'),
+        async () => {
+          for (;;) {
+            observe();
+            try {
+              const pending = await observePostAcceptRecords(store, push, signal);
+              watchdog.update(pending);
+              if (options.progress && Date.now() - reportedAt >= 5000) {
+                const run = pending.runs.find(run => run.mainCheck && !run.endedAt);
+                workProgress(
+                  'waiting for main audit',
+                  run ? `run=${run.id} status=${run.status}` : 'Waiting for audit admission',
+                );
+                reportedAt = Date.now();
+              }
+              const failed = pending.runs.find(
+                run =>
+                  failedMainCheck(run) &&
+                  !recoveryResult(pending, run) &&
+                  !pending.intents.some(intent => intent.id === fixMainIntentId(run)),
+              );
+              if (!failed && !selectMainAudit(structuredClone(pending), push)) {
+                watchdog.idle();
+                wakeGithubPush(store);
+                return;
+              }
+              if (foregroundQueued()) {
+                watchdog.waiting();
+                await sleep(1000);
+                continue;
+              }
+              if (failed && recoveryAllowed(pending))
+                await recoverOptimisticMain(store, failed, () => {
+                  observe();
+                  watchdog.updateRuns();
+                });
+              const selected = await selectPostAccept(store, push, signal);
+              contention = 0;
+              if (!selected) {
+                watchdog.idle();
+                wakeGithubPush(store);
+                return;
+              }
+              if ('wait' in selected) {
+                // Adopters run after publication, outside its pinned observation.
+                recoverRuns(store, { runs: (await observePostAcceptRecords(store, push, signal)).runs });
+                await sleep(1000);
+                continue;
+              }
+              const { view, runId, checkId, check, revision } = selected;
+              if (await reuseMainCheck(new WorkService(store.root), view, runId, check)) continue;
+              runWork(
+                store,
+                {
+                  action: 'run-check',
+                  operationId: runId,
+                  viewId: view.id,
+                  expectedHead: view.head!,
+                  checkId,
+                  expectedDefinition: check.definition,
+                  expectedEnvironment: checkEnvironment().fingerprint,
+                },
+                revision,
+              );
+            } catch (error) {
+              if (!(error instanceof ForgeError && ['WORK_BUSY', 'WORK_STALE'].includes(error.code)))
+                throw error;
+              const backoff = Math.min(1000 * 2 ** Math.min(contention++, 5), 30_000);
+              watchdog.waiting(error.code, backoff);
+              await sleep(backoff);
+            }
+          }
+        },
+        { anchor: store.directory, waitMs: queueWaitMs, observe },
+      );
+      if ('waiting' in response) {
+        observe();
+        throw new ForgeError(
+          'WORK_BUSY',
+          'Main audit worker is still active; retry to observe its retained run before GitHub push.',
+        );
+      }
+    }),
+  );
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const controller = new AbortController();
+  const stop = () => {
+    controller.abort();
+    setTimeout(() => process.exit(0), 1000).unref();
+  };
+  process.once('SIGTERM', stop);
+  process.once('SIGINT', stop);
   const push = process.argv[3]
     ? (JSON.parse(process.argv[3]) as { channel: string; checkId: string })
     : undefined;
-  drainPostAccept(new WorkStore(process.argv[2]!), push).catch(error => {
+  drainPostAccept(new WorkStore(process.argv[2]!), push, { signal: controller.signal }).catch(error => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
   });

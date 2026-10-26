@@ -1,6 +1,6 @@
 import { readLandingAttempts } from './land-attempts.js';
 // SPDX-License-Identifier: Apache-2.0
-import { allRecords } from './agent-lifecycle.js';
+import { landingPositions, landingMatch } from './landing-records-index.js';
 import { finishChild } from './agent-finish-journal.js';
 import { orderLandingEntries } from './landing-batch-order.js';
 import { deriveLandingPhases, landingEta, type PhaseRecords } from './land-phases.js';
@@ -12,27 +12,22 @@ import type { ChannelMove, CheckRun, WorkData } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
 const HISTORY_LIMIT = 20;
-const metadata = new WeakMap<
-  WorkStore,
-  { revision: number; entries: LandingEntry[]; moves: ChannelMove[] }
->();
-function records(store: WorkStore) {
-  const revision = store.revision(),
-    previous = metadata.get(store);
-  if (previous?.revision === revision) return previous;
+function records(store: WorkStore, channel: string, arrivedAt?: string) {
   const tx = store.readRecords();
-  const legacy = tx ? undefined : store.load();
-  const value = {
-    revision,
-    entries: tx
-      ? tx.manifest.collections.landingEntries
-        ? allRecords<LandingEntry>(store, 'landingEntries')
-        : []
-      : (legacy!.landingEntries ?? []),
-    moves: tx ? allRecords<ChannelMove>(store, 'channelMoves') : legacy!.channelMoves,
-  };
-  metadata.set(store, value);
-  return value;
+  if (!tx) {
+    const data = store.load();
+    return { entries: data.landingEntries ?? [], moves: data.channelMoves };
+  }
+  const entries = landingPositions(store, tx, 'landingEntries', ['queued', 'checking'], channel).map(
+    position => tx.at('landingEntries', position),
+  );
+  const moves: ChannelMove[] = [];
+  for (const position of tx.positions('channelMoves', channel, 'channel').reverse()) {
+    const move = tx.at('channelMoves', position);
+    if (move.status === 'accepted' && (!arrivedAt || move.at < arrivedAt)) moves.push(move);
+    if (moves.length > HISTORY_LIMIT) break;
+  }
+  return { entries, moves: moves.reverse() };
 }
 function runRecords(
   store: WorkStore,
@@ -98,15 +93,16 @@ function runRecords(
   };
 }
 /** Finite local-only projection. It never wakes a worker, fetches provider data or changes records. */
-export function readLandingProgress(
+function landingProgressSnapshot(
   store: WorkStore,
   operationId: string,
   journal?: LandEntry,
   now = Date.now(),
   includeFollowUp = true,
 ) {
-  const data = records(store);
   const entry = store.select('landingEntries', operationId);
+  const channel = entry?.channel ?? journal?.command.accept?.channel ?? 'main';
+  const data = records(store, channel, entry?.arrivedAt);
   const batch = entry?.batchId ? store.select('landingBatches', entry.batchId) : undefined;
   const runId =
     entry?.runId ??
@@ -119,8 +115,17 @@ export function readLandingProgress(
   const run = runId ? store.select('runs', runId) : undefined;
   const viewId = run?.viewId ?? journal?.single?.viewId ?? journal?.viewId ?? entry?.viewId;
   const acceptanceId = entry?.acceptanceId ?? journal?.result?.acceptanceId;
-  const move = data.moves.find(
-    item => item.status === 'accepted' && (acceptanceId ? item.id === acceptanceId : item.viewId === viewId),
+  const tx = store.readRecords();
+  const moves = acceptanceId
+    ? [store.select('channelMoves', String(acceptanceId))].filter((move): move is ChannelMove => !!move)
+    : viewId && tx
+      ? tx.all('channelMoves', viewId, 'viewId')
+      : data.moves;
+  const move = moves.find(
+    item =>
+      item.status === 'accepted' &&
+      item.channel === channel &&
+      (acceptanceId ? item.id === acceptanceId : item.viewId === viewId),
   );
   const result = runRecords(store, entry, run, move);
   if (!entry && journal?.single?.timing) {
@@ -206,7 +211,11 @@ export function readLandingProgress(
     )
     .slice(-HISTORY_LIMIT)
     .map(item => {
-      const prior = data.entries.find(entry => entry.acceptanceId === item.id);
+      const prior = tx
+        ? landingMatch(store, tx, 'landingEntries', 'acceptanceId', item.id ?? '').map(position =>
+            tx.at('landingEntries', position),
+          )[0]
+        : data.entries.find(entry => entry.acceptanceId === item.id);
       const priorRun = prior?.runId
         ? store.select('runs', prior.runId)
         : (
@@ -240,4 +249,8 @@ export function readLandingProgress(
     ...(check ? { check } : {}),
     ...(workerError ? { workerError } : {}),
   };
+}
+
+export function readLandingProgress(...args: Parameters<typeof landingProgressSnapshot>) {
+  return args[0].observing(() => landingProgressSnapshot(...args));
 }

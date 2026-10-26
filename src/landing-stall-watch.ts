@@ -2,6 +2,7 @@
 import { ForgeError } from './errors.js';
 import { editWork } from './work-edit.js';
 import { landingRecords, editLandingRecords } from './landing-records.js';
+import { landingPositions } from './landing-records-index.js';
 import { entryProgress, entryStall } from './landing-entry-stall.js';
 import { LANDING_STALL_MS } from './landing-stall.js';
 import type { WorkStore } from './work-store.js';
@@ -15,7 +16,7 @@ export function watchLandingStalls(store: WorkStore, signal: AbortSignal) {
     if (timer) clearTimeout(timer);
     timer = undefined;
     if (closed || signal.aborted) return;
-    const data = landingRecords(store);
+    const data = landingStallRecords(store);
     const pending = (data.landingEntries ?? []).filter(entry =>
       ['queued', 'checking', 'awaiting-review'].includes(entry.status),
     );
@@ -28,7 +29,7 @@ export function watchLandingStalls(store: WorkStore, signal: AbortSignal) {
       ...due.map(entry => Date.parse(entryProgress(data, entry).at) + LANDING_STALL_MS),
     );
     timer = setTimeout(
-      () => {
+      async () => {
         timer = undefined;
         try {
           if (closed || signal.aborted) return;
@@ -47,7 +48,7 @@ export function watchLandingStalls(store: WorkStore, signal: AbortSignal) {
             const tx = store.readRecords();
             if (tx) {
               try {
-                editLandingRecords(store, channel, publish, tx, channel);
+                await editLandingRecords(store, channel, publish, tx, channel);
               } finally {
                 tx.dispose();
               }
@@ -106,4 +107,44 @@ export function watchLandingStalls(store: WorkStore, signal: AbortSignal) {
       signal.removeEventListener('abort', close);
     },
   };
+}
+
+/** Deadline observations need live scalar entries and their exact batch/run
+ * progress, never Lane histories, Views or unrelated completed evidence. */
+export function landingStallRecords(store: WorkStore) {
+  const tx = store.readRecords();
+  if (!tx) return landingRecords(store);
+  try {
+    const data = tx.data();
+    data.landingEntries = landingPositions(store, tx, 'landingEntries', [
+      'queued',
+      'checking',
+      'awaiting-review',
+    ]).map(position => tx.fieldsAt('landingEntries', position).record);
+    data.landingBatches = [...new Set(data.landingEntries.flatMap(entry => entry.batchId ?? []))].flatMap(
+      id => tx.find('landingBatches', id)?.record ?? [],
+    );
+    data.runs = [
+      ...new Set(
+        data.landingBatches.flatMap(batch => [
+          ...batch.prefixes.map(prefix => prefix.runId),
+          ...(batch.confirmation ? [batch.confirmation.runId] : []),
+        ]),
+      ),
+    ].flatMap(id => tx.fields('runs', id)?.record ?? []);
+    const moves = new Set(
+      data.landingEntries.flatMap(entry =>
+        entry.acceptanceId ? tx.positions('channelMoves', entry.acceptanceId) : [],
+      ),
+    );
+    for (const batch of data.landingBatches)
+      for (const prefix of batch.prefixes)
+        for (const position of tx.positions('channelMoves', prefix.viewId, 'viewId')) moves.add(position);
+    data.channelMoves = [...moves]
+      .sort((a, b) => a - b)
+      .map(position => tx.fieldsAt('channelMoves', position).record);
+    return data;
+  } finally {
+    tx.dispose();
+  }
 }

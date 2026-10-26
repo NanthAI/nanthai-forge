@@ -1,9 +1,11 @@
-import { landingRecords } from './landing-records.js';
+import { landingPositions, prepareLandingRecords } from './landing-records-index.js';
+import { setImmediate as yieldTurn } from 'node:timers/promises';
+import { assertLandingWorkerActive } from './landing-worker-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import { optimisticLanding } from './autonomy-policy.js';
 import { readPolicy } from './work-autonomy.js';
 import { completeAccepted } from './agent-lifecycle.js';
-import { composeLandingSource } from './landing-compose-source.js';
+import { composeLandingSource, savedStack } from './landing-compose-source.js';
 import type { NativeSource } from './native-source.js';
 import type { WorkService } from './work.js';
 import type { WorkData } from './work-types.js';
@@ -66,25 +68,62 @@ export function settleCompletedLanes(
     entry.reason = `Every input Lane was completed before this landing ran, and its content is not on ${channel}; nothing landed. ${undo}`;
   }
 }
+/** Retain one composition verdict per live entry. Source objects are immutable;
+ * ordinary entries depend on exact View/main and saved stack pins. Stacked
+ * composition also consults parent/acceptance/no-op evidence, so its collection
+ * versions conservatively invalidate that verdict when such evidence changes. */
+const noopCompositions = new WeakMap<
+  WorkService['store'],
+  Map<string, { key: string; contained: boolean }>
+>();
 /** Reconcile queued no-ops before overlap/capacity selection, even while another
  * batch owns the train. Canonical main content takes precedence over a later save. */
 export function settleQueuedNoops(work: WorkService, data: WorkData, channel: string, source: NativeSource) {
   const main =
     [...data.channelMoves].reverse().find(move => move.channel === channel && move.status === 'accepted')
       ?.head ?? data.nativeHead;
+  let memo = noopCompositions.get(work.store);
+  if (!memo) noopCompositions.set(work.store, (memo = new Map()));
+  const queued = new Set(
+    (data.landingEntries ?? []).filter(entry => entry.status === 'queued').map(entry => entry.id),
+  );
+  for (const id of memo.keys()) if (!queued.has(id)) memo.delete(id);
   for (const entry of data.landingEntries ?? []) {
     if (entry.channel !== channel || entry.status !== 'queued') continue;
     const candidate = data.views.find(view => view.id === entry.viewId);
     if (!main || candidate?.status !== 'clean' || candidate.head !== entry.head) continue;
-    const result = composeLandingSource(
-      work.store,
-      source,
-      candidate,
-      main,
-      'No-op landing',
-      entry.arrivedAt,
-    );
-    if (result.head && sameLandingTree(source, result.head, main)) {
+    const stacks = candidate.inputs.map(pin => {
+      const lane = work.store.select('lanes', pin.laneId);
+      return lane ? savedStack(lane, pin.head) : undefined;
+    });
+    let evidence: unknown;
+    if (stacks.some(stack => stack && !stack.detached)) {
+      const tx = work.store.readRecords();
+      try {
+        evidence = tx
+          ? (['lanes', 'views', 'channelMoves', 'landingEntries'] as const).map(
+              name => tx.manifest.collections[name],
+            )
+          : work.store.load();
+      } finally {
+        tx?.dispose();
+      }
+    }
+    const key = JSON.stringify([main, entry.head, candidate, stacks, evidence]);
+    let cached = memo.get(entry.id);
+    if (cached?.key !== key) {
+      const result = composeLandingSource(
+        work.store,
+        source,
+        candidate,
+        main,
+        'No-op landing',
+        entry.arrivedAt,
+      );
+      cached = { key, contained: !!result.head && sameLandingTree(source, result.head, main) };
+      memo.set(entry.id, cached);
+    }
+    if (cached.contained) {
       markAlreadyOnMain(entry, main);
       if (sameLandingTree(source, candidate.head!, candidate.base))
         entry.reason = `Empty against base; source is already on main at ${main}; no check, acceptance or Channel move was needed.`;
@@ -109,22 +148,36 @@ export function settleQueuedNoops(work: WorkService, data: WorkData, channel: st
 /** Complete the Lanes of entries that were already on main, as acceptance would.
  * Retry-safe: completion of an already completed Lane is a no-op. */
 export async function completeAlreadyOnMain(work: WorkService, channel: string) {
-  const data = landingRecords(work.store, channel),
-    policy = readPolicy(work.store);
+  const policy = readPolicy(work.store);
   if (optimisticLanding(policy) || !policy.lifecycle.completeOnAccept) return;
-  for (const entry of data.landingEntries ?? []) {
-    if (entry.channel !== channel || !entry.alreadyOnMain || entry.keepOpen) continue;
-    const inputs = data.views.find(view => view.id === entry.viewId)?.inputs ?? [];
-    if (
-      inputs.some(pin =>
-        data.lanes.some(
-          lane =>
-            lane.id === pin.laneId &&
-            lane.head === pin.head &&
-            ['active', 'paused', 'ready'].includes(lane.state),
-        ),
+  const tx = work.store.readRecords();
+  if (tx) await prepareLandingRecords(work.store, tx);
+  const entries = tx
+    ? landingPositions(work.store, tx, 'landingEntries', [], channel, true)
+    : (work.store.load().landingEntries ?? []).map(entry => entry.id);
+  let turn = performance.now();
+  try {
+    for (const position of entries) {
+      assertLandingWorkerActive();
+      const entry =
+        typeof position === 'number' && tx
+          ? tx.at('landingEntries', position)
+          : work.store.select('landingEntries', String(position));
+      if (!entry || entry.channel !== channel || !entry.alreadyOnMain || entry.keepOpen) continue;
+      const view = tx ? tx.find('views', entry.viewId)?.record : work.store.select('views', entry.viewId);
+      if (
+        view?.inputs.some(pin => {
+          const lane = tx ? tx.fields('lanes', pin.laneId)?.record : work.store.select('lanes', pin.laneId);
+          return lane && lane.head === pin.head && ['active', 'paused', 'ready'].includes(lane.state);
+        })
       )
-    )
-      await completeAccepted(work, entry.viewId);
+        await completeAccepted(work, entry.viewId);
+      if (performance.now() - turn >= 8) {
+        await yieldTurn();
+        turn = performance.now();
+      }
+    }
+  } finally {
+    tx?.dispose();
   }
 }

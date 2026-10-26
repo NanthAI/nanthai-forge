@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { allRecords } from './agent-lifecycle.js';
+import { landingMatch } from './landing-records-index.js';
 import { readAttemptLocks } from './landing-attempt-timing.js';
 import { readLandCheckProgress } from './land-check-progress.js';
 import { finishChild } from './finish-child.js';
 import type { LandEntry } from './land-journal.js';
-import type { LandingBatch } from './landing-batch-types.js';
 import type { WorkStore } from './work-store.js';
 /** Every batch/requeue and proper diagnosis prefix keeps its own boundaries.
  * Missing historical timestamps stay absent rather than borrowing another try. */
@@ -12,7 +11,9 @@ export function readLandingAttempts(store: WorkStore, entryId: string, journal?:
   const tx = store.readRecords();
   const batches = tx
     ? tx.manifest.collections.landingBatches
-      ? allRecords<LandingBatch>(store, 'landingBatches')
+      ? landingMatch(store, tx, 'landingBatches', 'entryId', entryId).map(position =>
+          tx.at('landingBatches', position),
+        )
       : []
     : (store.load().landingBatches ?? []);
   const batched = batches

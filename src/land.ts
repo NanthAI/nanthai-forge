@@ -1,10 +1,11 @@
+import { prepareLandingRecords } from './landing-records-index.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { waitForLand, retrySingleInfrastructure, recoverLandInfrastructure } from './land-wait.js';
 import { landingWorkerSignal, landingController } from './landing-worker-context.js';
 import { staleLandingResult } from './landing-stale.js';
 import { landingDiagnosis } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
-import { landReceipt, readLandingHandle } from './land-receipt.js';
+import { observeLandReceipt, readLandingHandle } from './land-receipt.js';
 import { landingAdmission } from './landing-admission.js';
 import { existsSync } from 'node:fs';
 import { savedOverlapPlan, highOverlap } from './agent-overlap-plan.js';
@@ -41,9 +42,19 @@ async function landOnce(
   const { wait, ...request } = command;
   command = request;
   const store = work.store;
-  const admitted = () => {
+  const prepareObservation = async () => {
+    const tx = store.readRecords();
+    if (!tx) return;
+    try {
+      await prepareLandingRecords(store, tx);
+    } finally {
+      tx.dispose();
+    }
+  };
+  const admitted = async () => {
+    await prepareObservation();
     const journal = new LandJournal(store, command, selection);
-    const response = landReceipt(store, command, journal, false);
+    const response = await observeLandReceipt(store, command, journal, false);
     wakeLandingWorker(store);
     return {
       ...response,
@@ -56,6 +67,7 @@ async function landOnce(
   const locked = await withQueueSlot(
     join(store.directory, 'land-queue', command.operationId),
     async () => {
+      await prepareObservation();
       if (wait === false) return admitted();
       const journal = new LandJournal(store, command, selection);
       journal.preflight(store, command);
@@ -343,7 +355,7 @@ async function landOnce(
         if (!progressed && !submitted) break;
         if (journal.state.entries.every(entry => entry.result && !waiting(entry.result))) break;
       }
-      return landReceipt(store, command, journal);
+      return observeLandReceipt(store, command, journal);
     },
     { anchor: store.directory, phase: 'landing selected Lanes' },
   );

@@ -6,7 +6,7 @@ import { wakeAutoExchange } from './auto-exchange-wake.js';
 import { indexPeerRecords } from './agent-peers-index.js';
 // SPDX-License-Identifier: Apache-2.0
 import { assertWorkFormat } from './work-format.js';
-import { workLocked, type WorkLockOptions } from './work-lock.js';
+import { workLocked, workLockedAsync, type WorkLockOptions } from './work-lock.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { policyPreset } from './autonomy-policy.js';
@@ -25,7 +25,12 @@ import {
 import { nativeOwner } from './native-source.js';
 import { workGit } from './work-git.js';
 import { recordKeys, lookupKey } from './work-record-index.js';
-import { WorkRecordTransaction, type WorkCollection, type WorkRecord } from './work-record-transaction.js';
+import {
+  WorkRecordTransaction,
+  type WorkCollection,
+  type WorkRecord,
+  type WorkRecordReadMemo,
+} from './work-record-transaction.js';
 import { workSchema, type WorkData } from './work-types.js';
 import { isUnifiedWork, parseWork } from './work-unified-types.js';
 import { unifyIntent } from './work-intent-local.js';
@@ -40,7 +45,13 @@ export class WorkStore {
     if (this.writerDepth) this.afterWriter.push(run);
     else run();
   }
-  private readonly observation = new AsyncLocalStorage<{ pointer: Buffer | null }>();
+  private readonly observation = new AsyncLocalStorage<{
+    pointer: Buffer | null;
+    selected?: WorkRecordTransaction | undefined;
+    manifest?: RecordManifest | undefined;
+    manifestRead?: boolean;
+    reads?: WorkRecordReadMemo;
+  }>();
   /** Atomic rename pins revision and immutable records together, without a writer lock. */
   observing<T>(run: () => T): T {
     if (this.observation.getStore()) return run();
@@ -181,20 +192,40 @@ export class WorkStore {
   /** Read-only record access; legacy owners retain their full validation path. */
   readRecords(): WorkRecordTransaction | undefined {
     const bytes = this.readPointer(),
+      observation = this.observation.getStore();
+    let manifest: RecordManifest | undefined;
+    if (observation?.manifestRead) manifest = observation.manifest;
+    else {
       manifest = bytes ? recordManifest(JSON.parse(bytes.toString('utf8'))) : undefined;
-    return manifest &&
-      manifest.schema !== 'forge-work-records-v1' &&
-      Object.values(manifest.collections).every(index => index.lookup)
-      ? new WorkRecordTransaction(this.directory, manifest, bytes!)
-      : undefined;
+      if (observation) {
+        observation.manifest = manifest;
+        observation.manifestRead = true;
+      }
+    }
+    if (
+      !manifest ||
+      manifest.schema === 'forge-work-records-v1' ||
+      !Object.values(manifest.collections).every(index => index.lookup)
+    )
+      return;
+    if (observation)
+      observation.reads ??= { pages: new Map(), records: new Map(), json: new Map(), collections: new Map() };
+    return new WorkRecordTransaction(
+      this.directory,
+      observation ? structuredClone(manifest) : manifest,
+      bytes!,
+      observation?.reads,
+    );
   }
+
   select<K extends WorkCollection>(
     collection: K,
     value: string,
     field = 'id',
     compact = false,
   ): WorkRecord<K> | undefined {
-    const tx = this.readRecords();
+    const observation = this.observation.getStore();
+    const tx = observation ? (observation.selected ??= this.readRecords()) : this.readRecords();
     if (tx) {
       const position = tx.positions(collection, value, field)[0];
       return position === undefined
@@ -326,6 +357,24 @@ export class WorkStore {
     } finally {
       // Exact-page caches and wake hints finish before returning the receipt,
       // after writer release. Their immutable pins tolerate another publication.
+      if (!this.writerDepth) for (const notify of this.afterWriter.splice(0)) notify();
+    }
+  }
+  async lockedAsync<T>(run: () => T, options: WorkLockOptions = {}): Promise<T> {
+    try {
+      return await workLockedAsync(
+        join(this.directory, 'lock'),
+        () => {
+          this.writerDepth++;
+          try {
+            return run();
+          } finally {
+            this.writerDepth--;
+          }
+        },
+        options,
+      );
+    } finally {
       if (!this.writerDepth) for (const notify of this.afterWriter.splice(0)) notify();
     }
   }

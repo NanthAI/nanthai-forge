@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { withDetachedChecks } from './check-execution-context.js';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual as same } from 'node:util';
@@ -184,21 +185,23 @@ export async function admitLandingCheck(
           reservation,
           JSON.stringify({ runId: prefix.runId, viewId: prefix.viewId, head: prefix.head }),
         );
-        await retryWorkPhase(prefix.runId, () =>
-          work.dispatch(
-            {
-              action: 'run-check',
-              operationId: prefix.runId,
-              viewId: prefix.viewId,
-              expectedHead: prefix.head,
-              checkId: first.checkId,
-              expectedDefinition: first.definition,
-              expectedEnvironment: batch.environment?.fingerprint ?? first.environment,
-            },
-            store.revision(),
-            { beforePublish: driver.beforePublish },
-          ),
-        );
+        const dispatch = () =>
+          retryWorkPhase(prefix.runId, () =>
+            work.dispatch(
+              {
+                action: 'run-check',
+                operationId: prefix.runId,
+                viewId: prefix.viewId,
+                expectedHead: prefix.head,
+                checkId: first.checkId,
+                expectedDefinition: first.definition,
+                expectedEnvironment: batch.environment?.fingerprint ?? first.environment,
+              },
+              store.revision(),
+              { beforePublish: driver.beforePublish },
+            ),
+          );
+        await (route.actual === 'github-actions' ? withDetachedChecks(dispatch) : dispatch());
       }
     },
     { anchor: store.directory, waitMs },

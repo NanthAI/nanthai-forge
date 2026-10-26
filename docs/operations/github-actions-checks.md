@@ -43,6 +43,12 @@ code alone does not update an already installed owner runtime. Retained
 paths from conservative selection; lockfile graph fallbacks name
 `package-lock.json` in the recorded reason.
 
+Landing checks dispatch through a detached check controller, so owner driver
+work cannot starve GitHub polling. Read-only API failures retry within the existing
+observation window. Progress includes the HTTP status when available; retained
+`apiFailures` distinguish transport failures without an HTTP response from HTTP
+errors, without retaining raw stderr or response headers.
+
 New plans use the owner's `.forge/work/test-timings.json` history for both explicit
 and automatic shard counts. Complete per-file runner reports update a local EWMA
 (30% newest observation) when a passed or failed check receipt is reconciled;

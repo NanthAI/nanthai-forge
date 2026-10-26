@@ -219,7 +219,20 @@ for (const options of [{ enabled: false }, { supervised: true }])
 test('one-command undo is checked, preserves later work, and reconciles a lost reply', async t => {
   const f = fixture(t);
   await drainPostAccept(f.store);
-  const reverted = f.store.load().channelMoves.at(-1);
+  const audit = f.store.load();
+  const reverted = audit.channelMoves.at(-1);
+  assert.ok(
+    reverted.automatic,
+    JSON.stringify({
+      recovery: audit.channelMoves.map(move => move.optimisticRecovery),
+      runs: audit.runs.map(run => ({
+        id: run.id,
+        status: run.status,
+        recovery: run.recovery,
+        details: run.details,
+      })),
+    }),
+  );
   // Simulate a repair to the verification contract: restoring the original source is now permitted.
   f.store.locked(() => {
     const data = f.store.load();
@@ -351,4 +364,144 @@ test('retained failed shards are selected only with exact audit pins', t => {
   const audit = { id, head: 'head', backend: { pin: 'pin' }, check: f.check };
   assert.deepEqual(failedAuditTests(f.store, audit), ['tests/b.test.mjs']);
   assert.equal(failedAuditTests(f.store, { ...audit, head: 'different' }), undefined);
+});
+
+import cp from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { EventEmitter } from 'node:events';
+
+function interceptSpawn(t) {
+  const calls = [];
+  const original = cp.spawn;
+  t.mock.method(cp, 'spawn', (...args) => {
+    if (!args[1]?.[0]?.match(/\/(?:post-accept-main|check-controller-worker)\.js$/)) return original(...args);
+    calls.push(args[1]);
+    const child = new EventEmitter();
+    child.unref = () => {};
+    queueMicrotask(() => child.emit('spawn'));
+    return child;
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  return calls;
+}
+
+test('regression: optimistic recovery propagates MAIN_AUDIT_STALLED without a verdict', async t => {
+  const calls = interceptSpawn(t);
+  const f = fixture(t, { count: 1, bad: [0] });
+  const { selectPostAccept } = await import('../dist/post-accept-edit.js');
+  const { prepareRunRegistration } = await import('../dist/work-run-preparation.js');
+  const { checkEnvironment } = await import('../dist/check-environment.js');
+  const { recoverOptimisticMain } = await import('../dist/optimistic-recovery.js');
+  const { withDetachedChecks } = await import('../dist/check-execution-context.js');
+  const { ForgeError } = await import('../dist/errors.js');
+  const { saveMainAuditState, readMainAuditState } = await import('../dist/post-accept-state.js');
+  const selection = await selectPostAccept(f.store);
+  const prepared = prepareRunRegistration(f.store, {
+    action: 'run-check',
+    operationId: selection.runId,
+    viewId: selection.view.id,
+    expectedHead: selection.view.head,
+    checkId: f.check.id,
+    expectedDefinition: f.check.definition,
+    expectedEnvironment: checkEnvironment().fingerprint,
+  });
+  assert.ok(prepared.run, prepared.error?.message);
+  const audit = { ...prepared.run, status: 'failed', exitCode: 1, endedAt: new Date().toISOString() };
+  prepared.tx.replace('runs', prepared.tx.positions('runs', audit.id)[0], audit);
+  f.store.locked(() => f.store.commitRecords(prepared.tx));
+  let observed = false;
+  await assert.rejects(
+    withDetachedChecks(() =>
+      recoverOptimisticMain(f.store, audit, () => {
+        observed = true;
+        saveMainAuditState(f.store, {
+          status: 'stalled',
+          lastProgressAt: new Date().toISOString(),
+          runIds: [],
+          code: 'MAIN_AUDIT_STALLED',
+        });
+        throw new ForgeError('MAIN_AUDIT_STALLED', 'Synthetic watchdog expiry');
+      }),
+    ),
+    { code: 'MAIN_AUDIT_STALLED' },
+  );
+  assert.equal(observed, true);
+  assert.equal(f.store.load().channelMoves.at(-1).optimisticRecovery, undefined);
+  assert.ok(
+    f.store.load().runs.some(run => run.recovery?.phase === 'retry' && !run.endedAt),
+    'retry reservation is retained for resume',
+  );
+  assert.equal(readMainAuditState(f.store).status, 'stalled');
+  assert.ok(calls.some(args => args[0].endsWith('check-controller-worker.js')));
+});
+
+test('regression: recovery editing a pre-existing fix-main Intent preserves retained notes', async t => {
+  const { randomUUID } = await import('node:crypto');
+  interceptSpawn(t);
+  const f = fixture(t, { count: 1, bad: [0] });
+  const { selectPostAccept } = await import('../dist/post-accept-edit.js');
+  const { prepareRunRegistration } = await import('../dist/work-run-preparation.js');
+  const { checkEnvironment } = await import('../dist/check-environment.js');
+  const { fixMainIntentId } = await import('../dist/post-accept-fix-forward.js');
+  const { recoveryEdit } = await import('../dist/optimistic-recovery-edit.js');
+  const selection = await selectPostAccept(f.store);
+  const prepared = prepareRunRegistration(f.store, {
+    action: 'run-check',
+    operationId: selection.runId,
+    viewId: selection.view.id,
+    expectedHead: selection.view.head,
+    checkId: f.check.id,
+    expectedDefinition: f.check.definition,
+    expectedEnvironment: checkEnvironment().fingerprint,
+  });
+  assert.ok(prepared.run, prepared.error?.message);
+  const data = f.store.load();
+  const historical = {
+    ...prepared.run,
+    id: randomUUID(),
+    head: data.channelMoves[0].head,
+    viewId: data.channelMoves[0].viewId,
+    status: 'failed',
+    exitCode: 1,
+    endedAt: new Date().toISOString(),
+  };
+  prepared.tx.dispose();
+  const id = fixMainIntentId(historical);
+  const culpritLane = data.lanes[0],
+    oldIntent = culpritLane.intentId;
+  const intent = data.intents.find(item => item.id === oldIntent);
+  intent.id = id;
+  intent.notes.push({
+    kind: 'decision',
+    at: new Date().toISOString(),
+    text: 'Existing diagnosis and user discussion must survive',
+  });
+  culpritLane.intentId = id;
+  for (const view of data.views) if (view.intentId === oldIntent) view.intentId = id;
+  data.runs.push(historical);
+  data.revision++;
+  f.store.locked(() => f.store.save(data));
+  assert.equal(f.store.select('intents', id).notes.length, 1);
+  await recoveryEdit(
+    f.store,
+    current => {
+      const selected = current.intents.find(item => item.id === id);
+      selected.status = 'active';
+      selected.notes.push({
+        kind: 'decision',
+        at: new Date().toISOString(),
+        text: 'Automatic compensating revert notification',
+      });
+    },
+    [f.moves[0].viewId],
+    [f.moves[0].id],
+  );
+  assert.deepEqual(
+    f.store.select('intents', id).notes.map(note => note.text),
+    ['Existing diagnosis and user discussion must survive', 'Automatic compensating revert notification'],
+  );
 });

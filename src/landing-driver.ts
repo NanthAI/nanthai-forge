@@ -25,7 +25,7 @@ export async function claimLandingDriver(work: WorkService, channel: string): Pr
     id = randomUUID();
   const read = () => (existsSync(path) ? schema.parse(JSON.parse(readFileSync(path, 'utf8'))) : undefined);
   return retryWorkPhase(id, () =>
-    work.store.locked(() => {
+    work.store.lockedAsync(() => {
       const previous = read();
       invariant(
         !previous || previous.channel === channel,

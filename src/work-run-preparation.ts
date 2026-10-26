@@ -1,3 +1,4 @@
+import { landingRunBatch } from './landing-records-index.js';
 // SPDX-License-Identifier: Apache-2.0
 import { ForgeError, invariant } from './errors.js';
 import { hostname } from 'node:os';
@@ -28,16 +29,10 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
         view = tx.find('views', command.viewId)?.record;
       if (!check || check.definition !== command.expectedDefinition || view?.head !== command.expectedHead)
         return undefined;
-      const batches = tx.manifest.collections.landingBatches;
-      const batch = Array.from({ length: batches?.count ?? 0 }, (_, i) => tx.at('landingBatches', i)).find(
-        batch =>
-          batch.prefixes.some(
-            prefix =>
-              prefix.runId === command.operationId &&
-              prefix.viewId === command.viewId &&
-              prefix.head === command.expectedHead,
-          ),
-      );
+      const batch =
+        view.mainCheck || view.recovery
+          ? undefined
+          : landingRunBatch(store, tx, command.operationId, command.viewId, command.expectedHead);
       if (command.tests !== undefined)
         invariant(
           JSON.stringify(check.args) === JSON.stringify(['scripts/forge-check.mjs']) &&

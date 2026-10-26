@@ -392,6 +392,10 @@ test('actual queue batch catches independent submissions and respects skip for a
     );
   });
   const batch = await batchEdit(f.agent.work, 'fixture', data => selectBatch(f.agent.work, data, 'main'));
+  // This case exercises a completed pinned preview. Advisory contention can
+  // legitimately return unavailable, so drain the competing automatic fixture
+  // worker before asserting its exclusion (without changing any source pins).
+  await drainIntegrationPreviews(f.store);
   const composed = await composeBatch(f.agent.work, batch);
   assert.equal(composed.prefixes.length, 1);
   const entries = f.store.load().landingEntries;
