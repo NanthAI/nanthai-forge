@@ -2,6 +2,7 @@
 import type { ConflictNotice } from './agent-conflict-notice.js';
 import type { RepairResolution, SyncLineage } from './agent-repair-types.js';
 import type { WorkStore } from './work-store.js';
+import type { WorkRecord, WorkRecordTransaction } from './work-record-transaction.js';
 import type { Lane, WorkView } from './work-types.js';
 
 /** Project existing guarded sync receipts. No file capture/write, rebase, check
@@ -68,14 +69,33 @@ export function syncLineage(lane: Lane, head: string): SyncLineage[] {
   return syncs;
 }
 
+type RepairInputs = {
+  key: string;
+  intents: WorkRecord<'intents'>[];
+  views?: WorkView[];
+  moves?: WorkRecord<'channelMoves'>[];
+};
+// Peer reports decorate every notice; read these collections once per content, not once per notice.
+const repairInputs = new WeakMap<WorkStore, RepairInputs>();
+function readAll<K extends 'intents' | 'views' | 'channelMoves'>(tx: WorkRecordTransaction, collection: K) {
+  return Array.from({ length: tx.manifest.collections[collection]?.count ?? 0 }, (_, index) =>
+    tx.at(collection, index),
+  );
+}
+function inputsFor(store: WorkStore, tx: WorkRecordTransaction): RepairInputs {
+  const { intents, views, channelMoves } = tx.manifest.collections;
+  const key = JSON.stringify([intents, views, channelMoves]);
+  let inputs = repairInputs.get(store);
+  if (inputs?.key !== key) repairInputs.set(store, (inputs = { key, intents: readAll(tx, 'intents') }));
+  return inputs;
+}
+
 export function decorateRepair(store: WorkStore, notice: ConflictNotice): ConflictNotice {
   const tx = store.readRecords();
   if (!tx) return notice;
   const resolutions: RepairResolution[] = [];
-  let views: WorkView[] | undefined;
-  for (const intent of Array.from({ length: tx.manifest.collections.intents?.count ?? 0 }, (_, index) =>
-    tx.at('intents', index),
-  )) {
+  const inputs = inputsFor(store, tx);
+  for (const intent of inputs.intents) {
     const repairs = intent.notes.flatMap(note =>
       note.handoff?.repairs?.includes(notice.noticeId) ? [note.handoff] : [],
     );
@@ -92,9 +112,7 @@ export function decorateRepair(store: WorkStore, notice: ConflictNotice): Confli
           .map(lane => ({ laneId: lane.id, head: lane.head, handoffId: undefined })),
       );
     for (const pin of pins) {
-      views ??= Array.from({ length: tx.manifest.collections.views?.count ?? 0 }, (_, index) =>
-        tx.at('views', index),
-      );
+      const views = (inputs.views ??= readAll(tx, 'views'));
       const lane = tx.fields('lanes', pin.laneId)?.record;
       resolutions.push({
         noticeId: notice.noticeId,
@@ -122,10 +140,7 @@ export function decorateRepair(store: WorkStore, notice: ConflictNotice): Confli
                 definition: run.check.definition,
                 status: run.status,
               })),
-            acceptances: Array.from(
-              { length: tx.manifest.collections.channelMoves?.count ?? 0 },
-              (_, index) => tx.at('channelMoves', index),
-            )
+            acceptances: (inputs.moves ??= readAll(tx, 'channelMoves'))
               .filter(
                 move => move.status === 'accepted' && move.viewId === view.id && move.head === view.head,
               )
@@ -149,9 +164,7 @@ export function decorateRepair(store: WorkStore, notice: ConflictNotice): Confli
       (notice.evidence?.some(evidence => evidence.kind === 'check') ? notice.applicability : undefined) ??
       (notice.participants.every(p =>
         p.lane === 'main'
-          ? Array.from({ length: tx.manifest.collections.channelMoves?.count ?? 0 }, (_, index) =>
-              tx.at('channelMoves', index),
-            )
+          ? (inputs.moves ??= readAll(tx, 'channelMoves'))
               .filter(move => move.channel === 'main' && move.status === 'accepted')
               .at(-1)?.head === p.head
           : tx.fields('lanes', p.lane)?.record.head === p.head,

@@ -12,7 +12,8 @@ import { CoordinationJournal } from '../dist/agent-coordination-journal.js';
 import { agentPeers } from '../dist/agent-peers.js';
 import { integrationPreview } from '../dist/integration-preview.js';
 import { recordFixForward, fixMainIntentId } from '../dist/post-accept-fix-forward.js';
-import { syncLineage } from '../dist/agent-repair-lineage.js';
+import { decorateRepair, syncLineage } from '../dist/agent-repair-lineage.js';
+import { WorkRecordTransaction } from '../dist/work-record-transaction.js';
 import { enqueueLanding } from '../dist/landing-batch-store.js';
 import { drainLandingBatches } from '../dist/landing-batch.js';
 import { fixture as landingFixture } from './landing-batch-fixture.mjs';
@@ -358,4 +359,40 @@ test('saving a conflict resolution retains original sync replay and guarded undo
     f.context(b).notices.find(n => n.noticeId === notice.noticeId).syncs[0].undoneBy[0].operationId,
     undone.operationId,
   );
+});
+
+test('decorating many notices reads intents once per Work content and rereads after a repair', async t => {
+  const f = await fixture(t);
+  await f.agent.dispatch({
+    action: 'define-check',
+    name: 'static',
+    static: true,
+    executable: process.execPath,
+    args: [
+      '-e',
+      `const fs=require('node:fs');process.exit(['a','b'].every(n=>fs.readFileSync(n+'.txt','utf8')==='1\\n')?1:0)`,
+    ],
+  });
+  const lanes = [await f.start(), await f.start()];
+  await f.save(lanes[0], 'a.txt', '1\n');
+  await f.save(lanes[1], 'b.txt', '1\n');
+  const notice = integrationPreview(f.store, { laneIds: lanes.map(l => l.laneId) }).result.notices[0];
+  assert.ok(notice);
+  const reads = { intents: 0 },
+    at = WorkRecordTransaction.prototype.at;
+  t.mock.method(WorkRecordTransaction.prototype, 'at', function (collection, index) {
+    if (collection === 'intents') reads.intents++;
+    return at.call(this, collection, index);
+  });
+  const intents = f.store.readRecords().manifest.collections.intents.count;
+  for (let i = 0; i < 50; i++) assert.equal(decorateRepair(f.store, notice).resolutions, undefined);
+  assert.equal(reads.intents, intents);
+  await f.agent.dispatch({
+    action: 'handoff',
+    laneId: lanes[0].laneId,
+    summary: 'Repair pair',
+    repairs: [notice.noticeId],
+  });
+  const repaired = decorateRepair(f.store, notice);
+  assert.equal(repaired.resolutions[0].laneId, lanes[0].laneId);
 });
