@@ -4,7 +4,26 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostedRecoveryFixture } from './recovery-hosted-fixture.mjs';
-import { recoverOwner } from '../dist/recovery-owner.js';
+import { restoreRecoverySource } from '../dist/recovery-source.js';
+import { mkdirSync, renameSync } from 'node:fs';
+
+// Portable archive/fold tests exercise independent snapshot restoration. Route B
+// itself is covered by recovery-owner and recovery-runner and creates no owner.
+async function recoverSnapshot(target, request, transport) {
+  const directory = `${target}-snapshot-stage`,
+    stage = join(directory, 'snapshot');
+  mkdirSync(directory, { recursive: true });
+  const { selection } = await transport.prepare();
+  const coverage = await restoreRecoverySource(
+    directory,
+    existsSync(target) ? target : stage,
+    request,
+    selection,
+    transport,
+  );
+  if (!existsSync(target)) renameSync(stage, target);
+  return { coverage, reconnected: false, connection: null };
+}
 import { NativeSource } from '../dist/native-source.js';
 import { WorkStore } from '../dist/work-store.js';
 import { exportNativeWork, restoreNativeWork } from '../dist/native-backup.js';
@@ -17,7 +36,7 @@ for (const archive of [false, true])
     f.transport.reconnect = async () => {
       assert.fail('hosted recovery must never reconnect/write hosted');
     };
-    const result = await recoverOwner(f.target, f.request, f.transport);
+    const result = await recoverSnapshot(f.target, f.request, f.transport);
     assert.equal(result.coverage.main.head, f.head);
     assert.equal(result.coverage.main.moveId, f.acceptedReceipts.at(-1).id);
     assert.equal(result.reconnected, false);
@@ -37,7 +56,7 @@ for (const archive of [false, true])
       Object.values(f.tables).reduce((n, rows) => n + rows.length, 0),
     );
     const before = f.store().snapshotBytes();
-    await recoverOwner(f.target, f.request, f.transport);
+    await recoverSnapshot(f.target, f.request, f.transport);
     assert(f.store().snapshotBytes().equals(before));
     assert.equal(f.counters().reconnects, 0);
     assert.equal(f.receipts.size, 0, 'no new acceptance or reconnect receipt');
@@ -66,11 +85,13 @@ test('an interrupted page resumes its saved cursor, never duplicates receipts or
     }
     return page(selection, table, cursor);
   };
-  await assert.rejects(recoverOwner(f.target, f.request, f.transport), { code: 'EXCHANGE_REQUEST_FAILED' });
+  await assert.rejects(recoverSnapshot(f.target, f.request, f.transport), {
+    code: 'EXCHANGE_REQUEST_FAILED',
+  });
   assert(!existsSync(f.target));
   const expectedCursor = String(f.calls.find(call => call.table === 'projectHostedAcceptances').rows);
   f.calls.length = 0;
-  const result = await recoverOwner(f.target, f.request, f.transport);
+  const result = await recoverSnapshot(f.target, f.request, f.transport);
   assert.equal(f.calls[0].table, 'projectHostedAcceptances');
   assert.equal(f.calls[0].cursor, expectedCursor);
   const source = new NativeSource(f.target);
@@ -117,7 +138,7 @@ for (const fault of [
       }
       return result;
     };
-    await assert.rejects(recoverOwner(f.target, f.request, f.transport));
+    await assert.rejects(recoverSnapshot(f.target, f.request, f.transport));
     assert(!existsSync(f.target));
     assert.equal(f.counters().reconnects, 0);
     assert.equal(f.receipts.size, 0);
@@ -133,7 +154,7 @@ test('thousands of accepted entries use bounded pages and retain every original 
     peakHeapBytes = Math.max(peakHeapBytes, process.memoryUsage().heapUsed);
     return page(...args);
   };
-  const result = await recoverOwner(f.target, f.request, f.transport);
+  const result = await recoverSnapshot(f.target, f.request, f.transport);
   const elapsedMs = Math.round(performance.now() - started),
     recovered = result.coverage.hosted;
   assert(f.calls.every(call => call.rows <= 64));

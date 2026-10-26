@@ -2,8 +2,9 @@
 
 This is the lead's off-machine drill runbook. Fixture tests support the commands;
 they are not evidence of a recovery on another machine. Record measured results
-in the drill's private report. The recovered machine becomes owner. The old Mac
-returns as a source client, retaining its old owner directory for reconciliation.
+in the drill's private report. Under server authority the recovered machine
+becomes a runner and cache; native-owner projects retain owner recovery and local acceptance. The old Mac
+retains its original directory and edits for reconciliation.
 No lease, account transfer, new project or new access condition is involved.
 
 ## Inputs on the replacement machine
@@ -16,8 +17,8 @@ credential values into request JSON or the report. Local bindings and parent
 finish-driver retry files are not part of the portable backup. Recovery restores
 saved data; it does not resume the old parent command or any check process.
 
-Use Node 24.22.1+ (24.x) and a fresh owner destination with an existing parent
-directory. `OWNER` is the recovered directory, `DEPLOYMENT_URL` the surviving or
+Use Node 24.22.1+ (24.x) and a fresh cache destination with an existing parent
+directory. `NEW_CACHE` is the recovered directory, `DEPLOYMENT_URL` the surviving or
 restored Forge backend, `PROJECT_ID` the existing project, and `SOURCE` the matching
 Forge source/package directory. Keep the source deployment and original owner.
 
@@ -91,11 +92,12 @@ JS
 Copy the native archive and `fixture.json` off-machine. The native archive route
 below uses its matching hosted archive checkpoint; newly hosted projects use
 objects, so use the surviving-hosted route for this newly seeded object project.
-A local portable archive can also be restored independently with
-`nforge restore-native ARCHIVE.tar.gz OWNER`, then explicitly connected with
-`nforge recover OWNER reconnect --command-file REQUEST.json`. Preserve the
-archive's older coverage and reconcile through the existing bound exchange
-before publishing later local work; reconnect alone never publishes source.
+A local portable archive can still be restored independently with
+`nforge restore-native ARCHIVE.tar.gz INDEPENDENT_COPY`. It is a backup copy,
+not server Route B and not authority to accept for a server-authority project.
+Native-owner projects can also use `nforge recover NEW_OWNER` and explicit
+`recover OWNER reconnect`; native-owner rollback preserves those paths. Returning
+from server to owner authority requires the explicit higher-epoch rollback in operations.
 
 ## Route A: weekly deployment backup archive
 
@@ -129,124 +131,51 @@ Intent/Lane/Candidate detail and retained evidence; exercise current access unde
 the recovered auth configuration. Confirm encrypted Secret Objects can be used
 through their existing capabilities without exposing values. Set
 `DEPLOYMENT_URL` to this restored backend, retain its imported `PROJECT_ID`, then
-run Route B's guided command. This recovers the ZIP's captured project, not newer
+run the guided recover command. Native-owner mode retains full owner recovery;
+server mode follows Route B below. This recovers the ZIP's captured project, not newer
 work that never reached that weekly snapshot. No index backfill is part of recovery.
 
 ## Route B: surviving hosted copy
 
-No old local binding is needed. Sign in with the existing project owner account.
-Generate `RECOVERY_OPERATION_ID` once, retain it across every retry, and write a
-credential-free request on the replacement machine:
+Follow [Route B in operations](../operations.md#route-b-recover-a-runner-and-cache-from-hosted).
+Use the replacement machine's compatible package, existing account, deployment
+URL and project ID. This Route B applies to server authority or a pending local
+switch to server. The recovered machine is a runner/cache and cannot become an
+accepting native owner. A bound native-owner project, including rollback to
+native-owner, instead retains full native recovery and local acceptance. The original Mac's files and unsent edits remain
+available for reconciliation through hosted saves; starting an owner listener
+or reconnecting an archive does not grant local acceptance under server authority.
 
-```sh
-nforge login "$DEPLOYMENT_URL"
-export RECOVERY_OPERATION_ID DEPLOYMENT_URL PROJECT_ID
-node --input-type=module <<'JS' > recovery.json
-console.log(JSON.stringify({operationId:process.env.RECOVERY_OPERATION_ID,
-  url:process.env.DEPLOYMENT_URL,projectId:process.env.PROJECT_ID}));
-JS
-nforge recover "$OWNER" --command-file recovery.json > recovery-result.json
-nforge host "$OWNER" --status
-```
+Use the returned main head/receipt, authority epoch and hosted recovery counts to
+compare the off-machine inventory. Stream immutable recovery rows to compare
+exact acceptance receipts, queue outcomes, pending completion progress and stale
+source-return receipts. Unknown history coverage stays unknown. Select and open
+saved Lanes through hosted commands. Reconfigure credential references through
+the existing runner setup, then deliberately run one harmless hosted Candidate
+check with the registered worker. Observe the exact hosted run result. A passed
+check does not locally accept a Candidate.
 
-The command obtains an authenticated checkpoint/journal pair, validates exact
-source and evidence bytes, materializes every saved Lane, marks unfinished runs
-interrupted, and explicitly reconnects this directory as the existing owner.
-It never calls host/create, pushes, accepts source, starts checks or starts a
-listener. The connection retains the existing project key and authority epoch.
-`exchange pull` still opens selected main as a source client; it is not full-owner
-recovery.
-
-For a historical native archive checkpoint, add `archivePath` to `recovery.json`
-pointing to that checkpoint's exact `.tar.gz`. The command fetches the matching
-journal and checks both original archive and manifest hashes before overlay.
-Without `archivePath`, an archive-backed hosted checkpoint downloads through its
-existing authenticated range reader. Object-backed checkpoints download reusable
-objects. `cacheRoot` optionally reuses verified local source; it never bypasses
-fresh project authority or final source/Work CAS.
-
-## Validate and run one deliberate check
-
-Keep `recovery-result.json` private. Compare its `coverage.main` head/receipt,
-every `coverage.lanes` base/head/checkpoint and included evidence size/SHA-256
-against the off-machine fixture inventory. Read the saved Lane file and later
-hosted note. Verify the retained artifact's exact bytes, the missing evidence in
-`coverage.evidence.unavailable`, and the formerly running run's interrupted status.
-`completeHistory:unknown` or `incomplete` remains visible and does not become a
-claim of full saved-history coverage. Recovery capture age is unknown unless
-supported by the separately retained capture receipt; connection time is not RPO.
-
-Reconfigure executable/credential references for this machine using existing
-check settings. Deliberately run a harmless synthetic check on a restored
-Candidate and observe its exact run. A saved Lane without a clean Candidate
-returns `NOT_FOUND`, so use the `viewId` of a restored run from `status`. This
-starts a new check; it does not resume the restored one. No acceptance is needed:
-
-```sh
-export NODE_EXECUTABLE VIEW_ID
-node --input-type=module <<'JS' > drill-check.json
-console.log(JSON.stringify({name:'recovery-drill',executable:process.env.NODE_EXECUTABLE,
-  args:['-e','console.log("recovery drill passed")'],environmentLabel:'Recovered machine'}));
-JS
-nforge agent "$OWNER" define-check --command-file drill-check.json
-export DRILL_CHECK_ID
-node --input-type=module <<'JS' > drill-run.json
-console.log(JSON.stringify({viewId:process.env.VIEW_ID,checkId:process.env.DRILL_CHECK_ID}));
-JS
-nforge agent "$OWNER" run --command-file drill-run.json
-# If pending, retain its operationId and observe it; do not start another run.
-nforge agent "$OWNER" observe '{"operationId":"ORIGINAL_RUN_OPERATION_ID","waitMs":1000}'
-nforge host "$OWNER" --listen
-```
-
-Take `DRILL_CHECK_ID` from define-check's result. Inspect check outcome and logs;
-do not infer pass from queue admission. Stop the foreground listener with Ctrl+C
-after exercising one owner request through the restored app.
-
-## Original Mac returns
-
-On the old Mac, stop its foreground owner listener and retain its entire owner
-directory, including unpushed saved work and unsaved edits. Generate a **new**
-operation UUID in a request for the same deployment/project, then run:
-
-```sh
-nforge recover "$OLD_OWNER" client --command-file return-as-client.json
-nforge exchange "$OLD_OWNER" pull --target "$NEW_CLIENT_DIRECTORY"
-nforge host "$OLD_OWNER" --status
-```
-
-The first command changes only this local binding's role to independent copy;
-saved source and Work remain. The second opens selected main as an actual source
-client in a fresh directory. The recovered machine remains owner. To undo the
-local role selection, use `recover OLD_OWNER reconnect` with a new operation.
-Neither action rotates project identity or fences another directory. If both
-machines keep working as owners, existing source-return/checkpoint/Work/Channel
-CAS and reconciliation still apply; stale source must merge or surface a conflict.
-Never replace accepted work with the old directory or use `host --new` as recovery.
+For a credential-free scripted drill, run `node tests/recovery-runner-drill.mjs`
+after building core. It uses fake hosted tables and synthetic signing material;
+no deployment, login, real repository or external account is involved. The check
+itself runs a harmless Node command from verified recovered source. Report its
+per-step timings separately from any actual off-machine RTO/RPO evidence.
 
 ## Interrupted recovery and report
 
-Retry the same request and destination. Private `.forge-recovery-…` staging
-retains original pins, the matching journal and the reconnect request. Completed
-reconnect receipts reconcile even if hosted Work later advances; current owner
-authority is checked again before returning a cached result. A changed request
-fails `WORK_OPERATION_CHANGED`; changed source/Work/authority before reconnect
-fails `WORK_STALE`. Corrupt/missing content or an interrupted download never
-publishes a partial owner. Existing unrelated destinations are preserved.
-Completed retries do not overwrite new edits in the recovered owner.
+Retry the same request and fresh destination. Private `.forge-recovery-…`
+staging retains selected source/Work pins, table cursors and the original runner
+registration UUID/configuration. Current access is rechecked on retries. A
+changed request returns `WORK_OPERATION_CHANGED`; changed hosted pins during
+capture return `WORK_STALE`. Original staged data remains available. An unrelated
+destination is never replaced, and completed retries preserve new local edits.
+No saved external command or unknown paid execution is automatically replayed.
 
-If pins advanced before reconnect, the prior stage remains an independent saved
-copy. Use a new operation and fresh destination to recover the newer selection,
-or deliberately reconnect the retained independent owner and use existing
-reconciliation for later source changes. No restore auto-replays external work.
-
-Report both routes separately: source package identity, snapshot/archive hashes,
-checkpoint and journal pins, main receipt and all saved Lane pins, evidence
-coverage and omissions, current-auth checks, deliberate check outcome, reconnect
-receipt and old-Mac client result. Record start/end times separately for
-provisioning, provider import, application/config/auth restoration, download,
-validation, materialization, deliberate check and reconnect, plus peak disk.
-The command's combined elapsed time is not a breakdown of those stages; measure
-the individual phases externally where needed. State RPO from the last observed
-successful off-machine capture, and end-to-end RTO from actual drill timestamps.
-Do not substitute fixture timings or upload completion time for either measure.
+Report Route A and Route B separately: compatible package, deployment backup
+pins where relevant, selected main head/receipt, authority epoch, exact hosted
+recovery rows/counts and omissions, runner identity and registration receipt,
+current-auth checks, deliberate hosted check outcome and absence of local
+acceptance authority. Time provisioning, provider import, application/auth
+restoration, hosted selection, checkout, fold, registration, publication and
+check separately. Live dropped landings and recovery-point age require actual
+hosted evidence; local fixture timings do not establish either.

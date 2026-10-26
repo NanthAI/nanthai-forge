@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import { serverRecoveryAuthority } from '../src/recovery-authority';
 import { query, mutation, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id, Doc } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
@@ -69,11 +70,21 @@ export const prepare = query({
   handler: async (ctx, input) => {
     try {
       const project = await recoveryOwned(ctx, input.projectId),
-        old = await find(ctx, input.projectId, input.operationId);
+        old = serverRecoveryAuthority({ binding: project })
+          ? null
+          : await find(ctx, input.projectId, input.operationId);
       return JSON.stringify(
         old
-          ? { selection: null, receipt: recoveryConnectionSchema.parse(JSON.parse(old.receipt)) }
-          : { selection: await recoverySelection(ctx, project), receipt: null },
+          ? {
+              authority: sourceAuthority(project),
+              selection: null,
+              receipt: recoveryConnectionSchema.parse(JSON.parse(old.receipt)),
+            }
+          : {
+              authority: sourceAuthority(project),
+              selection: await recoverySelection(ctx, project),
+              receipt: null,
+            },
       );
     } catch (error) {
       return report(error);
@@ -96,6 +107,11 @@ export const reconnect = mutation({
         expected = recoverySelectionSchema.parse(JSON.parse(input.selection)),
         request = JSON.stringify({ selection: expected, requestHash: input.requestHash, role: input.role }),
         old = await find(ctx, input.projectId, input.operationId);
+      invariant(
+        !serverRecoveryAuthority({ binding: project }),
+        'SOURCE_AUTHORITY_STALE',
+        'Server-authority projects recover a runner and cache, never a native accepting owner.',
+      );
       if (old) {
         invariant(
           old.request === request,

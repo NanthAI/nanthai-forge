@@ -39,6 +39,7 @@ export async function foldHostedRecovery(
   target: string,
   selected: RecoverySelection,
   transport: RecoveryTransport,
+  cacheOnly = false,
 ) {
   if (!selected.hostedMain) return;
   invariant(
@@ -46,7 +47,7 @@ export async function foldHostedRecovery(
     'SOURCE_UNAVAILABLE',
     'Read the hosted recovery tables before publication.',
   );
-  const store = new WorkStore(target),
+  const store = cacheOnly ? undefined : new WorkStore(target),
     source = new NativeSource(target);
   const path = join(directory, 'hosted-fold.json');
   const identity = digest(canonicalPayload({ ...selected, completeHistory: null }));
@@ -55,7 +56,7 @@ export async function foldHostedRecovery(
   else {
     state = {
       identity,
-      baseline: digest(canonicalPayload(store.load())),
+      baseline: store ? digest(canonicalPayload(store.load())) : 'runner-cache',
       table: 0,
       cursor: null,
       phase: 'capture',
@@ -160,6 +161,7 @@ export async function foldHostedRecovery(
   // Validate the selected head even when a missing registration row omitted its closure.
   validateRecoveryTables(directory, source, state.recovery);
   source.state(selected.hostedMain.head);
+  if (!store) return hostedRecoverySchema.parse(state.recovery);
   const data = store.load();
   if (data.hostedRecovery) {
     invariant(
@@ -185,3 +187,14 @@ export async function foldHostedRecovery(
 }
 
 export { hostedRecoveryRows, hostedRecoveryObjects } from './recovery-hosted-read.js';
+
+/** Route B shares the same paged fold and validators without constructing a
+ * WorkStore, native marker, binding or mutable acceptance ledger. */
+export function foldHostedRecoveryCache(
+  directory: string,
+  target: string,
+  selected: RecoverySelection,
+  transport: RecoveryTransport,
+) {
+  return foldHostedRecovery(directory, target, selected, transport, true);
+}

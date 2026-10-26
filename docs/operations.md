@@ -21,45 +21,116 @@ An older CLI refuses an owner it cannot preserve. Upgrade by installing the new 
 
 ### Hosted backups and return
 
-`nforge recover NEW_OWNER --command-file recovery.json` guides full native-owner
-recovery and reconnects an existing project using current owner authority. The
-request contains `{operationId,url,projectId,archivePath?,cacheRoot?}` without
-credentials. Keep the operation ID and destination for retry. Saved main/Lanes,
-journal revision, exact evidence hashes and unavailable evidence are reported.
-For a project under server source authority, recovery also reads the hosted
-record versions/bodies/heads, source registrations, operations, finish/landing
-queue and observations, acceptance receipts/events/snapshot deltas, completion
-plans/pages, lifecycle overlays, check outcomes and source-return supersessions.
-The selected hosted main head, receipt, snapshot and revision are pinned alongside
-the seed checkpoint. Every page rechecks current owner access and those pins.
-Reads use project-prefixed indexes, at most 64 rows and a 128 KiB provider read
-window per page (one existing oversized document remains readable). A second
-paged pass compares exact row hashes and detects changes observed during capture;
-this is a verified paged export, not a database-wide transactional snapshot.
-If a table or source pin changes, staging is retained and the command reports
-`WORK_STALE`; it never silently selects newer work.
+`nforge recover NEW_DIRECTORY --command-file recovery.json` discovers the
+project's current source authority before selecting recovery. Being bound is not
+itself a cutover. In `native-owner` mode, including a rollback at a higher epoch,
+the command retains full owner recovery/reconnect and local acceptance. The
+existing native archive/object, saved-Lane, journal and evidence behavior stays
+available; requests accept `{operationId,url,projectId,archivePath?,cacheRoot?}`.
+`recover OWNER reconnect` and `recover OLD_OWNER client` remain native-mode
+commands. Shadow mode also retains native recovery and its existing authority
+rules.
 
-Private staging retains the original page cursor across interruption. The fold
-stores exact canonical hosted document strings in content-addressed pages, rooted
-at `Work.hostedRecovery`, plus the accepted source and referenced object closure.
-It checks H14 snapshot lineage and ordered completion-page roots without applying
-pending completions. Queue outcomes, original operation IDs, acceptance receipts,
-completion cursors and stale source-return supersession receipts remain exact;
-no acceptance is replayed and no check or queued command restarts. Existing
-`export-work` archive and native restore machinery retain this overlay and its
-objects. Internal `hostedRecoveryRows` streams one table's retained documents;
-the recovery result reports the hosted main and page/row/byte coverage.
+Only server authority, or a local pending switch to server, selects the new
+runner/cache behavior. The gate is
+`sourceAuthority(binding).mode === 'server' || state.authorityTransition?.mode === 'server'`.
+Fresh-machine recovery obtains the binding authority from its authenticated
+hosted selection. A native reconnect is not admitted while the local switch to
+server is pending. Server recovery takes `{operationId,url,projectId}` without
+credentials, reads selected main through hosted APIs, folds exact records and
+receipts, and registers the existing configured Mac runner. It creates no native
+owner marker, accepting Work store or owner binding. Its only hosted mutation is
+normal idempotent runner registration; no commands restart.
 
-This hosted-authority path makes an independent recovery copy and does not write
-to hosted or register a new accepting owner. The native seed Work and its local
-Channel history remain the baseline; newer hosted Work is retained separately in
-the portable overlay, with its original provenance. The runner/cache Route B
-reconnection and cutover qualification remain separate work. Legacy native-owner
-recovery continues to use its existing explicit reconnect receipt.
+The B1.5a1 fold pins hosted main's head, receipt, snapshot and revision alongside
+the seed checkpoint. It reads record versions/bodies/heads, operations, source
+registrations, finish/landing queues and observations, H14 acceptance snapshot
+deltas and completion pages, lifecycle overlays, check outcomes and stale
+source-return supersessions. Project-indexed pages use at most 64 rows and a
+128 KiB provider read window (an existing oversized document remains readable).
+A second pass compares exact row hashes. This is a verified paged export, not a
+database-wide transactional snapshot. Every page rechecks current owner access
+and pins; observed changes preserve staging and return `WORK_STALE`.
 
-See the [recovery drill](operations/recovery-drill.md) for both the weekly
-deployment ZIP and surviving-hosted routes, independent native archives, runner
-configuration, and returning the old machine as a source client.
+Canonical document strings and their referenced source/object closure remain in
+immutable content-addressed pages. The runner cache roots them in its recovery
+marker without constructing native Work. The independent archive/fold machinery
+also retains this overlay at `Work.hostedRecovery`; existing `export-work` and
+native restore preserve it for backup and an explicitly qualified rollback.
+`hostedRecoveryRows` streams the retained table documents. H14 lineage and ordered
+completion roots are validated without applying pending completions or replaying
+acceptance. Large opaque source blobs stream to disk and final cache validation
+hashes them from disk, with visited identities in disposable disk scratch.
+
+### Route B: recover a runner and cache from hosted
+
+This section applies to server authority. Bound projects that remain
+`native-owner` use the native recovery path above, including after rollback.
+
+On a clean machine, install the compatible Forge package and sign in with the
+existing owner account. Restore the existing runner configuration and private
+collector credential references through the normal worker setup. Recovery never
+changes project runner settings. Write `{operationId,url,projectId}` to
+`recovery.json`, using one UUID for all retries, then run:
+
+```sh
+nforge recover "$NEW_CACHE" --command-file recovery.json > recovery-result.json
+# The result names configuration.machineId. Start execution separately:
+nforge worker "$DEPLOYMENT_URL" "$PROJECT_ID" "$MACHINE_ID"
+```
+
+The recovered directory contains selected main source, `.forge/hosted-main.json`
+and `.forge/recovery-runner.json`. Immutable hosted recovery pages retain the
+original queue outcomes, pending completion cursors, source-return supersessions
+and acceptance/snapshot receipt identities; they are cache data, never a local
+acceptance ledger. Saved Lane source remains hosted and can be opened through
+the ordinary hosted agent commands. No native `accept`, owner listener, exchange
+push or reconnect step is part of Route B. Acceptance continues through hosted
+CAS. An explicit higher-epoch rollback is the separate procedure below.
+
+Retry the original request and destination after interruption, including a lost
+registration reply. Current access is checked again before cached results are
+returned. Completed retries preserve subsequent local edits; changed recovery
+pins before capture completes retain staging and report `WORK_STALE`. Keep the
+private staging path from the result until recovery is checked. Existing
+unrelated destinations remain untouched.
+
+The credential-free synthetic drill is `node tests/recovery-runner-drill.mjs`
+after `npm run build:core`. It starts with a clean destination, recovers work
+accepted only in fake hosted tables, runs the check selected by an actual hosted
+landing request through the hosted Mac executor, and verifies the recovered cache has no native acceptance
+path. Step times below are local fixture observations, not production RTO/RPO.
+One local synthetic run measured the following steps (milliseconds). Fixture
+creation was 8,526 ms; end-to-end recovery was 7,387 ms. The per-phase readings
+omit small journal/orchestration gaps and are not additive RTO estimates.
+
+| Step | Measured ms |
+| --- | ---: |
+| Select hosted pins and configured runner | 2 |
+| Checkout selected hosted main | 621 |
+| Fold hosted tables and source closure | 5,914 |
+| Revalidate receipts and cached objects | 487 |
+| Register runner | 2 |
+| Publish cache | 20 |
+| Prove native Work construction cannot accept | 13 |
+| Enqueue deliberate hosted landing and its check | 8 |
+| Execute check and deliver its hosted result | 322 |
+
+The fixture retained two landing requests (one accepted, one pending), one exact
+acceptance/completion receipt and hosted-only source. Dropped accepted receipts:
+0; pending landing/completion rows missing after recovery: 0. For server authority,
+the previous Route B restored a native owner; the new path produces no native
+owner marker or accepting Work store. Native-owner recovery and local acceptance
+remain available. No live before/after dropped-landing rate is claimed.
+
+The pending landing and partial completion receipts are compared byte for byte;
+metric 5.3's live dropped-landings count remains unmeasured by this fixture.
+
+See the [recovery drill](operations/recovery-drill.md) for Route A's weekly
+Convex ZIP restore, configuration inputs and reporting. A native portable archive
+remains an independent backup and input to an explicitly qualified rollback;
+it remains available for native-owner recovery and rollback, and does not grant
+local acceptance for server authority.
 
 For whole-deployment Convex snapshots, fresh-target restore and offline/live
 comparison tooling, see [hosted deployment durability](operations/hosted-durability.md).
@@ -523,7 +594,8 @@ check run and changes no check reuse key or runner configuration (metrics 6/8).
 3. **B1.2e — stop bound Mac acceptance.** Install the authority-aware local
    routing/fence before enabling server mode: when the project switches, bound
    direct accept and the Mac landing worker cannot publish native main; the error
-   names the hosted path. Unbound native owners retain ordinary acceptance.
+   names the hosted path. Native-owner projects, bound or unbound, retain ordinary
+   acceptance, including after rollback to native-owner.
    Re-read authority before publication; a saved local binding is not permission.
 4. **B1.5a — complete recoverability first.** SP1 → B1.4b must have supplied
    schema-2 main/cache reads from `projectHostedChannels:current`; qualify the

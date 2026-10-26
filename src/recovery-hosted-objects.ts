@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync } from 'node:fs';
+import { HostedCheckoutCache } from './hosted-checkout-cache.js';
+import { fingerprintPrivateFile } from './files.js';
+import { syncDirectory } from './native-durability.js';
 import { join } from 'node:path';
 import { NativeSource, parseNativeState } from './native-source.js';
 import { digest } from './hash.js';
@@ -57,6 +60,45 @@ export class RecoveryObjects {
       );
       const bytes = this.source.object(root.sha256);
       invariant(bytes.length === root.size, 'INVALID_WORK_BACKUP', 'Recovery object receipt differs.');
+      return root;
+    }
+    // Opaque blobs stream through the same verified checkout cache used by
+    // hosted reads. Their size does not become a recovery memory requirement.
+    if (!state && !inspect && this.transport.downloadToFile) {
+      this.source.put(Buffer.alloc(0)); // Initialize and validate private object directories.
+      const target = join(this.source.directory, pin.sha256);
+      if (!existsSync(target)) {
+        const cache = new HostedCheckoutCache(join(this.directory, 'streamed'), {
+          objects: async ids => {
+            invariant(
+              ids.length === 1 && ids[0] === pin.sha256,
+              'INVALID_WORK_BACKUP',
+              'Retain the selected opaque object.',
+            );
+            return [pin];
+          },
+          downloadToFile: (selected, path) => this.transport.downloadToFile!(selected, path),
+        });
+        await cache.ensure([pin.sha256]);
+        renameSync(join(cache.objects, pin.sha256), target);
+        syncDirectory(this.source.directory);
+      }
+      const observed = await fingerprintPrivateFile(target, 'INVALID_WORK_BACKUP');
+      invariant(
+        observed.sha256 === pin.sha256 && observed.size === pin.size,
+        'INVALID_WORK_BACKUP',
+        'Hosted recovery blob differs from its selected pin.',
+      );
+      const value = Buffer.from(
+        canonicalPayload({
+          kind: 'forge-hosted-recovery-object',
+          previous: null,
+          object: pin,
+          nested: false,
+        }),
+      );
+      const root = { sha256: this.source.put(value), size: value.length };
+      writeRecoveryState(marker, { pin, root });
       return root;
     }
     let bytes: Buffer;

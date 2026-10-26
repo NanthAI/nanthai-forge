@@ -149,3 +149,54 @@ test('improving history coverage does not introduce a reconnect gate', async t =
   const result = await f.connect(selected);
   assert.equal(result.selection.completeHistory, 'complete');
 });
+
+for (const receipt of [false, true])
+  test(`server authority never returns or replays native reconnect authority (cached=${receipt})`, async t => {
+    const f = fixture(t),
+      selected = (await f.prepare()).selection;
+    if (receipt) await f.connect(selected);
+    f.tables.hostedProjects.get('project').sourceAuthority = { mode: 'server', epoch: 1 };
+    await assert.rejects(f.connect(selected), e => e.data.code === 'SOURCE_AUTHORITY_STALE');
+    assert.equal(f.tables.projectRecoveryConnections.size, receipt ? 1 : 0);
+  });
+
+test('server recovery ignores old native reconnect receipts and selects current hosted authority', async t => {
+  const f = fixture(t),
+    selected = (await f.prepare()).selection;
+  await f.connect(selected);
+  const authority = { mode: 'server', epoch: 1 };
+  f.tables.hostedProjects.get('project').sourceAuthority = authority;
+  f.tables.projectHostedChannels ??= new Map();
+  f.tables.projectHostedChannels.set('channel', {
+    _id: 'channel',
+    projectId: 'project',
+    name: 'main',
+    operationId: randomUUID(),
+    selection: JSON.stringify({
+      schema: 2,
+      projectId: 'project',
+      snapshotId: 'seed',
+      sourceRevision: 0,
+      authority,
+      channel: 'main',
+      head: 'c'.repeat(64),
+      receipt: { id: randomUUID(), kind: 'native', previousHead: null, previousReceiptId: null },
+    }),
+  });
+  const before = structuredClone(f.tables);
+  const result = await f.prepare();
+  assert.equal(result.selection.authority.mode, 'server');
+  assert.equal(result.receipt, null);
+  assert.deepEqual(f.tables, before);
+});
+
+test('native reconnect receipt replay remains available without rediscovering a checkpoint', async t => {
+  const f = fixture(t),
+    selected = (await f.prepare()).selection;
+  const original = await f.connect(selected);
+  f.tables.projectBackups.delete('backup');
+  const replay = await f.prepare();
+  assert.equal(replay.selection, null);
+  assert.deepEqual(replay.receipt, original);
+  assert.deepEqual(replay.authority, { mode: 'native-owner', epoch: 0 });
+});

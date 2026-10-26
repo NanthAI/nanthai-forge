@@ -43,6 +43,7 @@ export const recoveryConnectionSchema = z.object({
 });
 export type RecoveryConnection = z.infer<typeof recoveryConnectionSchema>;
 export const recoveryPreparationSchema = z.object({
+  authority: sourceAuthoritySchema.optional(),
   selection: recoverySelectionSchema.nullable(),
   receipt: recoveryConnectionSchema.nullable(),
 });

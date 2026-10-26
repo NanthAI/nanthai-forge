@@ -725,19 +725,27 @@ failure returns `RECOVERY_INVENTORY_UNAVAILABLE` without changing publication
 success; missing/corrupt inventory never establishes coverage.
 ## Guided existing-project recovery
 
-`nforge recover NEW_OWNER --command-file REQUEST.json` obtains a matching full
-checkpoint and hosted journal with current owner authority, reports restored
-main/Lane/evidence coverage, and explicitly reconnects the existing project.
-Requests carry `{operationId,url,projectId,archivePath?,cacheRoot?}` and no token.
-Native archives and hosted object checkpoints retain their original hashes;
-whole-deployment weekly ZIP recovery first restores its application/backend.
-See [the recovery drill](recovery-drill.md) for commands and qualification.
+`nforge recover NEW_DIRECTORY --command-file REQUEST.json` selects recovery by
+current source authority. A binding alone never selects the server behavior.
+Native-owner projects, including a rollback to native-owner at a higher epoch,
+retain full native owner recovery and local acceptance. Their request is
+`{operationId,url,projectId,archivePath?,cacheRoot?}` without credentials;
+`recover OWNER reconnect` and `recover OLD_OWNER client` remain available.
+Shadow mode retains native recovery and its existing authority rules.
 
-An explicit `recover OWNER reconnect` binds an independent restore as owner;
-`recover OLD_OWNER client` returns the original Mac to an independent-copy role
-while preserving its work. Neither changes hosted identity/authority or introduces
-a lease. Existing source/Work/Channel CAS and reconciliation govern concurrent
-owners. `exchange pull` keeps its selected-main source-client semantics.
+The server gate is `sourceAuthority(binding).mode === 'server' ||
+state.authorityTransition?.mode === 'server'`. Under server authority, recovery
+creates a runner/cache from selected hosted main and exact paged Work, queue,
+acceptance, completion and source-return receipts. It creates no native accepting
+owner, and its only hosted mutation is ordinary runner registration. This path
+takes `{operationId,url,projectId}`; native archive options do not select an
+accepting server owner. Pending local server transitions also prevent native
+reconnect. Keep the operation ID and destination across interruption.
+
+A weekly deployment ZIP first restores its application/backend, then the same
+guided command follows the restored authority mode. See
+[Route B](../operations.md#route-b-recover-a-runner-and-cache-from-hosted) and
+[the recovery drill](recovery-drill.md) for commands and measured fixture times.
 
 ## Hosted Lane editing checkout
 

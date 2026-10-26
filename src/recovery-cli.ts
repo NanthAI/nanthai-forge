@@ -4,18 +4,18 @@ import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { recoverOwner, reconnectOwner } from './recovery-owner.js';
 
-export const RECOVERY_HELP = `nforge recover NEW_OWNER --command-file REQUEST.json
+export const RECOVERY_HELP = `nforge recover NEW_DIRECTORY --command-file REQUEST.json
 nforge recover OWNER reconnect|client --command-file REQUEST.json
 Request: {operationId,url,projectId,archivePath?,cacheRoot?}. No credentials in this file.
-Run nforge login URL with existing project-owner authority. Guided restore requires a fresh destination.
-The guided command obtains a matching checkpoint and hosted journal, restores all saved Lanes and
-available evidence, reports coverage, and explicitly reconnects to the existing project as owner.
-archivePath selects this project's exact native .tar.gz checkpoint. A weekly deployment ZIP must
-first be imported into a fresh deployment with matching application/auth/configuration; see recovery-drill.
-Retry the same request/destination after interruption, including a lost reconnect reply.
-reconnect binds an existing independent restore as owner; client returns an old owner to an independent
-copy without consuming canonical requests. Open current source separately with exchange pull --target.
-No lease, access condition, source acceptance, push, process restart or new hosted project is created.
+Native-owner and server-shadow projects retain full owner recovery/reconnect. Native-owner
+bound projects keep local acceptance, including after rollback to native-owner.
+Server authority (or a pending switch to server) selects Route B runner/cache recovery instead.
+It creates no native accepting owner and writes hosted only for normal runner registration.
+Server Route B takes {operationId,url,projectId}; archivePath/cacheRoot belong to native recovery.
+Run nforge login URL using existing owner access. Keep the operationId and destination on retry.
+Recovery never restarts commands. Start a recovered server worker separately with
+nforge worker URL PROJECT_ID MACHINE_UUID using its existing configuration/collector credentials.
+Weekly deployment ZIP restoration and explicit higher-epoch authority rollback remain separate.
 `;
 export async function recoveryCli(args: string[]) {
   if (!args.length || args.includes('--help')) {
