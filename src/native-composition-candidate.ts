@@ -99,8 +99,8 @@ export function prepareNativeComposition(
         ),
       );
     },
-    restore: () => {
-      for (const bytes of objects.values()) source.put(bytes);
+    restore: (target = source) => {
+      for (const bytes of objects.values()) target.put(bytes);
     },
   };
 }

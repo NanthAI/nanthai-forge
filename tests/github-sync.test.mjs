@@ -1,3 +1,4 @@
+import { cleanupOwner } from './owner-cleanup.mjs';
 import { until as untilWorker } from './landing-worker-fixture.mjs';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { withQueueSlot } from '../dist/landing-queue.js';
@@ -10,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { initNative } from '../dist/native-work.js';
+import { WorkStore } from '../dist/work-store.js';
 import { NativeSource } from '../dist/native-source.js';
 import { WorkService } from '../dist/work.js';
 import { githubSync } from '../dist/github-sync.js';
@@ -43,9 +45,12 @@ after(() => {
 
 function fixture(t, flags = {}) {
   const temporary = mkdtempSync(join(tmpdir(), 'forge-github-sync-'));
-  t.after(() => rmSync(temporary, { recursive: true, force: true }));
+  t.after(async () => {
+    await cleanupOwner(owner, undefined, { stopChecks: true });
+    rmSync(temporary, { recursive: true, force: true });
+  });
   const remote = join(temporary, 'remote.git'),
-    owner = join(temporary, 'native');
+    owner = join(temporary, 'forge-native');
   cpSync(seedRepository(), remote, { recursive: true });
   mkdirSync(owner);
   write(owner, 'a.txt', 'Accepted source\n');
@@ -552,6 +557,41 @@ test('auto-push coalesces a burst to the newest green main and preserves all map
   assert.equal(f.work.store.load().githubSync.commits.length, 3);
   assert.equal(f.work.store.load().githubSync.commits.at(-1).state, latest.view.head);
   assert.equal(git(f.remote, ['show', 'main:two.txt']), 'two');
+});
+
+test('auto-push hydrates and stages outside the writer lock, including its sync recorder', async t => {
+  const f = fixture(t);
+  await green(f);
+  await mirrorPolicy(f);
+  let held = false,
+    publications = 0;
+  const locked = WorkStore.prototype.locked;
+  t.mock.method(WorkStore.prototype, 'locked', function (run, options) {
+    return locked.call(
+      this,
+      () => {
+        held = true;
+        publications++;
+        try {
+          return run();
+        } finally {
+          held = false;
+        }
+      },
+      options,
+    );
+  });
+  for (const name of ['load', 'prepareSave']) {
+    const original = WorkStore.prototype[name];
+    t.mock.method(WorkStore.prototype, name, function (...args) {
+      assert.equal(held, false, `${name} ran under the writer lock`);
+      return original.apply(this, args);
+    });
+  }
+  await drain(f);
+  assert.equal(f.work.store.load().githubAutoPush.status, 'pushed');
+  assert.equal(f.controlState().pushes, 1);
+  assert.ok(publications > 0, 'only CAS publication acquires the lock');
 });
 
 test('auto-push divergence records both heads as Needs you without replacing remote history', async t => {
@@ -1462,7 +1502,12 @@ test('--wait-audit timeout exits while its newly started audit continues under t
     const child = await pending;
     assert.equal(child.status, 1, child.stderr);
     assert.equal(JSON.parse(child.stdout).reason, 'GITHUB_SYNC_AUDIT_TIMEOUT');
-    assert.equal(f.work.store.load().runs.find(run => run.id === runId).status, 'running');
+    // The socket proves execution; its running progress record can still be
+    // queued behind another writer. Timeout must retain that same live run.
+    const retained = f.work.store.load().runs.find(run => run.id === runId);
+    assert.ok(['preparing', 'running'].includes(retained.status));
+    assert.equal(retained.endedAt, undefined);
+    assert.ok(!retained.cancelRequested);
     for (const socket of sockets) socket.end();
     await drainPostAccept(f.work.store);
     assert.equal(f.work.store.load().runs.filter(run => run.mainCheck).length, 1);

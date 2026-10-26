@@ -129,14 +129,15 @@ export function landingRecords(
   return data;
 }
 
-/** Publish only the queue records the transition actually changed, under the
- * existing owner lock and driver fence. Never save a projection as whole Work. */
+/** Prepare only changed queue records outside the writer lock, then publish
+ * under the driver fence and exact-pointer CAS. Never save a projection as whole Work. */
 export function editLandingRecords<T>(
   store: WorkStore,
   channel: string,
   edit: (data: WorkData) => T,
   tx: WorkRecordTransaction,
   selectedId: string,
+  beforePublish?: () => void,
 ) {
   const data = landingRecords(store, channel, tx, selectedId);
   const before = new Map(
@@ -151,7 +152,12 @@ export function editLandingRecords<T>(
       before.get(collection)!.get(record.id) === JSON.stringify(record) ? [] : [{ collection, record }],
     ),
   );
-  if (!changes.length) return result;
+  if (!changes.length)
+    return store.locked(() => {
+      beforePublish?.();
+      tx.assertCurrent();
+      return result;
+    });
   const expanded = Number(data.schema) >= 19 || data.landingBatches?.some(batch => batch.entryIds.length > 4);
   tx.setSchema(
     (Number(data.schema) >= 21
@@ -169,8 +175,12 @@ export function editLandingRecords<T>(
     if (position === undefined) tx.append(collection, record);
     else tx.replace(collection, position, record);
   }
-  store.commitRecords(tx);
-  return result;
+  store.prepareCommitRecords(tx);
+  return store.locked(() => {
+    beforePublish?.();
+    store.commitRecords(tx, undefined, { prepared: true });
+    return result;
+  });
 }
 
 /** Locate a runner's exact prefix without hydrating completed diagnoses or Work.

@@ -522,11 +522,12 @@ export function agentCheckpoint(
                       : {}),
                     ...(lane.pendingMerge && !options.preserveMerge ? { pendingMerge: undefined } : {}),
                   });
+                  store.prepareCommitRecords(tx);
                   return store.locked(
                     () => {
                       preparedCheckpointCurrent(new NativeSource(store.root), candidate!);
                       try {
-                        store.commitRecords(tx);
+                        store.commitRecords(tx, undefined, { prepared: true });
                       } catch (error) {
                         if (error instanceof ForgeError && error.code === 'WORK_STALE')
                           throw checkpointMetadataChanged;

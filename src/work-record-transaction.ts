@@ -15,6 +15,7 @@ import {
   recordIO,
   readWorkFile,
   publishRecords,
+  prepareRecordPublication,
   type RecordManifest,
   type RecordCollection,
 } from './work-records.js';
@@ -30,6 +31,7 @@ export class WorkRecordTransaction {
   private readonly io;
   private readonly original: string;
   private readonly initial: string;
+  private prepared?: { revision: number; publish: () => void };
 
   constructor(
     readonly directory: string,
@@ -420,6 +422,20 @@ export class WorkRecordTransaction {
   dispose() {
     this.io.release();
   }
+  /** Call after staging mutations, outside the owner lock. The final commit
+   * still verifies the original pointer before publishing these durable bytes. */
+  prepareCommit(revision?: number) {
+    if (revision === undefined && JSON.stringify(this.manifest) === this.initial) return;
+    const next = revision ?? this.revision + 1;
+    invariant(
+      Number.isSafeInteger(next) && next >= this.revision,
+      'BAD_ARGUMENT',
+      'Work revision is invalid.',
+    );
+    assertWorkFormat(this.manifest.fields);
+    this.manifest.fields.revision = next;
+    this.prepared = { revision: next, publish: prepareRecordPublication(this.directory, this.manifest) };
+  }
   commit(revision?: number) {
     try {
       return this.publish(revision);
@@ -428,17 +444,23 @@ export class WorkRecordTransaction {
     }
   }
   private publish(revision?: number) {
-    const nextRevision = revision ?? this.revision + 1;
+    const nextRevision = revision ?? this.prepared?.revision ?? this.revision + 1;
     assertWorkFormat(this.manifest.fields);
     invariant(
       Number.isSafeInteger(nextRevision) && nextRevision >= this.revision,
       'BAD_ARGUMENT',
       'Work revision is invalid.',
     );
+    invariant(
+      !this.prepared || this.prepared.revision === nextRevision,
+      'BAD_ARGUMENT',
+      'Use the prepared Work revision.',
+    );
     this.assertCurrent();
     if (revision === undefined && JSON.stringify(this.manifest) === this.initial) return this.revision;
     this.manifest.fields.revision = nextRevision;
-    publishRecords(this.directory, this.manifest);
+    if (this.prepared) this.prepared.publish();
+    else publishRecords(this.directory, this.manifest);
     return nextRevision;
   }
 }

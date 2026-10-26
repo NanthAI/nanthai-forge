@@ -312,9 +312,13 @@ test('compose traverses outside the owner lock, rejects stale publication and re
   await assert.rejects(agent.dispatch(command), error => error.code === 'WORK_STALE');
   const { nativeObjects } = await import('../dist/native-objects.js');
   const locked = store.locked.bind(store);
-  let removed = [];
+  const removed = new Set();
   store.locked = (...args) => {
-    removed = nativeObjects(new WorkStore(store.root), { action: 'collect-native-objects' }).result.removed;
+    // Publication may retry: retain evidence from every collection, including
+    // the empty collection before the locked restoration fallback.
+    for (const id of nativeObjects(new WorkStore(store.root), { action: 'collect-native-objects' }).result
+      .removed)
+      removed.add(id);
     return locked(...args);
   };
   t.after(() => {
@@ -323,7 +327,7 @@ test('compose traverses outside the owner lock, rejects stale publication and re
   const reply = (await agent.dispatch(command)).result;
   store.locked = locked;
   assert.equal(reply.status, 'clean');
-  assert.ok(removed.length >= 2, 'unpublished merge State and blob should be collected');
+  assert.ok(removed.size >= 2, 'unpublished merge State and blob should be collected');
   const source = new NativeSource(store.root);
   const file = source.state(reply.head).files.find(file => file.path === 'source.txt');
   assert.equal(source.object(file.blob).toString(), 'local\ntwo\nthree\npeer\n');

@@ -1,3 +1,4 @@
+import { retryWorkEdit } from './work-edit.js';
 // SPDX-License-Identifier: Apache-2.0
 import { checkServiceEnv } from './worker-environment.js';
 import { spawn } from 'node:child_process';
@@ -66,8 +67,7 @@ export async function drainGithubPush(
       join(store.directory, 'github-auto-push-queue'),
       async () => {
         for (;;) {
-          const selected = store.locked(() => {
-            const data = store.load();
+          const selected = await retryWorkEdit(store, 'github-auto-push-select', data => {
             if (!pendingGithubPush(data)) return;
             const move = latestMain(data)!,
               policy = effectivePolicy(data).githubMirror!;
@@ -90,18 +90,15 @@ export async function drainGithubPush(
             };
             data.githubAutoPush = status;
             data.revision++;
-            store.save(data);
             return status;
           });
           if (!selected) return;
           const update = async (patch: Partial<GithubAutoPush>) => {
-            store.locked(() => {
-              const data = store.load();
+            await retryWorkEdit(store, selected.operationId, data => {
               data.githubAutoPush = { ...selected, ...patch, at: new Date().toISOString() };
-              Object.assign(selected, data.githubAutoPush);
               data.revision++;
-              store.save(data);
-            });
+              return data.githubAutoPush;
+            }).then(status => Object.assign(selected, status));
             await publishGithubStatus(store);
           };
           await publishGithubStatus(store);
@@ -179,12 +176,10 @@ export async function drainGithubPush(
     );
   } finally {
     try {
-      store.locked(() => {
-        const data = store.load();
+      await retryWorkEdit(store, 'github-auto-push-release', data => {
         if (data.githubAutoPush?.worker?.pid !== process.pid) return;
         delete data.githubAutoPush.worker;
         data.revision++;
-        store.save(data);
       });
     } catch {
       /* An exited worker is recoverable by its kernel process identity. */

@@ -14,7 +14,7 @@ import {
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { packRecord, unpackRecord } from './work-record-codec.js';
-import { recordPendingExchange } from './pending-exchange.js';
+import { preparePendingExchange } from './pending-exchange.js';
 import { recordOwnerMutation } from './self-metrics-journal.js';
 import { z } from 'zod';
 import { digest } from './hash.js';
@@ -363,7 +363,9 @@ export function putCollection(
     });
   return { count: values.length, pages, ...(indexed ? { lookup: indexBuild(io, entries) } : {}) };
 }
-export function publishRecords(directory: string, manifest: RecordManifest) {
+/** Stage and flush immutable pages and the next pointer before writer admission.
+ * Publication still requires the caller's expected-pointer CAS under its lock. */
+export function prepareRecordPublication(directory: string, manifest: RecordManifest) {
   manifest.schema = 'forge-work-records-v3';
   syncDirectory(join(directory, 'records'));
   const temp = join(directory, `${randomUUID()}.tmp`),
@@ -374,10 +376,28 @@ export function publishRecords(directory: string, manifest: RecordManifest) {
   } finally {
     closeSync(fd);
   }
-  recordPendingExchange(directory, manifest.fields.revision as number);
-  renameSync(temp, join(directory, 'work.json'));
-  syncDirectory(directory);
-  recordOwnerMutation(directory, manifest.fields.revision as number);
+  const expected = digest(JSON.stringify(manifest));
+  const pending = preparePendingExchange(directory, manifest.fields.revision as number);
+  return () => {
+    invariant(
+      digest(JSON.stringify(manifest)) === expected,
+      'WORK_STALE',
+      'Prepared Work pointer changed; prepare it again before publication.',
+    );
+    const bytes = readSource(directory, temp.slice(directory.length + 1), Number.MAX_SAFE_INTEGER);
+    invariant(
+      bytes && digest(bytes) === expected,
+      'INVALID_WORK_STORE',
+      'Prepared Work pointer bytes changed; the committed snapshot is preserved.',
+    );
+    pending();
+    renameSync(temp, join(directory, 'work.json'));
+    syncDirectory(directory);
+    recordOwnerMutation(directory, manifest.fields.revision as number);
+  };
+}
+export function publishRecords(directory: string, manifest: RecordManifest) {
+  prepareRecordPublication(directory, manifest)();
 }
 /** Write content-addressed pages only; nothing is visible until `publishRecords` switches the pointer. */
 export function stageRecords(directory: string, value: Record<string, unknown>): RecordManifest {

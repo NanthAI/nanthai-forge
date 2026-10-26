@@ -13,7 +13,15 @@ import { policyPreset } from './autonomy-policy.js';
 import { join, resolve } from 'node:path';
 import { ForgeError, invariant } from './errors.js';
 import { verifyRoot } from './git.js';
-import { readWorkFile, readRecords, readRecordPage, recordManifest, writeRecords } from './work-records.js';
+import {
+  readWorkFile,
+  readRecords,
+  readRecordPage,
+  recordManifest,
+  stageRecords,
+  publishRecords,
+  type RecordManifest,
+} from './work-records.js';
 import { nativeOwner } from './native-source.js';
 import { workGit } from './work-git.js';
 import { recordKeys, lookupKey } from './work-record-index.js';
@@ -26,6 +34,12 @@ import { preserveFields } from './work-normalization.js';
 export { preserveFields } from './work-normalization.js';
 
 export class WorkStore {
+  private writerDepth = 0;
+  private readonly afterWriter: (() => void)[] = [];
+  private afterPublication(run: () => void) {
+    if (this.writerDepth) this.afterWriter.push(run);
+    else run();
+  }
   private readonly observation = new AsyncLocalStorage<{ pointer: Buffer | null }>();
   /** Atomic rename pins revision and immutable records together, without a writer lock. */
   observing<T>(run: () => T): T {
@@ -208,28 +222,36 @@ export class WorkStore {
     }
     return new WorkRecordTransaction(this.directory, manifest, bytes!);
   }
-  commitRecords(transaction: WorkRecordTransaction, revision?: number) {
+  /** Prepare derived records and flush the next pointer before taking the writer lock. */
+  prepareCommitRecords(transaction: WorkRecordTransaction, revision?: number) {
+    captureTransactionFriction(transaction, this.readRecords());
+    transaction.prepareCommit(revision);
+  }
+  commitRecords(transaction: WorkRecordTransaction, revision?: number, options: { prepared?: boolean } = {}) {
     const previous = this.readRecords();
     const prior = previous?.manifest.collections.lanes?.pages ?? [];
-    captureTransactionFriction(transaction, previous);
+    if (!options.prepared) captureTransactionFriction(transaction, previous);
     const result = transaction.commit(revision);
-    wakeIntegrationPreview(this, previous, transaction);
-    wakeAutoExchange(this);
-    wakeLandingWorker(this);
-    try {
-      indexPeerRecords(
-        this.root,
-        transaction,
-        (transaction.manifest.collections.lanes?.pages ?? []).flatMap((hash, page) =>
-          hash !== prior[page] ? [page] : [],
-        ),
-      );
-    } catch {
-      /* Derived index cannot fail a committed mutation. */
-    }
+    this.afterPublication(() => {
+      wakeIntegrationPreview(this, previous, transaction);
+      wakeAutoExchange(this);
+      wakeLandingWorker(this);
+      try {
+        indexPeerRecords(
+          this.root,
+          transaction,
+          (transaction.manifest.collections.lanes?.pages ?? []).flatMap((hash, page) =>
+            hash !== prior[page] ? [page] : [],
+          ),
+        );
+      } catch {
+        /* Derived index cannot fail a committed mutation. */
+      }
+    });
     return result;
   }
-  save(data: WorkData): void {
+  /** Validate and stage immutable pages before writer admission. Caller pins collection until publication. */
+  prepareSave(data: WorkData, stage = stageRecords): RecordManifest {
     assertWorkFormat(data);
     const bytes = this.readPointer();
     let previousSchema: unknown;
@@ -263,18 +285,44 @@ export class WorkStore {
       data.schema = Math.max(data.schema, 12) as WorkData['schema'];
     if (isUnifiedWork(data)) data.intents = data.intents.map(unifyIntent);
     parseWork(data);
+    return stage(this.directory, data);
+  }
+  publishSave(manifest: RecordManifest, publish = () => publishRecords(this.directory, manifest)): void {
     const previous = this.readRecords();
-    writeRecords(this.directory, data);
-    wakeIntegrationPreview(this, previous, this.readRecords());
-    wakeAutoExchange(this);
-    wakeLandingWorker(this);
+    publish();
+    const next = this.readRecords();
+    this.afterPublication(() => {
+      wakeIntegrationPreview(this, previous, next);
+      wakeAutoExchange(this);
+      wakeLandingWorker(this);
+    });
+  }
+  save(data: WorkData): void {
+    this.publishSave(this.prepareSave(data));
   }
   /** Advisory only: publication always acquires the owner lock and revalidates. */
   preparing() {
     return !existsSync(join(this.directory, 'lock'));
   }
   locked<T>(run: () => T, options: WorkLockOptions = {}): T {
-    return workLocked(join(this.directory, 'lock'), run, options);
+    try {
+      return workLocked(
+        join(this.directory, 'lock'),
+        () => {
+          this.writerDepth++;
+          try {
+            return run();
+          } finally {
+            this.writerDepth--;
+          }
+        },
+        options,
+      );
+    } finally {
+      // Exact-page caches and wake hints finish before returning the receipt,
+      // after writer release. Their immutable pins tolerate another publication.
+      if (!this.writerDepth) for (const notify of this.afterWriter.splice(0)) notify();
+    }
   }
   laneLocked<T>(laneId: string, run: () => T, options: WorkLockOptions = {}): T {
     invariant(/^[0-9a-f-]{36}$/i.test(laneId), 'BAD_ARGUMENT', 'Select a Lane UUID.');

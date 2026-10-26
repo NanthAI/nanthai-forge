@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { frictionId, appendFriction } from './friction.js';
-import { pageSize } from './work-records.js';
+import { pageHashes, pageSize } from './work-records.js';
 import { digest } from './hash.js';
 import type { FrictionCapture } from './friction-types.js';
 import type { CheckRun, Lane } from './work-types.js';
@@ -90,8 +90,12 @@ export function captureTransactionFriction(tx: WorkRecordTransaction, previous?:
     const before = previous?.manifest.collections[name];
     for (let page = 0; page < index.pages.length; page++) {
       if (index.pages[page] === before?.pages[page]) continue;
+      // Each immutable page is validated once for this comparison, rather than
+      // rereading/decompressing it for every unchanged row in the page.
+      const hashes = pageHashes(tx.directory, index.pages[page]!);
+      const priorHashes = before?.pages[page] ? pageHashes(previous!.directory, before.pages[page]!) : [];
       for (let i = page * pageSize; i < Math.min((page + 1) * pageSize, index.count); i++) {
-        if (i < (before?.count ?? 0) && previous!.versionAt(name, i) === tx.versionAt(name, i)) continue;
+        if (i < (before?.count ?? 0) && priorHashes[i % pageSize] === hashes[i % pageSize]) continue;
         let input: Occurrence | undefined;
         if (name === 'runs') {
           // Status and error are header fields. Cost summaries own full run-page hydration;

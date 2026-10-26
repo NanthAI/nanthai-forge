@@ -2,7 +2,7 @@ import { currentChannelHead } from './agent-defaults.js';
 import { validatePassingPrefix, diagnosticStatus } from './landing-diagnosis.js';
 // SPDX-License-Identifier: Apache-2.0
 import { finishChild } from './agent-finish-journal.js';
-import { ForgeError } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { retryWorkPhase } from './work-retry.js';
 import { batchEdit, composeBatch } from './landing-batch-store.js';
 import { cancellationBoundary, evaluateBatch } from './landing-batch-check.js';
@@ -93,8 +93,14 @@ export async function advanceLandingBatch(
       // Even a known receipt replays this idempotent call to reconcile lifecycle
       // work interrupted after acceptance. No check is dispatched on this path.
       move = (
-        await retryWorkPhase(batch.id, () =>
-          work.dispatch(
+        await retryWorkPhase(batch.id, () => {
+          // Validate source/evidence on a committed snapshot outside writer
+          // admission. The same pointer must still be current at publication.
+          const validation = work.store.observing(() => {
+            if (!receipt) validatePassingPrefix(work, batch, passing);
+            return { pointer: work.store.pointer(), revision: work.store.revision() };
+          });
+          return work.dispatch(
             {
               action: 'accept-channel',
               operationId: batchAcceptanceId(batch, passing.viewId),
@@ -103,17 +109,21 @@ export async function advanceLandingBatch(
               expectedHead: passing.head,
               expectedPrevious: batch.previous,
             },
-            work.store.revision(),
+            validation.revision,
             {
               keepOpen: first.keepOpen,
               beforePublish: () => {
                 driver.beforePublish();
-                // Receipt replay reconciles an already-authorized acceptance even after policy/definition drift.
-                if (!receipt) validatePassingPrefix(work, batch, passing);
+                const current = work.store.pointer();
+                invariant(
+                  validation.pointer && current && validation.pointer.equals(current),
+                  'WORK_STALE',
+                  'Landing evidence changed during preparation. Retry the original settlement.',
+                );
               },
             },
-          ),
-        )
+          );
+        })
       ).result as ChannelMove;
     } catch (error) {
       if (!(error instanceof ForgeError)) throw error;

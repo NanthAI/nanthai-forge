@@ -1,3 +1,4 @@
+import { retryWorkEdit } from './work-edit.js';
 import { waitPushAudit } from './push-audit-wait.js';
 // SPDX-License-Identifier: Apache-2.0
 import { workProgress } from './work-progress.js';
@@ -226,8 +227,7 @@ export async function githubSync(
     if (!entries.length) {
       // Only unchanged moves remain: advance the cursor so no empty commit is ever published.
       if (original && cursor && !same(original.cursor, cursor))
-        store.locked(() => {
-          const current = store.load();
+        await retryWorkEdit(store, options.operationId ?? 'github-sync-cursor', current => {
           invariant(
             same(current.githubSync, stored),
             'WORK_STALE',
@@ -247,7 +247,6 @@ export async function githubSync(
               at: new Date().toISOString(),
             });
           current.revision++;
-          store.save(current);
         });
       return { ...plan, hostedSync: await publishGithubStatus(store) };
     }
@@ -258,8 +257,7 @@ export async function githubSync(
       binding.commits.push(...entries);
       if (cursor) binding.cursor = cursor;
       else delete binding.cursor;
-      store.locked(() => {
-        const current = store.load();
+      await retryWorkEdit(store, options.operationId ?? 'github-sync-binding', current => {
         invariant(
           same(current.githubSync, stored),
           'WORK_STALE',
@@ -273,7 +271,6 @@ export async function githubSync(
           });
         current.githubSync = binding;
         current.revision++;
-        store.save(current);
       });
     }
     if (!plan.alreadyPushed) {
@@ -320,9 +317,8 @@ export async function githubSync(
       remoteHead = await remoteSyncHead(root, remote, ref, !expected);
       if (remoteHead !== head) throw changed({ expectedHead: expected, remoteHead, localHead: head });
     }
-    store.locked(() => {
-      const current = store.load(),
-        saved = current.githubSync;
+    await retryWorkEdit(store, options.operationId ?? 'github-sync-result', current => {
+      const saved = current.githubSync;
       invariant(
         saved && entries.every(entry => saved.commits.some(item => same(item, entry))),
         'GITHUB_SYNC_HISTORY',
@@ -347,7 +343,6 @@ export async function githubSync(
           saved.pushedAt = new Date().toISOString();
         }
         current.revision++;
-        store.save(current);
       }
     });
     return {

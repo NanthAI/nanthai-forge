@@ -1,3 +1,4 @@
+import { checkToolFence } from './check-tool-fence.js';
 import { allRecords } from './agent-lifecycle.js';
 // SPDX-License-Identifier: Apache-2.0
 import { validatePrefixRun } from './landing-diagnosis.js';
@@ -5,7 +6,7 @@ import { hostname } from 'node:os';
 import { processAlive } from './local-process.js';
 import { finishChild } from './finish-child.js';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { readSource } from './files.js';
 import { NativeSource } from './native-source.js';
@@ -238,87 +239,115 @@ async function reuseCheck(
       } catch {
         continue;
       }
-      const reused = await batchEdit(
-        work,
-        batch?.id ?? prefix.runId,
-        current => {
-          const existing = current.runs.find(run => run.id === draft.id);
-          if (existing) return existing;
-          if (
-            replaced &&
-            !same(
-              current.runs.find(run => run.id === replaced.id),
-              replaced,
-            )
-          )
-            return;
-          const retained = retainedPassedCheck(
-            store,
-            current.runs.find(run => run.id === original.id),
-          );
-          if (!retained || evidence(retained) !== evidence(original)) return;
-          if (current.checks.find(item => item.id === check.id)?.definition !== check.definition) return;
-          const settings = effectivePolicy(current).checks;
-          if (
-            checkRoute(settings?.runner ?? 'local', check, true).actual !== route.actual ||
-            (route.actual === 'github-actions' &&
-              actionsCheckRuntime(settings?.repo, settings?.runsOn) !== runtime) ||
-            (route.actual !== 'local' && settings?.shards !== policy?.shards)
-          )
-            return;
-          const savedBatch = current.landingBatches?.find(item => item.id === batch?.id);
-          if (
-            (batch &&
-              (savedBatch?.status !== 'checking' ||
-                !savedBatch.prefixes.some(item => same(item, prefix)) ||
-                !same(savedBatch.environment, draft.environment))) ||
-            !same(
-              current.views.find(item => item.id === view.id),
-              view,
-            )
-          )
-            return;
-          if (!same(observeCheckInputs(store, check, draft.head, draft.environment), draft.inputObservations))
-            return;
-          if (route.actual === 'local' && !same(executable, localExecutable())) return;
-          const now = new Date().toISOString();
-          const reused: CheckRun = {
-            ...draft,
-            runner: { pid: 0, host: 'retained-check' },
-            status: 'passed',
-            startedAt: now,
-            endedAt: now,
-            exitCode: 0,
-            signal: null,
-            ...(original.checkSelection ? { checkSelection: original.checkSelection } : {}),
-            reusedFrom: { runId: original.id, endedAt: original.endedAt!, evidence: evidence(original) },
-            details: `reused check ${original.id} from ${original.endedAt}`,
-            backend: {
-              ...route,
-              cost: {
-                runner: route.actual,
-                billedSeconds: 0,
-                billedMinutes: 0,
-                estimatedCostUsd: 0,
-                items: [],
-                basis: `Reused check ${original.id}; no new execution. Original usage remains on that run.`,
-              },
-            },
-          };
-          if (replaced && savedBatch) {
-            const selected = savedBatch.prefixes.find(item => same(item, prefix))!;
-            selected.runId = reused.id;
-            // Re-evaluate any persisted interrupted verdict with the new receipt.
-            delete savedBatch.settlement;
-            for (const entry of current.landingEntries ?? []) {
-              if (entry.batchId === batch!.id && entry.runId === replaced.id) entry.runId = reused.id;
-            }
-          }
-          current.runs.push(reused);
-          return reused;
-        },
-        driver.beforePublish,
+      const toolsCurrent = checkToolFence(
+        [
+          ...(check.declaredInputs ?? []).flatMap(input =>
+            input.kind === 'tool' && (isAbsolute(input.executable) || !/[/\\]/.test(input.executable))
+              ? [input.executable]
+              : [],
+          ),
+          ...(route.actual === 'local' ? [process.execPath] : []),
+        ],
+        draft.environment,
       );
+      const toolsChanged = Symbol('reuse inputs changed');
+      let publishingReuse = false;
+      let reused: CheckRun | undefined;
+      try {
+        reused = await batchEdit(
+          work,
+          batch?.id ?? prefix.runId,
+          current => {
+            publishingReuse = false;
+            const existing = current.runs.find(run => run.id === draft.id);
+            if (existing) return existing;
+            if (
+              replaced &&
+              !same(
+                current.runs.find(run => run.id === replaced.id),
+                replaced,
+              )
+            )
+              return;
+            const retained = retainedPassedCheck(
+              store,
+              current.runs.find(run => run.id === original.id),
+            );
+            if (!retained || evidence(retained) !== evidence(original)) return;
+            if (current.checks.find(item => item.id === check.id)?.definition !== check.definition) return;
+            const settings = effectivePolicy(current).checks;
+            if (
+              checkRoute(settings?.runner ?? 'local', check, true).actual !== route.actual ||
+              (route.actual === 'github-actions' &&
+                actionsCheckRuntime(settings?.repo, settings?.runsOn) !== runtime) ||
+              (route.actual !== 'local' && settings?.shards !== policy?.shards)
+            )
+              return;
+            const savedBatch = current.landingBatches?.find(item => item.id === batch?.id);
+            if (
+              (batch &&
+                (savedBatch?.status !== 'checking' ||
+                  !savedBatch.prefixes.some(item => same(item, prefix)) ||
+                  !same(savedBatch.environment, draft.environment))) ||
+              !same(
+                current.views.find(item => item.id === view.id),
+                view,
+              )
+            )
+              return;
+            if (
+              !same(observeCheckInputs(store, check, draft.head, draft.environment), draft.inputObservations)
+            )
+              return;
+            if (route.actual === 'local' && !same(executable, localExecutable())) return;
+            if (!toolsCurrent()) return;
+            const now = new Date().toISOString();
+            const reused: CheckRun = {
+              ...draft,
+              runner: { pid: 0, host: 'retained-check' },
+              status: 'passed',
+              startedAt: now,
+              endedAt: now,
+              exitCode: 0,
+              signal: null,
+              ...(original.checkSelection ? { checkSelection: original.checkSelection } : {}),
+              reusedFrom: { runId: original.id, endedAt: original.endedAt!, evidence: evidence(original) },
+              details: `reused check ${original.id} from ${original.endedAt}`,
+              backend: {
+                ...route,
+                cost: {
+                  runner: route.actual,
+                  billedSeconds: 0,
+                  billedMinutes: 0,
+                  estimatedCostUsd: 0,
+                  items: [],
+                  basis: `Reused check ${original.id}; no new execution. Original usage remains on that run.`,
+                },
+              },
+            };
+            if (replaced && savedBatch) {
+              const selected = savedBatch.prefixes.find(item => same(item, prefix))!;
+              selected.runId = reused.id;
+              // Re-evaluate any persisted interrupted verdict with the new receipt.
+              delete savedBatch.settlement;
+              for (const entry of current.landingEntries ?? []) {
+                if (entry.batchId === batch!.id && entry.runId === replaced.id) entry.runId = reused.id;
+              }
+            }
+            current.runs.push(reused);
+            publishingReuse = true;
+            return reused;
+          },
+          () => {
+            if (!publishingReuse) return;
+            driver.beforePublish();
+            if (!toolsCurrent()) throw toolsChanged;
+          },
+        );
+      } catch (error) {
+        if (error === toolsChanged) return;
+        throw error;
+      }
       if (reused?.reusedFrom)
         workProgress('reused check', `${reused.reusedFrom.runId} from ${reused.reusedFrom.endedAt}`);
       return reused;

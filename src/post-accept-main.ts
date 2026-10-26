@@ -1,3 +1,4 @@
+import { editWork } from './work-edit.js';
 // SPDX-License-Identifier: Apache-2.0
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { WorkService } from './work.js';
@@ -118,21 +119,19 @@ export async function drainPostAccept(
           }
           wakeGithubPush(store);
           if (failed) await recoverOptimisticMain(store, failed);
-          const selected = store.locked(() => {
+          const selected = editWork(store, data => {
             // Recheck before loading Work: foreground arrivals never make a waiting
             // audit repeatedly deserialize owner history or contend on its lock.
             if (foregroundQueued()) return { wait: true as const };
-            const data = store.load();
-            const recovered = recoverRuns(store, data);
+            // Preparation must not start adopters that inherit its pinned pointer.
+            const recovered = recoverRuns(store, data, false);
             if (recordFixForward(data) || recovered) {
               data.revision++;
-              store.save(data);
             }
             const before = JSON.stringify(data);
             const selected = selectMainAudit(data, push);
             if (JSON.stringify(data) !== before) {
               data.revision++;
-              store.save(data);
             }
             if (!selected) return;
             if ('wait' in selected) return { wait: true as const };
@@ -147,6 +146,14 @@ export async function drainPostAccept(
           });
           if (!selected) return;
           if ('wait' in selected) {
+            // Launch recovery only after successful publication, outside the
+            // observation context, so adopters claim current committed records.
+            const records = store.readRecords();
+            recoverRuns(store, {
+              runs: records
+                ? ['queued', 'preparing', 'running'].flatMap(status => records.all('runs', status, 'status'))
+                : store.load().runs,
+            });
             await new Promise(resolve => setTimeout(resolve, 250));
             continue;
           }

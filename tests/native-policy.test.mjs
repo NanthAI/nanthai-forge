@@ -200,12 +200,14 @@ test('native optional Invariants assess exact checks and separate reviews, while
   assert.equal(successor.head, view.head);
   assert.equal((await assess(policy, successor)).result.satisfied, false);
   const acceptance = accept(policy, { expectedPrevious: view.head });
-  w.store.save = data => {
-    save(data);
+  // Native edits stage pages outside the lock, then publish the prepared pointer.
+  const publish = w.store.publishSave.bind(w.store);
+  w.store.publishSave = (...args) => {
+    publish(...args);
     throw Error('Lost accepted reply');
   };
   await assert.rejects(call(acceptance), /Lost accepted reply/);
-  w.store.save = save;
+  w.store.publishSave = publish;
   const retained = (await call(acceptance, 0)).result;
   assert.equal(retained.invariant.satisfied, true);
   const latest = (
@@ -380,17 +382,17 @@ test('native lost event registration and dead sequence recovery never restart co
       intentId: f.intent.id,
       inputs: [{ laneId: f.lane.id, head: f.lane.head }],
     },
-    save = f.w.store.save.bind(f.w.store);
+    publish = f.w.store.publishSave.bind(f.w.store);
   let lost = false;
-  f.w.store.save = data => {
-    save(data);
-    if (!lost && data.playbookRuns.length) {
+  f.w.store.publishSave = (...args) => {
+    publish(...args);
+    if (!lost && f.w.store.load().playbookRuns.length) {
       lost = true;
       throw Error('Lost registered reply');
     }
   };
   assert.throws(() => f.act(command), /Lost registered reply/);
-  f.w.store.save = save;
+  f.w.store.publishSave = publish;
   await f.call(command, 0);
   assert.equal(f.data().playbookRuns.length, 1);
   assert.equal(f.data().playbookRuns[0].status, 'interrupted');

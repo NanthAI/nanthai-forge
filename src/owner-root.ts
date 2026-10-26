@@ -1,3 +1,4 @@
+import { workLocked } from './work-lock.js';
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readdirSync } from 'node:fs';
@@ -103,7 +104,7 @@ function currentFiles(root: string, from: NativeFile[], to: NativeFile[]) {
   }
   return current;
 }
-/** Called under the owner lock, after durable Channel publication. A pending
+/** Called under the owner-root lock, after durable Channel publication. A pending
  * target is completed before selecting a newer main; replay can never rewind it. */
 export function updateOwnerRoot(store: WorkStore, data: WorkData, explicit = false) {
   invariant(
@@ -169,6 +170,17 @@ export function updateOwnerRoot(store: WorkStore, data: WorkData, explicit = fal
     return notice;
   }
 }
+/** Workspace refresh has its own lock; file I/O never owns the Work writer lock.
+ * Select current main after admission so delayed acceptance replay cannot rewind it. */
+export function refreshAcceptedOwnerRoot(store: WorkStore, explicit = false) {
+  const policy = effectivePolicy(store.readRecords()?.data() ?? store.load());
+  if (!explicit && !policy.ownerRootUpdates) return undefined;
+  return workLocked(
+    join(store.directory, 'owner-root-lock'),
+    () => updateOwnerRoot(store, store.load(), explicit),
+    { operation: 'owner root refresh' },
+  );
+}
 export function refreshOwnerRoot(store: WorkStore) {
-  return store.locked(() => updateOwnerRoot(store, store.load(), true));
+  return refreshAcceptedOwnerRoot(store, true);
 }

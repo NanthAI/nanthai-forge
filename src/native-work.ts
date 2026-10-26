@@ -1,6 +1,8 @@
+import { PreparedWorkSource } from './native-work-preparation.js';
+import { editWork } from './work-edit.js';
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { optimisticLanding } from './autonomy-policy.js';
-import { ownerRootNotice, updateOwnerRoot } from './owner-root.js';
+import { ownerRootNotice, refreshAcceptedOwnerRoot } from './owner-root.js';
 import { requireSourceAuthority, sourceAuthority } from './hosted-source-authority.js';
 import { readHostState } from './host-binding.js';
 import { pendingStatus } from './pending-status.js';
@@ -294,12 +296,26 @@ export function nativeExecute(
     }
   }
   let started: string[] = [];
+  const preparedSource = new PreparedWorkSource(store.root);
+  let verifySource: (() => void) | undefined;
+  const publish = <T>(edit: (data: WorkData) => T) =>
+    editWork(
+      store,
+      edit,
+      () => {
+        options.beforePublish?.();
+        if (command.action === 'accept-channel') {
+          const currentBinding = readHostState(store).binding;
+          if (currentBinding)
+            requireSourceAuthority(currentBinding, { mode: 'native-owner', epoch: authorityEpoch });
+        }
+      },
+      () => verifySource?.(),
+    );
   const result = (() => {
     try {
-      return store.locked(() => {
-        options.beforePublish?.();
-        const data = store.load(),
-          source = new NativeSource(store.root),
+      return publish(data => {
+        const source = preparedSource,
           at = new Date().toISOString();
         if (command.action === 'intent' && command.operationId) {
           const original = data.intents.find(i => i.id === command.operationId);
@@ -336,8 +352,7 @@ export function nativeExecute(
               'WORK_OPERATION_CHANGED',
               'Reconcile the original native acceptance inputs.',
             );
-            const ownerRoot = existing.channel === 'main' ? updateOwnerRoot(store, data) : undefined;
-            return { revision: data.revision, result: existing, ...(ownerRoot ? { ownerRoot } : {}) };
+            return { revision: data.revision, result: existing };
           }
         }
         if (
@@ -355,7 +370,7 @@ export function nativeExecute(
           }
         }
         // A prepared composition has exact source pins. Revalidate those against
-        // the latest locked Work instead of invalidating a potentially expensive
+        // the pinned Work snapshot instead of invalidating a potentially expensive
         // merge for another Lane's checkpoint, check progress or batch admission.
         // All other commands retain their explicit whole-Work revision guard.
         if (composition && options.reconcileComposition) composition.assertCurrent(data);
@@ -400,7 +415,7 @@ export function nativeExecute(
             break;
           case 'compose': {
             invariant(composition, 'WORK_STALE', 'Refresh Work before composing.');
-            composition.restore();
+            composition.restore(source);
             data.views.push(composition.view);
             data.intents.find(item => item.id === command.intentId)!.dependencies = composition.dependencies;
             result = composition.view;
@@ -464,7 +479,11 @@ export function nativeExecute(
             source.state(command.expectedHead);
             const previous = nativeChannels(data).find(item => item.name === command.channel)?.head ?? null;
             const ownerRequest = options.ownerRequest
-              ? { viewId: command.viewId, head: command.expectedHead, expectedMain: command.expectedPrevious }
+              ? {
+                  viewId: command.viewId,
+                  head: command.expectedHead,
+                  expectedMain: command.expectedPrevious,
+                }
               : undefined;
             let disjoint;
             if (options.ownerRequest && previous !== command.expectedPrevious) {
@@ -592,14 +611,9 @@ export function nativeExecute(
         }
         if (command.action === 'compose' || command.action === 'resolve-native-view')
           started = registerAutomations(data, result as WorkView);
+        verifySource = preparedSource.preparePublication();
         data.revision++;
-        store.save(data);
-        const ownerRoot =
-          command.action === 'accept-channel' && command.channel === 'main'
-            ? updateOwnerRoot(store, data)
-            : undefined;
         return {
-          ...(ownerRoot ? { ownerRoot } : {}),
           revision: data.revision,
           result:
             command.action === 'compose' || command.action === 'resolve-native-view'
@@ -608,11 +622,23 @@ export function nativeExecute(
         };
       });
     } catch (error) {
-      launchPlaybooks(store, started, error);
+      launchPlaybooks(
+        store,
+        started.filter(id => store.select('playbookRuns', id)),
+        error,
+      );
       throw error;
     }
   })();
   launchPlaybooks(store, started);
   if (command.action === 'accept-channel') wakeGithubPush(store);
-  return started.length ? { ...result, revision: store.load().revision } : result;
+  const ownerRoot =
+    command.action === 'accept-channel' && command.channel === 'main'
+      ? refreshAcceptedOwnerRoot(store)
+      : undefined;
+  return {
+    ...result,
+    ...(ownerRoot ? { ownerRoot } : {}),
+    ...(started.length ? { revision: store.revision() } : {}),
+  };
 }

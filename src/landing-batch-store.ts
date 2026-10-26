@@ -1,3 +1,4 @@
+import { editWork } from './work-edit.js';
 import { editLandingRecords } from './landing-records.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 import { assertLandingWorkerActive } from './landing-worker-context.js';
@@ -39,36 +40,45 @@ export function batchEdit<T>(
   beforePublish?: () => void,
   channel?: string,
 ) {
-  return retryWorkPhase(id, () =>
-    work.store.locked(() => {
+  return retryWorkPhase(id, () => {
+    const fence = () => {
       assertLandingWorkerActive();
       beforePublish?.();
-      if (channel !== undefined) {
-        const tx = work.store.readRecords();
-        if (tx) return editLandingRecords(work.store, channel, edit, tx, id);
+    };
+    assertLandingWorkerActive();
+    const tx = channel === undefined ? undefined : work.store.readRecords();
+    if (tx) {
+      try {
+        return editLandingRecords(work.store, channel!, edit, tx, id, fence);
+      } finally {
+        tx.dispose();
       }
-      const data = work.store.load();
-      const before = JSON.stringify(data);
-      const result = edit(data);
-      if (JSON.stringify(data) === before) return result;
-      const expanded =
-        Number(data.schema) >= 19 || data.landingBatches?.some(batch => batch.entryIds.length > 4);
-      data.schema = (
-        Number(data.schema) >= 21
-          ? data.schema
-          : [16, 18, 20].includes(Number(data.schema))
-            ? expanded
-              ? 20
-              : 18
-            : expanded
-              ? 19
-              : 17
-      ) as WorkData['schema'];
-      data.revision++;
-      work.store.save(data);
-      return result;
-    }),
-  );
+    }
+    return editWork(
+      work.store,
+      data => {
+        const before = JSON.stringify(data);
+        const result = edit(data);
+        if (JSON.stringify(data) === before) return result;
+        const expanded =
+          Number(data.schema) >= 19 || data.landingBatches?.some(batch => batch.entryIds.length > 4);
+        data.schema = (
+          Number(data.schema) >= 21
+            ? data.schema
+            : [16, 18, 20].includes(Number(data.schema))
+              ? expanded
+                ? 20
+                : 18
+              : expanded
+                ? 19
+                : 17
+        ) as WorkData['schema'];
+        data.revision++;
+        return result;
+      },
+      fence,
+    );
+  });
 }
 export function batchEligible(work: WorkService, command: FinishAction, view: WorkView) {
   if (!work.store.native || !command.accept || command.accept.invariant || !view.head) return false;
