@@ -240,7 +240,8 @@ test(
     const cli = JSON.parse(
       execFileSync(process.execPath, ['dist/cli.js', 'work', target], { encoding: 'utf8' }),
     );
-    assert.equal(cli.nativeHead, f.initialized.head);
+    assert.equal(cli.head, f.initialized.head);
+    assert.equal(cli.counts.lanes, restored.store.load().lanes.length);
     assert.equal(existsSync(called), false);
   },
 );

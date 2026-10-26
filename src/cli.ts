@@ -10,6 +10,7 @@ import { ghCli, forgeVersion } from './gh-cli.js';
 import { queueCli } from './queue-control.js';
 import { githubSyncCli } from './github-sync-cli.js';
 import { WorkStore } from './work-store.js';
+import { workCliSummary } from './work-cli-summary.js';
 import { requireHostedBinding } from './host-binding.js';
 import { hostCli } from './host-cli.js';
 import { localAgent } from './work-autonomy.js';
@@ -223,7 +224,7 @@ async function main(args: string[]): Promise<unknown> {
   if (args[0] === 'work') {
     if (args[1] === '--help' || args[1] === 'help' || args[2] === '--help') {
       process.stdout.write(
-        'nforge work ROOT [--compact | COMMAND_JSON EXPECTED_REVISION]\nnforge work ROOT --command-file FILE EXPECTED_REVISION\nLegacy complete Work interface: release, Playbooks, history, GitHub publication and other recorded actions. For concise task delivery use nforge agent ROOT ACTION --help.\n',
+        'nforge work ROOT [--compact | COMMAND_JSON EXPECTED_REVISION]\nnforge work ROOT --command-file FILE EXPECTED_REVISION\nWithout a command, prints revision, head and collection counts. --compact returns Work attributes with deferred diff details. Recorded actions include release, Playbooks, history and GitHub publication. For concise task delivery use nforge agent ROOT ACTION --help.\n',
       );
       return undefined;
     }
@@ -234,8 +235,9 @@ async function main(args: string[]): Promise<unknown> {
       'BAD_ARGUMENT',
       'Use work <root> [--compact | command-json expected-revision] or work <root> --command-file <json-file> <expected-revision>.',
     );
+    if (args.length === 2) return workCliSummary(args[1]);
     const work = new WorkService(args[1], localAgent());
-    if (args.length === 2 || compact) return work.status({ compact });
+    if (compact) return work.status({ compact });
     let input = args[2]!;
     if (fromFile) {
       try {

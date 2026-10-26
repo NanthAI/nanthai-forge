@@ -91,6 +91,7 @@ export const begin = internalMutation({
     revision: v.number(),
     initialRevision: v.number(),
     metadata: v.string(),
+    cursor: v.optional(v.string()),
   },
   returns: v.union(generationDocument, v.null()),
   handler: async (ctx, input) => {
@@ -113,15 +114,21 @@ export const begin = internalMutation({
           .eq('format', HOSTED_WORK_INDEX_FORMAT)
           .eq('workSchema', JSON.parse(input.metadata).schema),
       )
+      .order('desc')
       .take(1);
     const old = previous[0];
-    if (old) return old;
-    const { owner: _owner, ...fields } = input;
+    if (old && (!input.cursor || old.ensureCursor || old.status === 'ready')) return old;
+    if (old && input.cursor && old.nextBatch === 0) {
+      await ctx.db.patch(old._id, { ensureCursor: input.cursor, metadata: input.metadata });
+      return await ctx.db.get(old._id);
+    }
+    const { owner: _owner, cursor, ...fields } = input;
     void _owner;
     const id = await ctx.db.insert('projectWorkGenerations', {
       ...fields,
       format: HOSTED_WORK_INDEX_FORMAT,
       workSchema: JSON.parse(input.metadata).schema,
+      ...(cursor ? { ensureCursor: cursor } : {}),
       status: 'building',
       nextBatch: 0,
     });
@@ -201,7 +208,8 @@ export const publish = internalMutation({
       return false;
     }
     invariant(
-      generation.nextBatch === input.batches,
+      generation.nextBatch === input.batches &&
+        (!generation.ensureCursor || JSON.parse(generation.ensureCursor).phase === 'done'),
       'INVALID_WORK_JOURNAL',
       'Materialization batches are incomplete.',
     );

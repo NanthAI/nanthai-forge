@@ -5,11 +5,29 @@
 An export holds the full retained source States, Work and every available recorded run file.
 
 ```sh
-nforge work ROOT                                                    # shows the current revision
+nforge work ROOT                                                    # bounded revision, head and collection counts
 nforge work ROOT '{"action":"export-work","archive":true}' REVISION # folder plus .tar.gz
 nforge restore-native BACKUP.tar.gz NEW_DIR                         # native owners
 nforge restore-work BACKUP.tar.gz NEW_DIR                           # Git-backed owners
 ```
+
+With no command, `work` reads the commit pointer and prints the revision, source
+head and collection counts. It does not hydrate retained histories or build
+review diffs. `work ROOT --compact` retains the complete attribute interface
+with deferred diff details; use agent record pages for selected history.
+
+Hosted native record checkpoints above 2 MiB build their disposable Work index
+from server-held record pages. Each step reads up to 50 records (a 256 KiB
+target, with one indivisible record when larger), or advances a source State,
+selected summary, ancestry frontier or journal event. Rows and the next cursor
+commit together; staged RPC pages contain at most 100 rows / a 500 KB target.
+A retry resumes the saved phase instead of rebuilding completed projections.
+Publication checks the original backup and current Work revision and requires
+a completed cursor. Smaller and legacy checkpoints retain their existing
+projection layout. `host` follows pending ensure results before recording its
+binding and retains server error codes/messages if indexing fails. Index builds
+install no idle timer or poller; only an in-flight request drives continuations.
+
 
 Copy the whole export outside the project. It holds private history and logs, so treat it as private. Restore always writes to a new, unused directory. It validates every file against the manifest and recreates Lanes and Candidates. Unfinished commands are marked interrupted and never restart. The original owner is untouched, so keep it until you have checked the copy.
 

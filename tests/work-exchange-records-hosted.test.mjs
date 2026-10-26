@@ -24,7 +24,12 @@ import { convertWorkTo18 } from '../dist/work-intent-converter.js';
 import { legacyPolicy } from '../dist/autonomy-policy.js';
 import { unifyIntent } from '../dist/work-intent-local.js';
 import { digest } from '../dist/hash.js';
+import { continueLongAction } from '../dist/long-action.js';
 const index = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
+const ensureIndex = s =>
+  continueLongAction('Build test index', randomUUID(), continuation =>
+    index.ensure._handler(s.ctx, { projectId: 'project', continuation }),
+  );
 const { verifyRecordSeed } = await import(moduleUrl('../convex/projectWorkRecordExchange.ts'));
 const failCode = code => error => error.data?.code === code;
 
@@ -229,7 +234,7 @@ async function setup(t, records = true, history = 3, active = false, unified = f
     backupId,
     operationId: randomUUID(),
   });
-  const generationId = await index.ensure._handler(s.ctx, { projectId: 'project' });
+  const generationId = await ensureIndex(s);
   const baselineKey = 'synthetic/work-records';
   retainExchangeBaseline(
     first.store,
@@ -587,7 +592,7 @@ for (const [from, to] of [
       backupId,
       operationId: randomUUID(),
     });
-    await index.ensure._handler(s.ctx, { projectId: 'project' });
+    await ensureIndex(s);
     const before = JSON.parse(
       readFileSync(join(first.store.directory, `exchange-${baseline.input.operationId}`, 'work.json')),
     );

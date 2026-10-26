@@ -20,6 +20,7 @@ export const returnProjection = v.object({
   removed: v.array(v.object({ collection: v.string(), key: v.string() })),
 });
 export const generationFields = {
+  ensureCursor: v.optional(v.string()),
   returnCleanupRefs: v.optional(v.string()),
   returnCleanupOffset: v.optional(v.number()),
   returnCommitPlan: v.optional(v.string()),

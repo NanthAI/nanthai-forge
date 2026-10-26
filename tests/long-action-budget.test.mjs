@@ -125,12 +125,13 @@ test('publication wait yields pending at its budget and never releases another w
   assert.equal(validations, 0);
 });
 
-test('index budget yields only after a committed batch and resumes the next batch', async t => {
+test('legacy index budget yields only after a committed batch and resumes the next batch', async t => {
   let now = 0,
     nextBatch = 0,
     ready = false;
   t.mock.method(Date, 'now', () => now);
   const source = moduleSource('../convex/projectWorkIndexActions.ts')
+    .replace(/import \{ buildRecordIndex \} from '[^']+';/, 'const buildRecordIndex = async () => undefined;')
     .replace(
       /import \{ workProjection \} from '[^']+';/,
       'const workProjection = async () => ({ metadata: {}, batches: async function* () { for (let i=0; i<3; i++) yield [{key:String(i)}]; } });',

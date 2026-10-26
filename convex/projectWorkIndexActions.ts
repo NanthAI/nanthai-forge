@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { buildRecordIndex } from './projectWorkIndexBuild';
 import { workProjection } from './projectSourceProjection';
-import { v } from 'convex/values';
+import { v, ConvexError } from 'convex/values';
 import { action, internalAction, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
@@ -17,6 +18,13 @@ async function ensureIndex(
   owner: string,
   resumable = true,
 ): Promise<Id<'projectWorkGenerations'> | { pending: true; progress: string }> {
+  const paged = await buildRecordIndex(ctx, { projectId, owner });
+  if (paged) {
+    if (typeof paged === 'string' || resumable) return paged;
+    let result = paged as Id<'projectWorkGenerations'> | { pending: true; progress: string };
+    while (typeof result !== 'string') result = (await buildRecordIndex(ctx, { projectId, owner }))!;
+    return result;
+  }
   const started = Date.now();
   const expired = () => resumable && longActionExpired(started);
   while (true) {
@@ -120,6 +128,18 @@ export const ensure = action({
     try {
       return await ensureIndex(ctx, projectId, await caller(ctx));
     } catch (error) {
+      // Preserve the server's application code/message at this boundary. In
+      // particular, do not replace an index failure with an empty HTTP Error.
+      if (error instanceof ConvexError) throw error;
+      if (error instanceof Error && !(error instanceof ForgeError)) {
+        const code = (error as Error & { code?: unknown }).code;
+        return report(
+          new ForgeError(
+            typeof code === 'string' ? code : 'WORK_INDEX_BUILD_FAILED',
+            error.message || 'The Work index action failed without a diagnostic message.',
+          ),
+        );
+      }
       return report(error);
     }
   },

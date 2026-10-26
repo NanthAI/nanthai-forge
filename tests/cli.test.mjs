@@ -77,8 +77,9 @@ test('Work command files preserve literal input and existing revision checks', t
     assert.equal(JSON.parse(failed.stderr).error.code, 'BAD_ARGUMENT');
   }
   const status = JSON.parse(run('work', root).stdout);
-  assert.equal(status.intents.length, 1);
-  assert.equal(status.intents[0].outcome, command.outcome);
-  assert.equal(status.intents[0].notes[0].text, 'Inline still works');
+  assert.equal(status.counts.intents, 1);
+  const detail = JSON.parse(run('work', root, '--compact').stdout);
+  assert.equal(detail.intents[0].outcome, command.outcome);
+  assert.equal(detail.intents[0].notes[0].text, 'Inline still works');
   assert.equal(status.revision, 2);
 });

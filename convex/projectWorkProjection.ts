@@ -74,6 +74,7 @@ export function commandProjection(
   request: string,
   rows: (IndexEntry | null)[],
   acceptance?: Awaited<ReturnType<typeof hostedAcceptance>>,
+  retainedEvent?: HostedEvent,
 ) {
   const generationId = generation._id;
   const metadata = JSON.parse(generation.metadata) as IndexMetadata;
@@ -104,8 +105,8 @@ export function commandProjection(
   data.hostedEvents = values('events');
   data.planningItems = [...values('planningVersions'), ...values('planningItems')];
   data.planningComments = values('planningComments');
-  const at = new Date().toISOString(),
-    event: HostedEvent = {
+  const at = retainedEvent?.at ?? new Date().toISOString(),
+    event: HostedEvent = retainedEvent ?? {
       projectKey: project.key,
       archiveSha256: backup.digest,
       id: input.operationId,

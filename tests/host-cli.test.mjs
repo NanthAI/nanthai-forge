@@ -1133,3 +1133,36 @@ test('interrupted history stays unselected until the complete seed validates', a
       phase,
     );
 });
+
+test('host follows durable index continuations before binding and preserves server error diagnostics', async t => {
+  const f = setup(t),
+    action = f.dependencies.client.action;
+  let calls = 0,
+    fail = true;
+  f.dependencies.client.action = async (ref, args) => {
+    if (getFunctionName(ref) === 'projectWorkIndexActions:ensure') {
+      assert.equal(readHostState(f.store).binding, undefined);
+      calls++;
+      if (calls <= 2) return { pending: true, progress: JSON.stringify({ phase: 'index', step: calls }) };
+      if (fail) {
+        fail = false;
+        throw new ConvexError({
+          code: 'SYNTHETIC_INDEX_FAILURE',
+          message: 'The retained index page could not be read.',
+        });
+      }
+    }
+    return action(ref, args);
+  };
+  await assert.rejects(hostProject(f.root, { deployment: 'https://fixture.convex.cloud' }, f.dependencies), {
+    code: 'SYNTHETIC_INDEX_FAILURE',
+    message: 'The retained index page could not be read.',
+  });
+  const pending = readHostState(f.store).hosting;
+  assert.equal(pending.errorCode, 'SYNTHETIC_INDEX_FAILURE');
+  assert.equal(readHostState(f.store).binding, undefined);
+  const result = await hostProject(f.root, {}, f.dependencies);
+  assert.equal(result.operationId, pending.operationId);
+  assert.equal(calls, 4);
+  assert.equal(readHostState(f.store).binding.projectId, result.projectId);
+});
