@@ -1,0 +1,223 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Forge cockpit design tokens. Prefixed so they coexist with legacy screens during migration. */
+:root {
+  --fx-font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Inter, system-ui, sans-serif;
+  --fx-font-head: Manrope, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --fx-font-mono: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, Consolas, 'Liberation Mono', monospace;
+  --fx-t-11: 11px;
+  --fx-t-12: 12px;
+  --fx-t-13: 13px;
+  --fx-t-14: 14px;
+  --fx-t-16: 16px;
+  --fx-t-20: 20px;
+  --fx-t-28: 28px;
+  --fx-t-44: 44px;
+  --fx-s-1: 4px;
+  --fx-s-2: 8px;
+  --fx-s-3: 12px;
+  --fx-s-4: 16px;
+  --fx-s-5: 20px;
+  --fx-s-6: 24px;
+  --fx-s-8: 32px;
+  --fx-r-1: 4px;
+  --fx-r-2: 6px;
+  --fx-r-3: 8px;
+  --fx-r-4: 12px;
+  --fx-brand: #ff6b3d;
+  --fx-brand-hover: #ff865f;
+  --fx-on-brand: #17100b;
+  --fx-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  /* Row enter · sheet/toast · rail fill. All 0 under reduced motion. */
+  --fx-d-fast: 150ms;
+  --fx-d-base: 240ms;
+  --fx-d-slow: 420ms;
+
+  /* Light is the base so an unset theme is readable. */
+  --fx-bg: #f4f6f9;
+  --fx-surface: #ffffff;
+  --fx-surface-2: #f8f9fb;
+  --fx-surface-3: #eef1f5;
+  --fx-hover: #f1f4f8;
+  --fx-line: #e3e7ed;
+  --fx-line-strong: #cfd6df;
+  --fx-text: #141a24;
+  --fx-text-2: #4f5b6b;
+  --fx-text-3: #606c7c;
+  --fx-accent: #b43a11;
+  --fx-accent-bg: #fff0e9;
+  --fx-focus: #b43a11;
+  --fx-active: #1f6fd1;
+  --fx-active-bg: #e8f1fd;
+  --fx-waiting: #8a5800;
+  --fx-waiting-bg: #fff4dc;
+  --fx-stale: #6c7686;
+  --fx-stale-bg: #eef1f5;
+  --fx-conflict: #7a3fc4;
+  --fx-conflict-bg: #f3ecfd;
+  --fx-passed: #1e7a4c;
+  --fx-passed-bg: #e6f5ec;
+  --fx-failed: #c42b37;
+  --fx-failed-bg: #fdecee;
+  --fx-add: #1e7a4c;
+  --fx-add-bg: #e9f7ef;
+  --fx-del: #c42b37;
+  --fx-del-bg: #fdeef0;
+  --fx-shadow: 0 12px 40px #1a22302a, 0 1px 3px #1a223014;
+  --fx-scrim: #0b0e1366;
+  --fx-rail-off: #dde3ea;
+  --fx-syn-k: #2f5fd1;
+  --fx-syn-s: #1e7a4c;
+  --fx-syn-n: #9a6200;
+  --fx-syn-c: #7b8696;
+  --fx-syn-t: #1b8f84;
+  --fx-syn-f: #141a24;
+  --fx-syn-p: #3d4756;
+  --fx-word-add: #b9ecc9;
+  --fx-word-del: #f7c2c8;
+  /* Only the accepted toast and the newest Accepted-today row, briefly. */
+  --fx-glow: 0 0 0 1px #ff6b3d66, 0 0 24px #ff6b3d33;
+  --fx-hero-a: #f7f4f1;
+  --fx-hero-b: #fbf7f3;
+}
+:root[data-theme='dark'] {
+  --fx-bg: #0b0e13;
+  --fx-surface: #11151c;
+  --fx-surface-2: #161b24;
+  --fx-surface-3: #1c2230;
+  --fx-hover: #1a202b;
+  --fx-line: #222a36;
+  --fx-line-strong: #2e3746;
+  --fx-text: #e8ecf2;
+  --fx-text-2: #a3adbb;
+  --fx-text-3: #7a8596;
+  --fx-accent: #ff936e;
+  --fx-accent-bg: #2b1d17;
+  --fx-focus: #ff936e;
+  --fx-active: #6aaeff;
+  --fx-active-bg: #14233a;
+  --fx-waiting: #f2b84b;
+  --fx-waiting-bg: #2c2312;
+  --fx-stale: #7d8796;
+  --fx-stale-bg: #1a1f28;
+  --fx-conflict: #c79bff;
+  --fx-conflict-bg: #251a37;
+  --fx-passed: #5fd39a;
+  --fx-passed-bg: #12281e;
+  --fx-failed: #ff6f7a;
+  --fx-failed-bg: #311519;
+  --fx-add: #5fd39a;
+  --fx-add-bg: #0f2a1d;
+  --fx-del: #ff6f7a;
+  --fx-del-bg: #2e1418;
+  --fx-shadow: 0 12px 40px #0009, 0 1px 3px #0006;
+  --fx-scrim: #000a;
+  --fx-rail-off: #2a3240;
+  --fx-syn-k: #82aaff;
+  --fx-syn-s: #9ad8a3;
+  --fx-syn-n: #f2b84b;
+  --fx-syn-c: #6f7a8a;
+  --fx-syn-t: #7fd6d0;
+  --fx-syn-f: #e8ecf2;
+  --fx-syn-p: #c9d1dc;
+  --fx-word-add: #1f5a3a;
+  --fx-word-del: #6a2730;
+  --fx-glow: 0 0 0 1px #ff6b3d55, 0 0 24px #ff6b3d2e;
+  --fx-hero-a: #0b0e13;
+  --fx-hero-b: #161418;
+}
+
+/* Scope root for new screens. Legacy element styles do not leak into .fx descendants that use fx classes. */
+.fx {
+  font: 400 var(--fx-t-13) / 1.45 var(--fx-font-ui);
+  color: var(--fx-text);
+  background: var(--fx-bg);
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+/* Element defaults for cockpit screens only: the scope stops at hosted legacy screens (.fx-legacy) and
+   restarts at any cockpit screen nested inside one. */
+@scope (.fx) to (.fx-legacy) {
+  :scope :where(h1, h2, h3, h4, p, ul, ol, dl, dd, figure, blockquote) {
+    margin: 0;
+  }
+  :scope :where(h1, h2, h3) {
+    font-family: var(--fx-font-head);
+    letter-spacing: -0.015em;
+    color: var(--fx-text);
+    line-height: 1.25;
+  }
+  :scope :where(h1) {
+    font-size: var(--fx-t-20);
+    font-weight: 700;
+  }
+  :scope :where(h2) {
+    font-size: var(--fx-t-14);
+    font-weight: 700;
+  }
+  :scope :where(h3) {
+    font-size: var(--fx-t-13);
+    font-weight: 650;
+  }
+  :scope :where(p) {
+    color: inherit;
+    max-width: none;
+  }
+  :scope :where(a) {
+    color: inherit;
+    text-decoration: none;
+  }
+  :scope :where(a:hover) {
+    color: var(--fx-accent);
+  }
+  :scope :where(code, kbd, samp, pre) {
+    font-family: var(--fx-font-mono);
+    font-size: 12px;
+  }
+  :scope :where(small) {
+    display: inline;
+    font-size: var(--fx-t-12);
+    color: var(--fx-text-3);
+  }
+}
+.fx :focus-visible {
+  outline: 2px solid var(--fx-focus);
+  outline-offset: 2px;
+  border-radius: var(--fx-r-1);
+}
+.fx-muted {
+  color: var(--fx-text-2);
+}
+.fx-faint {
+  color: var(--fx-text-3);
+}
+.fx-mono {
+  font-family: var(--fx-font-mono);
+  font-size: 12px;
+}
+.fx-eyebrow {
+  font: 600 var(--fx-t-11) / 1.2 var(--fx-font-ui);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fx-text-3);
+}
+.fx-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fx-d-fast: 0ms;
+    --fx-d-base: 0ms;
+    --fx-d-slow: 0ms;
+  }
+  .fx *,
+  .fx *::before,
+  .fx *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

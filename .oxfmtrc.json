@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 110,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "arrowParens": "avoid",
+  "sortImports": false,
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "**/*.md",
+    "**/*.json",
+    "**/*.html",
+    "**/*.css",
+    "**/*.yml",
+    "convex/_generated/",
+    "tests/fixtures/",
+    "dist/",
+    "web-dist/",
+    "hosted-web-dist/",
+    "node_modules/",
+    "evals/",
+    "skills/",
+    "docs/"
+  ]
+}

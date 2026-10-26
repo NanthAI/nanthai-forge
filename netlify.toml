@@ -1,0 +1,21 @@
+[build]
+command = "npm run build:hosted"
+publish = "hosted-web-dist"
+
+[build.environment]
+NODE_VERSION = "24"
+VITE_FORGE_DEMO_REPOSITORY = "thevarsek/nanthai-edge-oss"
+
+[functions]
+directory = "netlify/functions"
+node_bundler = "esbuild"
+
+[[redirects]]
+from = "/device"
+to = "/index.html"
+status = 200
+
+[[redirects]]
+from = "/*"
+to = "/index.html"
+status = 200
