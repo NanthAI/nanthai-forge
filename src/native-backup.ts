@@ -1,3 +1,4 @@
+import { portableCheckPath, portableRunFiles, runLogRecord } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { retainRecoveryCapture } from './recovery-capture.js';
 import {
@@ -26,6 +27,7 @@ import { inspectArtifacts } from './work-artifacts.js';
 import { NativeSource, nativeMarker } from './native-source.js';
 import { NativeMaterialization } from './native-materialization.js';
 import { WorkStore } from './work-store.js';
+import { parseWorkBytes } from './work-metadata.js';
 import { workSchema, type WorkData } from './work-types.js';
 import { digest } from './hash.js';
 import { readSource, fingerprintPrivateFile } from './files.js';
@@ -106,10 +108,10 @@ async function exportSnapshot(
   for (const run of snapshot.data.runs) {
     const dir = join(store.directory, `check-${run.id}`);
     for (const name of [
-      'stdout.log',
-      'stderr.log',
-      ...(run.endedAt ? ['result.json'] : []),
-      ...(run.resourceUsage?.producer ? ['resources.txt'] : []),
+      ...portableRunFiles(snapshot.data, run),
+      ...['test-reports.json', 'modal-plan.json', 'modal-shard-logs.json', 'changes.json'].filter(name =>
+        existsSync(join(dir, name)),
+      ),
     ]) {
       const recorded = `check-${run.id}/${name}`;
       if (existsSync(join(dir, name))) await copy(dir, name, recorded);
@@ -157,9 +159,10 @@ async function exportSnapshot(
       revision: snapshot.data.revision,
       files,
       unavailable,
+      checkLogs: snapshot.data.runs.map(run => runLogRecord(snapshot.data, run)),
       coverage: head
         ? 'Selected native State and reachable ancestry/source, including intact original imported Git bundles and their refs. Only an empty native restore owner is included; original Work, discussion, planning, run logs, build outputs, projections, uncheckpointed files, ignored credentials and provider grants are excluded.'
-        : 'Complete retained native States, source bytes, Work records and available recorded run files. Native source-archive contribution receipts retain original archive digests and claims; contributor archive Work/log bytes remain in original saved/provider files, not this owner backup. Git compatibility contributions retain their original uploaded bundle, reachable candidate and base-projection bundles, source-to-Git mapping, original Git commit objects and receipt pins in this full backup. Source-only releases exclude contribution receipts and base projections. Uncheckpointed workspace changes, new ignored files/credentials, graphs, provider grants and running processes are excluded. Explicitly imported tracked Git source/history may include private credentials. Restore never runs recorded commands.',
+        : 'Complete retained native States, source bytes, Work records, results and failure summaries with provider log links; local logs only by explicit opt-in within retention. Native source-archive contribution receipts retain original archive digests and claims; contributor archive Work/log bytes remain in original saved/provider files, not this owner backup. Git compatibility contributions retain their original uploaded bundle, reachable candidate and base-projection bundles, source-to-Git mapping, original Git commit objects and receipt pins in this full backup. Source-only releases exclude contribution receipts and base projections. Uncheckpointed workspace changes, new ignored files/credentials, graphs, provider grants and running processes are excluded. Explicitly imported tracked Git source/history may include private credentials. Restore never runs recorded commands.',
     }),
     null,
     2,
@@ -250,7 +253,24 @@ async function restoreDirectory(
     'RESTORE_TARGET_EXISTS',
     'Choose a new native restore destination; existing work is preserved.',
   );
+  const originalWork = readSource(directory, 'work.json', Number.MAX_SAFE_INTEGER);
+  const workPin = manifest.files.find(file => file.path === 'work.json');
+  invariant(
+    originalWork &&
+      workPin &&
+      originalWork.length === workPin.size &&
+      digest(originalWork) === workPin.sha256,
+    'INVALID_WORK_BACKUP',
+    'Native Work bytes differ from the original manifest.',
+  );
+  const snapshot = parseWorkBytes(originalWork);
+  const omitted = new Set(
+    manifest.files
+      .filter(file => !portableCheckPath(snapshot, file.path) && !existsSync(join(directory, file.path)))
+      .map(file => file.path),
+  );
   const plan = artifactArchivePlan(manifest);
+  plan.physical = plan.physical.filter(file => !omitted.has(file.path));
   const scratch = realpathSync(
     mkdtempSync(join(realpathSync(dirname(destination)), '.forge-native-restore-')),
   );
@@ -300,7 +320,7 @@ async function restoreDirectory(
       for (const alias of plan.aliases) rmSync(join(work, alias.path), { force: true });
     }
     await materializeArtifactAliases(work, manifest.files, plan.aliases);
-    for (const file of manifest.files) {
+    for (const file of manifest.files.filter(file => !omitted.has(file.path))) {
       if (disposable) {
         const observed = await stageFingerprint(work, file.path);
         invariant(
@@ -366,7 +386,8 @@ async function restoreDirectory(
       revision: data.revision,
       restored: true,
       ...(warnings.length ? { warnings: [...new Set(warnings)] } : {}),
-      unavailable: manifest.unavailable,
+      unavailable: manifest.unavailable.filter(path => portableCheckPath(snapshot, path)),
+      checkLogs: manifest.checkLogs ?? snapshot.runs.map(run => runLogRecord(snapshot, run)),
       coverage: manifest.coverage,
     };
   } finally {

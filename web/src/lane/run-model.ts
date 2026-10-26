@@ -6,6 +6,8 @@ export type LogPage = {
   text: string;
   more: boolean;
   available?: boolean;
+  status?: string;
+  providerUrl?: string;
   firstLine?: number;
 };
 export type LogRead = (stream: 'stdout' | 'stderr', offset: number, signal?: AbortSignal) => Promise<LogPage>;

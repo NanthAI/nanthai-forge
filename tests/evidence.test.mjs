@@ -234,7 +234,11 @@ test('private check manifests bind original runs and native log digests without 
   linkSync(join(root, 'a.ts'), path);
   await assert.rejects(dispatch(exportCommand), code('INVALID_FILE_EXPORT'));
   unlinkSync(path);
-  await assert.rejects(dispatch(exportCommand), code('INVALID_FILE_EXPORT'));
+  // Policy-driven retention/restoration can deliberately omit a regular log.
+  assert.equal(
+    (await dispatch(exportCommand)).result.logs.some(log => log.stream === 'stdout'),
+    false,
+  );
   if (process.platform !== 'win32') {
     execFileSync('mkfifo', [path]);
     await assert.rejects(dispatch(exportCommand), code('INVALID_FILE_EXPORT'));

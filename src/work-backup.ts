@@ -1,3 +1,4 @@
+import { portableCheckPath, runLogRecord, checkLogCoverage } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { retainRecoveryCapture } from './recovery-capture.js';
 import { migrateHostedIntents } from './work-hosted-intents.js';
@@ -60,6 +61,10 @@ function ownedFiles(data: WorkData) {
         'stdout.log',
         'stderr.log',
         'result.json',
+        'test-reports.json',
+        'modal-plan.json',
+        'modal-shard-logs.json',
+        'changes.json',
         ...(run.check.measureResources ? ['resources.txt'] : []),
       ].map(name => `check-${run.id}/${name}`),
       ...(run.artifacts ?? [])
@@ -123,9 +128,11 @@ export async function exportWork(store: WorkStore, revision: number, archive = f
       unavailable: string[] = [];
     writeFileSync(join(path, 'work.json'), snapshot.bytes, { mode: 0o600, flag: 'wx' });
     files.push({ path: 'work.json', ...(await fingerprintPrivateFile(join(path, 'work.json'), code)) });
-    for (const name of ownedFiles(snapshot.data).filter(name => name !== 'work.json')) {
+    for (const name of ownedFiles(snapshot.data).filter(
+      name => name !== 'work.json' && portableCheckPath(snapshot.data, name),
+    )) {
       if (!existsSync(join(store.directory, name))) {
-        unavailable.push(name);
+        if (!/(?:test-reports|modal-plan|modal-shard-logs|changes)\.json$/.test(name)) unavailable.push(name);
         continue;
       }
       files.push({
@@ -182,7 +189,8 @@ export async function exportWork(store: WorkStore, revision: number, archive = f
       refs,
       files,
       unavailable,
-      coverage,
+      coverage: `${coverage} ${checkLogCoverage}`,
+      checkLogs: snapshot.data.runs.map(run => runLogRecord(snapshot.data, run)),
     };
     const json = JSON.stringify(manifest, null, 2) + '\n';
     writeFileSync(join(path, 'manifest.json'), json, { mode: 0o600, flag: 'wx' });
@@ -369,6 +377,7 @@ async function restoreDirectory(input: string, destination: string) {
         code,
         'Backup includes an unknown or duplicate file.',
       );
+      if (!portableCheckPath(data, file.path) && !existsSync(join(backup, file.path))) continue;
       names.add(file.path);
       const copied = await copyPrivate(containedFile(backup, file.path), join(store.directory, file.path));
       invariant(
@@ -381,7 +390,13 @@ async function restoreDirectory(input: string, destination: string) {
       names.has('work.json') &&
         names.has('source.bundle') &&
         manifest.unavailable.every(name => allowed.has(name) && !names.has(name)) &&
-        [...allowed].every(name => names.has(name) || manifest.unavailable.includes(name)),
+        [...allowed].every(
+          name =>
+            names.has(name) ||
+            manifest.unavailable.includes(name) ||
+            /(?:test-reports|modal-plan|modal-shard-logs|changes)\.json$/.test(name) ||
+            !portableCheckPath(data, name),
+        ),
       code,
       'Backup file coverage is incomplete.',
     );

@@ -1,3 +1,4 @@
+import { providerLogUrl } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import type { CheckRun, Lane, WorkView, WorkData } from './work-types.js';
 export const laneReceipt = (lane: Lane, path: string) => ({
@@ -66,6 +67,7 @@ export const runReceipt = (run: CheckRun) => ({
     ? { diagnostic: run.details.slice(0, 500), diagnosticTruncated: run.details.length > 500 }
     : {}),
   logs: {
+    ...(providerLogUrl(run) ? { status: 'provider-held', providerUrl: providerLogUrl(run) } : {}),
     ...(run.reusedFrom ? { runId: run.reusedFrom.runId } : {}),
     stdout: { offset: 0 },
     stderr: { offset: 0 },

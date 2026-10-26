@@ -1,3 +1,5 @@
+import { lstatSync } from 'node:fs';
+import { providerLogUrl } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { join } from 'node:path';
 import { fingerprintPrivateFile } from './files.js';
@@ -12,11 +14,27 @@ export async function exportCheck(store: WorkStore, id: string, revision: number
   const run = store.load().runs.find(item => item.id === id);
   invariant(run, 'NOT_FOUND', 'Select an existing local check run.');
   const directory = runOutputDirectory(store, id);
+  const present = (path: string) => {
+    try {
+      lstatSync(path);
+      return true;
+    } catch (error) {
+      // A dangling symlink or unreadable member still goes through strict validation.
+      return !(error instanceof Error && 'code' in error && error.code === 'ENOENT');
+    }
+  };
   const logs = await Promise.all(
-    (['stdout', 'stderr'] as const).map(async stream => {
-      const path = join(directory, stream + '.log');
-      return { stream, path, filename: `check-${id}-${stream}.log`, ...(await fingerprintPrivateFile(path)) };
-    }),
+    (['stdout', 'stderr'] as const)
+      .filter(stream => !providerLogUrl(run) && present(join(directory, `${stream}.log`)))
+      .map(async stream => {
+        const path = join(directory, stream + '.log');
+        return {
+          stream,
+          path,
+          filename: `check-${id}-${stream}.log`,
+          ...(await fingerprintPrivateFile(path)),
+        };
+      }),
   );
   const artifacts = await inspectArtifacts(directory, run);
   invariant(
@@ -30,6 +48,7 @@ export async function exportCheck(store: WorkStore, id: string, revision: number
         schema: 1,
         kind: 'forge-local-check-evidence',
         run,
+        ...(providerLogUrl(run) ? { logStatus: 'provider-held', providerUrl: providerLogUrl(run) } : {}),
         logs: logs.map(({ stream, filename, size, sha256 }) => ({ stream, filename, size, sha256 })),
         ...(artifacts.length
           ? {
@@ -50,6 +69,13 @@ export async function exportCheck(store: WorkStore, id: string, revision: number
     ) + '\n';
   return {
     revision: store.load().revision,
-    result: { json, filename: `check-${id}.json`, sha256: digest(json), logs, artifacts },
+    result: {
+      ...(providerLogUrl(run) ? { logStatus: 'provider-held', providerUrl: providerLogUrl(run) } : {}),
+      json,
+      filename: `check-${id}.json`,
+      sha256: digest(json),
+      logs,
+      artifacts,
+    },
   };
 }

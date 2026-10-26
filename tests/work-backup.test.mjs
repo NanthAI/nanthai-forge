@@ -25,6 +25,13 @@ test('source/Work recovery retains original history, undo pins, evidence, Channe
     git(root, ['commit', '-qm', 'Original history']);
     const work = new WorkService(root),
       command = c => work.dispatch(c, work.status().revision);
+    const policyData = work.store.load();
+    const { policyPreset } = await import('../dist/autonomy-policy.js');
+    policyData.autonomyPolicy = {
+      ...policyPreset('trusted'),
+      checkLogs: { uploadLocal: true, retentionDays: 90 },
+    };
+    work.store.save(policyData);
     const intent = (await command({ action: 'intent', outcome: 'Restore real work' })).result;
     const lane = (await command({ action: 'lane', intentId: intent.id, name: 'Portable Lane' })).result;
     const lanePath = work.store.path(lane.id);

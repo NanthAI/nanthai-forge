@@ -257,7 +257,11 @@ test('dispatch, log collection and job timing use the retained run identity', as
   assert.deepEqual(outcome.billableMinutes, [{ jobId: 20, minutes: 2 }]);
   assert.equal(calls.filter(call => call.endpoint.endsWith('/dispatches')).length, 1);
   assert.equal(calls.find(call => call.body)?.body.ref, `forge-check/${plan.runId}`);
-  assert.match(readFileSync(join(plan.output, 'shards/static.log'), 'utf8'), /synthetic smoke/);
+  assert.equal(
+    readFileSync(join(plan.output, 'shards/static.evidence'), 'utf8'),
+    '',
+    'passing provider chatter is not stored',
+  );
   assert.ok(progress.some(line => line.includes('forge-static')));
 });
 test('ambiguous dispatch is reconciled without a second mutation', async t => {
@@ -310,8 +314,8 @@ test('only unfinished shards retry once and retain their original logs', async t
   );
   assert.equal(result.status, 'passed');
   assert.equal(calls.filter(call => call.endpoint.endsWith('/rerun')).length, 1);
-  assert.ok(existsSync(join(plan.output, 'shards/static.log')));
-  assert.ok(existsSync(join(plan.output, 'shards/static.attempt-2.log')));
+  assert.ok(existsSync(join(plan.output, 'shards/static.evidence')));
+  assert.ok(existsSync(join(plan.output, 'shards/static.attempt-2.evidence')));
 });
 test('exhausted unfinished recovery is interrupted', async t => {
   const { plan, journal } = controllerFixture(t),
@@ -516,7 +520,7 @@ test('a stuck job recovery is explained in the result receipt and retained journ
     /job status stuck on GitHub.*log shows 1 passed, 0 failed.*run concluded success/,
   );
   assert.equal(read(join(path, 'github-actions.json')).stuckJobs[20].source, 'node-test-summary');
-  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /using log and run evidence/);
+  assert.match(readFileSync(join(path, 'controller-summary.txt'), 'utf8'), /using log and run evidence/);
 });
 test('raw transport diagnostics never enter receipts and logs', async t => {
   const { work, run, path } = fixture(t);
@@ -525,7 +529,8 @@ test('raw transport diagnostics never enter receipts and logs', async t => {
   });
   assert.equal(read(join(path, 'result.json')).status, 'interrupted');
   assert.doesNotMatch(
-    readFileSync(join(path, 'result.json'), 'utf8') + readFileSync(join(path, 'stdout.log'), 'utf8'),
+    readFileSync(join(path, 'result.json'), 'utf8') +
+      readFileSync(join(path, 'controller-summary.txt'), 'utf8'),
     /synthetic-secret-token/,
   );
 });
@@ -540,7 +545,10 @@ test('a git failure keeps its redacted, bounded stderr in the receipt', async t 
   const text = read(join(path, 'result.json')).details;
   assert.match(text, /GITHUB_SYNC_GIT_FAILED: git said "[^"]+"/);
   assert.match(text, /127\.0\.0\.1/);
-  assert.doesNotMatch(text + readFileSync(join(path, 'stdout.log'), 'utf8'), /ghp_synthetictoken123|octo:/);
+  assert.doesNotMatch(
+    text + readFileSync(join(path, 'controller-summary.txt'), 'utf8'),
+    /ghp_synthetictoken123|octo:/,
+  );
   const long = redactGitStderr(
     `Authorization: Bearer ghs_abcdef123456 x-access-token:abc ${'z'.repeat(3000)}`,
   );
@@ -1140,7 +1148,7 @@ test('exhausted transient check-ref pushes end as terminal infrastructure failur
   assert.equal(waits.length, 4);
   waits.forEach((ms, i) => assert.ok(ms >= 1000 * 2 ** i && ms <= 3000 * 2 ** i));
   assert.ok(waits.reduce((sum, ms) => sum + ms, 0) <= 45_000);
-  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /retry 5\/5/);
+  assert.match(readFileSync(join(path, 'controller-summary.txt'), 'utf8'), /retry 5\/5/);
   assert.equal(read(join(path, 'github-actions.json')).dispatching, undefined);
 });
 
@@ -1591,7 +1599,7 @@ for (const via of ['run-check', 'finish', 'observation']) {
     // alive until the controller has published its final cleanup progress.
     const deadline = Date.now() + 10_000;
     while (
-      !readFileSync(join(path, 'stdout.log'), 'utf8').includes(
+      !readFileSync(join(path, 'controller-summary.txt'), 'utf8').includes(
         'Removed run-owned ref after recording result.',
       )
     ) {
@@ -1641,7 +1649,7 @@ for (const conclusion of ['success', 'failure', 'cancelled']) {
           read(join(path, 'result.json')).status,
           conclusion === 'success' ? 'passed' : conclusion === 'failure' ? 'failed' : 'interrupted',
         );
-        assert.match(readFileSync(join(path, 'shards/static.log'), 'utf8'), /synthetic smoke/);
+        assert.match(readFileSync(join(path, 'shards/static.evidence'), 'utf8'), /synthetic smoke/);
       },
     );
     assert.equal(deleted, 1);
@@ -1712,7 +1720,7 @@ test('HTTP 400 interrupted before its deadline adopts the original execution and
   assert.equal(dispatches, 1);
   assert.equal(journal.apiFailures[0].message, 'Invalid request body');
   assert.equal(journal.dispatchAttempts[0].outcome, 'ambiguous');
-  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /Invalid request body/);
+  assert.match(readFileSync(join(path, 'controller-summary.txt'), 'utf8'), /Invalid request body/);
 });
 
 test('non-dispatch API failures survive retry and optional timing/log fallback', async t => {
@@ -1751,7 +1759,7 @@ test('non-dispatch API failures survive retry and optional timing/log fallback',
   const failures = read(join(path, 'github-actions.json')).apiFailures;
   assert.equal(failures.filter(error => error.message === 'Timing unavailable').length, 6);
   assert.equal(failures.filter(error => error.message === 'Logs unavailable').length, 6);
-  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /GitHub: Logs unavailable/);
+  assert.match(readFileSync(join(path, 'controller-summary.txt'), 'utf8'), /GitHub: Logs unavailable/);
 });
 
 for (const mode of [

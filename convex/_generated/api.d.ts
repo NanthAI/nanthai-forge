@@ -1,3 +1,8 @@
+import type * as projectHostedLogCleanupStore from "../projectHostedLogCleanupStore.js";
+import type * as projectCheckLogRetentionActions from "../projectCheckLogRetentionActions.js";
+import type * as projectCheckLogRetention from "../projectCheckLogRetention.js";
+import type * as projectCheckLogCleanup from "../projectCheckLogCleanup.js";
+import type * as projectCheckLogCleanupStore from "../projectCheckLogCleanupStore.js";
 import type * as artifactBlobFields from "../artifactBlobFields.js";
 import type * as artifactStorage from "../artifactStorage.js";
 import type * as importStorage from "../importStorage.js";
@@ -150,6 +155,12 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  projectCheckLogRetention: typeof projectCheckLogRetention;
+  projectCheckLogRetentionActions: typeof projectCheckLogRetentionActions;
+  projectHostedLogCleanupStore: typeof projectHostedLogCleanupStore;
+
+  projectCheckLogCleanup: typeof projectCheckLogCleanup;
+  projectCheckLogCleanupStore: typeof projectCheckLogCleanupStore;
   artifactBlobFields: typeof artifactBlobFields;
   artifactStorage: typeof artifactStorage;
   importStorage: typeof importStorage;

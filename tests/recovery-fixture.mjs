@@ -1,3 +1,4 @@
+import { effectivePolicy } from '../dist/autonomy-policy.js';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -55,6 +56,7 @@ export async function recoveryFixture(t, archive = false) {
   });
   const data = work.store.load(),
     runIds = [];
+  data.autonomyPolicy = { ...effectivePolicy(data), checkLogs: { uploadLocal: true, retentionDays: 90 } };
   for (const status of ['failed', 'running']) {
     const id = randomUUID();
     runIds.push(id);

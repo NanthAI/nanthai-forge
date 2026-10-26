@@ -1,3 +1,11 @@
+import { parseWorkBytes } from './work-metadata.js';
+import {
+  portableRunFiles,
+  runLogRecord,
+  checkLogCoverage,
+  portableCheckPath,
+  isCheckLogPath,
+} from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { recordMetricPublication } from './self-metrics-source-observations.js';
 import {
@@ -58,6 +66,7 @@ export type TransferReceipt = {
 export type ContentPin = { sha256: string; size: number };
 export type ExchangeManifest = z.infer<typeof nativeManifestSchema>;
 export interface ExchangeTransport {
+  registerLogs?(backupId: string, hasLogs: boolean): Promise<void>;
   readonly metadataTrees?: boolean;
   readonly workRecords?: boolean;
   checkpointKey?(backupId?: string): string | undefined;
@@ -201,10 +210,10 @@ export async function prepareNativeExchange(
       continue;
     }
     for (const name of [
-      'stdout.log',
-      'stderr.log',
-      ...(run.endedAt ? ['result.json'] : []),
-      ...(run.resourceUsage?.producer ? ['resources.txt'] : []),
+      ...portableRunFiles(snapshot.data, run),
+      ...['test-reports.json', 'modal-plan.json', 'modal-shard-logs.json', 'changes.json'].filter(name =>
+        existsSync(join(folder, name)),
+      ),
     ]) {
       const path = `${prefix}/${name}`;
       if (!existsSync(join(store.directory, path))) {
@@ -247,9 +256,10 @@ export async function prepareNativeExchange(
     id: operationId,
     head: snapshot.data.nativeHead,
     revision: snapshot.data.revision,
-    files,
-    unavailable,
-    coverage,
+    files: files.filter(file => portableCheckPath(snapshot.data, file.path)),
+    unavailable: unavailable.filter(path => portableCheckPath(snapshot.data, path)),
+    checkLogs: snapshot.data.runs.map(run => runLogRecord(snapshot.data, run)),
+    coverage: `${coverage} ${checkLogCoverage}`,
   });
   const json = JSON.stringify(manifest);
   const exchange = incrementalMetadata
@@ -391,8 +401,12 @@ export async function pushNativeExchange(
   const tree = preparedMetadata(prepared.directory, manifestBytes);
   const publishedBytes = tree?.bytes ?? manifestBytes,
     manifestPin = { sha256: digest(publishedBytes), size: publishedBytes.length };
+  const capturedLogs = prepared.manifest.files.some(file => isCheckLogPath(file.path))
+    ? parseWorkBytes(readFileSync(join(prepared.directory, 'work.json')))
+    : undefined;
   const unique = new Map(
     prepared.manifest.files
+      .filter(file => !capturedLogs || portableCheckPath(capturedLogs, file.path))
       .filter(file => !tree || file.path !== 'work.json')
       .map(file => [file.sha256, file]),
   );
@@ -481,6 +495,10 @@ export async function pushNativeExchange(
       ? await transport.publishedOwnerDerived(original)
       : ownerDerived;
     retainBaseline(original);
+    await transport.registerLogs?.(
+      original,
+      prepared.manifest.files.some(file => isCheckLogPath(file.path)),
+    );
     if (pendingCoverage && !options.deferPendingAcknowledgement)
       acknowledgePendingExchange(store, pendingCoverage);
     return { ...result(original), ownerDerived: pinned ?? undefined };
@@ -637,6 +655,10 @@ export async function pushNativeExchange(
       : null;
   const backupId = metadataId ?? (await transport.publish(manifestPin, false, ownerDerived));
   retainBaseline(backupId);
+  await transport.registerLogs?.(
+    backupId,
+    prepared.manifest.files.some(file => /\/(?:stdout|stderr)\.log$/.test(file.path)),
+  );
   if (pendingCoverage && !options.deferPendingAcknowledgement)
     acknowledgePendingExchange(store, pendingCoverage);
   return result(backupId);
@@ -679,8 +701,17 @@ export async function pullNativeExchange(
   let downloadedBytes = 0,
     reusedBytes = 0;
   try {
+    const workPin = manifest.files.find(file => file.path === 'work.json');
+    invariant(workPin, 'INVALID_WORK_BACKUP', 'Exchange omits its Work snapshot.');
+    const workBytes = await transport.download(workPin);
+    invariant(
+      workBytes.length === workPin.size && digest(workBytes) === workPin.sha256,
+      'INVALID_WORK_BACKUP',
+      'Exchange Work differs from its original pin.',
+    );
+    const snapshot = parseWorkBytes(workBytes);
     const grouped = new Map<string, typeof manifest.files>();
-    for (const file of manifest.files) {
+    for (const file of manifest.files.filter(file => portableCheckPath(snapshot, file.path))) {
       const group = grouped.get(file.sha256);
       if (group) {
         invariant(
@@ -734,6 +765,9 @@ export async function pullNativeExchange(
             );
             streamed.set(file.sha256, path);
             downloadedBytes += file.size;
+          } else if (file.sha256 === workPin.sha256) {
+            content.set(file.sha256, workBytes);
+            downloadedBytes += workBytes.length;
           } else missing.push(file);
         }
         if (missing.length) {

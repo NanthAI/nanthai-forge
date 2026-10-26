@@ -2,6 +2,7 @@
 import { v } from 'convex/values';
 import { defineTable } from 'convex/server';
 export const autonomyPolicy = v.object({
+  checkLogs: v.optional(v.object({ uploadLocal: v.boolean(), retentionDays: v.number() })),
   autoExchange: v.optional(
     v.object({
       enabled: v.boolean(),

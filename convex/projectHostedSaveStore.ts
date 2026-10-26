@@ -71,6 +71,13 @@ export async function saveObject(
     'SOURCE_UNAVAILABLE',
     'Commit the exact project source object before staging it.',
   );
+  // Source staging can reuse an old log hash before its State is registered.
+  // Mark that provenance in the same transaction: cleanup's exact row binding
+  // then fences a concurrent stage, without coordinating independent Lanes.
+  if ('patch' in ctx.db && !row.sourceReferenced) {
+    await ctx.db.patch(row._id, { sourceReferenced: true });
+    await ctx.db.insert('projectCheckLogSourcePins', { projectId, digest: row.digest });
+  }
   return {
     object: { sha256: row.digest, size: row.size },
     recipe: row.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null,

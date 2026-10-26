@@ -35,12 +35,22 @@ export async function seedHostedProject(
     })) as string,
   );
   const total: TransferReceipt = { uploadedObjects: 0, uploadedBytes: 0 };
-  const complete = () => {
+  const complete = async () => {
     invariant(
       state.backupId && (request.format !== 'native' || state.mainDigest === request.head),
       'SOURCE_HASH_MISMATCH',
       'Seed did not commit the pinned native main.',
     );
+    const capturedManifest = JSON.parse(readFileSync(join(directory, request.manifest.sha256), 'utf8'));
+    const hasLogs = capturedManifest.files.some((file: { path: string }) =>
+      /\/(?:stdout|stderr)\.log$/.test(file.path),
+    );
+    if (hasLogs)
+      await client.action(makeFunctionReference<'action'>('projectCheckLogRetentionActions:registerBackup'), {
+        projectId: input.projectId,
+        backupId: state.backupId,
+        hasLogs,
+      });
     return {
       ...total,
       backupId: state.backupId as string,

@@ -1,6 +1,7 @@
+import { checkEvidenceLines } from './check-compact-output.js';
 import { postAcceptMoves } from './post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { coverageArtifact, type CoverageInput } from '../scripts/test-coverage.mjs';
 import { selectionSourcePath } from '../scripts/test-impact.mjs';
@@ -12,7 +13,7 @@ import type { WorkStore } from './work-store.js';
 
 export const coverageSourcePath = 'coverage/test-impact.json';
 
-/** Compact check artifact reconstructed from retained execution logs, with runner-owned source pins. */
+/** Compact check artifact reconstructed from compact reports or legacy execution logs, with runner-owned source pins. */
 export function retainCheckCoverage(
   store: WorkStore,
   run: CheckRun,
@@ -28,16 +29,12 @@ export function retainCheckCoverage(
         .filter(file => selectionSourcePath(file.path))
         .map(file => [file.path, source.object(file.blob).toString('utf8')]),
     );
-    const shards = join(directory, 'shards');
-    const logs = existsSync(shards)
-      ? readdirSync(shards)
-          .filter(name => name.endsWith('.log'))
-          .map(name => join(shards, name))
-      : [join(directory, 'stdout.log')];
-    function* lines() {
-      for (const log of logs) yield* readFileSync(log, 'utf8').split('\n');
-    }
-    const artifact = coverageArtifact({ head: run.head, files, tests: selection.tests, lines: lines() });
+    const artifact = coverageArtifact({
+      head: run.head,
+      files,
+      tests: selection.tests,
+      lines: checkEvidenceLines(directory),
+    });
     if (!artifact) return [];
     // Native blob identities hash exact bytes, including non-UTF-8 selector inputs.
     // Such input cannot match a lossy text inventory and therefore stays broad.

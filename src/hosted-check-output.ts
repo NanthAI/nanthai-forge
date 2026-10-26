@@ -10,6 +10,8 @@ import { invariant } from './errors.js';
 export const outputStreamSchema = z
   .object({
     identity: checkHash.optional(),
+    kind: z.enum(['summary', 'local-log']).optional(),
+    expiresAt: z.number().finite().optional(),
     shard: checkNumber,
     attempt: checkNumber,
     executionId: z.string().min(1),
@@ -34,6 +36,7 @@ export const outputSealSchema = z
     chunks: checkNumber,
     bytes: checkNumber,
     sha256: checkHash,
+    failureSummary: z.string().max(4096).optional(),
   })
   .strict();
 export type OutputSeal = z.infer<typeof outputSealSchema>;

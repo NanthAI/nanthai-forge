@@ -343,7 +343,18 @@ function remove(store: WorkStore, item: Item): string | undefined {
   }
   // Re-check immediately before deleting: inside the owner's Work directory, and not a link.
   const inside = (path: string) => path.startsWith(store.directory + '/');
-  if (!inside(item.path) || (!item.tail && !plainDirectory(item.path)))
+  const logFile = item.kind === 'check-retention' && item.path.endsWith('.log');
+  let regularLog = false;
+  if (logFile) {
+    try {
+      const info = lstatSync(item.path);
+      regularLog =
+        info.isFile() && !info.isSymbolicLink() && info.nlink === 1 && realpathSync(item.path) === item.path;
+    } catch {
+      /* Changed path stays. */
+    }
+  }
+  if (!inside(item.path) || (logFile ? !regularLog : !item.tail && !plainDirectory(item.path)))
     return 'Path changed or is no longer a plain directory.';
   if (!plainDirectory(dirname(item.path))) return 'Parent directory changed.';
   try {
@@ -384,7 +395,7 @@ function cleanupResult(
     skippedKinds,
     totals: { count: listed.length, bytes: listed.reduce((sum, item) => sum + item.bytes, 0) },
     note: command.apply
-      ? 'Removed items were re-validated under the owner lock. Work records, State objects, check results, log tails and artifacts remain; repeating is safe.'
+      ? 'Removed items were re-validated under the owner lock. Work records, State objects, check results, compact summaries and artifacts remain; repeating is safe.'
       : 'No files were deleted. Send {"apply":true} (optionally with these item ids) to delete; every item is re-validated at that time.',
   };
 }
@@ -458,7 +469,7 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
             action: {
               actor: automatic.actor,
               summary: `Clean regenerable copies: ${chosen.map(i => i.path).join(', ')}`,
-              undo: 'Run reopen with the Lane id to re-materialize its retained head. Checks reconstruct workspaces when run again. Restore Lane dependencies with npm ci --ignore-scripts and rerun the build; retained source, log tails and artifacts remain. Seven-day retention removes older copies and log prefixes; those prefixes cannot be reconstructed. Expired closed-Lane auto-snapshot pointers and caches cannot be restored; object collection can later reclaim their otherwise unreachable unsaved source.',
+              undo: 'Run reopen with the Lane id to re-materialize its retained head. Checks reconstruct workspaces when run again. Restore Lane dependencies with npm ci --ignore-scripts and rerun the build; retained source, summaries and artifacts remain. Seven-day retention removes older copies and expired log bytes; those bytes cannot be reconstructed. Expired closed-Lane auto-snapshot pointers and caches cannot be restored; object collection can later reclaim their otherwise unreachable unsaved source.',
             },
           });
           store.commitRecords(tx);

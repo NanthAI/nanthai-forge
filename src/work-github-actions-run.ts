@@ -1,10 +1,12 @@
+import { appendControllerSummary } from './check-controller-summary.js';
+import { retainCompactCheckReports } from './check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
 import { actionsCheckRuntime } from './check-backend.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { retainCheckCoverage } from './check-coverage.js';
 import { actionsCost, actionsRate, unknownCost } from './check-cost.js';
 import { mkdirBelow } from './mkdir-below.js';
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readPolicy } from './work-autonomy.js';
 import { modalPlan, validateModalPlan, type ModalPlan } from './modal-plan.js';
@@ -47,7 +49,8 @@ export async function launchGithubActionsRun(
   const progress = (message: string) => {
     const line = `[github-actions ${++sequence}] ${message}`;
     durableReplace(sequencePath, String(sequence));
-    appendFileSync(join(path, 'stdout.log'), `${line}\n`, { mode: 0o600 });
+    appendControllerSummary(path, line);
+
     workProgress('github-actions check', line, `${run.id}:${sequence}`);
   };
   let cleanupRejected: (() => Promise<void>) | undefined;
@@ -101,7 +104,15 @@ export async function launchGithubActionsRun(
     run.status = 'running';
     if (run.error?.code === PENDING_ACTIONS_INFRA) delete run.error;
     updateModalRun(store, run);
-    const { journal, save } = actionsJournal(path, plan, repo, runsOn);
+    const { journal, save: saveJournal } = actionsJournal(path, plan, repo, runsOn);
+    const save = () => {
+      saveJournal();
+      if (journal.runId && run.backend?.executionIds?.[0] !== String(journal.runId)) {
+        run.backend!.executionIds = [String(journal.runId)];
+        run.backend!.providerUrl = `https://github.com/${journal.repo}/actions/runs/${journal.runId}`;
+        updateModalRun(store, run);
+      }
+    };
     api = recordActionsFailures(api, error => {
       (journal.apiFailures ??= []).push(error.response);
       save();
@@ -143,6 +154,9 @@ export async function launchGithubActionsRun(
     const outcome = await controlActions(plan, journal, save, api, cancelled, progress, executionAllowed);
     const jobStatusSummary = 'jobStatusSummary' in outcome ? outcome.jobStatusSummary : '';
     run.backend.executionIds = journal.runId ? [String(journal.runId)] : [];
+    if (journal.runId)
+      run.backend.providerUrl = `https://github.com/${journal.repo}/actions/runs/${journal.runId}`;
+    retainCompactCheckReports(path);
     run.backend.billableMinutes = outcome.billableMinutes;
     run.backend.cost = outcome.cost;
     if (outcome.cost.estimatedCostUsd !== null) run.backend.estimatedCostUsd = outcome.cost.estimatedCostUsd;
@@ -164,7 +178,7 @@ export async function launchGithubActionsRun(
         })),
         ...retainCheckCoverage(store, run, path, plan.standard ? plan.selection : undefined),
       ],
-      details: `${jobStatusSummary ? `${jobStatusSummary} ` : ''}GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} Source, result and collected logs remain retained; the run-owned ref is removed after the remote run is terminal.`,
+      details: `${jobStatusSummary ? `${jobStatusSummary} ` : ''}GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} Source, result and compact test evidence remain retained; full logs stay with GitHub Actions; the run-owned ref is removed after the remote run is terminal.`,
     });
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
     wakeLandingWorker(store);

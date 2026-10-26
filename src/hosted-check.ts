@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { checkLogsSchema } from './check-log-policy.js';
 import { checkSchema } from './work-types.js';
 import { digest } from './portable-hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -154,6 +155,7 @@ export const hostedCheckRunSchema = z
       .strict(),
     check: checkSchema.strict(),
     configuration: hostedCheckRunnerSchema,
+    checkLogs: checkLogsSchema.optional(),
     keyId: z.string().regex(/^[A-Z0-9_]+$/),
     dispatchKey: checkHash,
     dispatchStarted: z.boolean(),

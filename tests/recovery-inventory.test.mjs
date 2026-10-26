@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { fixture as hostedFixture, modules, upload } from './project-exchange-fixture.mjs';
+import { policyPreset } from '../dist/autonomy-policy.js';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { readRecoveryInventory } from '../dist/recovery-inventory.js';
@@ -37,6 +38,9 @@ function fixture(t) {
   writeFileSync(join(root, 'source.ts'), 'export const value = 1;\n');
   initNative(root);
   const work = new WorkService(root);
+  const data = work.store.load();
+  data.autonomyPolicy = { ...policyPreset('trusted'), checkLogs: { uploadLocal: true, retentionDays: 90 } };
+  work.store.save(data);
   const act = command => work.execute(command, work.store.revision()).result;
   const intent = act({ action: 'intent', outcome: 'Synthetic recovery inventory' });
   const lane = act({ action: 'lane', intentId: intent.id, name: 'Unlanded' });
@@ -237,7 +241,12 @@ for (const outcome of ['failed', 'unknown'])
             if (fail) throw Error('synthetic finish reply lost');
             return result;
           }
-          if (name === 'projectHostedSeedActions:stage') return s.ctx.runAction(ref, args);
+          if (
+            ['projectHostedSeedActions:stage', 'projectCheckLogRetentionActions:registerBackup'].includes(
+              name,
+            )
+          )
+            return s.ctx.runAction(ref, args);
           assert.ok(['projectWorkActions:initialize', 'projectWorkIndexActions:ensure'].includes(name));
           assert.equal((await readRecoveryInventory(f.root)).latestCompleteOffMachine.kind, 'seed');
         },

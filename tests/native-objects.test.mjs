@@ -143,9 +143,11 @@ test('inspection preserves format and collection retains all old source, dirty w
     const restoredWork = new WorkService(restored).store.load();
     assert.equal(restoredWork.schema, 12);
     assert.equal(restoredWork.lanes[0].checkpoints.at(-1).actor.kind, 'person');
+    assert.equal(fs.existsSync(join(restored, '.forge/work', 'check-' + run.id, 'stdout.log')), false);
+    assert.equal(JSON.parse(backup.json).checkLogs.find(item => item.runId === run.id).status, 'local-only');
     assert.deepEqual(
-      fs.readFileSync(join(restored, '.forge/work', 'check-' + run.id, 'stdout.log')),
-      logBytes,
+      fs.readFileSync(join(restored, '.forge/work', 'check-' + run.id, 'result.json')),
+      fs.readFileSync(join(f.w.store.directory, 'check-' + run.id, 'result.json')),
     );
     assert.equal(fs.existsSync(marker), false);
   } finally {

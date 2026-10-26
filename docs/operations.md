@@ -2,7 +2,7 @@
 
 ## Backup and recovery
 
-An export holds the full retained source States, Work and every available recorded run file.
+An export holds the full retained source States, Work, check results, failure summaries, compact test evidence and links to the CI provider’s logs. Full GitHub Actions and Modal logs stay with the provider. Local logs are included only when explicitly enabled for the project and within finite retention.
 
 ```sh
 nforge work ROOT                                                    # bounded revision, head and collection counts
@@ -29,13 +29,59 @@ binding and retains server error codes/messages if indexing fails. Index builds
 install no idle timer or poller; only an in-flight request drives continuations.
 
 
-Copy the whole export outside the project. It holds private history and logs, so treat it as private. Restore always writes to a new, unused directory. It validates every file against the manifest and recreates Lanes and Candidates. Unfinished commands are marked interrupted and never restart. The original owner is untouched, so keep it until you have checked the copy.
+Copy the whole export outside the project. It holds private history and check evidence, including opted-in local logs within retention, so treat it as private. Restore always writes to a new, unused directory. It validates every file against the manifest and recreates Lanes and Candidates. Unfinished commands are marked interrupted and never restart. The original owner is untouched, so keep it until you have checked the copy.
 
 Not included: uncheckpointed edits, ignored credentials, dependency caches and disposable workspaces. Checkpoint what you want first. To move between machines, restore on the target.
 
 A release export (source only, empty Work) is much narrower and is not a backup of Work.
 
 An older CLI refuses an owner it cannot preserve. Upgrade by installing the new package in a separate directory and pointing it at a backed-up owner. To roll back, restore the backup with the old tools. Never let an older writer rewrite an upgraded owner.
+
+### Check logs and retention
+
+Forge uses your CI provider’s log storage and retention. Status, exit code, timing,
+provider run/execution IDs, bounded failure summaries (4096 characters), failing
+names, compact test timings/coverage and reuse evidence remain in Forge. Full
+GitHub Actions and Modal output does not enter Work exports, hosting seeds or
+exchange. The Run view and agent log command return the provider link instead.
+Older archives with full logs still restore; deliberately omitted provider logs
+are provider-held, not missing check evidence. Results and source validation stay
+strict, and removing log bytes does not change a passed run’s evidence hash.
+
+Local logs stay on the machine for seven days. Hosted Mac workers keep their local pipe files under `FORGE_LOCAL_CHECK_LOG_DIR` (by default, the private `forge-mac-check-logs` directory in the machine’s temp directory), outside disposable source/runtime copies. Actual check starts and explicit
+cleanup enforce that bound; completed logs and stale logs whose collector exited are pruned on a later check start. Active collectors keep their current files. There is no idle timer. Upload is off until an owner
+explicitly enables it. The enabling command is the opt-in step:
+
+```sh
+nforge set-policy ROOT '{"checkLogs":{"uploadLocal":true,"retentionDays":90}}'
+# To stop uploading:
+nforge set-policy ROOT '{"checkLogs":{"uploadLocal":false}}'
+```
+
+Uploaded local logs expire through existing check/exchange lifecycle events, with an indexed expiry wake only when an expiry is already due; idle schedules no timer or poller. Uploaded local logs default to 90 days; `retentionDays` must be an integer from
+1 through 400. `never`, unlimited and larger values are rejected. Retention is
+based on the recorded run time, not refreshed by another export or exchange.
+The local seven-day lifetime can make a later export omit logs even while a
+previous opted-in hosted copy remains within its upload retention. Results,
+failure summaries, test reports, source recipes and artifacts have their existing
+lifetimes.
+
+One-off migration removes existing provider logs and expired/unapproved uploaded
+local logs. First inspect a dry-run plan, then apply that exact selection. Add
+`--hosted` to include the project’s existing hosted binding and R2 objects:
+
+```sh
+nforge maintenance check-logs ROOT --dry-run --plan /private/path/check-logs.json --hosted
+nforge maintenance check-logs ROOT --apply --plan /private/path/check-logs.json --hosted
+```
+
+Omit `--hosted` for owner-only cleanup. The plan and retry UUID remain private;
+apply keeps results, summaries, provider links and exact evidence hashes. Shared
+source/artifact hashes and recipe chunks are protected. Native archive copies
+are converted through the existing exact-manifest migration before retiring the
+old compressed container. A lost deletion reply resumes the same recorded
+operation; R2 keys rotate before deletion so replay cannot delete a replacement
+upload.
 
 ### Hosted backups and return
 
@@ -79,6 +125,10 @@ native restore preserve it for backup and an explicitly qualified rollback.
 completion roots are validated without applying pending completions or replaying
 acceptance. Large opaque source blobs stream to disk and final cache validation
 hashes them from disk, with visited identities in disposable disk scratch.
+
+Route A and Route B retain check outcomes, summaries, test evidence and provider
+links. Neither route requires full CI-provider log bytes. Opted-in local logs are
+recoverable only within their finite retention.
 
 ### Route B: recover a runner and cache from hosted
 
@@ -525,7 +575,7 @@ by requiring every original submission to settle, with no pending queue work.
 
 `nforge agent ROOT clean` (MCP `forge_task` action `clean`) reclaims regenerable local disk. It is a dry run unless you send `{"apply":true}`; the dry run lists candidates grouped by kind with bytes and the reason each is safe, plus totals and every skipped item with its reason. Apply recomputes the set under the owner lock and re-validates each item (pass `items` ids from a dry run to limit it; anything that changed is skipped). `kinds` filters:
 
-- `check-retention`: remove eligible terminal remote source copies immediately; after strictly more than seven days, remove unpinned terminal runs’ remaining source/runtime and shard work copies and keep the final 64 KiB of each combined or shard log at its original path. Terminal receipts (including failure summaries), selection, changes, plans, provider state and selected artifacts stay. Running/queued/preparing runs, explicit release build-run/export pins, resumable or unknown remote executions and in-use directories stay. Acceptance and open-Lane references retain evidence without protecting old bulk; recent shard work and logs remain untouched. Both the run end and the individual remaining copy/log must be older than seven days.
+- `check-retention`: remove eligible terminal remote source copies immediately; after strictly more than seven days, remove unpinned terminal runs’ remaining source/runtime and shard work copies and remove expired combined and shard log bytes while keeping compact test evidence. Terminal receipts (including failure summaries), compact test reports, selection, changes, plans, provider state and selected artifacts stay. Running/queued/preparing runs, explicit release build-run/export pins, resumable or unknown remote executions and in-use directories stay. Acceptance and open-Lane references retain evidence without protecting old bulk; recent shard work and logs remain untouched. Both the run end and the individual remaining copy/log must be older than seven days.
 - `check-workspaces`: finished check runs’ `workspace/`, `runtime/`, `modal-source/` and `github-actions-source/` copies, without an age gate. Remote source copies require a matching terminal receipt, no resumable backend, release/export pin, unresolved remote execution or process blocker. `result.json`, logs, selection, plans and artifacts stay. Missing receipts, archived-interrupted-only receipts, receipt mismatches and unresolved remote executions have specific skip reasons. An interrupted run with a matching archived receipt and a recorded supersession by a later retained Candidate in the same Intent/Lane family may release only its remote source copies; its evidence stays untouched. Ambiguous interruption or supersession retains all copies.
 - `lane-deps`: `node_modules`, `dist` and similar gitignored build directories inside completed or abandoned Lanes.
 - `lanes`: the whole directory of a completed or abandoned Lane, only when a capture of it equals the Lane head State; otherwise it is skipped as uncaptured edits. Gitignored files (such as `.env`) are not in State and are deleted with it. `reopen`, `checkpoint`, `sync` and `finish` re-materialize a removed Lane from its head State.
@@ -716,6 +766,8 @@ writer to downgrade an upgraded owner; restore its matching backup into a new
 folder with compatible tools.
 
 ### B1.5b: pinned cutover command and lead checklist
+
+Before the B1.5b cutover, review and apply the BYOCI check-log cleanup above, verify source/results and provider links, and exercise both recovery routes without provider log bytes. No deployment or production cleanup is performed by the builder.
 
 The cutover release is **nforge 0.3.1** (source contract 2). Install the matching
 package on every CLI/MCP host and deploy its server code before switching. The

@@ -95,7 +95,7 @@ export async function withWorkArchive<T>(
       throw new ForgeError(code, 'Archive manifest is invalid.');
     }
     const allowed =
-      /^(?:manifest\.json|work\.json|objects\/[0-9a-f]{64}|source\.bundle|(?:discussion|contribution)-[0-9a-f-]{36}\.(?:json|bundle)|check-[0-9a-f-]{36}\/(?:stdout\.log|stderr\.log|result\.json|resources\.txt|artifacts\/artifact-[0-9]+\.bin))$/i;
+      /^(?:manifest\.json|work\.json|objects\/[0-9a-f]{64}|source\.bundle|(?:discussion|contribution)-[0-9a-f-]{36}\.(?:json|bundle)|check-[0-9a-f-]{36}\/(?:stdout\.log|stderr\.log|result\.json|test-reports\.json|modal-plan\.json|modal-shard-logs\.json|changes\.json|resources\.txt|artifacts\/artifact-[0-9]+\.bin))$/i;
     invariant(
       Array.isArray(files) &&
         files.every(

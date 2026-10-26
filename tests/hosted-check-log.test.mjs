@@ -1,3 +1,4 @@
+import { effectivePolicy } from '../dist/autonomy-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -22,6 +23,13 @@ test('hosted log pages read only retained run bytes and recheck current read aut
   initNative(root);
   const agent = new AgentWorkflow(root),
     work = new WorkService(root);
+  // Explicit project opt-in: this fixture exercises portable local-log recovery.
+  const logPolicyData = work.store.load();
+  logPolicyData.autonomyPolicy = {
+    ...effectivePolicy(logPolicyData),
+    checkLogs: { uploadLocal: true, retentionDays: 90 },
+  };
+  work.store.save(logPolicyData);
   const lane = (await agent.dispatch({ action: 'start', outcome: 'Synthetic log' })).result;
   const view = (
     await agent.dispatch({

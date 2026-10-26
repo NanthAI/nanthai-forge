@@ -114,6 +114,9 @@ test('unknown publication outcomes retain pending work until original-operation 
 
 test('check completion and landing create pending work after the previous capture', async t => {
   const f = fixture(t);
+  const local = f.store.load();
+  local.autonomyPolicy = { ...effectivePolicy(local), checkLogs: { uploadLocal: true, retentionDays: 90 } };
+  f.store.save(local);
   const lane = (await f.agent.dispatch({ action: 'start', outcome: 'Check and land' })).result;
   const check = (
     await f.agent.dispatch({

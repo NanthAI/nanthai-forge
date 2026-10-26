@@ -51,37 +51,42 @@ export class MainAuditWatchdog {
     const evidence = JSON.stringify(
       this.runs.map(run => [
         run.id,
-        ...['result.json', 'github-actions.json', 'stdout.log', 'stderr.log', 'modal-shard-logs.json'].map(
-          file => {
-            const path = join(this.store.directory, `check-${run.id}`, file);
-            // Actions stdout/stderr contain controller diagnostics, not remote
-            // command output. Its journal carries actual job/log progress.
-            if (run.backend?.actual === 'github-actions' && ['stdout.log', 'stderr.log'].includes(file))
-              return null;
-            try {
-              const info = statSync(path),
-                stamp = `${info.ino}:${info.size}:${info.mtimeMs}`;
-              if (file !== 'github-actions.json') return stamp;
-              const retained = this.files.get(path);
-              if (retained?.stamp === stamp) return retained.value;
-              const journal = JSON.parse(readFileSync(path, 'utf8'));
-              // Repeated failed HTTP requests or unchanged polls are not progress.
-              const value = [
-                journal.commit,
-                journal.pushed,
-                journal.runId,
-                journal.states,
-                journal.retrying,
-                journal.logged,
-                journal.terminal,
-              ];
-              this.files.set(path, { stamp, value });
-              return value;
-            } catch {
-              return null;
-            }
-          },
-        ),
+        ...[
+          'result.json',
+          'github-actions.json',
+          'stdout.log',
+          'stderr.log',
+          'modal-shard-logs.json',
+          'modal-log-cursors.json',
+        ].map(file => {
+          const path = join(this.store.directory, `check-${run.id}`, file);
+          // Actions stdout/stderr contain controller diagnostics, not remote
+          // command output. Its journal carries actual job/log progress.
+          if (run.backend?.actual === 'github-actions' && ['stdout.log', 'stderr.log'].includes(file))
+            return null;
+          try {
+            const info = statSync(path),
+              stamp = `${info.ino}:${info.size}:${info.mtimeMs}`;
+            if (file !== 'github-actions.json') return stamp;
+            const retained = this.files.get(path);
+            if (retained?.stamp === stamp) return retained.value;
+            const journal = JSON.parse(readFileSync(path, 'utf8'));
+            // Repeated failed HTTP requests or unchanged polls are not progress.
+            const value = [
+              journal.commit,
+              journal.pushed,
+              journal.runId,
+              journal.states,
+              journal.retrying,
+              journal.logged,
+              journal.terminal,
+            ];
+            this.files.set(path, { stamp, value });
+            return value;
+          } catch {
+            return null;
+          }
+        }),
       ]),
     );
     if (evidence !== this.evidence) {

@@ -29,6 +29,7 @@ export async function collectHostedOutput(
   sink: OutputSink,
   chunkBytes = 64 * 1024,
   flushEachInput = false,
+  summary?: () => string,
 ): Promise<OutputSeal> {
   invariant(
     Number.isSafeInteger(chunkBytes) && chunkBytes > 0,
@@ -87,7 +88,15 @@ export async function collectHostedOutput(
   }
   await append(redactor.end());
   if (pending.length) await flush(pending);
+  const summaryText = summary?.();
+  const failureSummary = summaryText
+    ? new HostedOutputRedactor(redaction)
+        .write(Buffer.from(summaryText), true)
+        .toString('utf8')
+        .slice(0, 4096)
+    : '';
   const seal = outputSealSchema.parse({
+    ...(failureSummary ? { failureSummary } : {}),
     stream,
     chunks: sequence,
     bytes: offset,

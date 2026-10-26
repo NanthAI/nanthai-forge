@@ -1,3 +1,4 @@
+import { compactCheckText } from '../dist/check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
 // Actions controller under GitHub-side stress: rate limits, lagging job lists, OOM diagnosis.
 import test from 'node:test';
@@ -127,7 +128,7 @@ test('a successful run with a stuck job passes using complete timestamped node s
   assert.equal(outcome.failureSummary, '');
   assert.equal(waits.length, 30);
   assert.equal(calls.filter(call => call.log === 2).length, 1);
-  assert.equal(readFileSync(join(plan.output, 'shards/0.log'), 'utf8'), log);
+  assert.equal(readFileSync(join(plan.output, 'shards/0.evidence'), 'utf8'), compactCheckText(log));
   assert.equal(journal.states[2], 'in_progress/');
   assert.equal(journal.stuckJobs[2].source, 'node-test-summary');
   assert.equal(journal.stuckJobs[2].passed, 785);
@@ -141,7 +142,7 @@ test('a successful run with a stuck job passes using complete timestamped node s
   // Adoption reads retained output and does not duplicate or refetch it.
   api.log = async () => assert.fail('retained logs must be reused');
   assert.equal((await control(plan, journal, api)).status, 'passed');
-  assert.equal(readFileSync(join(plan.output, 'shards/0.log'), 'utf8'), log);
+  assert.equal(readFileSync(join(plan.output, 'shards/0.evidence'), 'utf8'), compactCheckText(log));
 });
 
 test('complete result markers cover every selected file before recovering a stuck job', async t => {
@@ -423,8 +424,8 @@ for (const missing of [false, true])
     assert.equal(calls.filter(call => call.endpoint.endsWith('/rerun')).length, 1);
     assert.deepEqual(journal.logged.sort(), [1, 2, 3, 4]);
     assert.equal(calls.filter(call => call.log === 2).length, 1);
-    assert.equal(readFileSync(join(plan.output, 'shards/1.log'), 'utf8'), 'ok\n');
-    assert.equal(readFileSync(join(plan.output, 'shards/1.attempt-2.log'), 'utf8'), 'ok\n');
+    assert.equal(readFileSync(join(plan.output, 'shards/1.evidence'), 'utf8'), '');
+    assert.equal(readFileSync(join(plan.output, 'shards/1.attempt-2.evidence'), 'utf8'), '');
   });
 
 test('test failure and likely OOM keep failure evidence while only the lost sibling is replaced', async t => {

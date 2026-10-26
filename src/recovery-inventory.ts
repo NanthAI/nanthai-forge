@@ -1,3 +1,4 @@
+import { runLogRecord, isCheckLogPath } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,7 +15,8 @@ import { WorkStore } from './work-store.js';
 
 export type RecoveryEvidence = {
   path: string;
-  status: 'covered' | 'pending' | 'unavailable' | 'unknown';
+  status: 'covered' | 'pending' | 'unavailable' | 'unknown' | 'provider-held' | 'local-only' | 'expired';
+  providerUrl?: string;
   captured: { sha256: string; size: number } | null;
   current: { sha256: string; size: number } | null;
 };
@@ -108,6 +110,18 @@ export async function readRecoveryInventory(root: string, now = Date.now()): Pro
   }
   const evidence: RecoveryEvidence[] = [];
   for (const path of paths) {
+    const run = isCheckLogPath(path) ? data.runs.find(run => path.startsWith(`check-${run.id}/`)) : undefined;
+    const disposition = run ? runLogRecord(data, run, now) : undefined;
+    if (disposition && disposition.status !== 'included') {
+      evidence.push({
+        path,
+        status: disposition.status,
+        captured: null,
+        current: null,
+        ...('providerUrl' in disposition ? { providerUrl: disposition.providerUrl } : {}),
+      });
+      continue;
+    }
     const prior = captured.get(path);
     let current: RecoveryEvidence['current'] = null;
     if (safeRelative(path) && path.startsWith('check-')) {
@@ -146,7 +160,7 @@ export async function readRecoveryInventory(root: string, now = Date.now()): Pro
   }
   const ages = saves.flatMap(save => (save.at ? [Math.max(0, now - Date.parse(save.at))] : []));
   const unknownSaveTimes = saves.filter(save => !save.at).length;
-  const evidencePending = evidence.some(item => item.status !== 'covered');
+  const evidencePending = evidence.some(item => ['pending', 'unavailable', 'unknown'].includes(item.status));
   const oldestKnownPendingAgeMs = ages.length ? Math.max(...ages) : null;
   return {
     schema: 1,

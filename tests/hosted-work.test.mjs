@@ -1,3 +1,4 @@
+import { effectivePolicy } from '../dist/autonomy-policy.js';
 import { workArchiveMetadata } from '../dist/work-archive-metadata.js';
 // SPDX-License-Identifier: Apache-2.0
 import { currentOwnerDisplay } from './project-exchange-fixture.mjs';
@@ -76,6 +77,13 @@ test('hosted Intent authority reconciles original operations, retains concurrent
     git(root, ['commit', '-qm', 'Original native source']);
     const local = new WorkService(root),
       c = input => local.dispatch(input, local.status().revision);
+    // Explicit project opt-in: this fixture exercises portable local-log recovery.
+    const logPolicyData = local.store.load();
+    logPolicyData.autonomyPolicy = {
+      ...effectivePolicy(logPolicyData),
+      checkLogs: { uploadLocal: true, retentionDays: 90 },
+    };
+    local.store.save(logPolicyData);
     const originalIntent = (await c({ action: 'intent', outcome: 'Original retained work' })).result;
     const lane = (await c({ action: 'lane', intentId: originalIntent.id, name: 'Original local Lane' }))
       .result;
@@ -922,6 +930,13 @@ test('native hosted source, Intent, local return, Channel and journal recovery r
   initNative(root);
   const local = new WorkService(root),
     act = command => local.dispatch(command, local.status().revision);
+  // Explicit project opt-in: this fixture exercises portable local-log recovery.
+  const logPolicyData = local.store.load();
+  logPolicyData.autonomyPolicy = {
+    ...effectivePolicy(logPolicyData),
+    checkLogs: { uploadLocal: true, retentionDays: 90 },
+  };
+  local.store.save(logPolicyData);
   const intent = (await act({ action: 'intent', outcome: 'Native source hosted privately' })).result;
   const lane = (await act({ action: 'lane', intentId: intent.id, name: 'Initial native Lane' })).result;
   const view = (

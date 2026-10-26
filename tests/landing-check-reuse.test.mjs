@@ -107,6 +107,8 @@ async function prepared(t, options = {}, definition) {
 for (const remote of [true, false])
   test(`${remote ? 'remote' : 'local'} identical inputs reuse a passed check across CLI interruption and repeated resubmissions`, async t => {
     const f = await prepared(t, { remote });
+    for (const name of ['stdout.log', 'stderr.log'])
+      rmSync(join(f.store.directory, `check-${f.original.id}`, name), { force: true });
     const dispatch = f.work.dispatch.bind(f.work);
     f.work.dispatch = (...args) => {
       assert.notEqual(args[0].action, 'run-check', 'a retained pass must never dispatch again');
@@ -131,7 +133,11 @@ for (const remote of [true, false])
       assert.equal(receipt.diagnostic, `reused check ${f.original.id} from ${f.original.endedAt}`);
       const waited = waitRun(f.store, reused).event;
       assert.equal(waited.reusedFrom.runId, f.original.id);
-      assert.equal(waited.logPath, join(f.store.directory, `check-${f.original.id}`, 'stdout.log'));
+      assert.equal(
+        waited.logPath,
+        remote ? null : join(f.store.directory, `check-${f.original.id}`, 'stdout.log'),
+      );
+      if (remote) assert.equal(waited.providerUrl, 'https://modal.com/apps');
       validatePassingPrefix(f.work, f.batch, f.prefix);
       const observation = queueObservation(f.store.select('landingEntries', f.entryId), reused);
       assert.equal(observation.checkReuse.runId, f.original.id);

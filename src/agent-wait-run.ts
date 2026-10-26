@@ -1,3 +1,4 @@
+import { providerLogUrl } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { pendingActionsInfra } from './github-actions-infra.js';
 import { runWork } from './work-run.js';
@@ -85,15 +86,18 @@ export function waitRun(store: WorkStore, original: CheckRun): { event: WaitEven
     ok: shard.exitCode === 0,
     failureClass: shard.infrastructure ? 'infrastructure' : shard.exitCode ? 'check' : null,
     reason: shard.infrastructure ?? null,
-    logPath: join(
-      store.directory,
-      path,
-      'shards',
-      shardLogName(
-        plan.success && shard.index === plan.data.groups.length ? 'static' : shard.index,
-        shard.attempt + 1,
-      ),
-    ),
+    providerUrl: providerLogUrl(run),
+    logPath: providerLogUrl(run)
+      ? null
+      : join(
+          store.directory,
+          path,
+          'shards',
+          shardLogName(
+            plan.success && shard.index === plan.data.groups.length ? 'static' : shard.index,
+            shard.attempt + 1,
+          ),
+        ),
   }));
   try {
     const output = runWork(
@@ -143,8 +147,9 @@ export function waitRun(store: WorkStore, original: CheckRun): { event: WaitEven
       reason: run.error?.message ?? run.details,
       ...(run.reusedFrom ? { reusedFrom: run.reusedFrom } : {}),
       failureSummary: run.failureSummary ?? null,
-      logPath: join(store.directory, path, 'stdout.log'),
-      stderrPath: join(store.directory, path, 'stderr.log'),
+      providerUrl: providerLogUrl(run),
+      logPath: providerLogUrl(run) ? null : join(store.directory, path, 'stdout.log'),
+      stderrPath: providerLogUrl(run) ? null : join(store.directory, path, 'stderr.log'),
       failingShardLogPaths: children.filter(shard => shard.terminal && !shard.ok).map(shard => shard.logPath),
       shards: {
         started: children.filter(child => child.type === 'shard').length,

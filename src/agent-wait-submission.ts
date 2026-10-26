@@ -147,6 +147,7 @@ export function waitSubmissions(
         submission.pendingReason,
       runId: runId ?? null,
       checkStatus: observed?.status ?? null,
+      ...(observed?.providerUrl ? { providerUrl: observed.providerUrl } : {}),
       logPath: observed?.logPath ?? null,
       stderrPath: observed?.stderrPath ?? null,
       failingShardLogPaths: observed?.failingShardLogPaths ?? [],

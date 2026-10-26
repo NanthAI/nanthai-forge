@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 'use node';
+import { providerLogUrl, runLogRecord } from '../src/check-log-policy';
+import type { CheckRun } from '../src/work-types';
 import { hostedText } from '../src/hosted-paths';
 import { blobStore } from './blobStore';
-// SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';
 import { action } from './cliServer';
@@ -123,6 +125,20 @@ export const log = action({
         keys: [{ collection: 'runs', key: input.runId }],
       });
       invariant(row, 'NOT_FOUND', 'Check run not found in this checkpoint.');
+      const selectedRun = JSON.parse(row.value) as CheckRun;
+      const providerUrl = providerLogUrl(selectedRun);
+      if (providerUrl)
+        return JSON.stringify({
+          status: 'provider-held',
+          providerUrl,
+          executionIds: selectedRun.backend?.executionIds ?? [],
+          available: false,
+          offset: 0,
+          nextOffset: 0,
+          bytes: 0,
+          text: selectedRun.failureSummary ?? '',
+          more: false,
+        });
       const { backup } = await ctx.runQuery(internal.projectBackups.get, {
         id: generation.backupId,
         owner: user.subject,
@@ -137,6 +153,18 @@ export const log = action({
           more: false,
         });
       const snapshot = await source(ctx, generation.backupId, user.subject);
+      const run = snapshot.data.runs.find(run => run.id === input.runId);
+      const disposition = run && runLogRecord(snapshot.data, run);
+      if (disposition && disposition.status !== 'included')
+        return JSON.stringify({
+          ...disposition,
+          available: false,
+          offset: 0,
+          nextOffset: 0,
+          bytes: 0,
+          text: run?.failureSummary ?? '',
+          more: false,
+        });
       const pin = snapshot.manifest.files.find(
         file => file.path === `check-${input.runId}/${input.stream}.log`,
       );

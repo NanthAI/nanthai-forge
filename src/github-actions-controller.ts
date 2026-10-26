@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { appendFileSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { compactCheckText } from './check-compact-output.js';
 import { mutate, observe, type ActionsApi, type ActionsJob, type ActionsRun } from './github-actions-api.js';
 import { ensureActionsDispatch } from './github-actions-dispatch.js';
 import type { ActionsJournal } from './github-actions-export.js';
@@ -55,7 +56,10 @@ export async function controlActions(
           join(
             plan.output,
             'shards',
-            shardLogName(shard === plan.groups.length ? 'static' : shard, attempt + 1),
+            shardLogName(shard === plan.groups.length ? 'static' : shard, attempt + 1).replace(
+              /\.log$/,
+              '.evidence',
+            ),
           ),
           'utf8',
         );
@@ -79,11 +83,12 @@ export async function controlActions(
       index: shard,
       attempt,
     });
-    logs.append(String(job.id), text);
-    appendFileSync(join(plan.output, 'stdout.log'), text, { mode: 0o600 });
+    logs.append(String(job.id), text.endsWith('\n') ? text : `${text}\n`);
+    logs.complete(String(job.id), job.conclusion === 'failure');
+
     journal.logged.push(job.id);
     save();
-    return text;
+    return compactCheckText(text);
   };
   for (;;) {
     const run = await observe(api, () => api.request<ActionsRun>(`${base}/runs/${journal.runId}`), progress);
@@ -276,7 +281,10 @@ export async function controlActions(
               join(
                 plan.output,
                 'shards',
-                shardLogName(shard === plan.groups.length ? 'static' : shard, attempt),
+                shardLogName(shard === plan.groups.length ? 'static' : shard, attempt).replace(
+                  /\.log$/,
+                  '.evidence',
+                ),
               ),
               'utf8',
             );
@@ -284,9 +292,10 @@ export async function controlActions(
             /* Logs may be unavailable; retain the observed job verdict. */
           }
           const files = failedTestFiles(text);
-          return `${job.name}: ${job.conclusion}; job ${job.id}; ${oom.has(job.id) ? 'exit 137/SIGKILL (likely OOM); ' : ''}${files.length ? `failing tests: ${files.join(', ')}` : 'inspect retained shard log'}.`;
+          return `${job.name}: ${job.conclusion}; job ${job.id}; ${oom.has(job.id) ? 'exit 137/SIGKILL (likely OOM); ' : ''}${files.length ? `failing tests: ${files.join(', ')}` : `inspect provider log https://github.com/${journal.repo}/actions/runs/${journal.runId}`}.`;
         })
-        .join('\n'),
+        .join('\n')
+        .slice(0, 4096),
     };
   }
 }

@@ -13,6 +13,7 @@ export const objectFields = {
   r2PreparedAt: v.optional(v.number()),
   recipe: v.optional(v.object({ digest: v.string(), size: v.number() })),
   removed: v.boolean(),
+  sourceReferenced: v.optional(v.boolean()),
 };
 /** Readable bytes exist: Convex storage, a recipe, or an R2 object a HEAD check confirmed. */
 export const isStored = (row: {

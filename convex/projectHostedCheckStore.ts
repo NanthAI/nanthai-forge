@@ -1,3 +1,4 @@
+import { wakeExpiredLogs } from './projectCheckLogRetention';
 // SPDX-License-Identifier: Apache-2.0
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -105,6 +106,7 @@ export async function writeHostedCheck(
   await notifyLandingCheck(ctx, { projectId: run.projectId as Id<'hostedProjects'>, runId: run.id });
 }
 export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {
+  await wakeExpiredLogs(ctx, run.projectId as Id<'hostedProjects'>);
   const row = await hostedOperationRow(
     ctx,
     run.projectId as Id<'hostedProjects'>,

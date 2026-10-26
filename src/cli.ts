@@ -59,6 +59,7 @@ Usage:
   nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination]
   nforge logout [DEPLOYMENT_URL]
   nforge auth status [DEPLOYMENT_URL]
+  nforge maintenance check-logs ROOT --dry-run|--apply --plan FILE [--hosted]
   nforge maintenance r2-backfill <root> [--dry-run|--verify] [--resume] [--state FILE]
   nforge hosted-work <deployment-url> <project-id> JSON
   nforge coordination <deployment-url> <project-id> JSON

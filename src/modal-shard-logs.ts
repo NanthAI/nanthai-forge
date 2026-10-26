@@ -1,6 +1,7 @@
+import { CompactCheckWriter } from './check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
 import { mkdirBelow } from './mkdir-below.js';
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { durableReplace } from './native-durability.js';
 import type { ModalEvent } from './modal-client.js';
@@ -14,6 +15,7 @@ export function shardLogName(shard: number | 'static', attempt = 1) {
 /** Execution identity survives controller adoption; retries never overwrite earlier output. */
 export class ModalShardLogs {
   private executions: Execution[] = [];
+  private writers = new Map<string, CompactCheckWriter>();
   private readonly indexPath: string;
   constructor(
     private readonly path: string,
@@ -29,7 +31,10 @@ export class ModalShardLogs {
   private filename(execution: Execution) {
     return join(
       'shards',
-      shardLogName(execution.index === this.staticIndex ? 'static' : execution.index, execution.attempt + 1),
+      shardLogName(
+        execution.index === this.staticIndex ? 'static' : execution.index,
+        execution.attempt + 1,
+      ).replace(/\.log$/, '.evidence'),
     );
   }
   register(event: Extract<ModalEvent, { kind: 'execution' }>) {
@@ -51,7 +56,16 @@ export class ModalShardLogs {
   }
   append(executionId: string, text: string) {
     const execution = this.executions.find(item => item.executionId === executionId);
-    if (execution) appendFileSync(join(this.path, this.filename(execution)), text, { mode: 0o600 });
+    if (!execution) return;
+    let writer = this.writers.get(executionId);
+    if (!writer) {
+      writer = new CompactCheckWriter(join(this.path, this.filename(execution)));
+      this.writers.set(executionId, writer);
+    }
+    writer.append(text);
+  }
+  complete(executionId: string, failed: boolean) {
+    this.writers.get(executionId)?.finish(failed);
   }
   failureSummary(result: Extract<ModalEvent, { kind: 'result' }>) {
     for (const outcome of result.executions ?? []) {
@@ -59,6 +73,11 @@ export class ModalShardLogs {
       if (!execution || execution.index !== outcome.index || execution.attempt !== outcome.attempt)
         throw new Error('Modal result shard identity changed.');
       if (outcome.exitCode !== undefined) execution.exitCode = outcome.exitCode;
+      if (outcome.exitCode !== undefined) {
+        let writer = this.writers.get(outcome.executionId);
+        if (!writer) writer = new CompactCheckWriter(join(this.path, this.filename(execution)));
+        writer.finish(outcome.exitCode !== 0);
+      }
       if (outcome.tests) execution.tests = outcome.tests;
       if (outcome.infrastructure) execution.infrastructure = outcome.infrastructure;
     }
@@ -87,7 +106,13 @@ export class ModalShardLogs {
       item => latest.get(item.index) === item || recovered.has(item.index),
     )) {
       const filename = this.filename(execution);
-      const lines = readFileSync(join(this.path, filename), 'utf8').split('\n');
+      let text = '';
+      try {
+        text = readFileSync(join(this.path, filename), 'utf8');
+      } catch {
+        /* Legacy execution may have no compact excerpt. */
+      }
+      const lines = text.split('\n');
       const failedFiles = [
         ...new Set([
           ...failedTestFiles(lines.join('\n')),

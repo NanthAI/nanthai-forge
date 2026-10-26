@@ -11,6 +11,8 @@ import { restoreWork } from './work-backup.js';
 import { readSource } from './files.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
+import { isCheckLogPath, runLogRecord } from './check-log-policy.js';
+import { parseWorkBytes } from './work-metadata.js';
 
 export function validateHistoricalObjects(store: WorkStore, records: HistoricalWork[]) {
   const source = new NativeSource(store.root);
@@ -201,6 +203,28 @@ export async function historicalWork(store: WorkStore, input: unknown, revision:
         };
       }
       const file = manifest.files.find(item => item.path === command.path);
+      if (isCheckLogPath(command.path)) {
+        const data = parseWorkBytes(work),
+          run = data.runs.find(run => command.path.startsWith(`check-${run.id}/`));
+        if (run) {
+          const record = runLogRecord(data, run);
+          if (record.status === 'provider-held' || (!file && record.status !== 'included'))
+            return {
+              revision: snapshot.revision,
+              result: {
+                private: true,
+                provenance: snapshot.record,
+                path: command.path,
+                ...record,
+                text: run.failureSummary ?? '',
+                totalBytes: 0,
+                offset: 0,
+                nextOffset: 0,
+                more: false,
+              },
+            };
+        }
+      }
       invariant(file, 'NOT_FOUND', 'Original evidence file is unavailable or not retained.');
       const selected = readSource(directory, file.path, file.size + 1, file.sha256);
       invariant(

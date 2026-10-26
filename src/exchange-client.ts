@@ -602,6 +602,14 @@ export class ConvexExchange implements ExchangeTransport {
       return Buffer.from(part.data);
     });
   }
+  async registerLogs(backupId: string, hasLogs: boolean) {
+    if (!hasLogs) return;
+    await this.client.action(action('projectCheckLogRetentionActions:registerBackup'), {
+      projectId: this.projectId,
+      backupId,
+      hasLogs,
+    });
+  }
   async migrate(
     backupId: string,
     operationId: string,

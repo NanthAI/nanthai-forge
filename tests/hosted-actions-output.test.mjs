@@ -56,7 +56,8 @@ async function fixture() {
       if (disconnected) throw new Error('synthetic offline');
       counters.commits++;
       counters.argumentBytes += Buffer.byteLength(JSON.stringify(message));
-      assert(!JSON.stringify(message).includes('first-live-line'));
+      assert(!JSON.stringify(message).includes('synthetic-private-value'));
+      if (message.body.kind === 'chunk') assert(!JSON.stringify(message).includes('first-live-line'));
       return s.run('actionsOutputCommit', (ctx, input) => output.commitHostedOutput(ctx, input, () => key), {
         projectId: s.projectId,
         message,
@@ -85,7 +86,7 @@ async function fixture() {
     environment: {},
     redaction: { secrets: ['synthetic-private-value'], paths: [root] },
     sink: () => spool.sink(),
-    command: [process.execPath, '-e', "console.log('first-live-line synthetic-private-value')"],
+    command: [process.execPath, '-e', "console.log('Error: first-live-line synthetic-private-value')"],
   };
   const chunks = () =>
     s
@@ -105,7 +106,7 @@ async function fixture() {
     },
   };
 }
-test('trusted runner publishes redacted H12 chunks while command is alive, before exit or provider logs', async () => {
+test('trusted runner publishes redacted compact failure excerpts while command is alive, before exit or provider logs', async () => {
   const s = await fixture();
   try {
     let observedWhileRunning = false;
@@ -126,8 +127,8 @@ test('trusted runner publishes redacted H12 chunks while command is alive, befor
     s.input.command = [
       process.execPath,
       '-e',
-      `const fs=require('node:fs'); console.log('first-live-line synthetic-private-value');
-      const deadline=Date.now()+5000; const wait=setInterval(()=>{if(fs.existsSync('continue')){clearInterval(wait);console.error('last-line');}
+      `const fs=require('node:fs'); console.log('ordinary-provider-chatter'); console.log('Error: first-live-line synthetic-private-value');
+      const deadline=Date.now()+5000; const wait=setInterval(()=>{if(fs.existsSync('continue')){clearInterval(wait);console.error('Error: last-line');}
       else if(Date.now()>deadline){clearInterval(wait);process.exitCode=9;}},10);`,
     ];
     const result = await runHostedActionsJob(s.input);
@@ -136,6 +137,7 @@ test('trusted runner publishes redacted H12 chunks while command is alive, befor
     assert.equal(result.seals.length, 2);
     const text = [...s.bytes.values()].map(b => b.toString()).join('');
     assert(text.includes('first-live-line [redacted]'));
+    assert(!text.includes('ordinary-provider-chatter'));
     assert(!text.includes('synthetic-private-value'));
     assert.equal((await s.chunks()).page.length, 2);
     assert(s.counters.argumentBytes > 0);

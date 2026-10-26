@@ -1,8 +1,10 @@
+import { retainCompactCheckReports } from './check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
   closeSync,
   constants,
   fstatSync,
+  existsSync,
   lstatSync,
   openSync,
   readFileSync,
@@ -11,7 +13,7 @@ import {
   realpathSync,
   rmSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { allRecords } from './agent-lifecycle.js';
 import { processBlocker, type workingProcesses } from './clean-processes.js';
 import { processGroupAlive } from './local-process.js';
@@ -220,16 +222,15 @@ export function retentionPlan(
       !info.isSymbolicLink() &&
       info.nlink === 1 &&
       old(info.mtimeMs) &&
-      info.size > LOG_TAIL_BYTES
+      info.size > 0
     )
       items.push({
         id: path,
         path,
         kind: 'check-retention',
-        tail: true,
-        bytes: info.size - LOG_TAIL_BYTES,
+        bytes: info.size,
         runId,
-        reason: `Log older than seven days; retain its final ${LOG_TAIL_BYTES} bytes at the original path.`,
+        reason: 'Local log retention expired after seven days; compact test evidence and results stay.',
       });
   }
   function scanLogs(directory: string, runId: string) {
@@ -257,6 +258,11 @@ export function retentionPlan(
 
 export function removeRetention(item: RetentionItem) {
   if (!item.tail) {
+    if (item.path.endsWith('.log')) {
+      const folder = dirname(item.path);
+      const directory = basename(folder) === 'shards' ? dirname(folder) : folder;
+      if (!existsSync(join(directory, 'test-reports.json'))) retainCompactCheckReports(directory);
+    }
     rmSync(item.path, { recursive: true, force: true });
     return;
   }

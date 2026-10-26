@@ -1,3 +1,4 @@
+import { portableCheckPath } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,7 +34,13 @@ export async function migrateNativeArchive(
     const bytes = readFileSync(join(directory, 'manifest.json')),
       manifest = nativeManifestSchema.parse(JSON.parse(bytes.toString('utf8')));
     return withValidatedNativeArchive(directory, async validated => {
-      const unique = [...new Map(manifest.files.map(file => [file.sha256, file])).values()],
+      const unique = [
+          ...new Map(
+            manifest.files
+              .filter(file => portableCheckPath(validated.data, file.path))
+              .map(file => [file.sha256, file]),
+          ).values(),
+        ],
         manifestPin = { sha256: digest(bytes), size: bytes.length };
       let uploadedBytes = 0,
         uploadedObjects = 0;
@@ -96,6 +103,9 @@ export async function migrateNativeArchive(
         uploadedObjects,
         logicalMembers: manifest.files.length,
         logicalBytes: manifest.files.reduce((sum, file) => sum + file.size, 0),
+        omittedLogs: manifest.files
+          .filter(file => !portableCheckPath(validated.data, file.path))
+          .map(file => file.path),
         logicalClosureVerified: true,
         fullRestoreVerified: false,
         originalCompressedRepresentationGuaranteed: false,

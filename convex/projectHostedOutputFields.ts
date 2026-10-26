@@ -3,6 +3,12 @@ import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
 export const hostedOutputTables = {
+  projectHostedOutputSummaries: defineTable({
+    ...identity,
+    streamId: v.string(),
+    position: v.number(),
+    text: v.string(),
+  }).index('by_project_and_run_and_stream_and_position', ['projectId', 'runId', 'streamId', 'position']),
   projectHostedOutputHeads: defineTable({
     ...identity,
     revision: v.number(),
@@ -17,6 +23,8 @@ export const hostedOutputTables = {
     ...identity,
     streamId: v.string(),
     descriptor: v.string(),
+    retired: v.optional(v.boolean()),
+    failureExcerpt: v.optional(v.string()),
     chunks: v.number(),
     bytes: v.number(),
     maxSequence: v.number(),

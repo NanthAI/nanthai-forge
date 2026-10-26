@@ -19,6 +19,7 @@ export const modalCostUsageSchema = z.array(
 );
 
 export const checkBackendSchema = z.object({
+  providerUrl: z.string().url().optional(),
   cost: checkCostSchema.optional(),
   credentialsRef: modalCredentialsRefSchema.nullable().optional(),
   retryable: z.boolean().optional(),

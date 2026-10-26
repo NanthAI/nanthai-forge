@@ -1,3 +1,4 @@
+import { portableRunFiles, runLogRecord, checkLogCoverage } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
@@ -152,8 +153,12 @@ export async function prepareHostedSeed(store: WorkStore, revision: number, oper
     main = pin(source.object(head));
     for (const run of data.runs) {
       const folder = join(store.directory, `check-${run.id}`);
-      const names = ['stdout.log', 'stderr.log', ...(run.endedAt ? ['result.json'] : [])];
-      if (run.resourceUsage?.producer) names.push('resources.txt');
+      const names = portableRunFiles(data, run);
+      names.push(
+        ...['test-reports.json', 'modal-plan.json', 'modal-shard-logs.json', 'changes.json'].filter(name =>
+          existsSync(join(folder, name)),
+        ),
+      );
       const artifacts = await inspectArtifacts(folder, run).catch(() => null);
       if (artifacts) names.push(...artifacts.map(artifact => `artifacts/${artifact.filename}`));
       else
@@ -192,8 +197,8 @@ export async function prepareHostedSeed(store: WorkStore, revision: number, oper
       revision,
       files,
       unavailable,
-      coverage:
-        'Complete pinned native source and Work; journal-only commands/attempts/waits are retained in seed recovery format 1. Available recorded evidence included; unavailable evidence is explicit. Processes are not included.',
+      checkLogs: data.runs.map(run => runLogRecord(data, run)),
+      coverage: `Complete pinned native source and Work; journal-only commands/attempts/waits are retained in seed recovery format 1. ${checkLogCoverage} Unavailable result/artifact evidence is explicit. Processes are not included.`,
     });
   } else {
     // Git compatibility keeps its existing portable bundle format, using the

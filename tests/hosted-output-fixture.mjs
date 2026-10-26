@@ -11,7 +11,14 @@ export const key = 'synthetic-output-collector-key';
 export async function outputFixture() {
   const s = await checksFixture();
   const run = await s.activate((await s.enqueue(s.selection())).id);
-  const stream = { shard: 0, attempt: 0, executionId: 'synthetic-shard-0', stream: 'stdout', name: '' };
+  const stream = {
+    kind: 'summary',
+    shard: 0,
+    attempt: 0,
+    executionId: 'synthetic-shard-0',
+    stream: 'stdout',
+    name: '',
+  };
   const call = async (name, fn, args, actor = 'owner') => {
     try {
       return await s.call(name, fn, args, actor);

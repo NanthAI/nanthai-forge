@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { deleteR2Object } from './r2Operations';
+import { r2Config } from './r2';
+import { portableCheckPath } from '../src/check-log-policy';
+import { parseWorkBytes } from '../src/work-metadata';
 import { v } from 'convex/values';
 import { action } from './cliServer';
 import { internal } from './_generated/api';
@@ -54,6 +58,26 @@ export const migrate = action({
         'BAD_ARGUMENT',
         'Retain the original migration UUID.',
       );
+      const retire = async () => {
+        const result = await ctx.runMutation(internal.projectExchange.retireArchive, {
+          backupId: input.backupId,
+          owner: user.subject,
+          operationId: input.operationId,
+        });
+        const retained = (
+          await ctx.runQuery(internal.projectBackups.get, { id: input.backupId, owner: user.subject })
+        ).backup.archiveReceipt;
+        if (result.retired && retained?.r2Key && retained.r2Committed) {
+          await deleteR2Object(r2Config(), retained.r2Key);
+          await ctx.runMutation(internal.projectExchange.retireArchiveR2, {
+            backupId: input.backupId,
+            owner: user.subject,
+            operationId: input.operationId,
+            key: retained.r2Key,
+          });
+        }
+        return result;
+      };
       if (backup.transport === 'objects') {
         invariant(
           backup.archiveReceipt?.operationId === input.operationId &&
@@ -62,11 +86,7 @@ export const migrate = action({
           'WORK_OPERATION_CHANGED',
           'Reconcile the original completed archive migration.',
         );
-        return ctx.runMutation(internal.projectExchange.retireArchive, {
-          backupId: input.backupId,
-          owner: user.subject,
-          operationId: input.operationId,
-        });
+        return retire();
       }
       const bytes = await objectBytes(ctx, project._id, user.subject, {
         sha256: input.manifestDigest,
@@ -93,7 +113,12 @@ export const migrate = action({
         'INVALID_WORK_BACKUP',
         'Original Work differs from its manifest.',
       );
-      const unique = [...new Map(manifest.files.map(file => [file.sha256, file])).values()];
+      const data = parseWorkBytes(original.work);
+      const unique = [
+        ...new Map(
+          manifest.files.filter(file => portableCheckPath(data, file.path)).map(file => [file.sha256, file]),
+        ).values(),
+      ];
       for (let offset = 0; offset < unique.length; offset += 100) {
         const pins = unique.slice(offset, offset + 100),
           rows: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, {
@@ -112,11 +137,7 @@ export const migrate = action({
         owner: user.subject,
         originalStorageId: backup.storageId!,
       });
-      return ctx.runMutation(internal.projectExchange.retireArchive, {
-        backupId: input.backupId,
-        owner: user.subject,
-        operationId: input.operationId,
-      });
+      return retire();
     } catch (error) {
       return report(error);
     }

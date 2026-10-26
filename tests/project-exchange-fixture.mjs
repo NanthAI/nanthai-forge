@@ -13,6 +13,11 @@ import { ownerDerivedBytes } from '../dist/owner-derived-local.js';
 import { ownerDerivedPages } from '../dist/owner-derived-pages.js';
 import { buildExchangeRoot } from '../dist/native-exchange-tree.js';
 const names = [
+  'projectCheckLogRetentionActions',
+  'projectCheckLogRetention',
+  'projectCheckLogCleanupStore',
+  'projectCheckLogCleanup',
+  'projectHostedLogCleanupStore',
   'projectObjects',
   'projectObjectCommit',
   'projectObjectDownloads',
@@ -39,6 +44,16 @@ export const modules = Object.fromEntries(
 export function fixture() {
   const s = state([]),
     run = s.ctx.runQuery;
+  for (const table of [
+    'projectCheckLogCleanups',
+    'projectCheckLogCleanupPages',
+    'projectCheckLogRetentions',
+    'projectHostedStates',
+    'projectHostedOutputStreams',
+    'projectHostedCheckRuns',
+    'projectHostedOutputSummaries',
+  ])
+    s.tables[table] ??= new Map();
   s.tables.hostedProjects.set('project', {
     _id: 'project',
     _creationTime: 1,

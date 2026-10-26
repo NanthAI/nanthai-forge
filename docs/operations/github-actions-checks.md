@@ -173,7 +173,7 @@ statuses and timestamps remain unchanged. Missing jobs, unavailable/truncated lo
 and incomplete evidence remain interrupted, even when the run is green. Failure
 evidence in the log or a failed run conclusion stays failed. Each shard status
 transition appears in numbered progress.
-Completed job logs, including failures, use the existing `shards/<index>.log` and
+Compact job evidence, including failure excerpts and machine test reports, uses `shards/<index>.evidence` and
 `shards/static.log` layout, with attempt suffixes for retries. GitHub exposes job
 logs after completion; this backend does not claim live stdout streaming.
 
@@ -182,7 +182,7 @@ startup failure) can retry once individually; successful siblings are retained.
 The rerun intent and original job ID are durable before the replacement request.
 A lost rerun reply or a replacement missing from a later job-list window stays
 `pending-infra`; the submission driver reopens the same run operation and adopts
-the replacement job without another rerun. Original and replacement logs and
+the replacement job without another rerun. Original and replacement compact test reports and
 cost observations remain separate. The run-owned ref stays retained while that
 replacement is unresolved. Recovery uses the original source, definition, shard
 selection, repository and runner label even if current runner settings change;
@@ -220,9 +220,9 @@ $0.004/job-minute, before its shared free allowance. Override any label through
 `checks.ratesUsdPerMinute`; see [cost basis and summaries](../operations.md#native-runner-selection). Selected output files are currently marked unavailable;
 remote native process resource metrics are unavailable.
 
-The result and collected logs are recorded before deleting a terminal run’s ref,
+The result and compact test evidence are recorded before deleting a terminal run’s ref,
 including failed and cancelled executions. Unresolved dispatches and reruns keep
-their refs. Source, results and local logs remain retained. Cleanup never deletes
+their refs. Source, results, failure summaries and provider log links remain retained; full logs stay with GitHub Actions. Cleanup never deletes
 a ref that no longer names this run’s commit; it uses the same exact Git lease
 as ref creation. A cleanup error preserves the result and reports reconciliation
 in progress. To restore a removed temporary branch, push the journal’s retained

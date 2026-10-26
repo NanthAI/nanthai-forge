@@ -3,11 +3,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate as immediate } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { writeFile } from 'node:fs/promises';
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
 import { checkPin } from '../dist/hosted-check.js';
+import { policyPreset } from '../dist/autonomy-policy.js';
 import { checkEnvironment } from '../dist/check-environment.js';
 import { executeHostedMacCheck } from '../dist/hosted-mac-execute.js';
 import { deliverMacCallback } from '../dist/hosted-mac-delivery.js';
@@ -20,6 +24,14 @@ const outputStore = await import(moduleUrl('../convex/projectHostedOutputStore.t
 const secret = 'synthetic-mac-fixed-collector';
 
 async function fixture(t, actualEnvironment = false) {
+  const localLogs = mkdtempSync(join(tmpdir(), 'forge-mac-log-test-'));
+  const oldLogs = process.env.FORGE_LOCAL_CHECK_LOG_DIR;
+  process.env.FORGE_LOCAL_CHECK_LOG_DIR = localLogs;
+  t.after(() => {
+    if (oldLogs === undefined) delete process.env.FORGE_LOCAL_CHECK_LOG_DIR;
+    else process.env.FORGE_LOCAL_CHECK_LOG_DIR = oldLogs;
+    rmSync(localLogs, { recursive: true, force: true });
+  });
   const oldId = process.env.FORGE_HOSTED_CHECK_KEY_ID,
     oldKey = process.env.FORGE_HOSTED_CHECK_KEY_SYNTHETIC;
   process.env.FORGE_HOSTED_CHECK_KEY_ID = 'SYNTHETIC';
@@ -104,6 +116,7 @@ async function fixture(t, actualEnvironment = false) {
     });
   return {
     ...f,
+    localLogs,
     configuration,
     scheduled,
     address,
@@ -298,112 +311,127 @@ test('provider refuses a run with no live owner and deduplicates concurrent deli
   await assert.rejects(provider.dispatch(run), code('WORK_STALE'));
 });
 
-test('direct hosted/R2 execution uploads redacted output and signed evidence with no Git or GitHub dependency', async t => {
-  const f = await fixture(t, true);
-  const definition = await f.configure(
-    {
-      kind: 'definition',
-      checkId: f.checkId,
-      command: {
-        name: 'synthetic-process',
-        executable: process.execPath,
-        args: [
-          '-e',
-          'console.log("synthetic success"); console.error("diagnostic"); if(process.env.FORGE_HOSTED_CHECK_KEY_SYNTHETIC) process.exit(99);',
-        ],
-        environmentLabel: 'clean',
+for (const uploadLocal of [false, true])
+  test(`direct hosted/R2 execution preserves local logs and uploads them only with opt-in (${uploadLocal})`, async t => {
+    const f = await fixture(t, true);
+    const definition = await f.configure(
+      {
+        kind: 'definition',
+        checkId: f.checkId,
+        command: {
+          name: 'synthetic-process',
+          executable: process.execPath,
+          args: [
+            '-e',
+            'console.log("synthetic success"); console.error("diagnostic"); if(process.env.FORGE_HOSTED_CHECK_KEY_SYNTHETIC) process.exit(99);',
+          ],
+          environmentLabel: 'clean',
+        },
       },
-    },
-    f.definition.digest,
-  );
-  const run = (await f.claim((await f.enqueue({ expectedDefinition: definition.digest })).id)).run;
-  const state = Buffer.from(
-    JSON.stringify({
-      schema: 1,
-      kind: 'forge-source-state',
-      parents: [],
-      files: [],
-      message: 'synthetic check source',
-      at: '2026-01-01T00:00:00.000Z',
-    }),
-  );
-  assert.equal(digest(state), run.request.expectedHead);
-  const uploaded = [],
-    outputObjects = new Map();
-  let lostChunkReply = false,
-    lostCompletionReply = false;
-  const transport = {
-    objects: async ids =>
-      ids.map(sha256 => {
-        assert.equal(sha256, run.request.expectedHead);
-        return { sha256, size: state.length };
+      f.definition.digest,
+    );
+    f.tables.hostedProjects.get(f.projectId).autonomyPolicy = {
+      ...policyPreset('supervised'),
+      checkLogs: { uploadLocal, retentionDays: 90 },
+    };
+    const run = (await f.claim((await f.enqueue({ expectedDefinition: definition.digest })).id)).run;
+    const state = Buffer.from(
+      JSON.stringify({
+        schema: 1,
+        kind: 'forge-source-state',
+        parents: [],
+        files: [],
+        message: 'synthetic check source',
+        at: '2026-01-01T00:00:00.000Z',
       }),
-    downloadToFile: async (_, path) => writeFile(path, state),
-    upload: async (pin, bytes) => {
-      uploaded.push(pin);
-      f.put(bytes);
-    },
-    callback: async (callback, signature) => {
-      const result = JSON.parse(
-        await f.call('macCallback', worker.callback, {
-          projectId: f.projectId,
-          callback: JSON.stringify(callback),
-          signature,
+    );
+    assert.equal(digest(state), run.request.expectedHead);
+    const uploaded = [],
+      outputObjects = new Map();
+    let lostChunkReply = false,
+      lostCompletionReply = false;
+    const transport = {
+      objects: async ids =>
+        ids.map(sha256 => {
+          assert.equal(sha256, run.request.expectedHead);
+          return { sha256, size: state.length };
         }),
-      );
-      if (callback.result.kind === 'complete' && !lostCompletionReply) {
-        lostCompletionReply = true;
-        throw new TypeError('Completion committed; reply lost.');
-      }
-      return result;
-    },
-    output: {
-      prepare: async message => {
-        const object =
-          message.body.kind === 'chunk'
-            ? message.body.chunk.object
-            : (await import('../dist/hosted-check-output.js')).outputRootObject(message.body.root);
-        return {
-          object,
-          target: { kind: 'r2', url: `https://synthetic.invalid/${object.sha256}`, headers: {} },
-        };
+      downloadToFile: async (_, path) => writeFile(path, state),
+      upload: async (pin, bytes) => {
+        uploaded.push(pin);
+        f.put(bytes);
       },
-      put: async (url, _, bytes) => {
-        outputObjects.set(url.split('/').at(-1), Buffer.from(bytes));
-        return { status: 200 };
-      },
-      commit: async (message, signature) => {
-        const result = await f.run(
-          'macOutput',
-          (ctx, input) => outputStore.commitHostedOutput(ctx, input, () => secret),
-          {
+      callback: async (callback, signature) => {
+        const result = JSON.parse(
+          await f.call('macCallback', worker.callback, {
             projectId: f.projectId,
-            message,
+            callback: JSON.stringify(callback),
             signature,
-          },
+          }),
         );
-        if (message.body.kind === 'chunk' && !lostChunkReply) {
-          lostChunkReply = true;
-          throw new TypeError('Chunk committed; reply lost.');
+        if (callback.result.kind === 'complete' && !lostCompletionReply) {
+          lostCompletionReply = true;
+          throw new TypeError('Completion committed; reply lost.');
         }
         return result;
       },
-    },
-  };
-  await executeHostedMacCheck(
-    run,
-    new AbortController().signal,
-    async command => (await f.control(run.id, command)).run,
-    transport,
-    secret,
-  );
-  assert.equal((await f.status(run.id)).status, 'passed');
-  assert(lostChunkReply && lostCompletionReply);
-  assert.equal(uploaded.length, 2);
-  assert(outputObjects.size >= 3);
-  assert([...outputObjects.values()].some(bytes => bytes.toString().includes('synthetic success')));
-  assert.equal(f.tables.projectHostedActionsExports.size, 0);
-});
+      output: {
+        prepare: async message => {
+          const object =
+            message.body.kind === 'chunk'
+              ? message.body.chunk.object
+              : (await import('../dist/hosted-check-output.js')).outputRootObject(message.body.root);
+          return {
+            object,
+            target: { kind: 'r2', url: `https://synthetic.invalid/${object.sha256}`, headers: {} },
+          };
+        },
+        put: async (url, _, bytes) => {
+          outputObjects.set(url.split('/').at(-1), Buffer.from(bytes));
+          return { status: 200 };
+        },
+        commit: async (message, signature) => {
+          const result = await f.run(
+            'macOutput',
+            (ctx, input) => outputStore.commitHostedOutput(ctx, input, () => secret),
+            {
+              projectId: f.projectId,
+              message,
+              signature,
+            },
+          );
+          if (message.body.kind === 'chunk' && !lostChunkReply) {
+            lostChunkReply = true;
+            throw new TypeError('Chunk committed; reply lost.');
+          }
+          return result;
+        },
+      },
+    };
+    await executeHostedMacCheck(
+      run,
+      new AbortController().signal,
+      async command => (await f.control(run.id, command)).run,
+      transport,
+      secret,
+    );
+    assert.equal((await f.status(run.id)).status, 'passed');
+    assert(lostCompletionReply);
+    assert.equal(lostChunkReply, uploadLocal);
+    assert.equal(uploaded.length, 2);
+    if (uploadLocal) assert(outputObjects.size >= 3);
+    assert.equal(
+      [...outputObjects.values()].some(bytes => bytes.toString().includes('synthetic success')),
+      uploadLocal,
+    );
+    const localFiles = readdirSync(f.localLogs, { recursive: true }).filter(name =>
+      String(name).endsWith('.log'),
+    );
+    assert(
+      localFiles.some(name => readFileSync(join(f.localLogs, name), 'utf8').includes('synthetic success')),
+    );
+    assert.equal(f.tables.projectHostedActionsExports.size, 0);
+  });
 
 test('active renewal is signed, cancel stops the live process through its subscription, then idle stops calling', async t => {
   const f = await fixture(t),

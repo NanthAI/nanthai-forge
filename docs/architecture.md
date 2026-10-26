@@ -278,7 +278,7 @@ Without a valid owner sidecar, hosted native Lane/Candidate diffstats advance th
 
 **Archives.** `export-work` writes the full retained closure: source States, Work and recorded run files. It can pack this as a `.tar.gz`. Source-only release archives are narrower and contain empty Work. Browser backup and contributor-proposal imports unpack local exports and upload reusable logical objects. New hosted archive registrations are retired; historical stored archives and pending uploads retain read/resume support. Object proposals pull as validated unpacked exports for direct native contribution import. Older hosted archives are still readable and can be converted explicitly. See [operations](operations.md).
 
-**Collection.** Object collection removes only verified, unreferenced objects. Referenced history, Lanes, logs and backups are never pruned.
+**Collection.** Object collection removes only verified, unreferenced objects. Referenced source history and Lanes are preserved. CI-provider logs stay with the provider; local logs use the explicit opt-in and finite retention described in [operations](operations.md#check-logs-and-retention).
 
 ## Work record delta exchange
 
@@ -341,11 +341,11 @@ See [Modal checks](operations/modal-checks.md) and [GitHub Actions and Blacksmit
 
 Modal interruptions preserve completed exact-plan shards. Failed test shards retry once; two named flake verdicts within seven days quarantine that exact test identity. Quarantined tests continue running without blocking on fully attributed failures; twenty consecutive clean passes or an explicit fix release quarantine. Infrastructure recovery keeps its attempts without contributing flake verdicts. See [flakes and quarantine](operations/modal-checks.md#flakes-and-quarantine).
 
-A check is an executable, its arguments, an optional environment label and explicit environment/credential passthrough names. A run records the pinned Candidate, the check definition, an environment fingerprint and the process owner. It runs in a fresh workspace under your OS account with private HOME/XDG/temp directories and a clean runtime allowlist plus declared passthrough. Passthrough values are transient; receipts retain names only. It is not sandboxed. The runner keeps outcomes, logs and chosen build outputs. Cancelled, interrupted and failed are different results. After a lost reply, a retry observes the existing run and does not start another.
+A check is an executable, its arguments, an optional environment label and explicit environment/credential passthrough names. A run records the pinned Candidate, the check definition, an environment fingerprint and the process owner. It runs in a fresh workspace under your OS account with private HOME/XDG/temp directories and a clean runtime allowlist plus declared passthrough. Passthrough values are transient; receipts retain names only. It is not sandboxed. The runner keeps outcomes, bounded failure summaries, compact test evidence, provider log links and chosen build outputs. Local logs stay local for seven days; upload requires explicit project opt-in with finite retention. Cancelled, interrupted and failed are different results. After a lost reply, a retry observes the existing run and does not start another.
 
 Playbooks run a sequence of checks. Automation rules start a Playbook on an event. Evidence is reused only under the explicit native disjoint fast-path policy; acceptance revalidates the exact check and manifest-path proof and schedules full main verification. Missing coverage is unknown. A passing check, a model critique and a human review are separate facts. Accepting a Channel is an explicit step against an observed previous head. An optional Invariant can require specific evidence first.
 
-A hosted project can ask a connected local computer to run a check. The request carries only pins and the check name. The local owner validates them and keeps the logs and evidence. A queued, claimed or finished status is a report. It does not prove the machine is online.
+A hosted project can ask a connected local computer to run a check. The request carries only pins and the check name. The local owner validates them and keeps results and compact evidence, with local log retention and upload governed by the explicit project setting. A queued, claimed or finished status is a report. It does not prove the machine is online.
 
 ## Making-of record
 
@@ -1257,7 +1257,7 @@ signed H10 shard and terminal callbacks. Cancellation retains its request until
 provider completion. Stuck jobs reuse the local complete-log plus run-conclusion
 rule; provider logs alone never claim live output.
 
-The fixed runner supervisor streams command pipes through H12 and atomically
+The fixed runner supervisor projects command pipes into compact machine test reports and bounded failure excerpts before H12 retention; full CI-provider logs stay with the provider. Local Mac pipes stay in private machine log directories for at most seven days, with raw hosted upload only by explicit opt-in and finite retention. The supervisor atomically
 retains redacted chunks/seals in a private durable spool before publication.
 Reconnect replays exact records without rerunning commands. Missing seals remain
 incomplete; final H12 retention is separate from H10 verdict authority. Existing
@@ -1484,3 +1484,5 @@ environment and credential inputs. Project commands continue to use their privat
 check runtime directories and declared passthrough. The self-host backend receives
 its explicitly selected S3 file settings. These are environment boundaries, not
 OS sandboxes or protection from credentials in files accessible to the account.
+
+Check-log cleanup protects source and artifact hashes, including shared recipe chunks. Hosted source staging records object provenance before publication; a new reference changes the cleanup guard, so a reviewed cleanup cannot delete bytes that became source during the operation.

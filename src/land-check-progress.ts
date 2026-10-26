@@ -93,7 +93,8 @@ export function readLandCheckProgress(directory: string, runId: string, includeF
     )
       continue;
     const prefix = execution.index === plan?.groups.length ? 'static' : String(execution.index);
-    const name = `${prefix}${execution.attempt ? `.attempt-${execution.attempt + 1}` : ''}.log`;
+    const stem = `${prefix}${execution.attempt ? `.attempt-${execution.attempt + 1}` : ''}`;
+    const name = names.includes(`${stem}.evidence`) ? `${stem}.evidence` : `${stem}.log`;
     if (!names.includes(name)) continue;
     const observed = fileMarkers(join(path, 'shards', name));
     markers ||= observed.markers;

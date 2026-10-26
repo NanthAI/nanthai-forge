@@ -95,7 +95,7 @@ test('seven-day boundary applies to shard work and logs; remote source copies ex
   assert.equal(plan(now).items.length, 5, 'recent remote source copy also expires');
 });
 
-test('dry-run is read-only; apply keeps receipts, summaries, small evidence and log tails, then is idempotent', async t => {
+test('dry-run is read-only; apply keeps receipts, summaries, compact evidence and expires log bytes, then is idempotent', async t => {
   const p = await fixture(t),
     before = p.store.pointer();
   const dry = clean(p);
@@ -107,8 +107,8 @@ test('dry-run is read-only; apply keeps receipts, summaries, small evidence and 
   assert.equal(existsSync(join(p.directory, 'modal-source')), false);
   assert.equal(existsSync(join(p.directory, 'shards', 'work-0')), false);
   for (const name of ['stdout.log', 'stderr.log', 'shards/0.log']) {
-    assert.equal(readFileSync(join(p.directory, name)).length, LOG_TAIL_BYTES);
-    assert.match(readFileSync(join(p.directory, name), 'utf8'), /failure tail/);
+    assert.equal(existsSync(join(p.directory, name)), false);
+    assert.match(readFileSync(join(p.directory, 'test-reports.json'), 'utf8'), /failure tail/);
   }
   for (const name of [
     'selection.json',
@@ -354,17 +354,18 @@ test('pruning an accepted run preserves command reads, acceptance evidence and G
   assert.equal(records.find(r => r.id === p.run.id).failureSummary, observed.failureSummary);
   for (const stream of ['stdout', 'stderr']) {
     const log = (await p.agent.dispatch({ action: 'log', operationId: p.run.id, stream, tail: 4096 })).result;
-    assert.match(log.text, /failure tail/);
+    assert.equal(log.status, 'provider-held');
+    assert.equal(log.providerUrl, 'https://modal.com/apps');
   }
   const shard = (await p.agent.dispatch({ action: 'log', operationId: p.run.id, shard: 0, tail: 4096 }))
     .result;
-  assert.match(shard.text, /failure tail/);
+  assert.equal(shard.status, 'provider-held');
   const view = (await p.agent.dispatch({ action: 'view', viewId: p.run.viewId })).result;
   assert.equal(view.status, 'accepted');
   assert.equal(view.accepted[0].id, move.id);
   assert.equal(view.runs[0].failureSummary, observed.failureSummary);
   const { failureSummary } = await import('../dist/agent-run-failure.js');
-  assert.match(failureSummary(p.store, current), /failure tail/);
+  assert.match(failureSummary(p.store, current), /Synthetic failure remains readable/);
   const { failedAuditTests } = await import('../dist/optimistic-evidence.js');
   assert.deepEqual(failedAuditTests(p.store, current), ['tests/synthetic.test.mjs']);
   const { requestPushAudit } = await import('../dist/pre-push-audit.js');
@@ -393,5 +394,5 @@ test('completed exchange baseline keeps staging metadata without pinning old own
   assert.equal(clean(p, { kinds }).totals.count, 5);
   assert.equal(clean(p, { kinds, apply: true }).totals.count, 5);
   assert.ok(existsSync(path), 'old baseline still reads staging metadata');
-  assert.equal(readFileSync(join(p.directory, 'stdout.log')).length, LOG_TAIL_BYTES);
+  assert.equal(existsSync(join(p.directory, 'stdout.log')), false);
 });

@@ -1,3 +1,5 @@
+import { providerLogUrl } from '../../../src/check-log-policy';
+import type { CheckRun } from '../../../src/work-types';
 // SPDX-License-Identifier: Apache-2.0
 import { useState, type ReactNode } from 'react';
 import { Button, ExactRecord, StatusPill } from '../ui/primitives';
@@ -16,6 +18,8 @@ export type DetailRun = {
   exitCode?: number | null;
   details?: string;
   cancelRequested?: boolean;
+  backend?: CheckRun['backend'];
+  failureSummary?: string;
   // gpt-c1 integration hook: populated only from recorded scope when available.
   scope?: { mode: 'scoped' | 'full'; selectedTests: readonly string[] };
 };
@@ -36,6 +40,7 @@ export function RunDetail({
   superseded?: boolean;
   remote?: boolean;
 }) {
+  const providerUrl = providerLogUrl(run);
   const [open, setOpen] = useState(new URLSearchParams(location.search).get('checkRun') === run.id);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState('');
@@ -58,9 +63,15 @@ export function RunDetail({
         {run.cancelRequested && liveRun(run.status) && <span>Cancellation requested</span>}
       </div>
       <div className="fx-run-tools">
-        <Button aria-expanded={open} onClick={() => setOpen(value => !value)}>
-          {open ? 'Hide output' : 'Full log'}
-        </Button>
+        {providerUrl ? (
+          <a href={providerUrl} target="_blank" rel="noreferrer">
+            Full log on {run.backend?.actual === 'github-actions' ? 'GitHub Actions' : 'Modal'}
+          </a>
+        ) : (
+          <Button aria-expanded={open} onClick={() => setOpen(value => !value)}>
+            {open ? 'Hide output' : 'Full log'}
+          </Button>
+        )}
         {rerun && !liveRun(run.status) && (
           <Button disabled={busy} onClick={() => void act(rerun)}>
             Rerun on this Candidate
@@ -72,7 +83,8 @@ export function RunDetail({
           </Button>
         )}
       </div>
-      {open && (
+      {providerUrl && run.failureSummary && <pre className="fx-run-output">{run.failureSummary}</pre>}
+      {open && !providerUrl && (
         <RunLog
           key={run.id}
           runId={run.id}

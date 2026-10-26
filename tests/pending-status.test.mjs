@@ -1,3 +1,4 @@
+import { effectivePolicy } from '../dist/autonomy-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
@@ -348,6 +349,7 @@ test('reader observes new log tails but leaves recorded active runs unchanged', 
   saved.runs[0].status = 'running';
   saved.runs[0].startedAt = at;
   delete saved.runs[0].endedAt;
+  saved.autonomyPolicy = { ...effectivePolicy(saved), checkLogs: { uploadLocal: true, retentionDays: 90 } };
   store.save(saved);
   const directory = join(store.directory, `check-${run.operationId}`);
   mkdirSync(directory, { recursive: true });

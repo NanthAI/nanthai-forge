@@ -150,7 +150,7 @@ fs.writeFileSync(${JSON.stringify(join(f.store.directory, 'submitter-pid'))},Str
   assert.equal(processAlive(run.runner), true);
   assert.equal(run.status, 'running');
   assert.equal(read(join(path, 'github-actions.json')).pushOutcome, 'not-sent');
-  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /Pinned/);
+  assert.match(readFileSync(join(path, 'controller-summary.txt'), 'utf8'), /Pinned/);
   assert.deepEqual(
     landingWorkerStates(f.store).map(state => state.id),
     [owner.id],

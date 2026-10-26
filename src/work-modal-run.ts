@@ -1,3 +1,5 @@
+import { appendControllerSummary } from './check-controller-summary.js';
+import { retainCompactCheckReports } from './check-compact-output.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { retainCheckCoverage } from './check-coverage.js';
 import { modalCredentials } from './modal-credentials.js';
@@ -68,7 +70,8 @@ export async function launchModalRun(
   const progress = (message: string) => {
     const line = `[modal ${++sequence}] ${message}`;
     durableReplace(sequencePath, String(sequence));
-    appendFileSync(join(path, 'stdout.log'), `${line}\n`, { mode: 0o600 });
+    appendControllerSummary(path, line);
+
     workProgress('modal check', line, `${run.id}:${sequence}`);
   };
   let signalled: NodeJS.Signals | undefined;
@@ -232,7 +235,7 @@ export async function launchModalRun(
             const key = `${event.executionId}:${event.stream}`;
             if (event.line <= (cursors[key] ?? -1)) return;
             shardLogs.append(event.executionId, event.text);
-            appendFileSync(join(path, `${event.stream}.log`), event.text, { mode: 0o600 });
+
             if (/^(?:ok|not ok) (?:\d+|-)/m.test(event.text.trimStart())) {
               completed++;
               if (event.text.trimStart().startsWith('not ok')) failed++;
@@ -287,6 +290,8 @@ export async function launchModalRun(
     run.backend!.cost = modalRunCost(run.backend!);
     const endedAt = new Date().toISOString();
     const summary = outcome ? shardLogs.failureSummary(outcome) : '';
+    retainCompactCheckReports(path);
+    run.backend!.providerUrl = 'https://modal.com/apps';
     const assessment =
       outcome && plan.standard ? modalQuarantine(store, run, outcome, plan.groups, endedAt) : undefined;
     run.backend!.retryable =

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { logRecordSchema } from './check-log-policy.js';
 import { nativeDependencyHead, nativeDependencyLookup } from './native-pr-pins.js';
 import type { WorkData } from './work-types.js';
 export const fileSchema = z.object({
@@ -19,6 +20,7 @@ export const manifestSchema = z.object({
   files: z.array(fileSchema),
   unavailable: z.array(z.string()),
   coverage: z.string(),
+  checkLogs: z.array(logRecordSchema).optional(),
 });
 
 export const nativeFileSchema = z
@@ -26,7 +28,7 @@ export const nativeFileSchema = z
     path: z
       .string()
       .regex(
-        /^(?:work\.json|objects\/[0-9a-f]{64}|check-[0-9a-f-]{36}\/(?:stdout\.log|stderr\.log|result\.json|resources\.txt|artifacts\/artifact-[0-9]+\.bin))$/,
+        /^(?:work\.json|objects\/[0-9a-f]{64}|check-[0-9a-f-]{36}\/(?:stdout\.log|stderr\.log|result\.json|test-reports\.json|modal-plan\.json|modal-shard-logs\.json|changes\.json|resources\.txt|artifacts\/artifact-[0-9]+\.bin))$/,
       ),
     size: z.number().safe().nonnegative(),
     sha256: z.string().regex(/^[0-9a-f]{64}$/),
@@ -40,6 +42,7 @@ const nativeManifestFields = {
   files: z.array(nativeFileSchema),
   unavailable: z.array(z.string()).default([]),
   coverage: z.string(),
+  checkLogs: z.array(logRecordSchema).optional(),
 };
 const artifactPath = z.string().regex(/^check-[0-9a-f-]{36}\/artifacts\/artifact-[0-9]+\.bin$/);
 const artifactAliasSchema = z.object({ path: artifactPath, target: artifactPath }).strict();

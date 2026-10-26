@@ -150,7 +150,10 @@ export function RunLog({
   }
   const lines = page ? logLines(page) : [];
   const remoteWaiting = Boolean(
-    remoteMachine && liveRun(status) && (!page || page.available === false || page.bytes === 0),
+    !page?.providerUrl &&
+    remoteMachine &&
+    liveRun(status) &&
+    (!page || page.available === false || page.bytes === 0),
   );
   const waitingMessage =
     status === 'queued'
@@ -161,7 +164,10 @@ export function RunLog({
   const firstBad = lines.findIndex(line => failureMarker(line.text));
   return (
     <div className="fx-run-log">
-      <div className="fx-run-tools" hidden={remoteWaiting}>
+      <div
+        className="fx-run-tools"
+        hidden={remoteWaiting || page?.status === 'summary' || !!page?.providerUrl}
+      >
         <label>
           Output{' '}
           <select
@@ -200,6 +206,17 @@ export function RunLog({
           <span className="fx-faint" role="status">
             {waitingMessage}
           </span>
+        ) : page?.providerUrl ? (
+          <div className="fx-run-unavailable">
+            <a href={page.providerUrl} target="_blank" rel="noreferrer">
+              Full log on the CI provider
+            </a>
+            {page.text && <pre>{page.text}</pre>}
+          </div>
+        ) : ['summary', 'expired', 'local-only'].includes(page?.status ?? '') ? (
+          <div className="fx-run-unavailable">
+            Retained failure summary<pre>{page?.text}</pre>
+          </div>
         ) : page?.available === false ? (
           <div className="fx-run-unavailable">
             <span>Output is on the runner. Local command:</span>
@@ -240,7 +257,10 @@ export function RunLog({
           <span className="fx-faint">{liveRun(status) ? 'Waiting for output…' : 'No output recorded.'}</span>
         )}
       </div>
-      <div className="fx-run-tools" hidden={remoteWaiting}>
+      <div
+        className="fx-run-tools"
+        hidden={remoteWaiting || page?.status === 'summary' || !!page?.providerUrl}
+      >
         <Button
           disabled={offset === 0 || busy}
           onClick={() => {

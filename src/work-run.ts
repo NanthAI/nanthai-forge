@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { runDetails } from './work-detail-store.js';
+import { cleanLocalCheckLogs } from './check-log-cleanup.js';
+import { compactFailureExcerpt, checkEvidenceLines } from './check-compact-output.js';
+import { providerLogUrl } from './check-log-policy.js';
+import { retainCompactCheckReports } from './check-compact-output.js';
 import { withoutLandingWorker } from './landing-worker-context.js';
 import { checkReuseKey } from './check-reuse-key.js';
 import { prepareRunRegistration } from './work-run-preparation.js';
@@ -429,6 +433,7 @@ async function launchLocal(
     } catch {
       /* Optional command-reported selection is unavailable; logs retain command output. */
     }
+    retainCompactCheckReports(path);
     artifacts = [...(artifacts ?? []), ...retainCheckCoverage(store, run, path, checkSelection)];
     run.reuseKey = checkReuseKey(store, run);
     const receipt = createRunReceipt({
@@ -751,6 +756,47 @@ export function runWork(
   if (command.action === 'read-check-output') {
     const run = store.select('runs', command.operationId);
     invariant(run, 'NOT_FOUND', 'Run not found.');
+    const providerUrl = providerLogUrl(run);
+    if (providerUrl) {
+      if (command.shard !== undefined) {
+        const bytes = readSource(directory(store, run.id), 'modal-plan.json', 4 * 1024 * 1024);
+        const groups = bytes ? JSON.parse(bytes.toString('utf8')).groups : undefined;
+        invariant(
+          Array.isArray(groups) && (command.shard === 'static' || command.shard < groups.length),
+          'NOT_FOUND',
+          'Selected shard is not in this recorded run.',
+        );
+      }
+      let retainedSummary = run.failureSummary;
+      if (!retainedSummary) {
+        const directory = runOutputDirectory(store, run.id);
+        try {
+          const bytes = safeDirectory(directory)
+            ? readSource(directory, 'result.json', 4 * 1024 * 1024)
+            : null;
+          if (bytes) retainedSummary = receiptSchema.parse(JSON.parse(bytes.toString('utf8'))).failureSummary;
+        } catch {
+          /* An incomplete receipt supplies no summary; compact evidence remains available. */
+        }
+      }
+      return {
+        revision: store.revision(),
+        result: {
+          status: 'provider-held',
+          ...(command.shard === undefined ? {} : { shard: command.shard, attempt: command.attempt ?? 1 }),
+          providerUrl,
+          executionIds: run.backend?.executionIds ?? [],
+          available: false,
+          stream: command.stream,
+          offset: 0,
+          nextOffset: 0,
+          bytes: 0,
+          text: retainedSummary ?? compactFailureExcerpt(runOutputDirectory(store, run.id)),
+          more: false,
+          private: true,
+        },
+      };
+    }
     const path = runOutputDirectory(store, run.id);
     const outputPath =
       command.shard === undefined
@@ -768,7 +814,35 @@ export function runWork(
         outputPath,
         constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
       );
-    } catch {
+    } catch (error) {
+      let missing = false;
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        try {
+          lstatSync(outputPath);
+        } catch (failure) {
+          missing = failure instanceof Error && 'code' in failure && failure.code === 'ENOENT';
+        }
+      }
+      if (missing && existsSync(join(path, 'test-reports.json'))) {
+        const text = [...checkEvidenceLines(path)]
+          .filter(line => !line.startsWith('__FORGE_'))
+          .join('\n')
+          .slice(0, 4096);
+        return {
+          revision: store.revision(),
+          result: {
+            status: 'summary',
+            stream: command.stream,
+            available: true,
+            offset: 0,
+            nextOffset: 0,
+            bytes: Buffer.byteLength(text),
+            text,
+            more: false,
+            private: true,
+          },
+        };
+      }
       throw new ForgeError('NOT_FOUND', 'Run output is not available as a regular local file.');
     }
     try {
@@ -799,6 +873,8 @@ export function runWork(
       closeSync(fd);
     }
   }
+  if (command.action === 'run-check' && !store.select('runs', command.operationId))
+    cleanLocalCheckLogs(store, { apply: true });
   const preparation =
     command.action === 'run-check' ? prepareRunRegistration(store, command, sequence?.id) : undefined;
   let started: CheckRun | undefined;

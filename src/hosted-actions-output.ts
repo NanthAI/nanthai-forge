@@ -1,3 +1,4 @@
+import { compactProviderOutput } from './check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
 import { collectHostedOutput, type OutputSink } from './hosted-output-collector.js';
@@ -51,9 +52,13 @@ export async function runHostedActionsJob(input: {
   // Attach immediately so a spawn error cannot become an unhandled rejection
   // while its pipes are draining.
   const streams = (['stdout', 'stderr'] as const).map(async stream => {
+    let summary = '';
     const sealed: OutputSeal = await collectHostedOutput(
-      child[stream],
+      compactProviderOutput(child[stream], value => {
+        summary = value;
+      }),
       {
+        kind: 'summary',
         shard: job.shard,
         attempt: job.attempt,
         executionId: String(job.id),
@@ -64,6 +69,7 @@ export async function runHostedActionsJob(input: {
       input.sink(stream),
       input.chunkBytes,
       true,
+      () => summary,
     );
     return sealed;
   });

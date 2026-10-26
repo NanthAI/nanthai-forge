@@ -112,3 +112,5 @@ from these generated files; the installed agent skill ships separately.
 including AI crawlers. App and project URLs, including legacy query routes, are
 excluded so crawler traffic does not trigger project reads. No sitemap is
 advertised because the site has none.
+
+Check logs follow bring-your-own-CI: providers retain full output under their own retention. Forge keeps results, failure summaries, compact test evidence and provider links. Local logs stay local unless explicitly opted in with finite retention; see [operations](operations.md#check-logs-and-retention).

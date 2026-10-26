@@ -504,8 +504,14 @@ test('fresh Git-free native restore reads original records/evidence and exports 
     ).result;
   assert.equal(first.files.length, 1);
   assert.equal(first.files.length + remaining.files.length, first.total);
-  assert.ok([...first.files, ...remaining.files].some(item => item.path === path));
-  assert.deepEqual(Buffer.from(file.data, 'base64'), readFileSync(join(f.old.store.directory, path)));
+  assert.equal(
+    [...first.files, ...remaining.files].some(item => item.path === path),
+    false,
+  );
+  assert.equal(file.status, 'local-only');
+  const resultPath = 'check-' + f.run.id + '/result.json';
+  const result = (await call({ action: 'read-work-history-file', id: record.id, path: resultPath })).result;
+  assert.deepEqual(Buffer.from(result.data, 'base64'), readFileSync(join(f.old.store.directory, resultPath)));
   const exported = (await call({ action: 'export-work-history', id: record.id })).result;
   assert.deepEqual(readFileSync(exported.path), f.archive);
   assert.equal(restored.store.load().runs.length, 0);

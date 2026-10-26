@@ -396,6 +396,34 @@ export const projectProposalDocument = v.object({
 });
 export default defineSchema({
   ...workDetailTables,
+  projectCheckLogCleanupPages: defineTable({
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    part: v.string(),
+    position: v.number(),
+    value: v.string(),
+  }).index('by_project_and_operation_and_part_and_position', [
+    'projectId',
+    'operationId',
+    'part',
+    'position',
+  ]),
+  projectCheckLogRetentions: defineTable({
+    projectId: v.id('hostedProjects'),
+    key: v.string(),
+    expiresAt: v.number(),
+  })
+    .index('by_project_and_key', ['projectId', 'key'])
+    .index('by_project_and_expiry', ['projectId', 'expiresAt']),
+  projectCheckLogSourcePins: defineTable({
+    projectId: v.id('hostedProjects'),
+    digest: v.string(),
+  }).index('by_project', ['projectId']),
+  projectCheckLogCleanups: defineTable({
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    value: v.string(),
+  }).index('by_project_and_operation', ['projectId', 'operationId']),
   ...hostedSeedTables,
   // Explicit current Channel pins; recovery/display snapshots never select these.
   projectHostedChannels: defineTable({

@@ -30,6 +30,8 @@ For agents: `nforge agent ./demo start '{"outcome":"…"}'`, edit the returned L
 
 Git repositories work too ([workflows](docs/workflows.md)), and projects can be hosted so several machines and people share them ([architecture](docs/architecture.md)). Your machine controls execution; native checks run locally or through the configured [Modal backend](docs/operations/modal-checks.md).
 
+Checks use your CI provider’s full logs. Forge retains results, failure summaries, compact test evidence and provider links. Local log upload is opt-in with finite retention ([operations](docs/operations.md#check-logs-and-retention)).
+
 ## Where things stand
 
 Forge is in active development and builds itself. [Status](docs/status.md) lists what works and what doesn't; [roadmap](docs/roadmap.md) lists what's next. Forge has not yet shown a token or time advantage over plain Git for single agents ([evals](evals/README.md)); multi-agent coordination is what we are measuring next.

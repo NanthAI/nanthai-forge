@@ -188,6 +188,9 @@ export async function enqueueHostedCheck(
     request,
     check: checkSchema.parse(JSON.parse(definition.value)),
     configuration: runner,
+    ...((await ctx.db.get(input.projectId))?.autonomyPolicy?.checkLogs
+      ? { checkLogs: (await ctx.db.get(input.projectId))!.autonomyPolicy!.checkLogs }
+      : {}),
     keyId,
     candidate: {
       digest: row.digest,

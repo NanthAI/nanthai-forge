@@ -1,3 +1,4 @@
+import { runLogRecord } from './check-log-policy.js';
 import { statusMetrics } from './self-metrics-status.js';
 import { readSelfMetricDisk } from './self-metrics-disk.js';
 import { integrationPreviewStatus } from './integration-preview-auto.js';
@@ -137,7 +138,9 @@ export function readPendingStatus(
     // Observe file metadata, never read logs or hash/export an archive. A later
     // mtime can disprove coverage; an earlier mtime does not prove it.
     for (const run of detail ? runs : [])
-      for (const name of ['stdout.log', 'stderr.log']) {
+      for (const name of runLogRecord(data, run, Date.parse(now)).status === 'included'
+        ? ['stdout.log', 'stderr.log']
+        : []) {
         try {
           const at = statSync(join(store.directory, `check-${run.id}`, name)).mtime.toISOString();
           if (!evidenceChangedAt || at > evidenceChangedAt) evidenceChangedAt = at;

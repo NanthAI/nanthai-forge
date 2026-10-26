@@ -89,26 +89,29 @@ creation outcomes remain interrupted and are never retried.
 Remote checks have a separate machine-wide admission pool of four; they never
 consume local check slots. When `FORGE_CHECK_QUEUE_DIR` selects a private queue
 root (including test fixtures), Modal admission uses a separate `modal-check-queue`
-child there instead of the machine-wide pool. Numbered progress and streamed stdout/stderr appear in
-`.forge/work/check-<run>/`. Plans, execution IDs, log cursors, source exports and
-terminal receipts remain there for reconciliation. Each execution also retains a combined
-stdout/stderr log under `check-<run>/shards/<index>.log`; the static job uses
-`static.log`. Retries use `<index>.attempt-2.log` or `static.attempt-2.log`,
-while the existing run-level stdout/stderr logs continue to include every shard.
-Failed receipts and finish output include a bounded summary with failing shard
-indices, attempt log paths, TAP `not ok` test names and the first error-block
-lines from that shard's log. Static failures without TAP include the last output
-lines. Only each shard's latest attempt determines its failure summary.
+child there instead of the machine-wide pool. Numbered controller progress is retained as
+`controller-summary.txt` (4096 characters). Plans, execution IDs, log cursors,
+source exports and terminal receipts remain in `.forge/work/check-<run>/` for
+reconciliation. Full stdout/stderr stay with Modal. Each execution retains
+compact test reports and bounded failure excerpts in
+`check-<run>/shards/<index>.evidence`; static evidence uses `static.evidence`, and
+retry evidence uses `<index>.attempt-2.evidence`. `test-reports.json` is the
+portable compact sidecar used by timings and coverage readers.
 
-Read one shard through the existing agent log action (the run id is `operationId`):
+Failed receipts and finish output retain failing shard/attempt identities, named
+failures and a bounded error excerpt (4096 characters). Only each shard’s latest
+attempt determines its failure summary; earlier attempts remain attributable for
+flake analysis. The agent log action returns the provider-held disposition,
+execution IDs, provider link and retained failure summary, rather than full log
+bytes:
 
 ```sh
-nforge agent OWNER log '{"operationId":"RUN_ID","shard":0,"tail":4096}'
-nforge agent OWNER log '{"operationId":"RUN_ID","shard":"static","attempt":2,"tail":4096}'
+nforge agent OWNER log '{"operationId":"RUN_ID","shard":0}'
+nforge agent OWNER log '{"operationId":"RUN_ID","shard":"static","attempt":2}'
 ```
 
-Shard reads combine stdout and stderr; `attempt` defaults to 1. Older bridge
-observations without shard identity retain their run-level logs.
+Older bridge
+observations without shard identity retain their provider execution IDs and links; they do not invent shard evidence.
 
 Restart reuses completed shard receipts and observes saved sandbox IDs. It replaces only confirmed stopped incomplete standard work and the recorded test-failure/static-OOM retries. A creation with an unknown response is
 never repeated. Recovery completion explicitly wakes the owner landing worker
@@ -159,7 +162,7 @@ retained recipe refuses adoption.
 Standard test shards emit per-file, named test reports, including nested test
 names. A failed shard retries once; a named test that passes after failing has a
 `recovered` verdict, never a clean verdict. Original exits, named results and
-attempt logs remain available. A recovery on a change that touches the test or
+attempt summaries and test reports remain available, with full logs held by Modal. A recovery on a change that touches the test or
 its statically identified code is labelled **Recovered, related change**, never
 `flake`. Missing source or inconclusive impact data stays recovered with unknown
 cause. A retry alone does not establish flakiness.

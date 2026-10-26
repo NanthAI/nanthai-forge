@@ -353,17 +353,21 @@ test('ranged downloads overlap at four requests, assemble in offset order and dr
 });
 
 test('parallel pull drains active transfers before removing failed staging and never creates an owner', async t => {
-  const { directory } = owner(t),
+  const { directory, store } = owner(t),
     target = join(directory, 'restored'),
     payloads = Array.from({ length: 24 }, (_, i) => Buffer.from(`source${i}`)),
-    head = pin(payloads[0]).sha256;
+    head = pin(payloads[0]).sha256,
+    work = Buffer.from(JSON.stringify(store.load()));
   const manifest = {
       schema: 1,
       kind: 'forge-native-work-backup',
       id: randomUUID(),
       head,
       revision: 0,
-      files: payloads.map(bytes => ({ path: `objects/${pin(bytes).sha256}`, ...pin(bytes) })),
+      files: [
+        { path: 'work.json', ...pin(work) },
+        ...payloads.map(bytes => ({ path: `objects/${pin(bytes).sha256}`, ...pin(bytes) })),
+      ],
       unavailable: [],
       coverage: 'Synthetic failed transfer',
     },
@@ -374,7 +378,10 @@ test('parallel pull drains active transfers before removing failed staging and n
     finished = false;
   const tr = {
     manifest: async () => ({ json, digest: digest(json), size: Buffer.byteLength(json) }),
-    download: async () => assert.fail('batch transport selected'),
+    download: async value => {
+      assert.equal(value.sha256, pin(work).sha256);
+      return work;
+    },
     downloadBatch: async pins => {
       const index = calls++;
       active++;

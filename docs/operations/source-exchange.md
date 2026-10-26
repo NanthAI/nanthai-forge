@@ -1642,3 +1642,19 @@ fence; the local pin provides fast refusal. Stale-authority feedback received by
 the owner transition, bound exchange, owner request consumer and hosted transports
 advances the matching binding pin; delayed errors cannot rewind a newer epoch.
 There is no polling or scheduled authority job.
+
+
+### Check-log closure
+
+Portable closure retains source, results, bounded failure summaries, compact test
+reports and provider execution links. Full CI-provider logs are provider-held.
+Local stdout/stderr are included only with explicit project opt-in and finite
+retention; see [check logs](../operations.md#check-logs-and-retention). Native
+archive conversion preserves original manifest and Work hashes while omitting
+provider-held or expired log payloads. Current readers accept those optional old
+log pins without treating source/results as missing. The retired compressed
+container is not a retained log copy. Historical native log reads return a
+provider link or a retained summary after expiry. Streamed output follows the
+same policy: fixed provider collectors retain compact reports/excerpts; Mac raw
+upload carries the explicit project setting and a finite expiry. Lifecycle events
+wake already-due expiries and schedule no idle expiry timer.

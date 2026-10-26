@@ -1,3 +1,4 @@
+import { portableCheckPath, runLogRecord } from './check-log-policy.js';
 import { foldHostedRecovery } from './recovery-hosted.js';
 import type { HostedRecoveryPage, RecoveryTable } from './recovery-hosted-protocol.js';
 import type { ContentPin } from './native-exchange.js';
@@ -164,7 +165,11 @@ async function recoveryCoverage(
   const source = new NativeSource(target);
   for (const id of nativeReachable(store)) source.object(id);
   const evidence = [];
-  for (const file of manifest.files.filter(file => file.path.startsWith('check-'))) {
+  for (const file of manifest.files.filter(
+    file =>
+      file.path.startsWith('check-') &&
+      (existsSync(join(store.directory, file.path)) || portableCheckPath(data, file.path)),
+  )) {
     const observed = await fingerprintPrivateFile(join(store.directory, file.path), 'INVALID_WORK_BACKUP');
     // Running-run metadata changes to interrupted; retained evidence bytes remain exact.
     invariant(
@@ -195,7 +200,11 @@ async function recoveryCoverage(
       head: lane.head,
       checkpoints: lane.checkpoints.map(c => ({ head: c.head, at: c.at })),
     })),
-    evidence: { included: evidence, unavailable: manifest.unavailable },
+    evidence: {
+      included: evidence,
+      unavailable: manifest.unavailable.filter(path => portableCheckPath(data, path)),
+      checkLogs: manifest.checkLogs ?? data.runs.map(run => runLogRecord(data, run)),
+    },
     runs: data.runs.map(run => ({ id: run.id, status: run.status })),
     completeHistory: selected.completeHistory,
     coverage: manifest.coverage,

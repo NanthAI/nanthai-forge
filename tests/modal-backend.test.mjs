@@ -204,10 +204,11 @@ test('mock client streams numbered progress, binds outcome/cost and persists dur
   assert.equal(receipt.status, 'passed');
   assert.equal(receipt.backend.estimatedCostUsd, 0.001);
   assert.deepEqual(receipt.backend.executionIds, ['sb-synthetic']);
-  const log = readFileSync(join(path, 'stdout.log'), 'utf8');
+  const log = readFileSync(join(path, 'controller-summary.txt'), 'utf8');
   assert.match(log, /\[modal 1\].*Pinned/);
   assert.match(log, /\[modal 2\] started fixture/);
-  assert.match(log, /synthetic output/);
+  assert.doesNotMatch(log, /synthetic output/);
+  assert.equal(existsSync(join(path, 'stdout.log')), false);
   assert.equal(modalMonthCost([{ ...run, backend: receipt.backend }]).estimatedCostUsd, 0.001);
   assert.equal(
     modalMonthCost([{ ...run, startedAt: '2000-01-01', backend: receipt.backend }]).recordedRuns,
@@ -232,7 +233,7 @@ for (const category of ['auth', 'network', 'billing'])
     assert.equal(run.backend.actual, 'local');
     assert.match(run.backend.fallback, new RegExp(category));
     assert.equal(work.store.select('runs', run.id).backend.actual, 'local');
-    assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /local fallback/);
+    assert.match(readFileSync(join(path, 'controller-summary.txt'), 'utf8'), /local fallback/);
   });
 
 test('test failures and ambiguous transport outcomes never trigger local retries', async t => {
@@ -288,7 +289,8 @@ test('restart reuses retained plan and execution IDs; replayed logs are deduplic
     emit(result(original));
   });
   assert.equal(read(join(path, 'result.json')).status, 'passed');
-  assert.equal(readFileSync(join(path, 'stdout.log'), 'utf8').split('once\n').length - 1, 1);
+  assert.equal(existsSync(join(path, 'stdout.log')), false);
+  assert.equal(read(join(path, 'modal-log-cursors.json'))['sb-existing:stdout'], 0);
   run.status = 'running';
   assert.equal(recoverRuns(work.store, { runs: [run] }), true);
   assert.equal(run.status, 'passed');
@@ -335,7 +337,7 @@ test(
     const receipt = read(join(path, 'result.json'));
     assert.equal(receipt.status, 'passed');
     assert.ok(receipt.backend.estimatedCostUsd < 0.05);
-    assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /synthetic smoke passed/);
+    assert.equal(receipt.backend.providerUrl, 'https://modal.com/apps');
     console.log(`Modal smoke allocation estimate: $${receipt.backend.estimatedCostUsd.toFixed(6)}`);
   },
 );
@@ -487,7 +489,7 @@ test('controller errors retain safe message details and execution IDs without re
   assert.equal(receipt.details, saved.details);
   assert.equal(receipt.backend.actual, 'modal');
   assert.deepEqual(receipt.backend.executionIds, ['sb-retained-error']);
-  for (const text of [receipt.details, readFileSync(join(path, 'stdout.log'), 'utf8')]) {
+  for (const text of [receipt.details, readFileSync(join(path, 'controller-summary.txt'), 'utf8')]) {
     assert.match(text, /Cannot find module 'scripts\/script-impact.mjs'/);
     assert.match(text, /scripts\/test-impact.mjs/);
     for (const privateText of [
@@ -800,27 +802,27 @@ test('interleaved Modal shards retain attributable logs, error bodies and agent 
   });
   const receipt = read(join(path, 'result.json'));
   assert.equal(receipt.status, 'failed');
-  assert.match(receipt.failureSummary, /Shard 0, attempt 1, exit 1: check-.*\/shards\/0.log/);
+  assert.match(receipt.failureSummary, /Shard 0, attempt 1, exit 1: check-.*\/shards\/0.evidence/);
   assert.match(receipt.failureSummary, /synthetic failure\n  ---\n  error: synthetic expected value/);
   assert.match(receipt.failureSummary, /second failure\n  ---\n  error: second body/);
   assert.doesNotMatch(receipt.failureSummary, /unrelated|UNRELATED/);
-  const failingLog = readFileSync(join(path, 'shards', '0.log'), 'utf8');
+  const failingLog = readFileSync(join(path, 'shards', '0.evidence'), 'utf8');
   assert.equal(failingLog.split('not ok 1').length - 1, 1);
   assert.doesNotMatch(failingLog, /UNRELATED/);
-  assert.match(readFileSync(join(path, 'shards', 'static.log'), 'utf8'), /UNRELATED DIAGNOSTIC/);
-  assert.match(
-    readFileSync(join(path, 'stdout.log'), 'utf8'),
-    /synthetic failure[\s\S]*unrelated passing test/,
-  );
+  assert.equal(readFileSync(join(path, 'shards', 'static.evidence'), 'utf8'), '');
+  assert.match(readFileSync(join(path, 'controller-summary.txt'), 'utf8'), /Pinned/);
   assert.equal(recoverRuns(work.store, { runs: [run] }), true);
   assert.equal(runReceiptWithFailure(work.store, run).failureSummary, receipt.failureSummary);
   const agent = new AgentWorkflow(work.store.root);
   const tail = (await agent.dispatch({ action: 'log', operationId: run.id, shard: 0, tail: 25 })).result;
-  assert.equal(tail.text, Buffer.from(failingLog).subarray(-25).toString());
+  assert.equal(tail.status, 'provider-held');
+  assert.equal(tail.providerUrl, 'https://modal.com/apps');
+  assert.match(tail.text, /synthetic failure/);
   assert.equal(tail.shard, 0);
   assert.equal(tail.more, false);
   const staticLog = (await agent.dispatch({ action: 'log', operationId: run.id, shard: 'static' })).result;
-  assert.match(staticLog.text, /UNRELATED DIAGNOSTIC/);
+  assert.equal(staticLog.status, 'provider-held');
+  assert.doesNotMatch(staticLog.text, /UNRELATED DIAGNOSTIC/);
   await assert.rejects(
     agent.dispatch({ action: 'log', operationId: run.id, shard: '../stdout' }),
     error => error.code === 'BAD_ARGUMENT',
@@ -875,15 +877,18 @@ test('static shard retries and controller adoption keep attempt logs separate an
       }),
     );
   });
-  assert.equal(readFileSync(join(path, 'shards', 'static.log'), 'utf8'), 'original OOM\n');
-  assert.equal(readFileSync(join(path, 'shards', 'static.attempt-2.log'), 'utf8'), 'retry static failure\n');
+  assert.equal(readFileSync(join(path, 'shards', 'static.evidence'), 'utf8'), 'original OOM\n');
+  assert.equal(
+    readFileSync(join(path, 'shards', 'static.attempt-2.evidence'), 'utf8'),
+    'retry static failure\n',
+  );
   const summary = read(join(path, 'result.json')).failureSummary;
-  assert.match(summary, /\(static\), attempt 2, exit 2:.*static.attempt-2.log\nretry static failure/);
+  assert.match(summary, /\(static\), attempt 2, exit 2:.*static.attempt-2.evidence\nretry static failure/);
   assert.doesNotMatch(summary, /original OOM/);
   const agent = new AgentWorkflow(work.store.root);
   assert.equal(
     (await agent.dispatch({ action: 'log', operationId: run.id, shard: 'static', attempt: 2 })).result.text,
-    'retry static failure\n',
+    read(join(path, 'result.json')).failureSummary,
   );
 });
 
@@ -925,7 +930,7 @@ test('safe network loss records manual recovery with retained completed shards',
   assert.match(receipt.details, /Retry with a new run\/finish operation/);
   assert.deepEqual(receipt.backend.executionIds, ['sb-completed']);
   assert.equal(receipt.exitCode, null);
-  assert.doesNotMatch(readFileSync(join(path, 'stdout.log'), 'utf8'), /local fallback/);
+  assert.doesNotMatch(readFileSync(join(path, 'controller-summary.txt'), 'utf8'), /local fallback/);
 });
 
 test('recoveries need independent history before flake quarantine can make failures nonblocking', async t => {
@@ -1157,7 +1162,10 @@ test('automatic infrastructure recovery keeps finish active and reuses the exact
   );
   assert.equal(calls, 2);
   assert.equal(read(join(path, 'result.json')).status, 'passed');
-  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /retrying the same Candidate\/plan once/);
+  assert.match(
+    readFileSync(join(path, 'controller-summary.txt'), 'utf8'),
+    /retrying the same Candidate\/plan once/,
+  );
 });
 
 test('monthly Modal estimate sums recorded billed quantities once, preserves legacy and fallback costs, and distinguishes billing', () => {
@@ -1241,7 +1249,7 @@ test('project token values stay out of Work, plans, receipts and logs', async t 
     JSON.stringify(work.store.load()),
     readFileSync(join(path, 'modal-plan.json'), 'utf8'),
     readFileSync(join(path, 'result.json'), 'utf8'),
-    readFileSync(join(path, 'stdout.log'), 'utf8'),
+    readFileSync(join(path, 'controller-summary.txt'), 'utf8'),
   ]) {
     assert.doesNotMatch(text, /synthetic-project-secret|synthetic-project-id/);
   }
@@ -1264,11 +1272,11 @@ test('external project file tokens are redacted even when controller exceptions 
   for (const text of [
     JSON.stringify(work.store.load()),
     readFileSync(join(path, 'result.json'), 'utf8'),
-    readFileSync(join(path, 'stdout.log'), 'utf8'),
+    readFileSync(join(path, 'controller-summary.txt'), 'utf8'),
   ]) {
     assert.doesNotMatch(text, /synthetic-external-id|synthetic-external-secret/);
   }
-  assert.match(readFileSync(join(path, 'stdout.log'), 'utf8'), /\[redacted\]/);
+  assert.match(readFileSync(join(path, 'controller-summary.txt'), 'utf8'), /\[redacted\]/);
 });
 
 test('superseded Modal Candidate reaches cancellation control and keeps execution receipt', async t => {

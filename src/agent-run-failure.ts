@@ -1,3 +1,5 @@
+import { checkEvidenceLines } from './check-compact-output.js';
+import { runOutputDirectory } from './work-run.js';
 // SPDX-License-Identifier: Apache-2.0
 import { runReceipt } from './agent-receipts.js';
 import { runWork } from './work-run.js';
@@ -26,7 +28,13 @@ export function failureSummary(store: WorkStore, run: CheckRun): string {
   const last = err.filter(line => line.trim()).slice(-40);
   const seen = new Set(last);
   const marked = [...out, ...err].filter(line => MATCH.test(line) && !seen.has(line)).slice(-40);
-  const files = failedTestFiles([...out, ...err].join('\n'));
+  let reports: string[] = [];
+  try {
+    reports = [...checkEvidenceLines(runOutputDirectory(store, run.id))];
+  } catch {
+    /* Older runs may have no compact reports. */
+  }
+  const files = failedTestFiles([...out, ...err, ...reports].join('\n'));
   const names = files.length ? `Failing tests: ${files.join(', ')}\n`.slice(0, CAP / 2) : '';
   const text = [...marked, ...last].join('\n');
   const remaining = CAP - names.length;

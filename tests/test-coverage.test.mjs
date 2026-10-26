@@ -1,3 +1,4 @@
+import { compactCheckText } from '../dist/check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import ts from 'typescript';
@@ -145,10 +146,16 @@ test('artifact decoding rejects wrong source, missing test completions and trunc
     [],
     [row(tests[0], [])],
     [coverageMarker + '{'],
+    [...tests.map(test => row(test, [])), coverageMarker + '{'],
     tests.map(test => row(test, [], { head: 'b'.repeat(64) })),
     tests.map(test => row(test, [], { complete: false })),
-  ])
+  ]) {
     assert.equal(coverageArtifact({ head, files, tests, lines }), null);
+    assert.equal(
+      coverageArtifact({ head, files, tests, lines: compactCheckText(lines.join('\n')).split('\n') }),
+      null,
+    );
+  }
   const artifact = coverageArtifact({
     head,
     files,

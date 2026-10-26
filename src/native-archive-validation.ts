@@ -1,9 +1,13 @@
+import { portableCheckPath } from './check-log-policy.js';
+import { existsSync } from 'node:fs';
 // SPDX-License-Identifier: Apache-2.0
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { nativeManifestSchema } from './work-archive-metadata.js';
-import { workSchema, type WorkData } from './work-types.js';
+import { parseWorkBytes } from './work-metadata.js';
+import type { WorkData } from './work-types.js';
+import { parseWork } from './work-unified-types.js';
 import { WorkStore } from './work-store.js';
 import { nativeMarker } from './native-source.js';
 import { nativeReachable } from './native-reachable.js';
@@ -45,7 +49,9 @@ export async function withValidatedNativeArchive<T>(
       JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')),
     ),
     plan = artifactArchivePlan(manifest);
+  const originalData = parseWorkBytes(readFileSync(join(directory, 'work.json')));
   for (const file of plan.physical) {
+    if (!portableCheckPath(originalData, file.path) && !existsSync(join(directory, file.path))) continue;
     const bytes = readSource(directory, file.path, file.size + 1, file.sha256);
     invariant(
       bytes && bytes.length === file.size && digest(bytes) === file.sha256,
@@ -53,7 +59,7 @@ export async function withValidatedNativeArchive<T>(
       'Native backup bytes differ from their manifest.',
     );
   }
-  const data = workSchema.parse(JSON.parse(readFileSync(join(directory, 'work.json'), 'utf8'))),
+  const data = parseWork(JSON.parse(readFileSync(join(directory, 'work.json'), 'utf8'))),
     aliases = new Map(plan.aliases.map(alias => [alias.path, alias.target]));
   const owner = realpathSync(mkdtempSync(join(dirname(directory), '.forge-native-validation-'))),
     work = join(owner, '.forge', 'work');

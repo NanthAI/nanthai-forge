@@ -9,6 +9,7 @@ import { invariant } from '../src/errors';
 import { removeExclusive } from './projectStorage';
 import { report } from './errors';
 import { emitChange } from './coordinationWrite';
+import { wakeExpiredLogs } from './projectCheckLogRetention';
 // A committed publication receipt already binds the exact validated immutable
 // root. Reconcile it before repeating storage reads, with current owner authority.
 export const published = internalQuery({
@@ -156,6 +157,7 @@ export const publish = internalMutation({
         source: 'exchange',
         head: input.preview.head,
       });
+      await wakeExpiredLogs(ctx, input.projectId);
       return id;
     } catch (error) {
       return report(error);
@@ -210,11 +212,17 @@ export const migrateArchive = internalMutation({
       await ctx.db.patch(backup._id, {
         transport: 'objects',
         storageId: object.storageId,
+        location: undefined,
+        r2Key: undefined,
+        r2Committed: undefined,
+        r2ConvexPurged: undefined,
         objectManifest: { digest: input.manifestDigest, size: input.manifestSize },
         archiveReceipt: {
           digest: backup.digest,
           size: backup.size,
           storageId: input.originalStorageId,
+          ...(backup.location ? { location: backup.location } : {}),
+          ...(backup.r2Key ? { r2Key: backup.r2Key, r2Committed: backup.r2Committed } : {}),
           operationId: input.operationId,
           at: Date.now(),
         },
@@ -272,5 +280,22 @@ export const completeHistory = internalMutation({
     } catch (error) {
       return report(error);
     }
+  },
+});
+
+export const retireArchiveR2 = internalMutation({
+  args: { backupId: v.id('projectBackups'), owner: v.string(), operationId: v.string(), key: v.string() },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const backup = await ctx.db.get(input.backupId);
+    invariant(backup, 'PROJECT_UNAVAILABLE', 'Original archive migration is unavailable.');
+    await activeOwnedProject(ctx, backup.projectId, input.owner);
+    invariant(
+      backup.archiveReceipt?.operationId === input.operationId && backup.archiveReceipt.r2Key === input.key,
+      'WORK_OPERATION_CHANGED',
+      'Retire only the original archive representation.',
+    );
+    await ctx.db.patch(backup._id, { archiveReceipt: { ...backup.archiveReceipt, r2Committed: false } });
+    return null;
   },
 });

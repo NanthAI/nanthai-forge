@@ -1,3 +1,4 @@
+import { checkLogsCli } from './check-logs-cli.js';
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { resolve } from 'node:path';
@@ -8,7 +9,8 @@ import { requireHostedBinding } from './host-binding.js';
 import { invariant } from './errors.js';
 import { runR2Backfill } from './r2-backfill.js';
 import type { BackfillCheck, BackfillPage, BackfillTarget, BackfillTransport } from './r2-backfill-types.js';
-export const MAINTENANCE_HELP = `nforge maintenance r2-backfill ROOT [--dry-run|--verify [--full-digest]] [--resume] [--state FILE]
+export const MAINTENANCE_HELP = `nforge maintenance check-logs ROOT --dry-run|--apply --plan FILE [--hosted]
+nforge maintenance r2-backfill ROOT [--dry-run|--verify [--full-digest]] [--resume] [--state FILE]
 nforge maintenance r2-backfill DEPLOYMENT PROJECT_ID [--dry-run|--verify [--full-digest]] [--resume] [--state FILE]
 Run with the existing owner login or FORGE_AUTH_TOKEN. Enable projectObjectCommit:setR2Writes first.
 Dry-run reads counts/bytes only. Run streams through private local files; resume uses the original state file.
@@ -21,6 +23,7 @@ export async function maintenanceCli(args: string[]) {
     process.stdout.write(MAINTENANCE_HELP);
     return;
   }
+  if (args[0] === 'check-logs') return checkLogsCli(args.slice(1));
   invariant(args.shift() === 'r2-backfill', 'BAD_ARGUMENT', 'Use maintenance r2-backfill.');
   const positional: string[] = [];
   let statePath: string | undefined;

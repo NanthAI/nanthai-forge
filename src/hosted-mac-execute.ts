@@ -1,3 +1,5 @@
+import { localMacLogFiles } from './check-local-log-files.js';
+import { compactProviderOutput } from './check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
 import { deliverMacCallback } from './hosted-mac-delivery.js';
 import { createReadStream } from 'node:fs';
@@ -36,6 +38,7 @@ export async function executeHostedMacCheck(
   key: string,
 ) {
   let run = initial;
+  const localLogs = localMacLogFiles(initial.projectId, initial.id);
   const root = await mkdtemp(join(tmpdir(), 'forge-mac-check-'));
   let cleanup = false;
   const owner = run.lease!.owner,
@@ -165,15 +168,32 @@ export async function executeHostedMacCheck(
         signal.addEventListener('abort', kill, { once: true });
         if (signal.aborted) kill();
         try {
-          const stream = (name: 'stdout' | 'stderr') =>
-            collectHostedOutput(
-              child[name]!,
-              { shard: 0, attempt: run.fence, executionId, stream: name, name },
+          const stream = (name: 'stdout' | 'stderr') => {
+            let summary = '';
+            return collectHostedOutput(
+              run.checkLogs?.uploadLocal
+                ? localLogs.stream(child[name]!, name)
+                : compactProviderOutput(localLogs.stream(child[name]!, name), value => {
+                    summary = value;
+                  }),
+              {
+                shard: 0,
+                attempt: run.fence,
+                executionId,
+                stream: name,
+                name,
+                kind: run.checkLogs?.uploadLocal ? 'local-log' : 'summary',
+                ...(run.checkLogs?.uploadLocal
+                  ? { expiresAt: Date.parse(run.at) + run.checkLogs.retentionDays * 86400000 }
+                  : {}),
+              },
               { secrets, paths: [root, homedir()] },
               sink,
               64 * 1024,
               true,
+              () => summary,
             );
+          };
           const [exitCode] = await Promise.all([exit, stream('stdout'), stream('stderr')]);
           signal.throwIfAborted();
           for (const artifact of await captureArtifacts(checkout, root, run.check.artifactPaths ?? [])) {
@@ -224,6 +244,7 @@ export async function executeHostedMacCheck(
           await callback({ kind: 'complete', status, exitCode, output: null, cost: { status: 'unknown' } });
           if (outputRoot) await publisher.final(outputRoot);
         } finally {
+          localLogs.complete();
           signal.removeEventListener('abort', kill);
           kill();
         }

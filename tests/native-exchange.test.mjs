@@ -320,8 +320,13 @@ test('running output is pinned with the atomic request so appends do not break t
   let releaseRun;
   t.after(async () => releaseRun?.());
   const { prepareNativeExchange } = await import('../dist/native-exchange.js');
-  const f = fixture(t),
-    view = f.act({
+  const f = fixture(t);
+  const { policyPreset } = await import('../dist/autonomy-policy.js');
+  const opted = f.w.store.load();
+  opted.autonomyPolicy = { ...policyPreset('trusted'), checkLogs: { uploadLocal: true, retentionDays: 90 } };
+  opted.revision++;
+  f.w.store.save(opted);
+  const view = f.act({
       action: 'compose',
       operationId: randomUUID(),
       intentId: f.intent.id,

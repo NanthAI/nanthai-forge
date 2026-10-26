@@ -97,8 +97,14 @@ export function lanesFixture() {
                 assert(index, `${table}.${name}`);
                 indexFields = index.fields;
                 const terms = [];
-                let lower = null;
+                let lower = null,
+                  upper = null;
                 const bounds = {
+                  lte(field, value) {
+                    assert.equal(field, index.fields[terms.length], 'index upper-bound order');
+                    upper = [field, value];
+                    return bounds;
+                  },
                   gt(field, value) {
                     assert.equal(field, index.fields[terms.length], 'index lower-bound order');
                     lower = [field, value];
@@ -114,7 +120,10 @@ export function lanesFixture() {
                 match = rows =>
                   [...rows.values()]
                     .filter(
-                      row => terms.every(([k, v]) => row[k] === v) && (!lower || row[lower[0]] > lower[1]),
+                      row =>
+                        terms.every(([k, v]) => row[k] === v) &&
+                        (!lower || row[lower[0]] > lower[1]) &&
+                        (!upper || row[upper[0]] <= upper[1]),
                     )
                     .sort((a, b) => {
                       for (const field of index.fields) {

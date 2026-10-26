@@ -1,3 +1,14 @@
+const checkLogModules = Object.fromEntries(
+  await Promise.all(
+    [
+      'projectCheckLogRetentionActions',
+      'projectCheckLogRetention',
+      'projectCheckLogCleanup',
+      'projectCheckLogCleanupStore',
+      'projectHostedLogCleanupStore',
+    ].map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))]),
+  ),
+);
 const projectR2Backfill = await import(moduleUrl('../convex/projectR2Backfill.ts'));
 const inventoryAccess = await import(moduleUrl('../convex/inventoryAccess.ts'));
 import { createHash } from 'node:crypto';
@@ -90,6 +101,11 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     projectWorkGenerations: new Map(),
     projectWorkRecords: new Map(),
     projectObjects: new Map(),
+    projectCheckLogSourcePins: new Map(),
+    projectCheckLogRetentions: new Map(),
+    projectCheckLogCleanups: new Map(),
+    projectCheckLogCleanupPages: new Map(),
+    projectHostedOutputSummaries: new Map(),
     projectPublications: new Map(),
     projectPublicationAttempts: new Map(),
     projectPublicationPages: new Map(),
@@ -421,6 +437,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     },
   };
   const modules = {
+    ...checkLogModules,
     projectR2Backfill,
     r2ArchiveSource,
     projectPublicationStore,

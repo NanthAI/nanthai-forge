@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { checkLogsSchema } from './check-log-policy.js';
 import { invariant } from './errors.js';
 import { modalCredentialsRefSchema } from './check-runner-settings.js';
 export const autoExchangeSchema = z.object({
@@ -21,6 +22,7 @@ export const autonomyPolicySchema = z.object({
     })
     .optional(),
   autoExchange: autoExchangeSchema.optional(),
+  checkLogs: checkLogsSchema.optional(),
   preset: z.enum(['supervised', 'trusted', 'autonomous', 'custom']),
   acceptance: z.object({
     mode: z.enum(['review', 'auto-on-pass']),
@@ -102,6 +104,7 @@ export const policyWriteSchema = z
     integrationPreview: autonomyPolicySchema.shape.integrationPreview,
     ownerRootUpdates: autonomyPolicySchema.shape.ownerRootUpdates,
     autoSnapshot: autonomyPolicySchema.shape.autoSnapshot,
+    checkLogs: checkLogsSchema.optional(),
     laneUpdates: autonomyPolicySchema.shape.laneUpdates.optional(),
     lifecycle: autonomyPolicySchema.shape.lifecycle.partial().optional(),
     notify: autonomyPolicySchema.shape.notify.partial().optional(),
@@ -127,6 +130,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
   const edited =
     command.integrationPreview ||
     command.autoExchange ||
+    command.checkLogs ||
     command.checks ||
     command.acceptance ||
     command.ownerRootUpdates !== undefined ||
@@ -143,6 +147,9 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     ...(edited ? { preset: 'custom' } : {}),
     ...(command.checks
       ? { checks: { runner: 'local', fallback: 'manual', ...base.checks, ...command.checks } }
+      : {}),
+    ...((command.checkLogs ?? previous.checkLogs)
+      ? { checkLogs: command.checkLogs ?? previous.checkLogs }
       : {}),
     acceptance: { ...base.acceptance, ...command.acceptance },
     integrationPreview: command.integrationPreview ?? base.integrationPreview ?? { auto: false },

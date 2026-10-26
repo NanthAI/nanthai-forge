@@ -1,3 +1,4 @@
+import { retainLogExpiry } from './projectCheckLogRetention';
 // SPDX-License-Identifier: Apache-2.0
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -48,9 +49,31 @@ export async function authorizeOutput(
   key: (id: string) => string,
 ) {
   const message = outputMessageSchema.parse(input.message);
+  if (
+    message.body.kind !== 'final' &&
+    (message.body.kind === 'chunk' ? message.body.chunk.stream : message.body.seal.stream).kind ===
+      'local-log'
+  ) {
+    const stream = message.body.kind === 'chunk' ? message.body.chunk.stream : message.body.seal.stream;
+    invariant(
+      typeof stream.expiresAt === 'number' && stream.expiresAt > 0,
+      'BAD_ARGUMENT',
+      'Uploaded local output requires finite retention.',
+    );
+  }
   invariant(message.projectId === input.projectId, 'EVIDENCE_CHANGED', 'Output project differs.');
   const { run } = await writableHostedCheck(ctx, { projectId: input.projectId, runId: message.runId });
   verifyOutput(message, input.signature, key(run.keyId));
+  if (message.body.kind !== 'final') {
+    const stream = message.body.kind === 'chunk' ? message.body.chunk.stream : message.body.seal.stream;
+    if (stream.stream !== 'artifact')
+      invariant(
+        stream.kind === 'summary' ||
+          (run.configuration.provider === 'mac' && stream.kind === 'local-log' && run.checkLogs?.uploadLocal),
+        'LOG_PROVIDER_HELD',
+        'CI providers retain full logs; collectors send compact test evidence. Local log upload requires the project opt-in.',
+      );
+  }
   invariant(
     run.plan &&
       run.dispatchStarted &&
@@ -63,6 +86,18 @@ export async function authorizeOutput(
     'EVIDENCE_CHANGED',
     'Output differs from the retained check execution and source pins.',
   );
+  if (run.configuration.provider === 'mac' && message.body.kind !== 'final') {
+    const stream = message.body.kind === 'chunk' ? message.body.chunk.stream : message.body.seal.stream;
+    if (stream.kind === 'local-log')
+      invariant(
+        run.checkLogs?.uploadLocal &&
+          stream.expiresAt === Date.parse(run.at) + run.checkLogs.retentionDays * 86400000,
+        'EVIDENCE_CHANGED',
+        'Use the selected finite local-log retention.',
+      );
+    if (stream.kind === 'local-log' && stream.expiresAt)
+      await retainLogExpiry(ctx, input.projectId, `output:${run.id}`, stream.expiresAt);
+  }
   if (run.configuration.provider === 'mac' && !hostedCheckTerminal(run))
     invariant(
       run.lease && run.lease.until > Date.now() && !run.cancelRequested,

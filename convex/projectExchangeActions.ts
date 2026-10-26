@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { portableCheckPath } from '../src/check-log-policy';
 import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { v } from 'convex/values';
 import { storeProjectArtifact } from './projectArtifactActions';
@@ -274,6 +275,15 @@ export const publish = action({
             'INVALID_WORK_BACKUP',
             'Manifest repeats a logical path.',
           );
+          const logicalSizes = new Map<string, number>();
+          for (const file of manifest.files) {
+            invariant(
+              !logicalSizes.has(file.sha256) || logicalSizes.get(file.sha256) === file.size,
+              'INVALID_WORK_BACKUP',
+              'Identical content has inconsistent logical sizes.',
+            );
+            logicalSizes.set(file.sha256, file.size);
+          }
           const workFile = manifest.files.find(file => file.path === 'work.json');
           invariant(workFile, 'INVALID_WORK_BACKUP', 'Manifest omits Work.');
           const data = validateParsedWork(resolved.data);
@@ -299,7 +309,9 @@ export const publish = action({
             'INVALID_WORK_BACKUP',
             'Work/source pins differ from the exchange manifest.',
           );
-          let contentPins = manifest.files.filter(file => !incremental || file.path !== 'work.json');
+          let contentPins = manifest.files.filter(
+            file => (!incremental || file.path !== 'work.json') && portableCheckPath(data, file.path),
+          );
           if (input.deferHistory) {
             const project = await ctx.runQuery(internal.projectWork.owner, {
               projectId: input.projectId,

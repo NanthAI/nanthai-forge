@@ -471,7 +471,8 @@ test('an ambiguous dispatch receipt stays pending-infra before and after Work pu
     assert.equal(submission.pendingReason, 'pending-infra');
     assert.equal(submission.cause, null);
     assert.equal(submission.runId, runId);
-    assert.equal(submission.logPath, join(path, 'stdout.log'));
+    assert.equal(submission.logPath, null);
+    assert.match(submission.providerUrl, /^https:\/\/github.com\//);
     assert.deepEqual(f.store.pointer(), before);
   }
 });

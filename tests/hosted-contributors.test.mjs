@@ -764,9 +764,10 @@ test('hosted contributor proposal reaches a new native owner Lane after journal 
   assert.deepEqual(recovered.store.load().nativeContributionReceipts, after.nativeContributionReceipts);
   assert.equal(readFileSync(join(recovered.store.path(result.id), 'a.ts'), 'utf8'), 'export const a=2;\n');
   assert.deepEqual(recovered.store.load().channelMoves, after.channelMoves);
+  assert.equal(existsSync(join(recovered.store.directory, `check-${originalRun.id}/stdout.log`)), false);
   assert.deepEqual(
-    readFileSync(join(recovered.store.directory, `check-${originalRun.id}/stdout.log`)),
-    originalLogs,
+    readFileSync(join(recovered.store.directory, `check-${originalRun.id}/result.json`)),
+    readFileSync(join(s.w.store.directory, `check-${originalRun.id}/result.json`)),
   );
 });
 
