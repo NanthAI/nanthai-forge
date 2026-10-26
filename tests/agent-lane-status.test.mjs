@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
 import { laneSchema } from '../dist/work-types.js';
 import { laneSummary } from '../dist/work-hosted-summary.js';

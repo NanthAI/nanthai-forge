@@ -16,7 +16,26 @@ import { randomUUID } from 'node:crypto';
 const base = '# Document\n\nShared paragraph.\nAnother paragraph.\n\nEnd.\n';
 const text = index =>
   base.replace('Another paragraph.', `${`docs-${index} addition.\n`.repeat(index + 1)}Another paragraph.`);
-const setup = t => fixture(t, { files: { 'shared.md': base } });
+const setup = async t => {
+  const f = await fixture(t, { files: { 'shared.md': base } });
+  const dispatch = f.agent.dispatch.bind(f.agent);
+  // These tests assert completed background overlap analysis as well as train planning.
+  const { agentResponseAdvisory } = await import('../dist/agent-response-advisory.js');
+  const { parseAgentAction } = await import('../dist/agent-action-parse.js');
+  const { resolveAgentDefaults } = await import('../dist/agent-defaults.js');
+  f.agent.dispatch = async input => {
+    const response = await dispatch(input);
+    if (['start', 'checkpoint'].includes(input.action)) {
+      const { command } = resolveAgentDefaults(
+        f.store,
+        parseAgentAction({ ...input, ...response.result.resolved }),
+      );
+      await agentResponseAdvisory(f.store, command, response, undefined, [], false, false);
+    }
+    return response;
+  };
+  return f;
+};
 const plan = f => planLandingTrain(f.store, f.store.load(), 'main');
 const trainEvent = (f, laneId) =>
   waitObservation(f.store, 'lane', laneId).events.find(e => e.type === 'train');

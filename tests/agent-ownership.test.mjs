@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
 import { agentPeers, boundPeers, PEERS_MAX_BYTES } from '../dist/agent-peers.js';
 import { updateHostState } from '../dist/host-binding.js';

@@ -147,6 +147,7 @@ const undoSyncDetailsSchema = z.object({
   status: z.enum(['merged', 'conflict']),
 });
 const checkpointSchema = z.object({
+  workRevision: z.number().safe().nonnegative().optional(),
   actor: workActorSchema.optional(),
   head: oid,
   parent: oid,
@@ -171,6 +172,12 @@ const checkpointSchema = z.object({
 });
 export const afterSchema = z.union([z.object({ intentId: id }).strict(), z.object({ viewId: id }).strict()]);
 export const laneSchema = z.object({
+  startReceipt: z
+    .object({
+      revision: z.number().safe().nonnegative(),
+      result: z.record(z.string(), z.unknown()),
+    })
+    .optional(),
   agentStart: agentOperationSchema.optional(),
   after: afterSchema.optional(),
   stack: stackSchema.optional(),

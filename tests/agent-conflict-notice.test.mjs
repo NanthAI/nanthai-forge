@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, readdirSyn
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
 import { agentPeers, PEERS_MAX_BYTES } from '../dist/agent-peers.js';
 import { updateHostState } from '../dist/host-binding.js';

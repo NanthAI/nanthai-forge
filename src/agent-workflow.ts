@@ -1,5 +1,8 @@
 import { readMetrics } from './metrics-cli.js';
 import { statusMetrics } from './self-metrics-status.js';
+import { agentResponseAdvisory } from './agent-response-advisory.js';
+import { durableResponseAdvisory } from './agent-response-advisory.js';
+import { scheduleAgentAdvisory } from './agent-advisory-worker.js';
 import { recordDecision, readDecisions } from './decisions.js';
 import { withLifecycleMetric, metricOperationId } from './self-metrics-journal.js';
 import { previewMeasurements } from './preview-accounting.js';
@@ -7,26 +10,21 @@ import { trainAccounting } from './train-accounting.js';
 import { scheduleIntegrationPreview } from './integration-preview-auto.js';
 import { retainedFinishCommand } from './agent-finish-journal.js';
 import { recordHandoff, readHandoff } from './agent-handoff.js';
-import { captureAutomatic, frictionReceipt } from './friction-auto.js';
+import { captureAutomatic } from './friction-auto.js';
 import { withRetryObservation } from './friction-retry.js';
 import { captureFriction, triageFriction, citeFriction } from './friction.js';
 import { readImprovements } from './improve.js';
 import { recordOverlapAlerts } from './agent-overlap-alerts.js';
-import { overlapReceipt } from './agent-overlap-receipt.js';
 import { readLaneSubmissions } from './landing-submission-read.js';
 import { land } from './land.js';
 import type { LandCommand } from './land-schema.js';
 import { agentLaneTests } from './agent-lane-tests.js';
 import { agentLaneStatus } from './agent-lane-status.js';
-import { syncSummary } from './agent-operation-summary.js';
 import { runnerMonthCosts } from './check-cost.js';
 import { candidateCommand } from './candidate-names.js';
 import { agentTake } from './agent-take.js';
-import { duplicateStartWarnings } from './agent-ownership.js';
-import { autoSnapshotNotices } from './lane-auto-snapshot.js';
 import { parseAgentAction } from './agent-action-parse.js';
 import { undoOptimisticRevert } from './optimistic-undo.js';
-import { indexPeerSource } from './agent-peers-index.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { agentPeers, RECEIPT_PEER_LIMIT } from './agent-peers.js';
 import { cancelLandingEntry } from './landing-batch-cancel.js';
@@ -74,7 +72,7 @@ import { readMakingOf, reportUsage } from './making-of-read.js';
 import type { CheckRun, WorkView, WorkData } from './work-types.js';
 export { agentActionSchema, type AgentAction } from './agent-workflow-schema.js';
 import type { AgentAction } from './agent-workflow-schema.js';
-import { READ_ONLY_ACTIONS, SNAPSHOT_READ_ACTIONS } from './agent-read-actions.js';
+import { SNAPSHOT_READ_ACTIONS } from './agent-read-actions.js';
 import { boundAgentSubmission } from './hosted-agent-bound.js';
 export class AgentWorkflow {
   readonly work: WorkService;
@@ -207,7 +205,20 @@ export class AgentWorkflow {
       command.action === 'finish' &&
       this.retainedCheckpoint(command.laneId, command.operationId!) &&
       ['completed', 'abandoned'].includes(store.select('lanes', command.laneId)?.state ?? '');
-    if (needed && !closedFinishReplay)
+    let savedCheckpointReplay = false;
+    if (command.action === 'checkpoint' && store.native) {
+      try {
+        savedCheckpointReplay = !!this.retainedCheckpoint(command.laneId, command.operationId!);
+      } catch (error) {
+        if (!(error instanceof ForgeError && error.code === 'SOURCE_CHANGED')) throw error;
+        savedCheckpointReplay = !!(await retryWorkPhase(
+          command.operationId!,
+          () => this.retainedCheckpoint(command.laneId, command.operationId!),
+          ['SOURCE_CHANGED'],
+        ));
+      }
+    }
+    if (needed && !closedFinishReplay && !savedCheckpointReplay)
       ensureLaneDirectory(store, needed, observed => {
         warnings = observed;
       });
@@ -231,166 +242,20 @@ export class AgentWorkflow {
           () => this.action(command, wait),
         ),
     );
-    if (
-      command.action === 'checkpoint' ||
-      (command.action === 'sync' && (response.result as { status?: string }).status !== 'conflict')
-    )
-      scheduleIntegrationPreview(store);
-    if (!wait && (command.action === 'finish' || command.action === 'land')) {
-      const peers =
-        command.action === 'finish'
-          ? overlapReceipt(store, command.laneId, undefined, false, false, command.operationId)
-          : undefined;
-      return {
-        ...response,
-        result: {
-          ...(response.result as object),
-          ...(peers ? { peers } : {}),
-          ...(resolved ? { resolved } : {}),
-        },
-      };
-    }
-    const friction = frictionReceipt(store, command, response.result);
-    const ownershipStop =
-      command.action === 'take' && (response.result as { status: string }).status === 'ownership';
-    const hostedSync =
-      ownershipStop || command.action === 'handoff' || READ_ONLY_ACTIONS.has(command.action)
-        ? undefined
-        : queueAgentSync(store, command, response.result, false, this.liveMcp ? 'MCP call' : undefined);
-    let links: unknown;
-    if (['checkpoint', 'finish'].includes(command.action) && 'laneId' in command) {
-      try {
-        links = await agentLinks(store, { laneId: command.laneId });
-      } catch (error) {
-        links = {
-          error: {
-            code: error instanceof ForgeError ? error.code : 'HOST_IDENTITY_UNAVAILABLE',
-            message: 'Forge URLs could not be resolved; use link to retry the read.',
-          },
-        };
-      }
-    }
-    if (['start', 'checkpoint', 'sync', 'finish', 'accept'].includes(command.action)) {
-      const laneId =
-        command.action === 'start'
-          ? (response.result as { laneId: string }).laneId
-          : (command as { laneId?: string }).laneId;
-      if (laneId)
-        try {
-          indexPeerSource(store, laneId);
-        } catch {
-          /* Observation reports unavailable source below. */
-        }
-    }
-    let overlapCoverage: string | undefined;
-    if (command.action === 'checkpoint' || command.action === 'sync') {
-      try {
-        overlapCoverage = await retryWorkPhase(
-          command.operationId!,
-          () =>
-            store.observing(() =>
-              recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT, command.action === 'checkpoint'),
-            ),
-          ['SOURCE_CHANGED'],
-        );
-      } catch {
-        overlapCoverage = 'local-incomplete';
-      }
-    }
-    let peers =
-      ['start', 'checkpoint', 'sync', 'finish'].includes(command.action) ||
-      (command.action === 'status' && command.laneId)
-        ? agentPeers(
-            store,
-            {
-              laneId:
-                command.action === 'start'
-                  ? (response.result as { laneId: string }).laneId
-                  : (command as { laneId: string }).laneId,
-              scope: (command as { scope?: { paths: string[] } }).scope,
-              detail: true,
-            },
-            { receipt: true },
-          )
-        : undefined;
-    if (command.action === 'start') {
-      const result = response.result as { laneId: string; warnings?: string[] };
-      try {
-        const duplicates = duplicateStartWarnings(store, result.laneId, command.outcome, peers?.overlaps);
-        if (duplicates.length) result.warnings = [...(result.warnings ?? []), ...duplicates];
-      } catch {
-        Object.assign(result, { ownershipCoverage: 'local-incomplete' });
-      }
-      // A restarted agent learns that its earlier open Lane holds recovered unsaved edits.
-      const recovered = command.actor
-        ? autoSnapshotNotices(store, command.actor).filter(item => item.laneId !== result.laneId)
-        : [];
-      if (recovered.length)
-        result.warnings = [
-          ...(result.warnings ?? []),
-          ...recovered.map(item => `Lane ${item.laneId} (${item.path}): ${item.notice}`),
-        ];
-    }
-    if (peers) {
-      if (overlapCoverage === 'local-incomplete') {
-        delete peers.clear;
-        peers.v = 1;
-        peers.coverage = 'local-incomplete';
-      }
-      try {
-        const journal = new CoordinationJournal(store);
-        if (command.action !== 'status') journal.record(peers.conflicts ?? []);
-        const laneId =
-          command.action === 'start'
-            ? (response.result as { laneId: string }).laneId
-            : (command as { laneId: string }).laneId;
-        if (peers.conflicts)
-          peers.conflicts = peers.conflicts.map(notice => journal.decorate(notice, laneId));
-      } catch {
-        peers.coverage = 'local-incomplete';
-      }
-      const detail = 'detail' in command && command.detail === true;
-      if (!detail && ['checkpoint', 'sync'].includes(command.action)) delete peers.changes;
-    }
-    const receiptLane =
-      command.action === 'start'
-        ? (response.result as { laneId: string }).laneId
-        : 'laneId' in command
-          ? command.laneId
-          : undefined;
-    if (receiptLane && (peers || ['handoff', 'complete', 'abandon'].includes(command.action)))
-      peers = overlapReceipt(
+    if (command.action === 'start' || command.action === 'checkpoint') {
+      // Receipt observations use indexed data and local journals, never the owner writer queue.
+      const receipt = await durableResponseAdvisory(
         store,
-        receiptLane,
-        peers,
-        READ_ONLY_ACTIONS.has(command.action),
-        'detail' in command && command.detail === true,
-        ['finish', 'handoff'].includes(command.action) && 'operationId' in command
-          ? command.operationId
-          : undefined,
+        command,
+        response,
+        resolved,
+        warnings,
+        this.liveMcp,
       );
-    const summary =
-      command.action === 'sync'
-        ? syncSummary(response.result as Parameters<typeof syncSummary>[0], command.channel)
-        : command.action === 'checkpoint'
-          ? (response.result as { head: string; parent: string }).head ===
-            (response.result as { parent: string }).parent
-            ? 'Lane checkpoint unchanged'
-            : 'saved Lane checkpoint'
-          : undefined;
-    return {
-      ...(summary ? { summary } : {}),
-      ...response,
-      result: {
-        ...(response.result as object),
-        ...friction,
-        ...(peers ? { peers } : {}),
-        ...(hostedSync ? { hostedSync } : {}),
-        ...(links ? { links } : {}),
-        ...(resolved ? { resolved } : {}),
-        ...(warnings.length ? { warnings } : {}),
-      },
-    };
+      scheduleAgentAdvisory(store, command, response, this.liveMcp);
+      return receipt;
+    }
+    return agentResponseAdvisory(store, command, response, resolved, warnings, this.liveMcp, true, wait);
   }
   private async action(command: AgentAction, wait = true): Promise<{ revision: number; result: unknown }> {
     const store = this.work.store;

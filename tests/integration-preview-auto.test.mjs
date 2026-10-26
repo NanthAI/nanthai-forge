@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createHook } from 'node:async_hooks';
 import { initNative } from '../dist/native-work.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { updateHostState } from '../dist/host-binding.js';
 import { CoordinationJournal } from '../dist/agent-coordination-journal.js';
 import { overlapNotifications } from '../dist/mcp-overlap-notifications.js';

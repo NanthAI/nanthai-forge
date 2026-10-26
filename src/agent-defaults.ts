@@ -84,7 +84,20 @@ export function resolveAgentDefaults(
       next = {
         ...command,
         operationId: pin('operationId', command.operationId, randomUUID),
-        expectedHead: pin('expectedHead', command.expectedHead, () => laneHead(store, command.laneId)),
+        expectedHead: pin('expectedHead', command.expectedHead, () => {
+          if (command.action === 'checkpoint' && command.operationId) {
+            const tx = store.readRecords();
+            const original = tx
+              ? (tx.fieldFind('lanes', command.laneId, 'checkpoints', command.operationId, 'operation') as
+                  | { parent: string }
+                  | undefined)
+              : store
+                  .select('lanes', command.laneId)
+                  ?.checkpoints.find(checkpoint => checkpoint.operation?.id === command.operationId);
+            if (original) return original.parent;
+          }
+          return laneHead(store, command.laneId);
+        }),
       };
       break;
     case 'finish': {

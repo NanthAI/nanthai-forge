@@ -286,7 +286,7 @@ export async function startMcp(
   const cleanup = async () => {
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
-    stopOverlap?.();
+    await stopOverlap?.();
     await sources?.close();
   };
   server.close = () =>

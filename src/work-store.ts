@@ -227,23 +227,28 @@ export class WorkStore {
     captureTransactionFriction(transaction, this.readRecords());
     transaction.prepareCommit(revision);
   }
-  commitRecords(transaction: WorkRecordTransaction, revision?: number, options: { prepared?: boolean } = {}) {
+  commitRecords(
+    transaction: WorkRecordTransaction,
+    revision?: number,
+    options: { prepared?: boolean; advisory?: boolean } = {},
+  ) {
     const previous = this.readRecords();
     const prior = previous?.manifest.collections.lanes?.pages ?? [];
     if (!options.prepared) captureTransactionFriction(transaction, previous);
     const result = transaction.commit(revision);
     this.afterPublication(() => {
-      wakeIntegrationPreview(this, previous, transaction);
+      if (options.advisory !== false) wakeIntegrationPreview(this, previous, transaction);
       wakeAutoExchange(this);
       wakeLandingWorker(this);
       try {
-        indexPeerRecords(
-          this.root,
-          transaction,
-          (transaction.manifest.collections.lanes?.pages ?? []).flatMap((hash, page) =>
-            hash !== prior[page] ? [page] : [],
-          ),
-        );
+        if (options.advisory !== false)
+          indexPeerRecords(
+            this.root,
+            transaction,
+            (transaction.manifest.collections.lanes?.pages ?? []).flatMap((hash, page) =>
+              hash !== prior[page] ? [page] : [],
+            ),
+          );
       } catch {
         /* Derived index cannot fail a committed mutation. */
       }

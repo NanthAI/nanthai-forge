@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';

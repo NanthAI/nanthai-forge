@@ -270,30 +270,30 @@ test('read-only MCP workflow actions and brief never acquire the owner writer lo
   assert.equal(locks, 0);
 });
 
-test('lifecycle activity retries metadata CAS without repeating source reads under the owner lock', async t => {
+test('lifecycle activity retries metadata CAS without repeating source reads or taking the owner lock', async t => {
   const { agent, store, peer, lane } = await fixture(t);
   writeFileSync(join(lane.path, 'a.txt'), 'activity source\n');
   await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'Activity fixture' });
-  const object = NativeSource.prototype.object,
-    locked = store.locked.bind(store);
+  const object = NativeSource.prototype.object;
   let reads = 0,
     lockedReads = 0,
     raced = false;
   t.mock.method(NativeSource.prototype, 'object', function (...args) {
     reads++;
     if (existsSync(join(store.directory, 'lock'))) lockedReads++;
-    return object.apply(this, args);
-  });
-  t.mock.method(store, 'locked', (run, options) => {
-    if (!raced) {
+    const result = object.apply(this, args);
+    if (!raced && reads === 2) {
       raced = true;
       peer.locked(() => {
         const tx = peer.records();
         tx.patchFields('lanes', lane.laneId, { concurrentExtension: 'retained' });
-        peer.commitRecords(tx);
+        peer.commitRecords(tx, undefined, { advisory: false });
       });
     }
-    return locked(run, options);
+    return result;
+  });
+  t.mock.method(store, 'locked', () => {
+    throw new Error('Activity must not join the owner writer queue');
   });
   queueAgentSync(store, { action: 'checkpoint', laneId: lane.laneId }, {});
   assert.ok(raced);

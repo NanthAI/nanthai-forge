@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { agentStart, agentCheckpoint } from '../dist/agent-workflow-mutations.js';
 import { agentPeers } from '../dist/agent-peers.js';
 import { boundPeers } from '../dist/agent-peers-bound.js';

@@ -75,6 +75,7 @@ function ownerWorkers(roots, _workerDirectory, { processAlive }, WorkStore, stop
         if (/^\.weekly-.*\.pending$/.test(name))
           workers.set(join(metrics, name), { worker: 'self-metrics-weekly-worker' });
     queue(join(directory, 'presence-owner'), 'presence-worker');
+    queue(join(directory, 'agent-advisory', 'drain'), 'agent-advisory-worker');
     queue(join(directory, 'integration-preview-drain'), 'integration-preview-worker');
     queue(join(directory, 'post-accept-main-queue'), 'post-accept-main');
     const controllers = join(directory, 'check-controllers');
@@ -178,6 +179,9 @@ export async function waitForOwnerChildren(
   { stopChecks = false } = {},
 ) {
   // Package smoke builds dist itself; importing the helper must work before that build.
+  const { drainAgentAdvisories } = await import('../dist/agent-advisory-worker.js');
+  if (existsSync(join(root, '.forge', 'native.json')) || existsSync(join(root, '.git')))
+    await drainAgentAdvisories(root);
   const processes = await import('../dist/local-process.js');
   const { WorkStore } = await import('../dist/work-store.js');
   const roots = [...new Set([resolve(root), realpathSync(root)])];

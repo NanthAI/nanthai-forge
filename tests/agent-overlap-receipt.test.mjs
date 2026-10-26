@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { CoordinationJournal } from '../dist/agent-coordination-journal.js';
 import { overlapReceipt } from '../dist/agent-overlap-receipt.js';
 import { initNative } from '../dist/native-work.js';

@@ -18,6 +18,7 @@ import { pushProgressSchema } from './push-progress-state.js';
 import { autoExchangeStateSchema } from './auto-exchange-state.js';
 import { exchangeObservationSchema } from './exchange-observation.js';
 import { wakeAutoExchange } from './auto-exchange-wake.js';
+import { workLocked } from './work-lock.js';
 import { WorkStore } from './work-store.js';
 import { invariant } from './errors.js';
 import { agentSyncSchema, compactAgentSync } from './agent-sync-state.js';
@@ -161,24 +162,35 @@ export function readHostState(store: WorkStore): HostState {
     state.agentSync = agentSyncSchema.parse(JSON.parse(readFileSync(queuePath, 'utf8')));
   return state;
 }
-/** Transport metadata is serialized by the owner lock, without changing Work revision.
+/** Transport metadata shares a local lock, without changing Work revision.
+ * Lifecycle queueing can skip the owner lock; other callers retain their existing guard.
  * The queue sidecar is authoritative once present, including during legacy migration. */
-export function updateHostState<T>(store: WorkStore, update: (state: HostState) => T): T {
-  const result = store.locked(() => {
-    const state = readHostState(store),
-      result = update(state);
-    if (state.agentSync) compactAgentSync(state.agentSync);
-    const validated = schema.parse(state);
-    const { agentSync, ...bindingState } = validated;
-    // Write the sidecar before removing legacy pending entries from the binding.
-    if (agentSync) writeChanged(store, 'hosted-agent-sync.json', agentSync);
-    writeChanged(store, 'hosted-binding.json', {
-      ...bindingState,
-      ...(agentSync ? { agentSync: { ...agentSync, pending: [] } } : {}),
-    });
-    if (!agentSync) rmSync(join(store.directory, 'hosted-agent-sync.json'), { force: true });
-    return result;
-  });
+export function updateHostState<T>(
+  store: WorkStore,
+  update: (state: HostState) => T,
+  options: { ownerLock?: boolean } = {},
+): T {
+  const apply = () =>
+    workLocked(
+      join(store.directory, 'hosted-binding.lock'),
+      () => {
+        const state = readHostState(store),
+          result = update(state);
+        if (state.agentSync) compactAgentSync(state.agentSync);
+        const validated = schema.parse(state);
+        const { agentSync, ...bindingState } = validated;
+        // Write the sidecar before removing legacy pending entries from the binding.
+        if (agentSync) writeChanged(store, 'hosted-agent-sync.json', agentSync);
+        writeChanged(store, 'hosted-binding.json', {
+          ...bindingState,
+          ...(agentSync ? { agentSync: { ...agentSync, pending: [] } } : {}),
+        });
+        if (!agentSync) rmSync(join(store.directory, 'hosted-agent-sync.json'), { force: true });
+        return result;
+      },
+      { operation: 'host transport metadata' },
+    );
+  const result = options.ownerLock === false ? apply() : store.locked(apply);
   wakeAutoExchange(store);
   return result;
 }

@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { CoordinationJournal } from '../dist/agent-coordination-journal.js';
 import { ForgeError } from '../dist/errors.js';
 import { digest } from '../dist/hash.js';

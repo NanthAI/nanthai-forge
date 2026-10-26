@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { performance } from 'node:perf_hooks';
 import { PeersSource } from '../dist/agent-peers-source.js';
 import { agentPeers, boundPeers, PEERS_MAX_BYTES } from '../dist/agent-peers.js';
@@ -271,7 +271,9 @@ test('MCP forge_task receipts and forge_peers match CLI reads', async t => {
       })
     ).content[0].text,
   );
-  assert.deepEqual(cp.result.peers, expected);
+  assert.equal(cp.result.peers.coverage, 'local-incomplete');
+  assert.equal(cp.result.peers.clear, undefined);
+  assert.deepEqual(agentPeers(new WorkStore(root), input), expected);
   const started = JSON.parse(
     (
       await tools.get('forge_task')({
@@ -279,7 +281,12 @@ test('MCP forge_task receipts and forge_peers match CLI reads', async t => {
       })
     ).content[0].text,
   );
-  assert.equal(started.result.peers.overlaps[0].lane, peer.laneId);
+  assert.equal(started.result.peers.coverage, 'local-incomplete');
+  assert.equal(started.result.peers.clear, undefined);
+  assert.equal(
+    agentPeers(new WorkStore(root), { laneId: started.result.laneId }).overlaps[0].lane,
+    peer.laneId,
+  );
   const check = (
     await agent.dispatch({
       action: 'define-check',

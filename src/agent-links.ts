@@ -60,7 +60,7 @@ export function buildAgentLinks(
   return { hosted, preferred: hosted, pinned: !!hosted || !!input.viewId || !!input.save };
 }
 /** Read-only: does not restore a Lane, checkpoint, index, or enqueue hosted work. */
-export async function agentLinks(store: WorkStore, input: LinkInput) {
+export async function agentLinks(store: WorkStore, input: LinkInput, localOnly = false) {
   invariant(
     [input.laneId, input.viewId, input.save].filter(Boolean).length === 1,
     'BAD_ARGUMENT',
@@ -82,11 +82,12 @@ export async function agentLinks(store: WorkStore, input: LinkInput) {
       parts.length >= 2 &&
       parts[0] !== 'projects' &&
       !parts[1]!.includes('~') &&
-      !process.env.FORGE_AUTH_TOKEN
+      (localOnly || !process.env.FORGE_AUTH_TOKEN)
     ) {
       owner = parts[0];
       hostedSlug = parts[1];
     } else {
+      invariant(!localOnly, 'HOST_IDENTITY_UNAVAILABLE', 'Hosted project identity is unavailable locally.');
       const project = await coordinationClient(binding.deployment, process.env.FORGE_AUTH_TOKEN).query(
         makeFunctionReference<
           'query',

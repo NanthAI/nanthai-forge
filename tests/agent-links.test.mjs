@@ -229,7 +229,9 @@ test('optional receipt links do not change checkpoint success when hosted identi
   t.after(() => {
     globalThis.fetch = originalFetch;
   });
+  let queries = 0;
   globalThis.fetch = async () => {
+    queries++;
     throw new Error('Synthetic offline');
   };
   writeFileSync(join(lane.path, 'example.ts'), 'two\n');
@@ -240,5 +242,6 @@ test('optional receipt links do not change checkpoint success when hosted identi
   });
   assert.equal(saved.result.laneId, lane.laneId);
   assert.ok(saved.result.head);
-  assert.ok(saved.result.links.error.code);
+  assert.equal(saved.result.links.error.code, 'HOST_IDENTITY_UNAVAILABLE');
+  assert.equal(queries, 0, 'durable receipts must not wait for network identity resolution');
 });

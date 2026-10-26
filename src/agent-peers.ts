@@ -1,3 +1,4 @@
+import { retainIndexedPeers } from './agent-receipt-peers.js';
 import { integrationPreviewStatus } from './integration-preview-auto.js';
 // SPDX-License-Identifier: Apache-2.0
 import { stackStatus } from './agent-stack.js';
@@ -109,7 +110,15 @@ export function agentPeers(
   options: { receipt?: boolean } = {},
 ): PeersDigest {
   const command = peersInputSchema.parse(input);
-  return store.observing(() => readPeers(store, command, options.receipt));
+  return store.observing(() => {
+    const peers = readPeers(store, command, options.receipt);
+    try {
+      retainIndexedPeers(store, command.laneId, peers);
+    } catch {
+      // An optional cache cannot invalidate an otherwise usable observation.
+    }
+    return peers;
+  });
 }
 function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, receipt = false): PeersDigest {
   const command = peersInputSchema.parse(input);

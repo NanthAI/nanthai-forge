@@ -189,7 +189,7 @@ test('no binding and opt-out preserve local commands; actor overrides and unchan
   assert.equal(readHostState(store).agentSync.pending.at(-1).activity.status, 'working');
 });
 
-test('presence lock contention only reports hosted deferral for an enabled binding', async t => {
+test('presence queueing bypasses owner lock contention and honors binding opt-out', async t => {
   const { workflow, store } = setup(t);
   const lane = (await workflow.dispatch({ action: 'start', outcome: 'Presence contention' })).result;
   const locked = store.locked.bind(store);
@@ -205,7 +205,8 @@ test('presence lock contention only reports hosted deferral for an enabled bindi
   };
   contend(undefined);
   bind(store);
-  contend({ status: 'deferred', sourcePush: 'explicit' });
+  contend({ status: 'queued', sourcePush: 'explicit', undo: 'nforge host ROOT --no-auto-sync' });
+  assert.equal(readHostState(store).agentSync.pending.length, 1);
   updateHostState(store, state => {
     state.binding.autoSync = false;
   });

@@ -1,3 +1,5 @@
+import { prepareReceiptSource } from './agent-receipt-peers.js';
+import { readStartReceipt, stageStartReceipt } from './agent-start-receipt.js';
 import { isUnifiedWork } from './work-unified-types.js';
 import { citeFriction } from './friction.js';
 import { workLockWaitMs } from './work-lock.js';
@@ -58,10 +60,41 @@ function sameOperation(tx: WorkRecordTransaction, operationId: string) {
     tx.positions('lanes', operationId, 'agentOperation').length > 0
   );
 }
+function replayedStart(store: WorkStore, command: StartAction) {
+  const tx = store.readRecords();
+  if (!tx) return;
+  const position = tx.positions('lanes', command.operationId, 'agentOperation')[0];
+  let lane = position === undefined ? undefined : tx.fieldsAt('lanes', position).record;
+  const intentPosition = tx.positions('intents', command.operationId, 'agentOperation')[0];
+  const intent = intentPosition === undefined ? undefined : tx.fieldsAt('intents', intentPosition).record;
+  if (!lane && intent?.agentStart) lane = tx.fields('lanes', intent.agentStart.laneId)?.record;
+  if (!lane || lane.state === 'creating') return;
+  invariant(
+    (lane.agentStart ?? intent?.agentStart)?.request === request(command),
+    'WORK_OPERATION_CHANGED',
+    'This start operation has different inputs. Its original Intent and Lane are retained.',
+  );
+  return readStartReceipt(store, lane, command.operationId);
+}
 export function agentStart(store: WorkStore, command: StartAction, liveMcp = false) {
   return store.laneLocked(
     command.operationId,
     () => {
+      // Keep source-independent record bytes stable across metadata CAS races.
+      // Re-preparing the same operation can reuse its immutable record pages.
+      const startIds = { laneId: randomUUID(), intentId: randomUUID(), at: new Date().toISOString() };
+      const setup = localAgentSetup(store.root, liveMcp) as { machine: string; mcpConfigured: boolean };
+      const end = Date.now() + (workLockWaitMs() || 1000);
+      for (;;) {
+        try {
+          const original = replayedStart(store, command);
+          if (original) return original;
+          break;
+        } catch (error) {
+          if (!(error instanceof ForgeError && error.code === 'SOURCE_CHANGED') || Date.now() >= end)
+            throw error;
+        }
+      }
       const reserved = preparedRecordCommit(store, 'start reservation', tx => {
         if (!store.native) executionGuard(store.root);
         const data = tx.data(),
@@ -96,8 +129,19 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
             'WORK_OPERATION_CHANGED',
             'This operation belongs to another retained action.',
           );
-          data.channelMoves =
-            command.channel === null ? [] : tx.all('channelMoves', command.channel ?? 'main', 'channel');
+          data.channelMoves = [];
+          if (command.channel !== null) {
+            const name = command.channel ?? 'main';
+            if (store.native) {
+              for (const position of tx.positions('channelMoves', name, 'channel').slice().reverse()) {
+                const move = tx.fieldsAt('channelMoves', position).record;
+                if (move.status === 'accepted') {
+                  data.channelMoves = [move];
+                  break;
+                }
+              }
+            } else data.channelMoves = tx.all('channelMoves', name, 'channel');
+          }
           const channels = store.native ? nativeChannels(data) : channelStatus(store, data);
           const channel =
             command.channel === null
@@ -121,8 +165,8 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
                 ? data.nativeHead!
                 : headAt(store.root));
 
-          const at = new Date().toISOString(),
-            laneId = randomUUID();
+          const at = startIds.at,
+            laneId = startIds.laneId;
           const alias = command.intentId
             ? (tx.find('intentAliases' as never, command.intentId, 'aliasId')?.record as unknown as
                 | { intentId: string }
@@ -187,7 +231,7 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
                     }
                   : {}),
               },
-              { id: randomUUID(), at },
+              { id: startIds.intentId, at },
             );
           if (!existing) intent.agentStart = { id: command.operationId, request: hash, laneId };
           lane = {
@@ -207,7 +251,7 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
             startedBy: localActor('agent', command.actor, command.tool),
             startedAt: at,
             ...(command.scope ? { scope: command.scope } : {}),
-            setup: localAgentSetup(store.root, liveMcp) as { machine: string; mcpConfigured: boolean },
+            setup,
             intentId: intent.id,
             name: command.name ?? derivedLaneName(command.outcome),
             assignment: command.assignment,
@@ -236,11 +280,15 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
           citeFriction(tx, lane.id, command.frictionIds ?? [], command.operationId);
         }
         return () => {
-          if (!original) store.commitRecords(tx);
+          if (!original) store.commitRecords(tx, undefined, { advisory: false });
           return { lane, intent: intent! };
         };
       });
       const { lane, intent } = reserved;
+      if (lane.state !== 'creating') {
+        const retained = readStartReceipt(store, lane, command.operationId);
+        if (retained) return retained;
+      }
       const warnings = lane.state === 'creating' ? diskGuard(store.root) : [];
       return store.laneLocked(
         lane.id,
@@ -250,28 +298,33 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
             const creating = lane.state === 'creating';
             if (creating) tx.patchFields('lanes', lane.id, { state: 'active' });
             const siblings = tx
-              .all('lanes', intent.id, 'intentId')
+              .positions('lanes', intent.id, 'intentId')
+              .map(position => tx.fieldsAt('lanes', position).record)
               .filter(item => item.id !== lane.id)
               .map(item => laneReceipt(item, store.path(item.id)));
+            const receipt = {
+              revision: tx.revision + (creating ? 1 : 0),
+              result: {
+                operationId: command.operationId,
+                outcome: intent.outcome,
+                siblingLanes: siblings,
+                ...(warnings.length ? { warnings } : {}),
+                ...laneReceipt({ ...lane, state: 'active' }, store.path(lane.id)),
+                base: lane.stack?.startHead ?? lane.base,
+                head: lane.stack?.startHead ?? lane.base,
+                currentHead: lane.stack ? lane.head : lane.base,
+                baseChannel: intent.baseChannel ?? null,
+              },
+            };
+            // Publish original receipt metadata atomically with activation.
+            // An interruption retains a creating Lane; replay still resumes it.
+            stageStartReceipt(tx, lane.id, receipt);
             return () => {
               if (creating) {
-                store.commitRecords(tx);
+                store.commitRecords(tx, undefined, { advisory: false });
                 lane.state = 'active';
               }
-              return {
-                revision: tx.revision,
-                result: {
-                  operationId: command.operationId,
-                  outcome: intent.outcome,
-                  siblingLanes: siblings,
-                  ...(warnings.length ? { warnings } : {}),
-                  ...laneReceipt(lane, store.path(lane.id)),
-                  base: lane.stack?.startHead ?? lane.base,
-                  head: lane.stack?.startHead ?? lane.base,
-                  currentHead: lane.head,
-                  baseChannel: intent.baseChannel ?? null,
-                },
-              };
+              return receipt;
             };
           });
         },
@@ -319,7 +372,50 @@ export function agentCheckpoint(
   return store.laneLocked(
     command.laneId,
     () => {
+      // A committed operation already owns immutable source. Replay must not
+      // recapture later edits or restore a workspace that has since been cleaned.
+      if (store.native) {
+        let tx: WorkRecordTransaction | undefined;
+        const end = Date.now() + (workLockWaitMs() || 1000);
+        for (;;) {
+          try {
+            tx = store.readRecords();
+            break;
+          } catch (error) {
+            if (!(error instanceof ForgeError && error.code === 'SOURCE_CHANGED') || Date.now() >= end)
+              throw error;
+          }
+        }
+        const original = tx?.fieldFind(
+          'lanes',
+          command.laneId,
+          'checkpoints',
+          command.operationId,
+          'operation',
+        ) as Lane['checkpoints'][number] | undefined;
+        if (original) {
+          invariant(
+            original.operation?.request === request(requestIdentity),
+            'WORK_OPERATION_CHANGED',
+            'Checkpoint operation inputs changed. Original source remains available.',
+          );
+          return {
+            revision: original.workRevision ?? tx!.revision,
+            result: {
+              operationId: command.operationId,
+              laneId: command.laneId,
+              head: original.head,
+              parent: original.parent,
+              message: original.message,
+              path: store.path(command.laneId),
+              captureCoverage: original.captureCoverage,
+            },
+          };
+        }
+      }
       let preparation = prepareCheckpoint(store, command, options.preserveMerge);
+      if (preparation.candidate)
+        prepareReceiptSource(store, preparation.candidate.lane.base, preparation.candidate.head);
       let refresh = false;
       let retryEnd: number | undefined;
       const retry = (code: string) => {
@@ -329,10 +425,19 @@ export function agentCheckpoint(
             code,
             `Checkpoint publication changed throughout lock patience. Retry original operation ${command.operationId}; existing work is preserved.`,
           );
+        if (code === 'WORK_BUSY')
+          Atomics.wait(
+            new Int32Array(new SharedArrayBuffer(4)),
+            0,
+            0,
+            Math.min(1 + Math.random() * 24, retryEnd - Date.now()),
+          );
       };
       for (;;) {
         if (refresh) {
           preparation = prepareCheckpoint(store, command, options.preserveMerge);
+          if (preparation.candidate)
+            prepareReceiptSource(store, preparation.candidate.lane.base, preparation.candidate.head);
           refresh = false;
         }
         const candidate = preparation.candidate;
@@ -344,11 +449,15 @@ export function agentCheckpoint(
               selected = store.native ? tx.fields('lanes', command.laneId) : tx.find('lanes', command.laneId),
               lane = selected?.record;
             const save = (advance = true) => {
-              tx.replace('lanes', selected!.position, lane!);
               preparedRecordCommit(store, 'Git checkpoint publication', latest => {
+                const saved = lane!.checkpoints.at(-1);
+                if (advance && saved?.operation?.id === command.operationId)
+                  saved.workRevision = latest.revision + 1;
+                tx.replace('lanes', selected!.position, lane!);
                 latest.stageLane(tx, command.laneId, version!);
                 if (after && lane!.after === after) latest.patchFields('lanes', command.laneId, { after });
-                return () => store.commitRecords(latest, latest.revision + (advance ? 1 : 0));
+                return () =>
+                  store.commitRecords(latest, latest.revision + (advance ? 1 : 0), { advisory: false });
               });
               tx = store.readRecords()!;
               version = tx.version('lanes', command.laneId);
@@ -375,7 +484,7 @@ export function agentCheckpoint(
               );
               if (pending) recoverCheckpoint(store, lane, save);
               return {
-                revision: tx.revision,
+                revision: original.workRevision ?? tx.revision,
                 result: {
                   operationId: command.operationId,
                   laneId: lane.id,
@@ -467,6 +576,7 @@ export function agentCheckpoint(
               if (!unchanged) workGit(path, ['update-ref', `refs/forge/checkpoints/${head}`, head]);
             }
             const checkpoint = {
+              ...(store.native ? { workRevision: tx.revision + 1 } : {}),
               ...(store.native && lane.pendingMerge && !options.preserveMerge
                 ? resolvedSyncCheckpoint(new NativeSource(store.root), lane, candidate!.capture.files)
                 : {}),
@@ -527,7 +637,7 @@ export function agentCheckpoint(
                     () => {
                       preparedCheckpointCurrent(new NativeSource(store.root), candidate!);
                       try {
-                        store.commitRecords(tx, undefined, { prepared: true });
+                        store.commitRecords(tx, undefined, { prepared: true, advisory: false });
                       } catch (error) {
                         if (error instanceof ForgeError && error.code === 'WORK_STALE')
                           throw checkpointMetadataChanged;
@@ -561,9 +671,11 @@ export function agentCheckpoint(
         } catch (error) {
           if (
             error === checkpointMetadataChanged ||
-            (store.native && error instanceof ForgeError && error.code === 'SOURCE_CHANGED')
+            (store.native &&
+              error instanceof ForgeError &&
+              ['SOURCE_CHANGED', 'WORK_BUSY'].includes(error.code))
           ) {
-            retry(error === checkpointMetadataChanged ? 'WORK_BUSY' : 'SOURCE_CHANGED');
+            retry(error === checkpointMetadataChanged ? 'WORK_BUSY' : (error as ForgeError).code);
             continue;
           }
           if (error !== checkpointPreparationChanged) throw error;
