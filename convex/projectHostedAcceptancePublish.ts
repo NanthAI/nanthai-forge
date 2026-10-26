@@ -183,7 +183,7 @@ export async function publishAcceptance(ctx: MutationCtx, claim: LandingClaim, n
       root: plan.root,
       pages: plan.inputPages,
       lanes: plan.lanes,
-      enabled: policy.lifecycle.completeOnAccept,
+      enabled: policy.lifecycle.completeOnAccept && !state.request.keepOpen,
     },
     automatic: attempt.actor.kind === 'agent',
     undo: { kind: 'revert', receiptId: identity.receiptId },

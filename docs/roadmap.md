@@ -104,6 +104,12 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 
 - Lifecycle mutations can commit their Lane head long before the CLI returns its advisory peer receipt. During writer contention, check the canonical saved head before replaying the same operation; expose durable mutation completion before expensive advisory hydration so builders can distinguish a committed save from a queued one.
 
+- A concurrent `start` reserved an active Lane before returning its receipt, then
+  spent several minutes waiting and preparing advisory output. Recovery required
+  reading the retained start operation from `records`. Emit the durable Lane ID
+  and path before optional peer analysis so a builder can safely use its own Lane
+  without retrying or guessing among other builders' new directories.
+
 - Repeating sync on a Lane with a pending merge returns `MERGE_PENDING` without listing its conflicting paths. Include the pending sync target and conflicting paths in that diagnostic so a merge agent can resume from the receipt.
 
 - Core finish/publication edits select 217 of 349 test files, including hosted and UI suites. Finite implementation agents need a phase-focused validation selection alongside the conservative landing selection; the broad local run competes with concurrent Lanes for check capacity and disk writes.

@@ -95,7 +95,8 @@ export const hostedAgentCommandSchemas = {
       candidateId: uuid.optional(),
       composeOperationId: uuid.optional(),
       after: uuid.nullable().default(null),
-      accept: z.literal(true).optional(),
+      accept: z.boolean().optional(),
+      keepOpen: z.boolean().optional(),
     })
     .strict(),
   cancel: z.object({ submissionId: uuid }).strict(),

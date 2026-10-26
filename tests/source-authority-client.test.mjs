@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { hostedWorkCli } from '../dist/hosted-work-cli.js';
@@ -151,6 +151,33 @@ test('failed hosted CAS never installs its proposed local authority; stale feedb
     'known CAS rejection does not strand the owner command',
   );
   assert.throws(() => nativeExecute(f.store, f.command, f.store.revision()), isStale);
+});
+
+test('completed transition replays its immutable drain proof after local work and rollback have advanced', async t => {
+  const f = setup(t),
+    input = { operationId: randomUUID(), expected: native, mode: 'server' };
+  assert.deepEqual(await transitionBoundSourceAuthority(f.store, input, f.client), server);
+  const rolledBack = { mode: 'native-owner', epoch: 2 };
+  assert.deepEqual(
+    await transitionBoundSourceAuthority(
+      f.store,
+      { operationId: randomUUID(), expected: server, mode: 'native-owner' },
+      f.client,
+    ),
+    rolledBack,
+  );
+  mkdirSync(join(f.store.directory, 'native-submissions'));
+  writeFileSync(
+    join(f.store.directory, 'native-submissions', `${randomUUID()}.json`),
+    JSON.stringify({ command: { action: 'land' } }),
+  );
+  assert.deepEqual(await transitionBoundSourceAuthority(f.store, input, f.client), server);
+  assert.deepEqual(
+    readHostState(f.store).binding.sourceAuthority,
+    rolledBack,
+    'old replay never rewinds the binding',
+  );
+  assert.equal(f.s.tables.projectSourceAuthorityTransitions.size, 2);
 });
 
 test('normal offline accepts work at epoch zero; owner writer stale feedback blocks subsequent local accepts', async t => {

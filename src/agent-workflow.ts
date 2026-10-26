@@ -75,6 +75,7 @@ import type { CheckRun, WorkView, WorkData } from './work-types.js';
 export { agentActionSchema, type AgentAction } from './agent-workflow-schema.js';
 import type { AgentAction } from './agent-workflow-schema.js';
 import { READ_ONLY_ACTIONS, SNAPSHOT_READ_ACTIONS } from './agent-read-actions.js';
+import { boundAgentSubmission } from './hosted-agent-bound.js';
 export class AgentWorkflow {
   readonly work: WorkService;
   constructor(
@@ -84,7 +85,10 @@ export class AgentWorkflow {
     this.work = new WorkService(root, localAgent(), liveMcp);
   }
   async dispatch(input: unknown) {
-    return this.dispatchRequest(input);
+    // Only finish and land can route to hosted; other actions validate before any Work read.
+    const action = input && typeof input === 'object' ? (input as { action?: unknown }).action : undefined;
+    if (action !== 'finish' && action !== 'land') return this.dispatchRequest(input);
+    return boundAgentSubmission(this.work.store, input, selected => this.dispatchRequest(selected));
   }
   private async dispatchRequest(input: unknown) {
     let selected = candidateCommand(input);

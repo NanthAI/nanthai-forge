@@ -23,6 +23,7 @@ export const hostedLandingRequestSchema = z
     candidateId: z.uuid(),
     expectedHead: hash.nullable(),
     agent: z.boolean().default(false),
+    keepOpen: z.boolean().optional(),
     check: landingCheckSelectionSchema.nullable(),
     finish: z
       .object({ composeOperationId: z.uuid(), after: z.uuid().nullable().default(null) })

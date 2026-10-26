@@ -379,7 +379,7 @@ below. The complete pinned hosted recovery/cutover still needs B1.5a/B1.5b. Foll
 throughout. No deployment, account operation or real-owner cutover was performed
 for this document.
 
-### B1.2b recommendation: drain the owner queue
+### B1.2b: drain the owner queue
 
 **Choose “drain the owner queue before the switch”, rather than implementing the
 G3 submission-ID bridge plus G6 journal bridge.** This is a one-time operator
@@ -411,6 +411,32 @@ it merely to enable cutover. If one cannot settle, remain owner-authoritative;
 there is no timeout that discards it. The tradeoff is a handover wait that may be
 longer than a bridge-enabled switch. This is less code and preserves metric 3's
 zero-dropped-landings invariant; the live zero is still to be measured by M1/B1.5b.
+
+The bound authority client records the handover marker before testing the drain
+predicate. CLI and MCP share native admission under the same owner lock. Already
+admitted requests reconcile their original native journals; new requests retain
+their operation and immutable input States in `hosted-submissions` and return
+`pending-handover` until hosted capability discovery reports server authority.
+Editing and saving remain available. Replay the original transition after its
+reported blockers settle. The transition retains its drained owner revision;
+the hosted transaction compares it with the seeded checkpoint and checks current
+owner-acceptance requests and nonterminal indexed entries/batches before changing
+the epoch. These indexed predicates participate in the same OCC transaction as
+the switch. Completed transition replays retain their original receipt.
+
+After the binding selects server authority, bound `finish` and `land` use the
+existing hosted-agent transport and H16 save path, then compose and enqueue on
+`projectHostedLanding:enqueue`. `finish` captures its primary Lane; `land` and
+siblings use their saved States. Private staging checkouts preserve those bytes
+across retries and leave working drafts untouched. The hosted request pins the
+authority epoch and exact composition/check selection. Source preparation can
+return pending before queue admission; replay the same operation to continue.
+Once enqueued, hosted workers own progress without a Mac or native listener.
+`wait:false` returns the queue receipt, and synchronous calls observe hosted
+submission versions; observation timeout remains pending. Check-only finish
+does not request acceptance, and `keepOpen` remains part of the accepting request.
+Provider OCC exhaustion retries the original payload without selecting newer
+source. Native-owner and server-shadow bindings keep their native landing path.
 
 ### Ordered cutover and forced upgrade
 

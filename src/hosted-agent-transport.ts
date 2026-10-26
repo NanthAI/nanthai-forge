@@ -1,4 +1,5 @@
 import { dirname, basename, resolve } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
 import {
   withLifecycleMetric,
   metricOperationId,
@@ -166,7 +167,7 @@ export class HostedAgentTransport {
       const result = await executeHostedAgent(session, action, command.data);
       return this.response(action, journal.operationId, result);
     } catch (error) {
-      const owner = nativeOwner(this.root);
+      const owner = nativeOwner(existsSync(this.root) ? realpathSync(this.root) : this.root);
       if (owner) rememberSourceAuthorityError(new WorkStore(owner), error, this.address.projectId);
       if (error instanceof z.ZodError)
         throw new ForgeError(
@@ -203,10 +204,19 @@ export class HostedAgentTransport {
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }
   async mutation<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
-    const value = await this.exchange.client.mutation(makeFunctionReference<'mutation'>(name), {
-      ...args,
-      projectId: this.address.projectId,
-    });
+    const request = { ...args, projectId: this.address.projectId };
+    let value: unknown;
+    for (let retry = 0; ; retry++) {
+      try {
+        value = await this.exchange.client.mutation(makeFunctionReference<'mutation'>(name), request);
+        break;
+      } catch (error) {
+        // Provider OCC exhaustion has no committed mutation. Reconcile the same
+        // receipt-pinned payload; never rediscover main, source or the epoch.
+        if (hostedActionError(error, name).code !== 'HOSTED_CONFLICT' || retry >= 3) throw error;
+        await new Promise(resolve => setTimeout(resolve, 25 * 2 ** retry));
+      }
+    }
     const metricRoot = resolve(this.root);
     recordOwnerMutation(dirname(metricRoot), undefined, `${basename(metricRoot)}.forge-metrics.jsonl`);
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;

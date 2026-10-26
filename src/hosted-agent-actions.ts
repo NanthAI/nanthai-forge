@@ -277,6 +277,19 @@ export async function executeHostedAgent(
     const candidate = hostedRecordSchema.options[3].parse(
       await session.query('projectHostedCompose:candidate', { candidateId }),
     );
+    if (command.accept === false) {
+      invariant(candidate.result.status === 'clean', 'VIEW_CONFLICT', 'Check a clean hosted Candidate.');
+      const check = await checkSelection(session, command.check);
+      const { kind: _kind, ...selection } = check;
+      void _kind;
+      return hostedCheckRequestSchema.parse({
+        operationId,
+        authorityEpoch: epoch,
+        candidateId,
+        expectedHead: candidate.result.head,
+        ...selection,
+      });
+    }
     return hostedLandingRequestSchema.parse({
       operationId,
       authorityEpoch: epoch,
@@ -287,8 +300,15 @@ export async function executeHostedAgent(
       agent: true,
       check: await checkSelection(session, command.check),
       finish: { composeOperationId, after: command.after },
+      ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
     });
   });
+  if (command.accept === false)
+    return {
+      phase: 'check',
+      composeOperationId,
+      run: await session.mutation('projectHostedChecks:enqueue', { request: canonicalPayload(request) }),
+    };
   // Account JWTs still make agent requests. Person authority is never selected by CLI input.
   const result = await session.mutation('projectHostedLanding:enqueue', {
     request: canonicalPayload(request),

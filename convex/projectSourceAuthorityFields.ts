@@ -13,5 +13,6 @@ export const sourceAuthorityTables = {
     operationId: v.string(),
     expected: sourceAuthority,
     authority: sourceAuthority,
+    ownerDrain: v.optional(v.object({ revision: v.number(), fingerprint: v.string() })),
   }).index('by_project_and_operation', ['projectId', 'operationId']),
 };

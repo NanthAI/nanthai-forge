@@ -6,6 +6,7 @@ import { sourceAuthority, nextSourceAuthority, requireSourceAuthority } from '..
 import { sourceAuthority as authorityValidator } from './projectSourceAuthorityFields';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { requireHostedOwnerDrained } from './projectSourceAuthorityDrain';
 
 /** One authorized project-row lookup, with no history scan or read-time migration. */
 export const current = query({
@@ -29,6 +30,7 @@ export const transition = mutation({
     operationId: v.string(),
     expected: authorityValidator,
     mode: authorityValidator.fields.mode,
+    ownerDrain: v.optional(v.object({ revision: v.number(), fingerprint: v.string() })),
   },
   returns: authorityValidator,
   handler: async (ctx, input) => {
@@ -51,13 +53,17 @@ export const transition = mutation({
         invariant(
           old.expected.mode === input.expected.mode &&
             old.expected.epoch === input.expected.epoch &&
-            old.authority.mode === input.mode,
+            old.authority.mode === input.mode &&
+            old.ownerDrain?.revision === input.ownerDrain?.revision &&
+            old.ownerDrain?.fingerprint === input.ownerDrain?.fingerprint,
           'WORK_OPERATION_CHANGED',
           'Replay the original authority transition and expected epoch.',
         );
         return old.authority;
       }
       const current = requireSourceAuthority(project, input.expected);
+      if (input.mode === 'server' && current.mode !== 'server')
+        await requireHostedOwnerDrained(ctx, project, input.ownerDrain);
       const authority = nextSourceAuthority(current, input.expected, input.mode);
       await ctx.db.patch(project._id, { sourceAuthority: authority });
       await ctx.db.insert('projectSourceAuthorityTransitions', {
@@ -65,6 +71,7 @@ export const transition = mutation({
         operationId: input.operationId,
         expected: input.expected,
         authority,
+        ...(input.ownerDrain ? { ownerDrain: input.ownerDrain } : {}),
       });
       return authority;
     } catch (error) {

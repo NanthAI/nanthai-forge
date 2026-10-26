@@ -104,6 +104,7 @@ const schema = z.object({
       operationId: z.uuid(),
       expected: sourceAuthoritySchema,
       mode: sourceAuthoritySchema.shape.mode,
+      ownerDrain: z.object({ revision: z.number().int().nonnegative(), fingerprint: z.string() }).optional(),
     })
     .optional(),
   hosting: hosting.optional(),

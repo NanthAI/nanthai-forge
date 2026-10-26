@@ -27,7 +27,20 @@ function setup() {
     revision: 0,
   });
   const transition = (expected = native, mode = 'server', operationId = randomUUID(), actor) =>
-    s.call('transition', authority.transition, { projectId, expected, mode, operationId }, actor);
+    s.call(
+      'transition',
+      authority.transition,
+      {
+        projectId,
+        expected,
+        mode,
+        operationId,
+        ...(s.tables.hostedProjects.get(projectId).currentBackup
+          ? { ownerDrain: { revision: 0, fingerprint: 'synthetic-drained' } }
+          : {}),
+      },
+      actor,
+    );
   return { ...s, projectId, transition };
 }
 
@@ -86,9 +99,11 @@ test('old owner completion is refused after switch and remains stale after rollb
   await s.call('complete-before', owner.complete, another);
   assert.equal(s.tables.ownerAcceptanceRequests.get(completed).state, 'rejected');
   assert.equal(s.counts.at(-1).touched.filter(x => x === 'hostedProjects').length, 1);
+  await assert.rejects(s.transition(), code('SOURCE_AUTHORITY_DRAIN_REQUIRED'));
+  await s.call('complete-original-before-switch', owner.complete, input);
   await s.transition();
   await assert.rejects(s.call('stale-complete', owner.complete, input), stale(server));
-  assert.equal(s.tables.ownerAcceptanceRequests.get(requestId).state, 'requested');
+  assert.equal(s.tables.ownerAcceptanceRequests.get(requestId).state, 'rejected');
   await s.transition(server, 'native-owner');
   await assert.rejects(
     s.call('rollback-stale-complete', owner.complete, input),
@@ -211,4 +226,55 @@ test('existing seed rejects a stale epoch using its authorized project row', asy
   );
   assert.equal(s.tables.projectHostedChannels.size, 1);
   await s.call('seed-replay', channels.seed, input); // completed receipt cannot write or rewind main
+});
+
+test('transition reports indexed nonterminal owner entries and batches without reading terminal history', async () => {
+  const s = setup();
+  const { HOSTED_WORK_INDEX_FORMAT } = await import('../dist/work-hosted-summary.js');
+  const generationId = s.insert('projectWorkGenerations', {
+    projectId: s.projectId,
+    backupId: 'backup',
+    format: HOSTED_WORK_INDEX_FORMAT,
+    status: 'ready',
+  });
+  s.patch('hostedProjects', s.projectId, { work: { generationId, backupId: 'backup' } });
+  const entry = s.insert('projectWorkRecords', {
+    projectId: s.projectId,
+    generationId,
+    collection: 'landingEntries',
+    key: 'waiting-entry',
+    status: 'awaiting-review',
+    position: 0,
+    value: '{}',
+  });
+  const batch = s.insert('projectWorkRecords', {
+    projectId: s.projectId,
+    generationId,
+    collection: 'landingBatches',
+    key: 'checking-batch',
+    status: 'checking',
+    position: 0,
+    value: '{}',
+  });
+  for (let i = 0; i < 200; i++)
+    s.insert('projectWorkRecords', {
+      projectId: s.projectId,
+      generationId,
+      collection: 'landingEntries',
+      key: `done-${i}`,
+      status: 'accepted',
+      position: i + 1,
+      value: '{}',
+    });
+  await assert.rejects(s.transition(), e => {
+    assert.equal(e.data.code, 'SOURCE_AUTHORITY_DRAIN_REQUIRED');
+    assert.match(e.data.message, /waiting-entry/);
+    assert.match(e.data.message, /checking-batch/);
+    return true;
+  });
+  assert(s.counts.at(-1).documents < 20, 'terminal history is not hydrated');
+  assert.equal(s.tables.hostedProjects.get(s.projectId).sourceAuthority, undefined);
+  s.patch('projectWorkRecords', entry, { status: 'failed' });
+  s.patch('projectWorkRecords', batch, { status: 'completed' });
+  assert.deepEqual(await s.transition(), server);
 });

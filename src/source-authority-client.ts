@@ -11,6 +11,12 @@ import {
 } from './hosted-source-authority.js';
 import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
+import { requireOwnerDrained } from './hosted-agent-owner-drain.js';
+import { digest } from './hash.js';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { durableReplace } from './native-durability.js';
+import { canonicalPayload } from './hosted-source-operation.js';
 
 /** Only call with feedback from this binding's authenticated transport. Never rewind a pin. */
 export function rememberSourceAuthorityError(store: WorkStore, error: unknown, projectId: string): void {
@@ -35,22 +41,61 @@ export async function transitionBoundSourceAuthority(
 ) {
   const binding = requireHostedBinding(store);
   invariant(z.uuid().safeParse(input.operationId).success, 'BAD_ARGUMENT', 'Retain the transition UUID.');
-  const request = {
+  let request: NonNullable<import('./host-binding.js').HostState['authorityTransition']> = {
     projectId: binding.projectId,
     deployment: binding.deployment,
     operationId: input.operationId,
     expected: sourceAuthoritySchema.parse(input.expected),
     mode: sourceAuthoritySchema.shape.mode.parse(input.mode),
   };
+  const directory = join(store.directory, 'source-authority-transitions');
+  const retainedPath = join(directory, `${input.operationId}.json`);
+  if (existsSync(retainedPath)) {
+    const retained = JSON.parse(readFileSync(retainedPath, 'utf8')) as typeof request;
+    invariant(
+      canonicalPayload({ ...retained, ownerDrain: null }) ===
+        canonicalPayload({ ...request, ownerDrain: null }),
+      'WORK_OPERATION_CHANGED',
+      'Replay the original bound authority transition.',
+    );
+    if (retained.ownerDrain)
+      request.ownerDrain = z
+        .object({ revision: z.number().int().nonnegative(), fingerprint: z.string() })
+        .parse(retained.ownerDrain);
+  }
   updateHostState(store, state => {
     invariant(
-      !state.authorityTransition || JSON.stringify(state.authorityTransition) === JSON.stringify(request),
+      !state.authorityTransition ||
+        canonicalPayload({ ...state.authorityTransition, ownerDrain: null }) ===
+          canonicalPayload({ ...request, ownerDrain: null }),
       'WORK_OPERATION_CHANGED',
       'Resume the original pending source authority transition.',
     );
+    request = state.authorityTransition ?? request;
     state.authorityTransition = request;
   });
   try {
+    if (request.mode === 'server' && request.expected.mode !== 'server' && !request.ownerDrain)
+      updateHostState(store, state => {
+        requireOwnerDrained(store);
+        request.ownerDrain = {
+          revision: store.revision(),
+          fingerprint: digest(
+            JSON.stringify({ operationId: request.operationId, revision: store.revision(), drained: true }),
+          ),
+        };
+        state.authorityTransition = request;
+      });
+    store.locked(() => {
+      mkdirSync(directory, { recursive: true });
+      if (existsSync(retainedPath))
+        invariant(
+          canonicalPayload(JSON.parse(readFileSync(retainedPath, 'utf8'))) === canonicalPayload(request),
+          'WORK_OPERATION_CHANGED',
+          'Resume the immutable authority transition payload.',
+        );
+      else durableReplace(retainedPath, canonicalPayload(request));
+    });
     const client = supplied ?? coordinationClient(binding.deployment, process.env.FORGE_AUTH_TOKEN);
     const { deployment: _deployment, ...args } = request;
     void _deployment;
