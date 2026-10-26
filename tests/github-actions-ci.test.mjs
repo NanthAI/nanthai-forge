@@ -1,3 +1,4 @@
+import { runDetails } from '../dist/work-detail-store.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -83,9 +84,14 @@ for (const tests of [[], ['tests/a.test.mjs']])
     const receipt = (await agent.dispatch(input)).result;
     assert.equal(receipt.status, 'passed');
     assert.equal(receipt.checkSelection.scope, 'partial');
-    assert.deepEqual(receipt.checkSelection.tests, tests);
+    assert.deepEqual(
+      runDetails(work.store, work.store.select('runs', receipt.runId)).checkSelection.tests,
+      tests,
+    );
+    if (tests.length) assert.equal(receipt.detailSummary.tests, tests.length);
+    else assert.equal(receipt.detailSummary, undefined);
     assert.match(receipt.coverage, /Partial evidence/);
-    const run = work.store.select('runs', receipt.runId);
+    const run = runDetails(work.store, work.store.select('runs', receipt.runId));
     assert.ok(work.store.load().schema >= 15);
     assert.equal(workSchema.safeParse({ ...work.store.load(), schema: 14 }).success, false);
     const output = readFileSync(join(work.store.directory, `check-${run.id}/stdout.log`), 'utf8');

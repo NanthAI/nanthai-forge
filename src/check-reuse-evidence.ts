@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runDetails } from './work-detail-store.js';
 import { isDeepStrictEqual as same } from 'node:util';
 import { digest } from './hash.js';
 import { readSource } from './files.js';
@@ -30,7 +31,7 @@ export const checkEvidenceFingerprint = (run: CheckRun) => digest(JSON.stringify
 /** Work's verdict alone is insufficient: the retained completion and recipe must agree. */
 export function retainedPassedCheck(store: WorkStore, value: unknown): CheckRun | undefined {
   try {
-    const run = checkRunSchema.parse(value);
+    const run = runDetails(store, checkRunSchema.parse(value));
     if (
       !successfulCheck(run) ||
       !gateCheck(run) ||

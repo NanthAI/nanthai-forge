@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { batchEntries, lostLandingCheckController } from './landing-check-recovery.js';
 import { reserveBoundaryConfirmation } from './landing-confirmation.js';
 import { checkingWait } from './landing-waiting.js';
@@ -10,7 +11,6 @@ import {
 } from './landing-diagnosis.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 import { evaluateSoloAdmission } from './landing-solo-evaluation.js';
-// SPDX-License-Identifier: Apache-2.0
 import { waitForAgentRun } from './agent-run-observer.js';
 import { batchEdit } from './landing-batch-store.js';
 import type { WorkService } from './work.js';
@@ -121,7 +121,7 @@ export async function evaluateBatch(
               entry.status !== 'checking'
             )
               return false;
-            recordDiagnosisNode(data, batch, prefix, parent, run);
+            recordDiagnosisNode(data, batch, prefix, parent, run, work.store);
             if (saved.confirmation) {
               const run = data.runs.find(run => run.id === saved.confirmation!.runId);
               saved.confirmation.verdict =

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runDetails } from './work-detail-store.js';
 import { finishChild } from './finish-child.js';
 import { batchEdit } from './landing-batch-store.js';
 import { diagnosticStatus, recordDiagnosisNode } from './landing-diagnosis.js';
@@ -39,13 +40,14 @@ export async function reserveBoundaryConfirmation(
     return false;
   // Standard runners retain the executed selection. A whole-Candidate rerun
   // repeats that selection (including the failed files), with a fresh operation.
-  const failedTests = failed.backend.testVerdicts
-    ?.filter(test => test.verdict === 'failed')
+  const detailed = runDetails(work.store, failed);
+  const failedTests = detailed
+    .backend!.testVerdicts?.filter(test => test.verdict === 'failed')
     .map(test => test.test);
   const confirmation = {
     failedRunId: failed.id,
     runId: finishChild(batch.id, `confirm:${failed.id}`),
-    tests: failedTests?.length ? failedTests : (failed.checkSelection?.tests ?? []),
+    tests: failedTests?.length ? failedTests : (detailed.checkSelection?.tests ?? []),
   };
   return batchEdit(
     work,
@@ -56,7 +58,15 @@ export async function reserveBoundaryConfirmation(
       if (saved.status !== 'checking' || saved.confirmation || prefix.runId !== failed.id) return false;
       for (const observed of saved.prefixes) {
         const run = data.runs.find(run => run.id === observed.runId);
-        if (run) recordDiagnosisNode(data, saved, observed, observed === prefix ? undefined : prefix, run);
+        if (run)
+          recordDiagnosisNode(
+            data,
+            saved,
+            observed,
+            observed === prefix ? undefined : prefix,
+            run,
+            work.store,
+          );
       }
       saved.confirmation = confirmation;
       prefix.runId = confirmation.runId;

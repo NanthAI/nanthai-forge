@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { migratedWork } from './projectWorkDetailLoad';
 import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
@@ -29,6 +30,7 @@ export async function source(
   reader?: ExchangeObjectReader,
   metadata = false,
   cacheMetadata = true,
+  currentDetails = false,
 ): Promise<SourceSnapshot> {
   const objectReader = reader ?? exchangeObjectReader(ctx, true);
   const original: { backup: Doc<'projectBackups'>; project: Doc<'hostedProjects'> } = await ctx.runQuery(
@@ -44,8 +46,11 @@ export async function source(
   // Only source return opts into owner publication metadata. Existing source
   // reads retain their current byte reader and access behavior.
   const publication = metadata ? await publicationSnapshot(ctx, original.backup, owner) : undefined;
+  const migrated = currentDetails
+    ? await migratedWork(ctx, original.backup, original.project, owner, objectReader)
+    : undefined;
   const streamed =
-    original.backup.transport === 'objects' && !publication
+    !migrated && original.backup.transport === 'objects' && !publication
       ? await resolveExchangeWork(
           (
             await objectReader.read(original.backup.projectId, owner, [
@@ -58,34 +63,40 @@ export async function source(
           pins => objectReader.read(original.backup.projectId, owner, pins),
         )
       : undefined;
-  const bytes = streamed
-    ? undefined
-    : publication?.work !== undefined
-      ? { manifest: Buffer.from(JSON.stringify(publication.manifest)), work: Buffer.from(publication.work) }
-      : original.backup.transport === 'objects'
-        ? await exchangeMetadata(ctx, original.backup, owner, objectReader)
-        : await projectArchiveMetadata(
-            ctx,
-            original.backup.storageId!,
-            original.backup.size,
-            original.backup.digest,
-            () => ctx.runQuery(internal.projectBackups.get, { id: backupId, owner }),
-            cacheMetadata,
-            original.project.r2Writes ?? false,
-          );
+  const bytes = migrated
+    ? { manifest: migrated.manifest, work: Buffer.alloc(0) }
+    : streamed
+      ? undefined
+      : publication?.work !== undefined
+        ? { manifest: Buffer.from(JSON.stringify(publication.manifest)), work: Buffer.from(publication.work) }
+        : original.backup.transport === 'objects'
+          ? await exchangeMetadata(ctx, original.backup, owner, objectReader)
+          : await projectArchiveMetadata(
+              ctx,
+              original.backup.storageId!,
+              original.backup.size,
+              original.backup.digest,
+              () => ctx.runQuery(internal.projectBackups.get, { id: backupId, owner }),
+              cacheMetadata,
+              original.project.r2Writes ?? false,
+            );
   const manifestBytes = streamed?.manifest ?? bytes!.manifest,
     manifest = sourceManifestSchema.parse(JSON.parse(Buffer.from(manifestBytes).toString('utf8'))),
     file = manifest.files.find(item => item.path === 'work.json');
   invariant(
     digest(manifestBytes) === original.backup.preview.manifestDigest &&
       file &&
-      (streamed || (digest(bytes!.work) === file.sha256 && bytes!.work.byteLength === file.size)),
+      (migrated || streamed || (digest(bytes!.work) === file.sha256 && bytes!.work.byteLength === file.size)),
     'INVALID_WORK_BACKUP',
     'Work or manifest bytes differ from the stored archive pins.',
   );
-  const data = streamed ? validateParsedWork(streamed.data) : parseWorkBytes(bytes!.work);
+  const data = migrated
+    ? validateParsedWork(migrated.data)
+    : streamed
+      ? validateParsedWork(streamed.data)
+      : parseWorkBytes(bytes!.work);
   invariant(
-    data.revision === manifest.revision &&
+    data.revision === (migrated?.revision ?? manifest.revision) &&
       (manifest.kind === 'forge-native-work-backup'
         ? data.nativeHead === manifest.head &&
           manifest.files.some(
@@ -97,7 +108,19 @@ export async function source(
     'Source format or Work revision differs from its manifest.',
   );
   await ctx.runQuery(internal.projectBackups.get, { id: backupId, owner });
-  return { ...original, manifest, data, originalWorkDigest: file.sha256, publication };
+  const effectiveManifest = migrated
+    ? {
+        ...manifest,
+        revision: migrated.revision,
+        files: [
+          ...manifest.files.map(pin => (pin.path === 'work.json' ? { ...pin, ...migrated.work } : pin)),
+          ...migrated.details
+            .filter(pin => !manifest.files.some(file => file.path === `objects/${pin.sha256}`))
+            .map(pin => ({ path: `objects/${pin.sha256}`, ...pin })),
+        ],
+      }
+    : manifest;
+  return { ...original, manifest: effectiveManifest, data, originalWorkDigest: file.sha256, publication };
 }
 export const journalEvent = (
   projectKey: string,
@@ -130,7 +153,9 @@ export async function load(
       current.work?.revision === project.work!.revision &&
       current.work?.initialRevision === project.work!.initialRevision &&
       JSON.stringify(current.work?.intentMigration ?? null) ===
-        JSON.stringify(project.work!.intentMigration ?? null)
+        JSON.stringify(project.work!.intentMigration ?? null) &&
+      JSON.stringify(current.work?.recordDetails ?? null) ===
+        JSON.stringify(project.work!.recordDetails ?? null)
     );
   };
   try {
@@ -141,11 +166,16 @@ export async function load(
         reader,
         options.metadata,
         options.cacheMetadata,
+        true,
       ),
       events: HostedEvent[] = [];
+    const migratedRevision =
+      project.work.recordDetails?.backupId === project.work.backupId
+        ? project.work.recordDetails.revision
+        : project.work.initialRevision;
     let cursor: string | null = null;
     invariant(
-      snapshot.project._id === projectId && snapshot.data.revision === project.work.initialRevision,
+      snapshot.project._id === projectId && snapshot.data.revision === migratedRevision,
       'INVALID_WORK_JOURNAL',
       'Hosted Work base differs from its source archive.',
     );
@@ -161,8 +191,10 @@ export async function load(
         });
       for (const item of page.page) {
         const operation = journalEvent(project.key, snapshot.backup.digest, item);
-        snapshot.data = migrateHostedIntents(snapshot.data, project.work.intentMigration);
-        applyHostedEvent(snapshot.data, operation);
+        if (item.previousRevision >= migratedRevision) {
+          snapshot.data = migrateHostedIntents(snapshot.data, project.work.intentMigration);
+          applyHostedEvent(snapshot.data, operation);
+        }
         events.push(operation);
       }
       if (page.isDone) break;

@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+import { compactDetailPage, slimWorkFormat } from './work-record-details.js';
+import { detailReader, detailWriter } from './work-detail-store.js';
 import { readWorkPointer } from './work-pointer.js';
 import { pendingRecordWriter } from './work-record-staging.js';
-// SPDX-License-Identifier: Apache-2.0
 import {
   closeSync,
   existsSync,
@@ -37,6 +39,7 @@ const manifestSchema = z.object({
   collections: z.record(z.string(), collectionSchema),
 });
 export type RecordManifest = z.infer<typeof manifestSchema>;
+const stagedDetails = new WeakMap<RecordManifest, () => void>();
 const fragmentSchema = z
   .object({
     kind: z.literal('forge-work-record-v2'),
@@ -222,7 +225,7 @@ export function readRecordPage(
 const legacyKey = 'legacyIntentMerge';
 function encodeStored(value: Record<string, unknown>) {
   const legacy = value[legacyKey];
-  return [16, 18, 20, 22].includes(value.schema as number) &&
+  return [16, 18, 20, 22, 24].includes(value.schema as number) &&
     legacy &&
     typeof legacy === 'object' &&
     !Array.isArray(legacy)
@@ -231,7 +234,7 @@ function encodeStored(value: Record<string, unknown>) {
 }
 function decodeStored(value: Record<string, unknown>) {
   const legacy = value[legacyKey];
-  if ([16, 18, 20, 22].includes(value.schema as number) && Array.isArray(legacy) && legacy.length === 1)
+  if ([16, 18, 20, 22, 24].includes(value.schema as number) && Array.isArray(legacy) && legacy.length === 1)
     value[legacyKey] = legacy[0];
   return value;
 }
@@ -378,6 +381,8 @@ export function prepareRecordPublication(directory: string, manifest: RecordMani
     renameSync(temp, join(directory, 'work.json'));
     syncDirectory(directory);
     recordOwnerMutation(directory, manifest.fields.revision as number);
+    stagedDetails.get(manifest)?.();
+    stagedDetails.delete(manifest);
   };
 }
 export function publishRecords(directory: string, manifest: RecordManifest) {
@@ -385,7 +390,30 @@ export function publishRecords(directory: string, manifest: RecordManifest) {
 }
 /** Write content-addressed pages only; nothing is visible until `publishRecords` switches the pointer. */
 export function stageRecords(directory: string, value: Record<string, unknown>): RecordManifest {
-  value = encodeStored(jsonValue(value) as Record<string, unknown>);
+  value = jsonValue(value) as Record<string, unknown>;
+  const putDetail = detailWriter(directory, true);
+  let slim = Number(value.schema) >= 23;
+  for (const key of value.nativeHead ? ['runs', 'automaticActions'] : []) {
+    if (!Array.isArray(value[key])) continue;
+    const before = value[key] as unknown[];
+    const after = compactDetailPage(key, before, putDetail, detailReader(directory));
+    if (after.some((record, index) => record !== before[index])) slim = true;
+    value[key] = after;
+  }
+  if (slim) {
+    value.schema = slimWorkFormat(Number(value.schema));
+    value.workDetailsMigrated = true;
+    const migration = value.workDetailMigration as { id?: string; fromSchema?: number } | undefined;
+    if (migration?.id)
+      value.workDetailMigrationReceipt = {
+        id: migration.id,
+        converter: 'work-details-v1',
+        fromSchema: migration.fromSchema,
+        revision: value.revision,
+      };
+    delete value.workDetailMigration;
+  }
+  value = encodeStored(value);
   const io = recordIO(directory),
     manifest: RecordManifest = {
       schema: 'forge-work-records-v3',
@@ -403,9 +431,10 @@ export function stageRecords(directory: string, value: Record<string, unknown>):
         io,
         field,
         true,
-        !([16, 18, 20, 22].includes(value.schema as number) && key === legacyKey),
+        !([16, 18, 20, 22, 24].includes(value.schema as number) && key === legacyKey),
       );
   }
+  stagedDetails.set(manifest, putDetail.release);
   return manifest;
 }
 export function writeRecords(directory: string, value: Record<string, unknown>): void {

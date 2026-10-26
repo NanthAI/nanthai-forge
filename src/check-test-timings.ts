@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runDetails } from './work-detail-store.js';
 import { closeSync, existsSync, openSync, readSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -57,7 +58,7 @@ export function recordCheckTimings(store: WorkStore, run: CheckRun, directory: s
   const marker = join(directory, 'test-timings-recorded');
   if (existsSync(marker)) return true;
   try {
-    const selected = new Set(run.checkSelection.tests),
+    const selected = new Set(runDetails(store, run).checkSelection!.tests),
       durations: Record<string, number> = {};
     const observe = (report: { file?: unknown; complete?: unknown; durationMs?: unknown }) => {
       if (

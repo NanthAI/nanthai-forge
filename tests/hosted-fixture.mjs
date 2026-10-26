@@ -85,6 +85,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     projectCheckRunners: new Map(),
     projectCheckRequests: new Map(),
     projectWorkHeads: new Map(),
+    projectWorkDetailMigrations: new Map(),
     projectRecoveryConnections: new Map(),
     projectWorkGenerations: new Map(),
     projectWorkRecords: new Map(),

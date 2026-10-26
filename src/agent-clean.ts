@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { automaticResult } from './work-detail-store.js';
 import {
   autoSnapshotRetentionPlan,
   autoSnapshotDiskUsage,
@@ -407,7 +408,8 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
       'Automatic cleanup supports regenerable copies and seven-day retention only.',
     );
     const original = store.select('automaticActions', automatic.id);
-    if (original?.result) return { revision: store.revision(), result: JSON.parse(original.result) };
+    const retained = automaticResult(store, original);
+    if (retained !== undefined) return { revision: store.revision(), result: JSON.parse(retained) };
   }
   const kinds = command.kinds ?? DEFAULT_KINDS,
     skippedKinds: { kind: Kind; reason: string; observed?: object }[] = [];
@@ -513,7 +515,7 @@ export function agentClean(store: WorkStore, command: CleanCommand, automatic?: 
     revision: store.revision(),
     result: automatic
       ? (JSON.parse(
-          store.select('automaticActions', automatic.id)?.result ?? JSON.stringify(result),
+          automaticResult(store, store.select('automaticActions', automatic.id)) ?? JSON.stringify(result),
         ) as typeof result)
       : {
           ...result,

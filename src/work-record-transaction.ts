@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { compactDetailPage, slimWorkFormat } from './work-record-details.js';
+import { detailReader, detailWriter } from './work-detail-store.js';
 import { assertWorkFormat } from './work-format.js';
 import { isDeepStrictEqual } from 'node:util';
 import { digest } from './hash.js';
@@ -42,6 +44,7 @@ export const isCompactWorkRecord = (record: object) =>
 
 export class WorkRecordTransaction {
   private readonly io;
+  private readonly putDetail;
   private readonly original: string;
   private readonly initial: string;
   private readonly pages: Map<string, string[]>;
@@ -55,6 +58,7 @@ export class WorkRecordTransaction {
     memo?: WorkRecordReadMemo,
   ) {
     assertWorkFormat(manifest.fields);
+    this.putDetail = detailWriter(directory, true);
     this.pages = memo?.pages ?? new Map();
     this.recordsByHash = memo?.records ?? new Map();
     this.io = recordIO(directory, false, memo ?? { json: new Map(), collections: new Map() }, true);
@@ -190,7 +194,20 @@ export class WorkRecordTransaction {
       );
     if (changes.size) index.lookup = indexUpdate(this.io, index.lookup, changes);
   }
+  private compact<K extends WorkCollection>(collection: K, value: WorkRecord<K>): WorkRecord<K> {
+    if (!this.manifest.fields.nativeHead) return value;
+    const next = compactDetailPage(
+      collection,
+      [value],
+      this.putDetail,
+      detailReader(this.directory),
+    )[0] as WorkRecord<K>;
+    if (next !== value)
+      this.setSchema(slimWorkFormat(Number(this.manifest.fields.schema)) as WorkData['schema']);
+    return next;
+  }
   replace<K extends WorkCollection>(collection: K, position: number, value: WorkRecord<K>) {
+    value = this.compact(collection, value);
     const before = this.at(collection, position),
       parsed = parseWork(
         { ...this.manifest.fields, intents: [], lanes: [], views: [], [collection]: [before] },
@@ -235,12 +252,39 @@ export class WorkRecordTransaction {
     );
     return record;
   }
+  /** Representation-only migration: selectors/positions stay exact. Publish
+   * each changed physical page once, without retaining 128 intermediate copies. */
+  replacePage<K extends WorkCollection>(collection: K, offset: number, values: WorkRecord<K>[]) {
+    const index = this.index(collection),
+      pages = new Map<number, string[]>();
+    invariant(
+      offset >= 0 && offset + values.length <= index.count,
+      'BAD_ARGUMENT',
+      'Migration page exceeds its retained collection.',
+    );
+    values.forEach((value, entry) => {
+      const position = offset + entry,
+        before = this.at(collection, position),
+        next = this.validate(collection, this.compact(collection, value));
+      invariant(
+        isDeepStrictEqual(recordKeys(before), recordKeys(next)),
+        'INVALID_WORK_STORE',
+        'A representation migration cannot change record selectors.',
+      );
+      if (isDeepStrictEqual(before, next)) return;
+      const page = Math.floor(position / pageSize);
+      const hashes = pages.get(page) ?? pageHashes(this.directory, index.pages[page]!);
+      hashes[position % pageSize] = putRecord(this.io, next);
+      pages.set(page, hashes);
+    });
+    for (const [page, hashes] of pages) index.pages[page] = this.io.put(hashes);
+  }
   /** Schema 16 completes unified fields for Intents written by execution writers. */
   private unified<K extends WorkCollection>(collection: K, value: WorkRecord<K>) {
     return collection === 'intents' && isUnifiedWork(this.manifest.fields) ? unifyIntent(value) : value;
   }
   append<K extends WorkCollection>(collection: K, value: WorkRecord<K>) {
-    const record = this.validate(collection, this.unified(collection, value)),
+    const record = this.validate(collection, this.compact(collection, this.unified(collection, value))),
       index = this.index(collection),
       position = index.count;
     this.keys(index, position, [], recordKeys(record));
@@ -301,6 +345,15 @@ export class WorkRecordTransaction {
     return record;
   }
   patchFields(collection: WorkCollection, id: string, fields: Record<string, unknown>) {
+    if (
+      (collection === 'runs' && ['checkSelection', 'backend'].some(key => Object.hasOwn(fields, key))) ||
+      (collection === 'automaticActions' && Object.hasOwn(fields, 'result'))
+    ) {
+      const found = this.find(collection, id);
+      invariant(found, 'NOT_FOUND', 'Work record not found.');
+      this.replace(collection, found.position, { ...found.record, ...fields } as typeof found.record);
+      return found.position;
+    }
     const position = this.positions(collection, id)[0];
     invariant(position !== undefined, 'NOT_FOUND', 'Work record not found.');
     const header = readFragment(this.directory, this.hash(collection, position)),
@@ -455,6 +508,7 @@ export class WorkRecordTransaction {
   }
   dispose() {
     this.io.release();
+    this.putDetail.release();
   }
   /** Call after staging mutations, outside the owner lock. The final commit
    * still verifies the original pointer before publishing these durable bytes. */

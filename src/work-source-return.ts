@@ -40,12 +40,17 @@ export function validateSourceReturn(
   manifest: z.infer<typeof sourceManifestSchema>,
 ) {
   invariant(
+    !(current.schema >= 23) || candidate.schema >= 23,
+    'WORK_UPGRADE_REQUIRED',
+    'Slim Work records require a format-23/24 checkpoint; upgrade nforge. Existing Work is preserved.',
+  );
+  invariant(
     !(current.schema >= 21) || candidate.schema >= 21,
     'WORK_UPGRADE_REQUIRED',
     'Stacked Lanes require a format-21/22 checkpoint; upgrade nforge. Existing Work is preserved.',
   );
   invariant(
-    ![16, 18, 20, 22].includes(current.schema) || [16, 18, 20, 22].includes(candidate.schema),
+    ![16, 18, 20, 22, 24].includes(current.schema) || [16, 18, 20, 22, 24].includes(candidate.schema),
     'WORK_UPGRADE_REQUIRED',
     'Unified hosted Intents require a unified format-16, format-18, format-20 or format-22 checkpoint; upgrade nforge. Existing Work is preserved.',
   );
@@ -77,7 +82,7 @@ export function validateSourceReturn(
     const next = intents.get(intent.id)!;
     invariant(
       next.base === intent.base &&
-        ([16, 18, 20, 22].includes(current.schema) || next.outcome === intent.outcome) &&
+        ([16, 18, 20, 22, 24].includes(current.schema) || next.outcome === intent.outcome) &&
         next.constraints === intent.constraints &&
         next.createdAt === intent.createdAt &&
         next.baseChannel?.name === intent.baseChannel?.name &&

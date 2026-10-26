@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { automaticResult } from './work-detail-store.js';
 import { createHash } from 'node:crypto';
 import { optimisticLanding } from './autonomy-policy.js';
 import { readPolicy } from './work-autonomy.js';
@@ -19,8 +20,9 @@ export async function acceptedLifecycle(work: WorkService, move: ChannelMove, ke
   if (optimisticLanding(policy)) return {}; // Retain original Lanes and working copies for recovery.
   if (keepOpen || !policy.lifecycle.completeOnAccept || move.status !== 'accepted') return {};
   const original = work.store.select('automaticActions', id);
-  if (original?.result)
-    return JSON.parse(original.result) as {
+  const retained = automaticResult(work.store, original);
+  if (retained !== undefined)
+    return JSON.parse(retained) as {
       completed?: Awaited<ReturnType<typeof completeAccepted>>;
       lifecycleAction?: { summary: string; undo: string };
       cleanup?: unknown;

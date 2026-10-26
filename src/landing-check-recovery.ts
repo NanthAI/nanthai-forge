@@ -66,7 +66,7 @@ export async function recoverLandingCheck(
       const entries = (data.landingEntries ?? []).filter(entry => batch.entryIds.includes(entry.id));
       if (!selected || !current || !lostLandingCheckController(current, entries)) return;
       if (saved.status !== 'checking') return;
-      recordDiagnosisNode(data, batch, selected, undefined, current);
+      recordDiagnosisNode(data, batch, selected, undefined, current, work.store);
       selected.runId = finishChild(run.id, 'controller-recovery');
       delete selected.reservedAt;
       if (saved.confirmation?.runId === run.id) saved.confirmation.runId = selected.runId;

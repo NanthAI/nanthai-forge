@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runDetails, automaticResult } from './work-detail-store.js';
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { WorkStore } from './work-store.js';
 import { NativeSource, nativeOwner, type NativeFile } from './native-source.js';
@@ -129,8 +130,25 @@ export function readWorkDetail(store: WorkStore, input: unknown) {
   const parsed = detailCommandSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Select a retained review and its original source pins.');
   return store.observing(() => {
-    const data = store.load(),
-      command = parsed.data;
+    const command = parsed.data;
+    if (command.kind === 'run') {
+      const run = store.select('runs', command.id);
+      invariant(run, 'NOT_FOUND', 'Run not found.');
+      invariant(run.head === command.expectedHead, 'EVIDENCE_CHANGED', 'Select the original run head.');
+      return { revision: store.revision(), result: { kind: 'run' as const, run: runDetails(store, run) } };
+    }
+    if (command.kind === 'automatic-action') {
+      const action = store.select('automaticActions', command.id);
+      invariant(action, 'NOT_FOUND', 'Automatic action not found.');
+      return {
+        revision: store.revision(),
+        result: {
+          kind: 'automatic-action' as const,
+          action: { ...action, result: automaticResult(store, action) },
+        },
+      };
+    }
+    const data = store.load();
     if (command.kind === 'lane') {
       const lane = data.lanes.find(item => item.id === command.id);
       invariant(lane, 'NOT_FOUND', 'Lane not found.');

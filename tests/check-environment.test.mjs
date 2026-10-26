@@ -1,3 +1,4 @@
+import { runDetails } from '../dist/work-detail-store.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -469,7 +470,9 @@ test('runner pins exact native comparison and records command selection in recei
     'full',
   );
   assert.equal(result.checkSelection.scope, 'scoped');
-  assert.deepEqual(runReceipt(result).checkSelection.tests, ['tests/fixture.test.mjs']);
+  assert.deepEqual(runReceipt(runDetails(f.work.store, result)).checkSelection.tests, [
+    'tests/fixture.test.mjs',
+  ]);
   assert.match(result.details, /Check selection: scoped/);
 });
 

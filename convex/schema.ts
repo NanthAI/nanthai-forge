@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workDetailMigration, workDetailTables } from './projectWorkDetailFields';
 import { hostedSeedTables } from './projectHostedSeedFields';
 import { backfillFields } from './r2BackfillFields';
 import { ownerAcceptanceTables } from './ownerAcceptanceFields';
@@ -249,6 +250,7 @@ export const projectBackupPreview = v.object({
   channels: v.array(v.object({ name: v.string(), head: v.string() })),
 });
 export const hostedWorkFields = v.object({
+  recordDetails: v.optional(workDetailMigration),
   intentMigration: v.optional(
     v.object({ operationId: v.string(), revision: v.number(), generationId: v.id('projectWorkGenerations') }),
   ),
@@ -393,6 +395,7 @@ export const projectProposalDocument = v.object({
   ...projectProposalFields,
 });
 export default defineSchema({
+  ...workDetailTables,
   ...hostedSeedTables,
   // Explicit current Channel pins; recovery/display snapshots never select these.
   projectHostedChannels: defineTable({

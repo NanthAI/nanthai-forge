@@ -10,12 +10,17 @@ import { RETENTION_MS } from './clean-retention.js';
 import type { WorkStore } from './work-store.js';
 
 const hash = /^[0-9a-f]{64}$/;
-export type RecordRoots = { kept: Map<string, Set<string>>; metadata: string[] };
+export type RecordRoots = {
+  kept: Map<string, Set<string>>;
+  metadata: string[];
+  details: Map<string, { sha256: string; size: number }>;
+};
 /** Mark exact record links; opaque extension pins are conservatively retained too.
  * Source hashes are never opened or collected by this walker. */
 export function recordRoots(store: WorkStore, available: Set<string>, now = Date.now()): RecordRoots {
   const kept = new Map<string, Set<string>>(),
-    metadata: string[] = [];
+    metadata: string[] = [],
+    details = new Map<string, { sha256: string; size: number }>();
   function mark(id: string, reason: string, required = false) {
     if (!available.has(id) && !required) return;
     const reasons = kept.get(id) ?? new Set<string>();
@@ -40,6 +45,18 @@ export function recordRoots(store: WorkStore, available: Set<string>, now = Date
     } else if (value && typeof value === 'object') {
       const row = value as Record<string, unknown>,
         manifest = recordManifest(value);
+      for (const field of ['detailRef', 'resultRef']) {
+        const pin = row[field] as { sha256?: unknown; size?: unknown } | undefined;
+        if (
+          pin &&
+          typeof pin.sha256 === 'string' &&
+          hash.test(pin.sha256) &&
+          typeof pin.size === 'number' &&
+          Number.isSafeInteger(pin.size) &&
+          pin.size >= 0
+        )
+          details.set(pin.sha256, { sha256: pin.sha256, size: pin.size });
+      }
       if (manifest) {
         for (const index of Object.values(manifest.collections)) collection(index, reason);
         visit(manifest.fields, reason);
@@ -108,6 +125,7 @@ export function recordRoots(store: WorkStore, available: Set<string>, now = Date
             processAlive(value as Parameters<typeof processAlive>[0])
           ) {
             for (const id of available) mark(id, `pending record writer: ${name}`);
+            visit(value, `pending detail writer: ${name}`);
           }
           continue;
         }
@@ -143,5 +161,5 @@ export function recordRoots(store: WorkStore, available: Set<string>, now = Date
       walk(directory, true, directory, `${entry.path}/`);
     }
   }
-  return { kept, metadata };
+  return { kept, metadata, details };
 }

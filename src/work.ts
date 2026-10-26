@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+import { migrateWorkDetails } from './work-detail-migration.js';
 import { composeLandingInputs } from './landing-compose-inputs.js';
 import { collectRecords } from './work-record-collection.js';
 import { withMetricRequester } from './self-metrics-journal.js';
@@ -8,7 +10,6 @@ import { candidateCommand } from './candidate-names.js';
 import { pendingStatus } from './pending-status.js';
 import { decorateRepair } from './agent-repair-lineage.js';
 import { landingRepairNotices } from './landing-repair-notice.js';
-// SPDX-License-Identifier: Apache-2.0
 import { executionBase } from './work-intent-local.js';
 import { migrateIntentWork } from './work-intent-migration.js';
 import { withWorkLockOptions } from './work-lock.js';
@@ -523,6 +524,22 @@ export class WorkService {
       ].includes(String(input.action))
     )
       return historicalWork(this.store, input, expectedRevision);
+    if (
+      input &&
+      typeof input === 'object' &&
+      'action' in input &&
+      input.action === 'migrate-record-details'
+    ) {
+      let migrated = 0;
+      for (;;) {
+        const page = this.store.locked(() => {
+          this.store.records();
+          return migrateWorkDetails(this.store);
+        });
+        migrated += page.migrated;
+        if (page.complete) return { revision: this.store.revision(), result: { complete: true, migrated } };
+      }
+    }
     if (input && typeof input === 'object' && 'action' in input && input.action === 'migrate-intents') {
       // Explicit owner action only; take a verified backup first. Retry returns the original receipt.
       const migration = migrateIntentWork(this.store);

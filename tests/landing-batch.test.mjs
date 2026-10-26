@@ -46,7 +46,7 @@ test('four ready entries land with one exact combined check and one Channel move
   await f.checkCandidates();
   await drainLandingBatches(f.work, 'main');
   const data = f.store.load();
-  assert.equal(data.schema, 17);
+  assert.equal(data.schema, 23);
   assert.equal(data.landingBatches.length, 1);
   assert.equal(data.runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length, 1);
   assert.equal(data.channelMoves.length, 1);
@@ -658,7 +658,7 @@ test('format17 batches migrate to unified format18 and keep working without down
   await f.candidate('after-migration.txt');
   await drainLandingBatches(f.work, 'main');
   data = f.store.load();
-  assert.equal(data.schema, 18);
+  assert.equal(data.schema, 24);
   assert.ok(data.landingEntries.every(entry => entry.status === 'accepted'));
   assert.ok(data.intents.every(intent => typeof intent.title === 'string'));
   assert.equal(f.content('before-migration.txt'), 'before-migration.txt\n');
@@ -691,7 +691,7 @@ for (const unifiedFirst of [false, true])
     assert.deepEqual(f.store.load(), migrated);
     await drainLandingBatches(new AgentWorkflow(f.root).work, 'main');
     const data = f.store.load();
-    assert.equal(data.schema, 20);
+    assert.equal(data.schema, 24);
     assert.equal(data.landingBatches.length, 1);
     assert.equal(data.landingBatches[0].entryIds.length, 8);
     assert.equal(data.landingBatches[0].status, 'completed');
@@ -703,7 +703,7 @@ for (const unifiedFirst of [false, true])
     await drainPostAccept(f.store);
     await f.candidate('later-small.txt');
     await drainLandingBatches(f.work, 'main');
-    assert.equal(f.store.load().schema, 20);
+    assert.equal(f.store.load().schema, 24);
   });
 
 for (const snapshot of [false, true])

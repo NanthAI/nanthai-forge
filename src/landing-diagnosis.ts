@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runDetails } from './work-detail-store.js';
 import { gateCheck } from './check-reuse-key.js';
 import { validateReusedCheck } from './check-reuse-evidence.js';
 import { invariant } from './errors.js';
@@ -67,7 +68,7 @@ export async function retainDiagnosisNode(
   return batchEdit(
     work,
     batch.id,
-    data => recordDiagnosisNode(data, batch, prefix, parent, run),
+    data => recordDiagnosisNode(data, batch, prefix, parent, run, work.store),
     driver.beforePublish,
     batch.channel,
   );
@@ -80,7 +81,12 @@ export function recordDiagnosisNode(
   prefix: BatchPrefix,
   parent?: BatchPrefix,
   run?: CheckRun,
+  store?: WorkStore,
 ) {
+  if (run?.detailRef) {
+    invariant(store, 'INVALID_WORK_STORE', 'Diagnosis needs the retained run detail.');
+    run = runDetails(store, run);
+  }
   const saved = data.landingBatches!.find(item => item.id === batch.id)!;
   const first = data.landingEntries!.find(entry => entry.id === batch.entryIds[0])!;
   const view = data.views.find(view => view.id === prefix.viewId)!;

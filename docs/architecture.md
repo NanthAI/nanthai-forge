@@ -142,6 +142,54 @@ Automatic snapshots reuse unchanged content-addressed blobs and clone newly chan
 
 **Work records.** Native owners keep Work in `.forge/work`. Git-backed owners keep it in the Git common directory under `forge-work`. `work.json` is a small manifest that points to immutable, content-addressed record pages. A save writes new records, syncs them, then atomically replaces the manifest. An interrupted save leaves the previous snapshot in place. Lock-free pointer readers validate one open descriptor, allowing atomic replacement to unlink that descriptor while retaining its coherent bytes. In-place mutation and unsafe file types still fail explicitly; source capture retains its separate pathname validation. The owner lock serializes manifest publication and shared Channel mutations. Landing queue edits, native acceptance, main-audit selection and GitHub mirror recording prepare against one committed pointer outside that lock. They stage changed immutable records, then verify the exact pointer and driver/authority fences before publishing; a concurrent commit retries without overwriting either writer. Git/network operations hold no Work writer lock. When enabled for the publication, derived peer caches warm after writer release and before the mutation receipt returns, using their immutable page pins. Owner workspace refresh serializes on its own lock and selects current main after admission. Agent Lane operations also take a per-Lane lock: checkpoint capture and native sync file writes run outside the owner lock; sync publishes only its Lane into a fresh manifest with a source-field CAS, preserving concurrent changes to other Lanes. Native start reserves its records, materializes outside the owner lock, then publishes activation. Start activation also retains its original receipt metadata in the Lane, without local filesystem paths. Start/checkpoint publish without inline preview preparation or peer indexing. Outside the owner writer lock, their receipts include queued hosted activity, indexed peer observations, pending overlap delivery, coordination recording, friction and start warnings. Hosted activity uses the transport-state lock shared by binding writers, without entering the owner writer queue. A local per-operation receipt preserves those observations on replay. Incomplete indexes remain explicitly `local-incomplete`. Checkpoint preparation primes saved region summaries before publication. Checkpoint receipts retain overlap-save metrics from immutable manifests, using the latest save delta and excluding accepted peer heads; missing ancestry or source leaves metric coverage incomplete. Receipts compare those summaries and committed contract data, retain observed conflict identities with current repair/sync lineage, and resolve links only from local identity (otherwise returning `links.error`). CLI/MCP source re-indexing, overlap recomputation and enabled previews run in a finite detached refresh; that refresh never marks unreturned notices delivered. A pending ticket makes worker startup visible; MCP shutdown and synthetic-owner teardown join scheduled refreshes. Read-only actions never schedule a refresh. Stacked start replay preserves original head/base while reporting the latest saved `currentHead`. Exact-operation checkpoint replay reads retained history without source capture or workspace restoration. Check execution and observation hold no Work, Lane or Channel lock; after a Channel CAS race finish either proves the enabled disjoint fast-path or syncs, composes and checks a fresh pinned attempt before rejoining the acceptance queue. Transient contention at the final cancellation/spawn journal step retries without rematerializing, changing the run ID or releasing its machine-capacity ticket; a never-started command is not marked failed merely because this lock was busy. The per-operation finish journal guard prevents duplicate drivers of the same operation; it does not exclude other agents.
 
+Native Work formats 23 (separate Intents) and 24 (unified Intents) retain run
+selection inventories, coverage details and named verdicts in hash-bound Work
+objects. The run keeps its outcome, source/check/provider pins, timing fields,
+selection scope, counts and at most twenty bounded failing test names. Detail
+objects use the existing Zstandard codec; their object hash covers the encoded
+bytes. Native export, seed, exchange, recovery and object collection follow those
+pins. Full Work loads and indexed list reads do not hydrate them. Check reuse,
+flake history, timing ingestion and diagnosis load selected details and preserve
+the original execution evidence fingerprint. Agent receipts include the detail
+pin and counts. A native `read-work-detail` command with `kind: "run"`, `id`
+and `expectedHead` hydrates that selected run; `kind: "automatic-action"` with
+`id` reads an original automatic result. Hosted detail reads resolve the selected record, verify its object
+and recheck the generation and current access before returning it.
+
+Automatic-action records keep a small result summary plus the immutable full
+result pin. Lifecycle completion and cleanup retries read that full result, so a
+lost reply preserves the original response. No action history or result is aged
+out or deleted by this change. Git-backed owners retain their existing inline
+representation.
+
+`nforge work ROOT '{"action":"migrate-record-details"}' REVISION` migrates a native
+owner in finite record pages, atomically publishing each cursor with its records.
+The representation change preserves the Work revision, identities, old pages and
+receipt digests. A retry resumes the saved page; a completed retry writes nothing.
+Ordinary native writers externalize new or changed detailed records too. Upgrade
+all writers sharing the owner first: previous CLIs reject formats 23/24 through
+`WORK_UPGRADE_REQUIRED` before preparing a write.
+
+For hosted Work, `nforge hosted-work DEPLOYMENT PROJECT_ID
+'{"action":"migrate-record-details","operationId":"UUID"}'` uses the same page
+conversion under existing owner authority in native-owner and server modes. Its
+original operation saves a cursor after each page. Publication checks the original
+backup, Work revision and authority epoch, then selects a compact record catalog
+and invalidates the disposable index. Original backups, source identities,
+acceptances and journal request bytes remain intact. Loads start at the migrated
+journal revision and replay later events; original journal rows remain readable.
+Object-backed migration reads selected catalog pages. Legacy archives use their
+existing compatibility loader. Final catalog composition currently loads one
+complete original Work before replacing its migrated records; it does not build
+multiple complete snapshots or a new source archive.
+
+The standalone synthetic measurement is
+`node --expose-gc tests/measure-work-record-details.mjs` after `npm run build:core`.
+It reports portable Work and logical record bytes, retained record/detail disk
+bytes and five warm-filesystem full-load samples for 1,446 runs and 1,968 actions.
+Old immutable record versions remain on disk until the existing explicit
+collection workflow; migration itself applies no retention policy.
+
 Lock admission uses FIFO filesystem tickets with process-start identities. Writers wait up to ten minutes by default (`FORGE_WORK_LOCK_WAIT_MS`); agent `start`, `checkpoint` and `sync` accept `waitMs`, and `lockWaitMs` selects lock patience separately from finish's existing observation window. Waiting emits compact stderr progress initially and every five seconds with queue position, operation/run identity, elapsed time and published holder phase. Check observation reports queued/preparing/running phases without taking a writer lock. Finish-driver and landing queues also use bounded waits (`FORGE_LANDING_LOCK_WAIT_MS`, falling back to the Work lock setting); timeout returns a typed, retryable outcome. `WORK_BUSY` after timeout includes available holder identity and instructions to replay the original operation. A not-yet-published holder is described as pending admission. Dead local holders and queue tickets recover; ambiguous/remote locks remain intact. All writers must use the current queue-aware CLI for FIFO ordering; the exclusive owner file still protects against older writers. `FORGE_WORK_LOCK_TRACE=/absolute/file.jsonl` records operation, actor, lock path, wait and hold milliseconds for each released lock. No source or prompt bytes enter this optional trace. Nothing is capped or deleted automatically.
 
 Native composition prepares its pinned source merge outside the owner lock. Direct compose commands retain their Work revision precondition. Finish and land instead revalidate the selected Lane heads, Intent source base and dependencies against current locked Work, retaining the prepared merge across unrelated metadata writes. Publication restores any newly merged objects collected during preparation and writes the Candidate in the short owner critical section. Receipt-reconciled phases retry contention with the same operation ID, including transient admission tickets during prepared record publication; changed source pins remain explicit failures. Pinned review detail reads use an immutable Work snapshot without joining the writer queue. Idle landing-worker observations with no active runs also avoid writer admission.

@@ -1,3 +1,4 @@
+import { runDetails } from '../dist/work-detail-store.js';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -184,7 +185,10 @@ for (const code of [false, true])
       code ? 'interaction' : 'docs',
       JSON.stringify(receipt.run),
     );
-    assert.deepEqual(receipt.run.checkSelection.tests, code ? ['tests/shared.test.mjs'] : []);
+    assert.deepEqual(
+      runDetails(f.store, f.store.select('runs', receipt.run.runId)).checkSelection.tests,
+      code ? ['tests/shared.test.mjs'] : [],
+    );
     assert.equal(receipt.run.head, receipt.acceptance.head);
     assert.equal(receipt.run.interaction.eligible, true);
     assert.equal(receipt.run.interaction.basis, code ? 'main-full-coverage' : 'docs-overlap');
@@ -198,7 +202,7 @@ for (const code of [false, true])
     const audit = data.runs.find(run => run.mainCheck && run.head === receipt.acceptance.head);
     assert.equal(audit?.status, 'passed');
     assert.equal(audit.checkSelection.scope, 'full');
-    assert.equal(data.schema, 15);
+    assert.equal(data.schema, 23);
     const view = data.views.find(view => view.id === receipt.view.viewId);
     assert.equal(scopedPostAccept(data, view).mode, 'full');
     const exact = data.runs.find(run => run.id === receipt.run.runId);
@@ -249,7 +253,7 @@ for (const code of [false, true])
         data.views.find(view => view.id === exact.viewId).resolution = { viewId: randomUUID() };
       },
     ].entries()) {
-      const changed = structuredClone(data);
+      const changed = structuredClone({ ...data, runs: data.runs.map(run => runDetails(f.store, run)) });
       mutate(changed);
       const fallback = interactionEvidence(
         { native: true, root: f.root, load: () => changed },
@@ -279,7 +283,7 @@ for (const code of [false, true])
     t.after(() => rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
     await restoreNativeWork(exported.path, target);
     const restored = new WorkStore(target).load();
-    assert.equal(restored.schema, 15);
+    assert.equal(restored.schema, 23);
     assert.deepEqual(restored.runs.find(run => run.id === exact.id).interaction, exact.interaction);
     assert.deepEqual(restored.runs.find(run => run.id === exact.id).checkSelection, exact.checkSelection);
   });

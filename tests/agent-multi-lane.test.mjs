@@ -100,7 +100,7 @@ for (const native of [true, false]) {
     assert.equal(data.views.length, 1);
     assert.equal(data.runs.length, 1);
     assert.equal(data.channelMoves.length, 1);
-    assert.equal(data.schema, 12);
+    assert.equal(data.schema, native ? 23 : 12);
     const attributed = structuredClone(data);
     attributed.lanes[0].checkpoints[0].actor = { kind: 'agent', name: 'Synthetic H17 actor' };
     assert.deepEqual(

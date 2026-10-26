@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { automaticResult, runDetails } from '../dist/work-detail-store.js';
 // Direct focused runs must also avoid the user's real check queue and saved login.
 import './check-runtime.mjs';
 import test from 'node:test';
@@ -105,7 +106,9 @@ test('finish removes completed Lane; acceptance replay never deletes a reopened 
   assert.equal(existsSync(lane.path), false, 'terminal replay does not rematerialize a cleaned Lane');
   assert.equal(p.store.select('lanes', lane.laneId).state, 'completed');
   const actions = allRecords(p.store, 'automaticActions');
-  const action = actions.find(item => item.result && removedLane(JSON.parse(item.result), lane.laneId));
+  const action = actions.find(
+    item => item.result && removedLane(JSON.parse(automaticResult(p.store, item)), lane.laneId),
+  );
   assert.ok(action);
   assert.match(action.action.undo, /reopen/);
   assert.match(action.action.summary, new RegExp(lane.laneId));
@@ -208,8 +211,9 @@ test('terminal check removes workspace and runtime while retained logs and artif
   assert.equal(existsSync(join(directory, 'runtime')), false);
   const receipt = JSON.parse(readFileSync(join(directory, 'result.json'), 'utf8'));
   assert.equal(receipt.status, 'passed');
-  for (const [key, value] of Object.entries(receipt)) assert.deepEqual(saved[key], value, key);
-  assert.deepEqual(saved.checkSelection, {
+  for (const [key, value] of Object.entries(receipt))
+    assert.deepEqual(runDetails(p.store, saved)[key], value, key);
+  assert.deepEqual(runDetails(p.store, saved).checkSelection, {
     scope: 'scoped',
     reason: 'Synthetic evidence before cleanup',
     tests: ['tests/synthetic.test.mjs'],
@@ -225,7 +229,9 @@ test('terminal check removes workspace and runtime while retained logs and artif
   const action = allRecords(p.store, 'automaticActions').find(
     item =>
       item.result &&
-      JSON.parse(item.result).removed.some(group => group.items.some(item => item.runId === saved.id)),
+      JSON.parse(automaticResult(p.store, item)).removed.some(group =>
+        group.items.some(item => item.runId === saved.id),
+      ),
   );
   assert.match(action.action.undo, /Checks reconstruct workspaces/);
 });
@@ -252,7 +258,8 @@ test('policy-off terminal cleanup preserves Work format and immutable run eviden
     receipt = JSON.parse(readFileSync(join(directory, 'result.json'), 'utf8'));
   assert.equal(p.store.load().schema, schema);
   assert.deepEqual(p.store.load().automaticActions ?? [], actions);
-  for (const [key, value] of Object.entries(receipt)) assert.deepEqual(saved[key], value, key);
+  for (const [key, value] of Object.entries(receipt))
+    assert.deepEqual(runDetails(p.store, saved)[key], value, key);
   assert.equal(existsSync(join(directory, 'workspace')), false);
   assert.equal(existsSync(join(directory, 'runtime')), false);
   assert.ok(existsSync(lane.path));
@@ -278,7 +285,7 @@ test('terminal handling immediately cleans remote source copies only when lifecy
     if (enabled) {
       const actions = allRecords(p.store, 'automaticActions').filter(action => action.result);
       const removed = actions.flatMap(action =>
-        JSON.parse(action.result).removed.flatMap(group => group.items),
+        JSON.parse(automaticResult(p.store, action)).removed.flatMap(group => group.items),
       );
       for (const leaf of ['modal-source', 'github-actions-source'])
         assert.ok(removed.some(item => item.path === join(directory, leaf)));

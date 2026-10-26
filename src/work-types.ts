@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 import { decisionRecordSchema } from './decision-types.js';
 import { frictionEventSchema } from './friction-types.js';
 import { checkEnvironmentSchema } from './check-environment-schema.js';
 export { checkEnvironmentSchema } from './check-environment-schema.js';
 import { landingEntrySchema, landingBatchSchema } from './landing-batch-types.js';
 import { checkBackendSchema } from './check-backend.js';
-// SPDX-License-Identifier: Apache-2.0
 import { hostedRecoverySchema } from './recovery-hosted-protocol.js';
 import { z } from 'zod';
 import { deliveryHandoffSchema } from './agent-handoff-types.js';
@@ -409,6 +409,17 @@ export const checkRunSchema = z
     recovery: recoveryCheckSchema.optional(),
     backend: checkBackendSchema.optional(),
     id,
+    detailRef: z
+      .object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().safe().nonnegative() })
+      .optional(),
+    detailSummary: z
+      .object({
+        tests: z.number().safe().nonnegative(),
+        coverageTests: z.number().safe().nonnegative(),
+        verdicts: z.record(z.string(), z.number().safe().nonnegative()),
+        failedTests: z.array(z.string().max(512)).max(20),
+      })
+      .optional(),
     failureSummary: z.string().max(4096).optional(),
     mainCheck: z.object({ channel: z.string() }).optional(),
     viewId: id,
@@ -1049,6 +1060,7 @@ export const workSchema = z
       z.literal(17),
       z.literal(19),
       z.literal(21),
+      z.literal(23),
     ]),
     landingEntries: z.array(landingEntrySchema).optional(),
     landingBatches: z.array(landingBatchSchema).optional(),
@@ -1067,7 +1079,17 @@ export const workSchema = z
       )
       .optional(),
     automaticActions: z
-      .array(z.object({ id, at: z.string(), action: automaticActionSchema, result: z.string().optional() }))
+      .array(
+        z.object({
+          id,
+          at: z.string(),
+          action: automaticActionSchema,
+          result: z.string().optional(),
+          resultRef: z
+            .object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().safe().nonnegative() })
+            .optional(),
+        }),
+      )
       .optional(),
     frictionEvents: z.array(frictionEventSchema).optional(),
     decisions: z.array(decisionRecordSchema).optional(),
@@ -1119,6 +1141,8 @@ export const workSchema = z
       ) &&
         !data.intents.some(intent => intent.lifecycle?.some(entry => entry.operation))) ||
         data.schema >= 13) &&
+      ((!data.runs.some(run => run.detailRef) && !data.automaticActions?.some(action => action.resultRef)) ||
+        data.schema >= 23) &&
       (!data.lanes.some(lane => lane.stack) || data.schema >= 21) &&
       (!data.lanes.some(
         lane =>
@@ -1312,6 +1336,8 @@ export const exportWorkCommandSchema = z.object({
   deduplicateArtifacts: z.boolean().optional(),
 });
 export const detailCommandSchema = z.discriminatedUnion('kind', [
+  z.object({ action: z.literal('read-work-detail'), kind: z.literal('run'), id, expectedHead: oid }),
+  z.object({ action: z.literal('read-work-detail'), kind: z.literal('automatic-action'), id }),
   z.object({
     action: z.literal('read-work-detail'),
     kind: z.literal('lane'),

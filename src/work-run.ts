@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+import { runDetails } from './work-detail-store.js';
 import { withoutLandingWorker } from './landing-worker-context.js';
 import { checkReuseKey } from './check-reuse-key.js';
 import { prepareRunRegistration } from './work-run-preparation.js';
@@ -18,7 +20,6 @@ import { pollCancellation } from './work-cancel-poll.js';
 import { shardLogName } from './modal-shard-logs.js';
 import { localCost, modalRunCost } from './check-cost.js';
 import { launchModalRun } from './work-modal-run.js';
-// SPDX-License-Identifier: Apache-2.0
 import { withWorkLockOptions } from './work-lock.js';
 import { wakeGithubPush } from './github-auto-push.js';
 import { lightweightDocsRun } from './work-docs-admission.js';
@@ -98,7 +99,10 @@ export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>, adop
           (!['modal', 'github-actions'].includes(run.backend?.actual ?? '') ||
             result.data.backend?.pin === run.backend?.pin)
         ) {
-          Object.assign(run, result.data);
+          const hydrated = runDetails(store, run);
+          delete run.detailRef;
+          delete run.detailSummary;
+          Object.assign(run, hydrated, result.data);
           recordCheckTimings(store, run, path);
           changed = true;
           if (!run.cancelRequested || run.status !== 'interrupted') continue;
@@ -195,6 +199,12 @@ export async function executeOwnedRun(
   complete?: (error?: unknown) => void,
 ) {
   try {
+    const detailed = runDetails(store, claimed);
+    if (detailed !== claimed) {
+      delete claimed.detailRef;
+      delete claimed.detailSummary;
+      Object.assign(claimed, detailed);
+    }
     await start(store, claimed);
   } catch {
     // Claiming ownership must not leave a live PID attached to an execution
@@ -831,7 +841,9 @@ export function runWork(
     if (existing) {
       invariant(
         JSON.stringify(
-          existing.checkSelection?.scope === 'partial' ? existing.checkSelection.tests : undefined,
+          existing.checkSelection?.scope === 'partial'
+            ? runDetails(store, existing).checkSelection!.tests
+            : undefined,
         ) === JSON.stringify(command.tests) &&
           existing.viewId === command.viewId &&
           existing.head === command.expectedHead &&

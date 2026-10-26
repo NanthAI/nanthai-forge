@@ -266,7 +266,7 @@ test('late original check evidence survives a driver replacement while stale set
   assert.equal(f.store.load().landingEntries[0].status, 'accepted');
 });
 
-test('legacy writers preserve optional evaluation state and no Work format upgrade is needed', async t => {
+test('legacy writers preserve optional evaluation state before completion results promote the Work format', async t => {
   const f = await fixture(t);
   await f.candidate('compatible.txt');
   const batch = await select(f),
@@ -283,7 +283,7 @@ test('legacy writers preserve optional evaluation state and no Work format upgra
   assert.equal(f.store.load().schema, 17);
   await drainLandingBatches(f.work, 'main');
   assert.equal(f.main().id, batchAcceptanceId(batch, saved.prefixes[0].viewId));
-  assert.equal(f.store.load().schema, 17);
+  assert.equal(f.store.load().schema, 23);
 });
 
 test('at runner capacity repeated drain observations publish no unchanged Work', async t => {

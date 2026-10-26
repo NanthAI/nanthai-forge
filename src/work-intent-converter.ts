@@ -27,7 +27,7 @@ const count = (data: {
 /** Pure, retry-stable conversion. No clock, random IDs, IO, or production reader wiring. */
 export function convertWork15To16(
   input: WorkData | UnifiedWorkData,
-  target: 16 | 18 | 20 | 22 = 16,
+  target: 16 | 18 | 20 | 22 | 24 = 16,
   options: { sameIdentityEdits?: ReadonlySet<string> } = {},
 ): UnifiedWorkData {
   if (input.schema === 16) {
@@ -37,10 +37,11 @@ export function convertWork15To16(
   invariant(
     input.schema === 15 ||
       (target !== 16 && input.schema === 17) ||
-      ((target === 20 || target === 22) && input.schema === 19) ||
-      (target === 22 && input.schema === 21),
+      ((target === 20 || target === 22 || target === 24) && input.schema === 19) ||
+      ((target === 22 || target === 24) && input.schema === 21) ||
+      (target === 24 && input.schema === 23),
     'WORK_UPGRADE_REQUIRED',
-    'Intent conversion requires Work 15/16, Work 17 targeting 18/20/22, Work 19 targeting 20/22, or Work 21 targeting 22.',
+    'Intent conversion requires Work 15/16, Work 17 targeting 18/20/22, Work 19 targeting 20/22, Work 21 targeting 22/24, or Work 23 targeting 24.',
   );
   workSchema.parse(input); // Validate without replacing original objects or extension fields.
   const source = structuredClone(input);
@@ -187,7 +188,7 @@ export function convertWork15To16(
     ...output,
     intentMergeReceipt: {
       converter: 'intent-merge-v1',
-      fromSchema: source.schema as 15 | 17 | 19 | 21,
+      fromSchema: source.schema as 15 | 17 | 19 | 21 | 23,
       toSchema: target,
       counts: {
         before: { ...count(source), ...(sameIdentityEdits ? { sameIdentityEdits } : {}) },
@@ -216,17 +217,31 @@ export function convertWorkTo18(
   input: WorkData | UnifiedWorkData,
   options: { sameIdentityEdits?: ReadonlySet<string> } = {},
 ): UnifiedWorkData {
-  if (input.schema === 16 || input.schema === 18 || input.schema === 20 || input.schema === 22) {
+  if (
+    input.schema === 16 ||
+    input.schema === 18 ||
+    input.schema === 20 ||
+    input.schema === 22 ||
+    input.schema === 24
+  ) {
     unifiedWorkSchema.parse(input);
     return {
       ...structuredClone(input),
-      schema: input.schema === 22 ? 22 : input.schema === 20 ? 20 : 18,
+      schema: input.schema === 24 ? 24 : input.schema === 22 ? 22 : input.schema === 20 ? 20 : 18,
     } as UnifiedWorkData;
   }
   invariant(
-    input.schema === 15 || input.schema === 17 || input.schema === 19 || input.schema === 21,
+    input.schema === 15 ||
+      input.schema === 17 ||
+      input.schema === 19 ||
+      input.schema === 21 ||
+      input.schema === 23,
     'WORK_UPGRADE_REQUIRED',
-    'Intent conversion requires Work format 15, 16, 17, 18, 19, 20, 21 or 22.',
+    'Intent conversion requires Work format 15, 16, 17, 18, 19, 20, 21, 22, 23 or 24.',
   );
-  return convertWork15To16(input, input.schema === 21 ? 22 : input.schema === 19 ? 20 : 18, options);
+  return convertWork15To16(
+    input,
+    input.schema === 23 ? 24 : input.schema === 21 ? 22 : input.schema === 19 ? 20 : 18,
+    options,
+  );
 }

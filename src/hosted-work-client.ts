@@ -25,6 +25,7 @@ export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
     })
     .strict(),
   z.object({ action: z.literal('workspace') }).strict(),
+  z.object({ action: z.literal('migrate-record-details'), operationId: z.uuid() }).strict(),
   z
     .object({
       action: z.literal('migrate-intents'),
@@ -93,8 +94,8 @@ async function workspace(client: HostedWorkTransport, projectId: string): Promis
   return JSON.parse(value) as Workspace;
 }
 /** Hydrates this selected record only; Intent notes/lifecycle remain separately paged histories. */
-async function detail(
-  client: HostedWorkTransport,
+export async function readIndexedWorkDetail(
+  client: Pick<HostedWorkTransport, 'query'>,
   args: { projectId: string; generationId: string; collection: string; id: string; sourceRevision?: number },
 ) {
   const { sourceRevision, ...selection } = args;
@@ -159,6 +160,21 @@ export async function dispatchHostedWork(
   );
   try {
     const request = parsed.data;
+    if (request.action === 'migrate-record-details') {
+      let result: { complete: boolean };
+      do {
+        result = JSON.parse(
+          (await client.action(makeFunctionReference('projectWorkDetailMigrationActions:step'), {
+            projectId,
+            operationId: request.operationId,
+          })) as string,
+        );
+        progress?.(
+          `Work detail migration ${request.operationId}: ${result.complete ? 'completed' : 'page saved'}.`,
+        );
+      } while (!result.complete);
+      return result;
+    }
     if (request.action === 'migrate-intents')
       return await runHostedIntentMigration(client, projectId, request, progress);
     if (request.action === 'accept') {
@@ -188,14 +204,29 @@ export async function dispatchHostedWork(
       'WORK_STALE',
       'The selected source generation changed. Start a fresh page from its current workspace.',
     );
-    if (request.action === 'detail')
-      return await detail(client, {
+    if (request.action === 'detail') {
+      const selected = await readIndexedWorkDetail(client, {
         projectId,
         generationId: current.generationId,
         ...(current.sourceRevision === undefined ? {} : { sourceRevision: current.sourceRevision }),
         collection: request.collection,
         id: request.id,
       });
+      const row = selected.value as { detailRef?: unknown; resultRef?: unknown } | null;
+      if (
+        (request.collection === 'runs' && row?.detailRef) ||
+        (request.collection === 'automaticActions' && row?.resultRef)
+      ) {
+        const value = await client.action(makeFunctionReference('projectWorkRecordDetails:detail'), {
+          projectId,
+          generationId: current.generationId,
+          collection: request.collection,
+          id: request.id,
+        });
+        return { ...selected, value: JSON.parse(value as string) };
+      }
+      return selected;
+    }
     let cursor = request.cursor;
     if (cursor?.startsWith(cursorPrefix)) {
       let binding;

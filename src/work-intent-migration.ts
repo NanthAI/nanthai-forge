@@ -49,7 +49,7 @@ export function migrateIntentWork(store: WorkStore, options: { beforeSwitch?: ()
   return store.locked(
     () => {
       const current = store.load();
-      if ([18, 20, 22].includes(Number(current.schema))) {
+      if ([18, 20, 22, 24].includes(Number(current.schema))) {
         const data = current as unknown as Migrated;
         return {
           migrated: false,

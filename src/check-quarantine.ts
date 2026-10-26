@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runDetails } from './work-detail-store.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -71,6 +72,8 @@ function observations(store: WorkStore): Observation[] {
     : store.load().runs;
   return [
     ...runs
+      .filter(run => run.endedAt && ['passed', 'failed'].includes(run.status))
+      .map(run => runDetails(store, run))
       .filter(run => run.backend?.testVerdicts && run.endedAt && ['passed', 'failed'].includes(run.status))
       .map(run => ({
         id: run.id,

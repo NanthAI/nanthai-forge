@@ -52,15 +52,15 @@ export const intentAliasSchema = z.object({ aliasId: id, intentId: id });
 const counts = z.record(z.string(), z.number().int().nonnegative());
 export const intentMergeReceiptSchema = z.object({
   converter: z.literal('intent-merge-v1'),
-  fromSchema: z.union([z.literal(15), z.literal(17), z.literal(19), z.literal(21)]),
-  toSchema: z.union([z.literal(16), z.literal(18), z.literal(20), z.literal(22)]),
+  fromSchema: z.union([z.literal(15), z.literal(17), z.literal(19), z.literal(21), z.literal(23)]),
+  toSchema: z.union([z.literal(16), z.literal(18), z.literal(20), z.literal(22), z.literal(24)]),
   counts: z.object({ before: counts, after: counts, foldedPairs: z.number().int().nonnegative() }),
   hashes: z.object({ input: hash, output: hash, intents: hash, planningItems: hash, planningComments: hash }),
 });
 export const unifiedWorkSchema = z
   .object({
     ...workSchema.shape,
-    schema: z.union([z.literal(16), z.literal(18), z.literal(20), z.literal(22)]),
+    schema: z.union([z.literal(16), z.literal(18), z.literal(20), z.literal(22), z.literal(24)]),
     intents: z.array(unifiedIntentSchema),
     initiatives: z.array(initiativeSchema),
     intentAliases: z.array(intentAliasSchema),
@@ -84,7 +84,7 @@ const partialUnifiedWorkSchema = unifiedWorkSchema.extend({
 export const isUnifiedWork = (value: unknown) =>
   !!value &&
   typeof value === 'object' &&
-  [16, 18, 20, 22].includes((value as { schema?: unknown }).schema as number);
+  [16, 18, 20, 22, 24].includes((value as { schema?: unknown }).schema as number);
 /**
  * Validate stored Work with the schema its format names. Schema-16 Intents may lack `base`
  * until their first Lane captures it; execution readers reach Intents through Lanes and Views.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { detachReturnMetadata } from './projectReturnMetadataStore';
 import { requireActiveReturn } from './projectReturnSupersede';
@@ -5,7 +6,6 @@ import { indexActivity } from '../src/work-hosted-index';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { commandProjection } from './projectWorkProjection';
-// SPDX-License-Identifier: Apache-2.0
 import { workProject, setWorkHead } from './projectWorkHead';
 import { acceptanceEvidence } from './autonomyFields';
 import { acceptanceActor } from './projectAutonomy';
@@ -247,7 +247,7 @@ export const returnSource = internalMutation({
       );
       invariant(
         !project.work?.intentMigration ||
-          (input.projection && [16, 18, 20].includes(JSON.parse(input.projection.metadata).schema)),
+          (input.projection && [16, 18, 20, 22, 24].includes(JSON.parse(input.projection.metadata).schema)),
         'WORK_UPGRADE_REQUIRED',
         'Hosted Intents migrated while this checkpoint was preparing; return a unified format-16, format-18 or format-20 checkpoint. Existing Work is preserved.',
       );

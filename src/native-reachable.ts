@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workDetailPins } from './work-record-details.js';
 import { hostedRecoveryObjects } from './recovery-hosted-read.js';
 import { validateNativeContributions } from './native-contribution-objects.js';
 import { NativeSource, parseNativeState } from './native-source.js';
@@ -99,6 +100,12 @@ export function nativeReachable(
     const bytes = source.object(id);
     onObject?.(id, bytes, false);
     ids.add(id);
+  }
+  for (const pin of workDetailPins(data)) {
+    const bytes = source.object(pin.sha256);
+    invariant(bytes.length === pin.size, 'INVALID_WORK_STORE', 'Retained Work detail size differs.');
+    onObject?.(pin.sha256, bytes, false);
+    ids.add(pin.sha256);
   }
   return [...ids].sort();
 }

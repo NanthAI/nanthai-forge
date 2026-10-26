@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runDetails } from './work-detail-store.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,7 +54,7 @@ export async function modalPlan(
   }
   const selection =
     run.checkSelection?.scope === 'partial'
-      ? run.checkSelection
+      ? runDetails(store, run).checkSelection!
       : standard
         ? standardSelection({
             files,

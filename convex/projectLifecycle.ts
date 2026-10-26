@@ -271,6 +271,7 @@ export const purge = internalMutation({
       'projectCheckRunners',
       'projectWorkRecords',
       'projectWorkGenerations',
+      'projectWorkDetailMigrations',
     ] as const) {
       const rows = await ctx.db
         .query(table)

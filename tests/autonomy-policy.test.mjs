@@ -1,3 +1,4 @@
+import { automaticResult } from '../dist/work-detail-store.js';
 // SPDX-License-Identifier: Apache-2.0
 import './check-runtime.mjs';
 import test from 'node:test';
@@ -281,7 +282,7 @@ test('autonomous cleanup only touches eligible copies and records regeneration i
     action = allRecords(p.store, 'automaticActions').find(
       item =>
         item.result &&
-        (JSON.parse(item.result).removed ?? [])
+        (JSON.parse(automaticResult(p.store, item)).removed ?? [])
           .flatMap(group => group.items)
           .some(item => item.laneId === lane.laneId),
     );

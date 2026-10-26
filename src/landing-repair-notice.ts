@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runDetails } from './work-detail-store.js';
 import { digest } from './hash.js';
 import { diagnosticCause } from './landing-observation.js';
 import { noticeParticipant, type ConflictNotice } from './agent-conflict-notice.js';
@@ -67,7 +68,9 @@ export function landingRepairNotices(store: WorkStore, laneId?: string): Conflic
     errors: [run.details, ...(run.error ? [run.error.message] : [])],
     selection: {
       known: !!run.checkSelection,
-      ...(run.checkSelection ? { scope: run.checkSelection.scope, tests: run.checkSelection.tests } : {}),
+      ...(run.checkSelection
+        ? { scope: run.checkSelection.scope, tests: runDetails(store, run).checkSelection!.tests }
+        : {}),
       ...(run.backend?.pin ? { plan: run.backend.pin } : {}),
     },
     logs: { operationId: run.id, streams: ['stdout', 'stderr'] },

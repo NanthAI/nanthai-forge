@@ -28,6 +28,7 @@ export const viewReceipt = (view: WorkView) => ({
 });
 export const runReceipt = (run: CheckRun) => ({
   ...(run.backend ? { backend: run.backend } : {}),
+  ...(run.detailRef ? { detailRef: run.detailRef, detailSummary: run.detailSummary } : {}),
   operationId: run.id,
   runId: run.id,
   viewId: run.viewId,

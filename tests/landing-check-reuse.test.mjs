@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runDetails } from '../dist/work-detail-store.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
@@ -434,7 +435,7 @@ test('retained Blacksmith pass survives Node patch and runner-label changes with
   const reused = f.store.select('runs', f.prefix.runId);
   assert.equal(reused.reusedFrom.runId, f.original.id);
   assert.deepEqual(
-    { scope: reused.checkSelection.scope, tests: reused.checkSelection.tests },
+    { scope: reused.checkSelection.scope, tests: runDetails(f.store, reused).checkSelection.tests },
     { scope: plan.selection.scope, tests: plan.selection.tests },
   );
   // Avoid a post-accept audit: this test stops at the exact passing landing receipt.

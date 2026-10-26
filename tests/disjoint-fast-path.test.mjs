@@ -499,7 +499,7 @@ test(
   },
 );
 
-test('scoped acceptance queues full main while disjoint policy stays off and format13 stays readable', t => {
+test('scoped acceptance queues full main while disjoint policy stays off and retains selection detail', t => {
   const f = fixture(t, false),
     candidate = f.candidate('b.txt');
   f.store.locked(() => {
@@ -515,7 +515,7 @@ test('scoped acceptance queues full main while disjoint policy stays off and for
   const { move } = f.accept(candidate);
   assert.deepEqual(move.postAccept, { checkId: f.check.id, mode: 'full', reason: 'scoped-check' });
   assert.equal(move.fastPath, undefined);
-  assert.equal(f.store.load().schema, 13);
+  assert.equal(f.store.load().schema, 23);
   assert.equal(f.store.load().autonomyPolicy.acceptance.disjointFastPath, false);
 });
 
