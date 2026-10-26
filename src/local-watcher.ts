@@ -2,7 +2,7 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { subscribeWatcher, failWatcherHelper, type WatchMessage } from './local-watcher-runtime.js';
+import { subscribeWatcher, type WatchMessage } from './local-watcher-runtime.js';
 export { watcherRuntime } from './local-watcher-runtime.js';
 
 export type WatchHealth = { status: 'healthy' | 'probing' | 'degraded'; code?: string };
@@ -61,7 +61,7 @@ export function watchLocal(
   };
   const deadline = (code: string, ms = probeMs) => {
     clearTimeout(timer);
-    timer = setTimeout(() => failWatcherHelper(code), ms);
+    timer = setTimeout(() => connection?.fail(code), ms);
     if (!persistent) timer.unref();
   };
   const beginProbe = () => {
@@ -139,7 +139,7 @@ export function watchLocal(
       active.delete(handle);
       cleanupProbe();
       closing = new Promise<void>(resolve => {
-        const bound = setTimeout(() => failWatcherHelper('WATCH_CLOSE_TIMEOUT'), closeMs);
+        const bound = setTimeout(() => connection?.fail('WATCH_CLOSE_TIMEOUT'), closeMs);
         resolveClose = () => {
           clearTimeout(bound);
           connection?.release();

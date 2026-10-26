@@ -35,11 +35,16 @@ The local native owner is canonical for Forge's own development. A hosted projec
 
 ## Local filesystem watching
 
-All native filesystem hints use `src/local-watcher.ts`. Each parent process lazily
-starts at most one owned child and multiplexes its subscriptions by ID. The last
-close releases the helper. Native open and close run only in that child, so a
-synchronous FSEvents hang cannot block the owner or agent event loop or shutdown.
-Worker threads can still wait in native teardown during Node shutdown.
+All native filesystem hints use `src/local-watcher.ts`. Processes attached to the
+same owner share one helper over a private local socket. A process-identity lease
+under the owner's `.forge/work` directory is elected under a recoverable lock;
+a dead lease can be replaced without reclaiming a live or reused PID. Identical
+path/recursive subscriptions share a native watcher and route events to every
+attached client. Socket disconnect releases that client's subscriptions, and the
+last disconnect exits the helper. Unowned diagnostic paths use a private helper.
+Native open and close run only in the helper, so a synchronous FSEvents hang
+cannot block the owner or agent event loop or shutdown. Worker threads can still
+wait in native teardown during Node shutdown.
 
 Opening errors (including EMFILE, ENOSPC and EPERM) mark the affected subscription
 degraded. Startup, native open and private-probe open have separate three-second
@@ -50,7 +55,7 @@ helper owns its private directory independently of subscribers; the parent track
 cleanup if it must kill the helper. Probe directories use the real temporary path,
 never source. Both probe close and subscription close wait at most 250 ms for an
 acknowledgement. A timeout degrades all subscriptions on that helper, kills it,
-disconnects IPC and unrefs it without waiting for native teardown. A replacement
+disconnects the affected transport and unrefs it without waiting for native teardown. A replacement
 requires an existing consumer's probe or a new subscription, a completed prior
 process exit, and the one-minute failure backoff. No retry timer is installed.
 
@@ -1351,7 +1356,12 @@ starts no local owner/listener. Source reads reuse the verified H04 object cache
 return saved Lane/State/blob pins and recheck current authorization before returning
 bytes, without Work/history hydration or substitution of local drafts. Only an
 explicit live run or submission wait creates subscriptions; every exit and server
-disconnect closes them. Finite status/observe and idle connections install no observer or timer.
+disconnect closes them. Finite status/observe installs no observer. All stdio MCP
+entry points close on stdin end/close or a broken output pipe, and after fifteen
+minutes without a request (`FORGE_MCP_IDLE_MS` overrides the deadline). One
+unreferenced timeout sleeps while idle; it is removed while any request is in
+flight and rearmed after the last response. Closing releases graph workers,
+watcher attachments and live waits without taking over background owner work.
 Account authentication never selects person acceptance in these tools. Live
 provisioning and provider qualification remain separate.
 

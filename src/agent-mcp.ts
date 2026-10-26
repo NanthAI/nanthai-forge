@@ -3,7 +3,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { McpStdioTransport } from './mcp-stdio.js';
 import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
 
@@ -194,8 +194,12 @@ export async function startAgentMcp(deployment: string, token: string | undefine
   const close = () => {
     void server.close();
   };
+  server.server.onclose = () => {
+    process.off('SIGINT', close);
+    process.off('SIGTERM', close);
+  };
   process.once('SIGINT', close);
   process.once('SIGTERM', close);
-  await server.connect(new StdioServerTransport());
+  await server.connect(new McpStdioTransport());
   return server;
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { registerHostedWorkTools } from './mcp-hosted-work.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { McpStdioTransport } from './mcp-stdio.js';
 import { watchCoordination } from './coordination-watch.js';
 import { z } from 'zod';
 import { ForgeError } from './errors.js';
@@ -140,8 +140,13 @@ export async function startCoordinationMcp(deployment: string, projectId: string
     session.stop();
     void server.close();
   };
+  server.server.onclose = () => {
+    session.stop();
+    process.off('SIGINT', close);
+    process.off('SIGTERM', close);
+  };
   process.once('SIGINT', close);
   process.once('SIGTERM', close);
-  await server.connect(new StdioServerTransport());
+  await server.connect(new McpStdioTransport());
   return server;
 }

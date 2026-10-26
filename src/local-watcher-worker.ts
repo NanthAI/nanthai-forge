@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-type Command = { id: number; type: string; path: string; recursive: boolean; probe: number };
+export type Command = { id: number; type: string; path: string; recursive: boolean; probe: number };
 type Probe = {
   directory: string;
   watcher?: FSWatcher;
@@ -14,12 +14,15 @@ type Probe = {
 };
 /** One child multiplexes every subscription in its parent. A native hang stalls
  * only this helper; the parent bounds each acknowledgement and can abandon it. */
-export function startLocalWatcher() {
-  const targets = new Map<number, FSWatcher>();
+export function startLocalWatcher(output?: (message: object, done: () => void) => void) {
+  type Target = { watcher: FSWatcher; ids: Set<number>; key: string };
+  const targets = new Map<number, Target>();
+  const shared = new Map<string, Target>();
   let probe: Probe | undefined;
   const queued = new Map<number, Command>();
   const send = (message: object, done = () => {}) => {
-    if (process.connected) process.send?.(message, done);
+    if (output) output(message, done);
+    else if (process.connected) process.send?.(message, done);
   };
   const failed = (id: number, error: NodeJS.ErrnoException) =>
     send({ id, type: 'degraded', code: error.code ?? 'WATCH_FAILED' });
@@ -102,15 +105,25 @@ export function startLocalWatcher() {
       if (probe.watcher) send({ id, probe: message.probe, type: 'probe-ready' });
     }
   };
-  process.on('message', (message: Command) => {
+  const receive = (message: Command) => {
     const { id } = message;
     try {
       if (message.type === 'open') {
-        const target = watch(message.path, { recursive: message.recursive }, (event, name) =>
-          send({ id, type: 'event', event, name: name?.toString() ?? null }),
-        );
+        const key = JSON.stringify([message.path, message.recursive]);
+        let target = shared.get(key);
+        if (!target) {
+          const ids = new Set<number>();
+          const watcher = watch(message.path, { recursive: message.recursive }, (event, name) => {
+            for (const id of ids) send({ id, type: 'event', event, name: name?.toString() ?? null });
+          });
+          target = { watcher, ids, key };
+          watcher.on('error', error => {
+            for (const id of ids) failed(id, error);
+          });
+          shared.set(key, target);
+        }
+        target.ids.add(id);
         targets.set(id, target);
-        target.on('error', error => failed(id, error));
         send({ id, type: 'opened' });
       } else if (message.type === 'close') {
         queued.delete(id);
@@ -120,8 +133,13 @@ export function startLocalWatcher() {
         targets.delete(id);
         if (!target) send({ id, type: 'closed' });
         else {
-          target.once('close', () => send({ id, type: 'closed' }));
-          target.close();
+          target.ids.delete(id);
+          if (target.ids.size) send({ id, type: 'closed' });
+          else {
+            shared.delete(target.key);
+            target.watcher.once('close', () => send({ id, type: 'closed' }));
+            target.watcher.close();
+          }
         }
       } else if (message.type === 'probe') {
         requestProbe(message);
@@ -129,8 +147,21 @@ export function startLocalWatcher() {
     } catch (error) {
       failed(id, error as NodeJS.ErrnoException);
     }
+  };
+  process.once('exit', () => {
+    if (probe) rmSync(probe.directory, { recursive: true, force: true });
   });
-  process.once('disconnect', () => process.exit(0));
-  send({ type: 'ready' });
+  if (!output) {
+    process.on('message', receive);
+    process.once('disconnect', () => process.exit(0));
+    send({ type: 'ready' });
+  }
+  return receive;
 }
-if (process.argv[1] === fileURLToPath(import.meta.url)) startLocalWatcher();
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  if (process.argv[2]) {
+    void import('./local-watcher-owner.js').then(({ startSharedWatcher }) =>
+      startSharedWatcher(process.argv[2]!),
+    );
+  } else startLocalWatcher();
+}

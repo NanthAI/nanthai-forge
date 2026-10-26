@@ -899,7 +899,11 @@ appear as planned file overlaps before either save and never become high-risk
 saved-region evidence. No new declaration action or mandatory step is needed.
 An attached MCP transport that supports logging notifications watches local
 journal publications and emits compact notices for its selected Lane; file-system
-events wake it, and closing the connection removes the watcher. The durable inbox
+events wake it. Connections for one owner share one watcher helper; closing a
+connection removes its attachment, and the last attachment exits the helper.
+Stdio EOF, close and broken output pipes close the MCP connection. Idle MCP
+servers close after two hours without requests (`FORGE_MCP_IDLE_MS` can
+select another duration); an in-flight request suspends that deadline. The durable inbox
 and next result remain authoritative when notifications are unavailable.
 
 Landing uses the same ready/smaller/earlier-start ordering as predictive overlap.

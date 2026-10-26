@@ -9,7 +9,7 @@ import { localActor } from './work-actor.js';
 import { inputAssessmentCommandSchema } from './work-input-types.js';
 import { nativeObjectCommandSchema } from './native-objects.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { McpStdioTransport } from './mcp-stdio.js';
 import { z } from 'zod';
 import { Workspace } from './workspace.js';
 import { ForgeError } from './errors.js';
@@ -293,7 +293,7 @@ export async function startMcp(
     void cleanup();
   };
   try {
-    await server.connect(new StdioServerTransport());
+    await server.connect(new McpStdioTransport());
   } catch (error) {
     await server.close();
     throw error;

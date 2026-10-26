@@ -67,7 +67,10 @@ async function connect(t, root, env, work = true) {
   await client.connect(transport);
   t.after(async () => {
     await client.close();
-    assert.equal(stderr, '');
+    // Concurrent owner observers can legitimately report FIFO lock progress on
+    // stderr. Protocol output is still parsed by the SDK; other diagnostics fail.
+    const diagnostics = stderr.split('\n').filter(line => line && !line.startsWith('waiting for lock: '));
+    assert.deepEqual(diagnostics, []);
   });
   const call = async (name, args = {}) => {
     const response = await client.callTool({ name, arguments: args });
