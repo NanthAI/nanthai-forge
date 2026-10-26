@@ -1,6 +1,5 @@
-import { checkToolFence } from './check-tool-fence.js';
-import { allRecords } from './agent-lifecycle.js';
 // SPDX-License-Identifier: Apache-2.0
+import { checkToolFence } from './check-tool-fence.js';
 import { validatePrefixRun } from './landing-diagnosis.js';
 import { hostname } from 'node:os';
 import { processAlive } from './local-process.js';
@@ -13,7 +12,7 @@ import { NativeSource } from './native-source.js';
 import { actionsCheckRuntime, checkRoute } from './check-backend.js';
 import { effectivePolicy } from './autonomy-policy.js';
 import { readPolicy } from './work-autonomy.js';
-import { checkPassthrough } from './check-environment.js';
+import { checkReuseKey, reusableCheckInputs } from './check-reuse-key.js';
 import { observeCheckInputs } from './work-inputs.js';
 import { modalPlan, modalRuntime, type ModalPlan } from './modal-plan.js';
 import { checkEnvironment } from './check-environment.js';
@@ -41,27 +40,18 @@ const same = isDeepStrictEqual;
 function recipe(plan: ModalPlan) {
   const inputs = Object.fromEntries(
     Object.entries(plan).filter(
-      ([name]) => !['runId', 'viewId', 'head', 'pin', 'source', 'output', 'costSafetyMargin'].includes(name),
+      ([name]) =>
+        !['runId', 'viewId', 'head', 'pin', 'source', 'output', 'costSafetyMargin', 'runtime'].includes(name),
     ),
   );
   return {
     ...inputs,
     selection: { scope: plan.selection.scope, tests: plan.selection.tests },
-    groups: { count: plan.groups.length, tests: plan.groups.flat().sort() },
+    groups: { tests: plan.groups.flat().sort() },
   };
 }
 function tree(store: WorkStore, head: string) {
   return new NativeSource(store.root).state(head).files;
-}
-function observedInputs(run: CheckRun) {
-  return (
-    checkPassthrough(run.check).every(name => name in run.environment.env) &&
-    (run.check.declaredInputs ?? []).every(
-      (input, index) =>
-        run.inputObservations?.[index]?.status === 'observed' &&
-        same(input, run.inputObservations[index]!.input),
-    )
-  );
 }
 
 export async function reuseLandingCheck(
@@ -137,13 +127,14 @@ async function reuseCheck(
     environment,
     ...(view.mainCheck ? { mainCheck: view.mainCheck } : {}),
     inputObservations: observeCheckInputs(store, check, view.head, environment),
-    backend: route,
+    backend: { ...route, ...(route.actual !== 'local' ? { runtime } : {}) },
     status: 'queued',
     startedAt: new Date().toISOString(),
     runner: { pid: process.pid, host: 'reuse' },
     details: '',
   };
-  if (!observedInputs(draft)) return;
+  draft.reuseKey = checkReuseKey(store, draft);
+  if (!draft.reuseKey || !reusableCheckInputs(draft)) return;
   const candidates = (store.readRecords()?.all('runs', 'passed', 'status') ?? store.load().runs).filter(
     run =>
       successful(run) &&
@@ -151,13 +142,8 @@ async function reuseCheck(
       !run.optimistic &&
       !run.recovery &&
       run.interaction === undefined &&
-      run.check.id === check.id &&
       run.check.definition === check.definition &&
-      same({ ...run.check, at: '' }, { ...check, at: '' }) &&
-      same(run.environment, draft.environment) &&
-      same(run.inputObservations, draft.inputObservations) &&
-      observedInputs(run) &&
-      run.backend?.actual === route.actual,
+      run.reuseKey === draft.reuseKey,
   );
   if (!candidates.length) return;
   const directory = mkdtempSync(join(store.directory, 'check-reuse-'));
@@ -173,13 +159,6 @@ async function reuseCheck(
     } catch {
       return;
     }
-    const localExecutable = () =>
-      observeCheckInputs(
-        store,
-        { ...check, declaredInputs: [{ kind: 'tool', executable: check.executable }] },
-        draft.head,
-        draft.environment,
-      )?.[0];
     for (const candidate of candidates.reverse()) {
       const original = retainedPassedCheck(store, candidate);
       if (!original) continue;
@@ -196,28 +175,11 @@ async function reuseCheck(
         !(plan.standard && plan.selection.scope === 'full' && original.checkSelection?.scope === 'full')
       )
         continue;
-      const executable = route.actual === 'local' ? localExecutable() : undefined;
       try {
         if (!same(tree(store, original.head), files)) continue;
-        if (route.actual === 'local') {
-          // Legacy local runs have no recipe/runtime pin. A checked batch retains
-          // the admitted Node bytes; arbitrary external executables remain unknown.
-          const oldBatch = allRecords<LandingBatch>(store, 'landingBatches').find(batch =>
-            batch.prefixes.some(prefix => prefix.runId === original.id),
-          );
-          const pins = oldBatch?.entryIds.map(id => store.select('landingEntries', id)?.runtimeSnapshot);
-          if (
-            executable?.status !== 'observed' ||
-            !pins?.length ||
-            pins.some(
-              pin =>
-                !pin?.nodeBinary ||
-                pin.nodeExecutable !== executable.locator ||
-                pin.nodeBinary !== executable.sha256,
-            )
-          )
-            continue;
-          const changes = readJson(store, original.id, 'changes.json') as Record<string, unknown>;
+        if (original.backend?.actual === 'local') {
+          const changes = readJson(store, original.id, 'changes.json') as Record<string, unknown> | undefined;
+          if (!changes && !(plan.standard && plan.selection.scope === 'full')) continue;
           const current = JSON.parse(
             readSource(directory, 'changes.json', 4 * 1024 * 1024)!.toString('utf8'),
           );
@@ -296,10 +258,12 @@ async function reuseCheck(
             )
               return;
             if (
-              !same(observeCheckInputs(store, check, draft.head, draft.environment), draft.inputObservations)
+              checkReuseKey(store, {
+                ...draft,
+                inputObservations: observeCheckInputs(store, check, draft.head, draft.environment),
+              }) !== draft.reuseKey
             )
               return;
-            if (route.actual === 'local' && !same(executable, localExecutable())) return;
             if (!toolsCurrent()) return;
             const now = new Date().toISOString();
             const reused: CheckRun = {
@@ -315,8 +279,10 @@ async function reuseCheck(
               details: `reused check ${original.id} from ${original.endedAt}`,
               backend: {
                 ...route,
+                actual: original.backend?.actual ?? route.actual,
+                ...(original.backend?.runtime ? { runtime: original.backend.runtime } : {}),
                 cost: {
-                  runner: route.actual,
+                  runner: original.backend?.actual ?? route.actual,
                   billedSeconds: 0,
                   billedMinutes: 0,
                   estimatedCostUsd: 0,

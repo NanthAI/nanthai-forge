@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { currentCheckReuseKey, gateCheck } from './check-reuse-key.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { evidenceView } from './work-evidence.js';
@@ -57,8 +58,12 @@ export function assessInvariant(
       )
         reasons.push('Source, ordered inputs or dependencies differ.');
       if (check?.definition !== run.check.definition) reasons.push('The check definition changed.');
-      if (environment.fingerprint !== run.environment.fingerprint)
-        reasons.push('Recorded runtime settings changed.');
+      if (
+        environment.fingerprint !== run.environment.fingerprint &&
+        (!run.reuseKey || currentCheckReuseKey(store, run, environment) !== run.reuseKey)
+      )
+        reasons.push('Recorded check inputs changed.');
+      if (!gateCheck(run)) reasons.push('An explicit partial test list cannot satisfy this gate.');
       if (run.cancelRequested) reasons.push('Cancellation was requested.');
       if (run.checkSelection?.scope === 'partial')
         reasons.push('Explicit test-file runs are partial evidence, not a landing gate.');

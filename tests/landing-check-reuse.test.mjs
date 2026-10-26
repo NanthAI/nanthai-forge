@@ -249,11 +249,6 @@ test('every modeled input change and incomplete outcome falls through to normal 
       mutate(({ data, entry }) => {
         data.checks[0].definition = entry.definition = 'd'.repeat(64);
       }),
-    environment: async () =>
-      mutate(({ batch }) => {
-        batch.environment.env.TZ = 'Pacific/Auckland';
-        batch.environment.fingerprint = 'e'.repeat(64);
-      }),
     'runtime recipe': async () => {
       const changed = JSON.parse(plan);
       changed.runtime = 'old-node-runtime';
@@ -272,13 +267,6 @@ test('every modeled input change and incomplete outcome falls through to normal 
       await mutate(({ run }) => {
         run.backend.runtime = changed.runtime;
         run.backend.pin = changed.pin;
-      });
-    },
-    'runner route': async () => {
-      await f.agent.dispatch({
-        action: 'set-policy',
-        operationId: randomUUID(),
-        checks: { runner: 'local' },
       });
     },
     'failed run': async () =>
@@ -392,12 +380,12 @@ test('reused receipt loses acceptance authority if the source result disappears'
   assert.equal(f.store.load().channelMoves.length, 0);
 });
 
-test('tonight replay: retained Blacksmith pass survives CLI mismatch and is ready without an Actions dispatch', async t => {
+test('retained Blacksmith pass survives Node patch and runner-label changes without an Actions dispatch', async t => {
   const f = await prepared(t, {}, () => ({ args: ['scripts/forge-check.mjs'] }));
   const path = join(f.store.directory, `check-${f.original.id}`);
   const plan = JSON.parse(readFileSync(join(path, 'modal-plan.json'), 'utf8'));
   plan.runtime =
-    'github-actions;repo:synthetic/fixture;node:24.22.1;runs-on:blacksmith-4vcpu-ubuntu-2404;unfinished-retry:1';
+    'github-actions;repo:synthetic/fixture;node:24.22.0;runs-on:blacksmith-4vcpu-ubuntu-2404;unfinished-retry:1';
   plan.pin = digest(
     JSON.stringify(
       Object.fromEntries(Object.entries(plan).filter(([key]) => !['pin', 'source', 'output'].includes(key))),
@@ -418,7 +406,7 @@ test('tonight replay: retained Blacksmith pass survives CLI mismatch and is read
   await f.agent.dispatch({
     action: 'set-policy',
     operationId: randomUUID(),
-    checks: { runner: 'github-actions', repo: 'synthetic/fixture', runsOn: 'blacksmith-4vcpu-ubuntu-2404' },
+    checks: { runner: 'github-actions', repo: 'synthetic/fixture', runsOn: 'ubuntu-latest' },
   });
   const dispatch = f.work.dispatch.bind(f.work);
   f.work.dispatch = (...args) => {
@@ -480,6 +468,11 @@ test('advisory timing history retains the passed shard placement', async t => {
     oldPlan.groups,
   );
   writeFileSync(join(f.store.directory, 'test-timings.json'), JSON.stringify(history));
+  await f.agent.dispatch({
+    action: 'set-policy',
+    operationId: randomUUID(),
+    checks: { runner: 'modal', shards: 3 },
+  });
   const reused = await reuseLandingCheck(f.work, f.batch, f.prefix, driver);
   assert.equal(reused.reusedFrom.runId, f.original.id);
   assert.equal(readFileSync(path, 'utf8'), JSON.stringify(oldPlan));
@@ -496,20 +489,22 @@ test('unrecorded passthrough values require a normal run', async t => {
   assert.equal(await reuseLandingCheck(f.work, f.batch, f.prefix, driver), undefined);
 });
 
-test('local reuse requires retained Node bytes and original scope evidence', async t => {
+test('local reuse ignores admitted Node binary observations but retains scope evidence', async t => {
   const f = await prepared(t, { remote: false });
-  const snapshot = f.store.load();
   for (const missing of [false, true]) {
     await batchEdit(f.work, 'changed-old-Node-bytes', data => {
       const runtime = data.landingEntries[0].runtimeSnapshot;
       if (missing) delete runtime.nodeBinary;
       else runtime.nodeBinary = 'a'.repeat(64);
     });
-    assert.equal(await reuseLandingCheck(f.work, f.batch, f.prefix, driver), undefined);
   }
-  await batchEdit(f.work, 'restore-Node', data =>
-    Object.assign(data, structuredClone(snapshot), { revision: data.revision }),
-  );
+  const reused = await reuseLandingCheck(f.work, f.batch, f.prefix, driver);
+  assert.equal(reused.reusedFrom.runId, f.original.id);
+  await batchEdit(f.work, 'retire-previous-request', data => {
+    data.landingBatches.find(batch => batch.id === f.batch.id).status = 'superseded';
+    data.landingEntries.find(entry => entry.id === f.entryId).status = 'interrupted';
+  });
+  Object.assign(f, await f.resubmit());
   rmSync(join(f.store.directory, `check-${f.original.id}`, 'changes.json'));
   assert.equal(await reuseLandingCheck(f.work, f.batch, f.prefix, driver), undefined);
 });
@@ -550,19 +545,23 @@ test('billing-only plan pins do not invalidate successful command evidence', asy
   assert.equal((await reuseLandingCheck(f.work, f.batch, f.prefix, driver)).reusedFrom.runId, f.original.id);
 });
 
-test('runner settings are revalidated at reuse publication', async t => {
-  const f = await prepared(t);
-  const reused = await reuseLandingCheck(f.work, f.batch, f.prefix, {
-    beforePublish() {
-      const data = f.store.load();
-      data.autonomyPolicy.checks.runner = 'local';
-      data.revision++;
-      f.store.save(data);
-    },
+for (const [setting, change] of [
+  ['runner', { runner: 'local' }],
+  ['shard count', { shards: 4 }],
+])
+  test(`${setting} settings are revalidated at reuse publication`, async t => {
+    const f = await prepared(t);
+    const reused = await reuseLandingCheck(f.work, f.batch, f.prefix, {
+      beforePublish() {
+        const data = f.store.load();
+        Object.assign(data.autonomyPolicy.checks, change);
+        data.revision++;
+        f.store.save(data);
+      },
+    });
+    assert.equal(reused, undefined);
+    assert.equal(f.store.select('runs', f.prefix.runId), undefined);
   });
-  assert.equal(reused, undefined);
-  assert.equal(f.store.select('runs', f.prefix.runId), undefined);
-});
 
 for (const failed of [false, true, 'cancelled-request'])
   test(`concurrent requests for one Candidate share a detached ${failed === true ? 'failing' : failed === 'cancelled-request' ? 'passing run after one request cancels' : 'passing'} run`, async t => {
@@ -825,4 +824,155 @@ test('a passing twin cannot hide changed pins on the retained diagnostic run', a
   await assert.rejects(reuseLandingCheck(f.work, f.batch, f.prefix, driver), { code: 'EVIDENCE_CHANGED' });
   assert.equal(f.store.select('landingBatches', f.batch.id).prefixes[0].runId, stalled.id);
   assert.deepEqual(f.store.select('runs', stalled.id), retained);
+});
+
+for (const remote of [false, true])
+  test(`${remote ? 'remote' : 'local'} restart observations and Node patch changes retain reusable evidence`, async t => {
+    const f = await prepared(t, { remote });
+    const { WorkService } = await import('../dist/work.js');
+    const { withLifecycleMetric, readSelfMetricReceipts } = await import('../dist/self-metrics-journal.js');
+    const { nativeSelfMetricsReader } = await import('../dist/self-metrics-native.js');
+    await batchEdit(f.work, 'restart-and-sleep-observations', data => {
+      const environment = data.landingBatches.find(batch => batch.id === f.batch.id).environment;
+      environment.node = environment.node.replace(/\.\d+$/, '.999');
+      environment.env.PATH = '/different/install/bin';
+      environment.env.npm_config_cache = '/different/cache';
+      environment.fingerprint = 'c'.repeat(64);
+    });
+    const batch = f.store.select('landingBatches', f.batch.id);
+    const restarted = new WorkService(f.root);
+    const { readSelfMetrics } = await import('../dist/self-metrics.js');
+    const reader = nativeSelfMetricsReader(f.root);
+    const baseline = await reader.read();
+    const period = { from: baseline.coverage.checkRequests, to: new Date(Date.now() + 1000).toISOString() };
+    assert.equal((await readSelfMetrics(reader, period)).metric6.reuseRate, 0);
+    const response = await withLifecycleMetric(
+      f.store.directory,
+      { action: 'finish', operationId: randomUUID() },
+      async () => {
+        const reused = await reuseLandingCheck(restarted, batch, batch.prefixes[0], driver);
+        assert.equal(reused.reusedFrom.runId, f.original.id);
+        assert.equal(reused.reuseKey, f.original.reuseKey);
+        assert.notEqual(reused.environment.fingerprint, f.original.environment.fingerprint);
+        validatePassingPrefix(restarted, batch, batch.prefixes[0]);
+        return { result: { run: runReceipt(reused) } };
+      },
+    );
+    assert.equal(
+      readSelfMetricReceipts(f.store.directory).at(-1).checkRequests[0].reuseKey,
+      response.result.run.reuseKey,
+    );
+    const metrics = await nativeSelfMetricsReader(f.root).read();
+    const fastMetrics = await nativeSelfMetricsReader(f.input.lane.path, { fast: true }).read();
+    assert.equal(
+      fastMetrics.runs.find(run => run.id === batch.prefixes[0].runId).reuseKey,
+      f.original.reuseKey,
+      'Lane status reads retain recorded keys without reconstructing source identities',
+    );
+    assert.equal(metrics.runs.find(run => run.id === batch.prefixes[0].runId).reuseKey, f.original.reuseKey);
+    period.to = new Date(Date.now() + 1000).toISOString();
+    assert.equal((await readSelfMetrics(reader, period)).metric6.reuseRate, 0.5);
+    t.diagnostic('Metric 6 synthetic replay: reuse rate 0 -> 0.5; one full execution, one reused request.');
+  });
+
+test('Node minor changes require a new local execution', async t => {
+  const f = await prepared(t, { remote: false });
+  await batchEdit(f.work, 'Node-minor-upgrade', data => {
+    const environment = data.landingBatches.find(batch => batch.id === f.batch.id).environment;
+    environment.node = 'v24.23.0';
+    environment.fingerprint = 'd'.repeat(64);
+  });
+  const batch = f.store.select('landingBatches', f.batch.id);
+  assert.equal(await reuseLandingCheck(f.work, batch, batch.prefixes[0], driver), undefined);
+});
+
+for (const partial of [false, true, 'scope'])
+  test(`${partial ? 'partial' : 'legacy unkeyed'} passes cannot be reused`, async t => {
+    const f = await prepared(t);
+    const path = join(f.store.directory, `check-${f.original.id}`, 'result.json');
+    const receipt = JSON.parse(readFileSync(path, 'utf8'));
+    if (partial)
+      receipt.checkSelection = {
+        scope: partial === 'scope' ? 'partial' : 'full',
+        tests: ['tests/one.test.mjs'],
+        reason: 'Explicit files',
+        ...(partial === true ? { partial: true } : {}),
+      };
+    else delete receipt.reuseKey;
+    writeFileSync(path, JSON.stringify(receipt));
+    await batchEdit(f.work, 'ineligible-result', data => {
+      const original = data.runs.find(run => run.id === f.original.id);
+      if (partial) original.checkSelection = receipt.checkSelection;
+      else delete original.reuseKey;
+    });
+    assert.equal(await reuseLandingCheck(f.work, f.batch, f.prefix, driver), undefined);
+    assert.equal(readFileSync(path, 'utf8'), JSON.stringify(receipt), 'legacy evidence is never backfilled');
+    if (!partial) {
+      const { nativeSelfMetricsReader } = await import('../dist/self-metrics-native.js');
+      const metrics = await nativeSelfMetricsReader(f.root).read();
+      assert.equal(
+        metrics.runs.find(run => run.id === f.original.id).reuseKey,
+        undefined,
+        'metrics never reconstruct missing legacy receipt keys',
+      );
+    }
+    if (partial) {
+      const { enforceAcceptance } = await import('../dist/work-autonomy.js');
+      const data = f.store.load();
+      const view = data.views.find(view => view.id === f.original.viewId);
+      assert.throws(
+        () => enforceAcceptance(f.store, data, view, null, { kind: 'agent', id: 'synthetic-agent' }),
+        { code: 'CHECK_REQUIRED' },
+      );
+    }
+  });
+
+test('content-equivalent passed evidence can cross runner routes while retaining original execution provenance', async t => {
+  const f = await prepared(t, { remote: false });
+  await f.agent.dispatch({ action: 'set-policy', operationId: randomUUID(), checks: { runner: 'modal' } });
+  await batchEdit(f.work, 'different-requesting-owner-node', data => {
+    const environment = data.landingBatches.find(batch => batch.id === f.batch.id).environment;
+    environment.node = 'v24.23.0';
+    environment.fingerprint = 'e'.repeat(64);
+  });
+  const batch = f.store.select('landingBatches', f.batch.id);
+  const reused = await reuseLandingCheck(f.work, batch, batch.prefixes[0], driver);
+  assert.equal(reused.reusedFrom.runId, f.original.id);
+  assert.equal(reused.reuseKey, f.original.reuseKey);
+  assert.equal(reused.backend.actual, f.original.backend.actual);
+  assert.equal(reused.backend.runtime, f.original.backend.runtime);
+  validatePassingPrefix(f.work, batch, batch.prefixes[0]);
+});
+
+test('finish adopts a keyed pass across owner fingerprints while preserving explicit environment pins', async t => {
+  const { adoptFinishRun } = await import('../dist/agent-finish-reuse.js');
+  const { checkEnvironment } = await import('../dist/check-environment.js');
+  const f = await prepared(t, { remote: false });
+  const command = { checkId: f.original.check.id, expectedDefinition: f.original.check.definition };
+  const viewId = f.original.viewId;
+  await batchEdit(f.work, 'changed-owner-observation', data => {
+    const original = data.runs.find(run => run.id === f.original.id);
+    original.environment.fingerprint = 'a'.repeat(64);
+  });
+  const path = join(f.store.directory, `check-${f.original.id}`, 'result.json');
+  const receipt = JSON.parse(readFileSync(path, 'utf8'));
+  receipt.environment.fingerprint = 'a'.repeat(64);
+  writeFileSync(path, JSON.stringify(receipt));
+  assert.equal(adoptFinishRun(f.store, command, viewId)?.id, f.original.id);
+  assert.equal(
+    adoptFinishRun(f.store, { ...command, expectedEnvironment: checkEnvironment().fingerprint }, viewId)?.id,
+    f.original.id,
+  );
+  assert.equal(
+    adoptFinishRun(f.store, { ...command, expectedEnvironment: 'b'.repeat(64) }, viewId),
+    undefined,
+  );
+  await batchEdit(f.work, 'partial-pass', data => {
+    data.runs.find(run => run.id === f.original.id).checkSelection = {
+      scope: 'partial',
+      reason: 'Explicit list',
+      tests: ['tests/one.test.mjs'],
+    };
+  });
+  assert.equal(adoptFinishRun(f.store, command, viewId), undefined);
 });

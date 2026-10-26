@@ -159,13 +159,20 @@ test('immutable Invariant versions reconcile original writes, reject changed sco
   assert.equal(work.status().intents.find(item => item.id === intent.id).status, 'active');
 });
 
-test('latest outcomes and exact source, definitions and runtime determine assessment without running or mutating work', async t => {
+test('latest outcomes and exact source, definitions and declared runtime determine assessment without running or mutating work', async t => {
+  const previousTZ = process.env.TZ;
+  process.env.TZ = 'UTC';
+  t.after(() => {
+    if (previousTZ === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTZ;
+  });
   const { root, work, local, dispatch, define, assess, run, lane, view, compose } = setup(t);
   const marker = join(root, '.git/outcome');
   writeFileSync(marker, '0');
   const check = local({
     action: 'define-check',
     name: 'Explicit synthetic command',
+    declaredInputs: [{ kind: 'environment', name: 'TZ' }],
     executable: process.execPath,
     args: ['-e', `process.exit(Number(require('node:fs').readFileSync(${JSON.stringify(marker)},'utf8')))`],
   });

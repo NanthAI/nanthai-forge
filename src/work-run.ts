@@ -1,3 +1,4 @@
+import { checkReuseKey } from './check-reuse-key.js';
 import { prepareRunRegistration } from './work-run-preparation.js';
 import { retryWorkPhase } from './work-retry.js';
 import { launchDetachedCheck, hasDetachedCheckRequest } from './check-controller.js';
@@ -216,6 +217,8 @@ export async function executeOwnedRun(
             join(path, 'result.json'),
             JSON.stringify(
               createRunReceipt({
+                reuseKey: claimed.reuseKey,
+                environment: claimed.environment,
                 status: 'interrupted',
                 backend: claimed.backend,
                 endedAt: new Date().toISOString(),
@@ -412,7 +415,10 @@ async function launchLocal(
       /* Optional command-reported selection is unavailable; logs retain command output. */
     }
     artifacts = [...(artifacts ?? []), ...retainCheckCoverage(store, run, path, checkSelection)];
+    run.reuseKey = checkReuseKey(store, run);
     const receipt = createRunReceipt({
+      reuseKey: run.reuseKey,
+      environment: run.environment,
       backend: {
         ...(run.backend ?? { requested: 'local', actual: 'local' }),
         cost:

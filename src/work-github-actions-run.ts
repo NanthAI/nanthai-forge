@@ -80,6 +80,8 @@ export async function launchGithubActionsRun(
           join(path, 'result.json'),
           JSON.stringify(
             createRunReceipt({
+              reuseKey: run.reuseKey,
+              environment: run.environment,
               status: 'runner-unavailable',
               backend: run.backend,
               endedAt: new Date().toISOString(),
@@ -146,6 +148,8 @@ export async function launchGithubActionsRun(
     if (outcome.cost.estimatedCostUsd !== null) run.backend.estimatedCostUsd = outcome.cost.estimatedCostUsd;
     else delete run.backend.estimatedCostUsd;
     const receipt = createRunReceipt({
+      reuseKey: run.reuseKey,
+      environment: run.environment,
       ...outcome,
       cancellation: run.cancellation,
       backend: run.backend,
@@ -201,6 +205,8 @@ export async function launchGithubActionsRun(
         ? error.message
         : `pending-infra: original provider operation requires discovery (${errorKind(error)}).`;
     const receipt = createRunReceipt({
+      reuseKey: run.reuseKey,
+      environment: run.environment,
       status: run.cancelRequested ? 'cancelled' : dispatchRejected ? 'failed' : 'interrupted',
       ...(pendingInfra
         ? { error: { code: PENDING_ACTIONS_INFRA, message: pendingMessage } }

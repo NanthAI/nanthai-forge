@@ -6,6 +6,7 @@ import { checkRunSchema } from './work-types.js';
 export const receiptSchema = z
   .object(checkRunSchema.shape)
   .pick({
+    reuseKey: true,
     status: true,
     cancellation: true,
     backend: true,
@@ -21,6 +22,7 @@ export const receiptSchema = z
     error: true,
   })
   .extend({
+    environment: checkRunSchema.shape.environment.optional(),
     status: checkRunSchema.shape.status.exclude(['queued', 'preparing', 'running']),
     endedAt: checkRunSchema.shape.endedAt.unwrap(),
   });

@@ -3,11 +3,9 @@ import type { MetricObservation } from './self-metrics-observations.js';
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { readWorkFile, recordManifest, readRecordPage } from './work-records.js';
-import { NativeSource, nativeOwner } from './native-source.js';
-import { digest } from './hash.js';
-import { selfMetricReuseKey } from './self-metrics-reuse-key.js';
 import { readSelfMetricJournal } from './self-metrics-journal.js';
-import type { WorkData, CheckRun, WorkView } from './work-types.js';
+import { NativeSource, nativeOwner } from './native-source.js';
+import type { WorkData, WorkView } from './work-types.js';
 import {
   minutesBetween,
   type MetricInput,
@@ -60,38 +58,6 @@ export function nativeSelfMetricsReader(
           const save = lane.checkpoints.find(save => save.head === input.head);
           return [{ ...input, intentId: lane.intentId, ...(save ? { savedAt: save.at } : {}) }];
         });
-      const source = new NativeSource(owner);
-      const keys = new Map<string, { tree: string; lockfile?: string | undefined } | undefined>();
-      const reuseKey = (run: CheckRun) => {
-        if (options.fast) return undefined;
-        if (!keys.has(run.head)) {
-          try {
-            const files = source.state(run.head).files;
-            keys.set(run.head, {
-              tree: digest(JSON.stringify(files)),
-              lockfile: files.find(f => f.path === 'package-lock.json')?.blob,
-            });
-          } catch {
-            keys.set(run.head, undefined);
-          }
-        }
-        const sourceKey = keys.get(run.head);
-        const observations = run.inputObservations;
-        const declared = run.check.declaredInputs ?? [];
-        const complete =
-          !declared.length ||
-          (observations?.length === declared.length &&
-            observations.every(o => o.status === 'observed' && o.sha256));
-        return selfMetricReuseKey({
-          tree: sourceKey?.tree,
-          definition: run.check.definition,
-          lockfile: sourceKey?.lockfile ?? run.backend?.lockfile,
-          node: run.environment.node,
-          declaredInputs: complete
-            ? declared.map((input, index) => ({ input, sha256: observations?.[index]?.sha256 }))
-            : undefined,
-        });
-      };
       const { receipts, incompleteTrailingRecords } = options.journal ?? readSelfMetricJournal(directory);
       const supplemental: MetricObservation[] = receipts.flatMap(r =>
         r.kind === 'mutation' && r.revision !== undefined
@@ -126,6 +92,7 @@ export function nativeSelfMetricsReader(
               status: check.conclusion === 'success' ? 'passed' : 'failed',
             });
         }
+      const source = new NativeSource(owner);
       const culpritIds = new Set(moves.flatMap(move => move.optimisticRecovery?.culpritIds ?? []));
       const culpritHeads = moves.filter(move => culpritIds.has(move.id)).map(move => move.head);
       for (const id of culpritIds) {
@@ -237,7 +204,7 @@ export function nativeSelfMetricsReader(
               run.resourceUsage?.status === 'measured' ? run.resourceUsage.realSeconds / 60 : undefined,
             ...(items?.length ? { executions: items } : {}),
             ...(run.reusedFrom ? { reusedFrom: run.reusedFrom.runId } : {}),
-            reuseKey: reuseKey(run),
+            reuseKey: run.reuseKey,
           };
         }),
         receipts,

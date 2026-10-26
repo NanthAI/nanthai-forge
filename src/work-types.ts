@@ -394,6 +394,7 @@ export const explicitTestsSchema = z
   .transform(tests => [...new Set(tests)].sort());
 export const checkRunSchema = z
   .object({
+    reuseKey: oid.optional(),
     reusedFrom: z.object({ runId: id, endedAt: z.string(), evidence: oid }).optional(),
     supersessionBaseline: id.optional(),
     optimistic: z.boolean().optional(),
@@ -414,6 +415,7 @@ export const checkRunSchema = z
     interaction: interactionEvidenceSchema.nullable().optional(),
     checkSelection: z
       .object({
+        partial: z.boolean().optional(),
         scope: z.enum(['docs', 'interaction', 'scoped', 'full', 'partial']),
         reason: z.string(),
         tests: z.array(z.string()),

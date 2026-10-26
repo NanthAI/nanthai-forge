@@ -3,7 +3,9 @@ import { ForgeError, invariant } from './errors.js';
 import { hostname } from 'node:os';
 import { processIdentity } from './local-process.js';
 import { diskGuard } from './disk-guard.js';
-import { checkRoute } from './check-backend.js';
+import { checkRoute, actionsCheckRuntime } from './check-backend.js';
+import { modalRuntime } from './modal-plan.js';
+import { checkReuseKey } from './check-reuse-key.js';
 import { checkEnvironment, checkEnvironmentDescription } from './check-environment.js';
 import { observeCheckInputs } from './work-inputs.js';
 import { readPolicy } from './work-autonomy.js';
@@ -93,6 +95,20 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
       };
       // Older readers without selection evidence must reject this optional feature.
       if (command.tests !== undefined) tx.setSchema(15);
+      run.reuseKey = checkReuseKey(store, {
+        ...run,
+        backend: {
+          ...run.backend!,
+          ...(route.actual === 'local'
+            ? {}
+            : {
+                runtime:
+                  route.actual === 'github-actions'
+                    ? actionsCheckRuntime(policy?.repo, policy?.runsOn)
+                    : modalRuntime,
+              }),
+        },
+      });
       if (command.interaction !== undefined) {
         run.interaction = command.interaction ? interactionEvidence(store, run, command.interaction) : null;
         tx.setSchema(15);

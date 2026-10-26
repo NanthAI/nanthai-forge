@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { gateCheck } from './check-reuse-key.js';
 import { validateReusedCheck } from './check-reuse-evidence.js';
 import { userInfo } from 'node:os';
 import { NativeSource } from './native-source.js';
@@ -117,11 +118,7 @@ export function enforceAcceptance(
   invariant(!reason, 'REVIEW_REQUIRED', reason ?? 'Waiting for review by a person; not in main yet');
   if (actor.kind === 'person') return undefined;
   const run = data.runs.find(
-    run =>
-      run.viewId === view.id &&
-      run.head === view.head &&
-      run.status === 'passed' &&
-      run.checkSelection?.scope !== 'partial',
+    run => run.viewId === view.id && run.head === view.head && run.status === 'passed' && gateCheck(run),
   );
   invariant(
     run,

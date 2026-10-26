@@ -95,6 +95,8 @@ export async function launchModalRun(
       if (!plan) {
         if (!localFallbackAllowed(store, run)) {
           const receipt = createRunReceipt({
+            reuseKey: run.reuseKey,
+            environment: run.environment,
             status: 'runner-unavailable',
             backend: run.backend,
             endedAt: new Date().toISOString(),
@@ -305,6 +307,8 @@ export async function launchModalRun(
           'Failed shard retry has no complete attributed test report; inspect retained attempts.'
         : '');
     const receipt = createRunReceipt({
+      reuseKey: run.reuseKey,
+      environment: run.environment,
       status: cancelled
         ? 'cancelled'
         : outcome
@@ -378,6 +382,8 @@ export async function launchModalRun(
   } catch (error) {
     if (error instanceof ForgeError && error.code === 'MODAL_CREDENTIALS_REQUIRED') {
       const receipt = createRunReceipt({
+        reuseKey: run.reuseKey,
+        environment: run.environment,
         status: 'runner-unavailable',
         backend: run.backend,
         endedAt: new Date().toISOString(),
@@ -408,6 +414,8 @@ export async function launchModalRun(
     run.endedAt = new Date().toISOString();
     run.details = `Modal controller interrupted: ${message}. No command was repeated. Retained execution IDs require reconciliation.`;
     const receipt = createRunReceipt({
+      reuseKey: run.reuseKey,
+      environment: run.environment,
       status: run.status,
       cancellation: run.cancellation,
       backend: run.backend,

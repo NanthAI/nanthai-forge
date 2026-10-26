@@ -30,7 +30,7 @@ export type SelfMetricReceipt = Requester & {
   revision?: number;
   deliveries?: { entryId: string; state: 'landed' | 'terminal-failed' }[];
   noOwner?: boolean;
-  checkRequests?: { id: string; runId: string; reused: boolean }[];
+  checkRequests?: { id: string; runId: string; reused: boolean; reuseKey?: string }[];
 };
 const request = new AsyncLocalStorage<Requester>();
 const writers = new WeakMap<Requester, Map<string, number>>();
@@ -228,8 +228,8 @@ export async function withLifecycleMetric<T>(
       if (hosted?.id && (state === 'landed' || state === 'terminal-failed'))
         deliveries.push({ entryId: hosted.id, state });
       const checked = result as typeof result & {
-        run?: { runId?: string; reused?: boolean; reuse?: string };
-        attempts?: { run?: { runId?: string; reused?: boolean; reuse?: string } }[];
+        run?: { runId?: string; reused?: boolean; reuse?: string; reuseKey?: string };
+        attempts?: { run?: { runId?: string; reused?: boolean; reuse?: string; reuseKey?: string } }[];
       };
       checkRequests = (checked?.attempts?.length ? checked.attempts.map(a => a.run) : [checked?.run]).flatMap(
         (run, index) =>
@@ -239,6 +239,7 @@ export async function withLifecycleMetric<T>(
                   id: `${current.operationId}:${index}`,
                   runId: run.runId,
                   reused: run.reused === true || run.reuse === 'reused',
+                  ...(run.reuseKey ? { reuseKey: run.reuseKey } : {}),
                 },
               ]
             : [],

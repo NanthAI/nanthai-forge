@@ -107,8 +107,11 @@ orphaned live process group remains visible until it exits or is cancelled.
 
 A new finish for the same Lane heads, dependencies, composed source, check
 definition and environment adopts the original live or completed passed/failed run and its Candidate.
-Changed pins require a fresh check. The original run identity and evidence are
-retained. Prioritization follows a finish into its short Channel landing wait.
+A retained passed run may also be adopted across owner restarts and Node patch
+changes when its content reuse key matches the current inputs and an explicit
+expected environment, if supplied, matches the current owner. Partial test-list
+runs are never adopted as full check evidence. Other changed pins require a fresh
+check. The original run identity and evidence are retained. Prioritization follows a finish into its short Channel landing wait.
 
 ### Landing queue
 
@@ -481,8 +484,10 @@ overlap, even when two additions have identical bytes. Missing provenance, stale
 sync/compose/re-check path in finish. Checks never hold Work, Lane or landing locks.
 
 Native batch landings reuse retained passed checks across resubmissions when the
-composed file paths, bytes and modes, check definition, environment and observed
-declared inputs agree. Scoped and custom checks also require the original
+stored content key agrees: tree (paths, bytes and modes), check definition, lockfile,
+Node major.minor and observed declared inputs. New execution and virtual receipts
+retain this key alongside the full environment fingerprint and runner runtime.
+Old receipts without a key are never reused. Scoped and custom checks also require the original
 base/comparison source, ordered Lane inputs and dependencies. Full standard checks
 can reuse identical source after acceptance or a main audit changes composition
 metadata. Main audits consult the same full-plan evidence before requesting a new
@@ -490,17 +495,18 @@ controller. Concurrent requests with the same exact execution inputs adopt one
 reserved run and its Candidate before dispatch; its detached controller executes
 once, and both requests observe the same result, including failure. Cancelling
 one request leaves a check needed by another request running.
-Remote reuse also compares the retained runner recipe, lockfile, selected scope/tests
-and shard count with a freshly prepared plan. It adopts the original validated shard
+Remote reuse also validates the retained runner recipe and selected scope/tests
+against a freshly prepared plan. Shard placement and count are scheduling advice. Node patch and runner label are
+receipt observations and do not invalidate the key. It adopts the original validated shard
 placement despite advisory timing-history changes; selection explanations and shadow
-coverage diagnostics and billing safety margins do not change execution. Local reuse requires admitted
-Node binary bytes and matching scope/selection; unobserved external executables,
+coverage diagnostics and billing safety margins do not change execution. Local reuse requires
+matching scope/selection; unobserved declared inputs,
 passthrough values and external claims fall back to a normal run. Missing or corrupt
 completion/plan evidence, failed and cancelled runs are never reused.
 
 A batch whose diagnostic run is interrupted or whose local controller is dead
 also searches for a later identical pass before waiting or reopening the original.
-The same source, definition, environment, inputs and runtime evidence checks apply.
+The same content-key, selection and retained-evidence checks apply.
 Adoption creates a new virtual receipt and updates the batch prefix; the original
 run and diagnosis remain retained. A cancelled request is not revived, and a live
 controller is left to complete normally.
@@ -509,9 +515,12 @@ A reused run records `reusedFrom.runId` and the original completion time. Progre
 and queue status say `reused check <run> from <time>`; the original run owns logs
 and compute costs. Virtual receipts have no process (`runner.pid:0`), so older
 readers reject them instead of silently dropping reuse provenance. Submitting CLI builds and temporary run/View identities do not
-change check inputs. Node/OS, environment and actual runner recipe changes still
-prevent reuse. Check-only commands and `assess-check-inputs` retain their existing
-behavior.
+change check inputs. Owner restart, sleep, install-path changes and Node patch
+upgrades preserve reuse; Node minor, lockfile or declared-input changes require
+a new run. Explicit partial test lists can never satisfy a gate. The `run` action
+accepts an explicit `tests` list for a failed-file-only retry and records partial
+evidence; Modal also retries failed shards while retaining completed shards.
+Check-only commands and `assess-check-inputs` retain their existing behavior.
 
 
 The acceptance receipt's structured `fastPath` records the policy, checked

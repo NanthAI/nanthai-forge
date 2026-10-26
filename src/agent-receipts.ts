@@ -34,6 +34,7 @@ export const runReceipt = (run: CheckRun) => ({
   head: run.head,
   checkId: run.check.id,
   checkDefinition: run.check.definition,
+  ...(run.reuseKey ? { reuseKey: run.reuseKey } : {}),
   environmentFingerprint: run.environment.fingerprint,
   environmentMode: run.environment.mode ?? 'legacy',
   env: run.check.env ?? [],

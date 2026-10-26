@@ -289,7 +289,7 @@ class FinishRunner {
     }
     const original = store.select('runs', attempt.operations.run),
       environment =
-        command.expectedEnvironment ?? original?.environment.fingerprint ?? checkEnvironment().fingerprint;
+        original?.environment.fingerprint ?? command.expectedEnvironment ?? checkEnvironment().fingerprint;
     this.control.update({ runId: attempt.operations.run, phase: 'check' });
     await withWorkProgress({ runId: attempt.operations.run, phase: 'queued for check' }, () =>
       phases.phase({
@@ -308,7 +308,13 @@ class FinishRunner {
     );
     if (this.control.cancelled()) return this.stop(attempt, { phase: 'check', status: 'cancelled' });
     const run = store.select('runs', attempt.operations.run)!;
-    attempt.run = runReceiptWithFailure(store, run);
+    attempt.run = {
+      ...runReceiptWithFailure(store, run),
+      ...(original?.status === 'passed' &&
+      attempt.operations.run !== finishChild(command.operationId, 'run', attempt.number)
+        ? { reused: true }
+        : {}),
+    };
     journal.save();
     if (run.status !== 'passed' || !command.accept)
       return this.stop(attempt, {

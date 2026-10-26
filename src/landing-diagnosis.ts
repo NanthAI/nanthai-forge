@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { gateCheck } from './check-reuse-key.js';
 import { validateReusedCheck } from './check-reuse-evidence.js';
 import { invariant } from './errors.js';
 import { diagnosticCause, batchDiagnosis } from './landing-observation.js';
@@ -42,6 +43,7 @@ export function validatePassingPrefix(work: WorkService, batch: LandingBatch, pr
   validateReusedCheck(work.store, run);
   invariant(
     run.status === 'passed' &&
+      gateCheck(run) &&
       !!run.endedAt &&
       run.exitCode === 0 &&
       !run.signal &&
