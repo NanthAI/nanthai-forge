@@ -1,0 +1,214 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Public Fable landing. The canvas mask leaves the copy and paste box calm. */
+.fx-public { min-height:100dvh; }
+.fx-public-top {height:56px;display:flex;align-items:center;gap:16px;padding:0 24px;position:relative;z-index:2;border-bottom:1px solid transparent;}
+.fx-public-top nav {margin-left:auto;display:flex;align-items:center;gap:4px;}
+.fx-public-top nav > a .fx-glyph {display:inline;vertical-align:-3px;margin-right:3px;}
+.fx-public-top nav > a {padding:7px 10px;border-radius:var(--fx-r-2);font-weight:500;color:var(--fx-text-2);}
+.fx-public-top nav > a:hover {background:var(--fx-hover);color:var(--fx-text);}
+.fx-public-top .fx-brand small {font-family:var(--fx-font-ui);}
+.fx-public:has(.fx-hero:not(.fx-hero-compact)) .fx-mark-top {animation:forge-arm-top 240ms var(--fx-ease) both;transform-origin:58px 6px;}
+.fx-public:has(.fx-hero:not(.fx-hero-compact)) .fx-mark-lower {animation:forge-arm-lower 240ms 180ms var(--fx-ease) both;transform-origin:48px 28px;}
+.fx-public:has(.fx-hero:not(.fx-hero-compact)) .fx-mark-top path:last-child {animation:forge-cross-warm 120ms 120ms both;}
+.fx-public:has(.fx-hero:not(.fx-hero-compact)) .fx-mark-lower path:last-child {animation:forge-cross-teal 120ms 300ms both;}
+.fx-public:has(.fx-hero:not(.fx-hero-compact)) .fx-mark-stem {animation:forge-stem 620ms both;}
+.fx-public {--fx-mark-flash:#000;}
+[data-theme=dark] .fx-public {--fx-mark-flash:#fff;}
+@keyframes forge-arm-top {0%{transform:translate(70px,-14px) rotate(-11deg)}80%{transform:translateX(-2px)}100%{transform:none}}
+@keyframes forge-arm-lower {0%{transform:translate(70px,-17px) rotate(-14deg)}80%{transform:translateX(-2px)}100%{transform:none}}
+@keyframes forge-cross-warm {from{fill:#ff6b3d}to{fill:#ffb347}}
+@keyframes forge-cross-teal {from{fill:#ff6b3d}to{fill:#23cbff}}
+@keyframes forge-stem {0%,67%,71%,100%{color:var(--fx-text)}68%,70%{color:var(--fx-mark-flash)}}
+.fx-hero {position:relative;overflow:hidden;background:linear-gradient(180deg,var(--fx-hero-a),var(--fx-hero-b));border-bottom:1px solid var(--fx-line);}
+.fx-hero-content {position:relative;z-index:1;min-height:700px;display:flex;flex-direction:column;justify-content:center;gap:26px;max-width:1180px;margin:0 auto;padding:40px 24px 48px;}
+.fx-hero h1 {max-width:680px;margin:0;font:730 60px/1.08 var(--fx-font-head);letter-spacing:-.035em;}
+.fx-hero h1 span {color:var(--fx-brand);}
+.fx-hero .fx-hero-lead {max-width:600px;margin:-6px 0 0;font:400 18px/1.5 var(--fx-font-ui);color:var(--fx-text-2);}
+.fx-hero-field {position:absolute;inset:0;pointer-events:none;contain:strict;}
+.fx-alive {will-change:transform;position:absolute;left:34%;top:0;display:block;width:66%;height:100%;pointer-events:none;mask-image:linear-gradient(90deg,transparent 0,#000 36.363636%);}
+.fx-hero-form {display:flex;align-items:center;gap:8px;width:100%;max-width:680px;height:58px;padding:6px 6px 6px 14px;border:1px solid var(--fx-line-strong);border-radius:var(--fx-r-4);background:var(--fx-surface);box-shadow:var(--fx-shadow);}
+.fx-hero-form:focus-within {border-color:var(--fx-accent);box-shadow:var(--fx-shadow),0 0 0 3px color-mix(in srgb,var(--fx-accent) 25%,transparent);}
+.fx-hero-input {display:flex;align-items:center;gap:8px;flex:1;min-width:0;color:var(--fx-text-3);}
+.fx-hero-input input {flex:1;min-width:0;width:100%;border:0;outline:none;background:none;font:400 14px var(--fx-font-ui);color:var(--fx-text);}
+.fx-hero-input input::placeholder {color:var(--fx-text-3);}
+.fx-hero-form .fx-btn-lg {height:44px;padding:0 20px;font-size:14px;border-radius:var(--fx-r-3);flex:none;}
+.fx-hero .fx-hero-note {margin:0;font-size:12px;color:var(--fx-text-3);}
+.fx-hero .fx-hero-error {margin:0;padding:10px 12px;border-radius:var(--fx-r-2);background:var(--fx-failed-bg);color:var(--fx-failed);font-size:13px;max-width:680px;}
+.fx-hero-compact .fx-hero-content {min-height:420px;}
+.fx-hero-compact h1 {font-size:44px;overflow-wrap:anywhere;}
+.fx-import-status {font-size:13px;color:var(--fx-text-2);}
+.fx-hero-try {display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.fx-hero-try > button:not(.fx-btn) {font:inherit;color:var(--fx-text-2);border:0;background:none;cursor:pointer;}
+.fx-progress {height:6px;width:100%;max-width:520px;overflow:hidden;border-radius:3px;background:var(--fx-surface-3);}
+.fx-progress > span {display:block;height:100%;background:var(--fx-brand);transition:width .4s var(--fx-ease);}
+.fx-progress > .fx-progress-bad {background:var(--fx-failed);}
+.fx-steps {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;max-width:1180px;margin:0 auto;padding:40px 24px;}
+.fx-step {padding:20px;border:1px solid var(--fx-line);border-radius:var(--fx-r-3);background:var(--fx-surface);display:flex;flex-direction:column;gap:10px;}
+.fx-step-icon {display:grid;place-items:center;width:32px;height:32px;border-radius:8px;background:var(--fx-surface-3);color:var(--fx-text);}
+.fx-step h2 {font:700 15px/1.25 var(--fx-font-head);}
+.fx-step p {font-size:13px;color:var(--fx-text-2);}
+.fx-landing-guard {max-width:1132px;margin:0 auto;padding:28px 0;border-block:1px solid var(--fx-line);}
+.fx-landing-guard h2 {font-size:20px;}
+.fx-landing-guard p {margin-top:6px;color:var(--fx-text-2);}
+.fx-landing-guard a {color:var(--fx-accent);}
+.fx-landing-footer {display:flex;align-items:center;gap:16px;max-width:1180px;margin:0 auto;padding:28px 24px 40px;font-size:12px;color:var(--fx-text-3);}
+.fx-landing-footer-links {display:flex;gap:16px;margin-left:auto;}
+.fx-landing-recent {max-width:1180px;margin:0 auto;padding:16px 24px 0;}
+@media(max-width:1180px){.fx-landing-guard{margin-inline:24px}}
+@media(max-width:900px){.fx-steps{grid-template-columns:1fr}}
+@media(max-width:720px){
+ .fx-public-top{padding:0 16px}.fx-public-top nav > a{display:none}.fx-public-top .fx-brand > span{display:none}
+ .fx-hero-content{min-height:0;padding:28px 16px 32px}.fx-hero h1{font-size:38px}.fx-hero .fx-hero-lead{font-size:16px}
+ .fx-alive{left:0;top:55%;width:100%;height:45%;opacity:.7;mask-image:linear-gradient(180deg,transparent 0,#000 55.555556%)}
+ .fx-hero-form{height:auto;flex-wrap:wrap;padding:10px;border-radius:var(--fx-r-3)}.fx-hero-input{flex-basis:100%;height:28px}.fx-hero-input input{min-width:160px}
+ .fx-hero-form .fx-btn{width:100%;justify-content:center}.fx-steps{padding-inline:16px}.fx-landing-guard{margin-inline:16px}
+ .fx-landing-footer{flex-direction:column;align-items:flex-start;padding-inline:16px}.fx-landing-footer-links{margin-left:0}
+}
+
+/* After import: the tour */
+.fx-tour-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  padding-bottom: 8px;
+}
+.fx-tour-head h1 {
+  font-size: 26px;
+  margin-top: 4px;
+}
+.fx-tour-step {
+  margin-top: 32px;
+}
+.fx-tour-label {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 2px 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.fx-tour-label > span {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--fx-r-1);
+  background: var(--fx-surface-3);
+  color: var(--fx-text-2);
+  font: 700 13px/1 var(--fx-font-ui);
+}
+.fx-tour-label h2 {
+  font-size: 17px;
+}
+.fx-tour-label p {
+  font-size: 13px;
+  color: var(--fx-text-2);
+}
+.fx-tour-graph {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
+}
+.fx-tour-canvas {
+  height: 460px;
+  border-radius: var(--fx-r-3);
+  overflow: hidden;
+  background: var(--fx-surface-2);
+  border: 1px solid var(--fx-line);
+}
+.fx-tour-canvas .point-field {
+  min-height: 460px;
+  border-radius: var(--fx-r-3);
+}
+.fx-hubs {
+  margin: 0;
+  padding: 6px 14px 6px 34px;
+  font-size: 12.5px;
+}
+.fx-hubs li {
+  padding: 6px 0;
+}
+.fx-hubs code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-example {
+  position: relative;
+  border: 1px solid var(--fx-line);
+  border-radius: var(--fx-r-3);
+  background: color-mix(in srgb, var(--fx-surface-2) 60%, transparent);
+}
+.fx-example > .fx-page {
+  padding-top: 26px;
+}
+.fx-example-ribbon {
+  position: absolute;
+  top: -11px;
+  left: 16px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: var(--fx-r-1);
+  background: var(--fx-waiting-bg);
+  border: 1px solid color-mix(in srgb, var(--fx-waiting) 40%, transparent);
+  color: var(--fx-waiting);
+  font: 650 11px/16px var(--fx-font-ui);
+
+}
+.fx-tour-prompt {
+  display: grid;
+  gap: 12px;
+  max-width: 920px;
+}
+.fx-prompt-card {
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+.fx-prompt-preview {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: 340px;
+  overflow: auto;
+  border-radius: var(--fx-r-2);
+  border: 1px solid var(--fx-line);
+  background: var(--fx-surface-2);
+  font: 12px/1.6 var(--fx-font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1060px) {
+  .fx-tour-graph {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fx-tour-canvas,
+  .fx-tour-canvas .point-field {
+    height: 360px;
+    min-height: 360px;
+  }
+}
+
+.fx-tour {max-width:1180px;margin:0 auto;padding:56px 24px 40px;}
+.fx-tour-head h1 {font-size:20px;margin:0;}
+.fx-tour-head h1 .fx-mono {font-size:16px;overflow-wrap:anywhere;}
+.fx-tour-head .fx-page-actions {margin-left:auto;}
+.fx-tour-head .fx-page-summary {font-size:13px;}
+@media(max-width:720px){.fx-tour{padding:32px 16px}.fx-tour-head .fx-page-actions{margin-left:0}}
+
+/* Keep the tour's existing graph controls, with the public Fable surfaces. */
+.fx-tour .point-field {--graph-edge:var(--fx-text-3);--graph-dot:var(--fx-brand);background:var(--fx-surface-2);color:var(--fx-text);}
+.fx-tour .point-node {color:var(--fx-text);}
+.fx-tour .point-label {color:var(--fx-text);background:var(--fx-surface);}
+.fx-tour .is-selected .point-label {color:var(--fx-accent);}
+.fx-tour .point-controls,.fx-tour .point-preview {background:var(--fx-surface);border-color:var(--fx-line-strong);border-radius:var(--fx-r-2);box-shadow:none;}
+.fx-tour .point-controls button {color:var(--fx-text);}
+.fx-tour .point-controls button:hover {background:var(--fx-hover);}
+.fx-tour .point-controls button[aria-pressed=true] {color:var(--fx-accent);}
+.fx-tour .point-controls>span,.fx-tour .point-preview span,.fx-tour .point-preview small {color:var(--fx-text-2);}
+.fx-tour .point-hint {display:none;}

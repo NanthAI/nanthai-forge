@@ -1,0 +1,47 @@
+/* ===== s52 additions (the only new classes; see DIRECTION.md §Component mapping) ===== */
+/* Landing progress: journey rail + recorded steps. Never a percentage. */
+.fx-land{display:grid;gap:10px;padding:12px 14px}
+.fx-land-rail{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fx-text-2)}
+.fx-land-steps{list-style:none;margin:0;padding:0;display:grid}
+.fx-land-steps>li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:10px;align-items:start;padding:8px 0;border-top:1px solid var(--fx-line)}
+.fx-land-steps>li:first-child{border-top:0;padding-top:0}
+.fx-land-steps b{display:block;font-size:13px;font-weight:650}
+.fx-land-steps p{margin-top:2px;font-size:12px;color:var(--fx-text-2);overflow-wrap:anywhere}
+.fx-land-steps time{font-size:11.5px;color:var(--fx-text-3);white-space:nowrap;line-height:1.5}
+.fx-land-steps .fx-gate-icon{margin-top:-1px}
+.fx-land-steps li.pending{color:var(--fx-text-3)}.fx-land-steps li.pending b{color:var(--fx-text-3);font-weight:550}
+.fx-land-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fx-land-actions>span{margin-left:auto;font-size:11.5px;color:var(--fx-text-3)}
+/* Landed line + completion rows (from H20b, now product) */
+.fx-landed{display:flex;gap:8px;align-items:flex-start;padding:12px 14px;font-size:13px;line-height:1.45}
+.fx-landed>.g{margin-top:3px}
+.fx-completion{list-style:none;margin:0;padding:0 14px 12px;display:grid;gap:6px;font-size:12.5px;color:var(--fx-text-2)}
+.fx-completion li{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* Feedback sent (RequestChanges sent state) */
+.fx-sent{display:grid;gap:6px;padding:12px 14px;border-top:1px solid var(--fx-line);font-size:12.5px}
+.fx-sent blockquote{padding:8px 10px;border-left:2px solid var(--fx-line-strong);color:var(--fx-text-2);white-space:pre-wrap}
+.fx-sent-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;color:var(--fx-text-3);font-size:12px}
+/* Inline confirm inside a panel (revert) */
+.fx-confirm{display:grid;gap:10px;padding:12px 14px;border-top:1px solid var(--fx-line)}
+.fx-confirm h3{font:650 13.5px/1.35 var(--fx-font-ui)}
+.fx-confirm-facts{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:12.5px;color:var(--fx-text-2)}
+.fx-confirm-facts li{display:flex;gap:8px;align-items:flex-start}.fx-confirm-facts .g{margin-top:3px;color:var(--fx-text-3)}
+.fx-rev-tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:var(--fx-r-1);font:600 11.5px/1 var(--fx-font-ui);color:var(--fx-text-2);background:var(--fx-surface-3);white-space:nowrap}
+
+.fx-decide-running{border-color:color-mix(in srgb,var(--fx-active) 45%,var(--fx-line))}
+
+.fx-decide-after{font-size:11.5px;line-height:1.5;color:var(--fx-text-3)}
+
+.fx-rail-lg>i{width:48px;height:6px;border-radius:3px}
+
+
+.fx-decision-recovery { padding:0 14px 12px; }
+.fx-confirm .fx-input { margin-top:6px; }
+.fx-review-request form { display:grid;gap:8px; }
+.fx-review-request .fx-review-secondary { margin-top:0; }
+.fx-land-rail { flex-wrap:wrap; }
+.fx-review-request .fx-sent-meta { display:grid;grid-template-columns:auto minmax(0,1fr); }
+
+.fx-decide .fx-decide-after { color:var(--fx-text-3); }
+
+.fx-decide-failed{border-color:color-mix(in srgb,var(--fx-failed) 45%,var(--fx-line))}

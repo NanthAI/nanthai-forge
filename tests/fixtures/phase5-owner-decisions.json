@@ -1,0 +1,119 @@
+{
+  "schema": 1,
+  "source": "docs/phase5-plan.md#owner-decisions-decided",
+  "note": "Prepared decide requests, not applied. Submit each record via nforge agent OWNER decide or forge_task. decidedAt is omitted when the plan gives no date; creation supplies recording time. Reasons paraphrase the plan context. Overrides are only supplied where an existing default is identified; the plan does not name an earlier decision record. Recording these facts does not enable their product behavior.",
+  "records": [
+    {
+      "action": "decide",
+      "operationId": "638b9b46-b9a9-5a34-85e0-c4c7a5dd1f1f",
+      "target": {
+        "kind": "project"
+      },
+      "decidedBy": "Owner",
+      "what": "Briefly red main is accepted for trusted and autonomous actors, with automatic fix-forward or revert. Supervised projects keep the strict full gate.",
+      "why": "Let contract-gated work land while continuous checks repair regressions; keep supervised behavior strict.",
+      "overrides": {
+        "kind": "default",
+        "description": "A passing full suite is required before every acceptance.",
+        "link": "docs/phase5-plan.md#bet-2-per-intent-contract-gates-full-suite-continuous"
+      }
+    },
+    {
+      "action": "decide",
+      "operationId": "bbe8f618-a9a9-5a8d-947f-5baffb34d6a9",
+      "target": {
+        "kind": "project"
+      },
+      "decidedBy": "Owner",
+      "what": "Storage is decided by SP1: native on R2 with reachability GC versus Git-native objects and packfiles on the same criteria. Build APFS clonefile Lanes with snapshots early regardless of the winner. A Git-native winner also requires an explicit change to design constraint 7.",
+      "why": "Choose from comparable evidence about disk, GC correctness, interoperability, migration and composition cost."
+    },
+    {
+      "action": "decide",
+      "operationId": "207574f3-50a0-57d6-97e5-d8cf840b63de",
+      "target": {
+        "kind": "project"
+      },
+      "decidedBy": "Owner",
+      "what": "Structural merge is either mergiraf or our own merge over tree-sitter declarations, compared in SP2. The contract check gates the output, never parse success.",
+      "why": "Evaluate both approaches before choosing; syntax alone cannot establish behavioral correctness.",
+      "overrides": {
+        "kind": "default",
+        "description": "Line-based merge is the current merge strategy.",
+        "link": "docs/phase5-plan.md#sp2-structural-merge-mergiraf-vs-our-own"
+      }
+    },
+    {
+      "action": "decide",
+      "operationId": "ff5e113a-9708-5a2f-9bf8-5bac018a0fc2",
+      "target": {
+        "kind": "project"
+      },
+      "decidedBy": "Owner",
+      "what": "Web breadth is frozen until E1 and E3 are published and Bet 1 is cut over. Hosted landing gaps G1\u2013G10 are frozen except G1, G2, G3 and G6 needed by Bet 1.",
+      "why": "Focus current work on authority cutover and the published evidence."
+    },
+    {
+      "action": "decide",
+      "operationId": "7fbb56d4-b0c9-5dc5-a639-de0f4adea1b3",
+      "target": {
+        "kind": "project"
+      },
+      "decidedBy": "Owner",
+      "what": "Bet 1 is imperative and starts at Phase 5 start; its prerequisites are the first slices built.",
+      "why": "The dual-master authority model is the central operational cause to remove first."
+    },
+    {
+      "action": "decide",
+      "operationId": "11d686f5-c983-585f-a28a-da74b30302e8",
+      "target": {
+        "kind": "project"
+      },
+      "decidedBy": "Owner",
+      "what": "Trust per path per actor (B2.6) is a new access rule. The owner approves its defaults before it is enabled.",
+      "why": "The build plan does not itself authorize new access restrictions or defaults."
+    },
+    {
+      "action": "decide",
+      "operationId": "b84a5b4f-eacb-5773-ae1b-5283abe87db7",
+      "target": {
+        "kind": "project"
+      },
+      "decidedBy": "Owner",
+      "what": "Vocabulary consolidation is a real slice set built after the Bet 1 cutover. No functionality is lost.",
+      "why": "Consolidate the surface after authority is settled while preserving capability."
+    },
+    {
+      "action": "decide",
+      "operationId": "c6cb6379-d437-5584-9367-baf92dbf9a74",
+      "target": {
+        "kind": "project"
+      },
+      "decidedBy": "Owner",
+      "what": "Bet 3 build waits only for E1 and E3. E2 runs during Bet 1 and must be published before B3.5.",
+      "why": "Build coordination after its baseline and methodology are published; its final measurement also needs E2.",
+      "decidedAt": "2026-10-24"
+    },
+    {
+      "action": "decide",
+      "operationId": "50a505cf-66de-5dfd-ac19-19a9b0ab380c",
+      "target": {
+        "kind": "project"
+      },
+      "decidedBy": "Owner",
+      "what": "Every point of the 2026-10-24 review is tracked in Review coverage; none is dropped silently.",
+      "why": "Keep review obligations visible and accounted for in the plan."
+    },
+    {
+      "action": "decide",
+      "operationId": "f305f032-a604-5a28-a461-6400fcc7e001",
+      "target": {
+        "kind": "project"
+      },
+      "decidedBy": "Owner",
+      "what": "Disk stays bounded per project. Collect automatic snapshots of completed or abandoned Lanes after the 7-day retention window; always keep the latest snapshot of every open Lane. Watch free space and per-project growth and warn before either crosses its budget (P5-M2).",
+      "why": "Retained snapshots and project growth need an explicit owner-approved disk policy.",
+      "decidedAt": "2026-10-24"
+    }
+  ]
+}

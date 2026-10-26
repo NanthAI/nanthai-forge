@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.fx-menu { position:fixed; z-index:90; min-width:210px; max-width:calc(100vw - 16px); max-height:calc(100dvh - 80px); overflow:auto; padding:4px; border:1px solid var(--fx-line-strong); border-radius:var(--fx-r-2); background:var(--fx-surface); box-shadow:0 2px 8px #0002; display:flex; flex-direction:column; align-items:stretch; gap:2px; }
+.fx-menu[hidden] { display:none; }
+.fx-menu :is(button,a[href]) { display:flex; align-items:center; justify-content:flex-start; gap:8px; min-height:34px; padding:6px 10px; width:100%; text-align:left; white-space:nowrap; font-size:12px; transition:none; border:0; border-radius:var(--fx-r-1); background:transparent; color:var(--fx-text); text-decoration:none; }
+.fx-menu :is(button,a[href]):is(:hover,:focus-visible) { background:var(--fx-hover); }
+.fx-menu svg { width:16px; height:16px; flex:none; }
+.fx-menu :is(button,a)[data-destructive] { color:var(--fx-failed, #c94f4f) !important; order:100; }
+.fx-menu label { display:grid; gap:6px; padding:6px 10px; }
+.fx-menu strong { padding:8px 10px; font-size:12px; }

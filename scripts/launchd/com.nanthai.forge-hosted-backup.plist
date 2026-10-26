@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.nanthai.forge-hosted-backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>--env-file=__EXISTING_ENV_FILE__</string>
+    <string>__SOURCE__/scripts/hosted-durability.mjs</string>
+    <string>backup</string>
+    <string>--deployment</string><string>__DEPLOYMENT__</string>
+    <string>--prefix</string><string>__PREFIX__</string>
+    <string>--state-dir</string><string>__STATE_DIR__</string>
+  </array>
+  <key>WorkingDirectory</key><string>__SOURCE__</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>__NODE_BIN__:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>StartCalendarInterval</key>
+  <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>__STATE_DIR__/launchd.log</string>
+  <key>StandardErrorPath</key><string>__STATE_DIR__/launchd-error.log</string>
+  <key>Umask</key><integer>63</integer>
+</dict>
+</plist>
