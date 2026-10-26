@@ -27,7 +27,10 @@ function ToastItem({ entry, store }: { entry: Toast; store: ToastStore }) {
     return () => clearTimeout(timer);
   }, [entry.id, entry.at, entry.tone, entry.persistent, entry.busy, store]);
   return (
-    <div className={`fx-toast fx-toast-${entry.tone}`} role={entry.tone === 'error' ? 'alert' : 'status'}>
+    <div
+      className={`fx-toast fx-toast-${entry.tone}${entry.accepted ? ' fx-toast-accepted' : ''}`}
+      role={entry.tone === 'error' ? 'alert' : 'status'}
+    >
       <span className="fx-toast-main">
         <Glyph
           name={entry.tone === 'error' ? 'failed' : entry.tone === 'success' ? 'passed' : 'info'}

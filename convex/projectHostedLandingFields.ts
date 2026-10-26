@@ -43,6 +43,8 @@ export const hostedLandingTables = {
     channel: v.literal('main'),
     submissionId: v.string(),
     operationId: v.string(),
+    candidateId: v.optional(v.string()),
+    revertOf: v.optional(v.string()),
     actor: v.string(),
     sequence: v.number(),
     runnable: v.boolean(),
@@ -52,6 +54,8 @@ export const hostedLandingTables = {
     value: v.string(),
   })
     .index('by_project_and_submission', ['projectId', 'submissionId'])
+    .index('by_project_and_revert_and_sequence', ['projectId', 'revertOf', 'sequence'])
+    .index('by_project_and_candidate_and_sequence', ['projectId', 'candidateId', 'sequence'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
     .index('by_project_and_channel_and_runnable_and_sequence', [

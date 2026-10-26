@@ -27,6 +27,8 @@ const server = { mode: 'server', epoch: 1 };
 const stale = authority =>
   new ConvexError({ code: 'SOURCE_AUTHORITY_STALE', message: 'Source authority changed.', authority });
 const isStale = error => (error.data?.code ?? error.code) === 'SOURCE_AUTHORITY_STALE';
+// Once hosted holds authority, local acceptance names the hosted writer instead of a stale pin.
+const isHosted = error => error.code === 'HOSTED_AUTHORITY';
 function setup(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-source-authority-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -121,7 +123,7 @@ test('owner transition journals before IO and resumes a hosted success whose rep
   assert.deepEqual(readHostState(reopened).binding.sourceAuthority, server);
   assert.equal(readHostState(reopened).authorityTransition, undefined);
   assert.equal(f.s.tables.projectSourceAuthorityTransitions.size, 1);
-  assert.throws(() => nativeExecute(reopened, f.command, reopened.revision()), isStale);
+  assert.throws(() => nativeExecute(reopened, f.command, reopened.revision()), isHosted);
   const rollback = { operationId: randomUUID(), expected: server, mode: 'native-owner' };
   assert.deepEqual(await transitionBoundSourceAuthority(reopened, rollback, f.client), {
     mode: 'native-owner',
@@ -199,8 +201,7 @@ test('normal offline accepts work at epoch zero; owner writer stale feedback blo
   assert.throws(
     () => nativeExecute(f.store, f.command, f.store.revision()),
     error => {
-      assert.equal(error.code, 'SOURCE_AUTHORITY_STALE');
-      assert.deepEqual(error.authority, server);
+      assert.equal(error.code, 'HOSTED_AUTHORITY');
       return true;
     },
   );
@@ -227,7 +228,7 @@ test('bound push persists normalized stale-writer feedback before surfacing the 
     isStale,
   );
   assert.deepEqual(readHostState(f.store).binding.sourceAuthority, server);
-  assert.throws(() => nativeExecute(f.store, f.command, f.store.revision()), isStale);
+  assert.throws(() => nativeExecute(f.store, f.command, f.store.revision()), isHosted);
 });
 
 test('native acceptance checks the authority again under the owner lock', t => {
@@ -240,7 +241,7 @@ test('native acceptance checks the authority again under the owner lock', t => {
     });
     return locked(fn);
   };
-  assert.throws(() => nativeExecute(f.store, f.command, f.store.revision()), isStale);
+  assert.throws(() => nativeExecute(f.store, f.command, f.store.revision()), isHosted);
   assert.equal(f.store.load().channelMoves.length, 0);
 });
 
@@ -291,5 +292,5 @@ test('bound hosted-work accept retains structured stale feedback and updates the
   );
   assert.equal(calls, 1);
   assert.deepEqual(readHostState(f.store).binding.sourceAuthority, server);
-  assert.throws(() => nativeExecute(f.store, f.command, f.store.revision()), isStale);
+  assert.throws(() => nativeExecute(f.store, f.command, f.store.revision()), isHosted);
 });

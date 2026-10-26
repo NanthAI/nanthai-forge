@@ -3,7 +3,8 @@ import { editWork } from './work-edit.js';
 import { postAcceptMoves } from './post-accept-coverage.js';
 import { optimisticLanding } from './autonomy-policy.js';
 import { ownerRootNotice, refreshAcceptedOwnerRoot } from './owner-root.js';
-import { requireSourceAuthority, sourceAuthority } from './hosted-source-authority.js';
+import { sourceAuthority } from './hosted-source-authority.js';
+import { requireLocalAcceptance } from './local-acceptance.js';
 import { readHostState } from './host-binding.js';
 import { pendingStatus } from './pending-status.js';
 import { decorateRepair } from './agent-repair-lineage.js';
@@ -282,6 +283,7 @@ export function nativeExecute(
     command.action === 'accept-channel'
       ? (command.authorityEpoch ?? (binding ? sourceAuthority(binding).epoch : 0))
       : 0;
+  if (command.action === 'accept-channel') requireLocalAcceptance(store, authorityEpoch);
   let composition: ReturnType<typeof prepareNativeComposition> | undefined;
   if (parsed.success && parsed.data.action === 'compose') {
     const snapshot = store.load(),
@@ -304,11 +306,7 @@ export function nativeExecute(
       edit,
       () => {
         options.beforePublish?.();
-        if (command.action === 'accept-channel') {
-          const currentBinding = readHostState(store).binding;
-          if (currentBinding)
-            requireSourceAuthority(currentBinding, { mode: 'native-owner', epoch: authorityEpoch });
-        }
+        if (command.action === 'accept-channel') requireLocalAcceptance(store, authorityEpoch);
       },
       () => verifySource?.(),
     );
@@ -331,9 +329,7 @@ export function nativeExecute(
           }
         }
         if (command.action === 'accept-channel') {
-          const currentBinding = readHostState(store).binding;
-          if (currentBinding)
-            requireSourceAuthority(currentBinding, { mode: 'native-owner', epoch: authorityEpoch });
+          requireLocalAcceptance(store, authorityEpoch);
           const existing = data.channelMoves.find(move => move.id === command.operationId);
           if (existing) {
             invariant(

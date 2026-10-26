@@ -1,0 +1,10 @@
+@font-face { font-family:Manrope; src:url('../../web/src/assets/fonts/Manrope-latin.woff2') format('woff2');font-weight:200 800;font-display:swap; }
+* { box-sizing:border-box; } body { margin:0;background:var(--fx-bg);color:var(--fx-text);font:13px/1.45 var(--fx-font-ui); }
+a { color:var(--fx-accent);text-decoration:none; } p,h1,h2,h3,blockquote { margin:0; } .fx-app { min-height:100dvh; }
+.fixture-top { display:flex;gap:24px;align-items:center;height:48px;padding:0 24px;background:var(--fx-surface);border-bottom:1px solid var(--fx-line); }
+.fixture-top b { font:700 15px var(--fx-font-head); }.fixture-top a { color:var(--fx-text-2); }
+.fixture-channel { height:32px;padding:7px 24px;color:var(--fx-text-2);border-bottom:1px solid var(--fx-line);font-size:12px; }
+.fx-page { padding:16px 24px 80px; }.fx-crumbs { color:var(--fx-text-3);margin-bottom:12px;font-size:12px; }
+.fixture-copy { padding:14px; }.fixture-copy p { margin-top:5px; }.fixture-diff>div { padding:10px 14px;border-bottom:1px solid var(--fx-line); }
+.fixture-diff pre { margin:0;padding:14px;overflow:auto;font:12px/1.7 var(--fx-font-mono); }.fixture-del { color:var(--fx-failed);background:var(--fx-del-bg); }.fixture-add { color:var(--fx-passed);background:var(--fx-add-bg); }
+@media(max-width:720px) { .fixture-top {gap:12px;}.fixture-top a {display:none;} }

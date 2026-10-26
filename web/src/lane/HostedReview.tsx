@@ -1,7 +1,6 @@
 import { OwnerDecisionsDisclosure } from '../decisions/OwnerDecisionsPanel';
 import { Breadcrumbs, workHref } from '../shell/Breadcrumbs';
 import { useReadRetry } from '../ui/read-retry';
-import { ErrorToast } from '../ui/Toast';
 import { ConversationScope } from './ConversationScope';
 // SPDX-License-Identifier: Apache-2.0
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -14,7 +13,7 @@ import type { WorkData, HostedChannelMove, MetadataCommand } from '../../../src/
 import { useWorkRecord, type WorkIndexWorkspace } from '../hosted-work-index';
 import { hostedHref } from '../cockpit/HostedNow';
 import { hostedError } from '../snapshot';
-import { Button, ExactRecord, Panel, StatusPill } from '../ui/primitives';
+import { ExactRecord, Panel, StatusPill } from '../ui/primitives';
 import { BriefSourceContext, hostedBriefs } from '../cockpit/brief';
 import { CopyPrompt } from '../cockpit/CopyPrompt';
 import { HostedLaneChanges } from './HostedLaneChanges';
@@ -23,19 +22,16 @@ import NativeSourceReview from '../NativeSourceReview';
 import { HostedConversation } from './HostedConversation';
 import { PendingWrite } from '../pending-write';
 import { useCoordination } from '../cockpit/coordination';
-import { RequestChanges } from './RequestChanges';
 import { reviewViewLabel } from './review-model';
-import { ReviewDisposition } from './ReviewDisposition';
 import type { ReviewRead } from './review-model';
 import { protectedMatches } from '../../../src/autonomy-policy';
 import { overlappingPaths } from '../../../src/coordination-paths';
-import LocalChecks from '../LocalChecks';
 import { HostedRunDetail } from './HostedRunDetail';
+import { LandingDecision } from './LandingDecision';
+import { useHostedLanding } from './use-hosted-landing';
+import { landingState, mainAncestryGate, landingRunSummary, feedbackWorking } from './landing-model';
+import { landingMain } from './landing-api';
 import { ReviewCheck } from './ReviewCheck';
-import { HostedRevertAcceptance } from './RevertAcceptance';
-import { ownerDecisionState, mainAncestryGate } from './owner-decision-model';
-import { OwnerDecision } from './OwnerDecision';
-import { Glyph } from '../ui/Glyph';
 
 type Props = {
   projectId: Id<'hostedProjects'>;
@@ -102,40 +98,14 @@ export function HostedReview({
       active = false;
     };
   }, [client, read, projectId, view.id, workspace.revision, readAttempt]);
-  const successorRead = useQuery(
-    api.projectViewReads.read,
-    story?.supersededBy
-      ? {
-          projectId,
-          action: 'view',
-          viewId: story.supersededBy,
-          paginationOpts: { numItems: 1, cursor: null },
-        }
-      : 'skip',
-  );
-  const successor = successorRead
-    ? (JSON.parse(successorRead) as ReviewRead & { runs: HostedRunSummary[] })
-    : null;
-  const successorRun = successor?.runs
-    .filter(run => run.head === successor.head)
-    .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
-    .at(-1);
-  const [requestedId, setRequestedId] = useState('');
-  const ownerStatus = useQuery(api.ownerAcceptance.status, { projectId, viewId: view.id });
+  const landing = useHostedLanding(projectId, view.id, story?.why.outcome ?? intent?.outcome ?? 'Candidate');
+  const main = useQuery(landingMain, { projectId });
+  const mainHead = main ? (JSON.parse(main).head as string) : undefined;
   const acceptance =
-    story?.accepted
-      .filter(
-        move =>
-          move.channel === 'main' &&
-          move.head === view.head &&
-          ownerStatus &&
-          (!ownerStatus.native || move.canonical === true),
-      )
-      .at(-1) ??
-    (ownerStatus && !ownerStatus.native
-      ? channels.find(move => move.viewId === view.id && move.channel === 'main' && move.head === view.head)
-      : undefined);
+    story?.accepted.filter(move => move.channel === 'main' && move.head === view.head).at(-1) ??
+    channels.find(move => move.viewId === view.id && move.channel === 'main' && move.head === view.head);
   const superseded = !acceptance && story?.status === 'superseded';
+  const decision = landingState(landing.read, superseded);
   const policy = useQuery(api.projectAutonomy.read, { projectId });
   const claims = useQuery(api.projectCoordinationReads.claims, { projectId });
   const overlaps = new Map<string, string[]>();
@@ -151,54 +121,16 @@ export function HostedReview({
         ]);
     }
   const protectedPaths = policy ? protectedMatches(policy, files) : [];
-  const accepted = ownerStatus?.native
-    ? ownerStatus.request?.state === 'accepted' || Boolean(acceptance)
-    : Boolean(ownerStatus) && Boolean(acceptance);
-  const ownerDecision = ownerDecisionState({
-    ...(ownerStatus?.request ? { state: ownerStatus.request.state } : {}),
-    ...(ownerStatus?.machine ? { machineName: ownerStatus.machine.name } : {}),
-    accepted,
-    optimistic: Boolean(requestedId && requestedId !== ownerStatus?.request?.operationId),
-  });
-  const run = runs
-    .filter(run => run.head === view.head)
-    .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
-    .at(-1);
+  const observedRun = landing.read?.run ?? landing.readyRun;
+  const run = observedRun
+    ? landingRunSummary(observedRun)
+    : runs
+        .filter(run => run.head === view.head)
+        .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+        .at(-1);
   const passed = run?.status === 'passed';
-  const [pending, setPending] = useState<FunctionArgs<typeof api.projectWorkActions.acceptChannel> | null>(
-    null,
-  );
-  const [accepting, setAccepting] = useState(false),
-    [acceptError, setAcceptError] = useState(''),
-    [done, setDone] = useState<{ at: string; actor: string } | null>(null);
-  const accept = async () => {
-    if (!view.head) return;
-    const original = pending ?? {
-      projectId,
-      operationId: crypto.randomUUID(),
-      revision: workspace.revision,
-      command: JSON.stringify({
-        action: 'accept-hosted-channel',
-        channel: 'main',
-        viewId: view.id,
-        head: view.head,
-        archiveSha256: workspace.backupDigest,
-        previousId: channels.find(move => move.channel === 'main')?.id ?? null,
-      }),
-    };
-    setPending(original);
-    setAccepting(true);
-    setAcceptError('');
-    try {
-      const result = await client.action(api.projectWorkActions.acceptChannel, original);
-      setPending(null);
-      if (!('state' in result)) setDone({ at: result.at, actor: result.actor });
-    } catch (e) {
-      setAcceptError(hostedError(e));
-    } finally {
-      setAccepting(false);
-    }
-  };
+  const [feedbackSent, setFeedbackSent] = useState(false);
+  const working = feedbackWorking(feedbackSent, view.inputs, lanes);
   const coordination = useCoordination(projectId);
   const delivery = useRef<PendingWrite<
     import('../../../src/coordination-types').CoordinationCommand,
@@ -211,7 +143,7 @@ export function HostedReview({
   const delivered = useRef(new Set<string>());
   const feedback = useRef<FunctionArgs<typeof api.projectWorkCommand.command> | null>(null);
   const send = useCallback(
-    async (text: string): Promise<string> => {
+    async (text: string, laneId?: string): Promise<string> => {
       const requested = {
         projectId,
         operationId: crypto.randomUUID(),
@@ -219,7 +151,7 @@ export function HostedReview({
           action: 'note',
           intentId: view.intentId,
           kind: 'decision',
-          text: `Changes requested for [Candidate](${hostedHref({ projectTab: 'intent', reviewView: view.id })}) @ ${view.head}:\n${text}`,
+          text: `Changes requested for [Candidate](${hostedHref({ projectTab: 'intent', reviewView: view.id })}):\n${text}`,
         }),
       };
       const original = feedback.current ?? requested;
@@ -228,7 +160,11 @@ export function HostedReview({
         await client.mutation(api.projectWorkCommand.command, original);
         recorded.current = true;
       }
-      for (const input of view.inputs.length ? view.inputs : [{ laneId: '' }]) {
+      for (const input of laneId
+        ? view.inputs.filter(input => input.laneId === laneId)
+        : view.inputs.length
+          ? view.inputs
+          : [{ laneId: '' }]) {
         if (delivered.current.has(input.laneId)) continue;
         const recipient = coordination.sessions
           .filter(session => session.context.laneId === input.laneId && session.status !== 'completed')
@@ -267,13 +203,8 @@ export function HostedReview({
     mainAncestryGate({
       included: view.main?.included,
       indexedMain: view.main?.head,
-      currentMain: ownerStatus?.mainHead,
-      rejection:
-        ownerStatus?.request?.state === 'rejected' && ownerStatus.request.receipt
-          ? JSON.parse(ownerStatus.request.receipt)
-          : null,
+      currentMain: mainHead,
     }),
-    { ok: owner, title: owner ? 'You can accept as project owner' : 'Project owner accepts', body: '' },
   ];
   return (
     <BriefSourceContext.Provider value={briefs}>
@@ -300,30 +231,14 @@ export function HostedReview({
           ]}
         />
         <div className="fx-review-head">
-          <StatusPill
-            tone={
-              ownerStatus?.native && !superseded
-                ? ownerDecision.tone
-                : accepted || done
-                  ? 'passed'
-                  : superseded
-                    ? 'stale'
-                    : passed
-                      ? 'passed'
-                      : 'waiting'
-            }
-            glyph={superseded ? 'stale' : undefined}
-          >
-            {ownerStatus?.native && !superseded
-              ? ownerDecision.label
-              : accepted || done
-                ? 'Accepted'
-                : story?.status === 'superseded'
-                  ? 'Superseded'
-                  : passed
-                    ? 'Ready'
-                    : 'Waiting'}
+          <StatusPill tone={acceptance ? 'passed' : working ? 'active' : decision.tone}>
+            {acceptance ? 'Accepted' : working ? 'Working' : decision.label}
           </StatusPill>
+          {landing.reverseRead?.request.observation.state === 'landed' && (
+            <span className="fx-rev-tag">
+              Reverted by {reviewViewLabel(views, landing.reverseRead.attempt.candidate.id)}
+            </span>
+          )}
           <h1 title={story?.why.outcome ?? intent?.outcome}>
             {story?.why.outcome ?? intent?.outcome ?? 'Review Candidate'}
           </h1>
@@ -365,20 +280,99 @@ export function HostedReview({
             </ReviewStory>
           </div>
           <aside className="fx-lane-col fx-review-side">
-            <details className="fx-panel">
-              <summary>Line comments</summary>
-              <NativeSourceReview
-                projectId={projectId}
-                workspace={workspace}
-                intentId={view.intentId}
-                viewId={view.id}
-                base={view.base}
-                head={view.head!}
-                editable={editable}
-                busy={busy}
-                act={act}
-              />
-            </details>
+            <LandingDecision
+              reverseLabel={
+                landing.reverseRead
+                  ? reviewViewLabel(views, landing.reverseRead.attempt.candidate.id)
+                  : undefined
+              }
+              reverseHref={
+                landing.reverseRead
+                  ? hostedHref({ projectTab: 'intent', reviewView: landing.reverseRead.attempt.candidate.id })
+                  : undefined
+              }
+              read={landing.read}
+              reverseRead={landing.reverseRead}
+              reversing={landing.reversing}
+              acceptance={acceptance}
+              candidateLabel={reviewViewLabel(views, view.id)}
+              canAccept={owner && view.status === 'clean' && Boolean(view.head)}
+              canComment={editable}
+              failures={landing.failures}
+              log={landing.log}
+              busy={busy || landing.busy}
+              error={landing.error}
+              gates={gates}
+              draftKey={`${view.id}:${view.head}`}
+              send={send}
+              onRequestSent={() => setFeedbackSent(true)}
+              recipients={view.inputs.map(input => {
+                const lane = lanes.find(item => item.id === input.laneId);
+                return {
+                  id: input.laneId,
+                  name: lane?.name ?? 'Lane',
+                  agent: lane?.startedBy?.name,
+                  state:
+                    lane?.head !== input.head
+                      ? 'Saved again'
+                      : lane?.state === 'completed'
+                        ? 'Done'
+                        : landing.read?.receipt?.completion.enabled
+                          ? 'Completing'
+                          : 'Active',
+                  automatic:
+                    lane?.head === input.head &&
+                    (lane?.state === 'completed' || Boolean(landing.read?.receipt?.completion.enabled)),
+                };
+              })}
+              accept={() =>
+                void landing.accept(observedRun?.status === 'passed' ? observedRun.id : undefined)
+              }
+              cancel={() => void landing.cancel()}
+              revert={
+                owner && (landing.read?.request.acceptance?.receiptId || acceptance?.id)
+                  ? why =>
+                      void landing.revert(landing.read?.request.acceptance?.receiptId ?? acceptance!.id, why)
+                  : undefined
+              }
+              replacement={
+                superseded && story?.supersededBy
+                  ? {
+                      href: hostedHref({ projectTab: 'intent', reviewView: story.supersededBy }),
+                      label: reviewViewLabel(views, story.supersededBy),
+                    }
+                  : undefined
+              }
+              repairHref={
+                view.inputs[0] ? workHref({ projectTab: 'lanes', lane: view.inputs[0].laneId }) : undefined
+              }
+              aheadLabel={landing.read?.ahead ? reviewViewLabel(views, landing.read.ahead) : undefined}
+              runHref={
+                observedRun?.configuration.provider === 'github-actions' && observedRun.executionId
+                  ? `https://github.com/${observedRun.configuration.repository}/actions/runs/${observedRun.executionId}`
+                  : run
+                    ? hostedHref({ projectTab: 'intent', reviewView: view.id, checkRun: run.id })
+                    : undefined
+              }
+            />
+            <ReviewCheck
+              run={run}
+              head={observedRun?.request.expectedHead ?? view.head}
+              superseded={superseded}
+            >
+              {observedRun?.configuration.provider === 'github-actions' && observedRun.executionId && (
+                <a
+                  href={`https://github.com/${observedRun.configuration.repository}/actions/runs/${observedRun.executionId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open run
+                </a>
+              )}
+              {run && !observedRun && (
+                <HostedRunDetail key={run.id} run={run} projectId={projectId} workspace={workspace} />
+              )}
+            </ReviewCheck>
             <ConversationScope
               lanes={view.inputs.map(input => ({
                 id: input.laneId,
@@ -394,96 +388,21 @@ export function HostedReview({
                 />
               )}
             </ConversationScope>
-            {story?.accepted
-              .filter(move => move.channel !== 'main' && move.head === view.head)
-              .map(move => (
-                <ReviewDisposition key={`${move.channel}:${move.at}`} acceptance={move} />
-              ))}
-            <ReviewCheck run={run} head={view.head} superseded={superseded}>
-              {run && <HostedRunDetail key={run.id} run={run} projectId={projectId} workspace={workspace} />}
-            </ReviewCheck>
-            {owner && !run && view.head && (
-              <LocalChecks projectId={projectId} workspace={workspace} viewId={view.id} head={view.head} />
-            )}
-            {acceptance ? (
-              <ReviewDisposition acceptance={acceptance} />
-            ) : superseded && story?.supersededBy ? (
-              <ReviewDisposition
-                replacement={{
-                  href: hostedHref({ projectTab: 'intent', reviewView: story.supersededBy }),
-                  label: reviewViewLabel(views, story.supersededBy),
-                  check:
-                    successorRead === undefined ? undefined : (successorRun?.status ?? 'no check recorded'),
-                }}
-              />
-            ) : done ? (
-              <ReviewDisposition acceptance={done} />
-            ) : !story ? (
-              <p className="fx-loading">Reading Candidate record…</p>
-            ) : (
-              <Panel title={accepted ? 'Acceptance' : 'Your decision'} className="fx-decide">
-                {!accepted && (
-                  <ul className="fx-gates">
-                    {gates.map(gate => (
-                      <li
-                        key={gate.title}
-                        className={gate.warn ? 'fx-gate-warn' : gate.ok ? 'fx-gate-ok' : 'fx-gate-bad'}
-                      >
-                        <span className="fx-gate-icon">
-                          <Glyph name={gate.ok ? 'passed' : 'info'} size={11} />
-                        </span>
-                        <div>
-                          <b>{gate.title}</b>
-                          {gate.body && <p>{gate.body}</p>}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {ownerStatus?.native && view.head ? (
-                  <OwnerDecision
-                    key={view.id}
-                    projectId={projectId}
-                    viewId={view.id}
-                    head={view.head}
-                    status={ownerStatus}
-                    showReceipt={false}
-                    onRequested={setRequestedId}
-                    disabled={busy || !owner || view.status !== 'clean'}
-                  />
-                ) : (
-                  <div className="fx-decide-go">
-                    {accepted || done ? (
-                      <p className="fx-c-passed">✓ Hosted selection updated</p>
-                    ) : (
-                      <Button
-                        variant="primary"
-                        size="lg"
-                        icon="passed"
-                        disabled={
-                          busy || accepting || !owner || !view.head || view.status !== 'clean' || !ownerStatus
-                        }
-                        onClick={() => void accept()}
-                      >
-                        {accepting ? 'Accepting…' : pending ? 'Retry acceptance' : 'Accept into main'}
-                      </Button>
-                    )}
-                    {acceptError && <ErrorToast>{acceptError}</ErrorToast>}
-                  </div>
-                )}
-                {!accepted && !done && (
-                  <RequestChanges draftKey={`${view.id}:${view.head}`} disabled={!editable} send={send} />
-                )}
-              </Panel>
-            )}
-            <OwnerDecisionsDisclosure intentId={view.intentId} />
-            {ownerStatus?.request?.state === 'accepted' && ownerStatus.request.receipt && (
-              <HostedRevertAcceptance
+            <details className="fx-panel">
+              <summary>Line comments</summary>
+              <NativeSourceReview
                 projectId={projectId}
-                move={JSON.parse(ownerStatus.request.receipt).acceptance}
-                base={JSON.parse(ownerStatus.request.receipt).acceptance.head}
+                workspace={workspace}
+                intentId={view.intentId}
+                viewId={view.id}
+                base={view.base}
+                head={view.head!}
+                editable={editable}
+                busy={busy}
+                act={act}
               />
-            )}
+            </details>
+            <OwnerDecisionsDisclosure intentId={view.intentId} />
             <CopyPrompt
               label="Hand to an agent"
               request={{
@@ -494,13 +413,18 @@ export function HostedReview({
             />
             <Panel>
               <ExactRecord
+                open={decision.kind === 'landed' || Boolean(acceptance)}
                 summary="Exact record: Candidate, pins, receipts"
                 rows={[
                   ['Candidate', view.id],
                   ['Head', view.head],
                   ['Base', view.base],
                   ['Check run', run?.id],
-                  ['Owner receipt', ownerStatus?.request?.receipt ?? undefined],
+                  ['Landing submission', landing.read?.request.id],
+                  [
+                    'Landing receipt',
+                    landing.read?.receipt ? JSON.stringify(landing.read.receipt) : undefined,
+                  ],
                   ['Previous main receipt', channels.find(move => move.channel === 'main')?.id],
                 ]}
               />

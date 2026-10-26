@@ -225,15 +225,17 @@ export function ConceptTerm({
 export function ExactRecord({
   summary = 'Exact record',
   rows,
+  open,
 }: {
   summary?: ReactNode;
+  open?: boolean;
   rows: readonly (readonly [label: string, value: string | undefined])[];
 }) {
   const [copied, setCopied] = useState('');
   const present = rows.filter((row): row is readonly [string, string] => Boolean(row[1]));
   if (present.length === 0) return null;
   return (
-    <details className="fx-record">
+    <details className="fx-record" open={open}>
       <summary>{summary}</summary>
       <dl>
         {present.map(([label, value]) => (

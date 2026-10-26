@@ -49,6 +49,7 @@ export async function pinLandingAttempt(
   );
   invariant(
     input.retainedSelection !== undefined ||
+      (input.actor.kind === 'person' && r.finish !== undefined) ||
       (main.head === r.expectedMain.head && main.receipt.id === r.expectedMain.receiptId),
     'CHANNEL_CHANGED',
     'Select the current main head and receipt.',

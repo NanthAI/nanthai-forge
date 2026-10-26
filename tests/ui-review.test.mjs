@@ -49,7 +49,7 @@ test('historical Review replaces decision controls with its recorded disposition
   const accepted = renderToStaticMarkup(
     h(ReviewDisposition, { acceptance: { at: '2026-10-15T10:00:00Z', actor: { name: 'Maya' } } }),
   );
-  assert.match(accepted, /Accepted into main/);
+  assert.match(accepted, /Landed on main/);
   assert.match(accepted, /by Maya/);
   assert.doesNotMatch(accepted, /<button/);
   const superseded = renderToStaticMarkup(
@@ -61,31 +61,11 @@ test('historical Review replaces decision controls with its recorded disposition
   assert.doesNotMatch(superseded, /<button/);
 });
 
-test('main ancestry gate follows current main and the owner rejection, never stale green evidence', async () => {
-  const { mainAncestryGate } = await import(moduleUrl('../web/src/lane/owner-decision-model.ts'));
+test('main ancestry gate follows current hosted main and never stale green evidence', async () => {
+  const { mainAncestryGate } = await import(moduleUrl('../web/src/lane/landing-model.ts'));
   assert.equal(mainAncestryGate({ included: true, indexedMain: 'm1', currentMain: 'm1' }).ok, true);
   assert.equal(mainAncestryGate({ included: true, indexedMain: 'm1', currentMain: 'm2' }).ok, false);
   assert.equal(mainAncestryGate({ included: null }).ok, false);
   assert.equal(mainAncestryGate({ included: true }).ok, false);
-  const rejected = mainAncestryGate({
-    included: true,
-    indexedMain: 'm2',
-    currentMain: 'm2',
-    rejection: {
-      code: 'NEEDS_RECHECK',
-      reason: 'Needs re-check: main moved and changed paths overlap the requested View.',
-    },
-  });
-  assert.equal(rejected.ok, false);
-  assert.match(rejected.title, /Needs an update/);
-  assert.equal(rejected.body, ''); // The owner decision owns the full rejection reason.
-  assert.equal(
-    mainAncestryGate({
-      included: true,
-      indexedMain: 'm2',
-      currentMain: 'm2',
-      rejection: { code: 'NETWORK_ERROR', reason: 'Owner unavailable' },
-    }).ok,
-    true,
-  );
+  assert.match(mainAncestryGate({ included: false }).title, /Needs an update/);
 });

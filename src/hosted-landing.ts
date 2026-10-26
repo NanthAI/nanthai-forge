@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { mainExpectationSchema } from './hosted-main.js';
 import { hostedCheckRequestSchema, checkNumber } from './hosted-check.js';
 import { autonomyPolicySchema } from './autonomy-policy.js';
+import { composeRequestSchema } from './hosted-compose.js';
 import { submissionOutcome } from './landing-submission-state.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
@@ -24,10 +25,19 @@ export const hostedLandingRequestSchema = z
     expectedHead: hash.nullable(),
     agent: z.boolean().default(false),
     keepOpen: z.boolean().optional(),
+    revertOf: z.uuid().optional(),
     check: landingCheckSelectionSchema.nullable(),
     finish: z
-      .object({ composeOperationId: z.uuid(), after: z.uuid().nullable().default(null) })
+      .object({
+        composeOperationId: z.uuid().optional(),
+        reviewedSource: composeRequestSchema.optional(),
+        after: z.uuid().nullable().default(null),
+      })
       .strict()
+      .refine(
+        value => Boolean(value.composeOperationId) !== Boolean(value.reviewedSource),
+        'Select one original composition or reviewed source.',
+      )
       .optional(),
   })
   .strict();

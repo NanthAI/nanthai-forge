@@ -45,14 +45,6 @@
 .fx-review-intent-crumb { max-width:min(680px,75vw); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
 .fx-review-disposition { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:12px 14px; font-size:13px; }
 
-/* Owner receipts can carry long structured rejection reasons. */
-.fx-owner-decision { min-width: 0; }
-.fx-owner-decision > [role='status'] { white-space: normal; }
-.fx-owner-reason { display: block; margin-top: var(--fx-s-2); overflow-wrap: anywhere; white-space: normal; }
-.fx-owner-decision .fx-btn { width: auto; max-width: 100%; align-self: flex-start; }
-.fx-owner-decision details { min-width: 0; overflow-wrap: anywhere; }
-
-.fx-owner-decision .fx-st { height: auto; min-height: 20px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
-.fx-owner-decision summary { min-height: var(--fx-s-8); display: flex; align-items: center; cursor: pointer; }
-
 .fx-review-head > .fx-st { max-width:100%; height:auto; min-height:20px; white-space:normal; overflow-wrap:anywhere; line-height:1.4; }
+
+.fx-review-page .fx-review-side { width:auto; }

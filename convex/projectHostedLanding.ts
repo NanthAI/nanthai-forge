@@ -7,6 +7,7 @@ import { beginHostedOperation } from './projectHostedOperations';
 import {
   ensureLandingQueue,
   landingRow,
+  landingQueue,
   loadLanding,
   loadLandingAttempt,
   insertLandingAttempt,
@@ -26,6 +27,9 @@ import {
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { loadHostedCheck } from './projectHostedCheckStore';
+import { finishRow } from './projectHostedFinishWake';
+import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 
 /** Cancel a submission, independently of Lane lifecycle or check execution. */
@@ -134,6 +138,8 @@ export const enqueue = mutation({
         channel: request.channel,
         submissionId,
         operationId: request.operationId,
+        candidateId: request.candidateId,
+        ...(request.revertOf ? { revertOf: request.revertOf } : {}),
         actor: actor.id,
         sequence,
         runnable: true,
@@ -253,6 +259,100 @@ export const attempts = query({
           observation: landingAttemptProgress(row, state)?.observation ?? null,
           superseded: row.attemptId !== state.attemptId,
         })),
+      });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** One Candidate subscription, no project queue scan or observer-driven work. */
+export const candidate = query({
+  args: { projectId: v.id('hostedProjects'), candidateId: v.string() },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, input) => {
+    try {
+      await reader(ctx, input.projectId);
+      const [row] = await ctx.db
+        .query('projectHostedLandingRequests')
+        .withIndex('by_project_and_candidate_and_sequence', q =>
+          q.eq('projectId', input.projectId).eq('candidateId', input.candidateId),
+        )
+        .order('desc')
+        .take(1);
+      if (!row) {
+        const [check] = await ctx.db
+          .query('projectHostedCheckRuns')
+          .withIndex('by_project_and_candidate', q =>
+            q.eq('projectId', input.projectId).eq('candidateId', input.candidateId),
+          )
+          .order('desc')
+          .take(1);
+        return canonicalPayload({
+          request: null,
+          run: check
+            ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: check.runId })).run
+            : null,
+        });
+      }
+      const { state } = await loadLanding(ctx, {
+        projectId: input.projectId,
+        submissionId: row.submissionId,
+      });
+      const attempt = await loadLandingAttempt(ctx, {
+        projectId: input.projectId,
+        attemptId: state.attemptId,
+      });
+      const run = attempt.check
+        ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: attempt.check.runId })).run
+        : null;
+      const finish = await finishRow(ctx, { projectId: input.projectId, submissionId: state.id });
+      const receipt = state.acceptance
+        ? await acceptanceRow(ctx, { projectId: input.projectId, receiptId: state.acceptance.receiptId })
+        : null;
+      const queue =
+        state.phase === 'queued'
+          ? await landingQueue(ctx, { projectId: input.projectId, channel: 'main' })
+          : null;
+      const [runnable] =
+        state.phase === 'queued'
+          ? await ctx.db
+              .query('projectHostedLandingRequests')
+              .withIndex('by_project_and_channel_and_runnable_and_sequence', q =>
+                q.eq('projectId', input.projectId).eq('channel', 'main').eq('runnable', true),
+              )
+              .take(1)
+          : [];
+      const ahead =
+        queue?.lease && queue.lease.submissionId !== state.id
+          ? await landingRow(ctx, { projectId: input.projectId, submissionId: queue.lease.submissionId })
+          : runnable && runnable.sequence < row.sequence
+            ? runnable
+            : null;
+      const [reverse] = state.acceptance
+        ? await ctx.db
+            .query('projectHostedLandingRequests')
+            .withIndex('by_project_and_revert_and_sequence', q =>
+              q.eq('projectId', input.projectId).eq('revertOf', state.acceptance!.receiptId),
+            )
+            .order('desc')
+            .take(1)
+        : [];
+      return canonicalPayload({
+        request:
+          state.observation.state === 'pending' && run?.status === 'unknown'
+            ? { ...state, observation: { ...state.observation, pendingReason: 'pending-infra' } }
+            : state,
+        attempt,
+        run,
+        reverseCandidateId: reverse?.candidateId ?? null,
+        message: finish ? JSON.parse(finish.value).source.message : null,
+        pendingAttempt: finish ? JSON.parse(finish.value).pending : null,
+        receipt: receipt ? JSON.parse(receipt.value) : null,
+        ahead:
+          ahead && !['landed', 'terminal-failed'].includes(ahead.phase)
+            ? JSON.parse(ahead.value).request.candidateId
+            : null,
       });
     } catch (error) {
       return report(error);

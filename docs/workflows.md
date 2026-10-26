@@ -18,6 +18,33 @@ The browser UI is the hosted app. Locally you work through the CLI, MCP and your
 
 Capture includes non-ignored regular files with executable modes. Symlinks and special files are reported, not captured. Agents use the shorter flow in [agents](agents.md).
 
+## Browser review and hosted landing
+
+The Candidate review puts **Your decision** above its check record and conversation.
+**Accept into main** submits the exact reviewed Candidate to the hosted landing
+queue as a person. It does not contact an owner machine. The page subscribes to
+that Candidate's submission and shows Queued, Checking, Landing, Landed or the
+retained failure. Reading progress starts no work and uses no polling timer.
+A main race recomposes the immutable reviewed input/dependency roots through the
+ordinary hosted finish driver; later Lane saves are not substituted. An existing
+exact passing check is selected when available. People retain their existing
+ability to accept an unchecked Candidate.
+
+**Cancel landing** cancels the submission separately from its Lane or shared check.
+**Ask for changes** opens inline, keeps a draft per Candidate during the browser
+session, and records feedback in the Intent and selected Lane conversation. It is
+advisory and adds no acceptance gate. Accepted versions links to this same review
+surface instead of offering another acceptance route.
+
+**Revert…** opens an inline confirmation. The source service prepares a reverse
+Lane from the actual acceptance receipt, composes a new Candidate on current main,
+and submits it to the same checked landing queue. The optional Why is retained in
+the revert Intent. Later disjoint landings remain; conflicts surface in the reverse
+Candidate. Main is never rewound. The original Candidate retains its Accepted
+outcome and links to its reverse submission. Source preparation/composition use
+finite job subscriptions; the landing queue continues independently once submitted.
+The Hand to an agent prompt remains available as a secondary route.
+
 ## Git-backed flow
 
 For a Git repository with an initial commit, `nforge work /path/to/repo` gives the same Intent, Lane and Candidate model. Each Lane is a Git branch and worktree (`forge/lane/<id>`). Stage the files you want, then checkpoint those exact staged files. A Candidate is a clean merge commit of up to eight Lane heads, kept at `refs/forge/views/<id>`. Your checkout is never rewritten. Hooks are disabled and clean/smudge filters and custom merge drivers are rejected.

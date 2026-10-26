@@ -330,6 +330,16 @@ must create a reverse-diff Lane on current main, preserve later work, then check
 and accept the new Candidate normally. Creating the Intent does not reverse source.
 Main is never rewound by this action.
 
+Once hosted holds source authority (`sourceAuthority.mode` is `server`, or a
+switch to it is pending), hosted landing is the only acceptance writer
+(`projectHostedLanding` / `projectHostedAcceptance`). The native `accept-channel`
+writer, shared by CLI, MCP, HTTP, agent accept, landing batches and owner
+requests, then rejects with `HOSTED_AUTHORITY`, naming the hosted project URL and
+an explicitly addressed hosted `finish` command. It checks at entry and again
+under the publication lock. There is no local override: hosted downtime pauses
+landing while editing continues. Before the switch and after a rollback to
+`native-owner`, the owner accepts as described above at its pinned epoch.
+
 ## Collaboration
 
 Source changes and live coordination are separate. Convex stores sessions and an append-only message feed outside the Work journal. A session is an attributed claim: who, where, status and optional Intent, Lane or path. Last-seen is the time a report arrived. A heartbeat touch moves only receipt time (`lastSeen`), preserving `lastActivity` and `activityKind`; real MCP activity advances both. Bound owner observations pin activity time before transport, so delayed delivery cannot look like fresh editing. CLI lifecycle calls persist local session observations; one process-owned observer with per-Lane filesystem watchers coalesces edits about once per minute without reading or hashing source. The same edit observations drive debounced Lane auto-snapshots: a background, Lane-locked (never waited for) capture with a metadata cache into a local State and a pointer under `.forge/work/auto-snapshots`, published under its own short lock that object collection also takes; the owner Work lock is never taken. Its minute tick also observes queued/running checks. Presence observers validate the current Work format before creating owner or Lane queue tickets; unsupported formats leave the owner untouched. HTTP owns its in-process presence observer: closing the last handle aborts watchers and waits for Lane queue releases. MCP connections do not own background presence or landing workers. CLI lifecycle activity wakes an existing owner worker or retains a detached presence worker. CLI/MCP check execution uses a detached controller with an exclusive per-run process lease, retaining the original run and provider pins independently of transport lifetime. HTTP shutdown also clears the acceptance interval and waits for its active poll before returning. Hosted Now uses shared 15-minute working and 90-minute folding defaults, keep quiet sessions visible, and collapse duplicate name+Lane observations. Silence never completes a session; explicit completion or accepted/closed Lanes do. Messages and handoffs target a session, a participant or the project; acknowledgements refer to the original and are recorded per participant. Claims are advisory path scopes with an expiry. Hosted Work writes, exchange publishes and source returns insert `change` events in the same transaction. Events carry denormalized kind, recipient, Intent and Lane for indexed inbox and scoped feeds. Nothing pauses an agent, locks a file or accepts source.

@@ -1201,6 +1201,18 @@ check command and perform a real owner-runner smoke after landing/deployment.
 
 ## Hosted landing queue API
 
+Browser acceptance can set `finish.reviewedSource` instead of
+`finish.composeOperationId`. This person selection pins the canonical Candidate's
+Intent, main receipt and immutable input/dependency roots; it cannot select
+another actor's mutable composition or follow later Lane saves. Agents retain the
+original composition requirement. Final acceptance uses the same authority,
+policy, check evidence and Channel CAS. `projectHostedLanding:candidate` is an
+indexed, read-only subscription over the selected Candidate, its current attempt,
+check, receipt and any compensating submission. New queue rows carry optional
+Candidate and revert-receipt keys; older rows remain valid without a backfill.
+A `revertOf` link is validated against the canonical reverse Lane's receipt
+provenance and its completed composition. It is not acceptance authority.
+
 `projectHostedLanding:enqueue({projectId, request})` accepts JSON metadata:
 
 ```json

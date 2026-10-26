@@ -2,6 +2,7 @@ import { feedbackError } from './InlineError';
 // SPDX-License-Identifier: Apache-2.0
 export type ToastInput = {
   message: string;
+  accepted?: boolean;
   tone?: 'error' | 'success' | 'info';
   retry?: () => unknown | Promise<unknown>;
   action?: unknown;

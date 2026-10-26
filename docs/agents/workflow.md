@@ -225,6 +225,18 @@ Select a check from `status`, or `define-check` with the local executable and ar
 
 `accept` takes `viewId`; `channel` defaults to `main` and `expectedPrevious` to its current head. Invariants, releases, Playbooks, human reviews and GitHub publication keep their existing owners.
 
+Once hosted holds source authority (`server` mode, or a pending switch to it),
+local `accept` and `accept-channel` return `HOSTED_AUTHORITY`, whatever the owner
+role or local autonomy policy. The error names the hosted project and an
+explicitly addressed `nforge agent ROOT finish` command for the hosted landing
+queue. Review and accept on the hosted project page, or submit a hosted Lane with
+`{"url":"DEPLOYMENT_URL","projectId":"PROJECT_ID","laneId":"HOSTED_LANE_ID","accept":true}`.
+The native landing worker and owner acceptance consumer then cannot move its
+Channels. There is no local override: if hosted is unavailable, landing pauses
+and editing continues. Unbound projects, and bound projects before the switch or
+after a rollback to `native-owner`, accept locally as before.
+
+
 For hosted Lanes, the same `nforge mcp ROOT --agent` detects the hosted checkout or
 retained CLI address; `--url URL --project-id ID` selects a new hosted address.
 Task/check/overview commands reuse the hosted CLI schemas and retry journal.

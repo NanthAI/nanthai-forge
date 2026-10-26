@@ -26,17 +26,34 @@ export function acceptanceName(acceptance: ReviewAcceptance) {
 export function ReviewDisposition({
   acceptance,
   replacement,
+  reverted,
+  check,
 }: {
+  reverted?: { href: string; label: string; at: string; why?: string; actor?: string; check?: string };
+  check?: string;
   acceptance?: ReviewAcceptance;
   replacement?: { href: string; label: string; check?: string };
 }) {
   const now = useNow();
+  if (reverted)
+    return (
+      <div className="fx-landed">
+        <Glyph name="passed" size={13} />
+        <div>
+          Reverted {age(reverted.at, now, true)} by <a href={reverted.href}>{reverted.label}</a>
+          {reverted.actor && ` · accepted by ${acceptanceName({ actor: reverted.actor, at: reverted.at })}`}
+          {reverted.check && ` · ${reverted.check} passed`}
+          {reverted.why && <p className="fx-faint">{reverted.why}</p>}
+        </div>
+      </div>
+    );
   if (acceptance)
     return (
       <p className="fx-review-disposition fx-c-passed" title={acceptance.at}>
         <Glyph name="passed" size={13} />
-        Accepted into {acceptance.channel ?? 'main'} {age(acceptance.at, now, true)} by{' '}
-        {acceptanceName(acceptance)}
+        {acceptance.channel && acceptance.channel !== 'main' ? 'Accepted into' : 'Landed on'}{' '}
+        {acceptance.channel ?? 'main'} {age(acceptance.at, now, true)} by {acceptanceName(acceptance)}
+        {check && ` · ${check} passed on exactly this Candidate`}
         {acceptance.actorFormerMember && <small className="fx-faint"> · former member</small>}
       </p>
     );

@@ -424,7 +424,13 @@ test('protected paths: opt-in review for a contract change, none by default', as
 
 test('performance: contract detection over a realistic change set stays within a few milliseconds', t => {
   const store = new Map(),
-    source = { object: blob => Buffer.from(store.get(blob)) };
+    reads = [],
+    source = {
+      object: blob => {
+        reads.push(blob);
+        return Buffer.from(store.get(blob));
+      },
+    };
   const body = n =>
     Array.from({ length: 120 }, (_, i) =>
       i % 6 === 0
@@ -453,13 +459,19 @@ test('performance: contract detection over a realistic change set stays within a
       before.push({ path: `src/same${n}.ts`, blob: `s${n}` });
       after.push({ path: `src/same${n}.ts`, blob: `s${n}` });
     }
+    reads.length = 0;
     const started = performance.now();
     result = contractDelta(source, before, after);
     samples.push(performance.now() - started);
+    // Work scales with changed files: each changed module is read once per side and
+    // the 400 unchanged paths are never read.
+    assert.deepEqual(reads.sort(), [...before.slice(0, 8), ...after.slice(0, 8)].map(e => e.blob).sort());
   }
   t.diagnostic(
     `contract delta, 8 changed ~13KB modules of 408: ${samples.map(s => s.toFixed(2)).join(', ')} ms`,
   );
   assert.ok(result.length >= 4);
-  assert.ok(Math.min(...samples) < 100, 'detection must not dominate a lifecycle receipt');
+  // Wall-clock on shared CI runners varies by several times, so the budget only
+  // catches gross regressions; the read assertion above guards the scaling.
+  assert.ok(Math.min(...samples) < 1000, 'detection must not dominate a lifecycle receipt');
 });
