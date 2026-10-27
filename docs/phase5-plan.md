@@ -300,7 +300,7 @@ Without the conditional G and replace-first I: about 13,100 non-test. To add: ab
 
 - **Size:** S–M. **Depends on:** B1.2e, B1.3b, B1.4b, B1.5a.
 - **Changes:** the dogfood project moves to hosted authority; old CLIs are refused with an upgrade message.
-- **Acceptance:** Route B passes on a clean machine; Route A is re-measured after the R2 purge of push-era objects (retaining every object referenced by kept backups). Times published in [operations](operations.md). One authority: every accept on the project goes through hosted CAS for seven days. **Metrics:** must not regress 3, 5 or 7. Metric 7 switches to its after-cutover form.
+- **Acceptance:** Route B passes on a clean machine; Route A is re-measured after the R2 purge of push-era objects (retaining every object referenced by kept backups). Times published in [operations](operations.md). One authority: every accept on the project goes through hosted CAS for seven days. **Metrics:** must not regress 3, 5 or 7. Metric 7 switches to its after-cutover form. No background process: like Git, a user needs no always-on local process after cutover (browser accepts and metadata sync work with the Mac asleep), and the dogfood login service is retired. Anything still kept running is opt-in, has one stated job and sends 0 Convex calls while idle.
 
 ### B1.5c. Big-repo onboarding benchmark
 

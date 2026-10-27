@@ -54,9 +54,21 @@ const presenceOnly = (entry: SyncEntry) => metadata(entry).entries?.length === 0
 export const syncSequence = (entry: SyncEntry) => activity(entry)?.sequence ?? 0;
 
 /** Never change a retained UUID's payload: an earlier attempt may have committed. */
-export function compactAgentSync(queue: AgentSyncState, now = Date.now()) {
+export function compactAgentSync(queue: AgentSyncState, now = Date.now(), boundProjectId?: string) {
+  // After a rebind, the new project was seeded from this owner's full Work: entries
+  // for the previous project are obsolete and would block the serial queue forever.
+  const bound = boundProjectId
+    ? queue.pending.filter(entry => entry.projectId === boundProjectId)
+    : queue.pending;
+  if (queue.headError && !bound.some(entry => entry.operationId === queue.headError?.operationId)) {
+    if (queue.pending.some(entry => entry.operationId === queue.headError?.operationId)) {
+      delete queue.headError;
+      delete queue.nextAttemptAt;
+      delete queue.unprepared;
+    }
+  }
   const latest = new Map<string, SyncEntry>();
-  for (const entry of queue.pending) {
+  for (const entry of bound) {
     if (presenceOnly(entry) && now - (activity(entry)?.activityAt ?? 0) > PRESENCE.workingMs) continue;
     const key = JSON.stringify([
       entry.deployment,

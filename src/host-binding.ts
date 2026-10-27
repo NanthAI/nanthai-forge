@@ -190,7 +190,7 @@ export function updateHostState<T>(
       () => {
         const state = readHostState(store),
           result = update(state);
-        if (state.agentSync) compactAgentSync(state.agentSync);
+        if (state.agentSync) compactAgentSync(state.agentSync, Date.now(), state.binding?.projectId);
         const validated = schema.parse(state);
         const { agentSync, ...bindingState } = validated;
         // Write the sidecar before removing legacy pending entries from the binding.

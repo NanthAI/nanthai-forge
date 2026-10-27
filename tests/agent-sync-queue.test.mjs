@@ -518,3 +518,42 @@ test('local prepare wakes a sleeping retry immediately and permanent errors leav
   assert.equal(waits, 0);
   assert.equal((await hostCli([store.root, '--status'])).agentSyncError.code, 'BAD_ARGUMENT');
 });
+
+test('entries for a previous project after a rebind are dropped instead of blocking the queue', async t => {
+  // Dogfood shape (2026-10-27): 84 entries for the pre-reseed project ahead of 2 for the new one,
+  // head failing PROJECT_WORK_INDEX_MISSING with a future retry.
+  const store = fixture(t, []);
+  const stale = Array.from({ length: 84 }, (_, i) => ({ ...entry(i + 1), projectId: 'previous-project' }));
+  const current = [entry(85), entry(86)];
+  writeFileSync(
+    join(store.directory, 'hosted-agent-sync.json'),
+    JSON.stringify({
+      sequence: 86,
+      pending: [...stale, ...current],
+      headError: {
+        code: 'PROJECT_WORK_INDEX_MISSING',
+        message: 'Prepare hosted Work before syncing metadata.',
+        seq: 1,
+        at: Date.now(),
+        attempts: 9,
+        operationId: stale[0].operationId,
+      },
+      nextAttemptAt: Date.now() + 300_000,
+      unprepared: 'previous',
+    }),
+  );
+  const calls = [];
+  await flushAgentSync(store, {
+    mutation: async (ref, args) => {
+      assert.equal(args.projectId, 'project');
+      calls.push(getFunctionName(ref));
+    },
+  });
+  const queue = readHostState(store).agentSync;
+  assert.equal(calls.length, 4); // two calls per current entry, none for the previous project
+  assert.equal(queue.pending.length, 0);
+  assert.equal(queue.headError, undefined);
+  assert.equal(queue.nextAttemptAt, undefined);
+  assert.equal(queue.discarded, 84);
+  assert.equal((await hostCli([store.root, '--status'])).agentSyncError ?? null, null);
+});
