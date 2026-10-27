@@ -119,6 +119,36 @@ export const lookup = internalQuery({
       : null;
   },
 });
+/** Exact build-partition reads share authority and generation checks per window. */
+export const lookups = internalQuery({
+  args: { ...selected, keys: v.array(v.object({ collection: v.string(), key: v.string() })) },
+  returns: v.array(v.union(indexEntry, v.null())),
+  handler: async (ctx, input) => {
+    await accessibleProject(ctx, input.projectId, input.owner);
+    const generation = await ctx.db.get(input.generationId);
+    invariant(generation?.projectId === input.projectId, 'WORK_STALE', 'The index build changed.');
+    invariant(input.keys.length <= 100, 'BAD_ARGUMENT', 'Read one build lookup window.');
+    const result = [];
+    let bytes = 0;
+    for (const { collection, key } of input.keys) {
+      const row = await record(ctx, input.generationId, collection, key);
+      const entry = row
+        ? {
+            collection: row.collection,
+            key: row.key,
+            parent: row.parent,
+            position: row.position,
+            value: row.value,
+          }
+        : null;
+      const size = new TextEncoder().encode(JSON.stringify(entry)).length;
+      if (result.length && bytes + size > 500000) break;
+      result.push(entry);
+      bytes += size;
+    }
+    return result;
+  },
+});
 /** Rows and their computational continuation commit together. Unknown replies
  * reconcile the saved cursor; concurrent drivers cannot append the same step. */
 export const step = internalMutation({
@@ -162,23 +192,26 @@ export const step = internalMutation({
         });
       }
     }
-    const [lastActive] = await ctx.db
-      .query('projectWorkRecords')
-      .withIndex('by_generation_and_collection_and_status_and_position', q =>
-        q.eq('generationId', generation._id).eq('collection', 'intents').eq('status', 'active'),
-      )
-      .order('desc')
-      .take(1);
-    const [last] = lastActive
-      ? []
-      : await ctx.db
-          .query('projectWorkRecords')
-          .withIndex('by_generation_and_collection_and_position', q =>
-            q.eq('generationId', generation._id).eq('collection', 'intents'),
-          )
-          .order('desc')
-          .take(1);
-    metadata.defaultIntentId = lastActive?.key ?? last?.key;
+    // Summary, tree, blob and scratch pages cannot change the default Intent.
+    if (input.entries.some(entry => entry.collection === 'intents')) {
+      const [lastActive] = await ctx.db
+        .query('projectWorkRecords')
+        .withIndex('by_generation_and_collection_and_status_and_position', q =>
+          q.eq('generationId', generation._id).eq('collection', 'intents').eq('status', 'active'),
+        )
+        .order('desc')
+        .take(1);
+      const [last] = lastActive
+        ? []
+        : await ctx.db
+            .query('projectWorkRecords')
+            .withIndex('by_generation_and_collection_and_position', q =>
+              q.eq('generationId', generation._id).eq('collection', 'intents'),
+            )
+            .order('desc')
+            .take(1);
+      metadata.defaultIntentId = lastActive?.key ?? last?.key;
+    }
     let cursor = input.cursor;
     if (input.cleanup) {
       const rows =

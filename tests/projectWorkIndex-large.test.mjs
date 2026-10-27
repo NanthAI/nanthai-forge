@@ -134,7 +134,7 @@ test('large record index resumes after a committed step loses its reply without 
   const query = f.s.ctx.runQuery;
   f.s.ctx.runQuery = (ref, args) => {
     if (getFunctionName(ref) === 'projectWork:events')
-      assert.equal(args.paginationOpts.numItems, 1, 'journal replay is independently paged');
+      assert.equal(args.paginationOpts.numItems, 50, 'journal replay reads one bounded ordered page');
     return query(ref, args);
   };
   await assert.rejects(actions.ensure._handler(f.s.ctx, { projectId: 'project' }));

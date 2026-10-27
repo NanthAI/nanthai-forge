@@ -4,7 +4,7 @@ import { archiveChannels } from '../src/work-archive-metadata';
 import { sourceTreeEntries } from '../src/source-tree-index';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { parseNativeState } from '../src/native-source';
-import { addDiffstats, type ChangedStates } from './projectDiffstatProjection';
+import { addDiffstats, type ChangedStates, type Pin } from './projectDiffstatProjection';
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import type { WorkData } from '../src/work-types';
@@ -34,12 +34,13 @@ export async function viewStates(
   owner: string,
   index: number,
   changedStates?: Map<string, ChangedStates>,
+  sourcePins?: ReadonlyMap<string, Pin>,
 ) {
   const { backup, manifest, data } = snapshot,
     view = data.views[index]!,
-    pins = new Map(manifest.files.map(file => [file.path, file]));
+    pins = sourcePins ?? new Map(manifest.files.map(file => [file.path, file]));
   function pin(head: string) {
-    const selected = pins.get(`objects/${head}`);
+    const selected = pins.get(sourcePins ? head : `objects/${head}`);
     invariant(selected?.sha256 === head, 'SOURCE_UNAVAILABLE', 'A View State is not retained.');
     return { sha256: selected.sha256, size: selected.size };
   }

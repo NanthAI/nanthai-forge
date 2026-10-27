@@ -7,6 +7,8 @@ import { workSchema } from '../dist/work-types.js';
 import { buildWorkRecords } from '../dist/work-exchange-records.js';
 const { projectSummaries } = await import(moduleUrl('../convex/projectWorkIndexBuildSummaries.ts'));
 const { exchangeObjectReader } = await import(moduleUrl('../convex/projectExchangeReader.ts'));
+const buildDiffstats = await import(moduleUrl('../convex/projectWorkIndexBuildDiffstats.ts'));
+const states = await import(moduleUrl('../convex/projectWorkIndexBuildStates.ts'));
 const ancestry = await import(moduleUrl('../convex/projectWorkAncestry.ts'));
 const diffstats = await import(moduleUrl('../convex/projectDiffstats.ts'));
 
@@ -161,6 +163,7 @@ export function callsFixture(scale = 1) {
           storageId: key,
         }));
       }
+      if (name === 'projectWorkIndexBuildStore:lookups') return args.keys.map(() => null);
       if (name === 'projectWorkIndexBuildStore:lookup') return null;
       if (name === 'projectWorkIndexBuildStore:rows') return [];
       if (name === 'projectWorkIndexBuildStore:rowBatch') return args.requests.map(() => []);
@@ -171,6 +174,9 @@ export function callsFixture(scale = 1) {
     runAction: async (ref, args) => {
       const name = getFunctionName(ref);
       metrics.calls[name] = (metrics.calls[name] ?? 0) + 1;
+      if (name === 'projectWorkIndexBuildDiffstats:compare')
+        return buildDiffstats.compare._handler(ctx, args);
+      if (name === 'projectWorkIndexBuildStates:batch') return states.batch._handler(ctx, args);
       if (name === 'projectWorkAncestry:changedStates') return ancestry.changedStates._handler(ctx, args);
       if (name === 'projectWorkAncestry:stateBatch') return ancestry.stateBatch._handler(ctx, args);
       if (name === 'projectDiffstats:compare') return diffstats.compare._handler(ctx, args);

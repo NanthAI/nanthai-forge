@@ -280,6 +280,21 @@ Without a valid owner sidecar, hosted native Lane/Candidate diffstats advance th
 
 **Collection.** Object collection removes only verified, unreferenced objects. Referenced source history and Lanes are preserved. CI-provider logs stay with the provider; local logs use the explicit opt-in and finite retention described in [operations](operations.md#check-logs-and-retention).
 
+Large server-held native checkpoints build their Work index from pinned record
+pages. An action parses the manifest/catalog once and shares bounded immutable
+record bytes, exact build lookups and main heads across its steps. Summary pages
+batch dependency frontiers, acceptance payload chunks, source State comparisons
+and distinct changed-file pairs. Tree parsing runs in a separate source window;
+only chunked path rows return to the coordinator. Blob rows drain in 500-row
+windows. Journal pages apply up to 50 ordered events with an overlay of preceding
+updates, then commit rows and the original revision/cursor continuation together.
+Existing partial summary and single-event journal cursors retain their meaning.
+Scratch cleanup does not reread the default Intent unless a page changed Intents.
+All source reads and durable steps retain current authority and exact generation
+checks; invocation-local byte reuse is not an authorization cache. Builds have
+no idle timer. `tests/projectWorkIndex-phases.test.mjs` measures the remaining
+phases on synthetic dogfood-sized Work and 3,000-file trees.
+
 ## Work record delta exchange
 
 Native exchange schema 2 keeps ordered collections of stable record keys and

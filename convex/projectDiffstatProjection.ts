@@ -41,6 +41,8 @@ export async function addDiffstats(
   owner: string,
   entries: IndexEntry[],
   changedStates?: ReadonlyMap<string, ChangedStates>,
+  preparedStats?: ReadonlyMap<string, Stats>,
+  sourcePins?: ReadonlyMap<string, Pin>,
 ) {
   if (snapshot.backup.transport !== 'objects' || snapshot.manifest.kind !== 'forge-native-work-backup')
     return;
@@ -48,9 +50,9 @@ export async function addDiffstats(
     internal.projectWorkIndexStore.current,
     { projectId: snapshot.backup.projectId, owner },
   );
-  const pins = new Map(
-    snapshot.manifest.files.map(file => [file.sha256, { sha256: file.sha256, size: file.size }]),
-  );
+  const pins =
+    sourcePins ??
+    new Map(snapshot.manifest.files.map(file => [file.sha256, { sha256: file.sha256, size: file.size }]));
   const pin = (hash: string) => {
     const selected = pins.get(hash);
     invariant(selected, 'SOURCE_UNAVAILABLE', 'Diffstat source is unavailable.');
@@ -63,7 +65,7 @@ export async function addDiffstats(
     if (!value.head || value.status === 'conflict') continue;
     const key = `${value.base}:${value.head}`;
     try {
-      let stats = cache.get(key);
+      let stats = cache.get(key) ?? preparedStats?.get(key);
       if (!stats && current) {
         const rows = await ctx.runQuery(internal.projectWorkIndexStore.lookups, {
           projectId: snapshot.backup.projectId,

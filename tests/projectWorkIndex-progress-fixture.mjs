@@ -6,30 +6,60 @@ import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
 import { workSchema } from '../dist/work-types.js';
 import { buildWorkRecords } from '../dist/work-exchange-records.js';
+import { metadataRequest } from '../dist/work-metadata.js';
 import { buildByteTree } from '../dist/native-exchange-tree.js';
+const projectObjects = await import(moduleUrl('../convex/projectObjects.ts'));
+const buildStates = await import(moduleUrl('../convex/projectWorkIndexBuildStates.ts'));
+const buildDiffstats = await import(moduleUrl('../convex/projectWorkIndexBuildDiffstats.ts'));
+const ancestry = await import(moduleUrl('../convex/projectWorkAncestry.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const at = '2026-01-01T00:00:00.000Z';
 /** Synthetic dogfood-sized shape. No source or credentials from an owner. */
-export function progressFixture(scale = 1, saved, ensure = actions.ensure._handler) {
+export function progressFixture(scale = 1, saved, ensure = actions.ensure._handler, options = {}) {
   const n = count => Math.max(1, Math.ceil(count * scale));
   const objects = new Map(),
     heads = [];
+  const generators = new Map(),
+    sizes = new Map();
+  const getObject = objects.get.bind(objects);
+  objects.get = key => getObject(key) ?? generators.get(key)?.();
+  const hasObject = objects.has.bind(objects);
+  objects.has = key => hasObject(key) || generators.has(key);
+  const put = bytes => {
+    const hash = digest(bytes);
+    objects.set(hash, bytes);
+    return hash;
+  };
+  const old = options.treeFiles ? put(Buffer.from('before\n')) : undefined;
+  const changes = options.treeFiles
+    ? Array.from({ length: 40 }, (_, i) => put(Buffer.from(`after ${i}\n`)))
+    : [];
+  const paths = Array.from({ length: options.treeFiles ?? 0 }, (_, i) => ({
+    path: `src/file-${i}.ts`,
+    blob: old,
+    mode: 'file',
+  }));
   for (let i = 0; i < n(2495); i++) {
-    const bytes = Buffer.from(
-      JSON.stringify({
-        schema: 1,
-        kind: 'forge-source-state',
-        parents: i && i <= n(1530) ? [heads[i - 1]] : [],
-        files: [],
-        message: `State ${i}`,
-        at,
-      }),
-    );
-    const head = digest(bytes);
-    objects.set(head, bytes);
+    const make = () =>
+      Buffer.from(
+        JSON.stringify({
+          schema: 1,
+          kind: 'forge-source-state',
+          parents: i && i <= n(1530) ? [heads[i - 1]] : [],
+          files: i ? paths.map((f, j) => (j < 40 ? { ...f, blob: changes[j] } : f)) : paths,
+          message: `State ${i}`,
+          at,
+        }),
+      );
+    const cached = options.sourcePins?.[i];
+    const bytes = cached ? undefined : make(),
+      head = cached?.sha256 ?? digest(bytes);
+    sizes.set(head, cached?.size ?? bytes.length);
+    if (options.treeFiles) generators.set(head, make);
+    else objects.set(head, bytes);
     heads.push(head);
   }
-  const head = heads.at(-1);
+  const head = options.treeFiles ? heads[0] : heads.at(-1);
   let data = workSchema.parse({
     schema: 17,
     revision: 27630,
@@ -142,6 +172,9 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
       priority: 'normal',
       status: 'accepted',
     });
+  if (options.objects)
+    for (let i = objects.size + generators.size; i < options.objects; i++)
+      put(Buffer.from(`Unused retained blob ${i}`));
   const records = buildWorkRecords(workSchema.parse(data));
   for (const [key, bytes] of records.objects) objects.set(key, bytes);
   const manifest = Buffer.from(
@@ -153,7 +186,12 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
       revision: data.revision,
       files: [
         { path: 'work.json', ...records.root.work },
-        ...heads.map(sha256 => ({ path: `objects/${sha256}`, sha256, size: objects.get(sha256).length })),
+        ...heads.map(sha256 => ({ path: `objects/${sha256}`, sha256, size: sizes.get(sha256) })),
+        ...(options.treeFiles
+          ? [...objects]
+              .filter(([key]) => !heads.includes(key) && !records.objects.has(key))
+              .map(([sha256, bytes]) => ({ path: `objects/${sha256}`, sha256, size: bytes.length }))
+          : []),
       ],
       unavailable: [],
       coverage: 'Synthetic index benchmark',
@@ -195,6 +233,26 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     transport: 'objects',
     preview: { format: 'native', revision: data.revision, manifestDigest: digest(manifest) },
   };
+  const journal = Array.from({ length: n(options.journal ?? 0) * Number(!!options.journal) }, (_, i) => {
+    const command = {
+      action: 'note',
+      intentId: data.intents[i % data.intents.length].id,
+      kind: 'comment',
+      text: `Journal ${i}`,
+    };
+    return {
+      _id: `event-${i}`,
+      projectId: 'project',
+      operationId: randomUUID(),
+      previousRevision: data.revision + i,
+      revision: data.revision + i + 1,
+      command: JSON.stringify(command),
+      request: metadataRequest(command),
+      actor: 'owner',
+      at,
+    };
+  });
+  project.work.revision += journal.length;
   s.tables.hostedProjects.set('project', project);
   s.tables.projectBackups.set('backup', backup);
   if (saved) {
@@ -246,6 +304,34 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
   };
   s.ctx.db.patch = (id, row) => patch(id, row);
   s.ctx.db.query = table => {
+    if (table === 'projectObjects') {
+      const values = {};
+      const q = {
+        withIndex(_name, build) {
+          const fields = {
+            eq: (key, value) => {
+              values[key] = value;
+              return fields;
+            },
+          };
+          build(fields);
+          return q;
+        },
+        async unique() {
+          const digest = values.digest;
+          if (values.projectId !== 'project' || !objects.has(digest)) return null;
+          return {
+            _id: digest,
+            _creationTime: 1,
+            projectId: 'project',
+            digest,
+            size: sizes.get(digest) ?? objects.get(digest).length,
+            storageId: digest,
+          };
+        },
+      };
+      return q;
+    }
     if (table !== 'projectWorkRecords') return queryDb(table);
     let matches = [],
       direction = 1;
@@ -308,24 +394,43 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
   };
   const metrics = {
     calls: {},
+    phases: {},
+    summaryCalls: { lanes: 0, views: 0, runs: 0 },
     steps: 0,
     documentsRead: 0,
     documentsWritten: 0,
     storageReads: 0,
     maxRpcBytes: 0,
+    maxSourceWindowBytes: 0,
     maxStepMs: 0,
     maxActionMs: 0,
     actionCalls: 0,
   };
+  const phase = () => {
+    const generation = [...s.tables.projectWorkGenerations.values()].find(g => g.ensureCursor);
+    return generation ? JSON.parse(generation.ensureCursor).phase : 'setup';
+  };
+  const metric = (key, count = 1) => {
+    const selected = phase();
+    const values = (metrics.phases[selected] ??= { calls: 0, documentsRead: 0, documentsWritten: 0 });
+    values[key] += count;
+    if (key === 'calls' && selected === 'summaries') {
+      const generation = [...s.tables.projectWorkGenerations.values()].find(g => g.ensureCursor);
+      const name = ['lanes', 'views', 'runs'][JSON.parse(generation.ensureCursor).field];
+      if (name) metrics.summaryCalls[name] += count;
+    }
+  };
   const get = s.ctx.db.get;
   s.ctx.db.get = async id => {
     metrics.documentsRead++;
+    metric('documentsRead');
     return get(id);
   };
   for (const kind of ['insert', 'patch', 'delete']) {
     const run = s.ctx.db[kind];
     s.ctx.db[kind] = async (...args) => {
       metrics.documentsWritten++;
+      metric('documentsWritten');
       return run(...args);
     };
   }
@@ -337,13 +442,15 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
         const run = q[kind];
         q[kind] = async (...args) => {
           const result = await run(...args);
-          metrics.documentsRead += Array.isArray(result)
+          const count = Array.isArray(result)
             ? result.length
             : result?.page
               ? result.page.length
               : result
                 ? 1
                 : 0;
+          metrics.documentsRead += count;
+          metric('documentsRead', count);
           return result;
         };
       }
@@ -362,21 +469,31 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
   s.ctx.runQuery = async (ref, args) => {
     const name = getFunctionName(ref);
     metrics.calls[name] = (metrics.calls[name] ?? 0) + 1;
-    if (name === 'projectObjects:resolve')
-      return args.digests.map(sha256 => ({
-        projectId: 'project',
-        digest: sha256,
-        size: objects.get(sha256).length,
-        storageId: sha256,
-      }));
+    metric('calls');
+    if (name === 'projectObjects:resolve') {
+      metrics.maxSourceWindowBytes = Math.max(
+        metrics.maxSourceWindowBytes,
+        args.digests.reduce((n, key) => n + (sizes.get(key) ?? objects.get(key).length), 0),
+      );
+      return projectObjects.resolve._handler(s.ctx, args);
+    }
     if (name === 'projectWork:get') return project;
-    if (name === 'projectWork:events') return { page: [], isDone: true, continueCursor: '' };
+    if (name === 'projectWork:events') {
+      const offset = Number(args.paginationOpts.cursor ?? 0);
+      const page = journal.slice(offset, offset + args.paginationOpts.numItems);
+      return {
+        page,
+        isDone: offset + page.length >= journal.length,
+        continueCursor: String(offset + page.length),
+      };
+    }
     if (name === 'projectBackups:get') return { project, backup };
     return query(ref, args);
   };
   s.ctx.runMutation = async (ref, args) => {
     const name = getFunctionName(ref);
     metrics.calls[name] = (metrics.calls[name] ?? 0) + 1;
+    metric('calls');
     metrics.maxRpcBytes = Math.max(metrics.maxRpcBytes, Buffer.byteLength(JSON.stringify(args)));
     const result = await mutation(ref, args);
     if (name === 'projectWorkIndexBuildStore:step') {
@@ -390,14 +507,32 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
   s.ctx.runAction = async (ref, args) => {
     const name = getFunctionName(ref);
     metrics.calls[name] = (metrics.calls[name] ?? 0) + 1;
+    metric('calls');
+    if (options.treeFiles) {
+      if (name === 'projectWorkIndexBuildStates:batch') return buildStates.batch._handler(s.ctx, args);
+      if (name === 'projectWorkIndexBuildStates:tree') return buildStates.tree._handler(s.ctx, args);
+      if (name === 'projectWorkIndexBuildDiffstats:compare')
+        return buildDiffstats.compare._handler(s.ctx, args);
+      if (name === 'projectWorkAncestry:changedStates') return ancestry.changedStates._handler(s.ctx, args);
+      if (name === 'projectWorkAncestry:stateBatch') return ancestry.stateBatch._handler(s.ctx, args);
+    }
+    if (name === 'projectWorkIndexBuildStates:tree') return [];
+    if (name === 'projectWorkIndexBuildDiffstats:compare')
+      return args.files.map(() => ({ add: 0, del: 0, exact: true }));
+    if (name === 'projectWorkIndexBuildStates:batch')
+      return args.requests.map(() => ({ before: [], after: [], paths: [], states: [] }));
     if (name === 'projectWorkAncestry:changedStates') return { before: [], after: [], paths: [] };
     if (name === 'projectWorkAncestry:stateBatch') return args.pins.map(p => ({ head: p.sha256, files: [] }));
     throw new Error(`Unexpected action ${name}`);
   };
+  // In the memory consumer only immutable record objects are the external fake
+  // storage. Do not also retain the producer's complete 40 MiB Work in the action.
+  if (options.consumerOnly) for (const key of Object.keys(data)) if (Array.isArray(data[key])) data[key] = [];
   return {
     s,
     data,
     metrics,
+    sourcePins: heads.map(sha256 => ({ sha256, size: sizes.get(sha256) })),
     snapshot: () => ({
       data,
       objects: [...objects],
@@ -407,6 +542,7 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
       const started = performance.now();
       stepStarted = started;
       metrics.actionCalls++;
+      metric('calls');
       const result = await ensure(s.ctx, { projectId: 'project' });
       metrics.maxActionMs = Math.max(metrics.maxActionMs, performance.now() - started);
       return result;

@@ -7,20 +7,21 @@ import {
   rowsRef,
   rowBatchRef,
   type RowRequest,
-  lookupRef,
   family,
   type Selected,
   type Exchange,
   type Cursor,
 } from './projectWorkIndexBuildTypes';
+import { buildContext, type BuildContext } from './projectWorkIndexBuildContext';
 import { viewContext } from './projectWorkIndexBuildProjection';
-import { exchangeObjectReader } from './projectExchangeReader';
 import { readRecord, type RecordPin } from '../src/work-exchange-records';
 import { partialWork } from '../src/work-exchange-delta';
 import { indexedRecord, type IndexEntry } from '../src/work-hosted-index';
 import { viewReadModels } from '../src/view-read-model';
 import { viewIndexEntries } from '../src/view-hosted-index';
 import { viewSummary, laneSummary, runSummary } from '../src/work-hosted-summary';
+import { summaryDiffstats } from './projectWorkIndexBuildDiffstats';
+import { summaryStates } from './projectWorkIndexBuildStates';
 import { viewStates } from './projectSourceProjection';
 import { addDiffstats, type ChangedStates } from './projectDiffstatProjection';
 import type { WorkView } from '../src/work-types';
@@ -31,6 +32,7 @@ export async function projectSummaries(
   exchange: Exchange,
   backup: Doc<'projectBackups'>,
   c: Cursor,
+  context: BuildContext = buildContext(ctx, selected, exchange),
 ): Promise<IndexEntry[]> {
   const field = ['lanes', 'views', 'runs'][c.field];
   if (!field) {
@@ -54,52 +56,8 @@ export async function projectSummaries(
     bytes += pin.size;
     c.record++;
   }
-  const bodies = await exchangeObjectReader(ctx, false, 0).read(selected.projectId, selected.owner, pins);
-  const batch = new Map(pins.map((p, i) => [p.sha256, bodies[i]!]));
-  const e: Exchange = {
-    ...exchange,
-    read: pin => (batch.has(pin.sha256) ? Promise.resolve(batch.get(pin.sha256)!) : exchange.read(pin)),
-  };
-  if (field === 'views') {
-    // Seed the common context for this page in metadata-sized transport windows.
-    // Dependency closure and unusually large records retain the ordinary reader.
-    // These are immutable projection inputs; the publication transaction rechecks
-    // current authority, just as it does for the page's own record bodies.
-    const values = await Promise.all(pins.map(pin => readRecord(pin, e.read, field)));
-    const laneIds = new Set(
-      values.flatMap(value => (value as unknown as WorkView).inputs.map(i => i.laneId)),
-    );
-    const intentIds = new Set(values.map(value => String(value.intentId)));
-    const lanes = e.records.fields.find(f => f.name === 'lanes');
-    const intents = e.records.fields.find(f => f.name === 'intents');
-    const pending = [
-      ...(lanes && 'records' in lanes ? lanes.records.filter(p => laneIds.has(p.key)) : []),
-      ...(intents && 'records' in intents ? intents.records.filter(p => intentIds.has(p.key)) : []),
-    ];
-    let retained = bytes;
-    while (pending.length) {
-      const selectedPins: RecordPin[] = [];
-      let size = 0;
-      while (pending.length && selectedPins.length < 100) {
-        const pin = pending.shift()!;
-        if (batch.has(pin.sha256) || pin.size > 256 * 1024 || retained + pin.size > 2 * 1024 * 1024) continue;
-        if (selectedPins.length && size + pin.size > 256 * 1024) {
-          pending.unshift(pin);
-          break;
-        }
-        selectedPins.push(pin);
-        size += pin.size;
-        retained += pin.size;
-      }
-      if (!selectedPins.length) continue;
-      const values = await exchangeObjectReader(ctx, false, 0).read(
-        selected.projectId,
-        selected.owner,
-        selectedPins,
-      );
-      for (const [index, pin] of selectedPins.entries()) batch.set(pin.sha256, values[index]!);
-    }
-  }
+  await context.prefetch(pins);
+  const e = context.exchange;
   const requests: RowRequest[] = [];
   for (const pin of pins) {
     const value = await readRecord(pin, e.read, field);
@@ -119,12 +77,76 @@ export async function projectSummaries(
     const cached = offset === 0 ? rowCache.get(key(request)) : undefined;
     return cached ? Promise.resolve(cached) : ctx.runQuery(rowsRef, { ...selected, ...request, offset });
   };
-  const lookup = (collection: string, key: string) =>
-    ctx.runQuery(lookupRef, { ...selected, collection, key });
-  const main = (await lookup('hostedChannels', 'main')) ?? (await lookup('channels', 'main'));
-  const mainHead: string | null = main ? JSON.parse(main.value).head : null;
+  const [hosted, local] = await context.main();
+  const mainHead = hosted ?? local ?? null;
+  if (field === 'views') {
+    // Walk dependency frontiers for the whole window, then hydrate each selected
+    // closure from the same bounded immutable byte memo.
+    let frontier = pins;
+    const seen = new Set<string>();
+    const laneIds = new Set<string>(),
+      intentIds = new Set<string>();
+    while (frontier.length) {
+      await context.prefetch(frontier);
+      const next: RecordPin[] = [];
+      for (const pin of frontier) {
+        if (seen.has(pin.key)) continue;
+        seen.add(pin.key);
+        const view = (await readRecord(pin, e.read, 'views')) as unknown as WorkView;
+        intentIds.add(view.intentId);
+        for (const input of view.inputs) laneIds.add(input.laneId);
+        const [latest] = pins.some(p => p.key === view.id)
+          ? await readRows('_buildFamily', family(view), 0, true)
+          : [];
+        for (const id of [
+          latest?.key,
+          ...(view.dependencies ?? []).flatMap(d => (d.kind === 'view' ? [d.viewId] : [])),
+        ]) {
+          const dependency = id && context.catalogs.get('views')?.get(id);
+          if (dependency && !seen.has(dependency.key)) next.push(dependency);
+        }
+      }
+      frontier = [...new Map(next.map(p => [p.key, p])).values()];
+    }
+    const lanes = [...laneIds].flatMap(id => {
+      const pin = context.catalogs.get('lanes')?.get(id);
+      return pin ? [pin] : [];
+    });
+    await context.prefetch(lanes);
+    for (const pin of lanes) intentIds.add(String((await readRecord(pin, e.read, 'lanes')).intentId));
+    await context.prefetch(
+      [...intentIds].flatMap(id => {
+        const pin = context.catalogs.get('intents')?.get(id);
+        return pin ? [pin] : [];
+      }),
+    );
+  }
   const result: IndexEntry[] = [];
   const changedStates = new Map<string, ChangedStates>();
+  const contexts = new Map<string, Awaited<ReturnType<typeof viewContext>>>();
+  if (field === 'views') {
+    for (const pin of pins) {
+      const view = (await readRecord(pin, e.read, field)) as unknown as WorkView;
+      const [latest] = await readRows('_buildFamily', family(view), 0, true);
+      contexts.set(
+        view.id,
+        await viewContext(ctx, selected, e, view, latest?.key ?? view.id, readRows, context.catalogs),
+      );
+    }
+    await summaryStates(ctx, context, backup, selected.owner, [...contexts.values()], changedStates);
+  }
+  if (field === 'lanes') {
+    const pairs = await Promise.all(
+      pins.map(async pin => {
+        const value = await readRecord(pin, e.read, field);
+        return partialWork(e.records, [
+          { collection: 'views', value: { ...value, inputs: [], dependencies: [] } },
+        ]);
+      }),
+    );
+    await summaryStates(ctx, context, backup, selected.owner, pairs, changedStates);
+  }
+  const stats = await summaryDiffstats(ctx, selected, context, changedStates);
   let outputBytes = 0;
   const started = Date.now();
   c.record -= pins.length;
@@ -152,8 +174,7 @@ export async function projectSummaries(
     } else if (field === 'runs') summary = runSummary(data.runs[0]!, mainSummary);
     else {
       const selectedView = value as unknown as WorkView;
-      const [latest] = await readRows('_buildFamily', family(selectedView), 0, true);
-      data = await viewContext(ctx, selected, e, selectedView, latest?.key ?? selectedView.id, readRows);
+      data = contexts.get(selectedView.id)!;
       const view = data.views[0]!;
       const model = viewReadModels(data, 0)[0]!;
       summary = {
@@ -170,6 +191,7 @@ export async function projectSummaries(
           selected.owner,
           0,
           changedStates,
+          context.pins,
         );
       } catch {
         await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: selected.owner });
@@ -198,6 +220,8 @@ export async function projectSummaries(
     selected.owner,
     result,
     changedStates,
+    stats,
+    context.pins,
   );
   return result;
 }

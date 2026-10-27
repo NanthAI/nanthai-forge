@@ -3,14 +3,8 @@
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
-import {
-  scratch,
-  rowsRef,
-  lookupRef,
-  type Selected,
-  type Exchange,
-  type Cursor,
-} from './projectWorkIndexBuildTypes';
+import { scratch, rowsRef, type Selected, type Exchange, type Cursor } from './projectWorkIndexBuildTypes';
+import { buildContext, type BuildContext } from './projectWorkIndexBuildContext';
 import { projectRecord } from './projectWorkIndexBuildProjection';
 import { projectSummaries } from './projectWorkIndexBuildSummaries';
 import { exchangeObjectReader } from './projectExchangeReader';
@@ -19,20 +13,18 @@ import { partialWork } from '../src/work-exchange-delta';
 import { materializeWork, indexedRecord, type IndexEntry } from '../src/work-hosted-index';
 import { parseNativeState } from '../src/native-state-format';
 import { stateParentEntries } from '../src/source-state-parent-index';
-import { sourceTreeEntries } from '../src/source-tree-index';
+import { treeRef } from './projectWorkIndexBuildStates';
 export async function projectStep(
   ctx: ActionCtx,
   selected: Selected,
   e: Exchange,
   backup: Doc<'projectBackups'>,
   c: Cursor,
+  context: BuildContext = buildContext(ctx, selected, e),
 ): Promise<IndexEntry[]> {
-  const pinMap = new Map(
-    e.manifest.files.filter(p => p.path === `objects/${p.sha256}`).map(p => [p.sha256, p]),
-  );
+  const pinMap = context.pins;
+  e = context.exchange;
   const rawFields = e.records.fields.filter((f): f is typeof f & { records: RecordPin[] } => 'records' in f);
-  const lookup = (collection: string, key: string) =>
-    ctx.runQuery(lookupRef, { ...selected, collection, key });
   if (c.phase === 'settings') {
     c.phase = 'records';
     const data = partialWork(e.records, []);
@@ -73,6 +65,17 @@ export async function projectStep(
       c.record++;
     }
     const bodies = await exchangeObjectReader(ctx, false, 0).read(selected.projectId, selected.owner, pins);
+    if (field.name === 'landingEntries') {
+      const values = await Promise.all(
+        pins.map((pin, i) => readRecord(pin, async () => bodies[i]!, field.name)),
+      );
+      await context.prefetch(
+        values.flatMap(value => {
+          const pin = context.catalogs.get('views')?.get(String(value.viewId));
+          return pin ? [pin] : [];
+        }),
+      );
+    }
     const result: IndexEntry[] = [];
     for (const [i, pin] of pins.entries()) {
       const value = await readRecord(pin, async () => bodies[i]!, field.name);
@@ -140,17 +143,10 @@ export async function projectStep(
     }
     return entries;
   }
-  if (c.phase === 'summaries') return projectSummaries(ctx, selected, e, backup, c);
+  if (c.phase === 'summaries') return projectSummaries(ctx, selected, e, backup, c, context);
   if (c.phase === 'trees') {
-    const main = await lookup('channels', 'main');
-    const hosted = await lookup('hostedChannels', 'main');
-    const heads = [
-      ...new Set([
-        e.manifest.head,
-        ...(main ? [JSON.parse(main.value).head as string] : []),
-        ...(hosted ? [JSON.parse(hosted.value).head as string] : []),
-      ]),
-    ];
+    const [hosted, main] = await context.main();
+    const heads = [...new Set([e.manifest.head, ...(main ? [main] : []), ...(hosted ? [hosted] : [])])];
     const head = heads[c.record++];
     if (!head) {
       c.phase = 'blobs';
@@ -160,10 +156,11 @@ export async function projectStep(
     const pin = pinMap.get(head);
     if (!pin) return [];
     try {
-      const [bytes] = await exchangeObjectReader(ctx, false, 0).read(selected.projectId, selected.owner, [
-        pin,
-      ]);
-      return sourceTreeEntries(head, parseNativeState(bytes!).files);
+      return await ctx.runAction(treeRef, {
+        projectId: selected.projectId,
+        actor: selected.owner,
+        pin: { sha256: pin.sha256, size: pin.size },
+      });
     } catch {
       await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: selected.owner });
       return [];
@@ -171,7 +168,7 @@ export async function projectStep(
   }
   if (c.phase === 'blobs') {
     const result: IndexEntry[] = [];
-    for (let i = 0; i < 100 && c.record < e.manifest.files.length; i++) {
+    for (let i = 0; i < 500 && c.record < e.manifest.files.length; i++) {
       const pin = e.manifest.files[c.record++]!;
       if (pin.path === `objects/${pin.sha256}`)
         result.push(

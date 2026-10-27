@@ -26,6 +26,11 @@ export const lookupRef = makeFunctionReference<
   Selected & { collection: string; key: string },
   IndexEntry | null
 >('projectWorkIndexBuildStore:lookup');
+export const lookupsRef = makeFunctionReference<
+  'query',
+  Selected & { keys: { collection: string; key: string }[] },
+  (IndexEntry | null)[]
+>('projectWorkIndexBuildStore:lookups');
 export const putPageRef = makeFunctionReference<
   'mutation',
   Selected & { key: string; position: number; body: string },

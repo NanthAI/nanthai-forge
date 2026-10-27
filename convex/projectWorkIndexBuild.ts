@@ -13,6 +13,7 @@ import {
   type Selected,
   type Cursor,
 } from './projectWorkIndexBuildTypes';
+import { buildContext } from './projectWorkIndexBuildContext';
 import { buildProgress } from './projectWorkIndexBuildProgress';
 import { projectStep } from './projectWorkIndexBuildStep';
 import { replayStep } from './projectWorkIndexBuildProjection';
@@ -89,6 +90,7 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
   }
   invariant(generation?.ensureCursor, 'WORK_STALE', 'Resume this snapshot’s index build.');
   const selected: Selected = { ...input, generationId: generation._id };
+  const context = buildContext(ctx, selected, exchange);
   const started = Date.now();
   // Both a work window and a step window: tests and very fast local storage do
   // not turn a single action into an unbounded loop.
@@ -133,7 +135,7 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
         const projected = await replayStep(ctx, selected, exchange, backup, generation, project, after);
         entries = projected.entries;
         metadata = projected.metadata;
-      } else entries = await projectStep(ctx, selected, exchange, backup, after);
+      } else entries = await projectStep(ctx, selected, exchange, backup, after, context);
       const batches = indexBatches(entries, { rows: 500, bytes: 500000 });
       if (batches.length > 1) {
         // Stage one independently readable RPC page at a time. Cursor+rows are
