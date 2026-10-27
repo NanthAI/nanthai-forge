@@ -9,6 +9,8 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { writeRecoveryState } from './recovery-state.js';
+import { hostedRecoveryRows } from './recovery-hosted-read.js';
+import { saveObjectSchema } from './hosted-save.js';
 import { RecoveryObjects, recoveryContentPins } from './recovery-hosted-objects.js';
 import {
   recoveryTables,
@@ -30,6 +32,7 @@ type Progress = {
   hash: string;
   hashes: Record<string, string>;
   recovery: HostedRecovery;
+  sourceComplete?: boolean;
 };
 
 /** Fold into immutable source objects, not an in-memory table or growing Work
@@ -89,6 +92,22 @@ export async function foldHostedRecovery(
     return { sha256: source.put(bytes), size: bytes.length };
   };
   while (state.phase !== 'complete') {
+    if (!state.sourceComplete && state.phase === 'verify') {
+      function* states() {
+        for (const row of hostedRecoveryRows(source, state.recovery, 'projectHostedStates'))
+          yield saveObjectSchema.parse({ sha256: row.head, size: row.size });
+      }
+      const closure = await retained.states(states());
+      state.recovery.objects = put({
+        kind: 'forge-hosted-recovery-object',
+        previous: state.recovery.objects,
+        object: closure,
+        nested: true,
+      });
+      state.sourceComplete = true;
+      writeRecoveryState(path, state);
+    }
+
     const table = recoveryTables[state.table]!;
     const page = hostedRecoveryPageSchema.parse(await transport.hostedPage(selected, table, state.cursor));
     invariant(
@@ -106,15 +125,6 @@ export async function foldHostedRecovery(
       if (state.phase !== 'capture') continue;
       let metadata: unknown;
       if (table === 'projectHostedRecordBodies') metadata = JSON.parse(String(row.value));
-      if (table === 'projectHostedStates') {
-        const closure = await retained.state(String(row.head));
-        state.recovery.objects = put({
-          kind: 'forge-hosted-recovery-object',
-          previous: state.recovery.objects,
-          object: closure,
-          nested: true,
-        });
-      }
       for (const pin of recoveryContentPins(metadata)) {
         const closure = await retained.retain(pin);
         state.recovery.objects = put({

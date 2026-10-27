@@ -742,6 +742,25 @@ takes `{operationId,url,projectId}`; native archive options do not select an
 accepting server owner. Pending local server transitions also prevent native
 reconnect. Keep the operation ID and destination across interruption.
 
+Hosted source recovery seeds an iterative queue from exact State registration
+pins before walking ancestry. Missing registrations are resolved explicitly;
+incomplete projections never establish that source is absent. Discovery receipts
+retain parent pins and deduplicated unknown file hashes without retaining parsed
+historical trees. Unique missing file pins use 100-digest project lookup pages;
+already retained file bytes and completed closures need no repeated lookup.
+Downloads reuse the existing batched signing/byte transport in bounded windows,
+with large opaque files streamed to private storage. Completed State receipts
+point at a shared immutable inventory of the retained closure. An interrupted
+walk resumes discovery and completed downloads under the same operation.
+Completed retries reuse their original inventory roots, including completed folds
+created by the prior recovery implementation.
+
+These local receipts are byte/inventory caches, not access grants. Source closure
+finishes before the second hosted-table scan, which rechecks current access and
+the selected authority/main/epoch and verifies every table's captured hash before
+publication. Object resolution and signing retain their existing authorization.
+Recovery starts no timer, poller or background work while idle.
+
 A weekly deployment ZIP first restores its application/backend, then the same
 guided command follows the restored authority mode. See
 [Route B](../operations.md#route-b-recover-a-runner-and-cache-from-hosted) and

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, readFileSync, renameSync } from 'node:fs';
+import { RecoveryStateQueue } from './recovery-state-queue.js';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { fingerprintPrivateFile } from './files.js';
 import { syncDirectory } from './native-durability.js';
 import { join } from 'node:path';
-import { NativeSource, parseNativeState } from './native-source.js';
+import { NativeSource } from './native-source.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { saveObjectSchema } from './hosted-save.js';
@@ -40,15 +41,17 @@ export class RecoveryObjects {
     invariant(this.transport.objects, 'SOURCE_UNAVAILABLE', 'Recovery requires project-scoped object reads.');
     const [pin] = await this.transport.objects([id]);
     invariant(pin?.sha256 === id, 'SOURCE_UNAVAILABLE', 'The exact hosted source object is unavailable.');
-    return this.retain(pin, true);
+    return this.states([pin]);
   }
-  /** Each completed closure has a durable, content-addressed receipt. Interrupted
-   * closures are retraversed; completed ones retain their entire child inventory. */
+  /** Registration pins seed the whole frontier before ancestry is traversed. */
+  async states(pins: Iterable<Pin>): Promise<Pin> {
+    return new RecoveryStateQueue(this.source, this.directory, this.transport, this).run(pins);
+  }
+  /** Metadata and opaque objects retain durable content-addressed receipts;
+   * State ancestry uses the iterative discovery queue above. */
   async retain(pin: Pin, state = false, inspect = true): Promise<Pin> {
-    const marker = join(
-      this.directory,
-      `${state ? 'state' : inspect ? 'metadata' : 'opaque'}-${pin.sha256}.json`,
-    );
+    if (state) return this.states([pin]);
+    const marker = join(this.directory, `${inspect ? 'metadata' : 'opaque'}-${pin.sha256}.json`);
     if (existsSync(marker)) {
       const receipt = JSON.parse(readFileSync(marker, 'utf8'));
       const original = saveObjectSchema.parse(receipt.pin),
@@ -62,9 +65,10 @@ export class RecoveryObjects {
       invariant(bytes.length === root.size, 'INVALID_WORK_BACKUP', 'Recovery object receipt differs.');
       return root;
     }
-    // Opaque blobs stream through the same verified checkout cache used by
-    // hosted reads. Their size does not become a recovery memory requirement.
-    if (!state && !inspect && this.transport.downloadToFile) {
+    // Large opaque blobs stream through the verified checkout cache. Small
+    // prefetched blobs use the bounded native read below, avoiding a separate
+    // stream/buffer allocation for every tiny historical file.
+    if (!inspect && pin.size > 2 * 1024 * 1024 && this.transport.downloadToFile) {
       this.source.put(Buffer.alloc(0)); // Initialize and validate private object directories.
       const target = join(this.source.directory, pin.sha256);
       if (!existsSync(target)) {
@@ -118,16 +122,7 @@ export class RecoveryObjects {
       );
       previous = { sha256: this.source.put(value), size: value.length };
     };
-    if (state) {
-      const parsed = parseNativeState(bytes);
-      for (const parent of parsed.parents) include(await this.state(parent));
-      for (const id of [...parsed.files.map(file => file.blob), ...(parsed.git ? [parsed.git.bundle] : [])]) {
-        invariant(this.transport.objects, 'SOURCE_UNAVAILABLE', 'Recovery requires object reads.');
-        const [child] = await this.transport.objects([id]);
-        invariant(child?.sha256 === id, 'SOURCE_UNAVAILABLE', 'A hosted source blob is unavailable.');
-        include(await this.retain(child, false, false));
-      }
-    } else if (inspect) {
+    if (inspect) {
       let value;
       try {
         value = JSON.parse(bytes.toString('utf8'));

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostedRecoveryFixture } from './recovery-hosted-fixture.mjs';
 import { restoreRecoverySource } from '../dist/recovery-source.js';
@@ -56,6 +56,12 @@ for (const archive of [false, true])
       Object.values(f.tables).reduce((n, rows) => n + rows.length, 0),
     );
     const before = f.store().snapshotBytes();
+    // A completed fold from the prior recovery implementation has no queue
+    // completion flag. Retrying it must preserve its original portable root.
+    const progressPath = join(`${f.target}-snapshot-stage`, 'hosted-fold.json');
+    const legacy = JSON.parse(readFileSync(progressPath, 'utf8'));
+    delete legacy.sourceComplete;
+    writeFileSync(progressPath, JSON.stringify(legacy));
     await recoverSnapshot(f.target, f.request, f.transport);
     assert(f.store().snapshotBytes().equals(before));
     assert.equal(f.counters().reconnects, 0);
