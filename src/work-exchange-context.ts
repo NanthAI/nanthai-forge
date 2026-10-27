@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { WORK_DELTA_BYTES, partialWork, type WorkDelta } from './work-exchange-delta.js';
+import { WORK_DELTA_BYTES, partialWork, batchContextIds, type WorkDelta } from './work-exchange-delta.js';
 import { recordIdentity, recordMap, readRecord, type WorkRecordRoot } from './work-exchange-records.js';
 /** Include inbound dependants, referenced records and sibling View families. */
 export async function workDeltaContext(
@@ -81,10 +81,13 @@ export async function workDeltaContext(
   let bytes = 0;
   for (const map of [old, next]) for (const id of selected) bytes += map.get(id)?.record.size ?? 0;
   if (bytes > (options.maxBytes ?? WORK_DELTA_BYTES)) return;
-  // Publication does not consume inbound/sibling bodies. Its changed-record
-  // validator needs prior changed bodies and the outgoing candidate closure;
-  // unchanged keys/refs inherit the validated base and whole digest traversal.
-  const needed = new Set(delta.changes.map(c => recordIdentity(c.collection, c.key)));
+  // Publication needs prior changed bodies, outgoing references and batch
+  // prefix metadata; other inbound/sibling bodies belong to source return.
+  // Unchanged keys/refs inherit the validated base and whole digest traversal.
+  const needed = new Set([
+    ...delta.changes.map(c => recordIdentity(c.collection, c.key)),
+    ...batchContextIds(after, delta.changes),
+  ]);
   if (options.prefetchOnly) {
     const queue = [...needed].filter(id => !metadataOnly.has(id));
     for (let cursor = 0; cursor < queue.length; cursor++)

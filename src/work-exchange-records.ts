@@ -84,7 +84,12 @@ const targets: Record<string, string> = {
   supersedes: 'decisions',
 };
 /** Only schema-owned fields supply references; uninterpreted extension fields remain opaque. */
-export function recordReferences(collection: string, value: unknown, format = 15): RecordRef[] {
+export function recordReferences(
+  collection: string,
+  value: unknown,
+  format = 15,
+  mode: 'all' | 'required' = 'all',
+): RecordRef[] {
   const shape = isUnifiedWork({ schema: format }) ? unifiedWorkSchema.shape : workSchema.shape;
   if (!Object.hasOwn(shape, collection)) return [];
   const schema =
@@ -105,13 +110,22 @@ export function recordReferences(collection: string, value: unknown, format = 15
   );
   const parsed = (result.data as unknown[])[0];
   const refs = new Map<string, RecordRef>();
-  const visit = (item: unknown) => {
+  const visit = (item: unknown, path = '') => {
     if (!item || typeof item !== 'object') return;
     if (Array.isArray(item)) {
-      item.forEach(visit);
+      item.forEach(child => visit(child, `${path}[]`));
       return;
     }
     for (const [field, child] of Object.entries(item)) {
+      // Composition plans every prefix run; passing the full batch never
+      // creates its unused proper-prefix runs. Keep their catalog pins stable.
+      if (
+        mode === 'required' &&
+        collection === 'landingBatches' &&
+        path === 'prefixes[]' &&
+        field === 'runId'
+      )
+        continue;
       const target = targets[field];
       if (target && typeof child === 'string')
         refs.set(recordIdentity(target, child), { collection: target, key: child });
@@ -119,7 +133,7 @@ export function recordReferences(collection: string, value: unknown, format = 15
         for (const id of child)
           if (typeof id === 'string')
             refs.set(recordIdentity('frictionEvents', id), { collection: 'frictionEvents', key: id });
-      } else visit(child);
+      } else visit(child, path ? `${path}.${field}` : field);
     }
   };
   visit(parsed);

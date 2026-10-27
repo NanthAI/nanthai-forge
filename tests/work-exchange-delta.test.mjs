@@ -342,3 +342,183 @@ test('publication context pages bounded record reads while source-return keeps i
     error => error.code === 'INVALID_WORK_BACKUP',
   );
 });
+
+test('planned prefix runs can be absent while recorded evidence and other references stay required', async () => {
+  const { validateParsedWork } = await import('../dist/work-metadata.js');
+  const { recordReferences } = await import('../dist/work-exchange-records.js');
+  const before = { ...seed(), schema: 23 };
+  const i = intent(),
+    laneId = randomUUID(),
+    viewId = randomUUID(),
+    entryId = randomUUID(),
+    runId = randomUUID();
+  before.intents.push(i);
+  before.lanes.push({
+    id: laneId,
+    intentId: i.id,
+    name: 'Synthetic',
+    base: head,
+    head,
+    assignment: '',
+    target: '',
+    state: 'active',
+    checkpoints: [],
+  });
+  before.views.push({
+    id: viewId,
+    intentId: i.id,
+    base: head,
+    head,
+    inputs: [{ laneId, head }],
+    status: 'clean',
+    at: 'now',
+    details: '',
+  });
+  const after = structuredClone(before);
+  after.landingBatches = [
+    {
+      id: randomUUID(),
+      channel: 'main',
+      base: head,
+      previous: head,
+      arrivedAt: 'now',
+      entryIds: [entryId],
+      mode: 'parallel',
+      status: 'completed',
+      prefixes: [{ entryIds: [entryId], viewId, head, runId }],
+      conflicts: [],
+    },
+  ];
+  assert.doesNotThrow(() => validateParsedWork(after), 'the full non-delta validator accepts planned runs');
+  let p = pair(before, after);
+  assert(
+    recordReferences('landingBatches', after.landingBatches[0], 23).some(ref => ref.key === runId),
+    'catalog reference pins retain their original bytes',
+  );
+  const validate = p => validateChangedRecords(p.a.root, p.b.root, p.delta.changes, p.read, new Set([head]));
+  assert.equal((await validate(p)).validated, 1);
+  // An unchanged batch reached through another changed record uses the same rules.
+  const reachable = structuredClone(after);
+  reachable.views[0].details = 'Changed Candidate';
+  p = pair(after, reachable);
+  assert.equal((await validate(p)).validated, 1);
+  for (const field of ['viewId', 'runId']) {
+    const invalid = structuredClone(after),
+      batch = invalid.landingBatches[0];
+    if (field === 'viewId') batch.prefixes[0].viewId = randomUUID();
+    else batch.confirmation = { failedRunId: randomUUID(), runId, tests: [] };
+    await assert.rejects(
+      validate(pair(before, invalid)),
+      e => e.code === 'INVALID_WORK_BACKUP' && /dangling reference/.test(e.message),
+    );
+  }
+  const diagnosed = structuredClone(after),
+    batch = diagnosed.landingBatches[0];
+  batch.diagnosis = {
+    version: 1,
+    strategy: 'prefix',
+    minimization: 'incomplete',
+    nodes: [
+      {
+        ...batch.prefixes[0],
+        id: runId,
+        inputs: [{ laneId, head }],
+        base: head,
+        previous: head,
+        checkId: randomUUID(),
+        definition: head,
+        environment: head,
+        status: 'passed',
+        selection: { runId, known: true },
+      },
+    ],
+  };
+  await assert.rejects(validate(pair(before, diagnosed)), e => e.code === 'INVALID_WORK_BACKUP');
+  const forged = structuredClone(after);
+  forged.landingBatches[0].prefixes[0].runId = 'invalid-id';
+  await assert.rejects(
+    async () => validate(pair(before, forged)),
+    e => e.code === 'INVALID_WORK_BACKUP',
+  );
+});
+
+test('batch Candidates permit multiple Intents only for the retained exact prefix head', async () => {
+  const { validateParsedWork } = await import('../dist/work-metadata.js');
+  const before = { ...seed(), schema: 23 },
+    after = { ...seed(), schema: 23 };
+  after.intents.push(intent(), intent());
+  after.lanes = after.intents.map(i => ({
+    id: randomUUID(),
+    intentId: i.id,
+    name: 'Input',
+    base: head,
+    head,
+    assignment: '',
+    target: '',
+    state: 'active',
+    checkpoints: [],
+  }));
+  const view = {
+    id: randomUUID(),
+    intentId: after.intents[1].id,
+    base: head,
+    head,
+    inputs: after.lanes.map(l => ({ laneId: l.id, head })),
+    status: 'clean',
+    at: 'now',
+    details: '',
+  };
+  after.views.push(view);
+  const entryId = randomUUID();
+  after.landingBatches = [
+    {
+      id: randomUUID(),
+      channel: 'main',
+      base: head,
+      previous: head,
+      arrivedAt: 'now',
+      entryIds: [entryId],
+      mode: 'parallel',
+      status: 'completed',
+      prefixes: [{ entryIds: [entryId], viewId: view.id, head, runId: randomUUID() }],
+      conflicts: [],
+    },
+  ];
+  assert.doesNotThrow(() => validateParsedWork(after));
+  const validate = async p => {
+    const cached = new Map();
+    await workDeltaContext(p.a.root, p.b.root, p.delta, p.read, [], new Set(), {
+      prefetchOnly: true,
+      maxBytes: 32 * 1024 * 1024,
+      readMany: async pins =>
+        Promise.all(
+          pins.map(async pin => {
+            const bytes = await p.read(pin);
+            cached.set(pin.sha256, bytes);
+            return bytes;
+          }),
+        ),
+    });
+    return validateChangedRecords(
+      p.a.root,
+      p.b.root,
+      p.delta.changes,
+      async pin => {
+        assert(cached.has(pin.sha256), 'all batch context bodies are prefetched');
+        return cached.get(pin.sha256);
+      },
+      new Set([head]),
+    );
+  };
+  await validate(pair(before, after));
+  const changedView = structuredClone(after);
+  changedView.views[0].details = 'Changed after its batch completed';
+  await validate(pair(after, changedView));
+  const forged = structuredClone(after);
+  forged.landingBatches[0].prefixes[0].head = 'b'.repeat(64);
+  await assert.rejects(validate(pair(before, forged)), e => e.code === 'INVALID_WORK_BACKUP');
+  const unrelated = structuredClone(after);
+  unrelated.landingBatches[0].prefixes = [];
+  unrelated.landingBatches[0].conflicts = [{ entryId, viewId: view.id }];
+  await assert.rejects(validate(pair(before, unrelated)), e => e.code === 'INVALID_WORK_BACKUP');
+});

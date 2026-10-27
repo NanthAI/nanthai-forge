@@ -79,6 +79,28 @@ test('dogfood-sized format-22 paged seed then format-24 catch-up publishes bound
       details: 'x'.repeat(38 * 1024),
     });
   }
+  // Composition reserves proper-prefix run IDs even when only the full
+  // Candidate executes. Retain the same missing-planned-run shape as dogfood.
+  const batch = (data, i) => {
+    const run = data.runs[i],
+      entryId = randomUUID();
+    return {
+      id: randomUUID(),
+      channel: 'main',
+      base: run.base,
+      previous: run.base,
+      arrivedAt: 'now',
+      entryIds: [entryId],
+      mode: 'parallel',
+      status: 'completed',
+      prefixes: [
+        { entryIds: [entryId], viewId: run.viewId, head: run.head, runId: randomUUID() },
+        { entryIds: [entryId], viewId: run.viewId, head: run.head, runId: run.id, reservedAt: 'now' },
+      ],
+      conflicts: [],
+    };
+  };
+  data.landingBatches = Array.from({ length: 508 }, (_, i) => batch(data, i));
   data.revision = 28041;
   store.save(data);
   // Extra retained source blobs bring the seed to the observed 32,000-object shape.
@@ -134,6 +156,7 @@ test('dogfood-sized format-22 paged seed then format-24 catch-up publishes bound
   land(store, 23);
   const after = store.load();
   after.schema = 24;
+  after.landingBatches.push(...Array.from({ length: 3 }, (_, i) => batch(after, i)));
   after.revision = 29560;
   // The real catch-up includes newly slimmed action records, while old records
   // remain byte-identical across the additive format promotion.
@@ -165,6 +188,8 @@ test('dogfood-sized format-22 paged seed then format-24 catch-up publishes bound
   next.input.previous = backupId;
   const metrics = await measurePublication(s, next.input, join(store.directory, 'scale-publication'));
   const { logs, ...measured } = metrics;
+  const recordsValidated = logs.find(([name]) => name === 'work-record exchange prepared')?.[1]
+    .recordsValidated;
   t.diagnostic(
     JSON.stringify({
       objects: s.tables.projectObjects.size,
@@ -174,9 +199,8 @@ test('dogfood-sized format-22 paged seed then format-24 catch-up publishes bound
       promotion: [baseline.schema, after.schema],
       changedFiles: 280,
       callsPerLanding: metrics.calls / 23,
-      callsPerChangedRecord: metrics.calls / 399,
-      recordsValidated: metrics.logs.find(([name]) => name === 'work-record exchange prepared')?.[1]
-        .recordsValidated,
+      callsPerChangedRecord: metrics.calls / recordsValidated,
+      recordsValidated,
       ...measured,
     }),
   );

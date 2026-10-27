@@ -210,6 +210,16 @@ export async function channelMetadataChanges(
   );
   return metadataOnly;
 }
+/** Batch prefixes are Candidates composed from more than one Intent. */
+export function batchContextIds(root: WorkRecordRoot, changes: WorkDelta['changes']) {
+  const views = new Set(changes.filter(c => c.collection === 'views').map(c => c.key));
+  const batches = root.fields.find(f => f.name === 'landingBatches');
+  return batches && 'records' in batches
+    ? batches.records
+        .filter(r => r.refs.some(ref => ref.collection === 'views' && views.has(ref.key)))
+        .map(r => recordIdentity('landingBatches', r.key))
+    : [];
+}
 export async function validateChangedRecords(
   before: WorkRecordRoot,
   after: WorkRecordRoot,
@@ -245,11 +255,15 @@ export async function validateChangedRecords(
       'INVALID_WORK_BACKUP',
       'Changed Work record has incorrect summary pins.',
     );
-    for (const ref of refs)
+    const required =
+      change.collection === 'landingBatches'
+        ? recordReferences(change.collection, value, recordMetadata(after).schema as number, 'required')
+        : refs;
+    for (const ref of required)
       invariant(
         next.has(recordIdentity(ref.collection, ref.key)),
         'INVALID_WORK_BACKUP',
-        'Changed Work record has a dangling reference.',
+        `Changed Work record ${change.collection}/${change.key} has a dangling reference to ${ref.collection}/${ref.key}.`,
       );
     current.push({ collection: change.collection, value });
     validated++;
@@ -267,15 +281,39 @@ export async function validateChangedRecords(
     selected = new Set(
       current.map(item => recordIdentity(item.collection, recordKey(item.value, item.collection)!)),
     );
+  for (const id of batchContextIds(after, changes)) {
+    if (selected.has(id)) continue;
+    selected.add(id);
+    const target = next.get(id)!;
+    sourceRecords.push({
+      collection: target.collection,
+      value: await readRecord(target.record, read, target.collection),
+    });
+  }
   for (let cursor = 0; cursor < sourceRecords.length; cursor++) {
     const item = sourceRecords[cursor]!,
       record = next.get(recordIdentity(item.collection, recordKey(item.value, item.collection)!))!.record;
     for (const ref of record.refs) {
       const id = recordIdentity(ref.collection, ref.key);
       if (selected.has(id)) continue;
-      selected.add(id);
       const target = next.get(id);
-      invariant(target, 'INVALID_WORK_BACKUP', 'Work record reference is unavailable.');
+      if (
+        !target &&
+        item.collection === 'landingBatches' &&
+        !recordReferences(
+          item.collection,
+          item.value,
+          recordMetadata(after).schema as number,
+          'required',
+        ).some(ref => recordIdentity(ref.collection, ref.key) === id)
+      )
+        continue;
+      invariant(
+        target,
+        'INVALID_WORK_BACKUP',
+        `Work record ${item.collection}/${record.key} reference ${ref.collection}/${ref.key} is unavailable.`,
+      );
+      selected.add(id);
       sourceRecords.push({
         collection: ref.collection,
         value: await readRecord(target.record, read, ref.collection),
@@ -285,10 +323,16 @@ export async function validateChangedRecords(
   const context = partialWork(after, sourceRecords);
   const lanes = new Map(context.lanes.map(lane => [lane.id, lane]));
   const views = new Map(context.views.map(view => [view.id, view]));
+  const batchPrefixes = new Map(
+    context.landingBatches?.flatMap(batch =>
+      batch.prefixes.map(prefix => [prefix.viewId, prefix.head] as const),
+    ),
+  );
   for (const view of candidate.views) {
     for (const input of view.inputs)
       invariant(
-        lanes.get(input.laneId)?.intentId === view.intentId,
+        lanes.has(input.laneId) &&
+          (lanes.get(input.laneId)!.intentId === view.intentId || batchPrefixes.get(view.id) === view.head),
         'INVALID_WORK_BACKUP',
         'A changed Candidate input belongs to another Intent.',
       );

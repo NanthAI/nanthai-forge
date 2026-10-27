@@ -237,11 +237,35 @@ Publication admits up to 32 MiB of reference-context record bytes across the two
 catalogs, read in pages of at most 100 pins with a 2 MiB target (an indivisible
 record is read alone). Its action-local byte memo uses the same 32 MiB bound, so
 validation reuses those authenticated bodies without duplicating them in the
-reader and review caches. Publication prefetches changed bodies and their outgoing references without
-retaining both parsed contexts, validates those records, and releases the memo before
+reader and review caches. Publication prefetches changed bodies, their outgoing references and the landing
+batches naming changed Candidates without retaining both parsed contexts. A
+cumulative batch Candidate can carry inputs from multiple Intents only when a
+retained batch prefix names that exact Candidate and head. Planned prefix run IDs
+remain in the authenticated catalog, but need not have run records: composition
+assigns all prefix IDs before checking, and a passing full batch leaves its proper
+prefixes unexecuted. Diagnostic and confirmation run references remain required.
+Publication validates those records and releases the memo before
 streaming the whole-Work digest. Source return retains its separate
 4 MiB context optimization window and its resumable compatibility path. Neither
 path loads complete Work to publish a records checkpoint.
+To check a retained push capture offline, after building core, run:
+
+```sh
+node --max-old-space-size=96 --max-semi-space-size=2 scripts/check-work-exchange-capture.mjs BASE_DIRECTORY CAPTURE_DIRECTORY
+```
+
+The base directory contains its retained `manifest.json` and `work.json`; the
+capture also contains `exchange.json` and `exchange-index.json`. The harness
+streams Work into catalogs, authenticates the original base and candidate pins,
+runs full schema validation in bounded record pages, and uses publication's delta,
+prefetch and changed-record validators before streaming the candidate digest. It
+makes no network or Convex calls, writes only private temporary prior-record
+bodies, removes that scratch on exit, and reports `PASS` with revisions, record
+counts, context pages, memory and elapsed time. Failure reports its structured
+error, including the parent and target of a dangling changed-record reference.
+This predicts the captured metadata validation; it does not verify live authority,
+storage availability or publication CAS.
+
 Publication receipt replay restores its optional local preparation hint. When
 reconciliation finds an exact retained base without that hint, it recovers the
 original Work bytes and property order before preparing a new record delta.
