@@ -102,6 +102,9 @@ export function nativeSelfMetricsReader(
       }
       const coverage = {
         overlaps: receipts.find(r => r.observation?.type === 'save')?.at,
+        overlapAnswers: receipts.find(
+          r => r.observation?.type === 'overlap-delivery' && r.observation.via === 'hook',
+        )?.at,
         lifecycle: receipts.find(r => r.kind === 'lifecycle')?.at,
         mutations: receipts.find(r => r.kind === 'mutation')?.at,
         deliveries: receipts.find(r => r.kind === 'lifecycle')?.at,

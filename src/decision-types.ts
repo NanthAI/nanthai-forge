@@ -1,3 +1,4 @@
+import { conversationSchema } from './agent-edit-types.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { workActorSchema } from './work-actor-types.js';
@@ -12,6 +13,7 @@ export const decisionOverrideSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('default'), description: text, link: text.optional() }),
 ]);
 export const decideInputSchema = z.object({
+  conversation: conversationSchema.optional(),
   operationId: id.optional(),
   target: decisionTargetSchema,
   decidedBy: text,
@@ -28,6 +30,7 @@ export const decisionsInputSchema = z.object({
   target: decisionTargetSchema.optional(),
 });
 export const decisionRecordSchema = z.object({
+  conversation: conversationSchema.optional(),
   schema: z.literal(1),
   kind: z.literal('decision'),
   id,

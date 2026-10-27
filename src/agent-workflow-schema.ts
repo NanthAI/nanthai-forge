@@ -1,3 +1,4 @@
+import { conversationSchema } from './agent-edit-types.js';
 import { contractTestsInput } from './intent-test-contract.js';
 import { decideInputSchema, decisionsInputSchema } from './decision-types.js';
 import { handoffSchema, handoffReadSchema } from './agent-handoff-types.js';
@@ -33,6 +34,14 @@ const acceptPin = z.object({
 });
 export const agentActionSchema = z.discriminatedUnion('action', [
   ...viewReadSchemas,
+  z.object({
+    action: z.literal('pre-edit'),
+    laneId: id,
+    paths: z.array(z.string()).min(1),
+    conversation: conversationSchema,
+  }),
+  z.object({ action: z.literal('install-hooks'), laneId: id }),
+  z.object({ action: z.literal('uninstall-hooks'), laneId: id }),
   decideInputSchema.extend({ action: z.literal('decide') }),
   decisionsInputSchema.extend({ action: z.literal('decisions') }),
   frictionInputSchema.extend({ action: z.literal('friction') }),
@@ -96,6 +105,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   }),
   z.object({
     action: z.literal('checkpoint'),
+    conversation: conversationSchema.optional(),
     detail: z.boolean().optional(),
     scope: peersScopeSchema.optional(),
     waitMs: z.number().int().nonnegative().safe().optional(),
@@ -109,6 +119,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   }),
   z.object({
     action: z.literal('finish'),
+    conversation: conversationSchema.optional(),
     preview: z.literal('skip').optional(),
     wait: z.boolean().optional(),
     frictionIds: z.array(id).optional(),

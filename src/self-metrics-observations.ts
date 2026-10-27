@@ -26,6 +26,7 @@ export const metricObservationSchema = z.discriminatedUnion('type', [
   z.object({
     ...identity,
     type: z.literal('save'),
+    parent: text.optional(),
     laneId: text,
     head: text,
     overlaps: z.array(z.object({ laneId: text, head: text, paths: z.array(text) })),
@@ -39,10 +40,13 @@ export const metricObservationSchema = z.discriminatedUnion('type', [
     paths: z.array(text),
     noticeIds: z.array(text),
     via: z.enum(['lifecycle', 'mcp', 'hook']),
+    firstWriteId: text.optional(),
   }),
   z.object({
     ...identity,
     type: z.literal('overlap-answer'),
+    laneId: text.optional(),
+    noticeId: text.optional(),
     deliveryId: text,
     disposition: z.enum(['acknowledged', 'routed-around']),
   }),

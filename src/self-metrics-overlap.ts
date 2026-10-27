@@ -25,6 +25,7 @@ export function recordMetricOverlapSave(
       at: focus.checkpoints?.at(-1)?.at ?? new Date().toISOString(),
       laneId: focus.id,
       head: focus.head,
+      parent: focus.checkpoints?.at(-1)?.parent,
       overlaps,
       complete,
     });

@@ -1,3 +1,4 @@
+import type { Conversation } from './agent-edit-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
   closeSync,
@@ -246,6 +247,7 @@ export class NativeSource {
     message: string,
     at: string,
     git?: z.infer<typeof gitImport>,
+    conversation?: Conversation,
   ): string {
     for (const parent of parents) this.state(parent);
     const bytes = Buffer.from(
@@ -258,6 +260,7 @@ export class NativeSource {
           message,
           at,
           ...(git ? { git } : {}),
+          ...(conversation ? { conversation } : {}),
         }),
       ),
     );

@@ -211,7 +211,71 @@ Checkpoint refresh workers and sync prime disposable summaries keyed by exact ba
 
 Lifecycle observations pre-compose main and up to three overlapping open Lanes. Notices include a proposed order and `granularity` (`file` today). Detailed reads return exact hunks/object pins, Intent, checkpoint message, actor/workspace and known owner sessions. Empty sessions mean unknown. Compact receipts list up to ten overlapping Lanes with paths, actors and Intent outcomes, within a 12,000-byte JSON budget, and point to detailed reads for additional context. Compact inbox and prediction examples cover distinct Lane pairs; additional regions for the same pair stay in detailed reads rather than inflating the omitted-Lane count. Existing journal alerts remain available to both participants through peers and Lane status, even if fresh source analysis is unavailable. A detached refresh does not mark an alert as delivered; only notices returned in a mutating receipt count as delivered. Known landed conflicts name the accepted Lane and Intent; unrelated later acceptances do not change that attribution. Explicit `peers` observations finish their selected reads regardless of elapsed time, rebuilding missing or corrupt disposable indexes in the same call. Lifecycle receipts bound expensive peer analysis before computing it; deferred work is not evidence of independence. Unavailable source, unsupported analysis and skipped composition or dependency work still report incomplete coverage; missing overlaps never establish independence.
 
-`peer-ack {"operationId":"UUID","laneId":"…","noticeId":"…","choice":"accept-order|swap|split","text":"optional explanation"}` records an advisory answer in the local journal outside portable Work. Reuse the operation ID and inputs after an unknown reply. `accept-order` keeps the order, `swap` proposes this Lane first, and `split` proposes splitting source. Both participants see answers in subsequent observations. Current source is re-composed; resolved or changed notices clear. The receiving agent resolves source using its own model; no resolver model is invoked. Hosted relay remains future work.
+`peer-ack {"operationId":"UUID","laneId":"…","noticeId":"…","choice":"accept-order|swap|split","text":"optional explanation"}` records overlap acknowledgements as indexed decision notes in portable Work. Older pre-compose conflict answers retain their local journal format. Reuse the operation ID and inputs after an unknown reply. `accept-order` keeps the order, `swap` proposes this Lane first, and `split` proposes splitting source. Both participants see answers in subsequent observations. Current source is re-composed; resolved or changed notices clear. The receiving agent resolves source using its own model; no resolver model is invoked. Hosted relay remains future work.
+
+
+## Overlap before the first write
+
+Install the local edit hooks for one Lane explicitly:
+
+```sh
+nforge agent ROOT install-hooks '{"laneId":"LANE_ID"}'
+nforge agent ROOT uninstall-hooks '{"laneId":"LANE_ID"}'
+```
+
+The installer adds its own command to Claude Code's `~/.claude/settings.json` and
+Codex's `~/.codex/hooks.json`; repeated installation is idempotent and uninstall
+removes only that command. Existing hooks and other settings are preserved.
+The client may require its normal trust review before enabling a new hook.
+Forge never installs these during start, save, or MCP startup.
+
+The `PreToolUse` matcher covers Claude `Edit`, `Write`, `MultiEdit`, and
+`NotebookEdit`, and Codex `apply_patch` (including move destinations). The hook
+uses the same local read as `nforge agent ROOT peers --path src/file.ts` from a
+Lane directory, or `peers {"laneId":"…","path":"src/file.ts"}` through CLI/MCP.
+That read does not write Work, presence, receipts, or source. It reads Lane header
+pages, saved path summaries, and current hook path claims. Missing summaries are
+incomplete coverage, never proof that paths are independent. No Views, complete
+Work archive, source trees, hosted functions, or transcripts are loaded.
+
+Before the first edit of each path in a Lane/session, the hook records a local
+path claim and calls that read. An overlapping edit returns a model-visible
+`deny` with the peer Lane, path, notice ID, and `peer-ack` command. Answer each
+notice using `accept-order` (acknowledge), `swap` (acknowledge and propose the
+other order), or `split` (record a route around). Acknowledgement permits the
+retry; editing another path also proceeds. This pauses only the agent tool call:
+source remains writable and no source lock or landing gate is introduced.
+Subsequent edits of a checked path use a local cache lookup. Shell-script writes
+and tools outside the matcher are not intercepted; Codex clients without hook
+support can call `forge_task` with `action:"pre-edit"`, `laneId`, `paths`, and
+`conversation:{agent:"codex",sessionId:"…",turnId:"…"}` before writing.
+
+Known callers receive `unacknowledgedOverlaps:{count,items}` in local CLI/MCP
+responses, including reads: at most five items plus the full count. Delivery
+never acknowledges an item. The caller is selected by `laneId`, the Lane working
+directory, `FORGE_LANE_ID`, or the last selected Lane on a workflow connection.
+Error responses carry the same caller context. Array responses preserve their
+existing value and add overlap JSON on CLI stderr or in a second MCP text block.
+Exact-byte `show` keeps source on stdout and reports overlap JSON on stderr. Unavailable inbox reads explicitly report unknown coverage. The hook
+supervisor kills a slow peer read after one second and fails open. Failure events
+are appended to `.forge/work/edit-hook/fail-open.jsonl` and emitted on stderr;
+when the owner is unreachable, stderr is the surviving record.
+
+The hook stores agent/session/turn references, never prompt or transcript text.
+Codex supplies `turn_id`; Claude's `UserPromptSubmit` hook creates an opaque local
+turn ID reused by that prompt's edit calls. A session first attached mid-turn uses
+its tool-call ID as the initial reference. An optional `conversation.link` supplied
+through MCP/save points to the agent's conversation. Saved States, checkpoint
+receipts, automatic snapshots, making-of saves, and review pins expose this
+reference. `decide` accepts the same optional `conversation` reference for D1
+records; overlap answer notes inherit the current edit reference. Snapshot restore
+retains the source State's producing reference. No transcript upload is added.
+Metric 4 reports first-write alert and acknowledgement counts/rate, and joins
+pre-write delivery to the subsequent save through its parent head. Metric 2's
+command/error accounting and landing behavior are unchanged.
+
+Client contracts: [Claude hooks](https://code.claude.com/docs/en/hooks) and
+[Codex hooks](https://learn.chatgpt.com/docs/hooks).
 
 Checkpoint, compose, run and accept also exist as separate actions. Checkpoint takes `laneId` and `message` (Git Lanes need staged edits; optional `expectedTree` binds a review). Compose takes `operationId`, `intentId` and `inputs:[{laneId,head}]`; it does not accept.
 

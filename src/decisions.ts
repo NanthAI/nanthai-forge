@@ -1,3 +1,4 @@
+import type { Conversation } from './agent-edit-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from 'node:crypto';
 import type { z } from 'zod';
@@ -19,8 +20,18 @@ export function decisionRecords(store: WorkStore): DecisionRecord[] {
     ? Array.from({ length: tx.manifest.collections.decisions?.count ?? 0 }, (_, i) => tx.at('decisions', i))
     : (store.load().decisions ?? []);
 }
-export function recordDecision(store: WorkStore, input: z.infer<typeof decideInputSchema>) {
-  const command = decideInputSchema.parse({ ...input, operationId: input.operationId ?? randomUUID() });
+export function recordDecision(
+  store: WorkStore,
+  input: z.infer<typeof decideInputSchema>,
+  context?: Conversation,
+) {
+  const prior = input.operationId ? store.select('decisions', input.operationId) : undefined;
+  const conversation = input.conversation ?? (prior ? prior.conversation : context);
+  const command = decideInputSchema.parse({
+    ...input,
+    operationId: input.operationId ?? randomUUID(),
+    ...(conversation ? { conversation } : {}),
+  });
   const request = digest(JSON.stringify(command));
   return store.locked(
     () => {

@@ -257,7 +257,9 @@ test('MCP forge_task receipts and forge_peers match CLI reads', async t => {
   const input = { laneId: mine.laneId, scope: { paths: ['src/a.txt'] } };
   const expected = agentPeers(new WorkStore(root), input);
   const mcp = JSON.parse((await tools.get('forge_peers')(input)).content[0].text);
-  assert.deepEqual(mcp, expected);
+  const { unacknowledgedOverlaps, ...digest } = mcp;
+  assert.deepEqual(unacknowledgedOverlaps, { count: 0, items: [] });
+  assert.deepEqual(digest, expected);
   const cli = JSON.parse(
     execFileSync(process.execPath, [resolve('dist/cli.js'), 'agent', root, 'peers', JSON.stringify(input)], {
       encoding: 'utf8',

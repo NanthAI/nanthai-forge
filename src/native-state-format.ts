@@ -1,3 +1,4 @@
+import { conversationSchema } from './agent-edit-types.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { safeRelative } from './safe-relative.js';
@@ -21,6 +22,7 @@ export const stateSchema = z
   .object({
     schema: z.literal(1),
     kind: z.literal('forge-source-state'),
+    conversation: conversationSchema.optional(),
     parents: z.array(oid),
     files: z.array(entry),
     message: z.string(),

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
 import { metricsCli } from './metrics-cli.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { improveCli } from './improve-cli.js';
@@ -422,7 +423,7 @@ if (syncPending) {
 }
 try {
   invariant(supportedNode(), 'UNSUPPORTED_NODE', nodeRequirement);
-  const output = await main(process.argv.slice(2));
+  const output = withCallerOverlaps(process.argv[3] ?? process.cwd(), await main(process.argv.slice(2)));
   if (syncPending) {
     invariant(
       output && typeof output === 'object' && 'pushed' in output,
@@ -433,6 +434,10 @@ try {
     const reason = (output as { reason?: unknown }).reason;
     process.exitCode = output.pushed === true || reason === 'dry-run' || reason === 'nothing-to-push' ? 0 : 1;
     syncPending = false;
+  }
+  if (Array.isArray(output)) {
+    const overlaps = callerOverlaps(process.argv[3] ?? process.cwd());
+    if (overlaps) process.stderr.write(JSON.stringify({ unacknowledgedOverlaps: overlaps }) + '\n');
   }
   if (output !== undefined) {
     process.stdout.write(
@@ -454,6 +459,9 @@ try {
   if (process.argv[2] === 'github-sync') {
     syncPending = false;
     process.stdout.write(`${JSON.stringify({ pushed: false, reason: failure.code, error: failure })}\n`);
-  } else process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
+  } else
+    process.stderr.write(
+      `${JSON.stringify(withCallerOverlaps(process.argv[3] ?? process.cwd(), { error: failure }))}\n`,
+    );
   process.exitCode = 1;
 }

@@ -1,3 +1,5 @@
+import { readEditContext } from './agent-edit-context.js';
+import { conversationSchema } from './agent-edit-types.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, lstatSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -32,6 +34,7 @@ const oid = z.string().regex(/^[0-9a-f]{64}$/);
 const pointerSchema = z.object({
   schema: z.literal(1),
   kind: z.literal('forge-auto-snapshot'),
+  conversation: conversationSchema.optional(),
   laneId: z.string().uuid(),
   state: oid,
   parent: z.string(),
@@ -211,8 +214,16 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
     saveCache();
     return { status: 'unchanged', reread, ms: elapsed() };
   }
+  const conversation = readEditContext(store.directory, laneId);
   const at = new Date().toISOString(),
-    state = source.writeState(files, [lane.head], 'Auto-snapshot of unsaved Lane edits', at),
+    state = source.writeState(
+      files,
+      [lane.head],
+      'Auto-snapshot of unsaved Lane edits',
+      at,
+      undefined,
+      conversation,
+    ),
     paths = changedPaths(head.files, files);
   const published = withAutoSnapshotLock(store, () => {
     const current = store.select('lanes', laneId);
@@ -227,6 +238,7 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
       parent: lane.head,
       tree,
       at,
+      ...(conversation ? { conversation } : {}),
       changedPathCount: paths.length,
       paths: paths.slice(0, 20),
       storage,

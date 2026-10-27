@@ -23,6 +23,26 @@ export function calculateOverlapMetrics(records: MetricRecords, period: MetricPe
     end = Math.min(time(period.to), time(period.asOf ?? period.to));
   const saves = events.filter(e => e.type === 'save');
   const deliveries = events.filter(e => e.type === 'overlap-delivery');
+  type Answer = Extract<MetricObservation, { type: 'overlap-answer' }>;
+  const answers = new Map<string, Answer[]>();
+  for (const event of events) {
+    if (event.type !== 'overlap-answer' || time(event.at) > end) continue;
+    const keys = [
+      event.deliveryId,
+      ...(event.laneId && event.noticeId ? [`notice:${event.laneId}:${event.noticeId}`] : []),
+    ];
+    for (const key of keys) {
+      const group = answers.get(key) ?? [];
+      group.push(event);
+      answers.set(key, group);
+    }
+  }
+  const answerFor = (delivery: (typeof deliveries)[number]) =>
+    [delivery.id, ...delivery.noticeIds.map(id => `notice:${delivery.laneId}:${id}`)]
+      .flatMap(key => answers.get(key) ?? [])
+      .filter(answer => time(answer.at) >= time(delivery.at))
+      .sort((a, b) => time(a.at) - time(b.at))[0];
+
   const rows = saves
     .filter(save => during(save.at, period) && time(save.at) <= end && save.overlaps.length)
     .map(save => {
@@ -31,30 +51,50 @@ export function calculateOverlapMetrics(records: MetricRecords, period: MetricPe
       const delivery = deliveries.find(
         d =>
           d.laneId === save.laneId &&
-          d.head === save.head &&
-          time(d.at) >= time(save.at) &&
+          ((d.via === 'hook' && d.head === save.parent && time(d.at) <= time(save.at)) ||
+            (d.head === save.head && time(d.at) >= time(save.at))) &&
           time(d.at) <= end &&
           (!next || time(d.at) < time(next.at)) &&
           d.paths.some(path => paths.has(path)),
       );
-      const answer =
-        delivery &&
-        events.find(
-          e =>
-            e.type === 'overlap-answer' &&
-            e.deliveryId === delivery.id &&
-            time(e.at) >= time(delivery.at) &&
-            time(e.at) <= end,
-        );
+      const answer = delivery && answerFor(delivery);
       return {
         saveId: save.id,
         laneId: save.laneId,
         head: save.head,
         deliveryId: delivery?.id ?? null,
-        deliverySeconds: delivery ? (time(delivery.at) - time(save.at)) / 1000 : null,
+        deliverySeconds: delivery ? Math.max(0, (time(delivery.at) - time(save.at)) / 1000) : null,
         disposition: answer?.type === 'overlap-answer' ? answer.disposition : null,
       };
     });
+  const firstWrites = deliveries.filter(d => d.via === 'hook' && during(d.at, period) && time(d.at) <= end);
+  const firstWriteAnswers = firstWrites.filter(delivery => answerFor(delivery));
+  const answeredIds = new Set(firstWriteAnswers.map(delivery => delivery.id));
+  // One first write can alert about several peers. Count the edit once, and
+  // require answers to every delivered notice before calling that write acknowledged.
+  const byWrite = new Map<string, typeof firstWrites>();
+  for (const delivery of firstWrites) {
+    const id = delivery.firstWriteId ?? delivery.id;
+    const group = byWrite.get(id) ?? [];
+    group.push(delivery);
+    byWrite.set(id, group);
+  }
+  for (const [id, group] of byWrite) {
+    const first = group[0]!;
+    const complete = group.every(delivery => answeredIds.has(delivery.id));
+    rows.push({
+      saveId: id,
+      laneId: first.laneId,
+      head: first.head,
+      deliveryId: id,
+      deliverySeconds: 0,
+      disposition: complete
+        ? group.some(delivery => answerFor(delivery)?.disposition === 'routed-around')
+          ? 'routed-around'
+          : 'acknowledged'
+        : null,
+    });
+  }
   const count = rows.filter(row => row.deliveryId).length;
   const gaps = [
     ...(!saves.length || !records.coverage?.overlaps || time(records.coverage.overlaps) > time(period.from)
@@ -83,9 +123,14 @@ export function calculateOverlapMetrics(records: MetricRecords, period: MetricPe
         ? (values[Math.floor((values.length - 1) / 2)]! + values[Math.floor(values.length / 2)]!) / 2
         : null;
     })(),
+    firstWrites: byWrite.size,
+    firstWriteAlerts: firstWrites.length,
+    firstWriteAcknowledgedOrRouted: firstWriteAnswers.length,
+    firstWriteAcknowledgementRate: ratio(firstWriteAnswers.length, firstWrites.length),
     acknowledgedOrRouted: rows.filter(row => row.disposition).length,
     acknowledgementRate:
-      records.coverage?.overlapAnswers && time(records.coverage.overlapAnswers) <= time(period.from)
+      firstWrites.length ||
+      (records.coverage?.overlapAnswers && time(records.coverage.overlapAnswers) <= time(period.from))
         ? ratio(rows.filter(row => row.disposition).length, count)
         : null,
     rows,

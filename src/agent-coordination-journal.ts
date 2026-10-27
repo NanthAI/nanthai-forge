@@ -1,3 +1,4 @@
+import { retainEditNotices } from './agent-edit-notices.js';
 import type { PreviewMeasurement } from './train-accounting.js';
 // SPDX-License-Identifier: Apache-2.0
 import { decorateRepair } from './agent-repair-lineage.js';
@@ -105,6 +106,7 @@ export class CoordinationJournal {
       },
       { operation: 'local overlap notices' },
     );
+    retainEditNotices(this.store.directory, notices);
     publishedOverlap(this.store);
   }
   overlaps(laneId?: string): OverlapAlert[] {

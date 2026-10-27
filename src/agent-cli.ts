@@ -1,3 +1,4 @@
+import { callerOverlaps } from './agent-caller-overlaps.js';
 import { hostedAgentAddress, hostedAgentCli } from './hosted-agent-cli.js';
 import { agentWaitCli } from './agent-wait.js';
 import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js';
@@ -114,6 +115,13 @@ const examples: Record<string, unknown> = {
     expectedVersion: 0,
     operationId: 'UUID',
   },
+  'pre-edit': {
+    laneId: 'LANE_ID',
+    paths: ['src/file.ts'],
+    conversation: { agent: 'codex', sessionId: 'SESSION', turnId: 'TURN' },
+  },
+  'install-hooks': { laneId: 'LANE_ID' },
+  'uninstall-hooks': { laneId: 'LANE_ID' },
   peers: { laneId: 'LANE_ID', detail: true },
   'peer-ack': { laneId: 'LANE_ID', noticeId: 'NOTICE_ID', choice: 'accept-order' },
   take: { laneId: 'LANE_ID', takeover: true },
@@ -286,6 +294,12 @@ export async function agentCli(args: string[]): Promise<unknown> {
   }
   const textMode = args[1] === 'wait' && args.includes('--text');
   if (textMode) args = args.filter(arg => arg !== '--text');
+  if (args[1] === 'peers' && args[2] === '--path' && args[3]) {
+    const workflow = new AgentWorkflow(args[0]!);
+    const laneId = laneFromCwd(workflow.work.store.directory) ?? process.env.FORGE_LANE_ID;
+    invariant(laneId, 'BAD_ARGUMENT', 'Run peers --path inside a Lane or set FORGE_LANE_ID.');
+    return workflow.dispatch({ action: 'peers', laneId, path: args[3] });
+  }
   const [root, requestedAction, option, path] = args;
   if (requestedAction) noticeViewAlias(requestedAction);
   const canonical = (value: string) => (value === 'save' ? 'checkpoint' : canonicalCandidateAction(value));
@@ -370,6 +384,8 @@ export async function agentCli(args: string[]): Promise<unknown> {
     process.stderr.write(`${notice.text.replace(/[\x00-\x1f\x7f]/g, ' ')}\n`);
   for (const line of overlapLines(predictions ?? [])) process.stderr.write(`${line}\n`);
   if (action === 'show') {
+    const overlaps = callerOverlaps(root, typeof selected.laneId === 'string' ? selected.laneId : undefined);
+    if (overlaps) process.stderr.write(JSON.stringify({ unacknowledgedOverlaps: overlaps }) + '\n');
     const file = response.result as ReturnType<
       typeof import('./agent-source-read.js').readAgentShow
     >['result'];

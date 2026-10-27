@@ -154,6 +154,7 @@ export function deriveMakingOf(input: MakingOfInput) {
         at: save.at,
         kind: save.sync ? ('sync' as const) : save.undoSync ? ('undo-sync' as const) : ('save' as const),
         message: save.message,
+        ...(save.conversation ? { conversation: save.conversation } : {}),
         ...(save.actor ? { actor: actorRow(save.actor) } : {}),
         ...(save.automatic ? { automatic: true } : {}),
       };

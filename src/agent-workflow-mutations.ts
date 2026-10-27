@@ -1,3 +1,4 @@
+import { readEditContext } from './agent-edit-context.js';
 import { prepareReceiptSource } from './agent-receipt-peers.js';
 import { readStartReceipt, stageStartReceipt } from './agent-start-receipt.js';
 import { isUnifiedWork } from './work-unified-types.js';
@@ -370,6 +371,8 @@ export function agentCheckpoint(
   /** finish reuses the current head when nothing changed (e.g. right after sync). */
   options: { allowUnchanged?: boolean; actor?: WorkActor; preserveMerge?: boolean } = {},
 ) {
+  const conversation = command.conversation ?? readEditContext(store.directory, command.laneId);
+  command = { ...command, ...(conversation ? { conversation } : {}) };
   return store.laneLocked(
     command.laneId,
     () => {
@@ -410,6 +413,7 @@ export function agentCheckpoint(
               message: original.message,
               path: store.path(command.laneId),
               captureCoverage: original.captureCoverage,
+              ...(original.conversation ? { conversation: original.conversation } : {}),
             },
           };
         }
@@ -577,6 +581,7 @@ export function agentCheckpoint(
               if (!unchanged) workGit(path, ['update-ref', `refs/forge/checkpoints/${head}`, head]);
             }
             const checkpoint = {
+              ...(conversation ? { conversation } : {}),
               ...(store.native ? { workRevision: tx.revision + 1 } : {}),
               ...(store.native && lane.pendingMerge && !options.preserveMerge
                 ? resolvedSyncCheckpoint(new NativeSource(store.root), lane, candidate!.capture.files)
@@ -603,6 +608,7 @@ export function agentCheckpoint(
                 laneId: lane.id,
                 head,
                 parent: checkpoint.parent,
+                ...(conversation ? { conversation } : {}),
                 message: command.message,
                 path,
                 captureCoverage,

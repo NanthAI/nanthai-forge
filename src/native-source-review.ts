@@ -63,9 +63,11 @@ export async function readNativeSourceReviewBytes(
   selection?: ReviewSelection,
 ) {
   const [original, selected] = await bytes([base, head]),
-    paths = reviewPaths(parseNativeState(original!).files, parseNativeState(selected!).files);
-  if (selection?.map) return { base, head, map: await readChangeMap(base, head, paths, bytes) };
-  if (!selection || selection.file === undefined) return { base, head, paths };
+    state = parseNativeState(selected!),
+    paths = reviewPaths(parseNativeState(original!).files, state.files);
+  const pins = { base, head, ...(state.conversation ? { conversation: state.conversation } : {}) };
+  if (selection?.map) return { ...pins, map: await readChangeMap(base, head, paths, bytes) };
+  if (!selection || selection.file === undefined) return { ...pins, paths };
   const file = paths.find(path => path.path === selection.file);
   invariant(file, 'NOT_FOUND', 'Choose a file from this source comparison.');
   const ids = [file.before?.blob, file.after?.blob].filter((id): id is string => !!id),
@@ -79,8 +81,7 @@ export async function readNativeSourceReviewBytes(
       selection.anchor.side === 'before' ? a : b,
     );
   return {
-    base,
-    head,
+    ...pins,
     file,
     before: file.before ? reviewTextPage(a, selection.beforeOffset) : null,
     after: file.after ? reviewTextPage(b, selection.afterOffset) : null,

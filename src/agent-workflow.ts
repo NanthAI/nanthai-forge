@@ -1,3 +1,9 @@
+import { rememberCaller } from './agent-caller-overlaps.js';
+import { readAgentTurn } from './agent-edit-context.js';
+import { unacknowledgedOverlaps } from './agent-edit-notices.js';
+import { preEdit } from './agent-pre-edit.js';
+import { acknowledgeOverlap } from './agent-overlap-ack.js';
+import { installEditHooks } from './agent-install-hooks.js';
 import { checkQuarantine } from './check-quarantine.js';
 import { queueAheadStackSync } from './queue-ahead-stack-sync.js';
 import { settleFinish } from './landing-journal-settle.js';
@@ -84,13 +90,37 @@ import { boundAgentCache } from './hosted-agent-cache.js';
 import { boundAgentSubmission } from './hosted-agent-bound.js';
 export class AgentWorkflow {
   readonly work: WorkService;
+  private callerLaneId?: string;
   constructor(
     root: string,
     private readonly liveMcp = false,
   ) {
     this.work = new WorkService(root, localAgent(), liveMcp);
+    const prefix = this.work.store.directory + '/lane-';
+    if (process.cwd().startsWith(prefix))
+      this.callerLaneId = process.cwd().slice(prefix.length).split('/')[0]!;
   }
   async dispatch(input: unknown) {
+    const response = await this.dispatchCore(input);
+    const selected = input as { laneId?: string };
+    const laneId =
+      selected?.laneId ??
+      (response?.result as { laneId?: string })?.laneId ??
+      this.callerLaneId ??
+      process.env.FORGE_LANE_ID;
+    if (!laneId) return response;
+    this.callerLaneId = laneId;
+    rememberCaller(this.work.store.root, laneId);
+    try {
+      return {
+        ...response,
+        unacknowledgedOverlaps: unacknowledgedOverlaps(this.work.store.directory, laneId),
+      };
+    } catch {
+      return { ...response, unacknowledgedOverlaps: { count: null, items: [], coverage: 'unavailable' } };
+    }
+  }
+  private async dispatchCore(input: unknown) {
     // Bound server source operations use hosted records; local Work is a cache.
     if (input && typeof input === 'object' && (input as { action?: unknown }).action === 'save')
       input = { ...input, action: 'checkpoint' };
@@ -319,10 +349,25 @@ export class AgentWorkflow {
     laneRun = false,
   ): Promise<{ revision: number; result: unknown }> {
     const store = this.work.store;
+    if (command.action === 'pre-edit')
+      return {
+        revision: store.revision(),
+        result: preEdit(store.root, command.laneId, command.paths, command.conversation),
+      };
+    if (command.action === 'install-hooks' || command.action === 'uninstall-hooks')
+      return {
+        revision: store.revision(),
+        result: installEditHooks(store.root, command.laneId, command.action === 'uninstall-hooks'),
+      };
     if (command.action === 'handoff')
       return recordHandoff(store, { ...command, operationId: command.operationId! });
     if (command.action === 'handoff-read') return readHandoff(store, command.laneId);
-    if (command.action === 'decide') return recordDecision(store, command);
+    if (command.action === 'decide')
+      return recordDecision(
+        store,
+        command,
+        this.callerLaneId ? readAgentTurn(store.directory, this.callerLaneId) : undefined,
+      );
     if (command.action === 'decisions') return readDecisions(store, command);
     if (command.action === 'friction') return captureFriction(store, command);
     if (command.action === 'friction-triage') return triageFriction(store, command);
@@ -338,6 +383,8 @@ export class AgentWorkflow {
       return agentLaneTests(store, command);
     if (command.action === 'take') return agentTake(store, command);
     if (command.action === 'peer-ack') {
+      const overlap = acknowledgeOverlap(store, { ...command, operationId: command.operationId! });
+      if (overlap) return overlap;
       const journal = new CoordinationJournal(store),
         request = { ...command, operationId: command.operationId! };
       let answer = journal.replay(request);
@@ -787,6 +834,7 @@ export class AgentWorkflow {
             laneId: command.laneId,
             expectedHead: command.expectedHead,
             message: command.message,
+            ...(command.conversation ? { conversation: command.conversation } : {}),
             ...(command.expectedTree ? { expectedTree: command.expectedTree } : {}),
           },
           command,

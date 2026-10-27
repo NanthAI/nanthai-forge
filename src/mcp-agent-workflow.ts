@@ -1,10 +1,11 @@
+import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
 import { drainAgentAdvisories } from './agent-advisory-worker.js';
 import { registerAgentWait } from './mcp-agent-wait.js';
 import { localActor } from './work-actor.js';
 import { overlapNotifications } from './mcp-overlap-notifications.js';
 import { candidateActionSchema } from './candidate-names.js';
 // SPDX-License-Identifier: Apache-2.0
-import { agentPeers, peersInputSchema } from './agent-peers.js';
+import { peersInputSchema } from './agent-peers.js';
 import { controlQueue } from './queue-control.js';
 import { registerHostedWorkTools } from './mcp-hosted-work.js';
 import { registerExchangeTools } from './mcp-exchange.js';
@@ -36,8 +37,19 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
     },
     async input => {
       notifications.select(input.laneId);
+      const response = await agent.dispatch({ action: 'peers', ...input });
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(agentPeers(agent.work.store, input)) }],
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({
+              ...(response.result as object),
+              ...('unacknowledgedOverlaps' in response
+                ? { unacknowledgedOverlaps: response.unacknowledgedOverlaps }
+                : {}),
+            }),
+          },
+        ],
       };
     },
   );
@@ -54,8 +66,18 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify(controlQueue(action, operation, undefined, localActor('agent'))),
+              text: JSON.stringify(
+                withCallerOverlaps(root, controlQueue(action, operation, undefined, localActor('agent'))),
+              ),
             },
+            ...(action === 'list' && callerOverlaps(root)
+              ? [
+                  {
+                    type: 'text' as const,
+                    text: JSON.stringify({ unacknowledgedOverlaps: callerOverlaps(root) }),
+                  },
+                ]
+              : []),
           ],
         };
       } catch (error) {
@@ -64,12 +86,14 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify({
-                error: {
-                  code: error instanceof ForgeError ? error.code : 'INTERNAL_ERROR',
-                  message: error instanceof ForgeError ? error.message : 'Queue action failed.',
-                },
-              }),
+              text: JSON.stringify(
+                withCallerOverlaps(root, {
+                  error: {
+                    code: error instanceof ForgeError ? error.code : 'INTERNAL_ERROR',
+                    message: error instanceof ForgeError ? error.message : 'Queue action failed.',
+                  },
+                }),
+              ),
             },
           ],
         };
@@ -89,7 +113,12 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
       try {
         return {
           content: [
-            { type: 'text' as const, text: JSON.stringify(await agentBrief(agent.work.store, input, true)) },
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                withCallerOverlaps(root, await agentBrief(agent.work.store, input, true), input.laneId),
+              ),
+            },
           ],
         };
       } catch (error) {
@@ -98,12 +127,14 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify({
-                error: {
-                  code: error instanceof ForgeError ? error.code : 'INTERNAL_ERROR',
-                  message: error instanceof ForgeError ? error.message : 'Briefing could not be read.',
-                },
-              }),
+              text: JSON.stringify(
+                withCallerOverlaps(root, {
+                  error: {
+                    code: error instanceof ForgeError ? error.code : 'INTERNAL_ERROR',
+                    message: error instanceof ForgeError ? error.message : 'Briefing could not be read.',
+                  },
+                }),
+              ),
             },
           ],
         };
@@ -116,6 +147,9 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
     {
       name: 'forge_task',
       actions: [
+        'pre-edit',
+        'install-hooks',
+        'uninstall-hooks',
         'start',
         'friction',
         'decide',
@@ -260,7 +294,7 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
             content: [
               {
                 type: 'text' as const,
-                text: JSON.stringify(response),
+                text: JSON.stringify(withCallerOverlaps(root, response)),
               },
             ],
           };
@@ -270,15 +304,17 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
             content: [
               {
                 type: 'text' as const,
-                text: JSON.stringify({
-                  error: {
-                    code: error instanceof ForgeError ? error.code : 'INTERNAL_ERROR',
-                    message:
-                      error instanceof ForgeError
-                        ? error.message
-                        : 'Forge could not complete the agent action.',
-                  },
-                }),
+                text: JSON.stringify(
+                  withCallerOverlaps(root, {
+                    error: {
+                      code: error instanceof ForgeError ? error.code : 'INTERNAL_ERROR',
+                      message:
+                        error instanceof ForgeError
+                          ? error.message
+                          : 'Forge could not complete the agent action.',
+                    },
+                  }),
+                ),
               },
             ],
           };

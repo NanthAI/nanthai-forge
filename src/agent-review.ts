@@ -88,10 +88,20 @@ function readReview(
         'VIEW_STALE',
         'Select the exact Candidate base and status.',
       );
+    const native = store.native ? new NativeSource(store.root) : undefined;
+    const conversations =
+      view && native
+        ? view.inputs.flatMap(input => {
+            const conversation = native.state(input.head).conversation;
+            return conversation ? [{ laneId: input.laneId, head: input.head, conversation }] : [];
+          })
+        : [];
     const pins = {
       ...(selection ? { kind: selection.kind, id: selection.id } : { kind: 'states' }),
       base,
       head,
+      ...(native && head ? { conversation: native.state(head).conversation } : {}),
+      ...(conversations.length ? { conversations } : {}),
       ...(lane || view
         ? {
             contract: view

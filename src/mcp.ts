@@ -1,3 +1,4 @@
+import { withCallerOverlaps } from './agent-caller-overlaps.js';
 import { candidateActionSchema } from './candidate-names.js';
 import { hostedAgentAddress } from './hosted-agent-cli.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
@@ -86,23 +87,33 @@ export async function startMcp(
     idempotentHint: true,
     openWorldHint: false,
   };
-  async function result(action: () => unknown | Promise<unknown>) {
+  async function result(action: () => unknown | Promise<unknown>, laneId?: string) {
     try {
-      return { content: [{ type: 'text' as const, text: JSON.stringify(await action()) }] };
+      return {
+        content: [
+          { type: 'text' as const, text: JSON.stringify(withCallerOverlaps(root, await action(), laneId)) },
+        ],
+      };
     } catch (error) {
       return {
         isError: true,
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify({
-              error: {
-                code: error instanceof ForgeError ? error.code : 'INTERNAL_ERROR',
-                message:
-                  error instanceof ForgeError ? error.message : 'Forge could not complete the request.',
-              },
-              ...(error instanceof RoutedSourceError ? { sourceContext: error.sourceContext } : {}),
-            }),
+            text: JSON.stringify(
+              withCallerOverlaps(
+                root,
+                {
+                  error: {
+                    code: error instanceof ForgeError ? error.code : 'INTERNAL_ERROR',
+                    message:
+                      error instanceof ForgeError ? error.message : 'Forge could not complete the request.',
+                  },
+                  ...(error instanceof RoutedSourceError ? { sourceContext: error.sourceContext } : {}),
+                },
+                laneId,
+              ),
+            ),
           },
         ],
       };
@@ -110,21 +121,23 @@ export async function startMcp(
   }
   async function sourceResult(laneId: string | undefined, query: (source: RepositoryQuery) => unknown) {
     if (work && laneId) queueAgentSync(work.store, { action: 'activity', laneId }, {}, false, 'MCP call');
-    return result(() =>
-      sources!.run(laneId, async selected => {
-        try {
-          return query(selected.query());
-        } catch (error) {
-          if (
-            !agentMode ||
-            !(error instanceof ForgeError) ||
-            !['INDEX_MISSING', 'SOURCE_STALE'].includes(error.code)
-          )
-            throw error;
-          await selected.reindex();
-          return query(selected.query());
-        }
-      }),
+    return result(
+      () =>
+        sources!.run(laneId, async selected => {
+          try {
+            return query(selected.query());
+          } catch (error) {
+            if (
+              !agentMode ||
+              !(error instanceof ForgeError) ||
+              !['INDEX_MISSING', 'SOURCE_STALE'].includes(error.code)
+            )
+              throw error;
+            await selected.reindex();
+            return query(selected.query());
+          }
+        }),
+      laneId,
     );
   }
   if (!hosted) {

@@ -62,7 +62,11 @@ export async function agentResponseAdvisory(
   const ownershipStop =
     command.action === 'take' && (response.result as { status: string }).status === 'ownership';
   const hostedSync =
-    !delivered || ownershipStop || command.action === 'handoff' || READ_ONLY_ACTIONS.has(command.action)
+    !delivered ||
+    ownershipStop ||
+    command.action === 'handoff' ||
+    ['pre-edit', 'install-hooks', 'uninstall-hooks'].includes(command.action) ||
+    READ_ONLY_ACTIONS.has(command.action)
       ? undefined
       : queueAgentSync(store, command, response.result, false, liveMcp ? 'MCP call' : undefined);
   let links: unknown;

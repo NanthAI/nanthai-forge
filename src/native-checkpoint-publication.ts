@@ -1,3 +1,4 @@
+import { readEditContext } from './agent-edit-context.js';
 // SPDX-License-Identifier: Apache-2.0
 import { lstatSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -102,6 +103,8 @@ function prepareCandidate(store: WorkStore, command: CheckpointAction, preserveM
           : [lane.head],
         command.message,
         candidate.at,
+        undefined,
+        command.conversation ?? readEditContext(store.directory, lane.id),
       );
   return {
     ...candidate,

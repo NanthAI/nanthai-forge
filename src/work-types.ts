@@ -1,4 +1,5 @@
 import { semanticPlanSchema } from './intent-semantic-conflict.js';
+import { conversationSchema, overlapAnswerSchema } from './agent-edit-types.js';
 // SPDX-License-Identifier: Apache-2.0
 import { intentTestContractSchema } from './intent-test-contract.js';
 import { decisionRecordSchema } from './decision-types.js';
@@ -70,6 +71,11 @@ export const dependencySchema = z.discriminatedUnion('kind', [
 ]);
 export type DependencyPin = z.infer<typeof dependencySchema>;
 export const noteSchema = z.object({
+  id: z.uuid().optional(),
+  operationId: z.uuid().optional(),
+  request: z.string().optional(),
+  overlapAnswer: overlapAnswerSchema.optional(),
+  conversation: conversationSchema.optional(),
   handoff: deliveryHandoffSchema.optional(),
   text: z.string().min(1).max(4000),
   at: z.string(),
@@ -151,6 +157,7 @@ const undoSyncDetailsSchema = z.object({
   status: z.enum(['merged', 'conflict']),
 });
 const checkpointSchema = z.object({
+  conversation: conversationSchema.optional(),
   workRevision: z.number().safe().nonnegative().optional(),
   actor: workActorSchema.optional(),
   head: oid,
