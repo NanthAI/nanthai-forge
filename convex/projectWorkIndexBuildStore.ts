@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalQuery, internalMutation } from './_generated/server';
+import type { Doc } from './_generated/dataModel';
+import { internalQuery, internalMutation, type QueryCtx } from './_generated/server';
 import { accessibleProject } from './projectAuthority';
 import { workProject } from './projectWorkHead';
 import { record } from './projectWorkIndexStore';
@@ -30,44 +31,73 @@ export const resume = internalQuery({
     return generation?.ensureCursor ? generation : null;
   },
 });
+const rowRequest = v.object({
+  collection: v.string(),
+  parent: v.optional(v.string()),
+  offset: v.optional(v.number()),
+  last: v.optional(v.boolean()),
+});
+type RowRequest = { collection: string; parent?: string; offset?: number; last?: boolean };
+async function readRows(
+  ctx: QueryCtx,
+  input: RowRequest & { generationId: Doc<'projectWorkGenerations'>['_id'] },
+) {
+  const query =
+    input.parent === undefined
+      ? ctx.db.query('projectWorkRecords').withIndex('by_generation_and_collection_and_position', q =>
+          q
+            .eq('generationId', input.generationId)
+            .eq('collection', input.collection)
+            .gte('position', input.offset ?? 0),
+        )
+      : ctx.db
+          .query('projectWorkRecords')
+          .withIndex('by_generation_and_collection_and_parent_and_position', q =>
+            q
+              .eq('generationId', input.generationId)
+              .eq('collection', input.collection)
+              .eq('parent', input.parent!)
+              .gte('position', input.offset ?? 0),
+          );
+  const rows = await query.order(input.last ? 'desc' : 'asc').take(input.last ? 1 : 100);
+  return rows.map(({ collection, key, parent, position, value }) => ({
+    collection,
+    key,
+    parent,
+    position,
+    value,
+  }));
+}
 export const rows = internalQuery({
-  args: {
-    ...selected,
-    collection: v.string(),
-    parent: v.optional(v.string()),
-    offset: v.optional(v.number()),
-    last: v.optional(v.boolean()),
-  },
+  args: { ...selected, ...rowRequest.fields },
   returns: v.array(indexEntry),
   handler: async (ctx, input) => {
     await accessibleProject(ctx, input.projectId, input.owner);
     const generation = await ctx.db.get(input.generationId);
     invariant(generation?.projectId === input.projectId, 'WORK_STALE', 'The index build changed.');
-    const query =
-      input.parent === undefined
-        ? ctx.db.query('projectWorkRecords').withIndex('by_generation_and_collection_and_position', q =>
-            q
-              .eq('generationId', input.generationId)
-              .eq('collection', input.collection)
-              .gte('position', input.offset ?? 0),
-          )
-        : ctx.db
-            .query('projectWorkRecords')
-            .withIndex('by_generation_and_collection_and_parent_and_position', q =>
-              q
-                .eq('generationId', input.generationId)
-                .eq('collection', input.collection)
-                .eq('parent', input.parent!)
-                .gte('position', input.offset ?? 0),
-            );
-    const rows = await query.order(input.last ? 'desc' : 'asc').take(input.last ? 1 : 100);
-    return rows.map(({ collection, key, parent, position, value }) => ({
-      collection,
-      key,
-      parent,
-      position,
-      value,
-    }));
+    return readRows(ctx, input);
+  },
+});
+/** Read the first context pages for one summary window under one authority
+ * snapshot. A bounded prefix is returned; remaining pages use ordinary rows. */
+export const rowBatch = internalQuery({
+  args: { ...selected, requests: v.array(rowRequest) },
+  returns: v.array(v.array(indexEntry)),
+  handler: async (ctx, input) => {
+    await accessibleProject(ctx, input.projectId, input.owner);
+    const generation = await ctx.db.get(input.generationId);
+    invariant(generation?.projectId === input.projectId, 'WORK_STALE', 'The index build changed.');
+    invariant(input.requests.length <= 30, 'BAD_ARGUMENT', 'Read one summary context window.');
+    const result = [];
+    let bytes = 0;
+    for (const request of input.requests) {
+      const rows = await readRows(ctx, { ...request, generationId: input.generationId });
+      const size = new TextEncoder().encode(JSON.stringify(rows)).length;
+      if (result.length && bytes + size > 500000) break;
+      result.push(rows);
+      bytes += size;
+    }
+    return result;
   },
 });
 export const lookup = internalQuery({

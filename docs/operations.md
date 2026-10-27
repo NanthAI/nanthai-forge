@@ -51,6 +51,37 @@ no timer, scheduler or poller: only an in-flight command advances the cursor.
 Existing post-publication retirement of obsolete derived generations remains
 separate from the build.
 
+Summary projection batches the common Lane/Intent record context and first
+submission/acceptance pages for up to ten records. Context queries return a
+complete prefix within a 500 KB target; remaining pages retain the ordinary
+paged reader. Changed-file comparison resolves unique before/after pins together
+in windows of at most 50 files, 100 pins and 2 MiB of eligible blob bytes. Blobs
+above the existing 1 MiB exact-count threshold remain unknown. State reads use
+100-pin / 2 MiB target windows (an indivisible State may exceed the target).
+View provenance shares its first State window with the base/head comparison and
+reuses that changed-tree result for diffstats within the same summary step.
+Unavailable optional save States still fall back to incomplete provenance while
+preserving an available base/head diff. Every actual batch retains the source
+reader's before/after current-access and availability checks; projection caches
+end with the step and publication rechecks current authority. There is no cursor
+format change: an in-flight build resumes at its existing phase/field/record.
+
+`tests/projectWorkIndex-calls.test.mjs` exercises the actual summary, ancestry,
+source reader and diffstat handlers against generated local storage: 555 Lanes,
+2,167 Views, 1,471 runs, 2,789 saves, 2,494 source States, 3,000 files per tree and
+40 changed paths. It retains eager line counts and file provenance. The measured
+summary-path function calls fell from 488,819 to 20,051 (24.4×): per Lane
+168.61 → 6.71, per View 181.98 → 7.13, per run 0.60 → 0.60. Object resolutions
+fell from 467,918 to 12,380. Local wall time was 54.57 → 35.76 s, with other
+builders sharing the Mac; it excludes hosted latency and outer generation
+load/commit calls. The largest source window was 1,040,969 bytes / 41 pins.
+Applying those per-record rates to 150 remaining Lanes, 2,167 Views and 1,471
+runs estimates about 17,335 summary-path calls, plus outer load/commit and any
+remaining non-summary phases. This estimates metric 5.8's hosted-call cost;
+it is not a billed dollar measurement. The resumable build retains its existing
+zero idle work and publication guards (metrics 5.2/5.7); no live deployment or
+landing measurement is implied.
+
 The local synthetic benchmark in `tests/projectWorkIndex-progress.test.mjs`
 uses 625 Intents, 555 Lanes, 2,789 saves, 2,167 Views, 1,471 runs, 2,001 actions,
 572 landing entries and 2,495 empty-file source States. Its measured baseline

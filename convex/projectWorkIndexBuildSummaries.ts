@@ -5,6 +5,8 @@ import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import {
   rowsRef,
+  rowBatchRef,
+  type RowRequest,
   lookupRef,
   family,
   type Selected,
@@ -20,7 +22,7 @@ import { viewReadModels } from '../src/view-read-model';
 import { viewIndexEntries } from '../src/view-hosted-index';
 import { viewSummary, laneSummary, runSummary } from '../src/work-hosted-summary';
 import { viewStates } from './projectSourceProjection';
-import { addDiffstats } from './projectDiffstatProjection';
+import { addDiffstats, type ChangedStates } from './projectDiffstatProjection';
 import type { WorkView } from '../src/work-types';
 /** A bounded summary page shares source resolution and diffstat work. */
 export async function projectSummaries(
@@ -58,11 +60,71 @@ export async function projectSummaries(
     ...exchange,
     read: pin => (batch.has(pin.sha256) ? Promise.resolve(batch.get(pin.sha256)!) : exchange.read(pin)),
   };
+  if (field === 'views') {
+    // Seed the common context for this page in metadata-sized transport windows.
+    // Dependency closure and unusually large records retain the ordinary reader.
+    // These are immutable projection inputs; the publication transaction rechecks
+    // current authority, just as it does for the page's own record bodies.
+    const values = await Promise.all(pins.map(pin => readRecord(pin, e.read, field)));
+    const laneIds = new Set(
+      values.flatMap(value => (value as unknown as WorkView).inputs.map(i => i.laneId)),
+    );
+    const intentIds = new Set(values.map(value => String(value.intentId)));
+    const lanes = e.records.fields.find(f => f.name === 'lanes');
+    const intents = e.records.fields.find(f => f.name === 'intents');
+    const pending = [
+      ...(lanes && 'records' in lanes ? lanes.records.filter(p => laneIds.has(p.key)) : []),
+      ...(intents && 'records' in intents ? intents.records.filter(p => intentIds.has(p.key)) : []),
+    ];
+    let retained = bytes;
+    while (pending.length) {
+      const selectedPins: RecordPin[] = [];
+      let size = 0;
+      while (pending.length && selectedPins.length < 100) {
+        const pin = pending.shift()!;
+        if (batch.has(pin.sha256) || pin.size > 256 * 1024 || retained + pin.size > 2 * 1024 * 1024) continue;
+        if (selectedPins.length && size + pin.size > 256 * 1024) {
+          pending.unshift(pin);
+          break;
+        }
+        selectedPins.push(pin);
+        size += pin.size;
+        retained += pin.size;
+      }
+      if (!selectedPins.length) continue;
+      const values = await exchangeObjectReader(ctx, false, 0).read(
+        selected.projectId,
+        selected.owner,
+        selectedPins,
+      );
+      for (const [index, pin] of selectedPins.entries()) batch.set(pin.sha256, values[index]!);
+    }
+  }
+  const requests: RowRequest[] = [];
+  for (const pin of pins) {
+    const value = await readRecord(pin, e.read, field);
+    if (field === 'lanes') requests.push({ collection: '_buildSubmission', parent: String(value.id) });
+    if (field === 'views')
+      requests.push(
+        { collection: '_buildFamily', parent: family(value as unknown as WorkView), last: true },
+        { collection: '_buildLocalAcceptance', parent: String(value.id) },
+        { collection: '_buildHostedAcceptance', parent: String(value.id) },
+      );
+  }
+  const rowPages = requests.length ? await ctx.runQuery(rowBatchRef, { ...selected, requests }) : [];
+  const key = (r: RowRequest) => JSON.stringify([r.collection, r.parent, r.last ?? false]);
+  const rowCache = new Map(rowPages.map((rows, index) => [key(requests[index]!), rows]));
+  const readRows = (collection: string, parent: string, offset = 0, last = false) => {
+    const request = { collection, parent, last };
+    const cached = offset === 0 ? rowCache.get(key(request)) : undefined;
+    return cached ? Promise.resolve(cached) : ctx.runQuery(rowsRef, { ...selected, ...request, offset });
+  };
   const lookup = (collection: string, key: string) =>
     ctx.runQuery(lookupRef, { ...selected, collection, key });
   const main = (await lookup('hostedChannels', 'main')) ?? (await lookup('channels', 'main'));
   const mainHead: string | null = main ? JSON.parse(main.value).head : null;
   const result: IndexEntry[] = [];
+  const changedStates = new Map<string, ChangedStates>();
   let outputBytes = 0;
   const started = Date.now();
   c.record -= pins.length;
@@ -81,12 +143,7 @@ export async function projectSummaries(
       const submitted: string[] = [];
       let offset = 0;
       while (true) {
-        const rows = await ctx.runQuery(rowsRef, {
-          ...selected,
-          collection: '_buildSubmission',
-          parent: String(value.id),
-          offset,
-        });
+        const rows = await readRows('_buildSubmission', String(value.id), offset);
         for (const row of rows) submitted.push(JSON.parse(row.value).head);
         if (rows.length < 100) break;
         offset = rows.at(-1)!.position + 1;
@@ -95,13 +152,8 @@ export async function projectSummaries(
     } else if (field === 'runs') summary = runSummary(data.runs[0]!, mainSummary);
     else {
       const selectedView = value as unknown as WorkView;
-      const [latest] = await ctx.runQuery(rowsRef, {
-        ...selected,
-        collection: '_buildFamily',
-        parent: family(selectedView),
-        last: true,
-      });
-      data = await viewContext(ctx, selected, e, selectedView, latest?.key ?? selectedView.id);
+      const [latest] = await readRows('_buildFamily', family(selectedView), 0, true);
+      data = await viewContext(ctx, selected, e, selectedView, latest?.key ?? selectedView.id, readRows);
       const view = data.views[0]!;
       const model = viewReadModels(data, 0)[0]!;
       summary = {
@@ -112,7 +164,13 @@ export async function projectSummaries(
       };
       let states;
       try {
-        states = await viewStates(ctx, { backup, manifest: e.manifest, data }, selected.owner, 0);
+        states = await viewStates(
+          ctx,
+          { backup, manifest: e.manifest, data },
+          selected.owner,
+          0,
+          changedStates,
+        );
       } catch {
         await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: selected.owner });
       }
@@ -139,6 +197,7 @@ export async function projectSummaries(
     { backup, manifest: e.manifest, data: partialWork(e.records, []) },
     selected.owner,
     result,
+    changedStates,
   );
   return result;
 }

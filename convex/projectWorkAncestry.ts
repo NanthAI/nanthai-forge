@@ -43,27 +43,65 @@ export const stateBatch = internalAction({
       parents: string[];
       files?: { path: string; blob: string; mode: 'file' | 'executable' | 'symlink' }[];
     }[] = [];
-    for (const pin of input.pins) {
-      const [bytes] = await reader.read(input.projectId, input.actor, [pin]);
-      const state = parseNativeState(bytes!);
-      result.push({
-        head: pin.sha256,
-        parents: state.parents,
-        ...(paths ? { files: state.files.filter(file => paths.has(file.path)) } : {}),
-      });
+    for (let offset = 0; offset < input.pins.length;) {
+      const pins: { sha256: string; size: number }[] = [];
+      let bytes = 0;
+      while (offset < input.pins.length && pins.length < 100) {
+        const pin = input.pins[offset]!;
+        if (pins.length && bytes + pin.size > 2 * 1024 * 1024) break;
+        pins.push(pin);
+        bytes += pin.size;
+        offset++;
+      }
+      const bodies = await reader.read(input.projectId, input.actor, pins);
+      for (const [index, pin] of pins.entries()) {
+        const state = parseNativeState(bodies[index]!);
+        result.push({
+          head: pin.sha256,
+          parents: state.parents,
+          ...(paths ? { files: state.files.filter(file => paths.has(file.path)) } : {}),
+        });
+      }
     }
     return result;
   },
 });
 export const changedStates = internalAction({
-  args: { projectId: v.id('hostedProjects'), actor: v.string(), before: statePin, after: statePin },
-  returns: v.object({ before: v.array(stateFile), after: v.array(stateFile), paths: v.array(v.string()) }),
+  args: {
+    projectId: v.id('hostedProjects'),
+    actor: v.string(),
+    before: statePin,
+    after: statePin,
+    pins: v.optional(v.array(statePin)),
+  },
+  returns: v.object({
+    before: v.array(stateFile),
+    after: v.array(stateFile),
+    paths: v.array(v.string()),
+    states: v.optional(v.array(v.object({ head: v.string(), files: v.array(stateFile) }))),
+  }),
   handler: async (ctx, input) => {
     const reader = exchangeObjectReader(ctx, false, 0);
-    const read = async (pin: { sha256: string; size: number }) =>
-      parseNativeState((await reader.read(input.projectId, input.actor, [pin]))[0]!).files;
-    const before = await read(input.before),
-      after = await read(input.after);
+    const pins = [input.before, input.after];
+    let size = input.before.size + input.after.size;
+    for (const pin of input.pins ?? []) {
+      if (pins.some(p => p.sha256 === pin.sha256)) continue;
+      if (pins.length >= 100 || size + pin.size > 2 * 1024 * 1024) break;
+      pins.push(pin);
+      size += pin.size;
+    }
+    let bodies: Buffer[];
+    try {
+      bodies = await reader.read(input.projectId, input.actor, pins);
+    } catch (error) {
+      if (pins.length === 2) throw error;
+      // Extra provenance is optional. Do not lose the available base/head diff
+      // when one save is unavailable; the caller retains its ordinary fallback.
+      pins.length = 2;
+      bodies = await reader.read(input.projectId, input.actor, pins);
+    }
+    const before = parseNativeState(bodies[0]!).files,
+      after = parseNativeState(bodies[1]!).files;
     const paths = new Set(
       reviewPaths(before, after)
         .filter(file => file.status !== 'unchanged')
@@ -73,6 +111,24 @@ export const changedStates = internalAction({
       before: before.filter(file => paths.has(file.path)),
       after: after.filter(file => paths.has(file.path)),
       paths: [...paths],
+      ...(input.pins
+        ? {
+            states: pins.slice(2).flatMap((pin, i) => {
+              try {
+                return [
+                  {
+                    head: pin.sha256,
+                    files: parseNativeState(bodies[i + 2]!).files.filter(file => paths.has(file.path)),
+                  },
+                ];
+              } catch {
+                // A malformed optional save has the same incomplete-provenance
+                // fallback as an unavailable save; base/head remain usable.
+                return [];
+              }
+            }),
+          }
+        : {}),
     };
   },
 });

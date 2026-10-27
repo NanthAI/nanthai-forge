@@ -30,6 +30,7 @@ export async function viewContext(
   e: Exchange,
   view: WorkView,
   latestId: string,
+  readRows?: (collection: string, parent: string, offset: number) => Promise<IndexEntry[]>,
 ) {
   const data = partialWork(e.records, [
     { collection: 'views', value: contextView(view) as unknown as Record<string, unknown> },
@@ -72,7 +73,9 @@ export async function viewContext(
   ] as const) {
     let offset = 0;
     while (true) {
-      const rows = await ctx.runQuery(rowsRef, { ...selected, collection: scratch, parent: view.id, offset });
+      const rows = readRows
+        ? await readRows(scratch, view.id, offset)
+        : await ctx.runQuery(rowsRef, { ...selected, collection: scratch, parent: view.id, offset });
       for (const row of rows) {
         let value = JSON.parse(row.value);
         if (value.payloadKey) {

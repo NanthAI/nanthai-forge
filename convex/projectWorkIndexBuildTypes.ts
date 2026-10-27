@@ -15,6 +15,12 @@ export const rowsRef = makeFunctionReference<
   Selected & { collection: string; parent?: string; offset?: number; last?: boolean },
   IndexEntry[]
 >('projectWorkIndexBuildStore:rows');
+export type RowRequest = { collection: string; parent?: string; offset?: number; last?: boolean };
+export const rowBatchRef = makeFunctionReference<
+  'query',
+  Selected & { requests: RowRequest[] },
+  IndexEntry[][]
+>('projectWorkIndexBuildStore:rowBatch');
 export const lookupRef = makeFunctionReference<
   'query',
   Selected & { collection: string; key: string },

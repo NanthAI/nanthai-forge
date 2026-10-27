@@ -4,7 +4,7 @@ import { archiveChannels } from '../src/work-archive-metadata';
 import { sourceTreeEntries } from '../src/source-tree-index';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { parseNativeState } from '../src/native-source';
-import { addDiffstats } from './projectDiffstatProjection';
+import { addDiffstats, type ChangedStates } from './projectDiffstatProjection';
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import type { WorkData } from '../src/work-types';
@@ -28,7 +28,13 @@ const derived = new Set(['viewDetails', 'viewFiles', 'laneViews', 'viewAcceptanc
 
 /** Source bytes live for one State read, not for the retained project closure.
  * Only a View's changed paths survive into save provenance. */
-export async function viewStates(ctx: ActionCtx, snapshot: Snapshot, owner: string, index: number) {
+export async function viewStates(
+  ctx: ActionCtx,
+  snapshot: Snapshot,
+  owner: string,
+  index: number,
+  changedStates?: Map<string, ChangedStates>,
+) {
   const { backup, manifest, data } = snapshot,
     view = data.views[index]!,
     pins = new Map(manifest.files.map(file => [file.path, file]));
@@ -39,17 +45,6 @@ export async function viewStates(ctx: ActionCtx, snapshot: Snapshot, owner: stri
   }
   const states = new Map<string, readonly ProvenanceFile[]>();
   if (!view.head || view.status === 'conflict') return states;
-  const changed: { before: ProvenanceFile[]; after: ProvenanceFile[]; paths: string[] } = await ctx.runAction(
-    internal.projectWorkAncestry.changedStates,
-    {
-      projectId: backup.projectId,
-      actor: owner,
-      before: pin(view.base),
-      after: pin(view.head),
-    },
-  );
-  states.set(view.base, changed.before);
-  states.set(view.head, changed.after);
   const pending = [
     ...new Set(
       viewContributors(data, view).flatMap(c => [
@@ -57,7 +52,37 @@ export async function viewStates(ctx: ActionCtx, snapshot: Snapshot, owner: stri
         ...c.saves.flatMap(({ save }) => [save.parent, save.head]),
       ]),
     ),
-  ].filter(head => !states.has(head));
+  ].filter(head => head !== view.base && head !== view.head);
+  // Share the first provenance window with the base/head read. The State action
+  // filters extra trees to changed paths before returning them to this heap.
+  const extraPins: { sha256: string; size: number }[] = [];
+  let bytes = pin(view.base).size + pin(view.head).size;
+  for (const head of pending) {
+    let next;
+    try {
+      next = pin(head);
+    } catch {
+      break;
+    }
+    if (extraPins.length >= 98 || bytes + next.size > 2 * 1024 * 1024) break;
+    extraPins.push(next);
+    bytes += next.size;
+  }
+  const key = `${view.base}:${view.head}`;
+  const changed: ChangedStates =
+    changedStates?.get(key) ??
+    (await ctx.runAction(internal.projectWorkAncestry.changedStates, {
+      projectId: backup.projectId,
+      actor: owner,
+      before: pin(view.base),
+      after: pin(view.head),
+      ...(extraPins.length ? { pins: extraPins } : {}),
+    }));
+  changedStates?.set(key, changed);
+  states.set(view.base, changed.before);
+  states.set(view.head, changed.after);
+  for (const state of changed.states ?? []) states.set(state.head, state.files);
+  for (let i = pending.length - 1; i >= 0; i--) if (states.has(pending[i]!)) pending.splice(i, 1);
   while (pending.length) {
     const selected: { sha256: string; size: number }[] = [];
     let bytes = 0;

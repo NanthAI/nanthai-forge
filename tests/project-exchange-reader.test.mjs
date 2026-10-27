@@ -304,3 +304,58 @@ test('bounded State actions recheck current source authority and exact content p
     code('INVALID_WORK_BACKUP'),
   );
 });
+
+test('State windows batch parent/provenance reads and retain the diff when an optional save disappears', async () => {
+  const ancestry = await import(moduleUrl('../convex/projectWorkAncestry.ts'));
+  const s = fixture(),
+    resolutions = [];
+  const make = async (name, blob) =>
+    upload(
+      s,
+      Buffer.from(
+        JSON.stringify({
+          schema: 1,
+          kind: 'forge-source-state',
+          parents: [],
+          files: [{ path: 'a.ts', blob, mode: 'file' }],
+          message: name,
+          at: 'now',
+        }),
+      ),
+    );
+  const before = await make('before', 'a'.repeat(64)),
+    after = await make('after', 'b'.repeat(64)),
+    save = await make('save', 'c'.repeat(64));
+  const run = s.ctx.runQuery;
+  s.ctx.runQuery = async (ref, args) => {
+    if (getFunctionName(ref) === 'projectObjects:resolve') resolutions.push(args.digests);
+    return run(ref, args);
+  };
+  await ancestry.stateBatch._handler(s.ctx, {
+    projectId: 'project',
+    actor: 'owner',
+    pins: [before, after, save],
+    paths: ['a.ts'],
+  });
+  assert.equal(resolutions.length, 2);
+  resolutions.length = 0;
+  const input = { projectId: 'project', actor: 'owner', before, after, pins: [save] };
+  const result = await ancestry.changedStates._handler(s.ctx, input);
+  assert.equal(resolutions.length, 2);
+  assert.deepEqual(result.paths, ['a.ts']);
+  assert.equal(result.states[0].files[0].blob, 'c'.repeat(64));
+  const malformed = await upload(s, Buffer.from('not a State'));
+  const withMalformed = await ancestry.changedStates._handler(s.ctx, { ...input, pins: [malformed] });
+  assert.deepEqual(withMalformed.paths, ['a.ts']);
+  assert.deepEqual(withMalformed.states, []);
+  s.tables.projectObjects.forEach(row => {
+    if (row.digest === save.sha256) row.removed = true;
+  });
+  const partial = await ancestry.changedStates._handler(s.ctx, input);
+  assert.deepEqual(partial.paths, ['a.ts']);
+  assert.deepEqual(partial.states, []);
+  await assert.rejects(
+    ancestry.changedStates._handler(s.ctx, { ...input, actor: 'stranger' }),
+    code('PROJECT_UNAVAILABLE'),
+  );
+});

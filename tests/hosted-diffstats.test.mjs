@@ -114,3 +114,49 @@ test('hosted comparisons count text changes and whole-file lines from authorized
   };
   await assert.rejects(compare._handler(ctx, input), /revoked/);
 });
+
+test('changed-file windows resolve unique pins together and remain bounded by bytes and pin count', async () => {
+  const { digest } = await import('../dist/hash.js');
+  const blobs = new Map(),
+    batches = [];
+  const pin = bytes => {
+    const sha256 = digest(bytes);
+    blobs.set(sha256, bytes);
+    return { sha256, size: bytes.length };
+  };
+  const before = pin(Buffer.from('before\n'));
+  const files = Array.from({ length: 120 }, (_, i) => ({ before, after: pin(Buffer.from(`after ${i}\n`)) }));
+  const ctx = {
+    runQuery: async (_ref, args) => {
+      batches.push(args.digests);
+      return args.digests.map(id => ({ storageId: id, digest: id, size: blobs.get(id).length }));
+    },
+    storage: {
+      getMetadata: async id => ({ size: blobs.get(id).length, sha256: id }),
+      get: async id => new Blob([blobs.get(id)]),
+    },
+  };
+  assert.deepEqual(await compare._handler(ctx, { projectId: 'project', actor: 'owner', files }), {
+    add: 120,
+    del: 120,
+    exact: true,
+    storageReads: 123,
+    storageBytes: [...blobs.values()].reduce((n, b) => n + b.length, 0) + 2 * before.size,
+  });
+  assert.equal(batches.length, 6, 'two authority/availability resolutions per 50-file window');
+  assert(batches.every(pins => pins.length <= 100));
+  assert(batches.every(pins => pins.reduce((n, key) => n + blobs.get(key).length, 0) <= 2 * 1024 * 1024));
+  await assert.rejects(
+    compare._handler(ctx, {
+      projectId: 'project',
+      actor: 'owner',
+      files: [{ before, after: { ...before, size: before.size + 1 } }],
+    }),
+    e => e.code === 'INVALID_WORK_BACKUP',
+  );
+  const big = Array.from({ length: 5 }, (_, i) => ({ after: pin(Buffer.alloc(700000, 65 + i)) }));
+  batches.length = 0;
+  await compare._handler(ctx, { projectId: 'project', actor: 'owner', files: big });
+  assert.equal(batches.length, 6);
+  assert(batches.every(pins => pins.reduce((n, key) => n + blobs.get(key).length, 0) <= 2 * 1024 * 1024));
+});
