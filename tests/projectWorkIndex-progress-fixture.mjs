@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { recipeObjects } from './projectObjectRecipe-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -6,6 +7,8 @@ import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs } from './convex-args.mjs';
 import { digest } from '../dist/hash.js';
+import { viewIndexEntries } from '../dist/view-hosted-index.js';
+import { ownerDiffstatPages } from '../dist/owner-diffstats.js';
 import { workSchema } from '../dist/work-types.js';
 import { buildWorkRecords } from '../dist/work-exchange-records.js';
 import { metadataRequest } from '../dist/work-metadata.js';
@@ -32,9 +35,13 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     objects.set(hash, bytes);
     return hash;
   };
-  const old = options.treeFiles ? put(Buffer.from('before\n')) : undefined;
+  const old = options.treeFiles
+    ? put(options.largeFiles ? Buffer.alloc(1024 * 1024, 67) : Buffer.from('before\n'))
+    : undefined;
   const changes = options.treeFiles
-    ? Array.from({ length: 40 }, (_, i) => put(Buffer.from(`after ${i}\n`)))
+    ? Array.from({ length: 40 }, (_, i) =>
+        put(options.largeFiles ? Buffer.alloc(1024 * 1024, 69) : Buffer.from(`after ${i}\n`)),
+      )
     : [];
   const paths = Array.from({ length: options.treeFiles ?? 0 }, (_, i) => ({
     path: `src/file-${i}.ts`,
@@ -199,10 +206,47 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
       coverage: 'Synthetic index benchmark',
     }),
   );
+  const companion = options.ownerStats
+    ? ownerDiffstatPages({
+        work: records.root.work.sha256,
+        stats: [...data.lanes, ...data.views].map(v => [
+          `${v.base}:${v.head}`,
+          { files: v.base === v.head ? 0 : 40, add: 40, del: 40 },
+        ]),
+      })
+    : undefined;
+  for (const [key, bytes] of companion?.objects ?? []) objects.set(key, bytes);
+  const stateFiles = {
+    has: head => heads.includes(head),
+    get: head => (head === heads[0] ? paths : paths.map((f, j) => (j < 40 ? { ...f, blob: changes[j] } : f))),
+  };
+  const ownerViews = options.ownerViews
+    ? data.views.map((view, index) => {
+        const make = () =>
+          Buffer.from(
+            JSON.stringify({
+              work: records.root.work.sha256,
+              view: [
+                view.id,
+                'f'.repeat(64),
+                viewIndexEntries(data, stateFiles, { index, positions: new Map() }),
+              ],
+            }),
+          );
+        const bytes = make(),
+          sha256 = digest(bytes);
+        const compressed = Buffer.from(gzipSync(bytes));
+        generators.set(sha256, () => gunzipSync(compressed));
+        sizes.set(sha256, bytes.length);
+        return { key: view.id, sha256, size: bytes.length };
+      })
+    : undefined;
   const root = Buffer.from(
     JSON.stringify({
       kind: 'forge-native-exchange',
       schema: 2,
+      ...(companion ? { ownerDiffstats: companion.pages } : {}),
+      ...(ownerViews ? { ownerViews } : {}),
       work: records.root.work,
       manifest: buildByteTree(manifest, objects),
       records: buildByteTree(records.bytes, objects),
@@ -265,7 +309,13 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     project = s.tables.hostedProjects.get('project');
     backup = s.tables.projectBackups.get('backup');
   }
-  const recipeStore = options.recipes ? recipeObjects(objects, sizes, new Set(heads)) : undefined;
+  const recipeStore = options.recipes
+    ? recipeObjects(objects, sizes, new Set([...heads, ...(options.largeFiles ? [old, ...changes] : [])]))
+    : undefined;
+  if (options.largeFiles && recipeStore) {
+    recipeStore.row(old);
+    recipeStore.row(changes[0]);
+  }
   // Index the fake database too: scanning every row would measure the fake, not the build.
   const byCollection = new Map(),
     byKey = new Map();
@@ -407,6 +457,8 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     documentsRead: 0,
     documentsWritten: 0,
     storageReads: 0,
+    sourceFileReads: 0,
+    sourceFileResolves: 0,
     maxRpcBytes: 0,
     maxSourceWindowBytes: 0,
     maxStepMs: 0,
@@ -467,6 +519,7 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     objects.has(id) ? { _id: id, sha256: id, size: objects.get(id).length } : null;
   s.ctx.storage.get = async id => {
     metrics.storageReads++;
+    if ([old, ...changes].includes(id)) metrics.sourceFileReads++;
     return new Blob([objects.get(id)]);
   };
   s.ctx.storage.getMetadata = async id => ({ sha256: id, size: objects.get(id).length });
@@ -475,6 +528,8 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
   let stepStarted = performance.now();
   s.ctx.runQuery = async (ref, args) => {
     const name = getFunctionName(ref);
+    if (name === 'projectObjects:resolve')
+      metrics.sourceFileResolves += args.digests.filter(id => [old, ...changes].includes(id)).length;
     metrics.calls[name] = (metrics.calls[name] ?? 0) + 1;
     metric('calls');
     if (name === 'projectObjects:resolve') {
@@ -558,6 +613,7 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     data,
     metrics,
     recipeBindings: recipeStore?.bindings,
+    filePins: [old, changes[0]].filter(Boolean).map(sha256 => ({ sha256, size: objects.get(sha256).length })),
     sourcePins: heads.map(sha256 => ({ sha256, size: sizes.get(sha256) })),
     snapshot: () => ({
       data,

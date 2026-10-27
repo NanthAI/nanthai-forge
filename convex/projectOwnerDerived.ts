@@ -84,8 +84,9 @@ export function ownerDerivedRows(c: Cursor, value: unknown): IndexEntry[] | unde
         rows.push(record);
         continue;
       }
-      const changes = stats.get(key);
-      if (!changes || (changes.add === undefined) !== (changes.del === undefined)) return;
+      const supplied = stats.get(key);
+      if (!supplied || (supplied.add === undefined) !== (supplied.del === undefined)) return;
+      const changes = { ...supplied, provenance: 'owner-reported', exact: supplied.add !== undefined };
       rows.push({ ...record, value: JSON.stringify({ ...value, changes }) });
       if (!rows.some(r => r.collection === 'diffstats' && r.key === key))
         rows.push({ collection: 'diffstats', key, parent: '', position: 0, value: JSON.stringify(changes) });

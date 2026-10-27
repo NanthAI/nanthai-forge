@@ -112,6 +112,9 @@ export const read = query({
       invariant(input.viewId, 'BAD_ARGUMENT', 'Select a View.');
       const model = await value(ctx, partition, 'viewDetails', input.viewId);
       invariant(model, 'NOT_FOUND', 'View not found.');
+      const stats = model.head
+        ? await value(ctx, partition, 'diffstats', `${model.base}:${model.head}`)
+        : null;
       let plans: FileProvenancePlan[], nextCursor: string | null;
       if (input.file !== undefined) {
         const plan = await value(ctx, partition, 'viewFiles', `${input.viewId}:${input.file}`);
@@ -178,6 +181,7 @@ export const read = query({
         backupId: generation.backupId,
         sourceTransport: backup.transport,
         ...(await acceptances(model)),
+        changes: stats,
         files: {
           total: model.fileCount,
           items: plans.map(file => ({

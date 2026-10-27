@@ -50,6 +50,8 @@ test('production native v2 push pins concurrent Work for the next push and reuse
   const nextBytes = objects.get(next.digest),
     nextRoot = JSON.parse(nextBytes);
   assert.equal(nextRoot.schema, 2);
+  assert(Array.isArray(nextRoot.ownerDiffstats));
+  assert(Array.isArray(nextRoot.ownerViews));
   assert.ok(nextRoot.delta);
   assert.equal(
     JSON.parse((await resolveExchangeRoot(nextBytes, read)).work).intents[0].outcome,
@@ -169,4 +171,49 @@ test('legacy unified baseline recovery preserves exact catalog property order an
   assert.equal(recovered.data.intents[0].base, undefined);
   assert.equal(buildWorkRecords(recovered.data).pin.sha256, buildWorkRecords(data).pin.sha256);
   assert.deepEqual(Object.keys(recovered.data), Object.keys(data));
+});
+
+test('record reseed uploads exact Work-bound count and View companions from existing owner facts', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-owner-index-pages-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'a.ts'), 'old\n');
+  initNative(root);
+  const work = new WorkService(root),
+    execute = command => work.execute(command, work.store.revision()).result;
+  const intent = execute({ action: 'intent', outcome: 'Count locally' });
+  const lane = execute({ action: 'lane', intentId: intent.id, name: 'Edit' });
+  const view = execute({
+    action: 'compose',
+    operationId: randomUUID(),
+    intentId: intent.id,
+    inputs: [{ laneId: lane.id, head: lane.head }],
+  });
+  const objects = new Map();
+  const result = await pushNativeExchange(work.store, work.store.revision(), randomUUID(), {
+    metadataTrees: true,
+    workRecords: true,
+    missing: async pins => pins.filter(p => !objects.has(p.sha256)).map(p => p.sha256),
+    upload: async (pin, bytes) => {
+      assert.equal(digest(bytes), pin.sha256);
+      objects.set(pin.sha256, Buffer.from(bytes));
+    },
+    publish: async pin => pin.sha256,
+  });
+  const tree = JSON.parse(objects.get(result.digest));
+  assert.equal(tree.ownerViews.length, 1);
+  const provenance = tree.ownerViews[0];
+  const page = JSON.parse(objects.get(provenance.sha256));
+  assert.equal(page.work, tree.work.sha256);
+  assert.equal(page.view[0], view.id);
+  assert(page.view[2].some(row => row.collection === 'viewDetails'));
+  const stats = tree.ownerDiffstats.flatMap(pin => {
+    const page = JSON.parse(objects.get(pin.sha256));
+    assert.equal(page.work, tree.work.sha256);
+    return page.stats;
+  });
+  assert.deepEqual(stats.find(([key]) => key === `${view.base}:${view.head}`)[1], {
+    files: 0,
+    add: 0,
+    del: 0,
+  });
 });

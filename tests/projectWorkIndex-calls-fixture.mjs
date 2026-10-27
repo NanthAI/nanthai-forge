@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { recipeObjects } from './projectObjectRecipe-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs } from './convex-args.mjs';
 import { digest } from '../dist/hash.js';
+import { viewIndexEntries } from '../dist/view-hosted-index.js';
+import { ownerDiffstatPages } from '../dist/owner-diffstats.js';
 import { workSchema } from '../dist/work-types.js';
 import { buildWorkRecords } from '../dist/work-exchange-records.js';
 const { projectSummaries } = await import(moduleUrl('../convex/projectWorkIndexBuildSummaries.ts'));
@@ -16,7 +19,7 @@ const diffstats = await import(moduleUrl('../convex/projectDiffstats.ts'));
 
 /** Exact synthetic dogfood counts; source bytes are generated on demand so the
  * fake does not retain thousands of full trees in the coordinator's heap. */
-export function callsFixture(scale = 1) {
+export function callsFixture(scale = 1, ownerStats = true) {
   const n = count => Math.max(1, Math.ceil(count * scale));
   const objects = new Map(),
     generators = new Map(),
@@ -143,14 +146,51 @@ export function callsFixture(scale = 1) {
     });
   }
   const built = buildWorkRecords(data);
+  const companion = ownerDiffstatPages({
+    work: built.root.work.sha256,
+    stats: data.views.map(v => [`${v.base}:${v.head}`, { files: 40, add: 40, del: 40 }]),
+  });
+  for (const [key, bytes] of companion.objects) objects.set(key, bytes);
+  const stateFiles = {
+    has: head => heads.includes(head),
+    get: head =>
+      head === base ? tree : tree.map((f, j) => (j < 40 ? { ...f, blob: changed[j].sha256 } : f)),
+  };
+  const ownerViews = data.views.map((view, index) => {
+    const make = () =>
+      Buffer.from(
+        JSON.stringify({
+          work: built.root.work.sha256,
+          view: [
+            view.id,
+            'f'.repeat(64),
+            viewIndexEntries(data, stateFiles, { index, positions: new Map() }),
+          ],
+        }),
+      );
+    const bytes = make(),
+      sha256 = digest(bytes);
+    const compressed = Buffer.from(gzipSync(bytes));
+    generators.set(sha256, () => gunzipSync(compressed));
+    return { key: view.id, sha256, size: bytes.length };
+  });
+
   for (const [key, bytes] of built.objects) objects.set(key, bytes);
   const sizes = new Map(files.map(p => [p.sha256, p.size]));
+  ownerViews.forEach(p => sizes.set(p.sha256, p.size));
   for (const [key, value] of objects) sizes.set(key, value.length);
   const stored = new Map(objects);
   const storedGet = stored.get.bind(stored);
   stored.get = key => storedGet(key) ?? generators.get(key)?.();
   const recipeStore = recipeObjects(stored, sizes, new Set(heads));
-  const metrics = { calls: {}, storageReads: 0, storageBytes: 0, maxPins: 0, maxBatchBytes: 0 };
+  const metrics = {
+    sourceFileReads: 0,
+    calls: {},
+    storageReads: 0,
+    storageBytes: 0,
+    maxPins: 0,
+    maxBatchBytes: 0,
+  };
   const ctx = {
     runQuery: async (ref, args) => {
       const name = getFunctionName(ref);
@@ -190,6 +230,7 @@ export function callsFixture(scale = 1) {
       getMetadata: async key => ({ sha256: key, size: sizes.get(key) }),
       get: async key => {
         const value = stored.get(key);
+        if ([old.sha256, ...changed.map(p => p.sha256)].includes(key)) metrics.sourceFileReads++;
         metrics.storageReads++;
         metrics.storageBytes += value.length;
         return new Blob([value]);
@@ -197,8 +238,13 @@ export function callsFixture(scale = 1) {
     },
   };
   const exchange = {
+    root: { schema: 2, ownerViews, ...(ownerStats ? { ownerDiffstats: companion.pages } : {}) },
     records: built.root,
-    manifest: { kind: 'forge-native-work-backup', head: base, files },
+    manifest: {
+      kind: 'forge-native-work-backup',
+      head: base,
+      files: [{ path: 'work.json', ...built.root.work }, ...files],
+    },
     read: async pin => (await exchangeObjectReader(ctx, false, 0).read('project', 'owner', [pin]))[0],
   };
   const selected = { projectId: 'project', owner: 'owner', generationId: 'generation' };

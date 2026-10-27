@@ -4,7 +4,7 @@ import { archiveChannels } from '../src/work-archive-metadata';
 import { sourceTreeEntries } from '../src/source-tree-index';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { parseNativeState } from '../src/native-source';
-import { addDiffstats, type ChangedStates, type Pin } from './projectDiffstatProjection';
+import { type ChangedStates, type Pin } from './projectDiffstatProjection';
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import type { WorkData } from '../src/work-types';
@@ -129,9 +129,6 @@ export async function workProjection(ctx: ActionCtx, snapshot: Snapshot, owner: 
       !streamed,
     ),
     projection = materializeWork(snapshot.data, snapshot.manifest, [], snapshot.backup.transport, parents);
-  await addDiffstats(ctx, snapshot, owner, projection.entries);
-  const diffstats = projection.entries.filter(entry => entry.collection === 'diffstats').length;
-  if (diffstats) projection.metadata.counts.diffstats = diffstats;
   if (!streamed)
     return {
       metadata: projection.metadata,

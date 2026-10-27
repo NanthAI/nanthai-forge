@@ -292,7 +292,7 @@ test('a moving snapshot cannot publish an incomplete record generation', async t
   assert([...f.s.tables.projectWorkGenerations.values()].every(g => g.status === 'building'));
 });
 
-test('paged View provenance and diffstats derive changed source and saved Lane history on the server', async t => {
+test('paged View provenance derives changed source and saved Lane history on the server', async t => {
   const f = await setup(t, 3 * 1024 * 1024, true);
   await continueLongAction('Synthetic index', randomUUID(), continuation =>
     actions.ensure._handler(f.s.ctx, { projectId: 'project', continuation }),
@@ -318,6 +318,6 @@ test('paged View provenance and diffstats derive changed source and saved Lane h
     (await index.detail._handler(f.s.ctx, { projectId: 'project', collection: 'lanes', id: f.lane.id }))
       .value,
   );
-  assert.equal(lane.changes.files, 1);
+  assert.equal(lane.changes, undefined, 'missing owner counts stay lazy');
   assert.equal(lane.checkpointCount, 1);
 });

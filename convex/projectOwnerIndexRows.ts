@@ -38,6 +38,8 @@ export async function prepareOwnerIndexRows(ctx: ActionCtx, c: Cursor) {
           }
         }
         if (old) {
+          if (row.collection === 'diffstats' && JSON.parse(old.value).provenance === 'server-computed')
+            row.value = old.value;
           if (row.collection !== 'viewFiles') row.position = old.position;
         } else {
           const position = delta.positions[row.collection] ?? 0;

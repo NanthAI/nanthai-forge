@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { diffstatPagePinSchema } from './owner-diffstats.js';
 import { createHash } from 'node:crypto';
 import { mapExchange, exchangePool } from './exchange-parallel.js';
 import { digest } from './hash.js';
@@ -42,6 +43,8 @@ export const exchangeRootSchema = z.union([
       records: recipeSchema,
       delta: pinSchema.optional(),
       recordPacks: z.array(recordPackSchema).optional(),
+      ownerDiffstats: z.array(diffstatPagePinSchema).optional(),
+      ownerViews: z.array(pinSchema.extend({ key: z.string() }).strict()).optional(),
     })
     .strict(),
 ]);

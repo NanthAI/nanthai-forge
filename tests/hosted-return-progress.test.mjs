@@ -501,7 +501,7 @@ test('an in-flight R3 writer cannot append into a computational cursor partition
   assert.equal(row.returnStep, 0);
 });
 
-test('native return cursor publishes Lane/View diffstats once with changed-file bytes and current authority', async t => {
+test('native return cursor publishes owner-reported Lane/View diffstats once with current authority', async t => {
   const s = await setup(t, 4, 2);
   const { compare } = await import(moduleUrl('../convex/projectDiffstats.ts'));
   for (let i = 0; i < 4; i++) {
@@ -527,7 +527,13 @@ test('native return cursor publishes Lane/View diffstats once with changed-file 
   for (const collection of ['lanes', 'views']) {
     const records = rows.filter(row => row.collection === collection);
     assert.equal(records.length, 1);
-    assert.deepEqual(JSON.parse(records[0].value).changes, { files: 1, add: 1, del: 1 });
+    assert.deepEqual(JSON.parse(records[0].value).changes, {
+      files: 1,
+      add: 1,
+      del: 1,
+      exact: true,
+      provenance: 'owner-reported',
+    });
   }
   assert.equal(comparisons, 0);
   assert.equal(rows.filter(row => row.collection === 'diffstats').length, 2);
@@ -572,7 +578,13 @@ test('full-partition diffstats batch many records into each durable step', async
   const rows = [...s.tables.projectWorkRecords.values()].filter(row => row.generationId === s.partitionId);
   assert.equal(rows.filter(row => row.collection === 'views').length, s.data.views.length);
   for (const view of rows.filter(row => row.collection === 'views'))
-    assert.deepEqual(JSON.parse(view.value).changes, { files: 1, add: 1, del: 1 });
+    assert.deepEqual(JSON.parse(view.value).changes, {
+      files: 1,
+      add: 1,
+      del: 1,
+      exact: true,
+      provenance: 'owner-reported',
+    });
   assert.equal(receipt.accounting.steps, s.tables.projectWorkGenerations.get(s.partitionId).returnStep);
 });
 

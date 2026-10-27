@@ -17,9 +17,12 @@ test('all post-parent index phases fit the dogfood call and action memory budget
   // A rejected batch silently falls back to per-item calls; the 2026-10-27 reseed ran 5x hot.
   assert.equal(result.rejected, 0, 'every batched action call passes its Convex argument validator');
   assert(result.recipeBindings > 500);
-  assert(result.viewCallsPerRecord <= 5, JSON.stringify(result));
+  assert.equal(result.calls['projectWorkIndexBuildDiffstats:compare'] ?? 0, 0);
+  assert.equal(result.sourceFileReads, 0);
+  assert.equal(result.sourceFileResolves, 0);
+  assert(result.viewCallsPerRecord <= 2, JSON.stringify(result));
   assert(result.viewResolvesPerRecord <= 4, JSON.stringify(result));
-  assert(result.remaining.calls <= 15000, JSON.stringify(result));
+  assert(result.remaining.calls <= 8000, JSON.stringify(result));
   assert(result.maxSourceWindowBytes <= 2 * 1024 * 1024, JSON.stringify(result));
   assert(result.maxRpcBytes < 600000);
   assert.equal(result.counts.views, 2167);
@@ -33,23 +36,10 @@ test('all post-parent index phases fit the dogfood call and action memory budget
 });
 
 test('a resumed dogfood coordinator action stays below 512 MiB without retaining historical database rows', async t => {
-  const { mkdtempSync, rmSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  const { tmpdir } = await import('node:os');
-  const directory = mkdtempSync(join(tmpdir(), 'forge-phase-memory-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const pins = join(directory, 'pins.json');
-  await promisify(execFile)(process.execPath, ['tests/projectWorkIndex-phases-worker.mjs', 'fixture', pins], {
-    env: { ...process.env, FORGE_TEST_PRECOMPILED: '1' },
-    maxBuffer: 1024 * 1024,
-  });
   const { stdout } = await promisify(execFile)(
     process.execPath,
-    ['--expose-gc', '--max-old-space-size=128', 'tests/projectWorkIndex-phases-worker.mjs', 'action', pins],
-    {
-      env: { ...process.env, FORGE_TEST_PRECOMPILED: '1' },
-      maxBuffer: 1024 * 1024,
-    },
+    ['tests/projectWorkIndex-phases-worker.mjs', 'memory'],
+    { env: { ...process.env, FORGE_TEST_PRECOMPILED: '1' }, maxBuffer: 1024 * 1024 },
   );
   const result = JSON.parse(stdout.match(/ACTION_RESULT (.+)/)[1]);
   assert.equal(result.pending, true);
@@ -336,4 +326,27 @@ test('lookup byte prefixes retain every payload part and cleanup leaves the defa
   });
   assert.equal(intentQueries, 0);
   assert.equal(JSON.parse(result.metadata).defaultIntentId, 'retained-default');
+});
+
+test('MiB recipe-stored files make the former eager comparison exceed the zero-byte budget', async t => {
+  const { progressFixture } = await import('./projectWorkIndex-progress-fixture.mjs');
+  const f = progressFixture(0.01, undefined, undefined, { treeFiles: 3000, recipes: true, largeFiles: true });
+  const [before, after] = f.filePins;
+  assert(before.size >= 1024 * 1024 && after.size >= 1024 * 1024);
+  assert(f.recipeBindings.has(before.sha256) && f.recipeBindings.has(after.sha256));
+  const prior = f.metrics.storageReads;
+  await diffstats.compare._handler(f.s.ctx, {
+    projectId: 'project',
+    actor: 'owner',
+    files: Array.from({ length: 40 }, () => ({ before, after })),
+  });
+  assert(f.metrics.sourceFileResolves > 0, 'the old eager path violates zero source reads');
+  assert(f.metrics.storageReads > prior);
+  t.diagnostic(
+    JSON.stringify({
+      oldEagerSourcePinResolves: f.metrics.sourceFileResolves,
+      oldEagerStorageReads: f.metrics.storageReads - prior,
+      calls: f.metrics.calls,
+    }),
+  );
 });

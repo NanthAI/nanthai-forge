@@ -56,6 +56,7 @@ import { sourceManifestSchema } from './work-archive-metadata.js';
 import { exchangeBaseline, retainExchangeBaseline } from './native-exchange-baseline.js';
 import { ownerDerivedBytes, preparedOwnerDerived } from './owner-derived-local.js';
 import { ownerDerivedPages } from './owner-derived-pages.js';
+import { ownerDiffstatPages } from './owner-diffstats.js';
 import { nativePublicationMetadata } from './native-publication.js';
 import type { PublicationMetadata } from './publication-metadata.js';
 import { preparedMetadata } from './native-exchange-prepared.js';
@@ -414,7 +415,14 @@ export async function pushNativeExchange(
     ? { sha256: digest(derivedPages.root), size: derivedPages.root.length }
     : undefined;
   const tree = preparedMetadata(prepared.directory, manifestBytes);
-  const publishedBytes = tree?.bytes ?? manifestBytes,
+  const ownerStats = derivedBytes ? ownerDiffstatPages(JSON.parse(derivedBytes.toString('utf8'))) : undefined;
+  const root = tree && JSON.parse(tree.bytes.toString('utf8'));
+  const publishedBytes =
+      root?.schema === 2 && ownerStats
+        ? Buffer.from(
+            JSON.stringify({ ...root, ownerDiffstats: ownerStats.pages, ownerViews: ownerStats.views }),
+          )
+        : (tree?.bytes ?? manifestBytes),
     manifestPin = { sha256: digest(publishedBytes), size: publishedBytes.length };
   const capturedLogs = prepared.manifest.files.some(file => isCheckLogPath(file.path))
     ? parseWorkBytes(readFileSync(join(prepared.directory, 'work.json')))
@@ -430,6 +438,12 @@ export async function pushNativeExchange(
       [
         ...unique.values(),
         ...(tree ? tree.pins : []),
+        ...(ownerStats?.views ?? []).map(({ sha256, size }) => ({ path: 'owner-view', sha256, size })),
+        ...[...(ownerStats?.objects ?? [])].map(([sha256, bytes]) => ({
+          path: 'owner-diffstats',
+          sha256,
+          size: bytes.length,
+        })),
         { path: 'manifest.json', ...manifestPin },
         ...(ownerDerived ? [{ path: 'owner-derived.json', ...ownerDerived }] : []),
         ...[...(derivedPages?.objects ?? [])].map(([sha256, bytes]) => ({
@@ -561,7 +575,8 @@ export async function pushNativeExchange(
               ? derivedPages?.root
               : pin.path === 'manifest.json'
                 ? publishedBytes
-                : (derivedPages?.objects.get(pin.sha256) ??
+                : (ownerStats?.read(pin.sha256) ??
+                  derivedPages?.objects.get(pin.sha256) ??
                   tree?.read(pin.sha256) ??
                   (existsSync(join(prepared.directory, staged))
                     ? readSource(prepared.directory, staged, pin.size + 1, pin.sha256)

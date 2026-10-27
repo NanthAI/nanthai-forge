@@ -135,6 +135,22 @@ export function ViewPage({
             <span>
               {data.files.total} changed {data.files.total === 1 ? 'file' : 'files'}
             </span>
+            {data.changes ? (
+              <span
+                title={
+                  data.changes.provenance === 'owner-reported'
+                    ? 'Line counts reported by the owner that published this View'
+                    : undefined
+                }
+              >
+                {data.changes.add !== undefined && data.changes.del !== undefined && (
+                  <DiffStat add={data.changes.add} del={data.changes.del} />
+                )}
+                {!data.changes.exact && ' · line counts unavailable'}
+              </span>
+            ) : (
+              <span>Line counts not computed yet</span>
+            )}
             <span title={data.at}>composed {age(data.at, now, true)}</span>
           </div>
         </div>

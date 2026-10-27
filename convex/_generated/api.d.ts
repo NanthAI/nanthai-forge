@@ -119,6 +119,8 @@ import type * as projectWorkIndexActions from "../projectWorkIndexActions.js";
 import type * as projectWorkIndexedCommand from "../projectWorkIndexedCommand.js";
 import type * as projectWorkIndexFields from "../projectWorkIndexFields.js";
 import type * as projectViewReads from "../projectViewReads.js";
+import type * as projectViewDiffstats from "../projectViewDiffstats.js";
+import type * as projectViewDiffstatStore from "../projectViewDiffstatStore.js";
 import type * as projectViewActions from "../projectViewActions.js";
 import type * as projectWork from "../projectWork.js";
 import type * as projectWorkActions from "../projectWorkActions.js";
@@ -273,6 +275,8 @@ declare const fullApi: ApiFromModules<{
   projectWorkIndexedCommand: typeof projectWorkIndexedCommand;
   projectWorkIndexFields: typeof projectWorkIndexFields;
   projectViewReads: typeof projectViewReads;
+  projectViewDiffstats: typeof projectViewDiffstats;
+  projectViewDiffstatStore: typeof projectViewDiffstatStore;
   projectViewActions: typeof projectViewActions;
   projectWork: typeof projectWork;
   projectWorkActions: typeof projectWorkActions;

@@ -1,27 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
-import { makeFunctionReference } from 'convex/server';
-import { internalAction, type ActionCtx } from './_generated/server';
+import { internalAction } from './_generated/server';
 import { v } from 'convex/values';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { contextualHunks } from '../src/review-hunks';
-import { reviewPaths } from '../src/native-source-review';
-import type { BuildContext } from './projectWorkIndexBuildContext';
-import type { ChangedStates, Pin, Stats } from './projectDiffstatProjection';
-import type { Selected } from './projectWorkIndexBuildTypes';
+import type { Pin } from './projectDiffstatProjection';
 import { invariant } from '../src/errors';
 const pin = v.object({ sha256: v.string(), size: v.number() });
 type File = { before?: Pin; after?: Pin };
 type Counts = { add: number; del: number; exact: boolean };
-const compareRef = makeFunctionReference<
-  'action',
-  {
-    projectId: Selected['projectId'];
-    actor: string;
-    files: File[];
-  },
-  Counts[]
->('projectWorkIndexBuildDiffstats:compare');
 /** One result per distinct blob pair, reused across the page's State pairs. */
 export const compare = internalAction({
   args: {
@@ -78,56 +65,3 @@ export const compare = internalAction({
     return result;
   },
 });
-export async function summaryDiffstats(
-  ctx: ActionCtx,
-  selected: Selected,
-  context: BuildContext,
-  changed: Map<string, ChangedStates>,
-) {
-  const paths = new Map(
-    [...changed].map(([key, states]) => [
-      key,
-      reviewPaths(states.before, states.after).filter(f => f.status !== 'unchanged'),
-    ]),
-  );
-  const files = new Map<string, File>();
-  const fileKey = (file: { before?: { blob: string } | null; after?: { blob: string } | null }) =>
-    JSON.stringify([file.before?.blob, file.after?.blob]);
-  for (const values of paths.values())
-    for (const file of values) {
-      const before = file.before && context.pins.get(file.before.blob);
-      const after = file.after && context.pins.get(file.after.blob);
-      if ((file.before && !before) || (file.after && !after)) continue;
-      files.set(fileKey(file), { ...(before ? { before } : {}), ...(after ? { after } : {}) });
-    }
-  const counts = new Map<string, Counts>(),
-    pending = [...files];
-  for (let offset = 0; offset < pending.length; offset += 50) {
-    const page = pending.slice(offset, offset + 50);
-    try {
-      const values = await ctx.runAction(compareRef, {
-        projectId: selected.projectId,
-        actor: selected.owner,
-        files: page.map(([, file]) => file),
-      });
-      page.forEach(([key], i) => counts.set(key, values[i]!));
-    } catch {
-      /* The ordinary diffstat fallback rechecks access and preserves unknown. */
-    }
-  }
-  const result = new Map<string, Stats>();
-  for (const [key, values] of paths) {
-    const stats = values.map(file => counts.get(fileKey(file)));
-    if (stats.some(s => !s)) continue;
-    result.set(key, {
-      files: values.length,
-      ...(stats.every(s => s!.exact)
-        ? {
-            add: stats.reduce((n, s) => n + s!.add, 0),
-            del: stats.reduce((n, s) => n + s!.del, 0),
-          }
-        : {}),
-    });
-  }
-  return result;
-}

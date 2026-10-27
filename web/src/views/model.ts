@@ -4,6 +4,7 @@ import type { FileProvenancePlan } from '../../../src/view-provenance-plan';
 import type { readFileProvenance } from '../../../src/view-provenance';
 import type { Tone } from '../ui/status';
 export type ViewModel = ViewReadModel & {
+  changes?: import('../../../src/owner-diffstats').DisplayStats | null;
   files: {
     items: FileRow[];
     total: number;

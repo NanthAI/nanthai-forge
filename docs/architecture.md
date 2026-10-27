@@ -283,8 +283,14 @@ Without a valid owner sidecar, hosted native Lane/Candidate diffstats advance th
 Large server-held native checkpoints build their Work index from pinned record
 pages. An action parses the manifest/catalog once and shares bounded immutable
 record bytes, exact build lookups and main heads across its steps. Summary pages
-batch dependency frontiers, acceptance payload chunks, source State comparisons
-and distinct changed-file pairs. Tree parsing runs in a separate source window;
+batch dependency frontiers and acceptance payload chunks. The reseed upload splits
+its already prepared owner display facts into independently pinned diffstat pages
+(up to 100 pairs) and selected View provenance pages, bound to the exact Work digest.
+The build reads only relevant pages, validates their source pins and View identities,
+and stores counts with `owner-reported` provenance and explicit exactness. It reuses
+the supplied provenance without rereading State or file bytes. Older uploads retain
+State-only provenance projection; index building never downloads changed-file bytes
+to count lines. Missing diffstats remain “not computed yet.” Tree parsing runs in a separate source window;
 only chunked path rows return to the coordinator. Blob rows drain in 500-row
 windows. Journal pages apply up to 50 ordered events with an overlay of preceding
 updates, then commit rows and the original revision/cursor continuation together.
@@ -293,7 +299,20 @@ Scratch cleanup does not reread the default Intent unless a page changed Intents
 All source reads and durable steps retain current authority and exact generation
 checks; invocation-local byte reuse is not an authorization cache. Builds have
 no idle timer. `tests/projectWorkIndex-phases.test.mjs` measures the remaining
-phases on synthetic dogfood-sized Work and 3,000-file trees.
+phases on synthetic dogfood-sized Work, 3,000-file trees and recipe-stored MiB files.
+
+Opening a View with missing counts invokes one finite `projectViewDiffstats:compute`
+action. It resolves the immutable base/head and changed-file pins in bounded pages,
+uses the ordinary comparison's 50-file/2 MiB windows and saves the display result.
+A second open uses the saved result. If optional comparison fails, a fresh
+authorized metadata read keeps the View available; access revocation and generation
+changes remain explicit errors. Oversized or otherwise inexact comparisons
+save explicit unknown line totals rather than restarting on every open. Current
+actor/project access and the selected generation are checked before reads and again
+when saving. Owner-reported counts are labeled in the detail view; an explicit
+server comparison replaces them and later owner publications preserve that result.
+Diffstats are disposable display metadata; acceptance and check evidence never use
+them. No timer, background comparison or idle scheduler is installed.
 
 ## Work record delta exchange
 

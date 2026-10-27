@@ -190,7 +190,12 @@ for (const mode of ['supplied'])
           const changes = JSON.parse(
             rows.find(r => r.collection === 'diffstats' && r.key === `${view.base}:${view.head}`).value,
           );
-          assert.deepEqual(changes, { files: 1, add: 1, del: 1 });
+          assert.deepEqual(changes, {
+            files: 1,
+            add: 1,
+            del: 1,
+            ...(mode === 'supplied' ? { exact: true, provenance: 'owner-reported' } : {}),
+          });
         }
         const generation = s.tables.projectWorkGenerations.get(generationId);
         const counts = JSON.parse(generation.metadata).counts;

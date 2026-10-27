@@ -446,3 +446,35 @@ test('supersession supplies the changed old summary comparison while retaining i
   assert.ok(derived.stats.some(([key]) => key === `${f.base}:${f.head}`));
   assert.ok(derived.stats.some(([key]) => key === `${f.base}:${next}`));
 });
+
+test('index companions bind bounded count pages and lazy View pages to the existing Work digest', async () => {
+  const { ownerDiffstatPages, diffstatPageSchema, ownerViewPageSchema } =
+    await import('../dist/owner-diffstats.js');
+  const f = fixture();
+  const stats = Array.from({ length: 2167 }, (_, i) => [
+    `${digest(`base-${i}`)}:${digest(`head-${i}`)}`,
+    { files: 40, ...(i % 2 ? { add: 41, del: 40 } : {}) },
+  ]);
+  const output = ownerDiffstatPages({ ...f.derived, stats });
+  assert.equal(output.pages.length, 22);
+  assert(output.pages.every(page => page.size <= 64 * 1024));
+  assert.equal(output.objects.size, 22, 'View bytes are produced on demand instead of retained twice');
+  assert.equal(output.views.length, f.derived.views.length);
+  for (const page of output.pages) {
+    const bytes = output.read(page.sha256);
+    assert.equal(digest(bytes), page.sha256);
+    const value = diffstatPageSchema.parse(JSON.parse(bytes));
+    assert.equal(value.work, f.derived.work);
+    assert.equal(value.stats[0][0], page.first);
+    assert.equal(value.stats.at(-1)[0], page.last);
+  }
+  for (const pin of output.views) {
+    const bytes = output.read(pin.sha256);
+    assert.equal(bytes.length, pin.size);
+    assert.equal(digest(bytes), pin.sha256);
+    assert.equal(ownerViewPageSchema.parse(JSON.parse(bytes)).work, f.derived.work);
+  }
+  assert.throws(() =>
+    diffstatPageSchema.parse({ work: f.derived.work, stats: [[stats[0][0], { files: 1, add: 1 }]] }),
+  );
+});
