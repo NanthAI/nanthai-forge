@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { transitionBoundSourceAuthority } from './source-authority-client.js';
 import { cutoverBoundProject, boundCutoverPins } from './source-cutover-client.js';
 import { readFileSync } from 'node:fs';
@@ -12,7 +13,6 @@ import { flushAgentSync } from './agent-hosted-sync.js';
 import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { spawn } from 'node:child_process';
 import { isAbsolute } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { WorkStore } from './work-store.js';
 import { readHostState, updateHostState, abandonPendingHost } from './host-binding.js';
 import { hostProject, HOST_HELP, type HostOptions } from './host-cli.js';
@@ -193,7 +193,7 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
     // FORGE_AUTH_TOKEN authenticates this worker's hosted source/metadata requests.
     const child = spawn(
       process.execPath,
-      [fileURLToPath(new URL('./cli.js', import.meta.url)), 'host', root, '--backfill'],
+      [workerPath(new URL('./cli.js', import.meta.url)), 'host', root, '--backfill'],
       {
         detached: true,
         stdio: 'ignore',

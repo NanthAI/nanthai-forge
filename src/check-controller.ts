@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { checkWorkerEnv, githubEnvNames, syncEnvNames } from './worker-environment.js';
 import { spawn } from 'node:child_process';
 import { effectivePolicy } from './autonomy-policy.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { durableReplace } from './native-durability.js';
 import { mkdirBelow } from './mkdir-below.js';
@@ -68,7 +68,7 @@ export async function launchDetachedCheck(store: WorkStore, run: CheckRun): Prom
   const policy = effectivePolicy(store.readRecords()?.data() ?? store.load());
   const child = spawn(
     process.execPath,
-    [fileURLToPath(new URL('./check-controller-worker.js', import.meta.url)), store.root, run.id],
+    [workerPath(new URL('./check-controller-worker.js', import.meta.url)), store.root, run.id],
     {
       detached: true,
       stdio: 'ignore',

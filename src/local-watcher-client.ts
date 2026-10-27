@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { fork, type ChildProcess } from 'node:child_process';
 import { createConnection, type Socket } from 'node:net';
-import { fileURLToPath } from 'node:url';
 import { childEnv } from '../scripts/child-env.mjs';
 import { processAlive, processStartTime } from './local-process.js';
 import type { WatchMessage } from './local-watcher-runtime.js';
@@ -46,7 +46,7 @@ export function sharedWatcher(directory: string) {
     } catch {
       /* Elect a helper when no live lease can be read. */
     }
-    candidate = fork(fileURLToPath(new URL('./local-watcher-worker.js', import.meta.url)), [directory], {
+    candidate = fork(workerPath(new URL('./local-watcher-worker.js', import.meta.url)), [directory], {
       detached: true,
       execArgv: [],
       env: childEnv(),

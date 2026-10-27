@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { checkWorkerEnv } from './worker-environment.js';
 import { previewTuple, previewCurrent } from './integration-preview-inputs.js';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readPolicy } from './work-autonomy.js';
 import { nativeChannels } from './native-work.js';
 import { channelStatus } from './work-channel.js';
@@ -60,7 +60,7 @@ export function scheduleIntegrationPreview(store: WorkStore, launch: typeof spaw
       try {
         const child = launch(
           process.execPath,
-          [fileURLToPath(new URL('./integration-preview-worker.js', import.meta.url)), store.root],
+          [workerPath(new URL('./integration-preview-worker.js', import.meta.url)), store.root],
           {
             detached: true,
             stdio: 'ignore',

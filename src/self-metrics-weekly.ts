@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { childEnv } from '../scripts/child-env.mjs';
 import { metricsSurface } from './self-metrics-surface.js';
 import type { MetricRecords, MetricPeriod } from './self-metrics-types.js';
@@ -176,7 +176,7 @@ function launchMetricWeek(directory: string, at: string, name: string) {
       process.execPath,
       [
         weeklyMetricTestHooks.worker ??
-          fileURLToPath(new URL('./self-metrics-weekly-worker.js', import.meta.url)),
+          workerPath(new URL('./self-metrics-weekly-worker.js', import.meta.url)),
         dirname(dirname(directory)),
         at,
         token,

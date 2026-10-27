@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { childEnv } from '../scripts/child-env.mjs';
 import { fork } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { rmSync, existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { mkdirBelow } from './mkdir-below.js';
@@ -21,7 +21,7 @@ export const watcherRuntime = {
   now: () => Date.now(),
   createWorker(directory?: string) {
     if (directory) return sharedWatcher(directory);
-    const child = fork(fileURLToPath(new URL('./local-watcher-worker.js', import.meta.url)), [], {
+    const child = fork(workerPath(new URL('./local-watcher-worker.js', import.meta.url)), [], {
       execArgv: [],
       env: childEnv(),
       stdio: ['ignore', 'ignore', 'ignore', 'ipc'],

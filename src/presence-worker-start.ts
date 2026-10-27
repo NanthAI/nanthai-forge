@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { checkServiceEnv } from './worker-environment.js';
 import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import type { WorkStore } from './work-store.js';
 import { readLandingWorkerStatus } from './landing-worker-status.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
@@ -24,7 +24,7 @@ export function startPresenceWorker(store: WorkStore) {
   // FORGE_AUTH_TOKEN authenticates hosted metadata emitted by this owner driver.
   const child = spawn(
     process.execPath,
-    [fileURLToPath(new URL('./presence-worker.js', import.meta.url)), store.root],
+    [workerPath(new URL('./presence-worker.js', import.meta.url)), store.root],
     {
       detached: true,
       stdio: 'ignore',

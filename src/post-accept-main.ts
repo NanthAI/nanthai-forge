@@ -1,3 +1,4 @@
+import { workerPath } from './worker-install.js';
 import { detachedWorker } from './detached-worker-shutdown.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { withDetachedChecks } from './check-execution-context.js';
@@ -74,7 +75,7 @@ function publishAuditWake(store: WorkStore, data: import('./work-types.js').Work
   )
     return;
   // FORGE_AUTH_TOKEN authenticates hosted metadata emitted by this owner driver.
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), store.root], {
+  const child = spawn(process.execPath, [workerPath(import.meta.url), store.root], {
     detached: true,
     stdio: 'ignore',
     env: checkServiceEnv(data.checks, childPolicy(data), ['FORGE_AUTH_TOKEN'], { FORGE_CHECK_FULL: '1' }),

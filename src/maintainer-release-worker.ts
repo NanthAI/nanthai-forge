@@ -25,7 +25,10 @@ try {
     status: name === 'backend' || name === 'web' ? 'unknown' : 'failed',
     exitCode: error instanceof ReleaseChildFailure ? error.exitCode : 1,
     signal: error instanceof ReleaseChildFailure ? error.signal : null,
-    result: {},
+    result:
+      error instanceof ForgeError && error.code === 'RELEASE_OWNER_UNVERIFIED'
+        ? { message: error.message }
+        : {},
     code: error instanceof ForgeError ? error.code : 'RELEASE_STAGE_FAILED',
   };
 }

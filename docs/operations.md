@@ -1704,3 +1704,11 @@ produce compressed versions and unreferenced versions are explicitly collected.
 Run backend evidence still contains inline verdict arrays. A separate test-name
 catalog is deferred: stable names repeat alongside their per-run verdicts. Splitting a run's stable test identities from its verdict/status
 vector requires a further record capability and reader/export compatibility work.
+
+## Maintainer release selection
+
+The [maintainer release](operations/release.md#select-and-verify-the-owner-runtime)
+selects the whole launchd owner install, retains the previous install and an exact
+rollback command, and verifies the restarted owner's authenticated install identity.
+Legacy directory copies migrate to a retained rollback directory and a selected
+symlink. Worker launches reject a different install from their loaded parent.

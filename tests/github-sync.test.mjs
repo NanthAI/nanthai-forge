@@ -1438,7 +1438,7 @@ test('--wait-audit observes the retained worker, prints progress, then exports f
       }
     });
     assert.equal(advanced, true);
-    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.status, 0, `${child.stderr}\n${child.stdout}`);
     assert.equal(JSON.parse(child.stdout).pushed, true);
     assert.match(child.stderr, /waiting for main audit/);
     assert.equal(git(f.remote, ['show', 'main:latest.txt']), 'Latest accepted main\n');

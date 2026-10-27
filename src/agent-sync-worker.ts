@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { syncUnprepared } from './agent-sync-state.js';
-import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { CheckQueue, queueEntries } from './check-queue.js';
 import { processStartTime } from './local-process.js';
@@ -31,7 +31,7 @@ export function startAgentSyncWorker(store: WorkStore) {
       return false;
     const child = spawn(
       process.execPath,
-      [fileURLToPath(new URL('./cli.js', import.meta.url)), 'host', store.root, '--sync-agent'],
+      [workerPath(new URL('./cli.js', import.meta.url)), 'host', store.root, '--sync-agent'],
       {
         detached: true,
         stdio: 'ignore',

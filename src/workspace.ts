@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { Worker } from 'node:worker_threads';
 import { normalizeRoot } from './snapshot.js';
 import { RepositoryQuery } from './query.js';
@@ -26,7 +27,8 @@ export class Workspace {
     if (this.pending) return this.pending;
     idleWorkers.delete(this);
     const worker =
-      this.worker ?? new Worker(new URL('./index-worker.js', import.meta.url), { workerData: this.root });
+      this.worker ??
+      new Worker(workerPath(new URL('./index-worker.js', import.meta.url)), { workerData: this.root });
     if (!this.worker) {
       // Idle failures cannot become unhandled errors, and a stopped worker is never reused.
       worker.on('error', () => {

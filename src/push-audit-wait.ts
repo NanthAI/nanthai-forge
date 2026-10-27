@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { checkServiceEnv } from './worker-environment.js';
 import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { ForgeError } from './errors.js';
 import { workProgress } from './work-progress.js';
 import type { WorkStore } from './work-store.js';
@@ -19,7 +19,7 @@ export async function waitPushAudit(
   const child = spawn(
     process.execPath,
     [
-      fileURLToPath(new URL('./post-accept-main.js', import.meta.url)),
+      workerPath(new URL('./post-accept-main.js', import.meta.url)),
       store.root,
       ...(audit ? [JSON.stringify(audit)] : []),
     ],

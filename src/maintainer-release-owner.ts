@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, realpathSync, renameSync, symlinkSync, openSync, fsyncSync, closeSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { existsSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { invariant } from './errors.js';
-import { releaseJson, releaseSave, releaseSelection, releaseWrite } from './maintainer-release-files.js';
+import {
+  releaseJson,
+  releaseSave,
+  releaseSelection,
+  releaseWrite,
+  releaseQuote,
+} from './maintainer-release-files.js';
+import { selectOwnerInstall } from './release-owner-selection.js';
 import type { ReleaseJournal } from './maintainer-release-schema.js';
 import { launchdOwnerSupervisor, type OwnerSupervisor } from './release-owner-supervisor.js';
 import {
@@ -104,7 +110,14 @@ export async function selectReleaseOwner(
       previous: { kind: previous.kind, mode: previous.mode, sha256: previous.sha256 },
       ...(pid && startTime ? { baseline: { pid, startTime } } : {}),
       restartRequested: false,
-      retired: [],
+      // Resolve old aliases before switching them: ps retains the original argv
+      // path even after installed-owner points at the new package.
+      retired: deps
+        .processes()
+        .filter(worker =>
+          oldReleaseWorker(journal.request.runtimeDirectory, realpathSync(installDirectory), worker),
+        )
+        .map(worker => ({ ...worker, signals: [], gone: false })),
     };
     releaseSave(path, state);
   }
@@ -116,28 +129,14 @@ export async function selectReleaseOwner(
   );
   const installed = realpathSync(installDirectory);
   invariant(
-    belowRuntime(realpathSync(journal.request.runtimeDirectory), state.installed),
+    belowRuntime(realpathSync(journal.request.runtimeDirectory), installed) &&
+      state.installed === realpathSync(join(installed, 'node_modules/@nanthai/forge/dist/cli.js')),
     'RELEASE_OWNER_PATH',
     'New owner install is outside the runtime directory.',
   );
-  const current = releaseSelection(state.service.cli);
-  const selected = current.exists && realpathSync(state.service.cli) === state.installed;
-  if (!selected) {
-    invariant(
-      current.kind === state.previous.kind && current.sha256 === state.previous.sha256,
-      'OWNER_SELECTION_CHANGED',
-      'Owner selection changed during release; the current entry point is preserved.',
-    );
-    const temporary = `${state.service.cli}.${randomUUID()}`;
-    symlinkSync(state.installed, temporary);
-    renameSync(temporary, state.service.cli);
-    const fd = openSync(dirname(state.service.cli), 'r');
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-  }
+  const selection = selectOwnerInstall(journal.directory, state.service.cli, installDirectory);
+  const rollbackCommand = `${selection.rollbackCommand} && launchctl kickstart -k ${releaseQuote(state.service.id)}`;
+  const unverified = `The owner did not verify the selected install. Rollback: ${rollbackCommand}`;
   const probe = async () => {
     const runtime = deps.runtime();
     if (
@@ -167,25 +166,29 @@ export async function selectReleaseOwner(
     invariant(
       !pid || (state.baseline?.pid === pid && state.baseline.startTime === deps.startTime(pid)),
       'RELEASE_OWNER_UNVERIFIED',
-      'A replacement owner is running but has not verified the selected install; it is preserved.',
+      unverified,
     );
     state.restartRequested = true;
     save();
     await deps.supervisor.restart(state.service);
     verified = await wait();
   }
-  invariant(
-    verified,
-    'RELEASE_OWNER_UNVERIFIED',
-    'The selected owner did not answer from its new install. Resume to verify the retained restart.',
-  );
+  invariant(verified, 'RELEASE_OWNER_UNVERIFIED', unverified);
   state.verified = verified;
   save();
+  // Pinned membership stays authoritative, except that check controllers finish on their own runtime.
+  const checkController = (worker: { executablePath: string }) =>
+    worker.executablePath.split('/').at(-1) === 'check-controller-worker.js';
   // Re-scan after draining: old workers may have spawned children during shutdown.
   for (;;) {
     const remaining = deps
       .processes()
-      .filter(worker => oldReleaseWorker(journal.request.runtimeDirectory, installed, worker));
+      .filter(
+        worker =>
+          !checkController(worker) &&
+          (oldReleaseWorker(journal.request.runtimeDirectory, installed, worker) ||
+            state.retired.some(previous => sameReleaseProcess(previous, worker))),
+      );
     if (!remaining.length) break;
     for (const worker of remaining) {
       if (!state.retired.some(previous => sameReleaseProcess(previous, worker))) {
@@ -195,10 +198,12 @@ export async function selectReleaseOwner(
     }
     for (const worker of state.retired) {
       // Older plans may include an in-flight check controller; preserve it on resume too.
-      if (!oldReleaseWorker(journal.request.runtimeDirectory, installed, worker)) continue;
+      if (checkController(worker)) continue;
       const live = () => deps.processes().some(current => sameReleaseProcess(current, worker));
       const send = (signal: 'SIGTERM' | 'SIGKILL') => {
-        if (!live() || !oldReleaseWorker(journal.request.runtimeDirectory, installed, worker)) return;
+        // Membership was pinned before selection or established by a later scan.
+        // Re-resolving an old alias here would mistake it for the new install.
+        if (!live()) return;
         worker.signals.push(signal);
         save(); // Retain intent before signalling, including a lost signal reply.
         deps.signal(worker, signal);
@@ -219,17 +224,16 @@ export async function selectReleaseOwner(
     }
   }
   verified = await probe();
-  invariant(
-    verified,
-    'RELEASE_OWNER_UNVERIFIED',
-    'The selected owner stopped answering during worker retirement. Resume to verify it.',
-  );
+  invariant(verified, 'RELEASE_OWNER_UNVERIFIED', unverified);
   state.verified = verified;
   save();
   return {
     owner: 'selected',
     supervisor: state.service.id,
-    selectionPath: state.service.cli,
+    selectionPath: selection.selectionPath,
+    installedDirectory: installed,
+    previousInstall: selection.previousInstall,
+    rollbackCommand,
     executablePath: state.installed,
     previousOwnerCli: backup,
     previousOwnerKind: state.previous.kind,

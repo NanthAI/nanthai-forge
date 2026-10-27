@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ownerEnvNames } from './worker-environment.js';
 import { spawnSync } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { releaseJson, releaseSave } from './maintainer-release-files.js';
 import { releaseReceiptSchema, type ReleaseJournal, type ReleaseStage } from './maintainer-release-schema.js';
 import { processAlive } from './local-process.js';
@@ -51,7 +51,7 @@ export function releaseChild(journal: ReleaseJournal, name: ReleaseStage, direct
   try {
     child = spawnSync(
       journal.node,
-      [fileURLToPath(new URL('./maintainer-release-worker.js', import.meta.url)), input],
+      [workerPath(new URL('./maintainer-release-worker.js', import.meta.url)), input],
       {
         stdio: ['ignore', log, log],
         env: childEnv({

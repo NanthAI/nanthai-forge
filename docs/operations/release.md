@@ -129,13 +129,21 @@ The supervisor interface keeps discovery, restart and PID observation separate
 from selection and retirement.
 
 The service's configured CLI entry point must be inside `runtimeDirectory`.
-Release atomically replaces that file or symlink with a symlink to the new
-installation's exact `dist/cli.js`. Node resolves that entry point into the new
-package, so imports and newly started workers use the new runtime. This also
-works with an existing real `installed-owner` directory: no directory is moved,
-removed or copied over. Previous entry-point bytes or link text, mode and digest
-are retained as `previous-owner-cli` in the release directory; the rest of every
-previous installation remains available.
+Release selects the whole install directory containing `node_modules/@nanthai/forge`.
+For an existing symlink it publishes a new symlink with atomic rename. On the
+first upgrade from a real `installed-owner` directory, it records the plan,
+renames that entire directory to a unique sibling rollback path, then publishes
+the symlink. That one-time migration has a recoverable gap: resume completes it
+from the retained plan if interrupted between renames. The service restarts only
+after publication; no package files are patched or copied over. The launchd
+ProgramArguments path stays the same and resolves wholly into the new package.
+`owner-install-selection.json` records both installs before mutation; the receipt
+names `selectionPath`, `installedDirectory`, `previousInstall` and `rollbackCommand`.
+A custom standalone CLI alias retains file-level atomic symlink selection into
+the new canonical package; its previous entry point is kept for rollback.
+Forge worker launchers pin the parent's package directory identity when loaded,
+resolve worker paths from that directory, and reject a different or rebound install
+with `WORKER_INSTALL_MISMATCH`. Restarting the owner loads the selected package.
 
 The stage restarts through launchd and verifies its reported PID, kernel start
 time, exact installed CLI path and authenticated local response. `serve` retains
@@ -157,7 +165,8 @@ created before this stage remain historical receipts.
 After verification, release retires detached `local-watcher-worker.js`,
 `auto-exchange.js`, `presence-worker.js` and `post-accept-main.js` processes, plus advisory,
 GitHub push, integration preview and weekly metrics workers in previous runtime
-installations. It matches the install path and kernel start
+installations. It snapshots old worker identities before switching an install alias (process
+arguments keep their original spelling), then matches the install path and kernel start
 identity, rechecks both before each signal, and excludes the current install,
 paths outside the runtime directory and all agent MCP `cli.js` processes. Each
 worker gets SIGTERM, up to ten seconds to exit, then SIGKILL only if that same
@@ -170,13 +179,14 @@ Physical check controllers keep their pinned runtime until their checks finish;
 release never signals them. Queued and checking landings survive owner replacement.
 If a remote controller dies, startup adopts its original run and provider pins.
 
-To undo owner selection, first check `selectionPath` still resolves to the
-receipt's `executablePath`. Atomically restore `previousOwnerCli` as a file with
-`previousOwnerMode`, or recreate its saved link text for
-`previousOwnerKind: "symlink"`, then restart the same supervisor. This restores
-the previous runtime without discarding either install. Retired advisory workers
-are recreated by ordinary owner activity. Owner rollback does not roll back
-backend/web deployments or the CLI wrapper.
+To undo owner selection, run the receipt's `rollbackCommand`. It first checks
+that the selection still resolves to this release, atomically replaces it with
+a symlink to `previousInstall`, then restarts the same supervisor. Both installs
+remain intact, including a legacy directory retained by migration. Verification
+failures also include this command in the failed stage receipt's message. A
+responsive process reporting the previous install fails the owner stage; a successful
+restart alone is insufficient. Retired advisory workers are recreated by ordinary
+owner activity. Owner rollback does not roll back backend/web or the CLI wrapper.
 
 ## Restore the prior CLI selection
 

@@ -1,3 +1,4 @@
+import { workerPath } from './worker-install.js';
 import { retryWorkEdit } from './work-edit.js';
 // SPDX-License-Identifier: Apache-2.0
 import { checkServiceEnv } from './worker-environment.js';
@@ -28,7 +29,7 @@ export function wakeGithubPush(store: WorkStore) {
     const data = store.load();
     if (!pendingGithubPush(data) || (data.githubAutoPush?.worker && processAlive(data.githubAutoPush.worker)))
       return;
-    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), store.root], {
+    const child = spawn(process.execPath, [workerPath(import.meta.url), store.root], {
       detached: true,
       stdio: 'ignore',
       // GitHub tokens authenticate Git/gh; FORGE_AUTH_TOKEN publishes hosted mirror status.

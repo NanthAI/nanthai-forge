@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ownerEnvNames } from './worker-environment.js';
 import { autoDriverStalled } from './push-progress-state.js';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { effectivePolicy } from './autonomy-policy.js';
 import { readHostState } from './host-binding.js';
 import { readPendingExchange } from './pending-exchange.js';
@@ -48,7 +48,7 @@ export function wakeAutoExchange(store: WorkStore, afterDrain = false, launch: t
       // FORGE_AUTH_TOKEN authenticates this worker's hosted source/metadata requests.
       const child = launch(
         process.execPath,
-        [fileURLToPath(new URL('./auto-exchange.js', import.meta.url)), store.root],
+        [workerPath(new URL('./auto-exchange.js', import.meta.url)), store.root],
         {
           detached: true,
           stdio: 'ignore',

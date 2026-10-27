@@ -10,6 +10,8 @@ import {
   rmSync,
   symlinkSync,
   realpathSync,
+  lstatSync,
+  renameSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -18,6 +20,10 @@ import { releaseProcessRow, oldReleaseWorker } from '../dist/release-owner-proce
 import { parseOwnerService } from '../dist/release-owner-supervisor.js';
 import { releaseSave } from '../dist/maintainer-release-files.js';
 import { releaseChild } from '../dist/maintainer-release-child.js';
+import { selectOwnerInstall } from '../dist/release-owner-selection.js';
+import { pinWorkerInstall } from '../dist/worker-install.js';
+import { pathToFileURL } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
 function fixture(t) {
@@ -34,10 +40,14 @@ function fixture(t) {
   const directory = join(runtimeDirectory, 'releases', 'release');
   const installed = join(directory, 'install-new');
   const cli = file(join(installed, 'node_modules/@nanthai/forge/dist/cli.js'));
+  writeFileSync(file(join(dirname(cli), 'local-watcher-worker.js')), 'new worker');
   const service = {
     id: 'fake-supervisor',
     cli: file(join(runtimeDirectory, 'installed-owner/node_modules/@nanthai/forge/dist/cli.js')),
   };
+  const selection = join(runtimeDirectory, 'installed-owner');
+  const oldWorker = file(join(selection, 'node_modules/@nanthai/forge/dist/local-watcher-worker.js'));
+  writeFileSync(oldWorker, 'old worker');
   const journal = { owner, directory, request: { runtimeDirectory } };
   let runtime = {
     pid: 101,
@@ -84,6 +94,8 @@ function fixture(t) {
   const run = () => selectReleaseOwner(journal, installed, cli, deps);
   return {
     root,
+    selection,
+    oldWorker,
     file,
     owner,
     directory,
@@ -118,7 +130,9 @@ function fixture(t) {
 test('release selects a new runtime atomically, verifies the supervised responder, retains rollback and repeats without restarting', async t => {
   const f = fixture(t);
   const result = await f.run();
-  assert.equal(readlinkSync(f.service.cli), f.cli);
+  assert.equal(readlinkSync(f.selection), f.installed);
+  assert.equal(realpathSync(f.service.cli), f.cli);
+  assert.equal(readFileSync(f.oldWorker, 'utf8'), 'new worker');
   assert.equal(readFileSync(result.previousOwnerCli, 'utf8'), 'previous entry point');
   assert.equal(f.restarts(), 1);
   assert.equal(JSON.parse(result.process).pid, 202);
@@ -129,8 +143,8 @@ test('release selects a new runtime atomically, verifies the supervised responde
 
 test('already selected and answering owner needs no supervisor restart', async t => {
   const f = fixture(t);
-  rmSync(f.service.cli);
-  symlinkSync(f.cli, f.service.cli);
+  rmSync(f.selection, { recursive: true });
+  symlinkSync(f.installed, f.selection);
   f.setRuntime({ ...f.runtime(), executablePath: f.cli });
   assert.match((await f.run()).note, /already runs/);
   assert.equal(f.restarts(), 0);
@@ -221,7 +235,8 @@ for (const crash of ['before-restart', 'after-restart', 'during-retirement'])
         throw new Error('synthetic crash');
       };
     await assert.rejects(f.run(), /synthetic crash/);
-    assert.equal(readlinkSync(f.service.cli), f.cli);
+    assert.equal(readlinkSync(f.selection), f.installed);
+    assert.equal(realpathSync(f.service.cli), f.cli);
     f.deps.supervisor.restart = restart;
     f.deps.signal = signal;
     await f.run();
@@ -247,7 +262,9 @@ test('crash before selection retains rollback bytes and preserves an intervening
     throw new Error('synthetic crash');
   };
   await assert.rejects(f.run());
-  rmSync(f.service.cli);
+  rmSync(f.selection);
+  mkdirSync(f.selection);
+  f.file(f.service.cli);
   writeFileSync(f.service.cli, 'intervening selection');
   f.deps.supervisor.restart = original;
   await assert.rejects(f.run(), { code: 'OWNER_SELECTION_CHANGED' });
@@ -429,6 +446,129 @@ test('verification deadline includes time spent on a slow probe', async t => {
   await assert.rejects(f.run(), { code: 'RELEASE_OWNER_UNVERIFIED' });
   assert.equal(probes, 1);
   assert.equal(f.restarts(), 1);
+});
+
+test('legacy directory migration keeps the whole previous install and provides executable rollback', async t => {
+  const f = fixture(t);
+  const result = await f.run();
+  assert.ok(lstatSync(result.selectionPath).isSymbolicLink());
+  assert.equal(result.installedDirectory, f.installed);
+  assert.equal(
+    readFileSync(
+      join(result.previousInstall, 'node_modules/@nanthai/forge/dist/local-watcher-worker.js'),
+      'utf8',
+    ),
+    'old worker',
+  );
+  // Execute only the local filesystem part, never launchctl.
+  execFileSync('/bin/sh', ['-c', result.rollbackCommand.split(' && launchctl')[0]]);
+  assert.equal(realpathSync(f.selection), result.previousInstall);
+  assert.equal(readFileSync(f.oldWorker, 'utf8'), 'old worker');
+  assert.ok(lstatSync(f.installed).isDirectory());
+});
+
+test('existing install symlink swaps as a whole and retains its previous target', async t => {
+  const f = fixture(t);
+  const previous = join(f.root, 'runtime with spaces', 'installed-owner.previous');
+  renameSync(f.selection, previous);
+  symlinkSync(previous, f.selection);
+  const result = await f.run();
+  assert.equal(result.previousInstall, previous);
+  assert.equal(realpathSync(f.service.cli), f.cli);
+  assert.equal(
+    readFileSync(join(previous, 'node_modules/@nanthai/forge/dist/local-watcher-worker.js'), 'utf8'),
+    'old worker',
+  );
+});
+
+test('migration resumes after a crash between retaining the directory and publishing the symlink', t => {
+  const f = fixture(t);
+  const result = selectOwnerInstall(f.directory, f.service.cli, f.installed);
+  rmSync(f.selection);
+  assert.equal(
+    selectOwnerInstall(f.directory, f.service.cli, f.installed).previousInstall,
+    result.previousInstall,
+  );
+  assert.equal(realpathSync(f.selection), f.installed);
+});
+
+test('a responsive owner from the previous install fails verification with an exact rollback command', async t => {
+  const f = fixture(t);
+  f.deps.supervisor.restart = async () =>
+    f.setRuntime({ ...f.runtime(), pid: 202, startTime: 'replacement-start' });
+  await assert.rejects(
+    f.run(),
+    error => error.code === 'RELEASE_OWNER_UNVERIFIED' && /Rollback:.*kickstart/.test(error.message),
+  );
+  assert.ok(lstatSync(f.selection).isSymbolicLink());
+});
+
+test('worker resolver rejects other installs and a legacy parent rebound to a newer install', t => {
+  const f = fixture(t);
+  const resolveWorker = pinWorkerInstall(pathToFileURL(f.service.cli).href);
+  assert.equal(resolveWorker(pathToFileURL(f.oldWorker)), f.oldWorker);
+  const newWorker = f.file(join(dirname(f.cli), 'local-watcher-worker.js'));
+  assert.throws(() => resolveWorker(pathToFileURL(newWorker)), { code: 'WORKER_INSTALL_MISMATCH' });
+  selectOwnerInstall(f.directory, f.service.cli, f.installed);
+  assert.throws(() => resolveWorker(pathToFileURL(f.oldWorker)), { code: 'WORKER_INSTALL_MISMATCH' });
+  const newResolver = pinWorkerInstall(pathToFileURL(f.cli).href);
+  assert.equal(newResolver(pathToFileURL(newWorker)), newWorker);
+});
+
+test('a direct service path already inside the selected install is preserved without a self-referential link', t => {
+  const f = fixture(t);
+  const result = selectOwnerInstall(f.directory, f.cli, f.installed);
+  assert.equal(result.previousInstall, f.installed);
+  assert.ok(lstatSync(f.installed).isDirectory());
+  assert.equal(realpathSync(f.cli), f.cli);
+  assert.equal(result.rollbackCommand, ':');
+});
+
+test('launchd configured entry point loads both owner and worker modules from the selected package', async t => {
+  const f = fixture(t);
+  for (const [cli, version] of [
+    [f.service.cli, 'old'],
+    [f.cli, 'new'],
+  ]) {
+    writeFileSync(join(dirname(cli), 'package.json'), JSON.stringify({ type: 'module' }));
+    writeFileSync(
+      join(dirname(cli), 'local-watcher-worker.js'),
+      `export const version = '${version}'; export const workerUrl = import.meta.url;`,
+    );
+    writeFileSync(
+      cli,
+      `import {version, workerUrl} from './local-watcher-worker.js'; console.log(JSON.stringify({ version, workerUrl, ownerUrl: import.meta.url }));`,
+    );
+  }
+  const before = JSON.parse(execFileSync(process.execPath, [f.service.cli], { encoding: 'utf8' }));
+  assert.equal(before.version, 'old');
+  await f.run();
+  const after = JSON.parse(execFileSync(process.execPath, [f.service.cli], { encoding: 'utf8' }));
+  assert.equal(after.version, 'new');
+  assert.equal(after.ownerUrl, pathToFileURL(f.cli).href);
+  assert.equal(after.workerUrl, pathToFileURL(join(dirname(f.cli), 'local-watcher-worker.js')).href);
+});
+
+test('legacy workers whose argv still uses installed-owner retire after that alias switches', async t => {
+  const f = fixture(t);
+  const worker = { pid: 303, startTime: 'legacy-worker', executablePath: f.oldWorker };
+  f.setWorkers([worker]);
+  await f.run();
+  assert.deepEqual(f.signals, [[303, 'SIGTERM']]);
+  assert.equal(f.workers().length, 0);
+  assert.equal(readFileSync(f.oldWorker, 'utf8'), 'new worker');
+});
+
+test('custom standalone launchd CLI aliases retain their supported atomic selection and rollback', async t => {
+  const f = fixture(t);
+  const cli = f.file(join(f.root, 'runtime with spaces/custom-owner.js'));
+  writeFileSync(cli, "console.log('old custom owner')");
+  f.service.cli = cli;
+  const result = await f.run();
+  assert.equal(result.selectionPath, cli);
+  assert.equal(realpathSync(cli), f.cli);
+  execFileSync('/bin/sh', ['-c', result.rollbackCommand.split(' && launchctl')[0]]);
+  assert.equal(execFileSync(process.execPath, [cli], { encoding: 'utf8' }).trim(), 'old custom owner');
 });
 
 test('release restart retains a checking remote landing and its replacement owner lands it', async t => {

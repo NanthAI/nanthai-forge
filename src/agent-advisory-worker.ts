@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workerPath } from './worker-install.js';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -73,7 +74,7 @@ export function scheduleAgentAdvisory(
     }
     const child = (agentAdvisoryTestHooks.launch ?? spawn)(
       process.execPath,
-      [fileURLToPath(import.meta.url), store.root, JSON.stringify({ command, response, liveMcp })],
+      [workerPath(import.meta.url), store.root, JSON.stringify({ command, response, liveMcp })],
       {
         detached: true,
         stdio: 'ignore',
