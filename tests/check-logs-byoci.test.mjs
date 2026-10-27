@@ -10,6 +10,7 @@ import {
   existsSync,
   rmSync,
   utimesSync,
+  symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -130,7 +131,8 @@ for (const runner of ['github-actions', 'modal'])
     assert(!manifest.unavailable.some(path => path.endsWith('.log')));
     assert.equal(manifest.checkLogs[0].status, 'provider-held');
     assert(manifest.checkLogs[0].providerUrl.startsWith('https://'));
-    assert(manifest.files.some(file => file.path.endsWith('/test-reports.json')));
+    assert(!manifest.files.some(file => file.path.endsWith('/test-reports.json')));
+    assert(manifest.files.some(file => file.path.endsWith('/test-evidence.json')));
     const target = join(f.root, 'restored');
     await restoreNativeWork(exported.result.archive.path, target);
     const restored = new WorkService(target).store;
@@ -278,7 +280,7 @@ test('local retention dry-run changes nothing, expiry removes full logs and keep
   const before = checkEvidenceFingerprint(f.store.load().runs[0]);
   assert.equal(cleanLocalCheckLogs(f.store, { now, apply: true, files: plan.files }).deleted, 2);
   assert(existsSync(join(f.folder, 'result.json')));
-  assert(existsSync(join(f.folder, 'test-reports.json')));
+  assert(existsSync(join(f.folder, 'test-evidence.json')));
   assert.equal(checkEvidenceFingerprint(f.store.load().runs[0]), before);
   assert.equal(cleanLocalCheckLogs(f.store, { now, apply: true, files: plan.files }).deleted, 0);
   assert(existsSync(late), 'a reviewed plan never expands to a newly eligible log');
@@ -289,7 +291,7 @@ test('provider cleanup command requires its dry-run and replays without altering
   await checkLogsCli([f.root, '--dry-run', '--plan', path]);
   assert(existsSync(join(f.folder, 'stdout.log')));
   const applied = await checkLogsCli([f.root, '--apply', '--plan', path]);
-  assert.equal(applied.local.deleted, 2);
+  assert.equal(applied.local.deleted, 3);
   assert.equal((await checkLogsCli([f.root, '--apply', '--plan', path])).local.deleted, 0);
   assert.deepEqual([...checkEvidenceLines(f.folder)].filter(Boolean).length, 1);
 });
@@ -356,6 +358,19 @@ test('hosted cleanup dry-run/apply deletes Convex and R2 log objects, preserves 
   ])
     s.tables[table] = new Map();
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+  const cache = Buffer.from('{"version":1,"full":true,"digests":{"synthetic":"digest"}}');
+  const data = f.store.load();
+  data.runs[0].artifacts = [
+    {
+      status: 'retained',
+      sourcePath: 'coverage/test-impact.json',
+      filename: 'artifact-0.bin',
+      size: cache.length,
+      sha256: digest(cache),
+    },
+  ];
+  data.revision++;
+  f.store.save(data);
   const exported = await exportNativeWork(f.store, f.store.revision(), false);
   const manifest = JSON.parse(exported.result.json);
   const providerPins = [];
@@ -369,6 +384,15 @@ test('hosted cleanup dry-run/apply deletes Convex and R2 log objects, preserves 
   manifest.files.push({ path: `objects/${providerPins[0].sha256}`, ...providerPins[0] });
   for (const file of manifest.files.filter(file => !providerPins.some(pin => pin.sha256 === file.sha256)))
     await upload(s, readFileSync(join(exported.result.path, file.path)));
+  const disposable = [];
+  for (const [name, bytes] of [
+    ['test-reports.json', readFileSync(join(f.folder, 'test-reports.json'))],
+    ['artifacts/artifact-0.bin', cache],
+  ]) {
+    const pin = await upload(s, bytes);
+    disposable.push(pin.sha256);
+    manifest.files.push({ path: `check-${f.run.id}/${name}`, ...pin });
+  }
   const root = await upload(s, Buffer.from(JSON.stringify(manifest)));
   s.tables.projectBackups.set('backup', {
     _id: 'backup',
@@ -449,7 +473,7 @@ test('hosted cleanup dry-run/apply deletes Convex and R2 log objects, preserves 
   assert(logRow.storageId);
   operationId = randomUUID();
   dry = JSON.parse(await clean._handler(s.ctx, { projectId: 'project', operationId }));
-  assert.equal(dry.objects, 1);
+  assert.equal(dry.objects, 3);
   assert(dry.shared.includes(providerPins[0].sha256));
   assert.equal(deletes.length, 0);
   const applied = JSON.parse(
@@ -460,10 +484,12 @@ test('hosted cleanup dry-run/apply deletes Convex and R2 log objects, preserves 
       expectedPlan: dry.planDigest,
     }),
   );
-  assert.equal(applied.deleted, 1);
+  assert.equal(applied.deleted, 3);
   assert.equal(applied.complete, true);
   assert.equal(deletes.length, 1);
   assert.equal(s.tables.projectObjects.get(logRow._id).r2Committed, false);
+  for (const pin of disposable)
+    assert(![...s.tables.projectObjects.values()].find(row => row.digest === pin).storageId);
   assert([...s.tables.projectObjects.values()].find(row => row.digest === providerPins[0].sha256).storageId);
   const replay = JSON.parse(
     await clean._handler(s.ctx, {
@@ -473,7 +499,7 @@ test('hosted cleanup dry-run/apply deletes Convex and R2 log objects, preserves 
       expectedPlan: dry.planDigest,
     }),
   );
-  assert.equal(replay.deleted, 1);
+  assert.equal(replay.deleted, 3);
   assert.equal(deletes.length, 1);
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'stranger' });
   await assert.rejects(clean._handler(s.ctx, { projectId: 'project', operationId: randomUUID() }));
@@ -677,5 +703,245 @@ test('hosted summary seals keep failing names and redact their bounded diagnosti
   }
   const coverageChunks = [];
   for await (const bytes of compactProviderOutput(coverageSource())) coverageChunks.push(Buffer.from(bytes));
-  assert(Buffer.concat(coverageChunks).toString().startsWith('__FORGE_COVERAGE__'));
+  assert.equal(Buffer.concat(coverageChunks).length, 0, 'rebuildable coverage traces are not uploaded');
+});
+
+test('CI reports and generated digest caches leave every portable closure and restore tolerates legacy missing caches', async t => {
+  const f = fixture(t),
+    data = f.store.load();
+  const cache = Buffer.from(
+    JSON.stringify({ version: 1, head: f.run.head, full: true, digests: { 'a.ts': 'b'.repeat(64) } }),
+  );
+  mkdirSync(join(f.folder, 'artifacts'));
+  writeFileSync(join(f.folder, 'artifacts/artifact-0.bin'), cache, { mode: 0o600 });
+  data.runs[0].artifacts = [
+    {
+      status: 'retained',
+      sourcePath: 'coverage/test-impact.json',
+      filename: 'artifact-0.bin',
+      size: cache.length,
+      sha256: digest(cache),
+    },
+  ];
+  data.revision++;
+  f.store.save(data);
+  const before = checkEvidenceFingerprint(f.store.load().runs[0]);
+  const exported = await exportNativeWork(f.store, f.store.revision(), false);
+  const manifest = JSON.parse(exported.result.json);
+  for (const result of [
+    manifest,
+    (await prepareNativeExchange(f.store, f.store.revision(), randomUUID())).manifest,
+  ]) {
+    assert(!result.files.some(file => /test-reports.json|artifact-0.bin/.test(file.path)));
+    assert(!result.unavailable.some(path => /test-reports.json|artifact-0.bin/.test(path)));
+  }
+  const seed = await prepareHostedSeed(f.store, f.store.revision(), randomUUID());
+  const seedManifest = JSON.parse(readFileSync(join(seed.directory, seed.request.manifest.sha256)));
+  assert(!seedManifest.files.some(file => /test-reports.json|artifact-0.bin/.test(file.path)));
+  manifest.files.push({
+    path: `check-${f.run.id}/artifacts/artifact-0.bin`,
+    size: cache.length,
+    sha256: digest(cache),
+  });
+  const reports = readFileSync(join(f.folder, 'test-reports.json'));
+  manifest.files.push({
+    path: `check-${f.run.id}/test-reports.json`,
+    size: reports.length,
+    sha256: digest(reports),
+  });
+  writeFileSync(join(exported.result.path, 'manifest.json'), JSON.stringify(manifest));
+  await restoreNativeWork(exported.result.path, join(f.root, 'missing-cache-restored'));
+  const { packWorkArchive } = await import('../dist/work-backup-archive.js');
+  const archive = await packWorkArchive(
+    exported.result.path,
+    manifest.files
+      .filter(file => !/(?:test-reports.json|artifact-0.bin)$/.test(file.path))
+      .map(file => file.path),
+  );
+  await restoreNativeWork(archive.path, join(f.root, 'missing-cache-archive-restored'));
+  const inventory = await readRecoveryInventory(join(f.root, 'missing-cache-restored'));
+  assert(!inventory.pending.evidence.some(file => file.path.endsWith('artifact-0.bin')));
+  const plan = await checkLogsCli([f.root, '--dry-run', '--plan', join(f.root, 'cache-plan.json')]);
+  assert(plan.local.files.some(file => file.path.endsWith('/artifacts/artifact-0.bin')));
+  await checkLogsCli([f.root, '--apply', '--plan', join(f.root, 'cache-plan.json')]);
+  assert(!existsSync(join(f.folder, 'test-reports.json')));
+  assert(!existsSync(join(f.folder, 'artifacts/artifact-0.bin')));
+  assert.equal(checkEvidenceFingerprint(f.store.load().runs[0]), before);
+});
+
+test('compact reports preserve failing names, durations and hashes without passing test inventories', async t => {
+  const f = fixture(t);
+  const report = {
+    file: 'tests/a.test.mjs',
+    complete: true,
+    durationMs: 12,
+    results: [
+      { name: 'passing-test-inventory', passed: true, durationMs: 2 },
+      { name: 'failure-name', passed: false, durationMs: 10 },
+    ],
+  };
+  writeFileSync(
+    join(f.folder, 'test-reports.json'),
+    JSON.stringify({
+      schema: 1,
+      files: [{ name: 'shards/0.evidence', text: '__FORGE_TESTS__' + JSON.stringify(report) + '\n' }],
+    }),
+  );
+  const { discardFullCheckReports } = await import('../dist/check-compact-output.js');
+  discardFullCheckReports(f.folder);
+  const text = readFileSync(join(f.folder, 'test-evidence.json'), 'utf8');
+  assert(!text.includes('passing-test-inventory'));
+  const line = [...checkEvidenceLines(f.folder, true)].find(line => line.startsWith('__FORGE_TESTS__'));
+  const retained = JSON.parse(line.slice(15));
+  assert.equal(retained.durationMs, 12);
+  assert.equal(retained.evidence, digest(JSON.stringify(report)));
+  assert.deepEqual(retained.counts, { total: 2, failed: 1 });
+  assert.deepEqual(retained.results, [{ name: 'failure-name', passed: false }]);
+  const { candidateTimings } = await import('../dist/agent-contract-timings.js');
+  assert.deepEqual(await candidateTimings(f.store, f.run.id, f.run.viewId, f.run.head), {
+    'tests/a.test.mjs': 12,
+  });
+});
+
+test('digest cache enforces count, bytes and age bounds while protecting real build artifacts', async t => {
+  const f = fixture(t, 'github-actions', 5),
+    data = f.store.load();
+  for (const [index, run] of data.runs.entries()) {
+    const folder = join(f.store.directory, `check-${run.id}/artifacts`);
+    mkdirSync(folder);
+    const bytes = Buffer.from('cache-' + index);
+    writeFileSync(join(folder, 'artifact-0.bin'), bytes, { mode: 0o600 });
+    run.artifacts = [
+      {
+        status: 'retained',
+        sourcePath: 'coverage/test-impact.json',
+        filename: 'artifact-0.bin',
+        size: bytes.length,
+        sha256: digest(bytes),
+      },
+    ];
+    utimesSync(join(folder, 'artifact-0.bin'), new Date(now - index * 1000), new Date(now - index * 1000));
+  }
+  const build = data.runs[4].artifacts[0];
+  build.sourcePath = 'dist/output.json';
+  data.revision++;
+  f.store.save(data);
+  const { pruneCoverageCache, COVERAGE_CACHE_BYTES } = await import('../dist/check-coverage-cache.js');
+  assert.deepEqual(pruneCoverageCache(f.store, undefined, now), { files: 3, bytes: 21 });
+  assert(existsSync(join(f.store.directory, `check-${data.runs[4].id}/artifacts/artifact-0.bin`)));
+  const path = join(f.folder, 'artifacts/artifact-0.bin');
+  writeFileSync(path, Buffer.alloc(COVERAGE_CACHE_BYTES + 1), { mode: 0o600 });
+  assert(pruneCoverageCache(f.store, undefined, now).bytes <= COVERAGE_CACHE_BYTES);
+  assert(!existsSync(path));
+  assert.deepEqual(pruneCoverageCache(f.store, undefined, now + 8 * DAY_MS), { files: 0, bytes: 0 });
+  const exported = await exportNativeWork(f.store, f.store.revision(), false);
+  const outputs = JSON.parse(exported.result.json).files.filter(file => file.path.includes('/artifacts/'));
+  assert.deepEqual(
+    outputs.map(file => file.path),
+    [`check-${data.runs[4].id}/artifacts/artifact-0.bin`],
+  );
+});
+
+test('synthetic report/cache shape measures export and seed closure savings', async t => {
+  const f = fixture(t, 'github-actions', 12),
+    data = f.store.load();
+  let excluded = 0;
+  for (const [index, run] of data.runs.entries()) {
+    const folder = join(f.store.directory, `check-${run.id}`);
+    const report = {
+      file: 'tests/synthetic.test.mjs',
+      complete: true,
+      durationMs: 12,
+      results: Array.from({ length: 4000 }, (_, i) => ({
+        name: `synthetic passing case ${index}-${i} ` + 'x'.repeat(100),
+        passed: true,
+      })),
+    };
+    const bytes = Buffer.from(
+      JSON.stringify({
+        schema: 1,
+        files: [{ name: 'stdout.log', text: '__FORGE_TESTS__' + JSON.stringify(report) + '\n' }],
+      }),
+    );
+    writeFileSync(join(folder, 'test-reports.json'), bytes, { mode: 0o600 });
+    mkdirSync(join(folder, 'artifacts'));
+    const cache = Buffer.from(
+      JSON.stringify({
+        version: 1,
+        head: run.head,
+        full: true,
+        digests: Object.fromEntries(
+          Array.from({ length: 12000 }, (_, i) => [`src/synthetic-${index}-${i}.ts`, 'a'.repeat(64)]),
+        ),
+      }),
+    );
+    writeFileSync(join(folder, 'artifacts/artifact-0.bin'), cache, { mode: 0o600 });
+    run.artifacts = [
+      {
+        status: 'retained',
+        sourcePath: 'coverage/test-impact.json',
+        filename: 'artifact-0.bin',
+        size: cache.length,
+        sha256: digest(cache),
+      },
+    ];
+    excluded += bytes.length + cache.length;
+  }
+  data.revision++;
+  f.store.save(data);
+  const exported = await exportNativeWork(f.store, f.store.revision(), false),
+    manifest = JSON.parse(exported.result.json);
+  const afterExport = manifest.files.reduce((sum, file) => sum + file.size, 0);
+  const compactBytes = manifest.files
+    .filter(file => file.path.endsWith('/test-evidence.json'))
+    .reduce((sum, file) => sum + file.size, 0);
+  const seed = await prepareHostedSeed(f.store, f.store.revision(), randomUUID());
+  const afterSeed = seed.pages.flat().reduce((sum, pin) => sum + pin.size, 0);
+  console.log(
+    'S55 synthetic report/cache bytes',
+    JSON.stringify({
+      exportBefore: afterExport - compactBytes + excluded,
+      exportAfter: afterExport,
+      seedBefore: afterSeed - compactBytes + excluded,
+      seedAfter: afterSeed,
+      excludedReportCacheBytes: excluded,
+      compactBytes,
+      baseline: 'same owner, previous file enumeration',
+    }),
+  );
+  assert(excluded > 20 * 1024 * 1024);
+  assert(afterExport < excluded / 50);
+  assert(afterSeed < excluded / 30);
+});
+
+test('portable report projection rejects linked files and cannot complete an unterminated machine report', async t => {
+  const f = fixture(t),
+    { portableCheckEvidence } = await import('../dist/check-compact-output.js');
+  rmSync(join(f.folder, 'test-reports.json'));
+  writeFileSync(
+    join(f.folder, 'stdout.log'),
+    '__FORGE_TESTS__{"file":"tests/a.test.mjs","complete":true,"durationMs":12,"results":[]}',
+  );
+  assert(
+    !JSON.parse(portableCheckEvidence(f.folder)).files.some(file => file.text.includes('"complete":true')),
+  );
+  const other = join(f.root, 'synthetic-report.json');
+  writeFileSync(other, '{"schema":1,"files":[]}');
+  symlinkSync(other, join(f.folder, 'test-reports.json'));
+  assert.throws(() => portableCheckEvidence(f.folder), { code: 'ARTIFACT_CHANGED' });
+});
+
+test('opted-in legacy local full reports may be absent during native recovery', async t => {
+  const f = fixture(t, 'local');
+  optIn(f);
+  const exported = await exportNativeWork(f.store, f.store.revision(), false),
+    manifest = JSON.parse(exported.result.json);
+  const bytes = readFileSync(join(f.folder, 'test-reports.json'));
+  manifest.files.push({
+    path: `check-${f.run.id}/test-reports.json`,
+    size: bytes.length,
+    sha256: digest(bytes),
+  });
+  writeFileSync(join(exported.result.path, 'manifest.json'), JSON.stringify(manifest));
+  await restoreNativeWork(exported.result.path, join(f.root, 'opted-legacy-restored'));
 });

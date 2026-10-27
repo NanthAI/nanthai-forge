@@ -1,4 +1,4 @@
-import { portableCheckPath, runLogRecord } from './check-log-policy.js';
+import { optionalCheckPath, portableCheckPath, runLogRecord } from './check-log-policy.js';
 import { foldHostedRecovery } from './recovery-hosted.js';
 import type { HostedRecoveryPage, RecoveryTable } from './recovery-hosted-protocol.js';
 import type { ContentPin } from './native-exchange.js';
@@ -168,7 +168,7 @@ async function recoveryCoverage(
   for (const file of manifest.files.filter(
     file =>
       file.path.startsWith('check-') &&
-      (existsSync(join(store.directory, file.path)) || portableCheckPath(data, file.path)),
+      (existsSync(join(store.directory, file.path)) || !optionalCheckPath(data, file.path)),
   )) {
     const observed = await fingerprintPrivateFile(join(store.directory, file.path), 'INVALID_WORK_BACKUP');
     // Running-run metadata changes to interrupted; retained evidence bytes remain exact.

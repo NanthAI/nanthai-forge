@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkEvidenceLines } from './check-compact-output.js';
 import { createReadStream, existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ContractTimingReader } from './contract-test-timings.js';
@@ -21,6 +22,7 @@ export async function candidateTimings(store: WorkStore, runId: string, candidat
         .sort((a, b) => Number(/attempt-(\d+)/.exec(a)?.[1] ?? 1) - Number(/attempt-(\d+)/.exec(b)?.[1] ?? 1))
         .map(name => join(shards, name))
     : [join(directory, 'stdout.log')];
+  for (const line of checkEvidenceLines(directory, true)) reader.accept(line + '\n');
   const timings: Record<string, number> = {};
   for (const log of logs) {
     if (!existsSync(log)) continue;

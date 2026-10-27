@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   appendFileSync,
+  constants,
+  fstatSync,
+  realpathSync,
   closeSync,
   existsSync,
   openSync,
@@ -11,6 +14,9 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { readSource } from './files.js';
+import { invariant } from './errors.js';
+import { summarizeCheckLines, summarizeExecutions } from './check-report-summary.js';
 import { durableReplace } from './native-durability.js';
 
 const coverageAtEnd = (text: string) =>
@@ -161,7 +167,8 @@ export function checkEvidenceFiles(directory: string): string[] {
     .map(name => join(shards, name));
 }
 export function* checkEvidenceLines(directory: string, testsOnly = false): Generator<string> {
-  const retained = join(directory, 'test-reports.json');
+  const compact = join(directory, 'test-evidence.json');
+  const retained = existsSync(compact) ? compact : join(directory, 'test-reports.json');
   if (existsSync(retained)) {
     const reports = JSON.parse(readFileSync(retained, 'utf8')) as { files: { name: string; text: string }[] };
     for (const report of reports.files)
@@ -178,14 +185,40 @@ export function* checkEvidenceLines(directory: string, testsOnly = false): Gener
     yield* boundedLines(path);
   }
 }
+/** Read-only projection for old owners: capture compact evidence without rewriting Work or source files. */
+export function portableCheckEvidence(directory: string): Buffer | undefined {
+  const read = (name: string) => {
+    const bytes = readSource(directory, name, Number.MAX_SAFE_INTEGER);
+    invariant(bytes, 'ARTIFACT_CHANGED', 'Check report bytes are not a contained regular file.');
+    return bytes;
+  };
+  if (existsSync(join(directory, 'test-evidence.json'))) return read('test-evidence.json');
+  const legacy = join(directory, 'test-reports.json');
+  const inputs = existsSync(legacy)
+    ? (JSON.parse(read('test-reports.json').toString('utf8')).files as { name: string; text: string }[])
+    : checkEvidenceFiles(directory)
+        .filter(existsSync)
+        .map(path => {
+          const name = path.slice(directory.length + 1);
+          return { name, text: compactLines(boundedLines(path)) };
+        });
+  if (!inputs.length) return undefined;
+  const files = inputs.map(file => ({ name: file.name, text: summarizeCheckLines(file.text.split('\n')) }));
+  return Buffer.from(JSON.stringify({ schema: 1, files }));
+}
 export function retainCompactCheckReports(directory: string) {
-  const files = checkEvidenceFiles(directory)
-    .filter(existsSync)
-    .map(path => ({
-      name: path.slice(directory.length + 1),
-      text: compactLines(boundedLines(path)),
-    }));
-  durableReplace(join(directory, 'test-reports.json'), JSON.stringify({ schema: 1, files }));
+  const compact = join(directory, 'test-evidence.json');
+  const bytes = portableCheckEvidence(directory);
+  if (bytes && !existsSync(compact)) durableReplace(compact, bytes);
+}
+/** Call after coverage, verdict and timing extraction. Retryable executions retain their input. */
+export function discardFullCheckReports(directory: string) {
+  retainCompactCheckReports(directory);
+  rmSync(join(directory, 'test-reports.json'), { force: true });
+  for (const path of checkEvidenceFiles(directory))
+    if (path.endsWith('.evidence')) durableReplace(path, summarizeCheckLines(boundedLines(path)));
+  const modal = join(directory, 'modal-shard-logs.json');
+  if (existsSync(modal)) durableReplace(modal, summarizeExecutions(readFileSync(modal)));
 }
 
 /** Drain provider pipes without ever spooling full log bytes. */
@@ -199,7 +232,7 @@ export async function* compactProviderOutput(
     diagnostics = 0,
     summary = '';
   const compact = (line: string) => {
-    let text = compactCheckText(line);
+    let text = summarizeCheckLines(compactCheckText(line).split('\n'));
     if (!text.startsWith('__FORGE_') && !text.startsWith('# ')) {
       text = text.slice(0, Math.max(0, 4096 - diagnostics));
       diagnostics += text.length;
@@ -247,13 +280,19 @@ export async function* compactProviderOutput(
 }
 
 function* boundedLines(path: string) {
-  const fd = openSync(path, 'r'),
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)),
     buffer = Buffer.alloc(65536),
     decoder = new StringDecoder('utf8');
   let pending = '',
     dropping = false,
     size: number;
   try {
+    const info = fstatSync(fd);
+    invariant(
+      info.isFile() && info.nlink === 1 && realpathSync(path) === path,
+      'ARTIFACT_CHANGED',
+      'Check evidence must be a contained regular file.',
+    );
     while ((size = readSync(fd, buffer, 0, buffer.length, null))) {
       const lines = (pending + decoder.write(buffer.subarray(0, size))).split('\n');
       pending = lines.pop()!;

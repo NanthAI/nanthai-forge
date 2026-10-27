@@ -991,9 +991,18 @@ test('recoveries need independent history before flake quarantine can make failu
   );
   const attempts = read(join(path, 'modal-shard-logs.json')).filter(item => item.index === 0);
   assert.deepEqual(
-    attempts.map(item => item.tests['tests/flake.test.mjs'].results[0].passed),
-    [false, true],
+    attempts.map(item => item.tests['tests/flake.test.mjs'].counts),
+    [
+      { total: 1, failed: 1 },
+      { total: 1, failed: 0 },
+    ],
   );
+  assert.deepEqual(attempts[0].tests['tests/flake.test.mjs'].results, [
+    { name: 'intermittent', passed: false },
+  ]);
+  assert.deepEqual(attempts[1].tests['tests/flake.test.mjs'].results, []);
+  for (const attempt of attempts)
+    assert.match(attempt.tests['tests/flake.test.mjs'].evidence, /^[a-f0-9]{64}$/);
   const historical = {
     ...run,
     id: randomUUID(),

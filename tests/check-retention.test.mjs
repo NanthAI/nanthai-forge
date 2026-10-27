@@ -108,7 +108,7 @@ test('dry-run is read-only; apply keeps receipts, summaries, compact evidence an
   assert.equal(existsSync(join(p.directory, 'shards', 'work-0')), false);
   for (const name of ['stdout.log', 'stderr.log', 'shards/0.log']) {
     assert.equal(existsSync(join(p.directory, name)), false);
-    assert.match(readFileSync(join(p.directory, 'test-reports.json'), 'utf8'), /failure tail/);
+    assert.match(readFileSync(join(p.directory, 'test-evidence.json'), 'utf8'), /failure tail/);
   }
   for (const name of [
     'selection.json',

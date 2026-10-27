@@ -166,6 +166,12 @@ test('source/Work recovery retains original history, undo pins, evidence, Channe
     assert.equal(git(root, ['show-ref']), refs);
     assert.equal(readFileSync(join(lanePath, 'a.ts'), 'utf8'), 'unfinished Lane');
     assert.ok(git(root, ['status', '--porcelain']).startsWith(rootStatus));
+    const oldManifest = readFileSync(join(exported.path, 'manifest.json'));
+    manifest.files.push({ path: `check-${runId}/test-reports.json`, size: 10, sha256: 'a'.repeat(64) });
+    writeFileSync(join(exported.path, 'manifest.json'), JSON.stringify(manifest));
+    await restoreWork(exported.path, join(root, 'legacy-without-full-report'));
+    manifest.files.pop();
+    writeFileSync(join(exported.path, 'manifest.json'), oldManifest);
     // Changed bytes, traversal and linked evidence never produce a restored destination.
     const log = manifest.files.find(file => file.path.endsWith('/stdout.log')),
       saved = readFileSync(join(exported.path, log.path));

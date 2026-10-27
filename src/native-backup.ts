@@ -1,4 +1,12 @@
-import { portableCheckPath, portableRunFiles, runLogRecord } from './check-log-policy.js';
+import { summarizeExecutions } from './check-report-summary.js';
+import { portableCheckEvidence } from './check-compact-output.js';
+import {
+  optionalCheckPath,
+  portableCheckPath,
+  portableRun,
+  portableRunFiles,
+  runLogRecord,
+} from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { retainRecoveryCapture } from './recovery-capture.js';
 import {
@@ -105,16 +113,29 @@ async function exportSnapshot(
     );
     files.push({ path: `objects/${id}`, ...observed });
   }
-  for (const run of snapshot.data.runs) {
+  for (const original of snapshot.data.runs) {
+    const run = portableRun(original);
     const dir = join(store.directory, `check-${run.id}`);
+    const evidence = portableCheckEvidence(dir);
+    if (evidence) {
+      const name = `check-${run.id}/test-evidence.json`;
+      mkdirSync(join(path, `check-${run.id}`), { recursive: true, mode: 0o700 });
+      writeFileSync(join(path, name), evidence, { mode: 0o600 });
+      files.push({ path: name, size: evidence.length, sha256: digest(evidence) });
+    }
     for (const name of [
       ...portableRunFiles(snapshot.data, run),
-      ...['test-reports.json', 'modal-plan.json', 'modal-shard-logs.json', 'changes.json'].filter(name =>
+      ...['modal-plan.json', 'modal-shard-logs.json', 'changes.json'].filter(name =>
         existsSync(join(dir, name)),
       ),
     ]) {
       const recorded = `check-${run.id}/${name}`;
-      if (existsSync(join(dir, name))) await copy(dir, name, recorded);
+      if (name === 'modal-shard-logs.json') {
+        const bytes = summarizeExecutions(readFileSync(join(dir, name)));
+        mkdirSync(join(path, `check-${run.id}`), { recursive: true, mode: 0o700 });
+        writeFileSync(join(path, recorded), bytes, { mode: 0o600 });
+        files.push({ path: recorded, size: bytes.length, sha256: digest(bytes) });
+      } else if (existsSync(join(dir, name))) await copy(dir, name, recorded);
       else unavailable.push(recorded);
     }
     try {
@@ -266,11 +287,12 @@ async function restoreDirectory(
   const snapshot = parseWorkBytes(originalWork);
   const omitted = new Set(
     manifest.files
-      .filter(file => !portableCheckPath(snapshot, file.path) && !existsSync(join(directory, file.path)))
+      .filter(file => optionalCheckPath(snapshot, file.path) && !existsSync(join(directory, file.path)))
       .map(file => file.path),
   );
   const plan = artifactArchivePlan(manifest);
   plan.physical = plan.physical.filter(file => !omitted.has(file.path));
+  plan.aliases = plan.aliases.filter(alias => !omitted.has(alias.path));
   const scratch = realpathSync(
     mkdtempSync(join(realpathSync(dirname(destination)), '.forge-native-restore-')),
   );

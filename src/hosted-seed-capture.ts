@@ -1,4 +1,6 @@
-import { portableRunFiles, runLogRecord, checkLogCoverage } from './check-log-policy.js';
+import { summarizeExecutions } from './check-report-summary.js';
+import { portableCheckEvidence } from './check-compact-output.js';
+import { portableRun, portableRunFiles, runLogRecord, checkLogCoverage } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
@@ -151,11 +153,14 @@ export async function prepareHostedSeed(store: WorkStore, revision: number, oper
       .at(-1);
     const head = accepted?.head ?? data.nativeHead!;
     main = pin(source.object(head));
-    for (const run of data.runs) {
+    for (const original of data.runs) {
+      const run = portableRun(original);
       const folder = join(store.directory, `check-${run.id}`);
+      const evidence = portableCheckEvidence(folder);
+      if (evidence) files.push({ path: `check-${run.id}/test-evidence.json`, ...keep(evidence, 'object') });
       const names = portableRunFiles(data, run);
       names.push(
-        ...['test-reports.json', 'modal-plan.json', 'modal-shard-logs.json', 'changes.json'].filter(name =>
+        ...['modal-plan.json', 'modal-shard-logs.json', 'changes.json'].filter(name =>
           existsSync(join(folder, name)),
         ),
       );
@@ -174,6 +179,11 @@ export async function prepareHostedSeed(store: WorkStore, revision: number, oper
           from = join(store.directory, path);
         if (!existsSync(from)) {
           unavailable.push(path);
+          continue;
+        }
+        if (name === 'modal-shard-logs.json') {
+          const bytes = summarizeExecutions(readFileSync(from));
+          files.push({ path, ...keep(bytes, 'object') });
           continue;
         }
         const target = join(directory, `evidence-${digest(path)}`);

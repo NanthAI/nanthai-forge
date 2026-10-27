@@ -3,7 +3,7 @@ import { runDetails } from './work-detail-store.js';
 import { cleanLocalCheckLogs } from './check-log-cleanup.js';
 import { compactFailureExcerpt, checkEvidenceLines } from './check-compact-output.js';
 import { providerLogUrl } from './check-log-policy.js';
-import { retainCompactCheckReports } from './check-compact-output.js';
+import { discardFullCheckReports } from './check-compact-output.js';
 import { withoutLandingWorker } from './landing-worker-context.js';
 import { checkReuseKey } from './check-reuse-key.js';
 import { prepareRunRegistration } from './work-run-preparation.js';
@@ -433,7 +433,6 @@ async function launchLocal(
     } catch {
       /* Optional command-reported selection is unavailable; logs retain command output. */
     }
-    retainCompactCheckReports(path);
     artifacts = [...(artifacts ?? []), ...retainCheckCoverage(store, run, path, checkSelection)];
     run.reuseKey = checkReuseKey(store, run);
     const receipt = createRunReceipt({
@@ -472,6 +471,7 @@ async function launchLocal(
       ...(checkSelection ? { checkSelection } : {}),
       ...(run.check.measureResources ? { resourceUsage: readResources(path, measured?.producer) } : {}),
     });
+    discardFullCheckReports(path);
     const temp = join(path, `${randomUUID()}.tmp`);
     try {
       const fd = openSync(temp, 'wx', 0o600);
@@ -823,7 +823,10 @@ export function runWork(
           missing = failure instanceof Error && 'code' in failure && failure.code === 'ENOENT';
         }
       }
-      if (missing && existsSync(join(path, 'test-reports.json'))) {
+      if (
+        missing &&
+        (existsSync(join(path, 'test-evidence.json')) || existsSync(join(path, 'test-reports.json')))
+      ) {
         const text = [...checkEvidenceLines(path)]
           .filter(line => !line.startsWith('__FORGE_'))
           .join('\n')

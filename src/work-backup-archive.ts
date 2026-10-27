@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { optionalCheckPath } from './check-log-policy.js';
+import { parseWorkBytes } from './work-metadata.js';
 import { childEnv } from '../scripts/child-env.mjs';
 import { execFileSync, spawn } from 'node:child_process';
 import {
@@ -95,7 +97,7 @@ export async function withWorkArchive<T>(
       throw new ForgeError(code, 'Archive manifest is invalid.');
     }
     const allowed =
-      /^(?:manifest\.json|work\.json|objects\/[0-9a-f]{64}|source\.bundle|(?:discussion|contribution)-[0-9a-f-]{36}\.(?:json|bundle)|check-[0-9a-f-]{36}\/(?:stdout\.log|stderr\.log|result\.json|test-reports\.json|modal-plan\.json|modal-shard-logs\.json|changes\.json|resources\.txt|artifacts\/artifact-[0-9]+\.bin))$/i;
+      /^(?:manifest\.json|work\.json|objects\/[0-9a-f]{64}|source\.bundle|(?:discussion|contribution)-[0-9a-f-]{36}\.(?:json|bundle)|check-[0-9a-f-]{36}\/(?:stdout\.log|stderr\.log|result\.json|test-reports\.json|test-evidence\.json|modal-plan\.json|modal-shard-logs\.json|changes\.json|resources\.txt|artifacts\/artifact-[0-9]+\.bin))$/i;
     invariant(
       Array.isArray(files) &&
         files.every(
@@ -111,14 +113,8 @@ export async function withWorkArchive<T>(
       'Archive file paths or sizes are invalid.',
     );
     const plan = artifactArchivePlan(metadata);
-    const names = ['manifest.json', ...plan.physical.map(file => file.path)];
-    invariant(
-      new Set(names).size === names.length &&
-        tar(['-tzf', archive], scratch).toString().trim().split('\n').sort().join('\n') ===
-          names.sort().join('\n'),
-      code,
-      'Archive includes missing, duplicate or unexpected files.',
-    );
+    const listed = tar(['-tzf', archive], scratch).toString().trim().split('\n');
+    const present = new Set(listed);
     const listing = tar(['-tvzf', archive], scratch).toString();
     invariant(
       listing
@@ -128,8 +124,36 @@ export async function withWorkArchive<T>(
       code,
       'Archive entries must be ordinary files.',
     );
-    const entries = [{ path: 'manifest.json', size: manifest.length }, ...plan.physical];
+    const entries = [
+      { path: 'manifest.json', size: manifest.length },
+      ...plan.physical.filter(file => present.has(file.path)),
+    ];
     validateArchiveEntrySizes(listing, entries);
+
+    const missing = plan.physical.filter(file => !present.has(file.path));
+    if (missing.length) {
+      let data: ReturnType<typeof parseWorkBytes>;
+      try {
+        data = parseWorkBytes(tar(['-xzOf', archive, '--', 'work.json'], scratch));
+      } catch {
+        throw new ForgeError(code, 'Archive Work records are invalid.');
+      }
+      invariant(
+        missing.every(file => optionalCheckPath(data, file.path)),
+        code,
+        'Archive omits required source, result or build-output evidence.',
+      );
+      plan.physical = plan.physical.filter(file => present.has(file.path));
+      plan.aliases = plan.aliases.filter(
+        alias => present.has(alias.target) || !optionalCheckPath(data, alias.path),
+      );
+    }
+    const names = ['manifest.json', ...plan.physical.map(file => file.path)];
+    invariant(
+      new Set(names).size === names.length && listed.sort().join('\n') === names.sort().join('\n'),
+      code,
+      'Archive includes missing, duplicate or unexpected files.',
+    );
     // Preserve exclusive destination creation, including case-alias collisions on the current filesystem.
     for (const file of entries) {
       const destination = join(directory, file.path);

@@ -107,8 +107,8 @@ async function prepared(t, options = {}, definition) {
 for (const remote of [true, false])
   test(`${remote ? 'remote' : 'local'} identical inputs reuse a passed check across CLI interruption and repeated resubmissions`, async t => {
     const f = await prepared(t, { remote });
-    for (const name of ['stdout.log', 'stderr.log'])
-      rmSync(join(f.store.directory, `check-${f.original.id}`, name), { force: true });
+    for (const name of ['stdout.log', 'stderr.log', 'test-reports.json', 'test-evidence.json', 'artifacts'])
+      rmSync(join(f.store.directory, `check-${f.original.id}`, name), { force: true, recursive: true });
     const dispatch = f.work.dispatch.bind(f.work);
     f.work.dispatch = (...args) => {
       assert.notEqual(args[0].action, 'run-check', 'a retained pass must never dispatch again');

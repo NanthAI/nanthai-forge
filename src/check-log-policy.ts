@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import type { CheckRun, WorkData } from './work-types.js';
 
-export type LogRun = Pick<CheckRun, 'id' | 'backend' | 'startedAt' | 'endedAt'>;
+export type LogRun = Pick<CheckRun, 'id' | 'backend' | 'startedAt' | 'endedAt' | 'artifacts'>;
 export type LogData = Pick<WorkData, 'autonomyPolicy'> & { runs: LogRun[] };
 
 export const DAY_MS = 86_400_000;
@@ -49,11 +49,30 @@ export function runLogRecord(data: Pick<WorkData, 'autonomyPolicy'>, run: LogRun
     ...(Number.isFinite(expires) ? { expiresAt: new Date(expires).toISOString() } : {}),
   };
 }
+export const coverageSourcePath = 'coverage/test-impact.json';
+export const portableRun = <T extends LogRun>(run: T): T => ({
+  ...run,
+  ...(run.artifacts
+    ? { artifacts: run.artifacts.filter(item => item.sourcePath !== coverageSourcePath) }
+    : {}),
+});
+export const isCheckReportPath = (path: string) => /^check-[0-9a-fA-F-]{36}\/test-reports\.json$/.test(path);
+export function isCheckCachePath(data: LogData, path: string): boolean {
+  const run = data.runs.find(run => path.startsWith(`check-${run.id}/`));
+  return !!run?.artifacts?.some(
+    item =>
+      item.status === 'retained' &&
+      item.sourcePath === coverageSourcePath &&
+      path === `check-${run.id}/artifacts/${item.filename}`,
+  );
+}
 export const isCheckLogPath = (path: string) =>
   /^check-[0-9a-fA-F-]{36}\/(?:[^/]+\.log|shards\/[^/]+\.log)$/.test(path);
 /** Apply even to old baseline closures: terminal Work fingerprints do not encode retention age/settings. */
 export function portableCheckPath(data: LogData, path: string, now = Date.now()): boolean {
-  if (!isCheckLogPath(path)) return true;
+  if (isCheckCachePath(data, path)) return false;
+  const report = isCheckReportPath(path);
+  if (!isCheckLogPath(path) && !report) return true;
   const run = data.runs.find(run => path.startsWith(`check-${run.id}/`));
   return !!run && runLogRecord(data, run, now).status === 'included';
 }
@@ -66,3 +85,16 @@ export function portableRunFiles(data: WorkData, run: CheckRun, now = Date.now()
 }
 export const checkLogCoverage =
   'Check results, failure summaries, compact test evidence and provider log links are retained. CI-provider logs stay with the provider. Local logs are included only by explicit project opt-in and within finite retention.';
+
+/** Metadata identifies generated caches; arbitrary artifact-0.bin build outputs remain durable. */
+export function isCheckMaintenancePath(path: string): boolean {
+  return (
+    isCheckLogPath(path) ||
+    isCheckReportPath(path) ||
+    /^check-[0-9a-fA-F-]{36}\/artifacts\/artifact-\d+\.bin$/.test(path)
+  );
+}
+
+/** Full reports are optional recovery inputs even when an opted-in local copy was captured. */
+export const optionalCheckPath = (data: LogData, path: string) =>
+  isCheckReportPath(path) || !portableCheckPath(data, path);

@@ -41,7 +41,7 @@ An older CLI refuses an owner it cannot preserve. Upgrade by installing the new 
 
 Forge uses your CI provider’s log storage and retention. Status, exit code, timing,
 provider run/execution IDs, bounded failure summaries (4096 characters), failing
-names, compact test timings/coverage and reuse evidence remain in Forge. Full
+names, compact per-file test counts/timings and evidence hashes, and reuse evidence remain in Forge. Full per-run CI test reports (`test-reports.json`) are discarded after extraction and never exported, seeded, exchanged or uploaded. The compact `test-evidence.json` retains completion, counts, failing names, file durations, bounded diagnostics and a hash of each original report; passing test inventories and coverage traces are omitted. Full
 GitHub Actions and Modal output does not enter Work exports, hosting seeds or
 exchange. The Run view and agent log command return the provider link instead.
 Older archives with full logs still restore; deliberately omitted provider logs
@@ -63,11 +63,11 @@ Uploaded local logs expire through existing check/exchange lifecycle events, wit
 based on the recorded run time, not refreshed by another export or exchange.
 The local seven-day lifetime can make a later export omit logs even while a
 previous opted-in hosted copy remains within its upload retention. Results,
-failure summaries, test reports, source recipes and artifacts have their existing
-lifetimes.
+failure summaries, compact test evidence, source recipes and selected build outputs remain retained. Local full test reports follow the same opt-in and finite uploaded retention as local logs.
 
-One-off migration removes existing provider logs and expired/unapproved uploaded
-local logs. First inspect a dry-run plan, then apply that exact selection. Add
+Generated `coverage/test-impact.json` digest manifests (often `artifacts/artifact-0.bin`) are rebuildable local caches, distinct from selected build outputs. They never enter export, seed, exchange or recovery closures. The cache keeps at most the newest three files and 16 MiB total, for up to seven days; check/coverage activity enforces the bound without an idle timer. This keeps recent comparison evidence available with a fixed local byte bound. Missing, evicted or corrupt manifests use the existing static/full selection; verdicts, check reuse and original evidence hashes do not depend on them. Old archives restore with or without these disposable files; source, results and actual build-output validation remain strict.
+
+One-off migration removes existing provider logs, full CI reports, generated digest caches and expired/unapproved uploaded local logs. Local plans include the exact report/cache paths and hashes; hosted plans identify generated caches from run artifact provenance, preserving ordinary build outputs even when named `artifact-0.bin`. First inspect a dry-run plan, then apply that exact selection. Add
 `--hosted` to include the project’s existing hosted binding and R2 objects:
 
 ```sh

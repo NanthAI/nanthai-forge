@@ -16,6 +16,7 @@ import { Transform } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { safeRelative, fingerprintPrivateFile } from './files.js';
 import { invariant } from './errors.js';
+import { coverageSourcePath } from './check-log-policy.js';
 import type { CheckRun } from './work-types.js';
 
 export async function captureArtifacts(workspace: string, directory: string, paths: string[]) {
@@ -98,6 +99,7 @@ export async function inspectArtifacts(directory: string, run: CheckRun) {
   return Promise.all(
     (run.artifacts ?? [])
       .filter(item => item.status === 'retained')
+      .filter(item => item.sourcePath !== coverageSourcePath)
       .map(async item => {
         const folder = join(directory, 'artifacts');
         invariant(

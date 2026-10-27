@@ -1,4 +1,6 @@
-import { portableCheckPath, runLogRecord, checkLogCoverage } from './check-log-policy.js';
+import { summarizeExecutions } from './check-report-summary.js';
+import { portableCheckEvidence } from './check-compact-output.js';
+import { optionalCheckPath, portableCheckPath, runLogRecord, checkLogCoverage } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { retainRecoveryCapture } from './recovery-capture.js';
 import { migrateHostedIntents } from './work-hosted-intents.js';
@@ -62,6 +64,7 @@ function ownedFiles(data: WorkData) {
         'stderr.log',
         'result.json',
         'test-reports.json',
+        'test-evidence.json',
         'modal-plan.json',
         'modal-shard-logs.json',
         'changes.json',
@@ -131,8 +134,25 @@ export async function exportWork(store: WorkStore, revision: number, archive = f
     for (const name of ownedFiles(snapshot.data).filter(
       name => name !== 'work.json' && portableCheckPath(snapshot.data, name),
     )) {
+      if (name.endsWith('/test-evidence.json')) {
+        const evidence = portableCheckEvidence(join(store.directory, name.slice(0, -19)));
+        if (evidence) {
+          mkdirSync(dirname(join(path, name)), { recursive: true, mode: 0o700 });
+          writeFileSync(join(path, name), evidence, { mode: 0o600 });
+          files.push({ path: name, size: evidence.length, sha256: digest(evidence) });
+        }
+        continue;
+      }
       if (!existsSync(join(store.directory, name))) {
-        if (!/(?:test-reports|modal-plan|modal-shard-logs|changes)\.json$/.test(name)) unavailable.push(name);
+        if (!/(?:test-reports|test-evidence|modal-plan|modal-shard-logs|changes)\.json$/.test(name))
+          unavailable.push(name);
+        continue;
+      }
+      if (name.endsWith('/modal-shard-logs.json')) {
+        const bytes = summarizeExecutions(readFileSync(join(store.directory, name)));
+        mkdirSync(dirname(join(path, name)), { recursive: true, mode: 0o700 });
+        writeFileSync(join(path, name), bytes, { mode: 0o600 });
+        files.push({ path: name, size: bytes.length, sha256: digest(bytes) });
         continue;
       }
       files.push({
@@ -377,7 +397,7 @@ async function restoreDirectory(input: string, destination: string) {
         code,
         'Backup includes an unknown or duplicate file.',
       );
-      if (!portableCheckPath(data, file.path) && !existsSync(join(backup, file.path))) continue;
+      if (optionalCheckPath(data, file.path) && !existsSync(join(backup, file.path))) continue;
       names.add(file.path);
       const copied = await copyPrivate(containedFile(backup, file.path), join(store.directory, file.path));
       invariant(
@@ -394,8 +414,8 @@ async function restoreDirectory(input: string, destination: string) {
           name =>
             names.has(name) ||
             manifest.unavailable.includes(name) ||
-            /(?:test-reports|modal-plan|modal-shard-logs|changes)\.json$/.test(name) ||
-            !portableCheckPath(data, name),
+            /(?:test-reports|test-evidence|modal-plan|modal-shard-logs|changes)\.json$/.test(name) ||
+            optionalCheckPath(data, name),
         ),
       code,
       'Backup file coverage is incomplete.',

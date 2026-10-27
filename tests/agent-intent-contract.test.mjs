@@ -107,6 +107,12 @@ test('native confirmation refuses missing reports and an unrelated Candidate run
   const runId = randomUUID();
   await agent.dispatch({ action: 'run', operationId: runId, viewId: view.id });
   rmSync(join(store.directory, `check-${runId}`, 'stdout.log'));
+  assert.equal(
+    (await agent.dispatch({ action: 'tests', candidateId: view.id, runId })).result.contractProposal.totalMs,
+    1200,
+    'compact timing evidence survives raw-log removal',
+  );
+  rmSync(join(store.directory, `check-${runId}`, 'test-evidence.json'));
   const command = {
     action: 'confirm-tests',
     operationId: randomUUID(),

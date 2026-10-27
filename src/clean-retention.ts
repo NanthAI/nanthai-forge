@@ -261,7 +261,7 @@ export function removeRetention(item: RetentionItem) {
     if (item.path.endsWith('.log')) {
       const folder = dirname(item.path);
       const directory = basename(folder) === 'shards' ? dirname(folder) : folder;
-      if (!existsSync(join(directory, 'test-reports.json'))) retainCompactCheckReports(directory);
+      if (!existsSync(join(directory, 'test-evidence.json'))) retainCompactCheckReports(directory);
     }
     rmSync(item.path, { recursive: true, force: true });
     return;

@@ -1,5 +1,8 @@
+import { summarizeExecutions } from './check-report-summary.js';
+import { portableCheckEvidence } from './check-compact-output.js';
 import { parseWorkBytes } from './work-metadata.js';
 import {
+  portableRun,
   portableRunFiles,
   runLogRecord,
   checkLogCoverage,
@@ -201,7 +204,8 @@ export async function prepareNativeExchange(
       if (existsSync(path)) mutable[`pinned-${file.sha256}`] = readFileSync(path);
     }
   }
-  for (const run of options.captured ? [] : snapshot.data.runs) {
+  for (const original of options.captured ? [] : snapshot.data.runs) {
+    const run = portableRun(original);
     const prefix = `check-${run.id}`,
       folder = join(store.directory, prefix);
     if (run.endedAt && baseline?.completedRuns.has(digest(JSON.stringify(run)))) {
@@ -209,9 +213,15 @@ export async function prepareNativeExchange(
       unavailable.push(...baseline.manifest.unavailable.filter(path => path.startsWith(`${prefix}/`)));
       continue;
     }
+    const evidence = portableCheckEvidence(folder);
+    if (evidence) {
+      const sha256 = digest(evidence);
+      mutable[`pinned-${sha256}`] = evidence;
+      files.push({ path: `${prefix}/test-evidence.json`, size: evidence.length, sha256 });
+    }
     for (const name of [
       ...portableRunFiles(snapshot.data, run),
-      ...['test-reports.json', 'modal-plan.json', 'modal-shard-logs.json', 'changes.json'].filter(name =>
+      ...['modal-plan.json', 'modal-shard-logs.json', 'changes.json'].filter(name =>
         existsSync(join(folder, name)),
       ),
     ]) {
@@ -220,7 +230,12 @@ export async function prepareNativeExchange(
         unavailable.push(path);
         continue;
       }
-      if (!run.endedAt) {
+      if (name === 'modal-shard-logs.json') {
+        const bytes = summarizeExecutions(readFileSync(join(folder, name))),
+          sha256 = digest(bytes);
+        mutable[`pinned-${sha256}`] = bytes;
+        files.push({ path, size: bytes.length, sha256 });
+      } else if (!run.endedAt) {
         const bytes = readSource(store.directory, path, Number.MAX_SAFE_INTEGER);
         invariant(
           bytes,

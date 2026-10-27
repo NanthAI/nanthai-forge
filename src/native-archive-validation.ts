@@ -1,4 +1,4 @@
-import { portableCheckPath } from './check-log-policy.js';
+import { optionalCheckPath } from './check-log-policy.js';
 import { existsSync } from 'node:fs';
 // SPDX-License-Identifier: Apache-2.0
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from 'node:fs';
@@ -51,7 +51,7 @@ export async function withValidatedNativeArchive<T>(
     plan = artifactArchivePlan(manifest);
   const originalData = parseWorkBytes(readFileSync(join(directory, 'work.json')));
   for (const file of plan.physical) {
-    if (!portableCheckPath(originalData, file.path) && !existsSync(join(directory, file.path))) continue;
+    if (optionalCheckPath(originalData, file.path) && !existsSync(join(directory, file.path))) continue;
     const bytes = readSource(directory, file.path, file.size + 1, file.sha256);
     invariant(
       bytes && bytes.length === file.size && digest(bytes) === file.sha256,

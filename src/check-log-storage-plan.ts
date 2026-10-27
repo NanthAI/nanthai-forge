@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { portableCheckPath, isCheckLogPath } from './check-log-policy.js';
+import { portableCheckPath, isCheckMaintenancePath } from './check-log-policy.js';
 import type { LogData } from './check-log-policy.js';
 export type LogStorageSnapshot = {
   id: string;
@@ -19,7 +19,7 @@ export function checkLogStoragePlan(
   const logs: { snapshotId: string; path: string; sha256: string; size: number }[] = [];
   for (const snapshot of snapshots)
     for (const file of snapshot.files)
-      if (isCheckLogPath(file.path) && !portableCheckPath(snapshot.data, file.path, now)) {
+      if (isCheckMaintenancePath(file.path) && !portableCheckPath(snapshot.data, file.path, now)) {
         candidates.add(file.sha256);
         logs.push({ snapshotId: snapshot.id, ...file });
       } else protectedPins.add(file.sha256);

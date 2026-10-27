@@ -16,7 +16,7 @@ import { resolveExchangeWork } from '../src/native-exchange-stream';
 import { sourceManifestSchema } from '../src/work-archive-metadata';
 import { parseNativeState } from '../src/native-state-format';
 import { objectRecipeSchema, objectChunkPageSchema } from '../src/object-chunks';
-import { isCheckLogPath } from '../src/check-log-policy';
+import { isCheckMaintenancePath } from '../src/check-log-policy';
 import { checkLogStoragePlan, type LogStorageSnapshot } from '../src/check-log-storage-plan';
 import { digest } from '../src/hash';
 import { deleteR2Object } from './r2Operations';
@@ -100,16 +100,17 @@ export async function planProjectCheckLogs(
   )) {
     const snapshot = await source(ctx, backup._id, actor, reader, false, false);
     for (const file of snapshot.manifest.files)
-      if (!isCheckLogPath(file.path)) protectedPins.add(file.sha256);
+      if (!isCheckMaintenancePath(file.path)) protectedPins.add(file.sha256);
     snapshots.push({
       id: backup._id,
-      files: snapshot.manifest.files.filter(file => isCheckLogPath(file.path)),
+      files: snapshot.manifest.files.filter(file => isCheckMaintenancePath(file.path)),
       data: {
         ...(snapshot.data.autonomyPolicy ? { autonomyPolicy: snapshot.data.autonomyPolicy } : {}),
         runs: snapshot.data.runs.map(run => ({
           id: run.id,
           startedAt: run.startedAt,
           endedAt: run.endedAt,
+          artifacts: run.artifacts,
           ...(run.backend
             ? { backend: { actual: run.backend.actual, requested: run.backend.requested } }
             : {}),

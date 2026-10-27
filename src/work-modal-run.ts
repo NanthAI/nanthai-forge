@@ -1,5 +1,5 @@
 import { appendControllerSummary } from './check-controller-summary.js';
-import { retainCompactCheckReports } from './check-compact-output.js';
+import { discardFullCheckReports } from './check-compact-output.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { retainCheckCoverage } from './check-coverage.js';
 import { modalCredentials } from './modal-credentials.js';
@@ -290,7 +290,6 @@ export async function launchModalRun(
     run.backend!.cost = modalRunCost(run.backend!);
     const endedAt = new Date().toISOString();
     const summary = outcome ? shardLogs.failureSummary(outcome) : '';
-    retainCompactCheckReports(path);
     run.backend!.providerUrl = 'https://modal.com/apps';
     const assessment =
       outcome && plan.standard ? modalQuarantine(store, run, outcome, plan.groups, endedAt) : undefined;
@@ -377,6 +376,7 @@ export async function launchModalRun(
       queue = undefined;
       return await launchModalRun(store, run, client, infrastructureRetries - 1);
     }
+    if (!run.backend?.retryable) discardFullCheckReports(path);
     const temp = join(path, `${randomUUID()}.tmp`);
     writeFileSync(temp, JSON.stringify(receipt), { mode: 0o600 });
     syncFile(temp);

@@ -4,6 +4,7 @@ import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { lookupRef, type Identity, type PlanState, type PlanWrite } from './projectCheckLogCleanupTypes';
 import { outputChunkSchema, outputKey, type OutputChunk } from '../src/hosted-check-output';
+import { summarizeCheckLines } from '../src/check-report-summary';
 import { compactCheckText } from '../src/check-compact-output';
 import { presignGet, r2Config } from './r2';
 import { deleteR2Object } from './r2Operations';
@@ -127,7 +128,7 @@ export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: 
         continue;
       }
       if (line.length > 1024 * 1024) continue;
-      let compact = compactCheckText(line);
+      let compact = summarizeCheckLines(compactCheckText(line).split('\n'));
       if (!compact.startsWith('__FORGE_') && !compact.startsWith('# ')) {
         compact = compact.slice(0, Math.max(0, 4096 - p.diagnostics));
         p.diagnostics += compact.length;

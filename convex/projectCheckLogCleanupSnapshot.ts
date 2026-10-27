@@ -9,7 +9,7 @@ import { partialWork } from '../src/work-exchange-delta';
 import { readRecord } from '../src/work-exchange-records';
 import { resolveExchangeWork } from '../src/native-exchange-stream';
 import { sourceManifestSchema } from '../src/work-archive-metadata';
-import { isCheckLogPath } from '../src/check-log-policy';
+import { isCheckMaintenancePath } from '../src/check-log-policy';
 import type { LogData, LogRun } from '../src/check-log-policy';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
@@ -59,7 +59,7 @@ export function snapshotReader(ctx: ActionCtx, input: Identity) {
       'Cleanup snapshot revision differs.',
     );
     const files = exchange.manifest.files.slice(offset, offset + 50);
-    const keys = new Set(files.filter(f => isCheckLogPath(f.path)).map(f => f.path.slice(6, 42)));
+    const keys = new Set(files.filter(f => isCheckMaintenancePath(f.path)).map(f => f.path.slice(6, 42)));
     const field = exchange.records.fields.find(f => f.name === 'runs');
     const pins = field && 'records' in field ? field.records.filter(r => keys.has(r.key)) : [];
     const bodies = pins.length ? await reader.read(input.projectId, input.actor, pins) : [];

@@ -28,7 +28,7 @@ export const nativeFileSchema = z
     path: z
       .string()
       .regex(
-        /^(?:work\.json|objects\/[0-9a-f]{64}|check-[0-9a-f-]{36}\/(?:stdout\.log|stderr\.log|result\.json|test-reports\.json|modal-plan\.json|modal-shard-logs\.json|changes\.json|resources\.txt|artifacts\/artifact-[0-9]+\.bin))$/,
+        /^(?:work\.json|objects\/[0-9a-f]{64}|check-[0-9a-f-]{36}\/(?:stdout\.log|stderr\.log|result\.json|test-reports\.json|test-evidence\.json|modal-plan\.json|modal-shard-logs\.json|changes\.json|resources\.txt|artifacts\/artifact-[0-9]+\.bin))$/,
       ),
     size: z.number().safe().nonnegative(),
     sha256: z.string().regex(/^[0-9a-f]{64}$/),

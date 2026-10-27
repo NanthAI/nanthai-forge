@@ -20,7 +20,7 @@ import { snapshotReader } from './projectCheckLogCleanupSnapshot';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { parseNativeState } from '../src/native-state-format';
 import { objectRecipeSchema, objectChunkPageSchema } from '../src/object-chunks';
-import { isCheckLogPath, portableCheckPath } from '../src/check-log-policy';
+import { isCheckMaintenancePath, portableCheckPath } from '../src/check-log-policy';
 import { hostedCheckRunSchema, hostedCheckTerminal } from '../src/hosted-check';
 import { invariant } from '../src/errors';
 import { digest } from '../src/hash';
@@ -137,7 +137,7 @@ export async function planStep(
       for (const file of page.files) {
         const candidate =
           state.phase === 'backups' &&
-          isCheckLogPath(file.path) &&
+          isCheckMaintenancePath(file.path) &&
           !portableCheckPath(page.data, file.path, state.now);
         mark(file.sha256, candidate ? { candidate: true } : { protected: true });
         if (candidate) logs.push({ snapshotId: selected._id, ...file });

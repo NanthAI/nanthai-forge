@@ -1,4 +1,13 @@
-import { runLogRecord, isCheckLogPath } from './check-log-policy.js';
+import { portableCheckEvidence } from './check-compact-output.js';
+import { summarizeExecutions } from './check-report-summary.js';
+import { readSource } from './files.js';
+import {
+  portableRun,
+  isCheckCachePath,
+  runLogRecord,
+  isCheckLogPath,
+  isCheckReportPath,
+} from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -92,7 +101,7 @@ export async function readRecoveryInventory(root: string, now = Date.now()): Pro
   const captured = new Map(latestCompleteOffMachine?.evidence.map(item => [item.path, item]));
   const paths = new Set(captured.keys());
   const artifacts = new Map<string, { sha256: string; size: number }>();
-  for (const run of data.runs) {
+  for (const run of data.runs.map(portableRun)) {
     const prefix = `check-${run.id}/`;
     for (const name of [
       'stdout.log',
@@ -110,7 +119,11 @@ export async function readRecoveryInventory(root: string, now = Date.now()): Pro
   }
   const evidence: RecoveryEvidence[] = [];
   for (const path of paths) {
-    const run = isCheckLogPath(path) ? data.runs.find(run => path.startsWith(`check-${run.id}/`)) : undefined;
+    if (isCheckCachePath(data, path)) continue;
+    const run =
+      isCheckLogPath(path) || isCheckReportPath(path)
+        ? data.runs.find(run => path.startsWith(`check-${run.id}/`))
+        : undefined;
     const disposition = run ? runLogRecord(data, run, now) : undefined;
     if (disposition && disposition.status !== 'included') {
       evidence.push({
@@ -127,7 +140,16 @@ export async function readRecoveryInventory(root: string, now = Date.now()): Pro
     if (safeRelative(path) && path.startsWith('check-')) {
       try {
         const absolute = join(store.directory, path);
-        if (realpathSync(absolute) === absolute) {
+        if (path.endsWith('/test-evidence.json')) {
+          const bytes = portableCheckEvidence(join(store.directory, path.slice(0, -19)));
+          if (bytes) current = { sha256: digest(bytes), size: bytes.length };
+        } else if (path.endsWith('/modal-shard-logs.json')) {
+          const original = readSource(store.directory, path, Number.MAX_SAFE_INTEGER);
+          if (original) {
+            const bytes = summarizeExecutions(original);
+            current = { sha256: digest(bytes), size: bytes.length };
+          }
+        } else if (realpathSync(absolute) === absolute) {
           const observed = await fingerprintPrivateFile(absolute);
           if (realpathSync(absolute) === absolute) current = observed;
         }

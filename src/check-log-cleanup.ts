@@ -5,10 +5,11 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { DAY_MS, LOCAL_LOG_DAYS, providerLogUrl } from './check-log-policy.js';
 import { retainCompactCheckReports } from './check-compact-output.js';
+import { coverageCacheFiles } from './check-coverage-cache.js';
 import type { WorkStore } from './work-store.js';
 
 /** Explicit provider-log migration, or age-based local retention during lifecycle work.
- * Never follows links or removes result/recipe/artifact files. Apply re-observes exact bytes. */
+ * Never follows links or removes result/recipe/build-output files. Apply re-observes exact bytes. */
 export function localCheckLogPlan(store: WorkStore, now = Date.now(), providers = false) {
   const files: { path: string; size: number; sha256: string; runId: string }[] = [];
   for (const run of store.load().runs) {
@@ -18,12 +19,14 @@ export function localCheckLogPlan(store: WorkStore, now = Date.now(), providers 
       continue;
     const directory = join(store.directory, `check-${run.id}`);
     if (!existsSync(directory) || realpathSync(directory) !== directory) continue;
-    const names = readdirSync(directory).filter(name => name.endsWith('.log'));
+    const names = readdirSync(directory).filter(
+      name => name.endsWith('.log') || name === 'test-reports.json',
+    );
     const shards = join(directory, 'shards');
     if (existsSync(shards) && realpathSync(shards) === shards)
       names.push(
         ...readdirSync(shards)
-          .filter(name => name.endsWith('.log'))
+          .filter(name => /\.(?:log|evidence)$/.test(name))
           .map(name => `shards/${name}`),
       );
     for (const name of names) {
@@ -38,6 +41,15 @@ export function localCheckLogPlan(store: WorkStore, now = Date.now(), providers 
         runId: run.id,
       });
     }
+  }
+  for (const file of coverageCacheFiles(store)) {
+    if (!providers && now - file.at < LOCAL_LOG_DAYS * DAY_MS) continue;
+    files.push({
+      path: file.path.slice(store.directory.length + 1),
+      size: file.size,
+      sha256: digest(readFileSync(file.path)),
+      runId: file.runId,
+    });
   }
   return { files, bytes: files.reduce((sum, file) => sum + file.size, 0) };
 }
@@ -74,7 +86,7 @@ export function cleanLocalCheckLogs(
       return { ...result(0), skipped: 'Work changed before cleanup; no files were removed.' };
     for (const runId of new Set(files.map(file => file.runId))) {
       const directory = join(store.directory, `check-${runId}`);
-      if (!existsSync(join(directory, 'test-reports.json'))) retainCompactCheckReports(directory);
+      retainCompactCheckReports(directory);
     }
     for (const file of files) {
       const path = join(store.directory, file.path),
@@ -89,7 +101,9 @@ export function cleanLocalCheckLogs(
         'EVIDENCE_CHANGED',
         'Log bytes changed since cleanup planning; retry with current files.',
       );
-      unlinkSync(path);
+    }
+    for (const file of files) {
+      unlinkSync(join(store.directory, file.path));
     }
     return result(files.length);
   });

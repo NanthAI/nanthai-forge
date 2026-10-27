@@ -1,5 +1,5 @@
 import { appendControllerSummary } from './check-controller-summary.js';
-import { retainCompactCheckReports } from './check-compact-output.js';
+import { discardFullCheckReports } from './check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
 import { actionsCheckRuntime } from './check-backend.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
@@ -156,7 +156,6 @@ export async function launchGithubActionsRun(
     run.backend.executionIds = journal.runId ? [String(journal.runId)] : [];
     if (journal.runId)
       run.backend.providerUrl = `https://github.com/${journal.repo}/actions/runs/${journal.runId}`;
-    retainCompactCheckReports(path);
     run.backend.billableMinutes = outcome.billableMinutes;
     run.backend.cost = outcome.cost;
     if (outcome.cost.estimatedCostUsd !== null) run.backend.estimatedCostUsd = outcome.cost.estimatedCostUsd;
@@ -180,6 +179,7 @@ export async function launchGithubActionsRun(
       ],
       details: `${jobStatusSummary ? `${jobStatusSummary} ` : ''}GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} Source, result and compact test evidence remain retained; full logs stay with GitHub Actions; the run-owned ref is removed after the remote run is terminal.`,
     });
+    discardFullCheckReports(path);
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));
     wakeLandingWorker(store);
     await cleanupActionsResult(plan, journal, save, api, progress, deleteRef);

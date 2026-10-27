@@ -11,7 +11,9 @@ import { digest } from './hash.js';
 import type { CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
-export const coverageSourcePath = 'coverage/test-impact.json';
+export { coverageSourcePath } from './check-log-policy.js';
+import { coverageSourcePath } from './check-log-policy.js';
+import { pruneCoverageCache } from './check-coverage-cache.js';
 
 /** Compact check artifact reconstructed from compact reports or legacy execution logs, with runner-owned source pins. */
 export function retainCheckCoverage(
@@ -45,7 +47,7 @@ export function retainCheckCoverage(
     mkdirSync(join(directory, 'artifacts'), { recursive: true, mode: 0o700 });
     const filename = `artifact-${run.check?.artifactPaths?.length ?? 0}.bin`;
     writeFileSync(join(directory, 'artifacts', filename), bytes, { mode: 0o600 });
-    return [
+    const retained: NonNullable<CheckRun['artifacts']> = [
       {
         status: 'retained',
         sourcePath: coverageSourcePath,
@@ -54,6 +56,8 @@ export function retainCheckCoverage(
         sha256: digest(bytes),
       },
     ];
+    pruneCoverageCache(store, { ...run, artifacts: [...(run.artifacts ?? []), ...retained] });
+    return retained;
   } catch {
     // Missing/truncated evidence cannot narrow selection or fail the command itself.
     return [];
@@ -64,6 +68,7 @@ export function retainCheckCoverage(
 export function latestCheckCoverage(store: WorkStore, main: string): CoverageInput | undefined {
   if (!store.native) return undefined;
   try {
+    pruneCoverageCache(store);
     const tx = store.readRecords(),
       data = tx ? tx.data() : store.load();
     const moves = postAcceptMoves(tx ? tx.all('channelMoves', 'main', 'channel') : data.channelMoves).filter(
