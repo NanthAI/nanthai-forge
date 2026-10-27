@@ -1,0 +1,4 @@
+.fx-test-contract-tests { list-style: none; margin: 0; padding: 10px 14px; }
+.fx-test-contract-tests li { display: flex; gap: 12px; padding: 4px 0; }
+.fx-test-contract-tests code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fx-test-contract-tests .num { white-space: nowrap; color: var(--fx-text-2); }

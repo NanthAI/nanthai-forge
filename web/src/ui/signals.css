@@ -1,0 +1,281 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Journey rail, automatic-action marks, (i), situation line, hot count and the accepted toast. */
+
+/* Journey rail: edited · saved · checked · accepted. A position, never a percentage. */
+.fx-rail {
+  display: inline-flex;
+  flex: none;
+  gap: 3px;
+  align-items: center;
+  vertical-align: middle;
+}
+.fx-rail > i {
+  display: block;
+  width: 16px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fx-rail-off);
+  transition: background-color var(--fx-d-base) var(--fx-ease);
+}
+.fx-rail > i:nth-child(2) {
+  transition-delay: calc(var(--fx-d-base) / 4);
+}
+.fx-rail > i:nth-child(3) {
+  transition-delay: calc(var(--fx-d-base) / 2);
+}
+.fx-rail > i:nth-child(4) {
+  transition-delay: calc(var(--fx-d-base) * 3 / 4);
+}
+.fx-rail-lg {
+  gap: 3px;
+}
+.fx-rail-lg > i {
+  width: 48px;
+  height: 6px;
+  border-radius: 3px;
+}
+.fx-rail > .fx-rail-on {
+  background: var(--fx-active);
+}
+.fx-rail > .fx-rail-ok {
+  background: var(--fx-passed);
+}
+.fx-rail > .fx-rail-bad {
+  background: var(--fx-failed);
+}
+.fx-rail > .fx-rail-conf {
+  background: var(--fx-conflict);
+}
+.fx-rail > .fx-rail-run {
+  background: var(--fx-active);
+  opacity: 0.5;
+  animation: fx-rail-run 2.4s var(--fx-ease) infinite;
+}
+.fx-rail-dim > i {
+  opacity: 0.5;
+}
+@keyframes fx-rail-run {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/* Something Forge did without a person, and the undo beside it. Never orange, never green. */
+.fx-auto {
+  display: inline-flex;
+  align-items: center;
+  font: 600 10px/14px var(--fx-font-ui);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--fx-text-2);
+  background: var(--fx-surface-3);
+  border-radius: 3px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+.fx-undo {
+  all: unset;
+  cursor: pointer;
+  color: var(--fx-accent);
+  font: 600 12px/1.3 var(--fx-font-ui);
+  white-space: nowrap;
+  border-radius: var(--fx-r-1);
+}
+.fx-undo:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.fx-undo:focus-visible {
+  outline: 2px solid var(--fx-focus);
+  outline-offset: 2px;
+}
+.fx-undo:disabled {
+  cursor: default;
+  color: var(--fx-text-3);
+  text-decoration: none;
+}
+.fx-undo-none {
+  font-size: 12px;
+  color: var(--fx-text-3);
+  white-space: nowrap;
+}
+
+/* (i): explanations that are not permanent UI. */
+.fx-info {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+.fx-info > button {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--fx-r-1);
+  color: var(--fx-text-3);
+  cursor: pointer;
+}
+.fx-info-inline > button {
+  width: 18px;
+  height: 18px;
+}
+.fx-info > button:hover,
+.fx-info[data-open] > button {
+  background: var(--fx-hover);
+  color: var(--fx-text);
+}
+.fx-info > button:focus-visible {
+  outline: 2px solid var(--fx-focus);
+  outline-offset: 1px;
+}
+.fx-info-tip {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  right: -6px;
+  width: 240px;
+  padding: 8px 10px;
+  border-radius: var(--fx-r-2);
+  border: 1px solid var(--fx-line-strong);
+  background: var(--fx-surface);
+  box-shadow: var(--fx-shadow);
+  color: var(--fx-text-2);
+  font: 400 12px/1.45 var(--fx-font-ui);
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--fx-d-fast) var(--fx-ease),
+    visibility 0s linear var(--fx-d-fast);
+}
+.fx-info:hover > .fx-info-tip,
+.fx-info > button:focus-visible + .fx-info-tip,
+.fx-info[data-open] > .fx-info-tip {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: var(--fx-d-base), 0s;
+}
+.fx-info[data-open] > .fx-info-tip {
+  transition-delay: 0s;
+}
+
+/* Only the Needs-you count is hot. */
+.fx-count-hot,
+.fx-tab-count {
+  background: var(--fx-brand);
+  color: var(--fx-on-brand);
+}
+
+/* Situation line: the one sentence under a page title. */
+.fx-situation {
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--fx-text-2);
+}
+.fx-situation b {
+  color: var(--fx-text);
+  font-weight: 650;
+}
+.fx-situation a {
+  color: var(--fx-text-2);
+  text-decoration: underline;
+  text-decoration-color: var(--fx-line-strong);
+  text-underline-offset: 3px;
+}
+.fx-situation a:hover {
+  color: var(--fx-accent);
+  text-decoration-color: var(--fx-accent);
+}
+
+/* The accepted toast is the celebration: it rises once, glows, and leaves. */
+.fx-toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 24px);
+  padding: 8px 8px 8px 14px;
+  border-radius: var(--fx-r-3);
+  background: var(--fx-surface);
+  border: 1px solid var(--fx-line-strong);
+  box-shadow: var(--fx-shadow);
+  color: var(--fx-text);
+  font-size: 12.5px;
+  animation: fx-rise var(--fx-d-base) var(--fx-ease);
+}
+.fx-toast-accepted {
+  box-shadow: var(--fx-shadow), var(--fx-glow);
+}
+.fx-toast-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.fx-toast-accepted .fx-toast-main > .fx-glyph {
+  color: var(--fx-passed);
+}
+.fx-toast b {
+  font-weight: 650;
+}
+.fx-toast-x {
+  width: 26px;
+  height: 26px;
+}
+@keyframes fx-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (max-width: 720px) {
+  .fx-toast-stack { bottom: calc(70px + env(safe-area-inset-bottom)); left: 12px; right: 12px; }
+  .fx-toast {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+}
+
+/* Journey explanations share the (i) tooltip, available on keyboard focus too. */
+.fx-rail { position: relative; min-height: 22px; }
+.fx-rail:focus-visible { outline: 2px solid var(--fx-focus); outline-offset: 3px; }
+.fx-rail:hover > .fx-info-tip, .fx-rail:focus > .fx-info-tip {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: var(--fx-d-base), 0s;
+}
+.fx-rail > .fx-info-tip { width: 250px; }
+
+.fx-toast-stack { position: fixed; right: 24px; bottom: 24px; z-index: 10000; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; max-width: calc(100vw - 24px); }
+.fx-toast-stack .fx-toast { pointer-events: auto; max-width: 480px; overflow-wrap: anywhere; }
+.fx-toast-error .fx-toast-main > .fx-glyph { color: var(--fx-failed); }
+.fx-toast-success .fx-toast-main > .fx-glyph { color: var(--fx-passed); }
+.fx-error-placeholder { display: block; min-height: 1px; }
+input[aria-invalid=true], textarea[aria-invalid=true], select[aria-invalid=true] { outline: 1px solid var(--fx-warning, #b78a46); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { .fx-toast { animation: none; } }
+@media (max-width: 720px) { .fx-toast-stack { bottom: calc(70px + env(safe-area-inset-bottom)); left: 12px; right: 12px; } .fx-toast-stack .fx-toast { width: 100%; max-width: 100%; } }
+
+/* Clerk errors appear as Forge toasts (Toast.tsx SignInErrors). Plain class selectors only: Clerk warns on selectors that depend on its internal DOM. */
+.cl-alert, .cl-formFieldErrorText { display: none; }
+.fx-toast-stack { background: transparent; }
+.fx-toast { box-sizing: border-box; }
+.fx-toast-main { flex: 1; }
+.fx-toast-main > .fx-glyph { flex-shrink: 0; }
+.fx-toast-main > span { min-width: 0; }
+
+.fx-tooltip{position:relative;display:inline-block}
+.fx-tooltip:hover>.fx-info-tip,.fx-tooltip:focus-within>.fx-info-tip{opacity:1;visibility:visible;transition-delay:0s}
+.fx-tooltip[data-placement=above]>.fx-info-tip{top:auto;bottom:calc(100% + 12px)}
+
+.fx-tooltip[data-placement=above]::before{content:'';position:absolute;bottom:100%;height:12px;left:-12px;right:-12px}

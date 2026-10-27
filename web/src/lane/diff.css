@@ -1,0 +1,58 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* All three modes use the same table geometry and exact Fable syntax tokens. */
+.fx .fx-diff {
+  margin-top: 0;
+  position: relative;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  font: 12px/18px var(--fx-font-mono);
+  mask-image: none;
+}
+.fx-diff table { border-collapse: collapse; width: 100%; }
+.fx .fx-diff td { display: table-cell; height: 18px; padding: 0 10px; white-space: pre; vertical-align: top; font: inherit; line-height: 18px; }
+.fx-diff tr.fx-diff-line { display: table-row; }
+.fx .fx-diff td.fx-diff-n {
+  position: static;
+  width: 1%;
+  padding: 0 8px;
+  text-align: right;
+  color: var(--fx-text-3);
+  user-select: none;
+  border-right: 1px solid var(--fx-line);
+  background: transparent;
+}
+.fx-diff .fx-diff-code { font: inherit; }
+.fx-diff .fx-diff-sign { display: inline-block; margin-right: 8px; text-align: left; }
+.fx-diff-added, .fx-diff tr.fx-diff-added td { background: var(--fx-add-bg); }
+.fx-diff-removed, .fx-diff tr.fx-diff-removed td { background: var(--fx-del-bg); }
+.fx-diff-modified { background: color-mix(in srgb, var(--fx-waiting-bg) 60%, transparent); }
+.fx-diff-modified .fx-diff-sign { color: var(--fx-waiting); }
+.fx-diff .fx-diff-hunk { position: static; }
+.fx-diff .fx-diff-hunk td { background: var(--fx-surface-2); color: var(--fx-text-3); padding: 3px 10px; }
+.fx-diff-split td.fx-diff-code { width: 50%; }
+.fx-diff-split .fx-diff-empty { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--fx-surface-2) 6px 8px); }
+.fx-diff-split td.fx-diff-mid { width: 1%; padding: 0; border-left: 1px solid var(--fx-line); }
+.fx-diff-split td.fx-diff-added { background: var(--fx-add-bg); }
+.fx-diff-split td.fx-diff-removed { background: var(--fx-del-bg); }
+.fx-diff-modes { margin-left: auto; display: inline-flex; border: 1px solid var(--fx-line-strong); border-radius: var(--fx-r-2); overflow: hidden; background: var(--fx-surface-2); flex: none; }
+.fx-diff-modes button { border: 0; background: none; height: 26px; padding: 0 10px; font: 12px var(--fx-font-ui); color: var(--fx-text-2); cursor: pointer; }
+.fx-diff-modes button[aria-pressed='true'] { background: var(--fx-surface); color: var(--fx-text); font-weight: 600; box-shadow: inset 0 0 0 1px var(--fx-line-strong); }
+:is(.diff, .source) .k { color: var(--fx-syn-k); }
+:is(.diff, .source) .s { color: var(--fx-syn-s); }
+:is(.diff, .source) .n { color: var(--fx-syn-n); }
+:is(.diff, .source) .c { color: var(--fx-syn-c); font-style: italic; background: transparent; }
+:is(.diff, .source) .t { color: var(--fx-syn-t); }
+:is(.diff, .source) .f { color: var(--fx-syn-f); font-weight: 600; }
+:is(.diff, .source) .p { color: var(--fx-syn-p); }
+:is(.diff, .source) mark.w { background: var(--fx-word-add); color: inherit; border-radius: 2px; padding: 0 1px; }
+:is(.diff, .source) mark.w.d { background: var(--fx-word-del); text-decoration: line-through; text-decoration-color: var(--fx-del); }
+:is(.diff, .source) mark.w.d + mark.w { margin-left: 4px; }
+.fx-diff-added .fx-diff-sign { color: var(--fx-add); }
+.fx-diff-removed .fx-diff-sign { color: var(--fx-del); }
+.fx-diff-note { padding: 14px; font-size: 12.5px; color: var(--fx-text-3); }
+.fx-diff[data-prose] table{table-layout:fixed}
+.fx-diff[data-prose] .fx-diff-code{white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal}
+.fx-diff[data-prose] td.fx-diff-n{width:38px;box-sizing:border-box}
+.fx-diff[data-prose] .fx-diff-hunk td{white-space:normal;overflow-wrap:anywhere}
+/* Line-number controls share the virtual renderer's fixed code row height. */
+.fx .fx-diff .fx-line-comment { height: 18px; min-height: 0; line-height: 18px; vertical-align: top; }

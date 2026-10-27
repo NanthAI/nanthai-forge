@@ -1,0 +1,32 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* A selected hosted project shows only the cockpit shell and its page: the legacy Projects surface's
+   collection tabs, width limit, padding and footer step aside, and the embedded page is full width. */
+.portal .hosted-home:has(.fx-project-page) {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+.portal .hosted-home:has(.fx-project-page) > .page-tabs,
+.portal:has(.fx-project-page) > .portal-footer {
+  display: none;
+}
+.fx-project-page .hosted-work {
+  border: 0;
+  padding: 0;
+}
+.fx-project-page .project-layout.embedded {
+  display: block;
+}
+/* Classic project pages (planning, activity, contributors…) keep a readable width and padding;
+   cockpit pages bring their own. */
+.fx-project-page .project-page-content > section:not(:has(.fx)),
+.fx-project-page > :not(.hosted-work) {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+.fx-project-page .project-page-content > .work-help {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 16px 16px 0;
+}

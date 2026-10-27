@@ -1,0 +1,454 @@
+[
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "638b9b46-b9a9-5a34-85e0-c4c7a5dd1f1f",
+    "operationId": "638b9b46-b9a9-5a34-85e0-c4c7a5dd1f1f",
+    "request": "62076dadb1e9d5a2bc039bf75a995a8f7940534eb472373fc9aad797223de496",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Briefly red main is accepted for trusted and autonomous actors, with automatic fix-forward or revert. Supervised projects keep the strict full gate.",
+    "why": "Let contract-gated work land while continuous checks repair regressions; keep supervised behavior strict.",
+    "at": "2026-10-25T10:39:29.054Z",
+    "decidedAt": "2026-10-25T10:39:29.054Z",
+    "overrides": {
+      "kind": "default",
+      "description": "A passing full suite is required before every acceptance.",
+      "link": "docs/phase5-plan.md#bet-2-per-intent-contract-gates-full-suite-continuous"
+    },
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "bbe8f618-a9a9-5a8d-947f-5baffb34d6a9",
+    "operationId": "bbe8f618-a9a9-5a8d-947f-5baffb34d6a9",
+    "request": "46e041f4aa22c649c4d1d88da68cd7776ed4ef3c8f2e71c22bd0be087044bf3f",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Storage is decided by SP1: native on R2 with reachability GC versus Git-native objects and packfiles on the same criteria. Build APFS clonefile Lanes with snapshots early regardless of the winner. A Git-native winner also requires an explicit change to design constraint 7.",
+    "why": "Choose from comparable evidence about disk, GC correctness, interoperability, migration and composition cost.",
+    "at": "2026-10-25T10:39:30.916Z",
+    "decidedAt": "2026-10-25T10:39:30.916Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "207574f3-50a0-57d6-97e5-d8cf840b63de",
+    "operationId": "207574f3-50a0-57d6-97e5-d8cf840b63de",
+    "request": "9ccad765b3c72b9f502a3310af0dc55416afa285cd2eadcbd9893c99a90ed9f6",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Structural merge is either mergiraf or our own merge over tree-sitter declarations, compared in SP2. The contract check gates the output, never parse success.",
+    "why": "Evaluate both approaches before choosing; syntax alone cannot establish behavioral correctness.",
+    "at": "2026-10-25T10:39:32.522Z",
+    "decidedAt": "2026-10-25T10:39:32.522Z",
+    "overrides": {
+      "kind": "default",
+      "description": "Line-based merge is the current merge strategy.",
+      "link": "docs/phase5-plan.md#sp2-structural-merge-mergiraf-vs-our-own"
+    },
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "ff5e113a-9708-5a2f-9bf8-5bac018a0fc2",
+    "operationId": "ff5e113a-9708-5a2f-9bf8-5bac018a0fc2",
+    "request": "d491121189950c04dc0113ab6c74834eeac4edb019b731d16e1abdda299de110",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Web breadth is frozen until E1 and E3 are published and Bet 1 is cut over. Hosted landing gaps G1–G10 are frozen except G1, G2, G3 and G6 needed by Bet 1.",
+    "why": "Focus current work on authority cutover and the published evidence.",
+    "at": "2026-10-25T10:39:34.232Z",
+    "decidedAt": "2026-10-25T10:39:34.232Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "7fbb56d4-b0c9-5dc5-a639-de0f4adea1b3",
+    "operationId": "7fbb56d4-b0c9-5dc5-a639-de0f4adea1b3",
+    "request": "8c532ec3a8dd208f547df6c69f5e23c326d0157ce2411fc2dd788b6800f1594c",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Bet 1 is imperative and starts at Phase 5 start; its prerequisites are the first slices built.",
+    "why": "The dual-master authority model is the central operational cause to remove first.",
+    "at": "2026-10-25T10:39:35.740Z",
+    "decidedAt": "2026-10-25T10:39:35.740Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "11d686f5-c983-585f-a28a-da74b30302e8",
+    "operationId": "11d686f5-c983-585f-a28a-da74b30302e8",
+    "request": "06921acc68cb008134cd9823222c3fbcfc9295c87247508c01ac0d812eeb0f97",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Trust per path per actor (B2.6) is a new access rule. The owner approves its defaults before it is enabled.",
+    "why": "The build plan does not itself authorize new access restrictions or defaults.",
+    "at": "2026-10-25T10:39:37.257Z",
+    "decidedAt": "2026-10-25T10:39:37.257Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "b84a5b4f-eacb-5773-ae1b-5283abe87db7",
+    "operationId": "b84a5b4f-eacb-5773-ae1b-5283abe87db7",
+    "request": "417eaa44c7b182b67fe0b70addea86af524b2cb726fee86da63f4e6b79a65ae1",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Vocabulary consolidation is a real slice set built after the Bet 1 cutover. No functionality is lost.",
+    "why": "Consolidate the surface after authority is settled while preserving capability.",
+    "at": "2026-10-25T10:39:38.768Z",
+    "decidedAt": "2026-10-25T10:39:38.768Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "c6cb6379-d437-5584-9367-baf92dbf9a74",
+    "operationId": "c6cb6379-d437-5584-9367-baf92dbf9a74",
+    "request": "282941babb94dc70713cd2cd71c43efb18054d51cbd5892e6639a48ca60431e4",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Bet 3 build waits only for E1 and E3. E2 runs during Bet 1 and must be published before B3.5.",
+    "why": "Build coordination after its baseline and methodology are published; its final measurement also needs E2.",
+    "at": "2026-10-25T10:39:40.280Z",
+    "decidedAt": "2026-10-24",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "50a505cf-66de-5dfd-ac19-19a9b0ab380c",
+    "operationId": "50a505cf-66de-5dfd-ac19-19a9b0ab380c",
+    "request": "00d8711cd9d477475f2e0505ee22e22b1798558dd69d12dcfbc8b4171f47867a",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Every point of the 2026-10-24 review is tracked in Review coverage; none is dropped silently.",
+    "why": "Keep review obligations visible and accounted for in the plan.",
+    "at": "2026-10-25T10:39:41.784Z",
+    "decidedAt": "2026-10-25T10:39:41.784Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "f305f032-a604-5a28-a461-6400fcc7e001",
+    "operationId": "f305f032-a604-5a28-a461-6400fcc7e001",
+    "request": "edfe1e3036a11caac53798182c9397d47d975bf29fe497203700b546f8cda569",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Disk stays bounded per project. Collect automatic snapshots of completed or abandoned Lanes after the 7-day retention window; always keep the latest snapshot of every open Lane. Watch free space and per-project growth and warn before either crosses its budget (P5-M2).",
+    "why": "Retained snapshots and project growth need an explicit owner-approved disk policy.",
+    "at": "2026-10-25T10:39:43.298Z",
+    "decidedAt": "2026-10-24",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "db64e1dc-1bd8-50d7-a529-d58f5a2e6dc3",
+    "operationId": "db64e1dc-1bd8-50d7-a529-d58f5a2e6dc3",
+    "request": "fea6ca39896f13ce90f88e241cf43aab7891b4ef177a9a76d86d2845c24c132a",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "SP1 storage is option (e): Git objects hold source bytes; Forge SHA-256 identities stay the daily format (each State record points at a Git tree, with a derived deterministic commit for export); a Forge packed store holds Work, evidence, edit streams and decisions. Constraint 7 now reads: Forge identities are the daily format; Git holds the bytes.",
+    "why": "Measured source disk about 26x lower than native objects, equal GC correctness, and Git interop and the GitHub mirror get simpler, while Forge keeps its own identities for what Git cannot model. See docs/research/sp1-storage.md.",
+    "at": "2026-10-25T10:39:44.781Z",
+    "decidedAt": "2026-10-25T07:30:00Z",
+    "overrides": {
+      "kind": "decision",
+      "decisionId": "bbe8f618-a9a9-5a8d-947f-5baffb34d6a9"
+    },
+    "supersedes": "bbe8f618-a9a9-5a8d-947f-5baffb34d6a9",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "001ca44f-5826-584c-a006-52d1b7106600",
+    "operationId": "001ca44f-5826-584c-a006-52d1b7106600",
+    "request": "9a2c305ba5ae186816e618049c896af2fb9103df83b2b2c216b5fdb6901a694b",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "B1.4b uses a get/put object interface and does not wait for the Git source layer; P5-SG lands after B1.5b, together with the B1.6–B1.8 deletions.",
+    "why": "Keeps the Bet 1 critical path unblocked by the storage change. See docs/phase5-plan.md.",
+    "at": "2026-10-25T10:39:46.252Z",
+    "decidedAt": "2026-10-25T07:30:00Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "84b69c6c-7877-58ba-a5c3-30f048a6f3d8",
+    "operationId": "84b69c6c-7877-58ba-a5c3-30f048a6f3d8",
+    "request": "6c253cd5232c80fc1682fc14d89cbda47996f05649faf8b5a668eff3a7ed4fe4",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "The records clean-up slice (P5-RC) runs now, including collection of unreferenced record versions: keep anything current Work, a kept backup or a 7-day snapshot references; take a full directory backup before the first apply.",
+    "why": "Records outweigh source (risk #1); 79% of record bytes were unreferenced. See docs/phase5-plan.md.",
+    "at": "2026-10-25T10:39:47.730Z",
+    "decidedAt": "2026-10-25T07:30:00Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "dcf6f5fe-a793-5fca-a740-d4cb24d43e0a",
+    "operationId": "dcf6f5fe-a793-5fca-a740-d4cb24d43e0a",
+    "request": "5127910cad1236d5c7413191669fded6938a81dcd183d7508442f55ccdc0c618",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "The Bet 1 cutover seeds a fresh hosted project and rebinds the owner to it, instead of seeding the existing hosted project in place.",
+    "why": "The one-time seed requires an empty project; a fresh project avoids migrating partial hosted state. See docs/operations.md.",
+    "at": "2026-10-25T10:39:49.241Z",
+    "decidedAt": "2026-10-25T06:30:00Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "3e878831-e05e-5fbd-a6fd-dcdc25ada9e2",
+    "operationId": "3e878831-e05e-5fbd-a6fd-dcdc25ada9e2",
+    "request": "02e486bab75a122f3d1537d9828c7f0c5854a0db5cfe983859d432dde8ee1091",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "No emergency override lets the Mac accept to main when hosted is down. Rollback is a transition back to native-owner at a higher epoch.",
+    "why": "One authority must stay one authority; a side door would reintroduce two writers. See docs/operations.md.",
+    "at": "2026-10-25T10:39:50.736Z",
+    "decidedAt": "2026-10-25T06:30:00Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "5e81de1b-64c2-5bc3-a089-6859ef4ee76e",
+    "operationId": "5e81de1b-64c2-5bc3-a089-6859ef4ee76e",
+    "request": "48b3285e5b47b34a0e5ed346d58455afb98412fc8ad04754310a7ae22da35bf6",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "The Bet 1 deletions (B1.6–B1.8) and the B1.9 retired-table purge are approved.",
+    "why": "Deleting the push, relay and legacy paths is the point of Bet 1. Lead gate before the first deletion: about 20 hosted landings without a core-claim incident, one live rollback drill, and the backup from before the cutover kept. See docs/phase5-plan.md.",
+    "at": "2026-10-25T10:39:52.220Z",
+    "decidedAt": "2026-10-25T09:30:00Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "a13e246c-4cdf-5d35-aa52-1b9b4388a2a3",
+    "operationId": "a13e246c-4cdf-5d35-aa52-1b9b4388a2a3",
+    "request": "9ccfd28028340b97cd32e5dbad8b2890807ec3a00a90546cafc0d358aff230ee",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "The soak after the B1.5b cutover is normal development on the hosted authority, with no idle waiting period.",
+    "why": "Forge is the only project on Forge, so continued development is the real test. See docs/phase5-plan.md.",
+    "at": "2026-10-25T10:39:53.700Z",
+    "decidedAt": "2026-10-25T09:30:00Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "68ee2941-0676-55ba-a5b6-94ffa11b2738",
+    "operationId": "68ee2941-0676-55ba-a5b6-94ffa11b2738",
+    "request": "9cb57677e3ca049f20e3d0cd4f83aa19b9710b5a2fa867bae8df524fdd0904a5",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Forge's own landing checks run on free GitHub-hosted runners (ubuntu-latest, 8 shards) on the public repository. No paid runner is used without an owner-set spend limit.",
+    "why": "Blacksmith 4-vCPU checks cost $88.54 in October 1–25 unnoticed; GitHub-hosted runners are free for public repositories. See docs/operations.md.",
+    "at": "2026-10-25T10:39:55.213Z",
+    "decidedAt": "2026-10-25T10:10:00Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  },
+  {
+    "schema": 1,
+    "kind": "decision",
+    "id": "120816bf-2d46-5817-a864-cb562b96bb73",
+    "operationId": "120816bf-2d46-5817-a864-cb562b96bb73",
+    "request": "aad7fdc792d0ab491f017b6435fdbc6214a5a0fe56fd33c472d547d34ee4faf5",
+    "target": {
+      "kind": "project"
+    },
+    "decidedBy": "Owner",
+    "what": "Phase 5 plan rows are stages 5.1–5.8, not weeks.",
+    "why": "Stage 5.1 was planned as a week and took about a day. See docs/phase5-plan.md.",
+    "at": "2026-10-25T10:39:56.697Z",
+    "decidedAt": "2026-10-25T10:00:00Z",
+    "actor": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    },
+    "requester": {
+      "kind": "agent",
+      "name": "Agent workflow"
+    }
+  }
+]

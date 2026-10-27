@@ -1,0 +1,20 @@
+Use case: ui-mockup
+Create ONE high fidelity polished product UI concept screenshot. Landscape frame 1440x1000. No browser frame, no device, full bleed app.
+Forge is a standalone human/agent development workspace across multiple projects. Attention desk structure, elegant professional working product, highly legible text, spacious hierarchy, precise thin rules and understated compact system controls. Manrope headings, crisp neutral system body type. Dark #0c1016 ground, #131923 surfaces, warm orange #ff936e selection and CTA, mint green #87d5ad success, red error, blue information. No neon, no glow, no decorative gradients.
+
+Top horizontal navigation 70px tall: small NanthAI multicolor angular monogram with Forge wordmark left. Workspace selected orange underline, then Explore, Agents, Settings. Far right small neutral avatar.
+Narrow left rail width about 184px under top navigation: All projects selected in muted dark surface, small grid icon. PROJECTS caption then three labelled synthetic examples Forge, Atlas SDK, Orbit app with understated small geometric icons. Small discreet Demo data label at bottom.
+Main canvas from x220: generous top Workspace heading left, cross-project search input right with placeholder Search across projects and command shortcut. Below heading a horizontal three-lens row Attention (selected orange underline), Active work, Recent changes.
+Central spacious attention queue occupying about 720px width, right column about 320px. Main section label Needs your attention with small count 2. Two large clean rows/cards with precise quiet dividers and roomy whitespace:
+First: orange review/change icon, tiny Forge project label, title Review source navigation, secondary reason Ready for your review. Small mint type badge Intent ready and muted 3 Lanes badge. Right/bottom action warm orange button Review changes with arrow.
+Second: red fork icon, tiny Atlas SDK label, title Resolve parser comparison, secondary reason Two changes need a decision. Small red type badge View conflict. Secondary outlined action Inspect changes with arrow.
+Keep every requested phrase correct and readable. No invented live agent presence or scores.
+
+Right side section Active work, small link View all. Three named Lane entries with slim branch glyphs:
+Source navigation / Forge / Assigned to Maya
+Parser comparison / Atlas SDK / Assigned to Agent
+Route cleanup / Orbit app / Assigned to You
+Assignments are plain static labels, no green online dots.
+Below right section a clean vertical timeline spine with small dots headed Recorded updates. Entry Source navigation ready, Forge, 12 min ago. Entry Parser comparison recorded, Atlas SDK, 34 min ago. Entry Route cleanup updated, Orbit app, 1 hr ago.
+Lower main area project summary horizontal bands under heading Projects. Three tidy rows Forge | 3 active Lanes | 1 ready to review; Atlas SDK | 2 active Lanes | 1 view conflict; Orbit app | 1 active Lane | No review pending. Clear column alignment and understated chevrons.
+Visual interest through controlled proportion, generous white space, readable hierarchy, meaningful semantic glyphs and restrained color. Avoid dashboard stat tile grids, heavy rounded pill UI, charts, fake terminal text, marketing copy, decorative illustrations, excessive badges, gradients and glass. Production-ready desktop concept.

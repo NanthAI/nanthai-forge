@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.account-data{min-width:0;margin-top:28px;padding:20px 0;border-top:1px solid var(--border)}
+.account-data summary{cursor:pointer;font-weight:600}.account-data>summary{font-size:18px}
+.account-data p{max-width:75ch;overflow-wrap:anywhere}.account-data>button{margin-right:10px;margin-bottom:10px}
+.account-data details{min-width:0;margin:14px 0}.account-data ul{list-style:none;padding:0}
+.account-data li{min-width:0;margin:14px 0}.hosted-home .account-data label{display:flex;align-items:center;gap:10px;margin:10px 0}
+.account-data input[type=checkbox]{width:auto;padding:0}.account-data fieldset{min-width:0;border:1px solid var(--border)}
+.account-data pre{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;font-size:12px}
+.account-data code{overflow-wrap:anywhere}.account-data li>button{margin-left:10px}
