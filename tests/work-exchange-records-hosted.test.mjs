@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { ConvexError } from 'convex/values';
@@ -538,13 +538,16 @@ test('format-18 seed followed by routine record and mirror metadata changes publ
 for (const [from, to] of [
   [17, 19],
   [18, 20],
+  [21, 23],
+  [22, 24],
 ])
   test(`format ${from} to ${to} publication and source return retain record delta mode`, async t => {
     const s = fixture(),
       first = await checkpoint(t, s);
-    const initial = { ...first.store.load(), schema: 17 };
-    const data = from === 18 ? convertWorkTo18(initial) : initial;
-    first.store.save(data);
+    const initial = { ...first.store.load(), schema: from % 2 === 0 ? from - 1 : from };
+    const data = from % 2 === 0 ? convertWorkTo18(initial) : initial;
+    // Preserve the historical format exactly; modern save can promote it.
+    writeFileSync(join(first.store.directory, 'work.json'), JSON.stringify(data, null, 2));
     const baseline = await preparedCheckpoint(s, first.store, 0, undefined, { records: true });
     const backupId = await seedRecordCheckpoint(s, baseline);
     await modules.projectWorkActions.initialize._handler(s.ctx, {
@@ -556,7 +559,11 @@ for (const [from, to] of [
     const before = JSON.parse(
       readFileSync(join(first.store.directory, `exchange-${baseline.input.operationId}`, 'work.json')),
     );
-    first.store.save({ ...before, schema: to, revision: before.revision + 1 });
+    assert.equal(before.schema, from);
+    writeFileSync(
+      join(first.store.directory, 'work.json'),
+      JSON.stringify({ ...before, schema: to, revision: before.revision + 1 }, null, 2),
+    );
     const candidate = await preparedCheckpoint(s, first.store, 0, undefined, {
       records: true,
       baseline: before,

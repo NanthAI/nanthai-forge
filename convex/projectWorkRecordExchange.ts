@@ -27,10 +27,14 @@ import { invariant } from '../src/errors';
 import { digest } from '../src/hash';
 import type { RecordPack } from '../src/work-record-packs';
 import type { WorkData } from '../src/work-types';
+// Publication needs changed records and their validated reference context, not
+// both complete Work snapshots. Keep this byte window independent of delta JSON.
+const PUBLICATION_CONTEXT_BYTES = 32 * 1024 * 1024;
 export async function recordExchange(
   backup: Pick<Doc<'projectBackups'>, 'projectId' | 'digest' | 'size' | 'objectManifest'>,
   owner: string,
   reader: ExchangeObjectReader,
+  bodyBudget = 8 * 1024 * 1024,
 ) {
   // Reuse authenticated record bodies across the validation phases of this one
   // action. This cache never serves a source-read endpoint or another action;
@@ -38,12 +42,34 @@ export async function recordExchange(
   // The underlying reader still checks authority on every actual storage read.
   const bodies = new Map<string, Promise<Buffer>>();
   let retained = 0;
+  const readMany = async (pins: { sha256: string; size: number }[]) => {
+    const missing = pins.filter(pin => !bodies.has(JSON.stringify([pin.sha256, pin.size])));
+    if (missing.length) {
+      const bytes = await reader.read(backup.projectId, owner, missing);
+      for (const [index, pin] of missing.entries()) {
+        if (retained + pin.size > bodyBudget) continue;
+        retained += pin.size;
+        bodies.set(JSON.stringify([pin.sha256, pin.size]), Promise.resolve(bytes[index]!));
+      }
+      const loaded = new Map(
+        missing.map((pin, index) => [JSON.stringify([pin.sha256, pin.size]), bytes[index]!]),
+      );
+      return Promise.all(
+        pins.map(
+          pin =>
+            bodies.get(JSON.stringify([pin.sha256, pin.size])) ??
+            Promise.resolve(loaded.get(JSON.stringify([pin.sha256, pin.size]))!),
+        ),
+      );
+    }
+    return Promise.all(pins.map(pin => bodies.get(JSON.stringify([pin.sha256, pin.size]))!));
+  };
   const read = (pin: { sha256: string; size: number }) => {
     const key = JSON.stringify([pin.sha256, pin.size]);
     const existing = bodies.get(key);
     if (existing) return existing;
     const result = reader.read(backup.projectId, owner, [pin]).then(bytes => bytes[0]!);
-    if (retained + pin.size <= 8 * 1024 * 1024) {
+    if (retained + pin.size <= bodyBudget) {
       retained += pin.size;
       bodies.set(key, result);
       result.catch(() => {
@@ -109,7 +135,18 @@ export async function recordExchange(
     'INVALID_WORK_BACKUP',
     'Work record source or revision differs from its manifest.',
   );
-  return { root, records, manifest, manifestBytes, read };
+  return {
+    root,
+    records,
+    manifest,
+    manifestBytes,
+    read,
+    readMany,
+    releaseBodies() {
+      bodies.clear();
+      retained = 0;
+    },
+  };
 }
 export async function verifyRecordSeed(
   exchange: NonNullable<Awaited<ReturnType<typeof recordExchange>>>,
@@ -191,7 +228,7 @@ export async function recordPublication(
       );
     if (!usable(selected)) return skip('selected-base-unvalidated');
   }
-  const candidate = await recordExchange(input, owner, reader);
+  const candidate = await recordExchange(input, owner, reader, PUBLICATION_CONTEXT_BYTES);
   if (!candidate) return skip('candidate-catalog-unavailable');
   if (!candidate.root.delta) return skip('delta-missing');
   if (candidate.root.delta.size > WORK_DELTA_BYTES) return skip('delta-over-budget');
@@ -229,7 +266,13 @@ export async function recordPublication(
     delta.changes,
     candidate.read,
   );
-  if (!(await workDeltaContext(previous.records, candidate.records, delta, candidate.read, [], metadataOnly)))
+  if (
+    !(await workDeltaContext(previous.records, candidate.records, delta, candidate.read, [], metadataOnly, {
+      maxBytes: PUBLICATION_CONTEXT_BYTES,
+      prefetchOnly: true,
+      readMany: candidate.readMany,
+    }))
+  )
     return skip('context-over-budget');
   const files = new Map(
     previous.manifest.files.filter(p => p.path !== 'work.json').map(p => [p.sha256, p.size]),
@@ -254,6 +297,7 @@ export async function recordPublication(
     )
   )
     return skip('channel-history-replaced');
+  candidate.releaseBodies();
   // Digest traversal consumes every pack once; retaining a second byte memo
   // wastes action memory without avoiding any storage/authority reads.
   await verifyRecordDigest(

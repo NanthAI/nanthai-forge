@@ -150,9 +150,24 @@ async function run(directory) {
     storageMetadataReads = 0,
     storageReads = 0,
     storageBytes = 0;
-  let peakRssBytes = 0;
+  let peakRssBytes = 0,
+    peakMemory;
+  let peakHeapBytes = 0,
+    peakExternalBytes = 0;
   const sample = () => {
-    peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
+    const usage = process.memoryUsage();
+    peakHeapBytes = Math.max(peakHeapBytes, usage.heapUsed);
+    peakExternalBytes = Math.max(peakExternalBytes, usage.external);
+    if (usage.rss > peakRssBytes) {
+      peakRssBytes = usage.rss;
+      peakMemory = {
+        heapUsed: usage.heapUsed,
+        external: usage.external,
+        arrayBuffers: usage.arrayBuffers,
+        storageBytes,
+        calls,
+      };
+    }
   };
   const pending = new Map();
   process.on('message', message => {
@@ -224,6 +239,9 @@ async function run(directory) {
       elapsedMs: performance.now() - started,
       baselineRssBytes,
       peakRssBytes,
+      peakMemory,
+      peakHeapBytes,
+      peakExternalBytes,
       // Linux rusage retains the fork parent's pre-exec high-water mark.
       // VmHWM belongs to this post-exec address space and excludes fixture setup.
       processPeakRssBytes:

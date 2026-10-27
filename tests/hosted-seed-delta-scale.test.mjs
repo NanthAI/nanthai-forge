@@ -14,10 +14,13 @@ import { land } from './source-landings-fixture.mjs';
 import { NativeSource } from '../dist/native-source.js';
 import { digest } from '../dist/hash.js';
 import { parseWork } from '../dist/work-unified-types.js';
+import { convertWorkTo18 } from '../dist/work-intent-converter.js';
+import { unifyIntent } from '../dist/work-intent-local.js';
+import { compactAction } from '../dist/work-record-details.js';
 
 import { indexObjects, measurePublication } from './hosted-seed-delta-scale-fixture.mjs';
 
-test('dogfood-sized paged seed then 23 landings publishes delta within call and memory budgets', async t => {
+test('dogfood-sized format-22 paged seed then format-24 catch-up publishes bounded delta', async t => {
   const s = fixture(),
     first = await checkpoint(t, s),
     store = first.store;
@@ -25,15 +28,19 @@ test('dogfood-sized paged seed then 23 landings publishes delta within call and 
   // This measures hosted publication, not local fragmented-store fsync cost.
   // Retain valid legacy JSON fixture snapshots through the normal Work reader.
   store.save = value => {
+    if (value.schema === 22 || value.schema === 24)
+      value.intents = value.intents.map(intent =>
+        intent.title === undefined ? unifyIntent(intent) : intent,
+      );
     parseWork(value);
     writeFileSync(join(store.directory, 'work.json'), JSON.stringify(value, null, 2));
   };
   land(store, 575, 5);
-  const data = store.load();
+  const data = convertWorkTo18({ ...store.load(), schema: 21 });
   // ~100 MiB of retained Work, spread over bounded record bodies and packs.
   for (const intent of data.intents)
     intent.notes.push(
-      ...Array.from({ length: 48 }, () => ({ kind: 'comment', at: 'now', text: 'x'.repeat(4000) })),
+      ...Array.from({ length: 24 }, () => ({ kind: 'comment', at: 'now', text: 'x'.repeat(4000) })),
     );
   while (data.views.length < 2200)
     data.views.push({ ...data.views[data.views.length % 575], id: randomUUID() });
@@ -69,7 +76,7 @@ test('dogfood-sized paged seed then 23 landings publishes delta within call and 
       startedAt: 'now',
       endedAt: 'later',
       runner: { pid: 1, host: 'synthetic' },
-      details: 'Synthetic retained run',
+      details: 'x'.repeat(38 * 1024),
     });
   }
   data.revision = 28041;
@@ -126,7 +133,23 @@ test('dogfood-sized paged seed then 23 landings publishes delta within call and 
   );
   land(store, 23);
   const after = store.load();
-  after.revision = 29558;
+  after.schema = 24;
+  after.revision = 29560;
+  // The real catch-up includes newly slimmed action records, while old records
+  // remain byte-identical across the additive format promotion.
+  after.automaticActions ??= [];
+  const detail = compactAction(
+    {
+      id: randomUUID(),
+      at: 'later',
+      action: { actor: 'synthetic', summary: 'Synthetic action', undo: 'Synthetic undo' },
+      result: 'Synthetic retained action detail',
+    },
+    bytes => ({ sha256: put(Buffer.from(bytes)), size: bytes.length }),
+  );
+  for (let i = 0; i < 126; i++) after.automaticActions.push({ ...detail, id: randomUUID() });
+  for (let i = 0; i < 83; i++) after.runs.push({ ...after.runs[i], id: randomUUID() });
+  for (let i = 0; i < 98; i++) after.views.push({ ...structuredClone(after.views[0]), id: randomUUID() });
   // A 280-file source change is retained alongside the 23 Work landings.
   const changed = files.map((file, i) =>
     i < 280 ? { ...file, blob: put(Buffer.from(`export const changed = ${i};\n`)) } : file,
@@ -134,7 +157,7 @@ test('dogfood-sized paged seed then 23 landings publishes delta within call and 
   const previous = after.nativeHead;
   after.nativeHead = source.writeState(changed, [previous], 'Changed 280 files', 'later');
   const lane = after.lanes.at(-1),
-    view = after.views.at(-1);
+    view = after.views.find(view => view.id === after.channelMoves.at(-1).viewId);
   lane.checkpoints.push({ head: after.nativeHead, parent: previous, at: 'later', message: 'Changed files' });
   lane.head = view.head = view.inputs[0].head = after.channelMoves.at(-1).head = after.nativeHead;
   store.save(after);
@@ -147,10 +170,11 @@ test('dogfood-sized paged seed then 23 landings publishes delta within call and 
       objects: s.tables.projectObjects.size,
       workBytes: seed.tree.root.work.size,
       landings: 23,
-      revisions: 1517,
+      revisions: 1519,
+      promotion: [baseline.schema, after.schema],
       changedFiles: 280,
       callsPerLanding: metrics.calls / 23,
-      callsPerChangedRecord: metrics.calls / 92,
+      callsPerChangedRecord: metrics.calls / 399,
       recordsValidated: metrics.logs.find(([name]) => name === 'work-record exchange prepared')?.[1]
         .recordsValidated,
       ...measured,
@@ -168,7 +192,9 @@ test('dogfood-sized paged seed then 23 landings publishes delta within call and 
     ),
   );
   assert(!metrics.logs.some(([name]) => name === 'work-record publication skip'));
-  assert(metrics.calls < 500, `publication calls ${metrics.calls}`);
+  assert(metrics.documentsRead < 10000, `publication document reads ${metrics.documentsRead}`);
+  assert(metrics.documentsWritten <= 10, `publication document writes ${metrics.documentsWritten}`);
+  assert(metrics.calls <= 600, `publication calls ${metrics.calls}`);
   const peak = Math.max(metrics.processPeakRssBytes, metrics.peakRssBytes);
   assert(peak < 256 * 1024 * 1024, `peak RSS ${peak}`);
   assert(metrics.elapsedMs < 30000, `publication wall time ${metrics.elapsedMs} ms`);

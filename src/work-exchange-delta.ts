@@ -67,9 +67,17 @@ export function supportsWorkDelta(before: WorkRecordRoot, after: WorkRecordRoot)
   }
   const from = recordMetadata(before).schema,
     to = recordMetadata(after).schema;
-  // These promotions only widen landing-batch capacity. Previously validated
-  // unchanged records retain identical interpretation and reference semantics.
-  return old.size === 0 && (from === to || (from === 17 && to === 19) || (from === 18 && to === 20));
+  // Capacity and retained-detail promotions add fields without reinterpreting
+  // unchanged records or their reference metadata. Changed records still pass
+  // the target format, reference, source-pin and canonical-byte validators.
+  return (
+    old.size === 0 &&
+    (from === to ||
+      (from === 17 && to === 19) ||
+      (from === 18 && to === 20) ||
+      (from === 21 && to === 23) ||
+      (from === 22 && to === 24))
+  );
 }
 export const workRecordChanges = (before: WorkRecordRoot, after: WorkRecordRoot) => {
   const old = recordMap(before),

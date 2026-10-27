@@ -116,7 +116,9 @@ export function exchangeObjectReader(
                   }
                 });
               }
-              return Buffer.from(await pending);
+              // With both memos disabled, this raw buffer belongs solely to
+              // this read. Digest streaming can consume it without a second copy.
+              return !reuseImmutableBytes && budget === 0 ? await pending : Buffer.from(await pending);
             }),
           )),
         );

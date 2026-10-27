@@ -49,7 +49,7 @@ for (const reason of reasons)
       notes: [],
     });
     if (reason === 'context-over-budget')
-      before.intents[0].notes = Array.from({ length: 600 }, () => ({
+      before.intents[0].notes = Array.from({ length: 4200 }, () => ({
         text: 'x'.repeat(4000),
         kind: 'comment',
         at: 'now',
@@ -89,6 +89,7 @@ for (const reason of reasons)
     const read = async pin => values.get(pin.sha256);
     const candidate = {
       records: b.root,
+      releaseBodies() {},
       root: { records: b.pin, delta: { sha256: 'd'.repeat(64), size: 100 } },
       manifest: { files: [{ path: `objects/${before.nativeHead}`, sha256: before.nativeHead, size: 0 }] },
       read: async pin => (pin.sha256 === 'd'.repeat(64) ? Buffer.from(JSON.stringify(delta)) : read(pin)),

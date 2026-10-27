@@ -255,13 +255,16 @@ test('only post-accept check links inherit validated receipt dependencies; alter
   );
 });
 
-test('capacity-only format promotions reuse unchanged validated records; unrelated format changes do not', async () => {
+test('compatible format promotions reuse unchanged validated records; unrelated format changes do not', async () => {
   const { convertWorkTo18 } = await import('../dist/work-intent-converter.js');
   for (const [from, to] of [
     [17, 19],
     [18, 20],
+    [21, 23],
+    [22, 24],
   ]) {
-    const before = from === 18 ? convertWorkTo18(seed()) : { ...seed(), schema: from };
+    const before =
+      from % 2 === 0 ? convertWorkTo18({ ...seed(), schema: from - 1 }) : { ...seed(), schema: from };
     before.intents = [];
     const after = { ...before, schema: to, revision: before.revision + 1 };
     const p = pair(before, after);
@@ -276,5 +279,66 @@ test('capacity-only format promotions reuse unchanged validated records; unrelat
   assert.equal(
     supportsWorkDelta(buildWorkRecords(seed()).root, buildWorkRecords({ ...seed(), schema: 19 }).root),
     false,
+  );
+});
+
+test('publication context pages bounded record reads while source-return keeps its smaller window', async () => {
+  const before = seed();
+  before.intents = Array.from({ length: 250 }, () => ({
+    ...intent(),
+    notes: Array.from({ length: 3 }, () => ({ kind: 'comment', text: 'x'.repeat(3000), at: 'now' })),
+  }));
+  const after = structuredClone(before);
+  for (const item of after.intents) item.status = 'completed';
+  const p = pair(before, after);
+  assert.equal(await workDeltaContext(p.a.root, p.b.root, p.delta, p.read), undefined);
+  let calls = 0;
+  const options = {
+    maxBytes: 8 * 1024 * 1024,
+    readMany: async pins => {
+      calls++;
+      assert(pins.length <= 100);
+      assert(pins.reduce((size, pin) => size + pin.size, 0) <= 2 * 1024 * 1024);
+      return Promise.all(pins.map(p.read));
+    },
+  };
+  const context = await workDeltaContext(p.a.root, p.b.root, p.delta, p.read, [], new Set(), options);
+  assert.deepEqual(context.previous.intents, before.intents);
+  assert.deepEqual(context.current.intents, after.intents);
+  assert.equal(calls, 6, 'three pages per catalog, rather than one call per record');
+  const authenticated = await workDeltaContext(p.a.root, p.b.root, p.delta, p.read, [], new Set(), {
+    ...options,
+    prefetchOnly: true,
+  });
+  assert.equal(authenticated.recordsRead, 250);
+  assert.deepEqual(authenticated.previous.intents, []);
+  assert.deepEqual(authenticated.current.intents, []);
+  const corrupt = new Map();
+  await workDeltaContext(p.a.root, p.b.root, p.delta, p.read, [], new Set(), {
+    ...options,
+    prefetchOnly: true,
+    readMany: async pins =>
+      pins.map(pin => {
+        const bytes = Buffer.from('corrupt');
+        corrupt.set(pin.sha256, bytes);
+        return bytes;
+      }),
+  });
+  await assert.rejects(
+    validateChangedRecords(
+      p.a.root,
+      p.b.root,
+      p.delta.changes,
+      async pin => corrupt.get(pin.sha256),
+      new Set([head]),
+    ),
+    error => error.code === 'INVALID_WORK_BACKUP',
+  );
+  await assert.rejects(
+    workDeltaContext(p.a.root, p.b.root, p.delta, p.read, [], new Set(), {
+      ...options,
+      readMany: async pins => pins.map(() => Buffer.from('corrupt')),
+    }),
+    error => error.code === 'INVALID_WORK_BACKUP',
   );
 });

@@ -223,7 +223,9 @@ export async function* workRecordChunks(
   const append = (bytes: string | Buffer) => {
     hash.update(bytes);
     size += Buffer.byteLength(bytes);
-    return Buffer.from(bytes);
+    // Record bodies are already immutable, verified buffers. Yield their span
+    // directly rather than allocating a second copy during digest traversal.
+    return typeof bytes === 'string' ? Buffer.from(bytes) : bytes;
   };
   yield append('{');
   for (const [index, field] of root.fields.entries()) {

@@ -386,3 +386,25 @@ test('State windows batch parent/provenance reads and retain the diff when an op
     code('PROJECT_UNAVAILABLE'),
   );
 });
+
+test('uncached digest reads own their verified raw buffer without copying or sharing later reads', async () => {
+  const s = fixture(),
+    bytes = Buffer.from('Owned digest buffer'),
+    pin = await upload(s, bytes);
+  const buffers = [];
+  s.ctx.storage.get = async () => ({
+    arrayBuffer: async () => {
+      const value = Uint8Array.from(bytes).buffer;
+      buffers.push(value);
+      return value;
+    },
+  });
+  const reader = exchangeObjectReader(s.ctx, false, 0);
+  const [first] = await reader.read('project', 'owner', [pin]);
+  assert.equal(first.buffer, buffers[0]);
+  first.fill(0);
+  const [second] = await reader.read('project', 'owner', [pin]);
+  assert.equal(second.buffer, buffers[1]);
+  assert.notEqual(second.buffer, first.buffer);
+  assert.deepEqual(second, bytes);
+});

@@ -243,7 +243,9 @@ export const publish = action({
             return id;
           }
           const reader = exchangeObjectReader(ctx, true);
-          const records = await recordPublication(ctx, input, owner, reader);
+          // Records own a bounded body memo. Avoid retaining duplicate bytes in
+          // the action and cross-action review caches during its digest traversal.
+          const records = await recordPublication(ctx, input, owner, exchangeObjectReader(ctx, false, 0));
           if (!('unavailable' in records)) {
             await validateExchangePins(ctx, input.projectId, owner, records.contentPins);
             const { deferHistory: _deferHistory, ...publication } = legacyInput;

@@ -220,7 +220,7 @@ action budget. Waiting callers return resumable pending progress after four minu
 retaining the original request; the client immediately continues that request. Final publication still checks
 current authority and the previous-checkpoint compare-and-set.
 
-Formats 16/18/20 use schema-owned unified collections, including alias keys and
+Formats 16/18/20/22/24 use schema-owned unified collections, including alias keys and
 unpinned planned Intents, in record catalogs and deltas. Catalog size is independent
 of the delta/context optimization budget; complete seed validation can establish
 validated records for catalogs above 4 MiB. Unknown extension arrays, duplicate
@@ -229,9 +229,19 @@ compatibility validation remains available for schema-1 checkpoints.
 Changes to schema-owned scalar metadata, including Git mirror and auto-push
 receipts, use record delta after normal versioned schema validation. Unknown
 changed scalar extensions and reordered collection histories make the delta unavailable.
-Capacity-only Work promotions 17→19 and 18→20 retain the validated record base;
+Capacity-only Work promotions 17→19 and 18→20 and retained-detail promotions
+21→23 and 22→24 retain the validated record base;
 unchanged records keep their reference meaning, while changed records use their
 new format's validation. Other format transitions make the publication delta unavailable.
+Publication admits up to 32 MiB of reference-context record bytes across the two
+catalogs, read in pages of at most 100 pins with a 2 MiB target (an indivisible
+record is read alone). Its action-local byte memo uses the same 32 MiB bound, so
+validation reuses those authenticated bodies without duplicating them in the
+reader and review caches. Publication prefetches changed bodies and their outgoing references without
+retaining both parsed contexts, validates those records, and releases the memo before
+streaming the whole-Work digest. Source return retains its separate
+4 MiB context optimization window and its resumable compatibility path. Neither
+path loads complete Work to publish a records checkpoint.
 Publication receipt replay restores its optional local preparation hint. When
 reconciliation finds an exact retained base without that hint, it recovers the
 original Work bytes and property order before preparing a new record delta.
