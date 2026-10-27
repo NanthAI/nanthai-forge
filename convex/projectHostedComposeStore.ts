@@ -1,3 +1,5 @@
+import { semanticPayload } from '../src/semantic-payload';
+import { semanticPlanSchema } from '../src/intent-semantic-conflict';
 import { notifyDesiredCompose } from './projectHostedLandingDesiredWake';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
@@ -6,7 +8,7 @@ import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
 import { hostedOperationRow } from './projectHostedOperations';
-import { hostedOperationSchema, canonicalPayload } from '../src/hosted-source-operation';
+import { hostedOperationSchema } from '../src/hosted-source-operation';
 import { composeRequestSchema, composeInputSchema, COMPOSE_ALGORITHM } from '../src/hosted-compose';
 import { saveObjectSchema, saveWorkerObjectSchema } from '../src/hosted-save';
 import { notifyFinishCompose } from './projectHostedFinishWake';
@@ -17,6 +19,7 @@ const progress = z
   .strict();
 export const composeStateSchema = z
   .object({
+    semanticPlan: semanticPlanSchema.optional(),
     request: composeRequestSchema,
     main: saveWorkerObjectSchema,
     inputs: progress,
@@ -54,7 +57,7 @@ export async function writeComposeState(
   id: Id<'projectHostedComposes'>,
   state: ComposeState,
 ) {
-  await ctx.db.patch(id, { value: canonicalPayload(composeStateSchema.parse(state)) });
+  await ctx.db.patch(id, { value: semanticPayload(composeStateSchema.parse(state), true) });
   if (state.status === 'completed' || state.status === 'failed') {
     const row = (await ctx.db.get(id))!;
     await notifyFinishCompose(ctx, row.projectId, row.operationId);

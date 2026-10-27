@@ -1,3 +1,4 @@
+import { semanticPayload } from '../src/semantic-payload';
 import { wakeExpiredLogs } from './projectCheckLogRetention';
 // SPDX-License-Identifier: Apache-2.0
 import type { QueryCtx, MutationCtx } from './_generated/server';
@@ -102,7 +103,10 @@ export async function writeHostedCheck(
   id: Id<'projectHostedCheckRuns'>,
   run: HostedCheckRun,
 ) {
-  await ctx.db.patch(id, { status: run.status, value: canonicalPayload(hostedCheckRunSchema.parse(run)) });
+  await ctx.db.patch(id, {
+    status: run.status,
+    value: semanticPayload(hostedCheckRunSchema.parse(run), true),
+  });
   await notifyLandingCheck(ctx, { projectId: run.projectId as Id<'hostedProjects'>, runId: run.id });
 }
 export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {

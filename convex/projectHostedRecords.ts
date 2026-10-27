@@ -3,13 +3,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { sourceAuthority } from '../src/hosted-source-authority';
-import {
-  hostedRecordSchema,
-  hostedRecordRef,
-  hostedRecordIndex,
-  type HostedRecordKind,
-} from '../src/hosted-records';
-import { canonicalPayload } from '../src/hosted-source-operation';
+import { hostedRecordValue, hostedRecordIndex, type HostedRecordKind } from '../src/hosted-records';
 import { invariant } from '../src/errors';
 import { digest } from '../src/portable-hash';
 import {
@@ -97,9 +91,7 @@ export async function writeHostedRecord(
   },
 ) {
   await activeProject(ctx, input.projectId, input.actor);
-  const record = hostedRecordSchema.parse(input.record),
-    ref = hostedRecordRef(record),
-    value = canonicalPayload(record);
+  const { record, ref, value } = hostedRecordValue(input.record);
   if (record.kind === 'lane') await materializeLifecycleLane(ctx, input.projectId, record.id);
   const old = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
   if (old) {

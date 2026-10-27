@@ -1,3 +1,4 @@
+import { semanticVerdict, semanticConflictMessage } from '../src/intent-semantic-conflict';
 import { digest } from '../src/portable-hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
 // SPDX-License-Identifier: Apache-2.0
@@ -194,7 +195,24 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
           ? { ciObservedAt: new Date(now).toISOString() }
           : {}),
       };
-      if (!hostedCheckTerminal(run)) {
+      const semantic = semanticVerdict(attempt.semanticPlan ?? run.semanticPlan, run.contractReports ?? {}, {
+        candidateId: attempt.candidate.id,
+        head: attempt.candidate.head,
+        runId: run.id,
+      });
+      if (hostedCheckTerminal(run) && semantic.overBudget) {
+        phase = 'terminal-failed';
+        observation = landingObservation('failed', 'CONTRACT_OVER_BUDGET');
+        error = {
+          code: 'CONTRACT_OVER_BUDGET',
+          message: `Composed contract union measured ${semantic.overBudget.measuredMs} ms; budget is under 90000 ms for Intents ${semantic.overBudget.intents.join(' + ')}.`,
+        };
+      } else if (['passed', 'failed'].includes(run.status) && semantic.conflicts.length) {
+        phase = 'terminal-failed';
+        observation = landingObservation('conflict');
+        state.semanticConflicts = semantic.conflicts;
+        error = { code: 'INTENT_SEMANTIC_CONFLICT', message: semanticConflictMessage(semantic.conflicts) };
+      } else if (!hostedCheckTerminal(run)) {
         phase = 'checking';
         observation = landingObservation('checking');
       } else if (run.status !== 'passed') {

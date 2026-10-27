@@ -4,6 +4,7 @@ import { invariant } from './errors.js';
 
 export type HostedCheckDispatch = Pick<
   HostedCheckRun,
+  | 'semanticPlan'
   | 'id'
   | 'projectId'
   | 'request'
@@ -38,6 +39,7 @@ export interface HostedCheckControlStore {
   control(command: unknown): Promise<ControlReply>;
 }
 const dispatchInput = (run: HostedCheckRun): HostedCheckDispatch => ({
+  ...(run.semanticPlan ? { semanticPlan: run.semanticPlan } : {}),
   id: run.id,
   projectId: run.projectId,
   request: run.request,

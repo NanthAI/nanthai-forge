@@ -1,3 +1,4 @@
+import { semanticPayload } from '../src/semantic-payload';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import { loadCompose, hostedComposeInput, writeComposeState } from './projectHostedComposeStore';
@@ -72,6 +73,7 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
   } else await saveObject(ctx, input.projectId, result.conflicts);
   const candidate = {
     kind: 'candidate' as const,
+    ...(state.semanticPlan ? { semanticPlan: state.semanticPlan } : {}),
     id: state.candidateId,
     version: 0,
     at: operation.firstAttempt.at,
@@ -95,5 +97,5 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
   };
   await finishHostedOperation(ctx, { ...input, receipt: terminal });
   await writeComposeState(ctx, row._id, { ...state, status: 'completed' });
-  return terminal;
+  return JSON.parse(semanticPayload(terminal)) as typeof terminal;
 }

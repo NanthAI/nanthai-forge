@@ -1,3 +1,6 @@
+import { semanticPayload } from '../src/semantic-payload';
+import { mainSemanticMembers, mergeSemanticMembers, semanticBaseSequence } from './projectSemanticContracts';
+import { readHostedRecord } from './projectHostedRecords';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
@@ -84,7 +87,29 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
     },
   });
   invariant(!prepared.replayed, 'SOURCE_UNAVAILABLE', 'The pending source operation lost its composition.');
+  const originalRow = await readHostedRecord(ctx, {
+    ...auth,
+    kind: 'candidate',
+    key: state.request.candidateId,
+  });
+  const originalCandidate = originalRow
+    ? hostedRecordSchema.options[3].parse(JSON.parse(originalRow.value))
+    : null;
+  const peers = await mainSemanticMembers(ctx, auth, pending.main.receiptId);
+  const semanticPlan = mergeSemanticMembers(
+    request.intentId,
+    originalCandidate?.semanticPlan?.members,
+    peers,
+  );
+  if (semanticPlan.members.length) {
+    const ownRow = await readHostedRecord(ctx, { ...auth, kind: 'intent', key: request.intentId });
+    const own = ownRow ? hostedRecordSchema.options[0].parse(JSON.parse(ownRow.value)) : null;
+    semanticPlan.afterSequence =
+      originalCandidate?.semanticPlan?.afterSequence ??
+      (own ? await semanticBaseSequence(ctx, input.projectId, own.base.receiptId) : 0);
+  }
   const stateValue: ComposeState = {
+    ...(semanticPlan.members.length ? { semanticPlan } : {}),
     request,
     main: await saveObject(ctx, input.projectId, { sha256: pending.main.head }),
     inputs: { next: null, pages: request.inputs.pages, count: request.inputs.count },
@@ -96,7 +121,7 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
   await ctx.db.insert('projectHostedComposes', {
     ...auth,
     jobId: prepared.operation.firstAttempt.ids.job!,
-    value: canonicalPayload(stateValue),
+    value: semanticPayload(stateValue),
   });
   return loadCompose(ctx, auth);
 }

@@ -1,3 +1,4 @@
+import { semanticTests } from './intent-semantic-conflict.js';
 import { landingCheckPrefix } from './landing-records.js';
 // SPDX-License-Identifier: Apache-2.0
 import { writeFileSync } from 'node:fs';
@@ -81,6 +82,9 @@ export function writeCheckScope(store: WorkStore, run: CheckRun, directory: stri
       comparison: run.comparisonBase ? 'main' : 'view-base',
       head: run.head,
       paths: paths.sort(),
+      ...(store.select?.('views', run.viewId)?.semanticPlan
+        ? { semanticTests: semanticTests(store.select?.('views', run.viewId)?.semanticPlan) }
+        : {}),
       ...(run.interaction !== undefined ? { interaction: run.interaction } : {}),
       ...(run.recovery ? { recovery: run.recovery } : {}),
       ...(run.optimistic || run.recovery ? { optimistic: true } : {}),

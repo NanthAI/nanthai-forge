@@ -1,3 +1,4 @@
+import { semanticConflictsSchema, semanticPlanSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { landingStallSchema } from './landing-stall.js';
@@ -48,6 +49,7 @@ export const hostedLandingCancelSchema = z
   .strict();
 export const hostedLandingAttemptSchema = z
   .object({
+    semanticPlan: semanticPlanSchema.optional(),
     schema: z.literal(1),
     projectId: z.string().min(1),
     submissionId: z.uuid(),
@@ -109,6 +111,7 @@ export const hostedLandingStateSchema = z
     attemptId: z.uuid(),
     phase: z.enum(['composing', 'queued', 'checking', 'ready', 'terminal-failed', 'landed']),
     preparing: z.literal(true).optional(),
+    semanticConflicts: semanticConflictsSchema.optional(),
     checkProgress: hash.optional(),
     timing: z
       .object({
@@ -137,6 +140,7 @@ export const hostedLandingStateSchema = z
   .strict();
 export const hostedLandingProgressSchema = hostedLandingStateSchema
   .pick({
+    semanticConflicts: true,
     observation: true,
     phase: true,
     error: true,

@@ -69,6 +69,7 @@ export function queueObservation(
     status: entry.status,
     queueStatus: entry.status,
     ...diagnosis,
+    ...(entry.semanticConflicts ? { semanticConflicts: entry.semanticConflicts } : {}),
     ...(['queued', 'checking'].includes(entry.status) && entry.waitingFor
       ? { waitingFor: entry.waitingFor }
       : {}),
@@ -112,6 +113,9 @@ export function projectSubmission(
       ? { waitingFor: result.waitingFor as import('./landing-batch-types.js').LandingWaiting }
       : {}),
     ...(result.queueAhead ? { queueAhead: result.queueAhead as NonNullable<Submission['queueAhead']> } : {}),
+    ...(result.semanticConflicts
+      ? { semanticConflicts: result.semanticConflicts as NonNullable<Submission['semanticConflicts']> }
+      : {}),
     ...(result.diagnosis ? { diagnosis: result.diagnosis as LandingDiagnosisReport } : {}),
   };
 }

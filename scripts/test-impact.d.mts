@@ -19,6 +19,7 @@ export function standardSelection(input: {
   files: Map<string, string>;
   coverage?: CoverageInput | undefined;
   paths?: string[];
+  semanticTests?: string[];
   interaction?: unknown;
   mainCheck?: unknown;
   env?: Record<string, string | undefined>;

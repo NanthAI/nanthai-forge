@@ -1,3 +1,4 @@
+import { semanticPlanSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { intentTestContractSchema } from './intent-test-contract.js';
 import { decisionRecordSchema } from './decision-types.js';
@@ -276,6 +277,7 @@ export const recoveryCheckSchema = z.object({
   tests: z.array(z.string()).optional(),
 });
 export const viewSchema = z.object({
+  semanticPlan: semanticPlanSchema.optional(),
   optimistic: z.boolean().optional(),
   recovery: recoveryCheckSchema.optional(),
   id,

@@ -69,19 +69,33 @@ export type HostedOperation = z.infer<typeof hostedOperationSchema>;
 export type HostedTerminalReceipt = z.infer<typeof hostedTerminalReceiptSchema>;
 
 /** JSON values only: recursively sorted object keys, preserved array order and exact strings. */
-export function canonicalPayload(value: unknown): string {
-  const parsed = z.json().parse(value);
-  function encode(item: z.infer<ReturnType<typeof z.json>>): string {
+export function canonicalPayload(value: unknown, validated = false): string {
+  const parsed: unknown = validated ? value : z.json().parse(value);
+  function encode(item: unknown): string {
     if (Array.isArray(item)) return `[${item.map(encode).join(',')}]`;
-    if (item && typeof item === 'object')
-      return `{${Object.keys(item)
+    if (item && typeof item === 'object') {
+      const prototype = Object.getPrototypeOf(item);
+      if (prototype !== Object.prototype && prototype !== null) return encode(z.json().parse(item));
+      const record = item as Record<string, unknown>;
+      return `{${Object.keys(record)
         .sort()
-        .map(key => `${JSON.stringify(key)}:${encode(item[key]!)}`)
+        .map(key => `${JSON.stringify(key)}:${encode(record[key])}`)
         .join(',')}}`;
-    return JSON.stringify(item);
+    }
+    if (
+      item === null ||
+      typeof item === 'string' ||
+      typeof item === 'boolean' ||
+      (typeof item === 'number' && Number.isFinite(item))
+    )
+      return JSON.stringify(item);
+    // Schema-validated metadata avoids a second deep clone. The encoder still
+    // rejects unsupported nested values rather than dropping or coercing them.
+    return encode(z.json().parse(item));
   }
   return encode(parsed);
 }
+
 export function hostedPayloadHash(payload: unknown, expected: HostedExpectedPins): string {
   return digest(canonicalPayload({ payload, expected: hostedExpectedPinsSchema.parse(expected) }));
 }

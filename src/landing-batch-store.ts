@@ -1,3 +1,4 @@
+import { semanticCompositionPlan } from './native-semantic-plan.js';
 import { prepareLandingRecords } from './landing-records-index.js';
 import { editWork } from './work-edit.js';
 import { recordLandingWaits, landingWait, checkingWait } from './landing-waiting.js';
@@ -581,6 +582,7 @@ export async function composeBatch(work: WorkService, batch: LandingBatch, befor
       inputs,
       dependencies,
       details: 'Cumulative landing prefix; exact-Candidate check required before acceptance.',
+      semanticPlan: semanticCompositionPlan(work.store, { ...candidate, inputs }, batch.base),
     });
     prefixes.push({
       entryIds: [...(prefixes.at(-1)?.entryIds ?? []), entryId],

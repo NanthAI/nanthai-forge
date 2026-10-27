@@ -76,6 +76,7 @@ const selection =
     ? explicit
     : standardSelection({
         coverage,
+        semanticTests: comparison?.semanticTests,
         paths: comparison?.paths,
         optimistic: comparison?.optimistic,
         recovery: comparison?.recovery,

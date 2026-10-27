@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -131,4 +132,41 @@ test('large object transport stays chunked and bundle/source pins are hash check
     withHostedActionsExport(result.export, s.transport, async () => {}),
     code('SOURCE_HASH_MISMATCH'),
   );
+});
+
+test('Actions covers only missing union files in the existing static job', async () => {
+  const covered = 'tests/covered-contract.test.mjs';
+  const s = await actionsFixture([{ path: 'package-lock.json', bytes: 'pinned lock' }]);
+  const primaryIntentId = randomUUID();
+  const members = [primaryIntentId, randomUUID()].map((intentId, index) => ({
+    intentId,
+    outcome: `Synthetic ${index}`,
+    version: 1,
+    tests: [{ path: index ? 'tests/missing-contract.test.mjs' : covered, durationMs: 1 }],
+  }));
+  assert(covered, 'fixture has a selected shard test');
+  const selection = { ...s.recipe.selection, tests: [covered] };
+  const { pin: _pin, ...originalRecipe } = s.recipe;
+  const recipePins = { ...originalRecipe, selection, groups: [[covered]] };
+  const recipe = { ...recipePins, pin: checkPin(recipePins) };
+  const plan = {
+    ...s.input.plan,
+    shardCount: 2,
+    selection: s.put(JSON.stringify(selection)),
+    manifest: s.put(JSON.stringify(recipe)),
+  };
+  const input = { ...s.input, plan, planDigest: checkPin(plan), semanticPlan: { primaryIntentId, members } };
+  const result = await exportHostedActions(input, s.transport);
+  await withHostedActionsExport(result.export, s.transport, async root => {
+    const workflow = await hostedActionsGit(root, [
+      'show',
+      `${result.export.commit}:.github/workflows/forge-check.yml`,
+    ]);
+    const script = `.github/forge-semantic-static-${input.id}.mjs`;
+    assert(workflow.includes(`node ${script}`));
+    assert.equal((workflow.match(/name: forge-static/g) ?? []).length, 1);
+    const command = await hostedActionsGit(root, ['show', `${result.export.commit}:${script}`]);
+    assert(command.includes('tests/missing-contract.test.mjs'));
+    assert(!command.includes(covered), 'already assigned files keep their original shard execution');
+  });
 });

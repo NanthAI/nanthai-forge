@@ -1,3 +1,5 @@
+import { semanticMember, mergeSemanticMembers } from './projectSemanticContracts';
+import type { SemanticPlan } from '../src/intent-semantic-conflict';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -86,6 +88,7 @@ export async function pinLandingAttempt(
     );
   }
   let check = null;
+  let semanticPlan: SemanticPlan | undefined;
   if (candidate.result.status === 'clean') {
     const head = candidate.result.head;
     const registered = await ctx.db
@@ -126,6 +129,21 @@ export async function pinLandingAttempt(
         'EVIDENCE_CHANGED',
         'The selected check belongs to different source or authority pins.',
       );
+      semanticPlan = run.semanticPlan;
+      if (!semanticPlan && candidate.semanticPlan) {
+        const member = await semanticMember(
+          ctx,
+          { projectId: input.projectId, actor: input.actor.id },
+          candidate.intentId,
+        );
+        if (member)
+          semanticPlan = {
+            ...mergeSemanticMembers(candidate.intentId, candidate.semanticPlan.members, [member]),
+            ...(candidate.semanticPlan.afterSequence !== undefined
+              ? { afterSequence: candidate.semanticPlan.afterSequence }
+              : {}),
+          };
+      }
       check = {
         runId: run.id,
         checkId: run.check.id,
@@ -137,6 +155,7 @@ export async function pinLandingAttempt(
   }
   const policy = effectivePolicy(project);
   return hostedLandingAttemptSchema.parse({
+    ...(semanticPlan ? { semanticPlan } : {}),
     schema: 1,
     projectId: input.projectId,
     submissionId: input.submissionId,

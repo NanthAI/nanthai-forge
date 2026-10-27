@@ -1,3 +1,4 @@
+import { semanticPayload } from '../src/semantic-payload';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 // SPDX-License-Identifier: Apache-2.0
@@ -93,7 +94,7 @@ export async function loadLandingAttempt(
 }
 export async function insertLandingAttempt(ctx: MutationCtx, input: HostedLandingAttempt) {
   const attempt = hostedLandingAttemptSchema.parse(input),
-    value = canonicalPayload(attempt);
+    value = semanticPayload(attempt, true);
   const old = await landingAttemptRow(ctx, {
     projectId: attempt.projectId as Id<'hostedProjects'>,
     attemptId: attempt.id,
@@ -197,7 +198,7 @@ export async function writeLanding(
     runId: attempt.check?.runId ?? null,
     phase: state.phase as LandingRow['phase'],
     runnable,
-    value: canonicalPayload(state),
+    value: semanticPayload(state),
   });
   await notifyFinish(ctx, state);
   return state;
@@ -224,6 +225,7 @@ export async function settleLandingOperation(ctx: MutationCtx, state: HostedLand
               submissionId: state.id,
               attemptId: state.attemptId,
               phase: state.phase,
+              ...(state.semanticConflicts ? { semanticConflicts: state.semanticConflicts } : {}),
               observation: state.observation,
               ...(state.acceptance ? { acceptance: state.acceptance } : {}),
             },
@@ -244,7 +246,8 @@ export async function retainLandingProgress(ctx: MutationCtx, state: HostedLandi
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original attempt is unavailable.');
   if (row.progress && hostedLandingProgressSchema.parse(JSON.parse(row.progress)).settled) return;
   await ctx.db.patch(row._id, {
-    progress: canonicalPayload({
+    progress: semanticPayload({
+      ...(state.semanticConflicts ? { semanticConflicts: state.semanticConflicts } : {}),
       observation: replaced ? landingObservation('failed', 'CHANNEL_CHANGED') : state.observation,
       phase: replaced ? 'terminal-failed' : state.phase,
       error: replaced
@@ -273,6 +276,7 @@ export function landingAttemptProgress(row: Doc<'projectHostedLandingAttempts'>,
   // Old rows have no reconstructible evidence. Never borrow a newer attempt's result.
   return row.attemptId === state.attemptId
     ? {
+        ...(state.semanticConflicts ? { semanticConflicts: state.semanticConflicts } : {}),
         observation: state.observation,
         phase: state.phase,
         error: state.error,
@@ -302,7 +306,7 @@ export async function recordLandingObservation(
     projectId: state.projectId as Id<'hostedProjects'>,
     submissionId: state.id,
     version: state.version,
-    value: canonicalPayload({
+    value: semanticPayload({
       submission: state,
       pendingAttempt: pendingAttempt ?? (finish ? JSON.parse(finish.value).pending : null),
     }),

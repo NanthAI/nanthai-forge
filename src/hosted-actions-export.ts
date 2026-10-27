@@ -1,3 +1,4 @@
+import { semanticCheckCommand } from './semantic-check-command.js';
 // SPDX-License-Identifier: Apache-2.0
 import { createReadStream } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises';
@@ -83,6 +84,35 @@ export async function exportHostedActions(
       ['.github/workflows/forge-check.yml', githubActionsWorkflow(input.configuration.runsOn)],
       ['.github/forge-check-plan.json', JSON.stringify(recipe)],
     ]);
+    const semanticCommand = semanticCheckCommand(
+      ['node', 'scripts/forge-check.mjs'],
+      input.semanticPlan,
+      'node',
+      tests,
+    );
+    if (semanticCommand.length > 2) {
+      const occupied = new Set(
+        state.files.filter(file => file.path.startsWith('.github/')).map(file => file.path.split('/')[1]),
+      );
+      const name = `forge-semantic-static-${input.id}`;
+      let suffix = 0,
+        file = `${name}.mjs`;
+      while (occupied.has(file)) file = `${name}-${++suffix}.mjs`;
+      const script = `.github/${file}`;
+      const workflow = generated.get('.github/workflows/forge-check.yml')!;
+      // Existing shards own their selected files; the static job covers only
+      // missing contract files after its configured preparation. No new job/run.
+      const marker = '      - run: node scripts/forge-check.mjs';
+      const position = workflow.lastIndexOf(marker);
+      generated.set(
+        '.github/workflows/forge-check.yml',
+        workflow.slice(0, position) + workflow.slice(position).replace(marker, `      - run: node ${script}`),
+      );
+      generated.set(
+        script,
+        `import {spawn} from 'node:child_process';const command=${JSON.stringify(semanticCommand)};const child=spawn(command[0],command.slice(1),{stdio:'inherit'});child.on('error',()=>{process.exitCode=1});child.on('close',code=>{process.exitCode=code??1});`,
+      );
+    }
     // A generated harness may replace those exact files, as in the local exporter.
     // A file/symlink at an ancestor would make that export unrepresentable.
     invariant(

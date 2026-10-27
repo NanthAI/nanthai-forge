@@ -1,3 +1,5 @@
+import { semanticPayload } from './semantic-payload.js';
+import { semanticPlanSchema } from './intent-semantic-conflict.js';
 import { intentTestContractSchema } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
@@ -79,6 +81,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
     .object({
       ...common,
       kind: z.literal('candidate'),
+      semanticPlan: semanticPlanSchema.optional(),
       intentId: z.uuid(),
       base: main,
       // Immutable page roots preserve ordered inputs/dependencies without a growing document.
@@ -135,15 +138,21 @@ export function hostedRecordIndex(record: HostedRecord) {
       return { parent: record.operationId, status: record.status };
   }
 }
-export function hostedRecordRef(record: HostedRecord): HostedRecordRef {
-  record = hostedRecordSchema.parse(record);
-  return {
+/** Validate and encode once when both the body and its immutable reference are needed. */
+export function hostedRecordValue(input: unknown) {
+  const record = hostedRecordSchema.parse(input),
+    value = semanticPayload(record, true);
+  const ref: HostedRecordRef = {
     kind: record.kind,
     key: record.id,
     version: record.version,
-    digest: digest(canonicalPayload(record)),
-    bytes: new TextEncoder().encode(canonicalPayload(record)).length,
+    digest: digest(value),
+    bytes: new TextEncoder().encode(value).length,
   };
+  return { record, value, ref };
+}
+export function hostedRecordRef(record: HostedRecord): HostedRecordRef {
+  return hostedRecordValue(record).ref;
 }
 
 // Transport windows, never total project/history limits. Callers keep requesting pages.

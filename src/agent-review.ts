@@ -1,3 +1,4 @@
+import { readSemanticConflicts } from './native-semantic-plan.js';
 import { latestTestContract, candidateTestContract } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
 import { handoffSummary } from './agent-handoff-types.js';
@@ -99,7 +100,15 @@ function readReview(
           }
         : {}),
       ...(lane ? { handoff: handoffSummary(readHandoff(store, lane.id).result.handoff) } : {}),
-      ...(view ? { status: view.status, inputs: view.inputs, dependencies: view.dependencies ?? [] } : {}),
+      ...(view
+        ? {
+            status: view.status,
+            inputs: view.inputs,
+            dependencies: view.dependencies ?? [],
+            semanticPlan: view.semanticPlan ?? null,
+            semanticConflicts: readSemanticConflicts(store, view.id),
+          }
+        : {}),
     };
     if (view?.status === 'conflict')
       return {

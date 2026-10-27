@@ -1,3 +1,4 @@
+import { retainSemanticConflict } from './landing-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { batchEntries, lostLandingCheckController } from './landing-check-recovery.js';
 import { admitLandingCheck } from './landing-check-admission.js';
@@ -58,6 +59,7 @@ export async function evaluateSoloAdmission(
     );
     return false;
   }
+  await retainSemanticConflict(work, batch, prefix, run, driver);
   const status = diagnosticStatus(run);
   const full = gateCheck(run) && (!run.checkSelection || run.checkSelection.scope === 'full');
   const details = run.failureSummary ?? (status === 'failed' ? failureSummary(work.store, run) : '');

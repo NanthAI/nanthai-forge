@@ -214,7 +214,25 @@ export function pinnedComparison(env = process.env) {
 
 export const pinnedPaths = (env = process.env) => pinnedComparison(env)?.paths ?? null;
 
-export function standardSelection({
+export function standardSelection(input) {
+  const selection = baseStandardSelection(input);
+  const tests = input.semanticTests ?? [];
+  if (!tests.length) return selection;
+  if (
+    tests.some(
+      test => !safePath(test) || !/^tests\/.+\.test\.[cm]?[jt]s$/.test(test) || !input.files.has(test),
+    )
+  )
+    throw new Error('An Intent contract test is absent from the composed Candidate.');
+  return {
+    ...selection,
+    scope: selection.scope === 'docs' ? 'scoped' : selection.scope,
+    tests: [...new Set([...selection.tests, ...tests])].sort(),
+    reason: `${selection.reason}; composed Intent contract union`,
+  };
+}
+
+function baseStandardSelection({
   paths,
   files,
   mainCheck,

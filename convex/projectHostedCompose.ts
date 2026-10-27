@@ -1,3 +1,10 @@
+import { semanticPayload } from '../src/semantic-payload';
+import {
+  mainSemanticMembers,
+  mergeSemanticMembers,
+  semanticMember,
+  semanticBaseSequence,
+} from './projectSemanticContracts';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
@@ -13,6 +20,7 @@ import {
   writeComposeState,
   hostedComposeInput,
   type ComposeState,
+  composeStateSchema,
 } from './projectHostedComposeStore';
 import {
   composeRequestSchema,
@@ -68,7 +76,10 @@ export const prepare = mutation({
       if (prepared.replayed) {
         const old = await composeRow(ctx, auth);
         invariant(old, 'SOURCE_UNAVAILABLE', 'The original composition is unavailable.');
-        return canonicalPayload({ state: JSON.parse(old.value), terminal: prepared.operation.terminal });
+        return canonicalPayload({
+          state: composeStateSchema.parse(JSON.parse(old.value)),
+          terminal: prepared.operation.terminal,
+        });
       }
       const main = await hostedStartMain(ctx, input.projectId);
       invariant(
@@ -80,7 +91,15 @@ export const prepare = mutation({
       );
       const intent = await readHostedRecord(ctx, { ...auth, kind: 'intent', key: request.intentId });
       invariant(intent, 'NOT_FOUND', 'Hosted Intent not found on this project.');
+      const peers = await mainSemanticMembers(ctx, auth, request.expectedMain.receiptId);
+      const ownIntent = hostedRecordSchema.options[0].parse(JSON.parse(intent.value));
+      const afterSequence = peers.length
+        ? await semanticBaseSequence(ctx, input.projectId, ownIntent.base.receiptId)
+        : 0;
       const state: ComposeState = {
+        ...(peers.length
+          ? { semanticPlan: { primaryIntentId: request.intentId, afterSequence, members: peers } }
+          : {}),
         request,
         main: await saveObject(ctx, input.projectId, { sha256: main.head }),
         inputs: { next: request.inputs.root, pages: 0, count: 0 },
@@ -92,7 +111,7 @@ export const prepare = mutation({
       await ctx.db.insert('projectHostedComposes', {
         ...auth,
         jobId: prepared.operation.firstAttempt.ids.job!,
-        value: canonicalPayload(state),
+        value: semanticPayload(state),
       });
       return canonicalPayload({ state, terminal: null });
     } catch (error) {
@@ -140,6 +159,7 @@ export const stage = mutation({
         'Stage the next original compose page.',
       );
       await saveObject(ctx, input.projectId, pin);
+      const contractMembers = new Map<string, Awaited<ReturnType<typeof semanticMember>>>();
       for (const value of page.entries) {
         const entry = (input.kind === 'inputs' ? composeLaneSchema : composeDependencySchema).parse(value);
         const key = 'laneId' in entry ? entry.laneId : entry.candidateId;
@@ -178,6 +198,17 @@ export const stage = mutation({
             'WORK_STALE',
             'Select the exact clean dependency Candidate.',
           );
+          if (!contractMembers.has(candidate.intentId))
+            contractMembers.set(candidate.intentId, await semanticMember(ctx, auth, candidate.intentId));
+          const member = contractMembers.get(candidate.intentId);
+          const semantic = mergeSemanticMembers(
+            state.request.intentId,
+            state.semanticPlan?.members,
+            candidate.semanticPlan?.members,
+            member ? [member] : [],
+          );
+          if (semantic.members.length)
+            state.semanticPlan = { ...semantic, afterSequence: state.semanticPlan?.afterSequence ?? 0 };
         }
         const registered = await ctx.db
           .query('projectHostedStates')

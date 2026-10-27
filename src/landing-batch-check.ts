@@ -1,3 +1,4 @@
+import { retainSemanticConflict } from './landing-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { batchEntries, lostLandingCheckController } from './landing-check-recovery.js';
 import { reserveBoundaryConfirmation } from './landing-confirmation.js';
@@ -99,6 +100,8 @@ export async function evaluateBatch(
       validatePrefixRun(work, batch, prefix, run);
       // Recovery runs on the next admission, after checking for a passed twin.
       if (lostLandingCheckController(run, batchEntries(work, batch))) return 'queued';
+      const semanticFailure = await retainSemanticConflict(work, batch, prefix, run, driver);
+      if (semanticFailure) return 'failed';
       // A sole failed Candidate has no proper prefix to diagnose or accept.
       // Publish its exact evidence and terminal entry together, freeing the
       // queue before unrelated acceptance/lifecycle work can delay it.

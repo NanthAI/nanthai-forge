@@ -1,3 +1,5 @@
+import { semanticPayload } from '../src/semantic-payload';
+import { mergeSemanticMembers, semanticMember } from './projectSemanticContracts';
 // SPDX-License-Identifier: Apache-2.0
 import { notifyActionsProgress } from './projectHostedActionsWake';
 import { z } from 'zod';
@@ -181,7 +183,14 @@ export async function enqueueHostedCheck(
     'Trusted hosted check callback configuration is unavailable.',
   );
   const id = prepared.operation.firstAttempt.ids.run!;
+  const member = await semanticMember(ctx, { projectId: input.projectId, actor }, candidate.intentId);
+  const semantic = member
+    ? mergeSemanticMembers(candidate.intentId, candidate.semanticPlan?.members, [member])
+    : undefined;
+  if (semantic && candidate.semanticPlan?.afterSequence !== undefined)
+    semantic.afterSequence = candidate.semanticPlan.afterSequence;
   const run = hostedCheckRunSchema.parse({
+    ...(semantic && semantic.members.length > 1 ? { semanticPlan: semantic } : {}),
     schema: 1,
     id,
     projectId: input.projectId,
@@ -226,7 +235,7 @@ export async function enqueueHostedCheck(
     candidateId: request.candidateId,
     ...(runner.provider === 'mac' ? { machineId: runner.machineId } : {}),
     status: run.status,
-    value: canonicalPayload(run),
+    value: semanticPayload(run, true),
   });
   await watchMacLease(ctx, run);
   return run;

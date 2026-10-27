@@ -1,3 +1,4 @@
+import { semanticReportsSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { hmac } from '@noble/hashes/hmac.js';
@@ -48,6 +49,7 @@ export const hostedCheckCallbackSchema = z
       z
         .object({
           kind: z.literal('complete'),
+          contractReports: semanticReportsSchema.optional(),
           status: z.enum(['passed', 'failed', 'cancelled', 'interrupted', 'runner-unavailable', 'unknown']),
           exitCode: z.number().int().nullable(),
           output: checkObject.nullable(),

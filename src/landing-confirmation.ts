@@ -20,7 +20,14 @@ export async function reserveBoundaryConfirmation(
   const full = batch.prefixes.at(-1)!;
   if (
     failingViewId !== full.viewId ||
-    full.entryIds.some(id => work.store.select('landingEntries', id)?.status === 'cancelled')
+    full.entryIds.some(id => {
+      const entry = work.store.select('landingEntries', id);
+      return (
+        entry?.status === 'cancelled' ||
+        entry?.semanticConflicts?.length ||
+        entry?.error?.code === 'CONTRACT_OVER_BUDGET'
+      );
+    })
   )
     return false;
   const failed = work.store.select('runs', full.runId);

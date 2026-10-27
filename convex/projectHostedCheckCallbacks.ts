@@ -158,6 +158,7 @@ export async function receiveHostedCheckCallback(
       run.exitCode = result.exitCode;
       run.output = result.output;
       run.cost = result.cost;
+      if (result.contractReports) run.contractReports = result.contractReports;
       if (machine)
         run.macEvidence = {
           provider: 'mac',

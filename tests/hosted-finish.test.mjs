@@ -651,3 +651,100 @@ test('a prepared but uncommitted metadata binding reconciles to the verified pla
   assert.equal((await f.current(state.id)).submission.phase, 'landed');
   assert.equal(f.metrics.sourceJobs, 1);
 });
+
+test('a main-race recompose retains newly accepted peer contracts in its named child check', async t => {
+  const f = await finishFixture(t);
+  const ownPath = 'tests/own-contract.test.mjs',
+    peerPath = 'tests/peer-contract.test.mjs';
+  const makeContract = (candidateId, head, path) => ({
+    version: 1,
+    operationId: randomUUID(),
+    request: 'a'.repeat(64),
+    candidateId,
+    measuredOn: head,
+    runId: randomUUID(),
+    at: '2026-01-01T00:00:00.000Z',
+    proposedTests: [path],
+    tests: [{ path, durationMs: 1 }],
+    totalMs: 1,
+  });
+  await f.tx(
+    'finishSemanticOwn',
+    {
+      _handler: async ctx => {
+        const row = await records.readHostedRecord(ctx, { ...f.auth, kind: 'intent', key: f.c.intentId });
+        const intent = JSON.parse(row.value);
+        return records.writeHostedRecord(ctx, {
+          ...f.auth,
+          expectedVersion: intent.version,
+          record: {
+            ...intent,
+            version: intent.version + 1,
+            testContracts: [makeContract(f.candidate.id, f.candidate.result.head, ownPath)],
+          },
+        });
+      },
+    },
+    {},
+  );
+  const { state } = await begin(f);
+  const main = f.moveMain();
+  const peerIntentId = randomUUID(),
+    peerCandidateId = randomUUID();
+  await f.tx(
+    'finishSemanticPeer',
+    {
+      _handler: async ctx => {
+        await records.writeHostedRecord(ctx, {
+          ...f.auth,
+          expectedVersion: null,
+          record: {
+            kind: 'intent',
+            id: peerIntentId,
+            version: 0,
+            at: '2026-01-01T00:00:00.000Z',
+            outcome: 'Accepted peer contract',
+            constraints: '',
+            creatorAccountId: 'owner',
+            assigneeAccountIds: [],
+            base: f.candidate.base,
+            status: 'active',
+            testContracts: [makeContract(peerCandidateId, main.head, peerPath)],
+          },
+        });
+        await records.writeHostedRecord(ctx, {
+          ...f.auth,
+          expectedVersion: null,
+          record: {
+            ...f.candidate,
+            id: peerCandidateId,
+            intentId: peerIntentId,
+            result: { status: 'clean', head: main.head },
+          },
+        });
+        await ctx.db.insert('projectHostedAcceptances', {
+          projectId: f.projectId,
+          receiptId: main.receipt.id,
+          submissionId: randomUUID(),
+          attemptId: randomUUID(),
+          sequence: 1,
+          value: JSON.stringify({ candidate: { id: peerCandidateId } }),
+        });
+      },
+    },
+    {},
+  );
+  await complete(f);
+  const runs = [...f.tables.projectHostedCheckRuns.values()].map(row => JSON.parse(row.value));
+  assert.equal(runs.length, 2);
+  const child = runs.find(run => run.request.candidateId !== f.candidate.id);
+  assert.deepEqual(
+    new Set(child.semanticPlan.members.map(member => member.intentId)),
+    new Set([f.c.intentId, peerIntentId]),
+  );
+  assert.equal(
+    child.semanticPlan.members.find(member => member.intentId === peerIntentId).acceptedSequence,
+    1,
+  );
+  assert.equal((await f.current(state.id)).submission.observation.pendingReason, 'checking');
+});

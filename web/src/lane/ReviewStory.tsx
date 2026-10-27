@@ -44,6 +44,29 @@ export function ReviewStory({
   return (
     <>
       <TestContract contract={data?.contract} />
+      {Boolean(data?.semanticConflicts?.length) && (
+        <Panel title="Intent semantic conflict" count={data!.semanticConflicts.length}>
+          {data!.semanticConflicts.map(conflict => (
+            <div key={`${conflict.runId}:${conflict.intents.map(intent => intent.intentId).join(':')}`}>
+              <p className="fx-panel-note">
+                {conflict.intents.map((intent, index) => (
+                  <span key={intent.intentId}>
+                    {index ? ' + ' : ''}
+                    {intent.outcome} (<code>{intent.intentId}</code>)
+                  </span>
+                ))}
+              </p>
+              <ul className="fx-test-contract-tests">
+                {conflict.failedTests.map(path => (
+                  <li key={path}>
+                    <code>{path}</code> failed together
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </Panel>
+      )}
       {(notes.length > 0 || Boolean(overlaps?.size) || protectedPaths.length > 0) && (
         <Panel title="What this does and why" actions={<a href={intentHref}>Open Intent</a>}>
           {notes.length > 0 && (

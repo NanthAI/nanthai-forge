@@ -1,3 +1,4 @@
+import { semanticCheckCommand } from './semantic-check-command.js';
 // SPDX-License-Identifier: Apache-2.0
 import { nativeQuarantine } from './check-native-quarantine.js';
 import { runDetails } from './work-detail-store.js';
@@ -617,7 +618,12 @@ async function launchLocal(
             }
             warnings = [...new Set([...warnings, ...diskGuard(store.root)])];
             // Serialize the last cancellation check with spawn and its running journal.
-            child = spawn(measured?.executable ?? run.check.executable, measured?.args ?? run.check.args, {
+            const command = semanticCheckCommand(
+              [measured?.executable ?? run.check.executable, ...(measured?.args ?? run.check.args)],
+              store.select('views', run.viewId)?.semanticPlan,
+              process.execPath,
+            );
+            child = spawn(command[0]!, command.slice(1), {
               cwd: workspace,
               env: processEnvironment.env,
               shell: false,

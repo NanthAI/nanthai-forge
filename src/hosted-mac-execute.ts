@@ -1,3 +1,6 @@
+import { semanticCheckCommand } from './semantic-check-command.js';
+import { ContractTimingReader } from './contract-test-timings.js';
+import { semanticTests } from './intent-semantic-conflict.js';
 import { localMacLogFiles } from './check-local-log-files.js';
 import { compactProviderOutput } from './check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -67,11 +70,20 @@ export async function executeHostedMacCheck(
       signal.throwIfAborted();
       return pin;
     };
-    const selection = await publish({ scope: 'full', tests: [] });
+    const command = semanticCheckCommand(
+      [run.check.executable, ...run.check.args],
+      run.semanticPlan,
+      process.execPath,
+    );
+    const selection = await publish({
+      scope: 'full',
+      tests: [],
+      semanticTests: semanticTests(run.semanticPlan),
+    });
     const manifest = await publish({
       head: run.request.expectedHead,
       definition: run.check.definition,
-      command: [run.check.executable, ...run.check.args],
+      command,
       lockfile,
       selection,
     });
@@ -162,7 +174,8 @@ export async function executeHostedMacCheck(
             if (!outputRoot || reply.root.revision > outputRoot.revision) outputRoot = reply.root;
           },
         };
-        const child = spawn(run.check.executable, run.check.args, {
+        const reports: ContractTimingReader['reports'] = {};
+        const child = spawn(command[0]!, command.slice(1), {
           cwd: checkout,
           env: runtime.env,
           detached: process.platform !== 'win32',
@@ -186,12 +199,22 @@ export async function executeHostedMacCheck(
         signal.addEventListener('abort', kill, { once: true });
         if (signal.aborted) kill();
         try {
+          const observe = async function* (stream: AsyncIterable<Uint8Array>) {
+            const contractReader = new ContractTimingReader();
+            const decoder = new TextDecoder();
+            for await (const bytes of stream) {
+              contractReader.accept(decoder.decode(bytes, { stream: true }));
+              yield bytes;
+            }
+            contractReader.accept(decoder.decode());
+            Object.assign(reports, contractReader.reports);
+          };
           const stream = (name: 'stdout' | 'stderr') => {
             let summary = '';
             return collectHostedOutput(
               run.checkLogs?.uploadLocal
-                ? localLogs.stream(child[name]!, name)
-                : compactProviderOutput(localLogs.stream(child[name]!, name), value => {
+                ? observe(localLogs.stream(child[name]!, name))
+                : compactProviderOutput(observe(localLogs.stream(child[name]!, name)), value => {
                     summary = value;
                   }),
               {
@@ -259,7 +282,14 @@ export async function executeHostedMacCheck(
             kind: 'shard',
             shard: { index: 0, attempt: run.fence, executionId, status, exitCode, output: null },
           });
-          await callback({ kind: 'complete', status, exitCode, output: null, cost: { status: 'unknown' } });
+          await callback({
+            kind: 'complete',
+            status,
+            exitCode,
+            output: null,
+            cost: { status: 'unknown' },
+            contractReports: reports,
+          });
           if (outputRoot) await publisher.final(outputRoot);
         } finally {
           localLogs.complete();

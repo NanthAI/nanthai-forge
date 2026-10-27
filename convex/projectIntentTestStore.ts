@@ -1,3 +1,4 @@
+import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { report } from './errors';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
@@ -139,7 +140,19 @@ export const review = query({
       const contract = input.candidateId
         ? candidateTestContract(intent, input.candidateId, input.head)
         : latestTestContract(intent);
-      return canonicalPayload({ contract });
+      const landing = input.candidateId
+        ? await ctx.db
+            .query('projectHostedLandingRequests')
+            .withIndex('by_project_and_candidate_and_sequence', q =>
+              q.eq('projectId', input.projectId).eq('candidateId', input.candidateId!),
+            )
+            .order('desc')
+            .take(1)
+        : [];
+      const conflicts = landing[0]
+        ? (hostedLandingStateSchema.parse(JSON.parse(landing[0].value)).semanticConflicts ?? [])
+        : [];
+      return canonicalPayload({ contract, semanticConflicts: conflicts });
     } catch (error) {
       return report(error);
     }

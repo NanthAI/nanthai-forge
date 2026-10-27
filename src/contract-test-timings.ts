@@ -4,6 +4,7 @@
 export class ContractTimingReader {
   private pending = '';
   private dropping = false;
+  readonly reports: Record<string, { durationMs: number; failed: boolean }> = {};
   readonly timings: Record<string, number> = {};
   accept(text: string) {
     const lines = (this.pending + text).split('\n');
@@ -17,15 +18,25 @@ export class ContractTimingReader {
       this.dropping = true;
     }
   }
-  report(report: { file?: unknown; complete?: unknown; durationMs?: unknown }) {
+  report(report: { file?: unknown; complete?: unknown; durationMs?: unknown; results?: unknown }) {
     if (
       typeof report?.file === 'string' &&
       report.complete === true &&
       typeof report.durationMs === 'number' &&
       Number.isFinite(report.durationMs) &&
       report.durationMs > 0
-    )
+    ) {
       this.timings[report.file] = report.durationMs;
+      if (
+        Array.isArray(report.results) &&
+        report.results.length &&
+        report.results.every(item => typeof item?.passed === 'boolean')
+      )
+        this.reports[report.file] = {
+          durationMs: report.durationMs,
+          failed: report.results.some(item => !item.passed),
+        };
+    }
   }
   private line(line: string) {
     const clean = line.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z\s+/, '').trim();

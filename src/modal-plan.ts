@@ -1,3 +1,4 @@
+import { semanticCheckCommand } from './semantic-check-command.js';
 // SPDX-License-Identifier: Apache-2.0
 import { runDetails } from './work-detail-store.js';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -44,7 +45,7 @@ export async function modalPlan(
     (run.check.executable === process.execPath || /(?:^|\/)node$/.test(run.check.executable));
   const files = new Map(state.files.map(file => [file.path, source.object(file.blob).toString('utf8')]));
   const { standardSelection, selectTests } = await import('../scripts/test-impact.mjs');
-  let comparison: { paths?: string[]; base?: string } = {};
+  let comparison: { paths?: string[]; base?: string; semanticTests?: string[] } = {};
   try {
     const observed = JSON.parse(readFileSync(writeCheckScope(store, run, path), 'utf8'));
     // Match forge-check's pinnedComparison contract; view-base comparisons are not scoped.
@@ -96,12 +97,15 @@ export async function modalPlan(
     standard,
     artifacts: run.check.artifactPaths ?? [],
     interaction: run.interaction !== undefined,
-    command: [
-      run.check.executable === process.execPath || /(?:^|\/)node$/.test(run.check.executable)
-        ? 'node'
-        : run.check.executable,
-      ...run.check.args,
-    ],
+    command: semanticCheckCommand(
+      [
+        run.check.executable === process.execPath || /(?:^|\/)node$/.test(run.check.executable)
+          ? 'node'
+          : run.check.executable,
+        ...run.check.args,
+      ],
+      standard ? undefined : store.select('views', run.viewId)?.semanticPlan,
+    ),
   };
   const plan = {
     ...pins,

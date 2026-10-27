@@ -1,3 +1,4 @@
+import type { SemanticConflict } from '../../../src/intent-semantic-conflict';
 import { readTestContract } from './test-contract-api';
 import { candidateTestContract, type IntentTestContract } from '../../../src/intent-test-contract';
 import { OwnerDecisionsDisclosure } from '../decisions/OwnerDecisionsPanel';
@@ -265,6 +266,10 @@ export function HostedReview({
                 story
                   ? {
                       ...story,
+                      semanticConflicts: canonicalContract
+                        ? ((JSON.parse(canonicalContract) as { semanticConflicts?: SemanticConflict[] })
+                            .semanticConflicts ?? [])
+                        : story.semanticConflicts,
                       contract: canonicalContract
                         ? (JSON.parse(canonicalContract) as { contract: IntentTestContract | null }).contract
                         : (candidateTestContract(intent, view.id, view.head) ?? story.contract),

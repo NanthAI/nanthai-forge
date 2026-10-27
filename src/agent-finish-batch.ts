@@ -41,7 +41,12 @@ export async function finishQueuedBatch(
   const infra = infraRun && pendingActionsInfra(infraRun) && entry.status !== 'cancelled';
   const pending = !!infra || ['queued', 'checking', 'awaiting-review'].includes(entry.status);
   return {
-    phase: entry.status === 'conflict' ? 'compose' : entry.status === 'accepted' ? 'accept' : 'check',
+    phase:
+      entry.status === 'conflict' && !entry.semanticConflicts?.length
+        ? 'compose'
+        : entry.status === 'accepted'
+          ? 'accept'
+          : 'check',
     status: infra
       ? 'pending-infra'
       : entry.status === 'awaiting-review'
@@ -57,6 +62,7 @@ export async function finishQueuedBatch(
     complete: entry.status === 'accepted',
     batchId: entry.batchId,
     ...landingDiagnosis(store, entry),
+    ...(entry.semanticConflicts ? { semanticConflicts: entry.semanticConflicts } : {}),
     ...(entry.previewDiagnostic
       ? { code: 'INTEGRATION_PREVIEW_EXCLUDED', preview: entry.previewDiagnostic }
       : {}),

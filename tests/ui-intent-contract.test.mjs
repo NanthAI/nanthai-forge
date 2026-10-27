@@ -62,3 +62,34 @@ test('Review and Intent data expose the same latest version; contract-less revie
     /Proving tests/,
   );
 });
+
+test('review names both Intents and the failing tests without requiring another user step', () => {
+  const semanticConflicts = [
+    {
+      runId: randomUUID(),
+      intents: [
+        { intentId: 'own-id', outcome: 'Own change' },
+        { intentId: 'peer-id', outcome: 'Peer change' },
+      ],
+      failedTests: ['tests/prove.test.mjs'],
+    },
+  ];
+  const props = {
+    data: { files: { items: [], total: 0 }, contract: null, semanticConflicts },
+    outcome: 'Own change',
+    intentHref: '/intent',
+    laneName: () => 'Lane',
+    children: () => null,
+  };
+  const html = renderToStaticMarkup(h(ReviewStory, props));
+  for (const text of [
+    'Intent semantic conflict',
+    'Own change',
+    'Peer change',
+    'own-id',
+    'peer-id',
+    'tests/prove.test.mjs',
+  ])
+    assert(html.includes(text), text);
+  assert.doesNotMatch(html, /<input|<form|Confirm|Acknowledge/);
+});

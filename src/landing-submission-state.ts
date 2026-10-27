@@ -27,6 +27,7 @@ export type Submission = {
   complete: boolean;
   queueAhead?: import('./queue-ahead-preview.js').QueueAheadPreview;
   diagnosis?: LandingDiagnosisReport;
+  semanticConflicts?: import('./intent-semantic-conflict.js').SemanticConflict[];
   stall?: import('./landing-stall.js').LandingStall;
   message?: string;
   waitingFor?: import('./landing-batch-types.js').LandingWaiting;

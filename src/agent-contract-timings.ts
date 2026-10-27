@@ -6,7 +6,12 @@ import { ContractTimingReader } from './contract-test-timings.js';
 import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 /** Run metadata goes through Work's selected-record accessor, never raw history fields. */
-export async function candidateTimings(store: WorkStore, runId: string, candidateId: string, head: string) {
+export async function candidateContractReports(
+  store: WorkStore,
+  runId: string,
+  candidateId: string,
+  head: string,
+) {
   const run = store.select('runs', runId);
   invariant(
     run && run.viewId === candidateId && run.head === head && ['passed', 'failed'].includes(run.status),
@@ -24,11 +29,13 @@ export async function candidateTimings(store: WorkStore, runId: string, candidat
     : [join(directory, 'stdout.log')];
   for (const line of checkEvidenceLines(directory, true)) reader.accept(line + '\n');
   const timings: Record<string, number> = {};
+  const reports: ContractTimingReader['reports'] = {};
   for (const log of logs) {
     if (!existsSync(log)) continue;
     const parser = new ContractTimingReader();
     for await (const chunk of createReadStream(log, { encoding: 'utf8' })) parser.accept(chunk as string);
     Object.assign(timings, parser.timings);
+    Object.assign(reports, parser.reports);
   }
   const modal = join(directory, 'modal-shard-logs.json');
   if (existsSync(modal)) {
@@ -39,5 +46,9 @@ export async function candidateTimings(store: WorkStore, runId: string, candidat
     for (const execution of executions.sort((a, b) => a.attempt - b.attempt))
       for (const report of Object.values(execution.tests ?? {})) reader.report(report);
   }
-  return { ...timings, ...reader.timings };
+  return { timings: { ...timings, ...reader.timings }, reports: { ...reports, ...reader.reports } };
+}
+
+export async function candidateTimings(store: WorkStore, runId: string, candidateId: string, head: string) {
+  return (await candidateContractReports(store, runId, candidateId, head)).timings;
 }

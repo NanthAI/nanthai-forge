@@ -1,3 +1,4 @@
+import { semanticPlanSchema, semanticReportsSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { checkLogsSchema } from './check-log-policy.js';
@@ -155,6 +156,8 @@ export const hostedCheckRunSchema = z
       .strict(),
     check: checkSchema.strict(),
     configuration: hostedCheckRunnerSchema,
+    semanticPlan: semanticPlanSchema.optional(),
+    contractReports: semanticReportsSchema.optional(),
     checkLogs: checkLogsSchema.optional(),
     keyId: z.string().regex(/^[A-Z0-9_]+$/),
     dispatchKey: checkHash,

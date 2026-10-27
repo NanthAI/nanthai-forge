@@ -39,6 +39,14 @@ export function viewReadModels(data: WorkData, selection?: number) {
     latest = new Map<string, string>();
   const family = (view: WorkView) => JSON.stringify([view.intentId, view.inputs.map(i => i.laneId).sort()]);
   for (const view of data.views) latest.set(family(view), view.id);
+  const semantic = new Map<string, import('./intent-semantic-conflict.js').SemanticConflict[]>();
+  for (const entry of data.landingEntries ?? [])
+    if (entry.status === 'conflict')
+      for (const conflict of entry.semanticConflicts ?? []) {
+        const records = semantic.get(conflict.candidateId) ?? [];
+        records.push(conflict);
+        semantic.set(conflict.candidateId, records);
+      }
   const selected = selection === undefined ? data.views : data.views.slice(selection, selection + 1);
   return selected.map(view => {
     const accepted = [
@@ -83,13 +91,15 @@ export function viewReadModels(data: WorkData, selection?: number) {
         ? ('accepted' as const)
         : supersededBy !== view.id
           ? ('superseded' as const)
-          : view.status === 'conflict'
+          : view.status === 'conflict' || semantic.has(view.id)
             ? ('conflict' as const)
             : ('ready' as const),
       sourceStatus: view.status,
       supersededBy: supersededBy === view.id ? null : supersededBy,
       accepted,
       contract: candidateTestContract(intent, view.id, view.head),
+      semanticPlan: view.semanticPlan ?? null,
+      semanticConflicts: semantic.get(view.id) ?? [],
       why: { intentId: view.intentId, outcome: intent?.outcome ?? null },
       whyIntentIds: viewWhyIntents(data, view),
     };

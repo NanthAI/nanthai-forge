@@ -1,3 +1,4 @@
+import { ContractTimingReader } from './contract-test-timings.js';
 // SPDX-License-Identifier: Apache-2.0
 import { digest } from './hash.js';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
@@ -140,9 +141,11 @@ export async function reconcileHostedActions(
       await save({ kind: 'wait', terminal: true });
       return { run, nextAt: m.nextAt };
     }
+    const contractReader = new ContractTimingReader();
     let failed = ['failure', 'action_required'].includes(observed.conclusion ?? '');
     let allPassed = latest.size === run.plan!.shardCount;
     for (const [index, job] of latest) {
+      let retainedLog: string | undefined;
       let status: 'running' | 'passed' | 'failed' | 'cancelled' | 'interrupted' = 'running';
       if (job.status === 'completed')
         status =
@@ -167,6 +170,7 @@ export async function reconcileHostedActions(
         } catch (error) {
           if (!(error instanceof ActionsApiError)) throw error;
         }
+        retainedLog = text;
         const evidence = actionsJobLogEvidence(text, recipe.groups[index] ?? []);
         status =
           evidence.status === 'failed'
@@ -176,6 +180,10 @@ export async function reconcileHostedActions(
                 [null, 'success'].includes(job.conclusion)
               ? 'passed'
               : 'interrupted';
+      }
+      if (terminal && run.semanticPlan && remote.log) {
+        const text = retainedLog ?? (await remote.log(job.id, m.repository));
+        contractReader.accept(text.endsWith('\n') ? text : text + '\n');
       }
       failed ||= status === 'failed';
       allPassed &&= status === 'passed';
@@ -205,6 +213,7 @@ export async function reconcileHostedActions(
               : 'interrupted';
       await emit({
         kind: 'complete',
+        ...(run.semanticPlan ? { contractReports: contractReader.reports } : {}),
         status,
         exitCode: status === 'passed' ? 0 : status === 'failed' ? 1 : null,
         output: null,

@@ -1279,9 +1279,33 @@ contract version; earlier versions and their receipts remain available. CLI and
 MCP receipts and the Intent/Review pages show the contract and exact measurement
 pins. A later Candidate does not inherit measurements from an earlier head.
 
-Contracts currently supply metadata only. Both contract-bearing and contract-less
-Intents retain the existing acceptance policy and complete check gate. This slice
-does not authorize contract-only acceptance.
+Both contract-bearing and contract-less Intents retain the existing acceptance
+policy and complete check gate. Contracts do not authorize contract-only acceptance.
+
+A clean composition with another accepted or included queued Intent also checks
+both declared contracts on the exact composed Candidate. The union deduplicates
+test files and augments the existing selection; complete reports from that check
+satisfy it without another run. Native custom commands and hosted Mac checks run
+uncovered files in the same workspace after the configured command. Actions keeps
+files already assigned to shards there and covers missing files in its existing
+static job. Original run identities and content-keyed passing-check reuse remain
+in place.
+
+A failing covered union records `INTENT_SEMANTIC_CONFLICT`, naming both Intent
+IDs and outcomes, contract versions, Candidate/head, run and failed tests. Landing
+status, agent responses and review reads retain that record. Source composition
+remains clean: the semantic conflict is separate from a text conflict. A clean
+union raises nothing. Incomplete reports and failures outside the union retain
+ordinary check outcomes; they do not establish a semantic conflict. A contract-less
+pair keeps the existing behavior. This is observed pair failure, not proof that
+either Intent fails alone or that the pair is minimal.
+
+The B2.1 budget also applies per pair: unique measured test-file time must stay
+under 90,000 ms. An over-budget completed union returns
+`CONTRACT_OVER_BUDGET` with its measured time and both Intent IDs. Earlier declaration
+timings never refuse a new composition before it runs. Conflict records
+use existing landing writes; composition carries selected contract metadata, and
+idle queues add no function calls or scheduled work.
 
 ## Queue-ahead conflict advice
 

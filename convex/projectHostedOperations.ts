@@ -1,3 +1,4 @@
+import { semanticPayload } from '../src/semantic-payload';
 // SPDX-License-Identifier: Apache-2.0
 import { requireSourceAuthority, type SourceAuthority } from '../src/hosted-source-authority';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -11,6 +12,7 @@ import {
   canonicalPayload,
   hostedOperationRequestSchema,
   hostedOperationSchema,
+  hostedTerminalReceiptSchema,
   type HostedTerminalReceipt,
 } from '../src/hosted-source-operation';
 
@@ -85,9 +87,9 @@ export async function finishHostedOperation(
   invariant(row, 'NOT_FOUND', 'Prepare the original operation before completing it.');
   const operation = completeHostedOperation(
     hostedOperationSchema.parse(JSON.parse(row.value)),
-    input.receipt,
+    hostedTerminalReceiptSchema.parse(JSON.parse(semanticPayload(input.receipt))),
   );
-  const value = canonicalPayload(operation);
+  const value = semanticPayload(operation);
   if (value !== row.value) await ctx.db.patch(row._id, { value });
   return operation;
 }

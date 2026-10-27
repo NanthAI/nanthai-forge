@@ -1437,6 +1437,30 @@ protected-path policy therefore uses its existing unavailable-coverage review ru
 never caller-supplied path claims. No new policy, UI step, provider call or cutover
 is introduced. The API is exercised with local metadata/provider/source-worker fakes.
 
+### Composed Intent contracts
+
+Native landing prefix Views retain the declared contracts of their selected
+Intents and accepted changes since the saved base. Accepted receipts are read in
+100-record pages, with selected Lane/Candidate metadata deduplicated. Hosted
+composition carries the declarations with canonical Candidate metadata; the
+current receipt, Candidate and Intent are selected directly rather than scanning
+Intent or acceptance history. Accepted sequence pins distinguish later peer
+changes from contracts already present when an Intent began. Dependency staging
+merges the declarations in its existing metadata pages. Hosted storage interns
+shared test paths in a per-plan dictionary, retaining exact per-contract membership
+and measurements; readers normalize both plain and indexed encodings. This bounds
+repeated path overhead without reading each Intent again or changing source bytes.
+
+The existing exact check executes the unique test union, retaining complete
+per-file durations and outcomes. Missing files are executed in the same owned
+check rather than reserving another run. Q3 reuse observes the original complete
+reports and never dispatches another semantic check. Hosted collectors sign the
+compact reports with the existing exact source/plan callback. Landing settlement
+records a covered failing union as a named Intent semantic conflict in its existing
+write; no conflict table, observer-driven execution or idle poller is introduced.
+The source Candidate remains clean. Review/status distinguish semantic conflicts,
+ordinary unrelated failures and measured per-pair budget refusals.
+
 ### Hosted finish orchestration
 
 `projectHostedLanding:enqueue` accepts an optional `finish` selection naming the
