@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { passingCheckExit } from './check-backend.js';
 import { runDetails } from './work-detail-store.js';
 import { gateCheck } from './check-reuse-key.js';
 import { validateReusedCheck } from './check-reuse-evidence.js';
@@ -46,7 +47,7 @@ export function validatePassingPrefix(work: WorkService, batch: LandingBatch, pr
     run.status === 'passed' &&
       gateCheck(run) &&
       !!run.endedAt &&
-      run.exitCode === 0 &&
+      passingCheckExit(run) &&
       !run.signal &&
       !run.cancelRequested &&
       work.store.select('checks', run.check.id)?.definition === run.check.definition,

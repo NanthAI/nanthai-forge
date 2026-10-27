@@ -103,6 +103,43 @@ A release export (source only, empty Work) is much narrower and is not a backup 
 
 An older CLI refuses an owner it cannot preserve. Upgrade by installing the new package in a separate directory and pointing it at a backed-up owner. To roll back, restore the backup with the old tools. Never let an older writer rewrite an upgraded owner.
 
+### Flake evidence and quarantine
+
+Native checks, GitHub Actions/BYOCI shards and Modal use the same test verdict
+assessment. The existing pinned impact selector identifies files affected by the
+Candidate. A shard retries only complete, named failures in unrelated files once,
+inside the same job with the same Candidate bytes. Fail then pass records a
+`flake` with `recovery: unchanged-source`; two supported flakes within seven days
+quarantine the exact `file :: test name`. A persistent failure stays `failed`.
+Affected tests and unknown impact are never eligible for retry or quarantine.
+
+Quarantined tests continue to run. A check passes with quarantine only when all
+remaining failures are named, quarantined and unrelated, and every non-test step
+passed. Run details name each ignored test; landing receipts retain
+`backend.verdict: quarantined` and `backend.ignoredTests`, alongside the actual
+exit code. Test evidence pins the Candidate head and both attempt identities.
+Reconciliation reuses the recorded assessment instead of changing an old verdict.
+Build, typecheck, lint, format, documentation and package smoke failures always
+block. More than ten quarantined tests fails the assessment with “Too many flaky
+tests”.
+
+`status` with `detail: true` reports the current `quarantine.needsYou` list;
+existing run records retain quarantine snapshots and verdict evidence. Each new
+quarantine captures a friction item for a fix slice. Twenty consecutive passing
+observations release the test automatically; the existing `fixQuarantinedTest`
+operation explicitly releases one exact test and is safe to replay. Later flakes
+count anew.
+
+Clean checks within the quarantine limit perform no quarantine-history read or extra write.
+If the limit is already exceeded, clean observations still advance release toward
+twenty passes through their existing receipts; the excess continues to fail until
+the active list returns to ten or fewer. Their named
+passes travel in the existing receipt. Failure assessment advances a local ledger
+projection, hydrates one run detail at a time, and retains pending runs so late
+completion is observed. Initial reconstruction reads recent test observations
+and older quarantine snapshots. There are no extra Convex calls, jobs, timers or
+idle work; the only extra execution is the eligible failing-file retry.
+
 ### Check logs and retention
 
 Forge uses your CI provider’s log storage and retention. Status, exit code, timing,

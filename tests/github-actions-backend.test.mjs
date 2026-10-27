@@ -2275,3 +2275,85 @@ for (const signal of ['SIGTERM', 'SIGHUP'])
     assert.equal(calls.filter(call => call.endpoint.endsWith('/cancel')).length, 0);
     assert.deepEqual(receipt.backend.executionIds, ['10']);
   });
+
+test('Actions landing verdict shares same-job flake quarantine and preserves a quarantined failing exit', async t => {
+  const file = 'tests/flake.test.mjs',
+    identity = `${file} :: synthetic flake`;
+  const { work, run } = fixture(t, { [file]: '// synthetic flake' });
+  run.check.args = ['scripts/forge-check.mjs'];
+  run.comparisonBase = run.base;
+  async function execute(passed, staticFailed = false) {
+    const current = {
+      ...run,
+      id: randomUUID(),
+      backend: { requested: 'github-actions', actual: 'github-actions' },
+    };
+    work.store.locked(() => {
+      const tx = work.store.records();
+      tx.append('runs', current);
+      work.store.commitRecords(tx);
+    });
+    let api, calls;
+    const proxy = {
+      request: (...args) => api.request(...args),
+      pages: (...args) => api.pages(...args),
+      log: (...args) => api.log(...args),
+      sleep: async () => {},
+    };
+    await launchGithubActionsRun(
+      work.store,
+      current,
+      proxy,
+      async (plan, journal, save) => {
+        assert.ok(plan.retryFiles.includes(file));
+        journal.commit = 'a'.repeat(40);
+        journal.pushed = true;
+        save();
+        const fake = transport(plan, journal, {
+          conclusion: passed && !staticFailed ? 'success' : 'failure',
+        });
+        api = fake.api;
+        calls = fake.calls;
+        const pages = api.pages;
+        api.pages = async (...args) =>
+          (await pages(...args)).map(job =>
+            job.name === 'forge-static'
+              ? { ...job, conclusion: staticFailed ? 'failure' : 'success' }
+              : { ...job, conclusion: passed ? 'success' : 'failure' },
+          );
+        api.log = async id =>
+          id === 20
+            ? staticFailed
+              ? 'typecheck FAILED\n'
+              : 'static passed\n'
+            : `__FORGE_TESTS__${JSON.stringify({ file, complete: true, results: [{ name: 'synthetic flake', passed }], retry: { complete: true, results: [{ name: 'synthetic flake', passed: false }] } })}\n`;
+      },
+      async () => {},
+    );
+    const receipt = read(join(work.store.directory, `check-${current.id}`, 'result.json'));
+    work.store.locked(() => {
+      const tx = work.store.records();
+      const saved = tx.find('runs', current.id);
+      tx.replace('runs', saved.position, { ...current, ...receipt });
+      work.store.commitRecords(tx);
+    });
+    assert.equal(calls.filter(call => call.endpoint.endsWith('/rerun')).length, 0, 'no extra CI job');
+    return receipt;
+  }
+  for (let i = 0; i < 2; i++) {
+    const receipt = await execute(true);
+    assert.equal(receipt.status, 'passed');
+    assert.equal(receipt.backend.verdict, 'flake');
+  }
+  const quarantined = await execute(false);
+  assert.equal(
+    quarantined.status,
+    'passed',
+    JSON.stringify({ backend: quarantined.backend, details: quarantined.details }),
+  );
+  assert.equal(quarantined.exitCode, 1);
+  assert.equal(quarantined.backend.verdict, 'quarantined');
+  assert.deepEqual(quarantined.backend.ignoredTests, [identity]);
+  assert.match(quarantined.details, /Ignored quarantined test/);
+  assert.equal((await execute(false, true)).status, 'failed');
+});

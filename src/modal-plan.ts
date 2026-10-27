@@ -15,7 +15,7 @@ import { partitionTests, timingDurations } from '../scripts/test-shards.mjs';
 import { readTimingHistory } from '../scripts/test-timings-file.mjs';
 
 export const modalRuntime =
-  'node:24.22.1-trixie-slim;git;time;python3;modal-sdk:1.6.2;cpu:2;memory:4096;static-memory:8192;static-oom-retry:16384;static-workers:2;static-heap:3072;flake-retry:1;resume:1;cost:worker-runtime-margin-1;timeout:900';
+  'node:24.22.1-trixie-slim;git;time;python3;modal-sdk:1.6.2;cpu:2;memory:4096;static-memory:8192;static-oom-retry:16384;static-workers:2;static-heap:3072;file-flake-retry:1;resume:1;cost:worker-runtime-margin-1;timeout:900';
 export const modalBridge = fileURLToPath(new URL('../scripts/modal-check/runner.py', import.meta.url));
 export async function modalPlan(
   store: WorkStore,
@@ -43,7 +43,7 @@ export async function modalPlan(
     JSON.stringify(run.check.args) === JSON.stringify(['scripts/forge-check.mjs']) &&
     (run.check.executable === process.execPath || /(?:^|\/)node$/.test(run.check.executable));
   const files = new Map(state.files.map(file => [file.path, source.object(file.blob).toString('utf8')]));
-  const { standardSelection } = await import('../scripts/test-impact.mjs');
+  const { standardSelection, selectTests } = await import('../scripts/test-impact.mjs');
   let comparison: { paths?: string[]; base?: string } = {};
   try {
     const observed = JSON.parse(readFileSync(writeCheckScope(store, run, path), 'utf8'));
@@ -69,7 +69,17 @@ export async function modalPlan(
     throw new Error('An explicit test file is absent from the pinned source.');
   const durations = timingDurations(readTimingHistory(join(store.directory, 'test-timings.json')));
   const lockfile = digest(files.get('package-lock.json') ?? '');
+  const impact = comparison.paths
+    ? comparison.paths.length
+      ? selectTests({ files, paths: comparison.paths })
+      : { scope: 'none', tests: [] as string[] }
+    : undefined;
+  const retryFiles =
+    impact && impact.scope !== 'full'
+      ? selection.tests.filter(file => !comparison.paths!.includes(file) && !impact.tests.includes(file))
+      : [];
   const pins = {
+    retryFiles,
     runId: run.id,
     viewId: run.viewId,
     head: run.head,
@@ -110,6 +120,7 @@ export type ModalPlan = NonNullable<Awaited<ReturnType<typeof modalPlan>>>;
 /** Recompute the retained recipe, including exact View and shard membership. */
 export function validateModalPlan(plan: ModalPlan, run: CheckRun) {
   const {
+    retryFiles,
     runId,
     viewId,
     head,
@@ -132,6 +143,7 @@ export function validateModalPlan(plan: ModalPlan, run: CheckRun) {
     plan.pin !== run.backend?.pin ||
     digest(
       JSON.stringify({
+        ...(retryFiles !== undefined ? { retryFiles } : {}),
         runId,
         viewId,
         head,

@@ -43,7 +43,7 @@ const env = { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.
 const npm = (...args) => execFileSync(process.execPath, [npmCli, ...args], { env, stdio: 'inherit' });
 
 npm('ci', '--ignore-scripts');
-const { pinnedComparison, standardSelection, sourceFiles } = await import('./test-impact.mjs');
+const { pinnedComparison, standardSelection, sourceFiles, selectTests } = await import('./test-impact.mjs');
 const comparison = pinnedComparison();
 let coverage;
 try {
@@ -53,6 +53,22 @@ try {
 }
 const explicit = env.FORGE_SELECTED_TESTS ? JSON.parse(env.FORGE_SELECTED_TESTS) : undefined;
 const files = sourceFiles();
+const impact = comparison?.paths
+  ? comparison.paths.length
+    ? selectTests({ files, paths: comparison.paths })
+    : { scope: 'none', tests: [] }
+  : undefined;
+env.FORGE_TEST_RETRY_FILES = JSON.stringify(
+  impact && impact.scope !== 'full'
+    ? [...files.keys()].filter(
+        file =>
+          file.startsWith('tests/') &&
+          file.endsWith('.test.mjs') &&
+          !impact.tests.includes(file) &&
+          !comparison.paths.includes(file),
+      )
+    : [],
+);
 if (explicit?.scope === 'partial' && explicit.tests.some(path => !files.has(path)))
   throw new Error('An explicit test file is absent from the pinned source.');
 const selection =

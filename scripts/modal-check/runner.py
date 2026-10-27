@@ -107,7 +107,6 @@ def main():
         jobs = plan['groups'] + [None]
         static_resources = ';static-memory:8192;' in plan.get('runtime', '')
         resilient = ';resume:1;' in plan.get('runtime', '')
-        flaky_retry = ';flake-retry:1;' in plan.get('runtime', '')
         if not journal_path.exists():
             require_current_node(plan)
             source = validate(plan)
@@ -146,6 +145,7 @@ def main():
             env = {'HOME': '/tmp/home', 'XDG_CONFIG_HOME': '/tmp/config', 'CI': '1',
                    'FORGE_TEST_WORKERS': '2', 'FORGE_MAX_CONCURRENT_CHECKS': '2',
                    'FORGE_TEST_EVENTS': '1',
+                   'FORGE_TEST_RETRY_FILES': json.dumps(plan.get('retryFiles', [])),
                    'FORGE_GIT_TIMEOUT_MS': '240000', 'FORGE_TEST_TIMINGS': '/tmp/times.jsonl'}
             if static_resources and plan['standard'] and files is None and plan['selection']['scope'] != 'docs':
                 env['FORGE_STATIC_WORKERS'] = '2'
@@ -253,10 +253,6 @@ def main():
                     retries.append((index, item.get('memory', 4096), 'stall'))
                 elif oom and attempts == 1 and not (output / 'modal-cancel').exists():
                     retries.append((index, 16384, 'oom'))
-                elif (flaky_retry and plan['standard'] and jobs[index] is not None and
-                      item.get('exitCode', 0) != 0 and
-                      attempts == 1 and not (output / 'modal-cancel').exists()):
-                    retries.append((index, item.get('memory', 4096), 'flake'))
             if not retries:
                 break
             if 'app' not in locals():

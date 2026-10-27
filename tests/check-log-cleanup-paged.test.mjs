@@ -127,8 +127,8 @@ async function seeded(t, runs = 1, objectCount = 0) {
   // Stable IDs keep content-defined catalog boundaries reproducible for call budgets.
   data.runs = Array.from({ length: runs }, (_, i) => ({
     id: `${i.toString(16).padStart(8, '0')}-0000-4000-8000-000000000001`,
-    startedAt: new Date().toISOString(),
-    endedAt: new Date().toISOString(),
+    startedAt: '2026-10-27T00:00:00.000Z',
+    endedAt: '2026-10-27T00:00:01.000Z',
     viewId: view.id,
     head: view.head,
     base: view.base,
@@ -139,7 +139,7 @@ async function seeded(t, runs = 1, objectCount = 0) {
     status: 'passed',
     exitCode: 0,
     signal: null,
-    runner: { pid: process.pid, host: 'synthetic' },
+    runner: { pid: 1, host: 'synthetic' },
     details: 'Synthetic passed',
     backend: { requested: 'github-actions', actual: 'github-actions' },
   }));
@@ -271,8 +271,11 @@ test('dogfood-shaped synthetic inventory measures bounded actions, calls and mem
   const selected = await snapshot(s.tables.projectBackups.get('backup'), 0);
   assert.equal(selected.files.length, 50);
   const snapshotResolves = counts.get('projectObjects:resolve') ?? 0;
+  // Content-defined catalog boundaries still move with the service's random record IDs,
+  // so the count spans ~22–44 across runs. Per-run resolution would need at least 100
+  // (stdout and stderr for 50 runs); the bound proves batching without chunk-alignment flakes.
   assert(
-    snapshotResolves < 40,
+    snapshotResolves < 60,
     `one resumed snapshot page batches its catalog chunks as well as its selected runs (${snapshotResolves})`,
   );
   counts.clear();

@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { testReportSchema } from './check-test-report.js';
 import { modalCostUsageSchema } from './check-backend.js';
 import { modalBridge } from './modal-plan.js';
 import type { ModalPlan } from './modal-plan.js';
@@ -62,17 +63,7 @@ export const modalEventSchema = z.discriminatedUnion('kind', [
           attempt: z.number().int().nonnegative(),
           exitCode: z.number().int().optional(),
           infrastructure: z.enum(['oom', 'sandbox-stopped']).optional(),
-          tests: z
-            .record(
-              z.string(),
-              z.object({
-                file: z.string(),
-                complete: z.boolean(),
-                durationMs: z.number().positive().finite().optional().catch(undefined),
-                results: z.array(z.object({ name: z.string(), passed: z.boolean() })),
-              }),
-            )
-            .optional(),
+          tests: z.record(z.string(), testReportSchema).optional(),
         }),
       )
       .optional(),

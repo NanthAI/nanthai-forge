@@ -17,7 +17,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { CheckQueue } from './check-queue.js';
-import { modalQuarantine } from './check-quarantine.js';
+import { checkQuarantineResult } from './check-quarantine.js';
 import { modalPlan, validateModalPlan, type ModalPlan } from './modal-plan.js';
 import { bindModalResult, modalClient, type ModalClient, type ModalEvent } from './modal-client.js';
 import { workProgress } from './work-progress.js';
@@ -292,11 +292,12 @@ export async function launchModalRun(
     const summary = outcome ? shardLogs.failureSummary(outcome) : '';
     run.backend!.providerUrl = 'https://modal.com/apps';
     const assessment =
-      outcome && plan.standard ? modalQuarantine(store, run, outcome, plan.groups, endedAt) : undefined;
+      outcome && plan.standard ? checkQuarantineResult(store, run, outcome, plan.groups, endedAt) : undefined;
     run.backend!.retryable =
       !cancelled && !outcome && terminal?.kind === 'error' && terminal.category !== 'unknown';
     if (assessment) {
       run.backend!.testVerdicts = assessment.testVerdicts;
+      run.backend!.ignoredTests = assessment.ignoredTests;
       run.backend!.quarantine = assessment.quarantine;
       run.backend!.verdict = assessment.verdict;
     }
@@ -354,7 +355,7 @@ export async function launchModalRun(
         : unavailable
           ? runnerRetryMessage(unavailable)
           : outcome
-            ? `Modal outcome bound to the exact source, definition, selection and runtime; compute cost is estimated. ${outcome.details ?? ''} ${assessment?.verdict === 'flake' ? 'Known flake: recovery supported by retained source/history evidence; attempts and named results retained.' : ''} ${assessment?.verdict === 'recovered' ? `Recovered${assessment.testVerdicts.some(item => item.recovery === 'related-change') ? ', related change' : ''}; failure and passing retry retained. Flakiness is not established.` : ''} ${assessment?.quarantine.length ? 'Quarantined tests still ran and reported; only attributed failures with unchanged or unrelated source evidence are non-blocking.' : ''}`.trim()
+            ? `${assessment?.details ?? ''} Modal outcome bound to the exact source, definition, selection and runtime; compute cost is estimated. ${outcome.details ?? ''} ${assessment?.verdict === 'flake' ? 'Known flake: recovery supported by retained source/history evidence; attempts and named results retained.' : ''} ${assessment?.verdict === 'recovered' ? `Recovered${assessment.testVerdicts.some(item => item.recovery === 'related-change') ? ', related change' : ''}; failure and passing retry retained. Flakiness is not established.` : ''} ${assessment?.quarantine?.length ? 'Quarantined tests still ran and reported; only attributed failures with unchanged or unrelated source evidence are non-blocking.' : ''}`.trim()
             : `Modal infrastructure interrupted the check; no check failure was recorded. Retry resumes the same pinned Candidate/plan and retains completed shards. ${terminal?.kind === 'error' ? (terminal.details ?? `Modal ${terminal.category} failure.`) : ''}`.trim(),
     });
     if (

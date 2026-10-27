@@ -54,6 +54,7 @@ export function compactCheckText(text: string): string {
                 file: report.file,
                 complete: report.complete,
                 durationMs: report.durationMs,
+                ...(report.retry ? { retry: report.retry } : {}),
                 results: Array.isArray(report.results)
                   ? report.results.map((test: { name: string; passed: boolean; durationMs?: number }) => ({
                       name: test.name,
@@ -148,8 +149,12 @@ export class CompactCheckWriter {
   }
   retainFailureTail() {
     if (!this.diagnostics && this.tail) {
-      appendFileSync(this.path, this.tail, { mode: 0o600 });
-      this.diagnostics = this.tail.length;
+      const diagnostics = this.tail
+        .split('\n')
+        .filter(line => !line.trimStart().startsWith('__FORGE_'))
+        .join('\n');
+      if (diagnostics.trim()) appendFileSync(this.path, diagnostics, { mode: 0o600 });
+      this.diagnostics = diagnostics.length;
     }
   }
 }

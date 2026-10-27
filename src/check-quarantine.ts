@@ -1,9 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-import { runDetails } from './work-detail-store.js';
+import { testExecutionVerdicts } from './check-test-verdicts.js';
+import {
+  quarantineHistory,
+  quarantineOverLimit,
+  observeQuarantine,
+  quarantineList,
+  type QuarantineState,
+} from './check-quarantine-history.js';
+import { appendFriction, frictionId } from './friction.js';
+import { existsSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { durableReplace } from './native-durability.js';
+import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
@@ -14,44 +24,16 @@ type Verdict = TestVerdict;
 type Observation = TestObservation;
 const fixesSchema = z.array(z.object({ id: z.uuid(), at: z.string(), test: z.string() }));
 export function quarantineLedger(observations: readonly Observation[]) {
-  const tests = new Map<string, { flakes: number[]; quarantined: boolean; consecutivePasses: number }>();
+  const states = new Map<string, QuarantineState>();
   const seen = new Set<string>();
   for (const observation of [...observations].sort(
     (a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id),
   )) {
     if (seen.has(observation.id)) continue;
     seen.add(observation.id);
-    const now = Date.parse(observation.at);
-    for (const result of observation.tests) {
-      const state = tests.get(result.test) ?? { flakes: [], quarantined: false, consecutivePasses: 0 };
-      if (result.verdict === 'fixed') {
-        state.flakes = [];
-        state.quarantined = false;
-        state.consecutivePasses = 0;
-      } else if (result.verdict === 'passed') {
-        state.consecutivePasses++;
-        if (state.consecutivePasses >= 20) {
-          state.quarantined = false;
-          state.flakes = [];
-        }
-      } else {
-        state.consecutivePasses = 0;
-        if (
-          result.verdict === 'flake' &&
-          result.evidenceRunId &&
-          ['unrelated-change', 'unchanged-source'].includes(result.recovery ?? '')
-        ) {
-          state.flakes = state.flakes.filter(at => now - at <= 7 * 86400000);
-          state.flakes.push(now);
-          if (state.flakes.length >= 2) state.quarantined = true;
-        }
-      }
-      tests.set(result.test, state);
-    }
+    observeQuarantine(states, observation);
   }
-  return [...tests]
-    .filter(([, state]) => state.quarantined)
-    .map(([test, state]) => ({ test, consecutivePasses: state.consecutivePasses }));
+  return quarantineList(states);
 }
 function fixes(store: WorkStore): Observation[] {
   let bytes: string;
@@ -65,31 +47,8 @@ function fixes(store: WorkStore): Observation[] {
     .parse(JSON.parse(bytes))
     .map(({ id, at, test }) => ({ id, at, tests: [{ test, verdict: 'fixed' }] }));
 }
-function observations(store: WorkStore): Observation[] {
-  const tx = store.readRecords();
-  const runs = tx
-    ? Array.from({ length: tx.manifest.collections.runs!.count }, (_, i) => tx.at('runs', i))
-    : store.load().runs;
-  return [
-    ...runs
-      .filter(run => run.endedAt && ['passed', 'failed'].includes(run.status))
-      .map(run => runDetails(store, run))
-      .filter(run => run.backend?.testVerdicts && run.endedAt && ['passed', 'failed'].includes(run.status))
-      .map(run => ({
-        id: run.id,
-        at: run.endedAt!,
-        tests: run.backend!.testVerdicts!,
-        source: {
-          head: run.head,
-          definition: run.check.definition,
-          ...(run.backend?.runtime ? { runtime: run.backend.runtime } : {}),
-        },
-      })),
-    ...fixes(store),
-  ];
-}
 export function checkQuarantine(store: WorkStore) {
-  return store.locked(() => ({ needsYou: quarantineLedger(observations(store)) }));
+  return { needsYou: quarantineList(quarantineHistory(store, fixes(store)).states) };
 }
 /** Explicit fix is retry-safe and only releases the named test; later flakes count anew. */
 export function fixQuarantinedTest(store: WorkStore, operationId: string, test: string) {
@@ -112,131 +71,178 @@ export function fixQuarantinedTest(store: WorkStore, operationId: string, test: 
     return {
       operationId,
       test,
-      needsYou: quarantineLedger(observations(store)),
+      needsYou: quarantineList(quarantineHistory(store, fixes(store)).states),
       details: 'Explicit fix recorded. The test continues to run; later flake verdicts count anew.',
     };
   });
 }
 
-/** Only complete, attributed reports may remove a failure from the landing gate. */
-export function modalTestVerdicts(result: Extract<ModalEvent, { kind: 'result' }>, groups: string[][]) {
-  const latest = new Map<number, NonNullable<typeof result.executions>[number]>();
-  for (const execution of result.executions ?? [])
-    if ((latest.get(execution.index)?.attempt ?? -1) < execution.attempt)
-      latest.set(execution.index, execution);
-  const verdicts = new Map<string, Verdict>();
-  const failures: string[] = [];
-  let unknownFailure =
-    result.executions !== undefined &&
-    Array.from({ length: groups.length + 1 }, (_, index) => index).some(index => !latest.has(index));
-  const priorAttempts = (execution: NonNullable<typeof result.executions>[number]) =>
-    (result.executions ?? []).filter(
-      item => item.index === execution.index && item.attempt < execution.attempt,
+export function assessTestQuarantine(
+  store: WorkStore,
+  run: CheckRun,
+  observed: ReturnType<typeof testExecutionVerdicts>,
+  at: string,
+) {
+  const retained = join(store.directory, `check-${run.id}`, 'quarantine-assessment.json');
+  const input = digest(JSON.stringify({ head: run.head, definition: run.check?.definition, observed }));
+  const replay = () => {
+    const saved = JSON.parse(readFileSync(retained, 'utf8')) as { input: string; assessment: Assessment };
+    invariant(
+      saved.input === input,
+      'EVIDENCE_CHANGED',
+      'Retained test assessment names different Candidate or test evidence.',
     );
-  const infrastructureOnly = (execution: NonNullable<typeof result.executions>[number]) =>
-    (execution.exitCode === 137 || execution.infrastructure === 'sandbox-stopped') &&
-    !Object.values(execution.tests ?? {}).some(report => report.results.some(test => !test.passed));
-  const recoveredFailure = [...latest.values()].some(
-    execution =>
-      groups[execution.index] &&
-      execution.exitCode === 0 &&
-      priorAttempts(execution).some(
-        previous =>
-          previous.tests &&
-          Object.values(previous.tests).some(report => report.results.some(test => !test.passed)),
-      ),
-  );
-  for (const execution of latest.values()) {
-    const files = groups[execution.index];
-    if (!files) {
-      if (execution.exitCode !== 0) unknownFailure = true;
-      continue;
-    }
-    const previous = priorAttempts(execution);
-    const recoveredInfrastructure = previous.length > 0 && previous.every(infrastructureOnly);
-    let namedFailure = false;
-    for (const file of files) {
-      const report = execution.tests?.[file];
-      if (!report?.complete || report.file !== file) {
-        if (execution.exitCode !== 0 || previous.length > 0) unknownFailure = true;
-        continue;
-      }
-      for (const test of report.results) {
-        const identity = `${file} :: ${test.name}`;
-        const failedBefore = previous.some(
-          item =>
-            item.exitCode !== 0 &&
-            item.tests?.[file]?.complete &&
-            item.tests[file]!.file === file &&
-            item.tests[file]!.results.some(old => old.name === test.name && !old.passed),
-        );
-        const verdict = !test.passed ? 'failed' : failedBefore ? 'recovered' : 'passed';
-        const old = verdicts.get(identity);
-        // Infrastructure recovery does not advance quarantine clean-pass streaks.
-        // Duplicate names are conservative: a failure wins over a pass.
-        if (
-          !(recoveredInfrastructure && execution.exitCode === 0 && test.passed) &&
-          (!old || verdict === 'failed' || (old.verdict === 'passed' && verdict === 'recovered'))
-        )
-          verdicts.set(identity, { test: identity, verdict });
-        if (verdict !== 'passed') failures.push(identity);
-        if (!test.passed) namedFailure = true;
-      }
-    }
-    if (execution.exitCode !== 0 && !namedFailure) unknownFailure = true;
-    if (
-      execution.exitCode === 0 &&
-      previous.some(item => !infrastructureOnly(item) && item.exitCode !== 0) &&
-      ![...verdicts.values()].some(
-        item => item.verdict === 'recovered' && files.some(file => item.test.startsWith(`${file} :: `)),
-      )
-    )
-      unknownFailure = true;
-  }
-  return {
-    verdicts: [...verdicts.values()],
-    failures: [...new Set(failures)],
-    unknownFailure,
-    recoveredFailure,
+    return saved.assessment;
   };
+  if (existsSync(retained)) return replay();
+  // Passing observations are retained in the existing receipt, with no ledger I/O.
+  if (!observed.unknownFailure && observed.verdicts.every(item => item.verdict === 'passed')) {
+    if (quarantineOverLimit(store)) {
+      const quarantine = quarantineList(
+        quarantineHistory(store, fixes(store), { id: run.id, at, tests: observed.verdicts }).states,
+      );
+      const blocked = quarantine.length > 10;
+      // Even excess-quarantine clean checks write only the existing run receipt.
+      return {
+        testVerdicts: observed.verdicts,
+        quarantine,
+        ignoredTests: [],
+        blocked,
+        verdict: blocked ? ('failed' as const) : ('clean' as const),
+        details: blocked ? 'Too many flaky tests: more than 10 quarantined tests; check failed.' : '',
+      };
+    }
+    return {
+      testVerdicts: observed.verdicts,
+      quarantine: undefined,
+      ignoredTests: [],
+      blocked: false,
+      verdict: 'clean' as const,
+      details: '',
+    };
+  }
+  return store.locked(() => {
+    if (existsSync(retained)) return replay();
+    const evidence = testFlakeEvidence(store, run, []);
+    const verdicts = observed.verdicts.map(item => ({
+      ...(item.attempts && ['recovered', 'flake'].includes(item.verdict)
+        ? evidence.canQuarantine(item.test)
+          ? { ...item, verdict: 'flake' as const, recovery: 'unchanged-source' as const }
+          : { ...item, verdict: 'recovered' as const, recovery: evidence.recovery(item.test).recovery }
+        : item.verdict === 'recovered'
+          ? evidence.recovery(item.test)
+          : item.verdict === 'flake' && !evidence.canQuarantine(item.test)
+            ? { ...item, verdict: 'recovered' as const, recovery: 'related-change' as const }
+            : item),
+      ...(item.attempts ? { head: run.head } : {}),
+    }));
+    const updated = quarantineHistory(store, fixes(store), { id: run.id, at, tests: verdicts });
+    const previous = new Set(updated.previousQuarantine.map(item => item.test));
+    const quarantine = quarantineList(updated.states);
+    const quarantined = new Set(quarantine.map(item => item.test));
+    const tooMany = quarantine.length > 10;
+    const ignored = verdicts.filter(
+      item => item.verdict === 'failed' && quarantined.has(item.test) && evidence.canQuarantine(item.test),
+    );
+    const ignoredNames = new Set(ignored.map(item => item.test));
+    const blocked =
+      tooMany ||
+      observed.unknownFailure ||
+      verdicts.some(
+        item => item.verdict === 'recovered' || (item.verdict === 'failed' && !ignoredNames.has(item.test)),
+      );
+    const assessment = {
+      testVerdicts: verdicts,
+      quarantine,
+      ignoredTests: tooMany || observed.unknownFailure ? [] : [...ignoredNames],
+      blocked,
+      verdict: tooMany
+        ? ('failed' as const)
+        : verdicts.some(item => item.verdict === 'recovered')
+          ? ('recovered' as const)
+          : ignored.length && !blocked
+            ? ('quarantined' as const)
+            : verdicts.some(item => item.verdict === 'flake')
+              ? ('flake' as const)
+              : verdicts.some(item => item.verdict === 'failed')
+                ? ('failed' as const)
+                : ('clean' as const),
+      details: tooMany
+        ? 'Too many flaky tests: more than 10 quarantined tests; check failed.'
+        : ignored
+            .map(item => `Ignored quarantined test: ${item.test}; run ${run.id}; Candidate ${run.head}.`)
+            .join(' '),
+    };
+    const added = quarantine.filter(item => !previous.has(item.test));
+    if (added.length) {
+      const tx = store.records();
+      for (const item of added) {
+        const id = frictionId(`quarantine:${run.id}:${item.test}`);
+        appendFriction(tx, {
+          id,
+          operationId: id,
+          kind: 'capture',
+          automatic: true,
+          count: 1,
+          at,
+          request: digest(JSON.stringify({ runId: run.id, test: item.test })),
+          title: `Fix quarantined test: ${item.test}`,
+          area: 'checks',
+          detail: `Two evidenced flakes within seven days. Test continues to run. Run ${run.id}; Candidate ${run.head}.`,
+          evidence: [run.id, run.head, item.test],
+        });
+      }
+      store.commitRecords(tx);
+    }
+    if (existsSync(join(store.directory, `check-${run.id}`)))
+      durableReplace(retained, JSON.stringify({ input, assessment }));
+    updated.save();
+    return assessment;
+  });
 }
-export function modalQuarantine(
+type Assessment = {
+  testVerdicts: Verdict[];
+  ignoredTests: string[];
+  quarantine?: { test: string; consecutivePasses: number }[];
+  blocked: boolean;
+  verdict: 'clean' | 'recovered' | 'flake' | 'quarantined' | 'failed';
+  details: string;
+};
+export function checkQuarantineResult(
   store: WorkStore,
   run: CheckRun,
   result: Extract<ModalEvent, { kind: 'result' }>,
   groups: string[][],
   at: string,
 ) {
-  const observed = modalTestVerdicts(result, groups);
-  const { failures, unknownFailure, recoveredFailure } = observed;
-  return store.locked(() => {
-    const history = observations(store).filter(item => item.id !== run.id && item.at <= at);
-    const evidence = testFlakeEvidence(store, run, history);
-    const verdicts = observed.verdicts.map(item =>
-      item.verdict === 'recovered' ? evidence.recovery(item.test) : item,
-    );
-    const quarantine = quarantineLedger([...history, { id: run.id, at, tests: verdicts }]);
-    const quarantined = new Set(quarantine.map(item => item.test));
-    const nonblocking = (test: string) =>
-      quarantined.has(test) &&
-      evidence.canQuarantine(test) &&
-      !verdicts.some(item => item.test === test && item.verdict === 'recovered');
-    const blocked = unknownFailure || failures.some(test => !nonblocking(test));
-    return {
-      testVerdicts: verdicts,
-      quarantine,
-      blocked,
-      verdict:
-        verdicts.some(item => item.verdict === 'recovered') ||
-        (recoveredFailure && !verdicts.some(item => item.verdict === 'flake'))
-          ? ('recovered' as const)
-          : verdicts.some(item => item.verdict === 'flake')
-            ? ('flake' as const)
-            : failures.some(test => !nonblocking(test))
-              ? ('failed' as const)
-              : failures.length
-                ? ('quarantined' as const)
-                : ('clean' as const),
-    };
-  });
+  const observed = testExecutionVerdicts(result, groups);
+  // Retained provider retries also ran the same pinned Candidate. No new job is launched.
+  for (const item of observed.verdicts)
+    if (item.verdict === 'recovered') {
+      const file = item.test.split(' :: ')[0]!;
+      const executions = (result.executions ?? []).filter(execution => execution.tests?.[file]);
+      const last = executions.sort((a, b) => a.attempt - b.attempt).at(-1);
+      const first = executions.find(
+        execution =>
+          execution !== last &&
+          execution.tests?.[file]?.complete &&
+          execution.tests[file]!.results.some(
+            test => `${file} :: ${test.name}` === item.test && !test.passed,
+          ),
+      );
+      if (first && last) {
+        item.evidenceRunId = first.executionId;
+        item.attempts = [
+          { runId: first.executionId, attempt: first.attempt, passed: false },
+          { runId: last.executionId, attempt: last.attempt, passed: true },
+        ];
+      }
+    }
+  return assessTestQuarantine(store, run, observed, at);
 }
+
+export {
+  testExecutionVerdicts,
+  testExecutionVerdicts as modalTestVerdicts,
+  checkQuarantineResult as modalQuarantine,
+};

@@ -174,8 +174,8 @@ class BridgeTests(unittest.TestCase):
         journal_file.write_text(json.dumps(journal))
         events = self.run_bridge()
         self.assertEqual(Sandbox.created, 2)
-        self.assertEqual(events[-1]['kind'], 'error')
-        self.assertFalse(events[-1]['safeFallback'])
+        self.assertEqual(events[-1]['kind'], 'result')
+        self.assertEqual(events[-1]['exitCode'], 1)
 
     def test_app_lifetime_covers_all_shards_and_preserves_process_failure(self):
         self.plan['groups'] = [['synthetic-a'], ['synthetic-b']]
@@ -446,31 +446,29 @@ class BridgeTests(unittest.TestCase):
         expected = sum(bridge.allocation_rate(x) for x in journal['executions'])
         self.assertEqual(events[-1]['estimatedCostUsd'], expected)
 
-    def test_failed_test_shard_retries_once_same_image_and_keeps_completed_sibling(self):
+    def test_failed_test_shard_never_creates_a_whole_shard_flake_retry(self):
         self.standard([['synthetic']])
-        self.plan['runtime'] += 'flake-retry:1;resume:1;'
+        self.plan['runtime'] += 'file-flake-retry:1;resume:1;'
+        self.plan['retryFiles'] = ['synthetic']
         self.plan_file.write_text(json.dumps(self.plan))
         Sandbox.exit_codes = [7, 0, 0]
         events = self.run_bridge()
-        self.assertEqual(events[-1]['exitCode'], 0)
-        self.assertEqual(Sandbox.created, 3)
-        journal = json.loads((self.output / 'modal-executions.json').read_text())
-        self.assertEqual([(item['index'], item['attempt']) for item in journal['executions']], [(0, 0), (1, 0), (0, 1)])
-        self.assertEqual(journal['executions'][-1]['retryReason'], 'flake')
-        self.assertTrue(all(options['image'].object_id == journal['image'] for options in Sandbox.options))
+        self.assertEqual(events[-1]['exitCode'], 7)
+        self.assertEqual(Sandbox.created, 2)
+        self.assertEqual(json.loads(Sandbox.options[0]['env']['FORGE_TEST_RETRY_FILES']), ['synthetic'])
         self.run_bridge()
-        self.assertEqual(Sandbox.created, 3)
+        self.assertEqual(Sandbox.created, 2)
 
-    def test_repeated_test_failure_does_not_retry_forever(self):
+    def test_legacy_flake_runtime_does_not_repeat_a_failed_whole_shard(self):
         self.standard([['synthetic']])
         self.plan['runtime'] += 'flake-retry:1;resume:1;'
         self.plan_file.write_text(json.dumps(self.plan))
         Sandbox.exit_codes = [7, 0, 7]
         events = self.run_bridge()
         self.assertEqual(events[-1]['exitCode'], 7)
-        self.assertEqual(Sandbox.created, 3)
+        self.assertEqual(Sandbox.created, 2)
         self.run_bridge()
-        self.assertEqual(Sandbox.created, 3)
+        self.assertEqual(Sandbox.created, 2)
 
     def test_test_oom_retry_is_infrastructure_and_cannot_stack_with_flake_retry(self):
         self.standard([['synthetic']])
@@ -488,16 +486,16 @@ class BridgeTests(unittest.TestCase):
         self.run_bridge()
         self.assertEqual(Sandbox.created, 3)
 
-    def test_flake_retry_then_oom_cannot_stack(self):
+    def test_failed_file_retry_outcome_cannot_trigger_a_new_sandbox(self):
         self.standard([['synthetic']])
-        self.plan['runtime'] += 'flake-retry:1;resume:1;'
+        self.plan['runtime'] += 'file-flake-retry:1;resume:1;'
         self.plan_file.write_text(json.dumps(self.plan))
         Sandbox.exit_codes = [1, 0, 137]
         events = self.run_bridge()
-        self.assertEqual(events[-1]['exitCode'], 137)
-        self.assertEqual(Sandbox.created, 3)
+        self.assertEqual(events[-1]['exitCode'], 1)
+        self.assertEqual(Sandbox.created, 2)
         self.run_bridge()
-        self.assertEqual(Sandbox.created, 3)
+        self.assertEqual(Sandbox.created, 2)
 
     def test_network_resume_reuses_completed_exit_without_observing_or_reexecuting_it(self):
         self.standard([['synthetic-a'], ['synthetic-b']])

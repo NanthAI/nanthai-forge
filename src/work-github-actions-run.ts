@@ -1,3 +1,4 @@
+import { checkQuarantineResult } from './check-quarantine.js';
 import { appendControllerSummary } from './check-controller-summary.js';
 import { discardFullCheckReports } from './check-compact-output.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -160,14 +161,41 @@ export async function launchGithubActionsRun(
     run.backend.cost = outcome.cost;
     if (outcome.cost.estimatedCostUsd !== null) run.backend.estimatedCostUsd = outcome.cost.estimatedCostUsd;
     else delete run.backend.estimatedCostUsd;
+    const endedAt = new Date().toISOString();
+    const assessment =
+      plan.standard && 'executions' in outcome && ['passed', 'failed'].includes(outcome.status)
+        ? checkQuarantineResult(
+            store,
+            run,
+            {
+              kind: 'result',
+              pin: plan.pin,
+              head: plan.head,
+              definition: plan.definition,
+              exitCode: outcome.exitCode ?? 1,
+              estimatedCostUsd: 0,
+              executions: outcome.executions,
+            },
+            plan.groups,
+            endedAt,
+          )
+        : undefined;
+    if (assessment)
+      Object.assign(run.backend, {
+        testVerdicts: assessment.testVerdicts,
+        ignoredTests: assessment.ignoredTests,
+        ...(assessment.quarantine ? { quarantine: assessment.quarantine } : {}),
+        verdict: assessment.verdict,
+      });
     const receipt = createRunReceipt({
       reuseKey: run.reuseKey,
       environment: run.environment,
       ...outcome,
+      ...(assessment ? { status: assessment.blocked ? 'failed' : 'passed' } : {}),
       cancellation: run.cancellation,
       backend: run.backend,
       checkSelection: plan.standard ? plan.selection : undefined,
-      endedAt: new Date().toISOString(),
+      endedAt,
       signal: null,
       artifacts: [
         ...(run.check.artifactPaths ?? []).map(sourcePath => ({
@@ -177,7 +205,7 @@ export async function launchGithubActionsRun(
         })),
         ...retainCheckCoverage(store, run, path, plan.standard ? plan.selection : undefined),
       ],
-      details: `${jobStatusSummary ? `${jobStatusSummary} ` : ''}GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} Source, result and compact test evidence remain retained; full logs stay with GitHub Actions; the run-owned ref is removed after the remote run is terminal.`,
+      details: `${assessment?.details ?? ''} ${jobStatusSummary ? `${jobStatusSummary} ` : ''}GitHub Actions result bound to the pinned source, check and shard plan. Job timestamps and the retained per-label rate provide a gross USD estimate; GitHub/Blacksmith billing is authoritative. Ref: refs/heads/forge-check/${run.id}.${cancellationDetails(run)} Source, result and compact test evidence remain retained; full logs stay with GitHub Actions; the run-owned ref is removed after the remote run is terminal.`,
     });
     discardFullCheckReports(path);
     durableReplace(join(path, 'result.json'), JSON.stringify(receipt));

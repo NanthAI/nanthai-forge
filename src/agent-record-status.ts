@@ -1,3 +1,4 @@
+import { checkQuarantine } from './check-quarantine.js';
 import { recordStatusMetrics } from './self-metrics-status-records.js';
 import { readLaneSubmissions } from './landing-submission-read.js';
 import { agentLaneStatus } from './agent-lane-status.js';
@@ -91,6 +92,7 @@ export function agentRecordStatus(
     result: {
       ...(lane ? { lane } : {}),
       ...(unsavedEdits.length ? { unsavedEdits } : {}),
+      quarantine: checkQuarantine(store),
       metrics: recordStatusMetrics(store.root, tx),
       ...agentCostSummary(store.root, tx),
       autonomyPolicy: readPolicy(store),

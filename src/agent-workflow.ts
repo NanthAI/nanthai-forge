@@ -1,3 +1,4 @@
+import { checkQuarantine } from './check-quarantine.js';
 import { queueAheadStackSync } from './queue-ahead-stack-sync.js';
 import { settleFinish } from './landing-journal-settle.js';
 import { readLandingHandle } from './land-receipt.js';
@@ -442,6 +443,7 @@ export class AgentWorkflow {
         revision: data.revision,
         result: {
           ...(lane ? { lane } : {}),
+          quarantine: checkQuarantine(store),
           metrics: statusMetrics(store.root, data),
           modalCost: modalMonthCost(data.runs),
           checkCosts: (() => {

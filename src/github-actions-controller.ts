@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { testReports } from './check-test-report.js';
 import { compactCheckText } from './check-compact-output.js';
 import { mutate, observe, type ActionsApi, type ActionsJob, type ActionsRun } from './github-actions-api.js';
 import { ensureActionsDispatch } from './github-actions-dispatch.js';
@@ -265,6 +266,18 @@ export async function controlActions(
         : interrupted
           ? null
           : 0,
+      executions: await Promise.all(
+        [...latest].map(async ([index, job]) => ({
+          executionId: String(job.id),
+          index,
+          attempt:
+            journal.retrySources[index] !== undefined && journal.retrySources[index] !== job.id ? 1 : 0,
+          exitCode: job.conclusion === 'success' || recovered.has(job.id) ? 0 : 1,
+          ...(index < plan.groups.length
+            ? { tests: testReports((await collectLog(job, index)).split('\n')) }
+            : {}),
+        })),
+      ),
       billableMinutes,
       cost: cost(),
       jobStatusSummary: summaries.join('\n'),

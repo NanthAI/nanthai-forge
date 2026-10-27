@@ -31,9 +31,20 @@ export const checkBackendSchema = z.object({
         verdict: z.enum(['passed', 'failed', 'recovered', 'flake', 'fixed']),
         recovery: z.enum(['related-change', 'unrelated-change', 'unchanged-source', 'unknown']).optional(),
         evidenceRunId: z.string().optional(),
+        head: z.string().optional(),
+        attempts: z
+          .array(
+            z.object({
+              runId: z.string(),
+              attempt: z.number().int().nonnegative().optional(),
+              passed: z.boolean(),
+            }),
+          )
+          .optional(),
       }),
     )
     .optional(),
+  ignoredTests: z.array(z.string()).optional(),
   quarantine: z
     .array(z.object({ test: z.string(), consecutivePasses: z.number().int().nonnegative() }))
     .optional(),
@@ -49,6 +60,11 @@ export const checkBackendSchema = z.object({
   costUsage: modalCostUsageSchema.optional(),
   estimatedCostUsd: z.number().nonnegative().finite().optional(),
 });
+/** Keep the real process exit while admitting an explicitly assessed quarantine pass. */
+export const passingCheckExit = (run: Pick<CheckRun, 'exitCode' | 'backend'>) =>
+  run.exitCode === 0 ||
+  (run.exitCode === 1 && run.backend?.verdict === 'quarantined' && !!run.backend.ignoredTests?.length);
+
 /** Shared by dispatch and retained-evidence comparison. */
 export const actionsCheckRuntime = (repo: string | undefined, runsOn = 'ubuntu-latest') =>
   `github-actions;repo:${repo};node:24.22.1;runs-on:${runsOn};unfinished-retry:1`;

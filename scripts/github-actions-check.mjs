@@ -56,6 +56,7 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
     // Partial runs never claim coverage, even when the job inherits a coverage head.
     if (plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;
     else delete env.FORGE_TEST_COVERAGE_HEAD;
+    env.FORGE_TEST_RETRY_FILES = JSON.stringify(plan.retryFiles ?? []);
     run('node', ['scripts/test-files.mjs', ...plan.groups[index]]);
   }
 }

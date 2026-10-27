@@ -6,7 +6,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex', 'schema', 'documents', 'package']) {
+for (const failure of [
+  'none',
+  'exit',
+  'signal',
+  'ordinary',
+  'convex',
+  'schema',
+  'documents',
+  'package',
+  'test',
+]) {
   test(`synthetic static verification preserves ${failure} outcome with queued builds`, t => {
     const root = mkdtempSync(join(tmpdir(), 'forge-verify-static-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -34,7 +44,7 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex', 'schema',
       'scripts/test-files.mjs',
       `import { writeFileSync } from 'node:fs';
       export const fileTimeout = () => 1000;
-      if (process.argv[1].endsWith('test-files.mjs')) writeFileSync('tests-ran', '');`,
+      if (process.argv[1].endsWith('test-files.mjs')) { writeFileSync('tests-ran', ''); process.exitCode = ${failure === 'test' ? 1 : 0}; }`,
     );
     write(
       'scripts/package-smoke.mjs',
@@ -98,9 +108,13 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex', 'schema',
       result.stdout + result.stderr,
     );
     assert.match(result.stdout, /\[build:core\] ok/);
-    assert.match(result.stdout, /\[test\] ok/);
+    assert.match(result.stdout, new RegExp(`\\[test\\] ${failure === 'test' ? 'FAILED' : 'ok'}`));
+    assert.match(
+      result.stdout,
+      new RegExp(`__FORGE_STATIC__\\{"passed":${['none', 'test'].includes(failure)}\\}`),
+    );
     assert.match(result.stdout, new RegExp(`\\[documents\\] ${failure === 'documents' ? 'FAILED' : 'ok'}`));
-    if (['none', 'package'].includes(failure)) {
+    if (['none', 'package', 'test'].includes(failure)) {
       assert.match(
         result.stdout,
         new RegExp(`\\[smoke:package\\] ${failure === 'package' ? 'FAILED' : 'ok'}`),
@@ -124,7 +138,7 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex', 'schema',
     assert.match(
       result.stdout,
       new RegExp(
-        `\\[typecheck:convex:tsc\\] ${['none', 'schema', 'documents', 'package'].includes(failure) ? 'ok' : 'FAILED'}`,
+        `\\[typecheck:convex:tsc\\] ${['none', 'schema', 'documents', 'package', 'test'].includes(failure) ? 'ok' : 'FAILED'}`,
       ),
     );
     assert.deepEqual(

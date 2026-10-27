@@ -16,7 +16,14 @@ export function fileTimeout(env = process.env) {
   return Number(value);
 }
 
-export async function runFiles(files, { workers = workerBudget(), timeoutMs = fileTimeout() } = {}) {
+export async function runFiles(
+  files,
+  {
+    workers = workerBudget(),
+    timeoutMs = fileTimeout(),
+    retryFiles = JSON.parse(process.env.FORGE_TEST_RETRY_FILES ?? '[]'),
+  } = {},
+) {
   const totals = Object.fromEntries(
     ['tests', 'pass', 'fail', 'cancelled', 'skipped', 'todo'].map(k => [k, 0]),
   );
@@ -34,6 +41,9 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
   }
   let next = 0,
     failed = false;
+  const reports = new Map();
+  let retrying = false,
+    stopped = false;
   const children = new Set();
   function kill(child) {
     if (!child.pid) return;
@@ -45,6 +55,7 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
     }
   }
   const stop = () => {
+    stopped = true;
     failed = true;
     next = files.length;
     for (const child of children) kill(child);
@@ -115,7 +126,7 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
       child.once('error', error => {
         process.stdout.write(`not ok - ${file}: ${error.message}\n`);
       });
-      child.once('close', code => {
+      child.once('close', (code, signal) => {
         const durationMs = performance.now() - started;
         if (coverageDirectory) {
           try {
@@ -137,6 +148,16 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
         }
         clearTimeout(timer);
         children.delete(child);
+        const report = {
+          file,
+          results,
+          durationMs,
+          complete:
+            !timedOut && !signal && (code === 0 || (code === 1 && results.some(item => !item.passed))),
+        };
+        const previous = reports.get(file);
+        if (retrying) report.retry = { complete: previous.complete, results: previous.results };
+        reports.set(file, report);
         if (code !== 0 || timedOut) {
           failed = true;
           process.stdout.write(`# Failed test file: ${file}\n`);
@@ -145,10 +166,7 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
               `__FORGE_TEST_FAILURE__${JSON.stringify({ file, output: diagnostics.join('\n') })}\n`,
             );
         }
-        if (process.env.FORGE_TEST_EVENTS === '1')
-          process.stdout.write(
-            `__FORGE_TESTS__${JSON.stringify({ file, results, durationMs, complete: !timedOut && (code === 0 || results.some(item => !item.passed)) })}\n`,
-          );
+
         resolve();
       });
     });
@@ -158,6 +176,31 @@ export async function runFiles(files, { workers = workerBudget(), timeoutMs = fi
       while (next < files.length) await runFile(files[next++]);
     }),
   );
+  const retry = files.filter(file => {
+    const report = reports.get(file);
+    return retryFiles.includes(file) && report?.complete && report.results.some(test => !test.passed);
+  });
+  if (retry.length && !stopped) {
+    retrying = true;
+    // A single retry phase stays in this shard and uses the exact same source bytes.
+    await Promise.all(
+      Array.from({ length: Math.min(workers, retry.length) }, async (_, i) => {
+        for (let index = i; index < retry.length; index += workers) await runFile(retry[index]);
+      }),
+    );
+    failed =
+      stopped ||
+      [...reports.values()].some(
+        report =>
+          !report.complete ||
+          report.results.some(test => !test.passed) ||
+          report.retry?.results.some(
+            old => !old.passed && !report.results.some(test => test.name === old.name && test.passed),
+          ),
+      );
+  }
+  if (process.env.FORGE_TEST_EVENTS === '1')
+    for (const report of reports.values()) process.stdout.write(`__FORGE_TESTS__${JSON.stringify(report)}\n`);
   process.off('SIGTERM', stop);
   process.off('SIGINT', stop);
   for (const [name, count] of Object.entries(totals)) process.stdout.write(`# ${name} ${count}\n`);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { nativeQuarantine } from './check-native-quarantine.js';
 import { runDetails } from './work-detail-store.js';
 import { cleanLocalCheckLogs } from './check-log-cleanup.js';
 import { compactFailureExcerpt, checkEvidenceLines } from './check-compact-output.js';
@@ -435,10 +436,24 @@ async function launchLocal(
     }
     artifacts = [...(artifacts ?? []), ...retainCheckCoverage(store, run, path, checkSelection)];
     run.reuseKey = checkReuseKey(store, run);
+    const endedAt = new Date().toISOString();
+    const assessment =
+      !stopping && !failure && !signal
+        ? nativeQuarantine(store, { ...run, checkSelection }, path, code, endedAt)
+        : undefined;
+    if (assessment) details += ` ${assessment.details}`;
     const receipt = createRunReceipt({
       reuseKey: run.reuseKey,
       environment: run.environment,
       backend: {
+        ...(assessment
+          ? {
+              testVerdicts: assessment.testVerdicts,
+              ignoredTests: assessment.ignoredTests,
+              quarantine: assessment.quarantine,
+              verdict: assessment.verdict,
+            }
+          : {}),
         ...(run.backend ?? { requested: 'local', actual: 'local' }),
         cost:
           run.backend?.costUsage ||
@@ -459,11 +474,19 @@ async function launchLocal(
               actor: { kind: 'system', name: 'Forge check queue' },
             }
           : undefined),
-      status: stopping ? 'cancelled' : code === 0 && !failure ? 'passed' : 'failed',
+      status: stopping
+        ? 'cancelled'
+        : assessment
+          ? assessment.blocked
+            ? 'failed'
+            : 'passed'
+          : code === 0 && !failure
+            ? 'passed'
+            : 'failed',
       ...(!stopping && (code !== 0 || failure) ? { failureSummary: failureSummary(store, run) } : {}),
       exitCode: code,
       signal,
-      endedAt: new Date().toISOString(),
+      endedAt,
       details,
       ...(warnings.length ? { warnings } : {}),
       ...(error ? { error } : {}),

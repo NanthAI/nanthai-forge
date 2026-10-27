@@ -121,3 +121,42 @@ test('machine reports keep file attribution and nested names despite concurrent 
       .results.some(item => item.name === 'second suite > same name' && item.passed),
   );
 });
+
+test('one in-shard retry runs only eligible failing files and retains both named attempts', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-test-retry-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const files = ['flake', 'persistent', 'affected', 'clean'].map(name => join(root, `${name}.mjs`));
+  for (const [index, file] of files.entries())
+    writeFileSync(
+      file,
+      `
+    import test from 'node:test'; import assert from 'node:assert/strict';
+    import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+    const path = ${JSON.stringify(file + '.count')};
+    const count = existsSync(path) ? Number(readFileSync(path)) + 1 : 1;
+    writeFileSync(path, String(count));
+    test('result', () => assert.ok(${index === 0 ? 'count > 1' : index === 3 ? 'true' : 'false'}));
+  `,
+    );
+  const result = await run(files, {
+    FORGE_TEST_EVENTS: '1',
+    FORGE_TEST_RETRY_FILES: JSON.stringify(files.slice(0, 2)),
+  });
+  assert.equal(result.code, 1, result.output);
+  const { readFileSync } = await import('node:fs');
+  assert.deepEqual(
+    files.map(file => Number(readFileSync(file + '.count'))),
+    [2, 2, 1, 1],
+  );
+  const reports = result.output
+    .split('\n')
+    .filter(line => line.startsWith('__FORGE_TESTS__'))
+    .map(line => JSON.parse(line.slice(15)));
+  assert.equal(reports.length, 4);
+  assert.deepEqual(reports.find(report => report.file === files[0]).retry.results, [
+    { name: 'result', passed: false },
+  ]);
+  assert.equal(reports.find(report => report.file === files[0]).results[0].passed, true);
+  assert.equal(reports.find(report => report.file === files[1]).results[0].passed, false);
+  assert.equal(reports.find(report => report.file === files[2]).retry, undefined);
+});

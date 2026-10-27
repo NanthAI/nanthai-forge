@@ -53,6 +53,6 @@ jobs:
 `;
 }
 export function githubActionsRecipe(plan: ModalPlan) {
-  const { pin, head, definition, selection, groups, standard, interaction, command } = plan;
-  return { pin, head, definition, selection, groups, standard, interaction, command };
+  const { retryFiles, pin, head, definition, selection, groups, standard, interaction, command } = plan;
+  return { retryFiles, pin, head, definition, selection, groups, standard, interaction, command };
 }

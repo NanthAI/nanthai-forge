@@ -17,6 +17,7 @@ const child = spawn(plan.command[0], plan.command.slice(1), {
       'FORGE_TEST_WORKERS',
       'FORGE_MAX_CONCURRENT_CHECKS',
       'FORGE_TEST_EVENTS',
+      'FORGE_TEST_RETRY_FILES',
       'FORGE_GIT_TIMEOUT_MS',
       'FORGE_TEST_TIMINGS',
       'FORGE_STATIC_WORKERS',
