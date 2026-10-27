@@ -1,3 +1,4 @@
+import { ensureWorkIndex } from './work-index-client.js';
 import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { withBoundPushProgress } from './bound-push-progress.js';
@@ -481,9 +482,7 @@ async function pushAttempt(
   );
   report('refreshing hosted Work index');
   await retryExchange('hosted index refresh', request.operationId, () =>
-    transport.client.action(makeFunctionReference<'action'>('projectWorkIndexActions:ensure'), {
-      projectId: request.projectId,
-    }),
+    ensureWorkIndex(transport.client, request.projectId),
   );
   return { ...result, sourceReturn };
 }

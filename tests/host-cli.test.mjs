@@ -1143,7 +1143,18 @@ test('host follows durable index continuations before binding and preserves serv
     if (getFunctionName(ref) === 'projectWorkIndexActions:ensure') {
       assert.equal(readHostState(f.store).binding, undefined);
       calls++;
-      if (calls <= 2) return { pending: true, progress: JSON.stringify({ phase: 'index', step: calls }) };
+      if (calls <= 2)
+        return {
+          pending: true,
+          progress: JSON.stringify({
+            phase: 'index',
+            buildPhase: 'summaries',
+            field: 'views',
+            done: calls * 10,
+            total: 2167,
+            step: calls,
+          }),
+        };
       if (fail) {
         fail = false;
         throw new ConvexError({
@@ -1154,12 +1165,23 @@ test('host follows durable index continuations before binding and preserves serv
     }
     return action(ref, args);
   };
-  await assert.rejects(hostProject(f.root, { deployment: 'https://fixture.convex.cloud' }, f.dependencies), {
-    code: 'SYNTHETIC_INDEX_FAILURE',
-    message: 'The retained index page could not be read.',
-  });
+  const events = [];
+  await assert.rejects(
+    hostProject(
+      f.root,
+      { deployment: 'https://fixture.convex.cloud', onProgress: event => events.push(event) },
+      f.dependencies,
+    ),
+    {
+      code: 'SYNTHETIC_INDEX_FAILURE',
+      message: 'The retained index page could not be read.',
+    },
+  );
   const pending = readHostState(f.store).hosting;
   assert.equal(pending.errorCode, 'SYNTHETIC_INDEX_FAILURE');
+  assert.equal(pending.progress.indexBuild.done, 20);
+  assert.equal(pending.progress.indexBuild.total, 2167);
+  assert(events.some(e => e.indexBuild?.field === 'views' && e.objectsDone === 20));
   assert.equal(readHostState(f.store).binding, undefined);
   const result = await hostProject(f.root, {}, f.dependencies);
   assert.equal(result.operationId, pending.operationId);

@@ -1,3 +1,4 @@
+import { ensureWorkIndex } from './work-index-client.js';
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
@@ -43,7 +44,7 @@ async function readBrief(store: WorkStore, input: unknown, liveMcp: boolean): Pr
         )
       )
         throw error;
-      await client.action(makeFunctionReference<'action'>('projectWorkIndexActions:ensure'), { projectId });
+      await ensureWorkIndex(client, projectId);
       hosted = await read();
     }
     if (hosted.context.coverage.some(line => line.startsWith('Source paths unavailable'))) {

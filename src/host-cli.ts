@@ -122,14 +122,16 @@ export async function hostProject(
     lastPhase = '';
   const progress = hostProgress(event => {
     options.onProgress?.(event);
+    if (event.phase !== 'complete') {
+      pending.progress = event;
+      delete pending.errorCode;
+    }
     if (
       event.phase !== lastPhase ||
       performance.now() - lastSaved >= 1000 ||
       event.objectsDone === event.objectsTotal
     ) {
       if (event.phase !== 'complete') {
-        pending.progress = event;
-        delete pending.errorCode;
         try {
           save();
         } catch (error) {
@@ -142,8 +144,6 @@ export async function hostProject(
       lastPhase = event.phase;
     }
   });
-  const heartbeat = setInterval(progress.emit, 2000);
-  heartbeat.unref();
   try {
     progress.phase('preparing source and Work');
     // Pin before the first creation call; a lost creation reply can then resume
@@ -188,11 +188,15 @@ export async function hostProject(
       operationId: pending.initializeId,
     });
     progress.phase('building Work index');
-    await continueLongAction('Building Work index', pending.initializeId, continuation =>
-      client.action(makeFunctionReference<'action'>('projectWorkIndexActions:ensure'), {
-        projectId: created.projectId,
-        continuation,
-      }),
+    await continueLongAction(
+      'Building Work index',
+      pending.initializeId,
+      continuation =>
+        client.action(makeFunctionReference<'action'>('projectWorkIndexActions:ensure'), {
+          projectId: created.projectId,
+          continuation,
+        }),
+      progress.index,
     );
     const binding = {
       projectId: created.projectId,
@@ -245,16 +249,16 @@ export async function hostProject(
       );
     if (pending.projectId) rememberSourceAuthorityError(store, error, pending.projectId);
     updateHostState(store, state => {
-      if (state.hosting?.operationId === pending.operationId)
+      if (state.hosting?.operationId === pending.operationId) {
         state.hosting.errorCode = error instanceof ForgeError ? error.code : 'HOST_INTERRUPTED';
+        if (pending.progress) state.hosting.progress = pending.progress;
+      }
     });
     if (error instanceof ForgeError && error.code === 'WORK_STALE' && !pending.projectId)
       updateHostState(store, state => {
         if (state.hosting?.operationId === pending.operationId) delete state.hosting;
       });
     throw error;
-  } finally {
-    clearInterval(heartbeat);
   }
 }
 export { hostCli } from './host-command.js';

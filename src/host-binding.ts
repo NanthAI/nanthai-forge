@@ -1,3 +1,4 @@
+import { hostIndexProgressSchema } from './work-index-build-progress.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
   statSync,
@@ -65,6 +66,7 @@ const hosting = z.object({
       bytesTotal: z.number(),
       bytesPerSecond: z.number(),
       etaSeconds: z.number().nullable(),
+      indexBuild: hostIndexProgressSchema.optional(),
     })
     .optional(),
   errorCode: z.string().optional(),

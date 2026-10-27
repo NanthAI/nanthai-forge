@@ -16,17 +16,52 @@ head and collection counts. It does not hydrate retained histories or build
 review diffs. `work ROOT --compact` retains the complete attribute interface
 with deferred diff details; use agent record pages for selected history.
 
+### Hosting and Work index progress
+
+`nforge host ROOT --new --json --wait` emits `host-progress` JSON lines while
+building the hosted Work index. `indexBuild` gives `buildPhase`, the current
+`field` when applicable, committed records `done` / `total`, durable `step` and
+`stepsPerSecond`; the top-level object counters mirror those record counts.
+For parent traversal and summaries, totals come from the generation's
+`metadata.counts`; initial record totals come from the pinned record catalog.
+Parent totals can grow as retained ancestors are discovered. Cleanup counts
+collections. ETA covers the current phase/field, uses newly observed progress
+and resets on a phase/field change or command restart. It is unknown until a
+second advancing sample, rather than timing previously saved work as fresh work.
+Only fixed labels and counters appear in progress. No progress-only Convex call
+is made. Hosted reads, briefs and source-return index refreshes also consume
+continuations and report the same counters; exchange transports report them as
+`host-progress` events on stderr alongside their existing progress callbacks.
+`host --status` retains the latest index counters when hosting is interrupted.
+
 Hosted native record checkpoints above 2 MiB build their disposable Work index
-from server-held record pages. Each step reads up to 50 records (a 256 KiB
-target, with one indivisible record when larger), or advances a source State,
-selected summary, ancestry frontier or journal event. Rows and the next cursor
-commit together; staged RPC pages contain at most 100 rows / a 500 KB target.
-A retry resumes the saved phase instead of rebuilding completed projections.
-Publication checks the original backup and current Work revision and requires
-a completed cursor. Smaller and legacy checkpoints retain their existing
-projection layout. `host` follows pending ensure results before recording its
-binding and retains server error codes/messages if indexing fails. Index builds
-install no idle timer or poller; only an in-flight request drives continuations.
+from server-held record pages. Each step reads up to 50 records or parent States
+(a 256 KiB target, with one indivisible record when larger). Summary steps share
+up to ten records, stopping after a 500-row / 500 KB output target or one second
+of projection work. One unusually large record remains indivisible. Rows and
+the next cursor commit together, and that mutation returns the committed
+generation instead of querying it again. Staged RPC pages contain at most 500
+rows / a 500 KB target. A killed command resumes the saved phase/field/record;
+only its uncommitted in-flight step may repeat. Publication checks the original
+backup and current Work revision and requires a completed cursor. Smaller and
+legacy checkpoints retain their existing projection layout. `host` follows
+pending ensure results before recording its binding and retains server error
+codes/messages if indexing fails. The build and its staged-page cleanup install
+no timer, scheduler or poller: only an in-flight command advances the cursor.
+Existing post-publication retirement of obsolete derived generations remains
+separate from the build.
+
+The local synthetic benchmark in `tests/projectWorkIndex-progress.test.mjs`
+uses 625 Intents, 555 Lanes, 2,789 saves, 2,167 Views, 1,471 runs, 2,001 actions,
+572 landing entries and 2,495 empty-file source States. Its measured baseline
+was 7,451 durable steps in 373 action calls and 11.05 s; bounded pages reduced
+that to 959 steps in 48 calls and 3.73 s. Runs retain 2,580 payload chunks. The fake database observed
+360,579 → 60,170 document reads and 75,632 → 68,496 writes, with
+147,053 → 40,477 internal calls (19.7 → 42.2 calls per larger step). The longest
+measured action was 157 ms; the 128 MB fixture stayed below 449 MB RSS. Its source/ancestry
+calls use local fakes, so these figures measure projection and continuation
+overhead, not hosted network latency or a production build duration. The
+separate 128 MB record fixture checks the action memory and RPC page budgets.
 
 
 Copy the whole export outside the project. It holds private history and check evidence, including opted-in local logs within retention, so treat it as private. Restore always writes to a new, unused directory. It validates every file against the manifest and recreates Lanes and Candidates. Unfinished commands are marked interrupted and never restart. The original owner is untouched, so keep it until you have checked the copy.

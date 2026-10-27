@@ -39,7 +39,7 @@ export const stepRef = makeFunctionReference<
     metadata?: string;
     cleanup?: string;
   },
-  boolean
+  Doc<'projectWorkGenerations'> | null
 >('projectWorkIndexBuildStore:step');
 export type Cursor = {
   phase:

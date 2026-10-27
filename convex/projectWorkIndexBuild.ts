@@ -13,6 +13,7 @@ import {
   type Selected,
   type Cursor,
 } from './projectWorkIndexBuildTypes';
+import { buildProgress } from './projectWorkIndexBuildProgress';
 import { projectStep } from './projectWorkIndexBuildStep';
 import { replayStep } from './projectWorkIndexBuildProjection';
 import { exchangeObjectReader } from './projectExchangeReader';
@@ -22,7 +23,7 @@ import { materializeWork, indexBatches, type IndexEntry, type IndexMetadata } fr
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 /** Server-held record bodies are independently pinned and validated by seed.
- * Each durable step consumes one record or one source State. No complete Work
+ * Each durable step consumes a bounded record or source State page. No complete Work
  * object, projection, or historical State file map survives in the action. */
 export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
   const existing: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
@@ -92,7 +93,7 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
   // Both a work window and a step window: tests and very fast local storage do
   // not turn a single action into an unbounded loop.
   for (let steps = 0; steps < 20 && Date.now() - started < 10_000; steps++) {
-    const expected = generation.ensureCursor;
+    const expected: string = generation.ensureCursor!;
     let cursor = JSON.parse(expected!) as Cursor;
     if (cursor.phase === 'done') {
       const metadata = JSON.parse(generation.metadata) as IndexMetadata;
@@ -107,7 +108,7 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
         return generation._id;
       return {
         pending: true as const,
-        progress: JSON.stringify({ phase: 'index', step: generation.nextBatch }),
+        progress: buildProgress(generation, exchange),
       };
     }
     let metadata: string | undefined;
@@ -133,7 +134,7 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
         entries = projected.entries;
         metadata = projected.metadata;
       } else entries = await projectStep(ctx, selected, exchange, backup, after);
-      const batches = indexBatches(entries);
+      const batches = indexBatches(entries, { rows: 500, bytes: 500000 });
       if (batches.length > 1) {
         // Stage one independently readable RPC page at a time. Cursor+rows are
         // published together below, so a lost reply never repeats completed IO.
@@ -153,7 +154,7 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
         metadata = undefined;
       } else cursor = after;
     }
-    await ctx.runMutation(stepRef, {
+    const committed: Doc<'projectWorkGenerations'> | null = await ctx.runMutation(stepRef, {
       ...selected,
       expected,
       cursor: JSON.stringify(cursor),
@@ -161,16 +162,11 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
       ...(cleanup ? { cleanup } : {}),
       ...(metadata ? { metadata } : {}),
     });
-    generation = await ctx.runQuery(resume, input);
+    generation = committed ?? (await ctx.runQuery(resume, input));
     invariant(generation?.ensureCursor, 'WORK_STALE', 'The snapshot changed during index preparation.');
   }
   return {
     pending: true as const,
-    progress: JSON.stringify({
-      phase: 'index',
-      step: generation.nextBatch,
-      done: generation.nextBatch,
-      total: 0,
-    }),
+    progress: buildProgress(generation, exchange),
   };
 }

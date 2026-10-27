@@ -345,3 +345,35 @@ test('owner decision reads page immutable Work, hydrate oversized what, retain a
   );
   assert.equal(calls, 0, 'older optional projections render empty without reads');
 });
+
+test('a hosted read drives index continuations to completion and reports counts without progress queries', async () => {
+  const { ensureWorkIndex } = await import('../dist/work-index-client.js');
+  const { hostProgress } = await import('../dist/host-progress.js');
+  const events = [],
+    progress = hostProgress(event => events.push(event));
+  progress.phase('building Work index');
+  let calls = 0;
+  const client = {
+    action: async (ref, args) => {
+      assert.equal(getFunctionName(ref), 'projectWorkIndexActions:ensure');
+      assert.equal(args.continuation, calls > 0);
+      calls++;
+      return calls < 3
+        ? {
+            pending: true,
+            progress: JSON.stringify({
+              phase: 'index',
+              buildPhase: 'parents',
+              done: calls * 50,
+              total: 2495,
+              step: calls,
+            }),
+          }
+        : 'generation';
+    },
+  };
+  assert.equal(await ensureWorkIndex(client, 'project', progress.index), 'generation');
+  assert.equal(calls, 3);
+  assert.equal(events.at(-1).objectsDone, 100);
+  assert.equal(events.at(-1).objectsTotal, 2495);
+});

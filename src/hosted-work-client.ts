@@ -1,3 +1,4 @@
+import { ensureWorkIndex } from './work-index-client.js';
 // SPDX-License-Identifier: Apache-2.0
 import { hostedActionError } from './hosted-action-error.js';
 import { SourceAuthorityStaleError } from './hosted-source-authority.js';
@@ -83,7 +84,7 @@ const reference = (name: string) => makeFunctionReference<'query'>(`projectWorkI
 async function workspace(client: HostedWorkTransport, projectId: string): Promise<Workspace> {
   let value = await client.query(reference('workspace'), { projectId });
   if (value === null) {
-    await client.action(makeFunctionReference('projectWorkIndexActions:ensure'), { projectId });
+    await ensureWorkIndex(client, projectId);
     value = await client.query(reference('workspace'), { projectId });
   }
   invariant(

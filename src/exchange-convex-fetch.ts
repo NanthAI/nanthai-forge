@@ -1,3 +1,4 @@
+import { indexProgressReporter } from './work-index-client.js';
 // SPDX-License-Identifier: Apache-2.0
 import { exchangeFetch, type ExchangeRequestOptions } from './exchange-request.js';
 import { ForgeError } from './errors.js';
@@ -79,6 +80,7 @@ export function exchangeConvexFetch(
       longAction && ['projectExchangeActions:publish', 'projectWorkIndexActions:ensure'].includes(name);
     const guard = pendingProgressGuard(name, payload.args?.[0]?.operationId ?? name);
     let progressName: string | undefined;
+    const indexProgress = name === 'projectWorkIndexActions:ensure' ? indexProgressReporter() : undefined;
     onCall?.(name, true);
     try {
       const request: RequestInit & { dispatcher?: Dispatcher } = {
@@ -108,6 +110,7 @@ export function exchangeConvexFetch(
           const value = envelope?.status === 'success' ? envelope.value : null;
           if (value?.pending === true) {
             guard(value.progress);
+            if (value.progress) indexProgress?.(value.progress);
             payload.args[0].continuation = true;
             if (progressName) onCall?.(progressName, false);
             progressName = `${name}: ${value.progress ?? 'pending'}`;

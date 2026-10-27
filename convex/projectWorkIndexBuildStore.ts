@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { internalQuery, internalMutation } from './_generated/server';
-import { internal } from './_generated/api';
 import { accessibleProject } from './projectAuthority';
 import { workProject } from './projectWorkHead';
 import { record } from './projectWorkIndexStore';
@@ -101,14 +100,14 @@ export const step = internalMutation({
     metadata: v.optional(v.string()),
     cleanup: v.optional(v.string()),
   },
-  returns: v.boolean(),
+  returns: v.union(generationDocument, v.null()),
   handler: async (ctx, input) => {
     const project = await workProject(ctx, await accessibleProject(ctx, input.projectId, input.owner));
     const generation = await ctx.db.get(input.generationId);
     invariant(generation?.projectId === input.projectId, 'WORK_STALE', 'The index build changed.');
     if (project.work?.backupId !== generation.backupId || project.work.revision !== generation.revision)
-      return false;
-    if (generation.status !== 'building' || generation.ensureCursor !== input.expected) return false;
+      return null;
+    if (generation.status !== 'building' || generation.ensureCursor !== input.expected) return null;
     const metadata = {
       ...JSON.parse(input.metadata ?? generation.metadata),
       counts: JSON.parse(generation.metadata).counts,
@@ -177,18 +176,14 @@ export const step = internalMutation({
         )
         .take(100);
       for (const page of pages) await ctx.db.delete(page._id);
-      if (pages.length === 100)
-        await ctx.scheduler.runAfter(0, internal.projectReturnMetadataStore.retire, {
-          partitionId: generation._id,
-          key: previous.key,
-        });
     }
-    await ctx.db.patch(generation._id, {
+    const update = {
       ensureCursor: cursor,
       metadata: JSON.stringify(metadata),
       nextBatch: generation.nextBatch + 1,
-    });
-    return true;
+    };
+    await ctx.db.patch(generation._id, update);
+    return { ...generation, ...update };
   },
 });
 
