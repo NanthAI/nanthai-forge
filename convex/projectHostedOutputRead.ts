@@ -206,3 +206,35 @@ export const summaries = query({
     }
   },
 });
+
+/** Sign only the requested exact chunk window, checking current access once in
+ * this transaction. Previously issued URLs never authorize another window. */
+export const downloads = mutation({
+  args: {
+    ...identity,
+    entries: v.array(v.object({ streamId: v.union(v.string(), v.null()), sequence: v.number() })),
+  },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    try {
+      await outputReader(ctx, input.projectId);
+      await loadHostedCheck(ctx, input);
+      invariant(
+        input.entries.length > 0 && input.entries.length <= 100,
+        'BAD_ARGUMENT',
+        'Sign a window of at most 100 exact output chunks.',
+      );
+      const result = [];
+      for (const entry of input.entries) {
+        const object = await downloadableOutput(ctx, { ...input, ...entry });
+        result.push({
+          object,
+          url: await presignGet(r2Config(), outputKey(input.projectId, input.runId, object)),
+        });
+      }
+      return canonicalPayload(result);
+    } catch (error) {
+      return report(error);
+    }
+  },
+});

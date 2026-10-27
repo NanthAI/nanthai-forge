@@ -20,6 +20,9 @@ export type StreamProgress = {
   excerpt: string;
   position: number;
   target?: OutputChunk;
+  targets?: OutputChunk[];
+  retainedPins?: string[];
+  indexed?: boolean;
   retainedCursor?: string | null;
   after?: string | null;
   done?: boolean;
@@ -33,7 +36,7 @@ type Stream = {
   seal: string | null;
   descriptor: string;
 };
-/** One raw chunk or one retained-reference page per call. Line carry and summary
+/** One raw chunk or one deletion/reference window per call. Line carry and summary
  * positions survive action/process loss; full logs and summaries never accumulate. */
 export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: PlanState, stream: Stream) {
   const p = (state.stream ??= {
@@ -164,31 +167,73 @@ export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: 
     } else p.cursor = page.continueCursor;
     return writes;
   }
-  if (!p.target) {
-    const page = await pageAt(p.cursor);
-    if (!page.page.length) {
-      finish();
+  if (p.targets) {
+    const retained = JSON.parse(
+      await ctx.runQuery(internal.projectHostedLogCleanupStore.retained, {
+        ...address,
+        cursor: p.retainedCursor ?? null,
+      }),
+    );
+    p.retainedPins = [
+      ...new Set([
+        ...(p.retainedPins ?? []),
+        ...retained.pins.filter((pin: string) => p.targets!.some(chunk => chunk.object.sha256 === pin)),
+      ]),
+    ];
+    if (!retained.isDone) {
+      p.retainedCursor = retained.continueCursor;
       return writes;
     }
-    p.target = outputChunkSchema.parse(JSON.parse(page.page[0].value));
-    p.retainedCursor = null;
-    p.after = page.isDone ? null : page.continueCursor;
-    p.done = page.isDone;
-  }
-  const retained = JSON.parse(
-    await ctx.runQuery(internal.projectHostedLogCleanupStore.retained, {
-      ...address,
-      cursor: p.retainedCursor ?? null,
-    }),
-  );
-  if (retained.pins.includes(p.target.object.sha256) || retained.isDone) {
-    if (!retained.pins.includes(p.target.object.sha256)) {
-      await pageAt(null); // fresh authority and original stream pins immediately before IO
-      await deleteR2Object(r2Config(), outputKey(input.projectId, stream.runId, p.target.object));
-    }
-    delete p.target;
+    await pageAt(null); // original authority/stream bindings immediately before IO
+    for (const chunk of p.targets)
+      if (!p.retainedPins.includes(chunk.object.sha256))
+        await deleteR2Object(r2Config(), outputKey(input.projectId, stream.runId, chunk.object));
+    delete p.targets;
+    delete p.retainedPins;
+    delete p.retainedCursor;
     if (p.done) finish();
     else p.cursor = p.after!;
-  } else p.retainedCursor = retained.continueCursor;
+    return writes;
+  }
+  if (!p.indexed) {
+    p.indexed = await ctx.runMutation(internal.projectHostedLogCleanupStore.indexDigests, address);
+    return writes;
+  }
+  const page = JSON.parse(
+    await ctx.runQuery(internal.projectHostedLogCleanupStore.page, {
+      ...address,
+      cursor: p.cursor,
+      expected,
+    }),
+  );
+  const targets = page.page.map((row: { value: string }) =>
+    outputChunkSchema.parse(JSON.parse(row.value)),
+  ) as OutputChunk[];
+  const retained = JSON.parse(
+    await ctx.runQuery(internal.projectHostedLogCleanupStore.retainedBatch, {
+      ...address,
+      expected,
+      digests: targets.map(chunk => chunk.object.sha256),
+    }),
+  );
+  if (!retained.indexed) {
+    p.indexed = false;
+    return writes;
+  }
+  if (retained.overflow?.length) {
+    p.targets = targets;
+    p.retainedPins = retained.pins;
+    p.retainedCursor = null;
+    p.after = page.continueCursor;
+    p.done = page.isDone;
+    return writes;
+  }
+  // The reference window and exact stream bindings are freshly checked directly
+  // before deletion IO, including retries after a lost response.
+  for (const chunk of targets)
+    if (!retained.pins.includes(chunk.object.sha256))
+      await deleteR2Object(r2Config(), outputKey(input.projectId, stream.runId, chunk.object));
+  if (page.isDone) finish();
+  else p.cursor = page.continueCursor;
   return writes;
 }

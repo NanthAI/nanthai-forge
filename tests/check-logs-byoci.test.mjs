@@ -532,6 +532,30 @@ test('uploaded-log expiry wakes only on lifecycle events when an indexed expiry 
     1,
   );
 });
+test('continuous uploaded-log expiries start at most one automatic sweep per project per day', async () => {
+  const { fixture: hostedFixture, modules } = await import('./project-exchange-fixture.mjs');
+  const s = hostedFixture(),
+    calls = [];
+  s.ctx.scheduler.runAfter = async (...args) => {
+    calls.push(args);
+    return 'synthetic-wake';
+  };
+  const project = s.tables.hostedProjects.get('project');
+  project.checkLogSweptAt = Date.now() - 60_000;
+  await modules.projectCheckLogRetention.register._handler(s.ctx, {
+    projectId: 'project',
+    actor: 'owner',
+    entries: [{ key: 'due-soon-after', expiresAt: Date.now() - 1 }],
+  });
+  assert.equal(calls.length, 0, 'an expiry due within a day of the last sweep waits');
+  project.checkLogSweptAt = Date.now() - DAY_MS - 1;
+  await modules.projectCheckLogRetention.register._handler(s.ctx, {
+    projectId: 'project',
+    actor: 'owner',
+    entries: [{ key: 'due-next-day', expiresAt: Date.now() - 1 }],
+  });
+  assert.equal(calls.length, 1, 'the next lifecycle event after a day starts one sweep');
+});
 for (const shared of [false, true])
   test(`legacy hosted streamed cleanup preserves shared artifact chunks (${shared}), hashes and summaries`, async t => {
     const { moduleUrl } = await import('./convex-module.mjs');

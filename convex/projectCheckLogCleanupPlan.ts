@@ -10,6 +10,7 @@ import {
   lookupRef,
   nodesRef,
   queueRef,
+  sourcesRef,
   type Identity,
   type PlanState,
   type Node,
@@ -34,10 +35,12 @@ const phases = [
   'recipes',
   'trees',
   'closure',
+  'source-union',
+  'source-closure',
   'select',
   'ready',
 ];
-export async function resumePlan(ctx: ActionCtx, input: Identity): Promise<PlanState> {
+export async function resumePlan(ctx: ActionCtx, input: Identity, automatic = false): Promise<PlanState> {
   const prior = await ctx.runQuery(readRef, input);
   if (prior) {
     const state = JSON.parse(prior);
@@ -53,6 +56,7 @@ export async function resumePlan(ctx: ActionCtx, input: Identity): Promise<PlanS
       ...input,
       value: JSON.stringify({
         version: 2,
+        ...(automatic ? { automatic: true } : {}),
         guard: '',
         now: Date.now(),
         phase: phases[0]!,
@@ -74,6 +78,9 @@ export async function resumePlan(ctx: ActionCtx, input: Identity): Promise<PlanS
     }),
   );
 }
+// Hashes this invocation already merged into the union. States share most files,
+// so later States send only new hashes and the transaction reads only their leaves.
+const unionSent = new WeakMap<object, Set<string>>();
 export async function planStep(
   ctx: ActionCtx,
   input: Identity,
@@ -84,6 +91,8 @@ export async function planStep(
     state = structuredClone(original);
   const nodes: Node[] = [],
     writes: PlanWrite[] = [];
+  let sent: Set<string> | undefined,
+    fresh: string[] = [];
   const mark = (key: string, flags: Omit<Node, 'key'>) => nodes.push({ key, ...flags });
   const put = (part: string, position: number, value: unknown) =>
     writes.push({ part, position, value: JSON.stringify(value) });
@@ -118,7 +127,11 @@ export async function planStep(
       invariant(state.guard === page.guard, 'WORK_STALE', 'Project changed during cleanup inventory.');
       const selected = page.page[0] as Doc<'projectBackups'> | Doc<'projectProposals'> | undefined;
       state.cursor = page.isDone ? null : page.continueCursor;
-      if (selected?.status === 'stored' && (state.phase === 'backups' || selected.transport === 'objects')) {
+      if (
+        selected?.status === 'stored' &&
+        (!state.automatic || state.phase !== 'backups' || selected.transport === 'objects') &&
+        (state.phase === 'backups' || selected.transport === 'objects')
+      ) {
         state.selected = selected;
         state.fileOffset = 0;
         mark(
@@ -186,8 +199,23 @@ export async function planStep(
       mark(tree.sha256, { children: page.children.map(child => child.sha256) });
       for (const child of page.children) if (child.height) mark(child.sha256, { tree: child });
     }
-  } else if (state.phase === 'closure') {
-    if (state.queueOffset === state.queueCount) advance();
+  } else if (state.phase === 'source-union') {
+    const page = JSON.parse(await ctx.runQuery(sourcesRef, { ...input, cursor: state.cursor }));
+    for (const key of page.page) mark(key, { protected: true });
+    state.cursor = page.isDone ? null : page.continueCursor;
+    if (page.isDone) advance();
+  } else if (['closure', 'source-closure'].includes(state.phase)) {
+    if (state.sourceParts) {
+      const position = state.sourceOffset ?? 0;
+      const refs = await lookup<Node[]>('sourceRefs', position);
+      invariant(refs, 'NOT_FOUND', 'Original State reference page is unavailable.');
+      nodes.push(...refs);
+      state.sourceOffset = position + 1;
+      if (state.sourceOffset === state.sourceParts) {
+        delete state.sourceParts;
+        delete state.sourceOffset;
+      }
+    } else if (state.queueOffset === state.queueCount) advance();
     else {
       const batch: { key: string; kind: 'candidate' | 'protected' | 'state'; node: Node }[] = JSON.parse(
         await ctx.runQuery(queueRef, { ...input, offset: state.queueOffset }),
@@ -209,18 +237,26 @@ export async function planStep(
           const source = parseNativeState(await read({ sha256: row.digest, size: row.size }));
           const refs = [
             { key: row.digest, protected: true },
-            ...source.files.map(file => ({ key: file.blob, protected: true })),
             ...source.parents.map(parent => ({ key: parent, state: true })),
             ...(source.git ? [{ key: source.git.bundle, protected: true }] : []),
           ];
-          const offset = state.sourceOffset ?? 0;
-          nodes.push(...refs.slice(offset, offset + 50));
-          if (offset + 50 < refs.length) {
-            state.sourceOffset = offset + 50;
-            state.queueOffset--;
-            break;
+          // One verified parse contributes the complete deduplicated reference union.
+          // The transaction merges bounded union buckets; propagation visits each hash once.
+          sent = unionSent.get(snapshot) ?? new Set<string>();
+          unionSent.set(snapshot, sent);
+          fresh = [...new Set(source.files.map(file => file.blob))].filter(blob => !sent!.has(blob));
+          if (fresh.length) put('sourceProtection', 0, fresh);
+          const unique = [...new Map(refs.map(ref => [ref.key, ref])).values()];
+          if (unique.length <= 3500) nodes.push(...unique);
+          else {
+            // Larger trees stage bounded durable pages in this same transaction.
+            // Resumed propagation never downloads or parses the State again.
+            for (let offset = 0; offset < unique.length; offset += 500)
+              put('sourceRefs', offset / 500, unique.slice(offset, offset + 500));
+            state.sourceParts = Math.ceil(unique.length / 500);
+            state.sourceOffset = 0;
           }
-          delete state.sourceOffset;
+          break; // bound this transaction to one State/tree, not 25 whole trees
         } else for (const child of current?.children ?? []) mark(child, { [entry!.kind]: true });
       }
     }
@@ -308,7 +344,7 @@ export async function planStep(
       ),
     ]),
   );
-  return JSON.parse(
+  const next: PlanState = JSON.parse(
     await ctx.runMutation(stepRef, {
       ...input,
       expected,
@@ -317,4 +353,6 @@ export async function planStep(
       writes: JSON.stringify(writes),
     }),
   );
+  for (const blob of fresh) sent!.add(blob); // only after the union commit
+  return next;
 }

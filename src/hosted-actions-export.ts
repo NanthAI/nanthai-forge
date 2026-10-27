@@ -39,7 +39,11 @@ export async function exportHostedActions(
     const cache = join(root, 'source-cache');
     await mkdir(cache, { mode: 0o700 });
     const reader = new SourceWorkerReader(cache, transport, progress);
-    await reader.resolve(input.request.expectedHead);
+    await reader.resolveMany([
+      input.request.expectedHead,
+      input.plan.manifest.sha256,
+      input.plan.selection.sha256,
+    ]);
     const state = parseNativeState(await readFile(join(cache, input.request.expectedHead)));
     const recipe = hostedActionsRecipeSchema.parse(await reader.json(input.plan.manifest));
     const { pin, ...recipePins } = recipe;
@@ -93,8 +97,9 @@ export async function exportHostedActions(
     await hostedActionsGit(root, ['init', '--bare', '--template=', '--initial-branch=forge-export']);
     const entries: string[] = [];
     let lockfile = digest('');
+    // Deduplicate before describing; consume grants and stream bytes in bounded windows.
+    await reader.resolveMany(state.files.map(file => file.blob));
     for (const file of state.files) {
-      await reader.resolve(file.blob);
       const path = join(cache, file.blob);
       if (file.path === 'package-lock.json') lockfile = file.blob;
       if (generated.has(file.path)) continue;

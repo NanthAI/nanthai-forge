@@ -18,6 +18,7 @@ export type OutputSink = {
   /** Direct R2 PUT/verified commit. Must retry identical chunk after unknown ack. */
   publish(chunk: OutputChunk, bytes: Uint8Array): Promise<void>;
   seal(seal: OutputSeal): Promise<void>;
+  publishBatch?(chunks: { chunk: OutputChunk; bytes: Uint8Array }[], seal?: OutputSeal): Promise<void>;
 };
 /** Fixed trusted collector, outside the process executing project commands.
  * Backpressure follows storage acknowledgements, never viewer presence/speed.
@@ -48,6 +49,13 @@ export async function collectHostedOutput(
   let sequence = 0,
     offset = 0,
     pending = Buffer.alloc(0);
+  const window: { chunk: OutputChunk; bytes: Uint8Array }[] = [];
+  let windowBytes = 0;
+  const publishWindow = async (seal?: OutputSeal) => {
+    await sink.publishBatch!(window, seal);
+    window.length = 0;
+    windowBytes = 0;
+  };
   const flush = async (bytes: Buffer) => {
     const chunk = outputChunkSchema.parse({
       stream,
@@ -58,8 +66,17 @@ export async function collectHostedOutput(
         size: bytes.length,
       },
     });
+    if (
+      sink.publishBatch &&
+      window.length &&
+      (window.length >= 32 || windowBytes + bytes.length > 2 * 1024 * 1024)
+    )
+      await publishWindow();
     await sink.retain(chunk, bytes);
-    await sink.publish(chunk, bytes);
+    if (sink.publishBatch) {
+      window.push({ chunk, bytes });
+      windowBytes += bytes.length;
+    } else await sink.publish(chunk, bytes);
     hash.update(bytes);
     sequence++;
     offset += bytes.length;
@@ -85,6 +102,7 @@ export async function collectHostedOutput(
       await flush(pending);
       pending = Buffer.alloc(0);
     }
+    if (flushEachInput && sink.publishBatch && window.length) await publishWindow();
   }
   await append(redactor.end());
   if (pending.length) await flush(pending);
@@ -102,6 +120,7 @@ export async function collectHostedOutput(
     bytes: offset,
     sha256: hash.digest('hex'),
   });
-  await sink.seal(seal);
+  if (sink.publishBatch) await publishWindow(seal);
+  else await sink.seal(seal);
   return seal;
 }

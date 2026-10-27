@@ -284,6 +284,17 @@ export const projectPurgeBlocked = v.union(
   v.literal('R2_PURGE_RETRY_EXHAUSTED'),
 );
 const projectFields = {
+  checkLogSweep: v.optional(
+    v.object({
+      operationId: v.string(),
+      cutoff: v.number(),
+      sequence: v.number(),
+      task: v.id('_scheduled_functions'),
+      running: v.boolean(),
+      settling: v.optional(v.boolean()),
+    }),
+  ),
+  checkLogSweptAt: v.optional(v.number()),
   purgeBlocked: v.optional(projectPurgeBlocked),
   r2Purge: v.optional(
     v.object({ generation: v.number(), cursor: v.union(v.string(), v.null()), failures: v.number() }),

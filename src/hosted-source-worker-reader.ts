@@ -15,6 +15,12 @@ import { workerObjectSchema, type WorkerObject, type WorkerPin } from './hosted-
  * upload consumes the stream completely and commits only the supplied exact pin. */
 export interface SourceWorkerTransport {
   describe?(sha256: string): Promise<WorkerObject>;
+  describeAndRead?(sha256s: string[]): Promise<
+    {
+      descriptor: WorkerObject;
+      read: (() => Promise<AsyncIterable<Uint8Array>>) | null;
+    }[]
+  >;
   read(pin: WorkerPin): Promise<AsyncIterable<Uint8Array>>;
   upload(pin: WorkerPin, bytes: AsyncIterable<Uint8Array>): Promise<void>;
 }
@@ -43,6 +49,30 @@ export class SourceWorkerReader {
     await this.file(ref);
     this.resolvedObjects++;
   }
+  /** Authorize each deduplicated window afresh, even when byte files exist. */
+  async resolveMany(sha256s: readonly string[]) {
+    const unique = [...new Set(sha256s)];
+    for (let start = 0; start < unique.length; start += 100) {
+      const hashes = unique.slice(start, start + 100);
+      if (!this.transport.describeAndRead) {
+        for (const hash of hashes) await this.resolve(hash);
+        continue;
+      }
+      const window = await this.transport.describeAndRead(hashes);
+      invariant(window.length === hashes.length, 'SOURCE_HASH_MISMATCH', 'Source window is incomplete.');
+      for (let i = 0; i < window.length; i++) {
+        const entry = window[i]!;
+        const ref = workerObjectSchema.parse(entry.descriptor);
+        invariant(
+          ref.object.sha256 === hashes[i],
+          'SOURCE_HASH_MISMATCH',
+          'Source window changed order or bytes.',
+        );
+        await this.file(ref, entry.read ?? undefined);
+        this.resolvedObjects++;
+      }
+    }
+  }
   private readonly saved = new Map<string, WorkerPin>();
   constructor(
     readonly directory: string,
@@ -50,7 +80,7 @@ export class SourceWorkerReader {
     private readonly progress: () => Promise<void> = async () => {},
   ) {}
   /** A job-private verified cache, never a persistent authorization cache. */
-  async file(input: WorkerObject): Promise<string> {
+  async file(input: WorkerObject, read?: () => Promise<AsyncIterable<Uint8Array>>): Promise<string> {
     const pin = jobObject.parse(input.object),
       prior = this.saved.get(pin.sha256);
     if (prior) {
@@ -70,7 +100,7 @@ export class SourceWorkerReader {
       );
       bytes = readObjectRecipe(recipe, async ref => readFile(await this.file({ object: ref, recipe: null })));
     } else {
-      bytes = await this.transport.read(pin);
+      bytes = await (read ? read() : this.transport.read(pin));
       this.metrics.downloads++;
     }
     const hash = createHash('sha256');

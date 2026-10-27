@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { notifyActionsProgress } from './projectHostedActionsWake';
 import { z } from 'zod';
 import { watchMacLease, macLeaseMs } from './projectHostedCheckLease';
 import { v } from 'convex/values';
@@ -88,6 +89,7 @@ export const cancel = mutation({
           await completeHostedCheck(ctx, run);
         }
         await writeHostedCheck(ctx, row._id, run);
+        await notifyActionsProgress(ctx, run);
       }
       await completeCheckOperation(ctx, prepared.operation, {
         runId: run.id,

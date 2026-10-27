@@ -22,6 +22,17 @@ export async function landingFailureExcerpt(io: LandingIO, runId: string) {
       isDone: boolean;
       continueCursor: string;
     } = await io.query('projectHostedOutputRead:streams', { runId, cursor });
+    const tails = page.page.filter(
+      row => row.stream.stream !== 'artifact' && !row.seal?.failureSummary && row.chunks && !row.retired,
+    );
+    const targets = tails.length
+      ? await io.mutation<{ object: Pin; url: string }[]>('projectHostedOutputRead:downloads', {
+          runId,
+          entries: tails.map(row => ({ streamId: row.streamId, sequence: row.maxSequence })),
+        })
+      : [];
+    invariant(targets.length === tails.length, 'EVIDENCE_CHANGED', 'Output download window is incomplete.');
+    const byStream = new Map(tails.map((row, i) => [row.streamId, targets[i]!]));
     for (const row of page.page) {
       if (row.stream.stream === 'artifact') continue;
       if (row.seal?.failureSummary) {
@@ -45,11 +56,7 @@ export async function landingFailureExcerpt(io: LandingIO, runId: string) {
         text.push(compact);
         continue;
       }
-      const selected = await io.mutation<{ object: Pin; url: string }>('projectHostedOutputRead:download', {
-        runId,
-        streamId: row.streamId,
-        sequence: row.maxSequence,
-      });
+      const selected = byStream.get(row.streamId)!;
       const response = await fetch(selected.url);
       invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Check output download failed.');
       const bytes = new Uint8Array(await response.arrayBuffer());

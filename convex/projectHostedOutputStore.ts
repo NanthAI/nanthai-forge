@@ -12,7 +12,7 @@ import {
   outputRootSchema,
   type OutputRoot,
 } from '../src/hosted-check-output';
-import { checkPin, hostedCheckTerminal } from '../src/hosted-check';
+import { checkPin, hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 
@@ -43,10 +43,11 @@ export const outputChunk = (
     .unique();
 /** Fresh project/actor/epoch authority is checked even for duplicate callbacks,
  * after terminal check results and again after external HEAD verification. */
-export async function authorizeOutput(
+async function validateOutput(
   ctx: MutationCtx,
   input: { projectId: Id<'hostedProjects'>; message: unknown; signature: string },
   key: (id: string) => string,
+  run: HostedCheckRun,
 ) {
   const message = outputMessageSchema.parse(input.message);
   if (
@@ -62,7 +63,6 @@ export async function authorizeOutput(
     );
   }
   invariant(message.projectId === input.projectId, 'EVIDENCE_CHANGED', 'Output project differs.');
-  const { run } = await writableHostedCheck(ctx, { projectId: input.projectId, runId: message.runId });
   verifyOutput(message, input.signature, key(run.keyId));
   if (message.body.kind !== 'final') {
     const stream = message.body.kind === 'chunk' ? message.body.chunk.stream : message.body.seal.stream;
@@ -122,6 +122,46 @@ export async function authorizeOutput(
   );
   return message;
 }
+type SignedInput = { projectId: Id<'hostedProjects'>; message: unknown; signature: string };
+export async function authorizeOutput(ctx: MutationCtx, input: SignedInput, key: (id: string) => string) {
+  return (await authorizeOutputWindow(ctx, [input], key))[0]!;
+}
+/** Authority is fresh within this transaction only; each signature and all
+ * original message pins remain independently validated. No cross-call cache. */
+export async function authorizeOutputWindow(
+  ctx: MutationCtx,
+  inputs: SignedInput[],
+  key: (id: string) => string,
+) {
+  invariant(inputs.length > 0 && inputs.length <= 100, 'BAD_ARGUMENT', 'Select a bounded output window.');
+  const first = inputs[0]!,
+    message = outputMessageSchema.parse(first.message);
+  const { run } = await writableHostedCheck(ctx, { projectId: first.projectId, runId: message.runId });
+  const messages = [];
+  for (const input of inputs) {
+    invariant(
+      input.projectId === first.projectId && outputMessageSchema.parse(input.message).runId === run.id,
+      'EVIDENCE_CHANGED',
+      'An output window belongs to one exact project and run.',
+    );
+    messages.push(await validateOutput(ctx, input, key, run));
+  }
+  return messages;
+}
+export async function commitHostedOutput(ctx: MutationCtx, input: SignedInput, key: (id: string) => string) {
+  return commitOutputMessage(ctx, input.projectId, await authorizeOutput(ctx, input, key));
+}
+export async function commitHostedOutputWindow(
+  ctx: MutationCtx,
+  inputs: SignedInput[],
+  key: (id: string) => string,
+) {
+  const messages = await authorizeOutputWindow(ctx, inputs, key),
+    receipts = [];
+  for (const message of messages)
+    receipts.push(await commitOutputMessage(ctx, inputs[0]!.projectId, message, true));
+  return receipts;
+}
 export function rootForOutput(
   id: OutputIdentity,
   executionId: string,
@@ -138,13 +178,13 @@ export function rootForOutput(
     bytes: head?.bytes ?? 0,
   });
 }
-export async function commitHostedOutput(
+async function commitOutputMessage(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; message: unknown; signature: string },
-  key: (id: string) => string,
+  projectId: Id<'hostedProjects'>,
+  message: import('../src/hosted-check-output').OutputMessage,
+  batch = false,
 ) {
-  const message = await authorizeOutput(ctx, input, key);
-  const id = { projectId: input.projectId, runId: message.runId };
+  const id = { projectId: projectId, runId: message.runId };
   const existingHead = await outputHead(ctx, id);
   const head = {
     ...id,
@@ -200,7 +240,11 @@ export async function commitHostedOutput(
           'WORK_OPERATION_CHANGED',
           'Retry the original output chunk.',
         );
-        return { duplicate: true, revision: prior.revision };
+        return {
+          duplicate: true,
+          revision: prior.revision,
+          ...(batch ? { root: rootForOutput(id, message.executionId, existingHead) } : {}),
+        };
       }
       invariant(!head.final && !stream.seal, 'EVIDENCE_CHANGED', 'Sealed output is immutable.');
       const before = chunk.sequence > 0 ? await outputChunk(ctx, id, streamId, chunk.sequence - 1) : null;
@@ -224,6 +268,7 @@ export async function commitHostedOutput(
       await ctx.db.insert('projectHostedOutputChunks', {
         ...id,
         streamId,
+        digest: chunk.object.sha256,
         sequence: chunk.sequence,
         revision: head.revision,
         value: canonicalPayload(chunk),
@@ -236,7 +281,11 @@ export async function commitHostedOutput(
           'WORK_OPERATION_CHANGED',
           'Retry the original stream seal.',
         );
-        return { duplicate: true, revision: head.revision };
+        return {
+          duplicate: true,
+          revision: head.revision,
+          ...(batch ? { root: rootForOutput(id, message.executionId, existingHead) } : {}),
+        };
       }
       invariant(
         !head.final &&

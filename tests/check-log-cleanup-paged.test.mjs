@@ -124,8 +124,9 @@ async function seeded(t, runs = 1, objectCount = 0) {
   const data = JSON.parse(readFileSync(join(prepared.directory, 'work.json'))),
     manifest = structuredClone(prepared.manifest);
   const environment = service.status().environment;
-  data.runs = Array.from({ length: runs }, () => ({
-    id: randomUUID(),
+  // Stable IDs keep content-defined catalog boundaries reproducible for call budgets.
+  data.runs = Array.from({ length: runs }, (_, i) => ({
+    id: `${i.toString(16).padStart(8, '0')}-0000-4000-8000-000000000001`,
     startedAt: new Date().toISOString(),
     endedAt: new Date().toISOString(),
     viewId: view.id,
@@ -539,4 +540,464 @@ test('server cleanup preserves structured INTERNAL_ERROR diagnostics', async () 
     cleanup.clean._handler(s.ctx, { projectId: 'project', operationId: randomUUID() }),
     error => error.data?.code === 'INTERNAL_ERROR' && error.data.message === 'Synthetic inventory diagnostic',
   );
+});
+
+test('E3 dogfood State closure parses 2,500 3,000-file States once within 15,000 calls', async () => {
+  const { resumePlan, planStep } = await import(moduleUrl('../convex/projectCheckLogCleanupPlan.ts'));
+  const s = fixture();
+  indexCleanupPages(s);
+  const input = { projectId: 'project', actor: 'owner', operationId: randomUUID() };
+  const blobs = Array.from({ length: 32000 }, (_, i) => digest(`protected-${i}`));
+  const heads = [],
+    sizes = [],
+    reads = new Map();
+  const bytesAt = i =>
+    Buffer.from(
+      JSON.stringify({
+        schema: 1,
+        kind: 'forge-source-state',
+        parents: i ? [heads[i - 1]] : [],
+        files: Array.from({ length: 3000 }, (_, j) => ({
+          path: `file-${j}.ts`,
+          blob: blobs[(i * 13 + j) % blobs.length],
+          mode: 'file',
+        })),
+        message: `State ${i}`,
+        at: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+  for (let i = 0; i < 2500; i++) {
+    const bytes = bytesAt(i),
+      head = digest(bytes);
+    heads.push(head);
+    sizes.push(bytes.length);
+    s.tables.projectObjects.set(`state-${i}`, {
+      _id: `state-${i}`,
+      projectId: 'project',
+      digest: head,
+      size: bytes.length,
+      storageId: `state-${i}`,
+      removed: false,
+    });
+  }
+  const metadata = s.ctx.storage.getMetadata,
+    get = s.ctx.storage.get;
+  s.ctx.storage.getMetadata = async id =>
+    id.startsWith('state-')
+      ? { size: sizes[Number(id.slice(6))], sha256: heads[Number(id.slice(6))] }
+      : metadata(id);
+  s.ctx.storage.get = async id => {
+    if (!id.startsWith('state-')) return get(id);
+    const i = Number(id.slice(6));
+    reads.set(i, (reads.get(i) ?? 0) + 1);
+    return new Blob([bytesAt(i)]);
+  };
+  let state = await resumePlan(s.ctx, input);
+  const original = JSON.stringify(state);
+  state.phase = 'closure';
+  state = JSON.parse(
+    await s.ctx.runMutation(
+      (await import('convex/server')).makeFunctionReference('projectCheckLogCleanupStore:planStep'),
+      {
+        ...input,
+        expected: original,
+        value: JSON.stringify(state),
+        nodes: JSON.stringify([{ key: heads.at(-1), state: true }]),
+        writes: '[]',
+      },
+    ),
+  );
+  const counts = new Map();
+  let documentReads = 0,
+    documentWrites = 0;
+  const query = s.ctx.db.query;
+  const getDocument = s.ctx.db.get;
+  s.ctx.db.get = async id => {
+    const row = await getDocument(id);
+    documentReads += Number(!!row);
+    return row;
+  };
+  s.ctx.db.query = table => {
+    const q = query(table);
+    for (const method of ['unique', 'take', 'paginate']) {
+      const run = q[method];
+      q[method] = async (...args) => {
+        const result = await run(...args);
+        documentReads +=
+          method === 'unique' ? Number(!!result) : method === 'paginate' ? result.page.length : result.length;
+        return result;
+      };
+    }
+    return q;
+  };
+  for (const method of ['insert', 'patch']) {
+    const run = s.ctx.db[method];
+    s.ctx.db[method] = (...args) => {
+      documentWrites++;
+      return run(...args);
+    };
+  }
+  for (const method of ['runQuery', 'runMutation']) {
+    const run = s.ctx[method];
+    s.ctx[method] = (ref, args) => {
+      const name = getFunctionName(ref);
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+      return run(ref, args);
+    };
+  }
+  const started = performance.now(),
+    heap = process.memoryUsage().heapUsed;
+  // Production sweeps share one snapshot per invocation of up to twenty steps.
+  let snapshot = snapshotReader(s.ctx, input);
+  for (let step = 0; ['closure', 'source-union', 'source-closure'].includes(state.phase); step++) {
+    if (step % 20 === 0) snapshot = snapshotReader(s.ctx, input);
+    state = await planStep(s.ctx, input, state, snapshot);
+  }
+  const calls = [...counts.values()].reduce((sum, n) => sum + n, 0);
+  assert(calls <= 15000, `State closure calls: ${calls}`);
+  assert.equal(reads.size, 2500);
+  assert(
+    [...reads.values()].every(n => n === 1),
+    'one byte read per State',
+  );
+  const nodes = [...s.tables.projectCheckLogCleanupPages.values()]
+    .filter(row => row.part.startsWith('node:'))
+    .map(row => JSON.parse(row.value));
+  assert.equal(nodes.filter(node => node.protected && blobs.includes(node.key)).length, 32000);
+  assert(documentReads < 1000000, `bounded union document reads: ${documentReads}`);
+  assert(documentWrites < 100000, `deduplicated durable union writes: ${documentWrites}`);
+  console.log(
+    'E3 State closure',
+    JSON.stringify({
+      states: 2500,
+      filesPerState: 3000,
+      uniqueBlobs: 32000,
+      calls,
+      functions: Object.fromEntries(counts),
+      documentReads,
+      documentWrites,
+      StateByteReads: [...reads.values()].reduce((a, b) => a + b, 0),
+      elapsedMs: performance.now() - started,
+      heapDeltaBytesIncludingFakeDB: Math.max(0, process.memoryUsage().heapUsed - heap),
+      peakRssBytesIncludingFakeDB: process.resourceUsage().maxRSS * 1024,
+      beforeAuditEstimateCalls: 762500,
+    }),
+  );
+});
+
+test('E3 output cleanup indexes legacy chunks once and rechecks 1,000 candidates in bounded windows', async t => {
+  const s = fixture();
+  s.tables.projectHostedOutputChunks = new Map();
+  const descriptor = { shard: 0, attempt: 0, executionId: 'synthetic', stream: 'stdout', name: '' };
+  const stream = {
+    runId: randomUUID(),
+    streamId: digest('E3 raw'),
+    bytes: 1000,
+    chunks: 1000,
+    maxSequence: 999,
+    seal: null,
+    descriptor: JSON.stringify(descriptor),
+  };
+  s.tables.projectHostedOutputStreams.set('raw', {
+    _id: 'raw',
+    projectId: 'project',
+    ...stream,
+    retired: true,
+  });
+  s.tables.projectHostedOutputStreams.set('artifact', {
+    _id: 'artifact',
+    projectId: 'project',
+    ...stream,
+    streamId: 'artifact',
+    descriptor: JSON.stringify({ ...descriptor, stream: 'artifact' }),
+    retired: true,
+  });
+  const rawPins = Array.from({ length: 1000 }, (_, i) => digest(`E3 raw ${i}`));
+  for (let i = 0; i < 2000; i++) {
+    const raw = i < 1000,
+      sequence = i % 1000;
+    const pin = raw || sequence < 50 ? rawPins[sequence] : digest(`E3 artifact ${sequence}`);
+    s.tables.projectHostedOutputChunks.set(`chunk-${i}`, {
+      _id: `chunk-${i}`,
+      projectId: 'project',
+      runId: stream.runId,
+      streamId: raw ? stream.streamId : 'artifact',
+      sequence,
+      revision: i,
+      value: JSON.stringify({
+        stream: raw ? descriptor : { ...descriptor, stream: 'artifact' },
+        sequence,
+        offset: sequence,
+        object: { sha256: pin, size: 1 },
+      }),
+    });
+  }
+  const env = { ...process.env },
+    fetch = globalThis.fetch,
+    deleted = new Set();
+  t.after(() => {
+    process.env = env;
+    globalThis.fetch = fetch;
+  });
+  Object.assign(process.env, {
+    R2_ACCOUNT_ID: 'synthetic',
+    R2_BUCKET: 'fixture',
+    R2_ACCESS_KEY_ID: 'synthetic',
+    R2_SECRET_ACCESS_KEY: 'synthetic',
+  });
+  globalThis.fetch = async (url, init) => {
+    assert.equal(init.method, 'DELETE');
+    const pin = rawPins.find(pin => String(url).includes(pin));
+    assert(pin);
+    deleted.add(pin);
+    return new Response(null, { status: 204 });
+  };
+  let calls = 0;
+  for (const method of ['runQuery', 'runMutation']) {
+    const run = s.ctx[method];
+    s.ctx[method] = (ref, args) => {
+      calls++;
+      return run(ref, args);
+    };
+  }
+  const identity = { projectId: 'project', actor: 'owner', operationId: randomUUID() },
+    state = { outputOffset: 0 };
+  const expected = JSON.stringify({
+    bytes: stream.bytes,
+    chunks: stream.chunks,
+    maxSequence: stream.maxSequence,
+    seal: stream.seal,
+    descriptor: stream.descriptor,
+  });
+  const unknown = JSON.parse(
+    await modules.projectHostedLogCleanupStore.retainedBatch._handler(s.ctx, {
+      ...identity,
+      ...stream,
+      digests: [rawPins[0]],
+      expected,
+    }),
+  );
+  assert.equal(unknown.indexed, false, 'missing index coverage cannot authorize deletion');
+  const started = performance.now();
+  while (!state.outputOffset) await streamCleanup.cleanupStreamStep(s.ctx, identity, state, stream);
+  assert(calls <= 200, `cleanup control calls: ${calls}`);
+  assert.equal(deleted.size, 950);
+  assert(
+    rawPins.slice(0, 50).every(pin => !deleted.has(pin)),
+    'retired artifact references still protect shared bytes',
+  );
+  s.tables.hostedProjects.get('project').removal = 'deleting';
+  await assert.rejects(
+    modules.projectHostedLogCleanupStore.retainedBatch._handler(s.ctx, {
+      ...identity,
+      ...stream,
+      digests: [rawPins[99]],
+      expected,
+    }),
+    /unavailable/,
+  );
+  console.log(
+    'E3 output cleanup',
+    JSON.stringify({
+      rawChunks: 1000,
+      otherChunks: 1000,
+      calls,
+      deletes: deleted.size,
+      elapsedMs: performance.now() - started,
+      beforeAuditEstimateReferenceCalls: 40000,
+    }),
+  );
+});
+
+test('E3 due expiry coalesces concurrent events and drains a backlog with one resumable plan', async () => {
+  const s = fixture(),
+    retention = modules.projectCheckLogRetention;
+  for (let i = 0; i < 150; i++)
+    s.tables.projectCheckLogRetentions.set(`due-${i}`, {
+      _id: `due-${i}`,
+      projectId: 'project',
+      key: `output:${i}`,
+      expiresAt: Date.now() - 10000,
+    });
+  for (let i = 0; i < 20; i++)
+    await retention.register._handler(s.ctx, { projectId: 'project', actor: 'owner', entries: [] });
+  assert.equal(s.scheduled.length, 1, 'concurrent lifecycle wakes share the durable project sweep');
+  const operationIds = new Set();
+  let actions = 0;
+  for (let at = 0; at < s.scheduled.length; at++) {
+    const { args } = s.scheduled[at];
+    operationIds.add(args.operationId);
+    const first = await retention.claimSweep._handler(s.ctx, args);
+    assert(first);
+    assert.equal(await retention.claimSweep._handler(s.ctx, args), null, 'one driver wins this continuation');
+    // Release the test claim so the real action drives its planner/settlement.
+    s.tables.hostedProjects.get('project').checkLogSweep.running = false;
+    await modules.projectCheckLogRetentionActions.sweep._handler(s.ctx, args);
+    assert(++actions < 20);
+  }
+  assert.equal(operationIds.size, 1);
+  assert.equal(s.tables.projectCheckLogCleanups.size, 1);
+  assert.equal(s.tables.projectCheckLogRetentions.size, 0);
+  assert.equal(s.tables.hostedProjects.get('project').checkLogSweep, undefined);
+  const scheduled = s.scheduled.length;
+  await retention.register._handler(s.ctx, { projectId: 'project', actor: 'owner', entries: [] });
+  assert.equal(s.scheduled.length, scheduled, 'settled project has zero idle wake cost');
+  console.log(
+    'E3 coalesced retention',
+    JSON.stringify({ lifecycleWakes: 20, dueReceipts: 150, plans: 1, actions, scheduled }),
+  );
+});
+
+test('E3 source union splits skewed hashes into bounded durable pages and deduplicates retries', async () => {
+  const { protectSourceUnion } = await import(moduleUrl('../convex/projectCheckLogCleanupSource.ts'));
+  const s = fixture();
+  indexCleanupPages(s);
+  const input = { projectId: 'project', actor: 'owner', operationId: randomUUID() };
+  const pins = Array.from({ length: 6000 }, (_, i) => `0000${digest(`skewed-${i}`).slice(4)}`);
+  await protectSourceUnion(s.ctx, input, pins);
+  const prior = structuredClone([...s.tables.projectCheckLogCleanupPages.values()]);
+  await protectSourceUnion(s.ctx, input, [...pins].reverse());
+  assert.deepEqual([...s.tables.projectCheckLogCleanupPages.values()], prior);
+  const pages = prior.map(row => JSON.parse(row.value));
+  assert(pages.every(page => page.pins.length <= 512));
+  assert.equal(new Set(pages.flatMap(page => page.pins)).size, 6000);
+});
+
+test('E3 interrupted sweep resumes its original plan and source changes retain stale receipts', async () => {
+  const s = fixture(),
+    retention = modules.projectCheckLogRetention;
+  s.tables.projectCheckLogRetentions.set('due', {
+    _id: 'due',
+    projectId: 'project',
+    key: 'output:expired',
+    expiresAt: 1,
+  });
+  await retention.register._handler(s.ctx, { projectId: 'project', actor: 'owner', entries: [] });
+  const original = s.scheduled[0].args,
+    mutate = s.ctx.runMutation;
+  let lost = true;
+  s.ctx.runMutation = async (ref, args) => {
+    const result = await mutate(ref, args);
+    if (lost && getFunctionName(ref) === 'projectCheckLogCleanupStore:planStep') {
+      lost = false;
+      throw Error('Synthetic lost automatic step reply');
+    }
+    return result;
+  };
+  await assert.rejects(
+    modules.projectCheckLogRetentionActions.sweep._handler(s.ctx, original),
+    /lost automatic/,
+  );
+  assert.equal(s.tables.projectCheckLogCleanups.size, 1);
+  const systemGet = s.ctx.db.system.get;
+  s.ctx.db.system.get = id =>
+    id === 'task-0' ? Promise.resolve({ state: { kind: 'failed' } }) : systemGet(id);
+  await retention.register._handler(s.ctx, { projectId: 'project', actor: 'owner', entries: [] });
+  assert.equal(s.scheduled[1].args.operationId, original.operationId);
+  s.tables.hostedProjects.get('project').revision++;
+  await modules.projectCheckLogRetentionActions.sweep._handler(s.ctx, s.scheduled[1].args);
+  const restarted = s.scheduled[2].args;
+  assert.notEqual(
+    restarted.operationId,
+    original.operationId,
+    'a changed guard retains the stale plan and prepares fresh scope',
+  );
+  await modules.projectCheckLogRetentionActions.sweep._handler(s.ctx, restarted);
+  assert.equal(s.tables.projectCheckLogCleanups.size, 2);
+  assert.equal(s.tables.projectCheckLogRetentions.size, 0);
+  assert.equal(s.tables.hostedProjects.get('project').checkLogSweep, undefined);
+});
+
+test('E3 heavily repeated digests complete the existing paged safety scan rather than retaining unused bytes', async t => {
+  const s = fixture();
+  s.tables.projectHostedOutputChunks = new Map();
+  const descriptor = { shard: 0, attempt: 0, executionId: 'synthetic', stream: 'stdout', name: '' };
+  const pin = digest('same raw chunk');
+  const stream = {
+    runId: randomUUID(),
+    streamId: digest('repeated'),
+    bytes: 120,
+    chunks: 120,
+    maxSequence: 119,
+    seal: null,
+    descriptor: JSON.stringify(descriptor),
+  };
+  s.tables.projectHostedOutputStreams.set('raw', {
+    _id: 'raw',
+    projectId: 'project',
+    ...stream,
+    retired: true,
+  });
+  for (let sequence = 0; sequence < 120; sequence++)
+    s.tables.projectHostedOutputChunks.set(`chunk-${sequence}`, {
+      _id: `chunk-${sequence}`,
+      projectId: 'project',
+      runId: stream.runId,
+      streamId: stream.streamId,
+      sequence,
+      revision: sequence,
+      digest: pin,
+      value: JSON.stringify({
+        stream: descriptor,
+        sequence,
+        offset: sequence,
+        object: { sha256: pin, size: 1 },
+      }),
+    });
+  const env = { ...process.env },
+    fetch = globalThis.fetch;
+  let deletes = 0;
+  t.after(() => {
+    process.env = env;
+    globalThis.fetch = fetch;
+  });
+  Object.assign(process.env, {
+    R2_ACCOUNT_ID: 'synthetic',
+    R2_BUCKET: 'fixture',
+    R2_ACCESS_KEY_ID: 'synthetic',
+    R2_SECRET_ACCESS_KEY: 'synthetic',
+  });
+  globalThis.fetch = async (_url, init) => {
+    assert.equal(init.method, 'DELETE');
+    deletes++;
+    return new Response(null, { status: 204 });
+  };
+  const state = { outputOffset: 0 },
+    input = { projectId: 'project', actor: 'owner', operationId: randomUUID() };
+  let steps = 0;
+  while (!state.outputOffset) {
+    await streamCleanup.cleanupStreamStep(s.ctx, input, state, stream);
+    assert(++steps < 50);
+  }
+  assert.equal(
+    deletes,
+    120,
+    'shared address deletion stays idempotent; no reference-count ceiling changes retention',
+  );
+});
+
+test('E3 a State-only source reference protects a log candidate without relying on source projections', async t => {
+  const { s } = await seeded(t, 1);
+  const source = [...s.tables.projectObjects.values()].find(row => row.storageId === 'log-0-stdout');
+  const pin = await upload(
+    s,
+    Buffer.from(
+      JSON.stringify({
+        schema: 1,
+        kind: 'forge-source-state',
+        parents: [],
+        files: [{ path: 'retained-source.txt', blob: source.digest, mode: 'file' }],
+        message: 'source',
+        at: new Date().toISOString(),
+      }),
+    ),
+  );
+  s.tables.projectHostedStates.set('source', { _id: 'source', projectId: 'project', head: pin.sha256 });
+  const input = { projectId: 'project', operationId: randomUUID() },
+    dry = await drive(s, input);
+  assert.equal(dry.objects, 1);
+  assert.equal(dry.counts.shared, 1);
+  const applied = await drive(s, { ...input, apply: true, expectedPlan: dry.planDigest });
+  assert.equal(applied.complete, true);
+  assert.equal(s.tables.projectObjects.get(source._id).storageId, source.storageId);
 });

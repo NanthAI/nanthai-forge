@@ -325,8 +325,12 @@ test('decision failure excerpts verify exact output and never download artifacts
       isDone: true,
     }),
     mutation: async (name, args) => {
-      calls.push(args.streamId);
-      return { url: 'https://output.invalid/chunk', object: { sha256: digest(bytes), size: bytes.length } };
+      assert.equal(name, 'projectHostedOutputRead:downloads');
+      calls.push(...args.entries.map(entry => entry.streamId));
+      return args.entries.map(() => ({
+        url: 'https://output.invalid/chunk',
+        object: { sha256: digest(bytes), size: bytes.length },
+      }));
     },
   };
   const result = await landingFailureExcerpt(io, 'run');

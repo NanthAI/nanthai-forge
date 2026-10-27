@@ -91,6 +91,9 @@ export async function actionsFixture(files = []) {
       return `synthetic-task-${scheduled.length}`;
     },
   };
+  s.decorateContext(ctx => {
+    ctx.scheduler = scheduler;
+  });
   const commands = [],
     metrics = { reads: 0, readBytes: 0, uploads: 0, uploadBytes: 0 };
   const store = {

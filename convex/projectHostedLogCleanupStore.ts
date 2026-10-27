@@ -58,6 +58,75 @@ export const retained = internalQuery({
     return JSON.stringify({ pins, isDone: page.isDone, continueCursor: page.continueCursor });
   },
 });
+/** Upgrade only missing digest metadata in bounded event-driven pages. No byte or
+ * authority cache: the authoritative chunk value supplies every index key. */
+export const indexDigests = internalMutation({
+  args: identity,
+  returns: v.boolean(),
+  handler: async (ctx, input) => {
+    await activeOwnedProject(ctx, input.projectId, input.actor);
+    const rows = await ctx.db
+      .query('projectHostedOutputChunks')
+      .withIndex('by_project_and_run_and_digest', q =>
+        q.eq('projectId', input.projectId).eq('runId', input.runId).eq('digest', undefined),
+      )
+      .take(50);
+    for (const row of rows) await ctx.db.patch(row._id, { digest: JSON.parse(row.value).object.sha256 });
+    return rows.length < 50;
+  },
+});
+/** Revalidate a candidate window against current indexed references. Legacy rows
+ * must be indexed first; their absence never establishes missing references. */
+export const retainedBatch = internalQuery({
+  args: { ...identity, digests: v.array(v.string()), expected: v.string() },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    await activeOwnedProject(ctx, input.projectId, input.actor);
+    const original = await outputStream(ctx, input, input.streamId);
+    invariant(original, 'NOT_FOUND', 'Original output stream is unavailable.');
+    requireOriginal(original, input.expected);
+    invariant(input.digests.length <= 50, 'BAD_ARGUMENT', 'Read one cleanup candidate page.');
+    const missing = await ctx.db
+      .query('projectHostedOutputChunks')
+      .withIndex('by_project_and_run_and_digest', q =>
+        q.eq('projectId', input.projectId).eq('runId', input.runId).eq('digest', undefined),
+      )
+      .take(1);
+    if (missing.length) return JSON.stringify({ indexed: false, pins: [] });
+    const pins: string[] = [],
+      overflow: string[] = [],
+      streams = new Map<string, Awaited<ReturnType<typeof outputStream>>>();
+    for (const pin of new Set(input.digests)) {
+      const rows = await ctx.db
+        .query('projectHostedOutputChunks')
+        .withIndex('by_project_and_run_and_digest', q =>
+          q.eq('projectId', input.projectId).eq('runId', input.runId).eq('digest', pin),
+        )
+        .take(100);
+      // Unusually shared digests continue through the existing paged safety scan.
+      if (rows.length === 100) {
+        overflow.push(pin);
+        continue;
+      }
+      for (const row of rows) {
+        if (row.streamId === input.streamId) continue;
+        if (!streams.has(row.streamId))
+          streams.set(row.streamId, await outputStream(ctx, input, row.streamId));
+        const stream = streams.get(row.streamId);
+        invariant(
+          stream,
+          'SOURCE_UNAVAILABLE',
+          'Retained output chunk has no stream; its bytes were preserved.',
+        );
+        if (!stream.retired || JSON.parse(stream.descriptor).stream === 'artifact') {
+          pins.push(pin);
+          break;
+        }
+      }
+    }
+    return JSON.stringify({ indexed: true, pins, overflow });
+  },
+});
 export const summary = internalMutation({
   args: {
     ...identity,

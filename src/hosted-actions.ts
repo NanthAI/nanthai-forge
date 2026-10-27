@@ -38,6 +38,9 @@ export const hostedActionsMappingSchema = z
   .object({
     schema: z.literal(1),
     wakeGeneration: checkNumber.default(0),
+    wakeAt: checkNumber.default(0),
+    lastCallbackAt: checkNumber.default(0),
+    adoptedAt: checkNumber.default(0),
     reconciliation: z
       .object({ settles: checkNumber, cancelSent: z.boolean() })
       .strict()

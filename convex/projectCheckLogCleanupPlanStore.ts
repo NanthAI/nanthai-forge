@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import { protectSourceUnion } from './projectCheckLogCleanupSource';
 import { internalQuery, internalMutation } from './_generated/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
@@ -130,7 +131,15 @@ export const step = internalMutation({
         prior = await page(ctx, input, part, 0);
       const before: Node = prior ? JSON.parse(prior.value) : { key: change.key };
       for (const flag of ['candidate', 'protected', 'state', 'tree'] as const) {
-        if (!change[flag] || before[flag]) continue;
+        const propagation = flag === 'candidate' || flag === 'protected';
+        const hasChildren = (change.children ?? before.children)?.length;
+        const newChildren = change.children?.length && !before.children?.length;
+        if (
+          !(change[flag] || before[flag]) ||
+          (before[flag] && !(propagation && newChildren)) ||
+          (propagation && !hasChildren)
+        )
+          continue;
         const tree = flag === 'tree';
         await put(ctx, input, {
           part: tree ? 'treeQueue' : 'queue',
@@ -138,19 +147,19 @@ export const step = internalMutation({
           value: JSON.stringify({ key: change.key, kind: flag }),
         });
       }
-      await put(ctx, input, {
-        part,
-        position: 0,
-        value: JSON.stringify({
-          ...before,
-          ...change,
-          candidate: before.candidate || change.candidate,
-          protected: before.protected || change.protected,
-          state: before.state || change.state,
-        }),
+      const value = JSON.stringify({
+        ...before,
+        ...change,
+        candidate: before.candidate || change.candidate,
+        protected: before.protected || change.protected,
+        state: before.state || change.state,
       });
+      if (prior?.value !== value) await put(ctx, input, { part, position: 0, value });
     }
-    for (const write of JSON.parse(input.writes) as PlanWrite[]) await put(ctx, input, write);
+    for (const write of JSON.parse(input.writes) as PlanWrite[]) {
+      if (write.part === 'sourceProtection') await protectSourceUnion(ctx, input, JSON.parse(write.value));
+      else await put(ctx, input, write);
+    }
     const value = JSON.stringify(state);
     await ctx.db.patch(row._id, { value });
     return value;
@@ -179,5 +188,24 @@ export const queue = internalQuery({
       result.push({ ...entry, node: saved ? JSON.parse(saved.value) : null });
     }
     return JSON.stringify(result);
+  },
+});
+
+export const sources = internalQuery({
+  args: { ...identity, cursor: v.union(v.string(), v.null()) },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    await activeOwnedProject(ctx, input.projectId, input.actor);
+    const result = await ctx.db
+      .query('projectCheckLogCleanupPages')
+      .withIndex('by_project_and_operation_and_part_and_position', q =>
+        q
+          .eq('projectId', input.projectId)
+          .eq('operationId', input.operationId)
+          .gte('part', 'sourceUnion:')
+          .lt('part', 'sourceUnion;'),
+      )
+      .paginate({ cursor: input.cursor, numItems: 1 });
+    return JSON.stringify({ ...result, page: result.page.flatMap(row => JSON.parse(row.value).pins) });
   },
 });

@@ -2,7 +2,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
-import { gatedFixture, childWorker, until } from './landing-worker-fixture.mjs';
+import {
+  gatedFixture,
+  childWorker,
+  until,
+  runningChildRun,
+  settledLandingEntries,
+} from './landing-worker-fixture.mjs';
 import { finishChild } from '../dist/finish-child.js';
 import { processAlive, processGroupAlive } from '../dist/local-process.js';
 
@@ -36,13 +42,14 @@ for (const admission of ['solo', 'combined'])
         retained.every(run => run.status === 'passed' && run.reuseKey),
         'seed keyed passed evidence',
       );
-      let owner, replacement;
+      let owner, replacement, running;
+      const ownerStarted = performance.now();
       try {
-        owner = await childWorker(f);
-        await until(f, () => f.started, 'in-flight check started');
-        const running = f.store.load().runs.find(run => run.status === 'running');
+        owner = await childWorker(f, { ready: () => f.started && (running = runningChildRun(f.store)) });
+        const startupReadyMs = Math.round(performance.now() - ownerStarted);
         assert(running?.childPid, 'kill only the synthetic running command');
         assert.equal(running.runner.pid, owner.child.pid, 'owner hosts this in-process check controller');
+        const stopped = performance.now();
         await owner.stop(signal);
         // A hard service/machine loss can also lose the command. Reclaim only our
         // synthetic process group, never an unrelated process on the test machine.
@@ -53,13 +60,13 @@ for (const admission of ['solo', 'combined'])
           () => !processAlive(running.runner) && !processGroupAlive(running.childPid, running.childStartTime),
           'old synthetic execution ended',
         );
+        const oldExecutionEndMs = Math.round(performance.now() - stopped);
         f.release();
-        replacement = await childWorker(f);
-        await until(
-          f,
-          () => f.store.load().landingEntries.every(entry => !['queued', 'checking'].includes(entry.status)),
-          'restarted owner settles original entries',
-        );
+        const restarted = performance.now();
+        const originalEntries = [passed.command.operationId, inflight.command.operationId];
+        replacement = await childWorker(f, {
+          ready: () => settledLandingEntries(f.store, originalEntries),
+        });
         const data = f.store.load(),
           entries = data.landingEntries.filter(entry =>
             [passed.command.operationId, inflight.command.operationId].includes(entry.id),
@@ -97,6 +104,9 @@ for (const admission of ['solo', 'combined'])
             admission,
             signal,
             elapsedMs: Math.round(performance.now() - started),
+            startupReadyMs,
+            oldExecutionEndMs,
+            restartSettleMs: Math.round(performance.now() - restarted),
             passedCheckReruns: reruns,
             strandedEntries: 0,
             operatorMutationsToSettle: 0,

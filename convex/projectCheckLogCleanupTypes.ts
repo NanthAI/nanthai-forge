@@ -15,6 +15,7 @@ export const reviewParts = ['objects', 'logs', 'shared', 'archives', 'hostedOutp
 export type Part = (typeof reviewParts)[number];
 export type PlanState = {
   version: 2;
+  automatic?: boolean;
   guard: string;
   now: number;
   phase: string;
@@ -28,6 +29,7 @@ export type PlanState = {
   recipeCount: number;
   recipeOffset: number;
   sourceOffset?: number;
+  sourceParts?: number;
   queueCount: number;
   queueOffset: number;
   treeCount: number;
@@ -44,3 +46,5 @@ export const lookupRef = makeFunctionReference<'query'>('projectCheckLogCleanupS
 export const nodesRef = makeFunctionReference<'query'>('projectCheckLogCleanupStore:planNodes');
 
 export const queueRef = makeFunctionReference<'query'>('projectCheckLogCleanupStore:planQueue');
+
+export const sourcesRef = makeFunctionReference<'query'>('projectCheckLogCleanupStore:planSources');

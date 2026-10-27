@@ -62,6 +62,21 @@ export function sourceWorkerHttp(config: {
     );
     return { url, headers: value.headers };
   };
+  const readTarget = async (target: { url: string; headers: Record<string, string> }) => {
+    const url = new URL(target.url);
+    invariant(
+      url.protocol === 'https:' && !url.username && !url.password && !url.hash,
+      'SOURCE_WORKER_UNAVAILABLE',
+      'Source transfer grant must use HTTPS.',
+    );
+    const response = await request(url, {
+      headers: target.headers,
+      redirect: 'error',
+      signal: AbortSignal.timeout(config.timeoutMs),
+    });
+    invariant(response.ok && response.body, 'SOURCE_WORKER_UNAVAILABLE', 'Source transfer is unavailable.');
+    return Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
+  };
   const transport: SourceWorkerTransport = {
     async describe(sha256) {
       const response = await control('describe', {
@@ -88,6 +103,35 @@ export function sourceWorkerHttp(config: {
       invariant(response.ok && response.body, 'SOURCE_WORKER_UNAVAILABLE', 'Source transfer is unavailable.');
       return Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
     },
+    ...('kind' in config.input && config.input.kind === 'forge-hosted-actions'
+      ? {
+          async describeAndRead(sha256s: string[]) {
+            const response = await control('describe-and-grant', {
+              sha256s,
+              input: config.input,
+              executionId: config.executionId,
+            });
+            const entries = z
+              .array(
+                z
+                  .object({
+                    descriptor: workerObjectSchema,
+                    target: z
+                      .object({ url: z.url(), headers: z.record(z.string(), z.string()) })
+                      .strict()
+                      .nullable(),
+                  })
+                  .strict(),
+              )
+              .max(100)
+              .parse(await readSourceControlReply(response));
+            return entries.map(entry => ({
+              descriptor: entry.descriptor,
+              read: entry.target ? () => readTarget(entry.target!) : null,
+            }));
+          },
+        }
+      : {}),
     async upload(pin, bytes) {
       const target = await transfer('upload', pin);
       if ('stored' in target) {

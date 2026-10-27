@@ -189,6 +189,46 @@ export async function planProjectCheckLogs(
     offset: 0,
   };
 }
+export async function applyPlanStep(
+  ctx: ActionCtx,
+  identity: import('./projectCheckLogCleanupTypes').Identity,
+  state: import('./projectCheckLogCleanupTypes').PlanState,
+) {
+  if (state.outputOffset < state.counts.hostedOutputs) {
+    const body = await ctx.runQuery(lookupRef, {
+      ...identity,
+      part: 'hostedOutputs',
+      position: state.outputOffset,
+    });
+    invariant(body, 'NOT_FOUND', 'Original cleanup stream page is unavailable.');
+    const streams = JSON.parse(body);
+    const expected = JSON.stringify(state);
+    const writes = await cleanupStreamStep(ctx, identity, state, streams[0]);
+    state.step++;
+    state = JSON.parse(
+      await ctx.runMutation(stepRef, {
+        ...identity,
+        expected,
+        value: JSON.stringify(state),
+        nodes: '[]',
+        writes: JSON.stringify(writes),
+      }),
+    );
+  } else if (state.offset < state.counts.objects) {
+    const pending = JSON.parse(
+      await ctx.runMutation(internal.projectCheckLogCleanupStore.claim, {
+        ...identity,
+        offset: state.offset,
+      }),
+    );
+    if (pending.jobs.length) {
+      const config = r2Config();
+      for (const job of pending.jobs) await deleteR2Object(config, job.key);
+    }
+    state = JSON.parse(await ctx.runMutation(internal.projectCheckLogCleanupStore.complete, identity));
+  }
+  return state;
+}
 /** Each invocation advances at most twenty metadata steps or one deletion page.
  * The caller continues immediately only while this requested operation is pending. */
 export const clean = action({
@@ -222,39 +262,7 @@ export const clean = action({
           'ARCHIVE_MIGRATION_REQUIRED',
           'The cleanup client must convert the planned native archives before deleting stored log objects.',
         );
-        if (state.outputOffset < state.counts.hostedOutputs) {
-          const body = await ctx.runQuery(lookupRef, {
-            ...identity,
-            part: 'hostedOutputs',
-            position: state.outputOffset,
-          });
-          invariant(body, 'NOT_FOUND', 'Original cleanup stream page is unavailable.');
-          const streams = JSON.parse(body);
-          const expected = JSON.stringify(state);
-          const writes = await cleanupStreamStep(ctx, identity, state, streams[0]);
-          state.step++;
-          state = JSON.parse(
-            await ctx.runMutation(stepRef, {
-              ...identity,
-              expected,
-              value: JSON.stringify(state),
-              nodes: '[]',
-              writes: JSON.stringify(writes),
-            }),
-          );
-        } else if (state.offset < state.counts.objects) {
-          const pending = JSON.parse(
-            await ctx.runMutation(internal.projectCheckLogCleanupStore.claim, {
-              ...identity,
-              offset: state.offset,
-            }),
-          );
-          if (pending.jobs.length) {
-            const config = r2Config();
-            for (const job of pending.jobs) await deleteR2Object(config, job.key);
-          }
-          state = JSON.parse(await ctx.runMutation(internal.projectCheckLogCleanupStore.complete, identity));
-        }
+        state = await applyPlanStep(ctx, identity, state);
       }
       const pending =
         state.phase !== 'ready' ||

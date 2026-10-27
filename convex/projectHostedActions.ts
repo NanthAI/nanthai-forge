@@ -15,7 +15,7 @@ import {
 import { hostedCheckTerminal, checkPin } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
-import { armActionsWake } from './projectHostedActionsWake';
+import { armActionsWake, actionsFallbackMs } from './projectHostedActionsWake';
 import { report } from './errors';
 
 /** Only fixed worker control metadata enters this transaction. No source/Git,
@@ -47,6 +47,9 @@ export async function controlHostedActions(
     m = {
       schema: 1,
       wakeGeneration: 0,
+      wakeAt: 0,
+      lastCallbackAt: 0,
+      adoptedAt: 0,
       reconciliation: { settles: 0, cancelSent: false },
       runId: run.id,
       dispatchKey: run.dispatchKey,
@@ -165,7 +168,10 @@ export async function controlHostedActions(
         invariant(!m.run || m.run === command.run, 'EVIDENCE_CHANGED', 'The retained Actions run changed.');
         const newlyAdopted = m.run === null;
         m.run = command.run;
-        if (newlyAdopted) await armActionsWake(ctx, input, m, now + 10_000);
+        if (newlyAdopted) {
+          m.adoptedAt = now;
+          await armActionsWake(ctx, input, m, now + actionsFallbackMs);
+        }
         m.error = null;
       } else if (m.dispatching && command.empty) {
         m.emptyLookups++;
@@ -173,7 +179,11 @@ export async function controlHostedActions(
       } else m.emptyLookups = 0;
     } else if (command.kind === 'wait') {
       if (command.terminal) m.reconciliation.settles++;
-      m.nextAt = now + Math.min(60_000, 10_000 + m.reconciliation.settles * 1_000);
+      m.nextAt =
+        now +
+        (command.terminal ? Math.min(60_000, 10_000 + m.reconciliation.settles * 1_000) : actionsFallbackMs);
+      // Preserve the finite terminal job-list settling cadence without polling active runs.
+      if (command.terminal && m.run !== null) await armActionsWake(ctx, input, m, m.nextAt);
     } else if (command.kind === 'cancel-sent') {
       invariant(
         run.cancelRequested && m.run !== null,

@@ -1088,6 +1088,18 @@ execution ID, source head, plan digest and a strict `body`:
   declare every output stream, including prior attempts. No verdict implies that
   an incomplete collector has retained the entire log.
 
+`projectHostedOutputBatch:{prepare,commit}` takes
+`{projectId,entries:[{message,signature}]}` with up to 100 signed records and returns
+ordered target/receipt arrays. Fixed collectors use `workerPrepare`/`workerCommit`
+with the same signatures. Commit does one authorize mutation, external HEADs, then
+one atomic apply mutation that rechecks current authority and every signature/pin.
+Each original chunk keeps its revision and duplicate receipt. Batch replay replies
+also include the current aggregate root for duplicate chunks/seals, so a lost
+seal acknowledgement can still complete final collection. Retry the exact
+retained window after unknown acknowledgements. The collector buffers up to
+32 chunks/2 MiB, retaining each before publication; seals may share that window.
+Live input flushes still publish available redacted output without a timer.
+
 Public metadata APIs use current project reader authority, including anonymous
 public reads. They return canonical JSON text:
 
@@ -1101,6 +1113,9 @@ public reads. They return canonical JSON text:
   subscription observes new chunks. The cursor orders commits; each chunk retains
   its own stream sequence and offset. Transport pages use 50 rows/128 KiB with
   continuation, without a total log/stream/history ceiling.
+- `downloads({projectId,runId,entries:[{streamId,sequence}]})` signs up to 100
+  requested committed chunk/root objects after one fresh access check. It returns
+  targets in request order. The Check panel uses one window per stream page.
 - `download({projectId,runId,streamId,sequence})` signs one exact committed chunk
   after a fresh access check. A null `streamId` selects the completed root object.
   Missing sequences return `NOT_FOUND` for recovery from the original collector.
@@ -1125,7 +1140,13 @@ project objects through `sourceWorkerHttp` with input
 `{kind:"forge-hosted-actions",runId,dispatchKey,owner,token}` and
 `executionId:owner`. The trusted ingress derives project/lease identity from its
 authenticated worker request and routes describe/grant/commit to the internal
-`projectHostedActionsTransfers` functions. They recheck current project/actor,
+`projectHostedActionsTransfers` functions. Actions exports additionally route
+`describe-and-grant` to `projectHostedActionsReadBatch:describeAndGrant` with
+`{projectId,input,executionId,sha256s}`. At most 100 unique digests select ordered
+`{descriptor,target}` entries; recipe descriptors have a null target and their
+leaves retain exact grants. Export deduplicates paths by content before requesting
+windows, consumes grants immediately and streams hash-verified bytes to disk/Git.
+No grant or cached file authorizes a later window. They recheck current project/actor,
 epoch, dispatch key and live lease on every descriptor/grant and post-HEAD commit.
 Repository and bundle bytes transfer directly to object storage; Convex sees
 only exact `{sha256,size}` pins. Worker heartbeats renew the lease during export.
@@ -1141,7 +1162,13 @@ workflow/recipe bytes belong only to the harness commit, not the Candidate State
 Each invocation performs one export, one ref publication, or a bounded
 lookup/dispatch step and returns pending without waiting for a runner. The
 mapping's `nextAt` carries lookup/rejection backoff. Adopting a run arms an
-indexed, generation-fenced `projectHostedActionsWake` observation for that run. The adapter reports eventually consistent absence as unknown to H10, so
+indexed, generation-fenced `projectHostedActionsWake` fallback for that run, due
+in five minutes. Existing signed exact provider callbacks update check progress
+and postpone fallback reconciliation; terminal callbacks and authorized cancellation
+wake the controller immediately. One bounded controller tick retains its next
+fallback before HTTP to survive lost replies. Terminal branch cleanup stops the
+wakes. Active runs do not poll every 10–60 seconds; no idle project scan runs.
+Provider terminal-job settling keeps its existing bounded recovery rule. The adapter reports eventually consistent absence as unknown to H10, so
 H10 cannot add another recovery. Its own twelve lookups plus a fresh empty branch
 lookup permit the local path's one recovery after an ambiguous response, including
 HTTP 400. Accepted acknowledgements never permit redelivery. GitHub does not

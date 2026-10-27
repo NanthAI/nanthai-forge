@@ -120,7 +120,7 @@ test('reconnect mid-run commits one exact native-State verdict and cleans the ru
   assert.equal(first.run.status, 'running');
   assert(first.nextAt > s.now());
   assert.equal(s.counts().logs, 0);
-  s.advance();
+  s.advance(300000);
   s.complete();
   const terminal = await s.tick();
   assert.equal(terminal.run.status, 'passed');
@@ -176,10 +176,10 @@ test('cancel request is retained until provider completion; cancel acknowledgeme
   await s.cancel(s.input.id);
   assert.equal((await s.tick()).run.status, 'running');
   assert.equal(s.counts().cancels, 1);
-  s.advance();
+  s.advance(300000);
   await s.tick();
   assert.equal(s.counts().cancels, 1);
-  s.advance();
+  s.advance(300000);
   s.complete('cancelled');
   assert.equal((await s.tick()).run.status, 'cancelled');
 });
@@ -259,7 +259,11 @@ test('complete logs plus green run recover stuck job after the local settling wi
   for (let i = 0; i < 30; i++) {
     const r = await s.tick();
     assert.equal(r.run.status, 'running');
-    s.advance();
+    assert(
+      s.mapping().wakeAt - s.now() <= 60000,
+      'completed-provider settling keeps its bounded recovery cadence',
+    );
+    s.advance(300000);
   }
   assert.equal(s.counts().logs, 0);
   const r = await s.tick();
@@ -344,7 +348,7 @@ test('idle undispatched run creates no mapping or provider observation', async (
   assert.equal(result.mapping, null);
   assert.equal(s.tables.projectHostedActionsExports.size, 0);
 });
-test('targeted durable wakes deduplicate deliveries, rearm before HTTP and stop at terminal evidence', async () => {
+test('targeted durable wakes deduplicate deliveries, rearm before HTTP and stop after terminal cleanup', async () => {
   const wake = await import(moduleUrl('../convex/projectHostedActionsWake.ts')),
     s = await fixture();
   assert.equal(s.scheduled.length, 1);
@@ -354,7 +358,7 @@ test('targeted durable wakes deduplicate deliveries, rearm before HTTP and stop 
       (ctx, input) => wake.prepareActionsWake({ ...ctx, scheduler: s.scheduler }, input, s.now()),
       { projectId: s.projectId, runId: s.input.id, generation: s.mapping().wakeGeneration },
     );
-  s.advance();
+  s.advance(300000);
   const selected = await tick();
   assert.equal(selected.runId, s.input.id);
   assert.equal(s.scheduled.length, 2);
@@ -368,8 +372,32 @@ test('targeted durable wakes deduplicate deliveries, rearm before HTTP and stop 
   assert.equal(s.scheduled.length, 2);
   s.complete();
   await s.tick();
+  assert.equal((await tick()).runId, s.input.id, 'terminal callback wakes exact branch cleanup');
+  await cleanupHostedActions(s.store, s.remote);
+  const schedules = s.scheduled.length;
   assert.equal(await tick(), null);
-  assert.equal(s.scheduled.length, 2);
+  assert.equal(s.scheduled.length, schedules);
+});
+test('a run whose provider and controller never answer backs off and stops waking after a quiet day', async () => {
+  const wake = await import(moduleUrl('../convex/projectHostedActionsWake.ts')),
+    s = await fixture();
+  const tick = () =>
+    s.run(
+      'actionsWakePrepare',
+      (ctx, input) => wake.prepareActionsWake({ ...ctx, scheduler: s.scheduler }, input, s.now()),
+      { projectId: s.projectId, runId: s.input.id, generation: s.mapping().wakeGeneration },
+    );
+  let wakes = 0;
+  for (; wakes < 500; wakes++) {
+    s.advance(Math.max(1, s.mapping().wakeAt - s.now()));
+    // Each observation reaches no controller and records no callback.
+    if ((await tick()) === null && s.mapping().wakeAt <= s.now()) break;
+  }
+  assert(wakes < 60, `stuck run wakes a finite, small number of times (${wakes})`);
+  const schedules = s.scheduled.length;
+  s.advance(7 * 24 * 60 * 60_000);
+  assert.equal(await tick(), null);
+  assert.equal(s.scheduled.length, schedules, 'no timer remains after the quiet limit');
 });
 test('fake ctx bounds reconciliation reads independently of ten thousand historical exports', async () => {
   const s = await fixture();
@@ -429,7 +457,7 @@ test('lost cancel reply retries only cancellation for the retained run, without 
   const first = await s.tick();
   assert.equal(first.run.status, 'running');
   assert(!s.mapping().reconciliation.cancelSent);
-  s.advance();
+  s.advance(300000);
   await s.tick();
   assert(s.mapping().reconciliation.cancelSent);
   assert.equal(cancel, 2);
@@ -477,4 +505,101 @@ test('wake action sends only fixed-run metadata, and terminal no-op never contac
     if (previousKey === undefined) delete process.env.FORGE_HOSTED_ACTIONS_CONTROLLER_KEY;
     else process.env.FORGE_HOSTED_ACTIONS_CONTROLLER_KEY = previousKey;
   }
+});
+
+test('eight-minute callback-driven check uses at most fifteen wake calls and zero progress polls', async t => {
+  const wake = await import(moduleUrl('../convex/projectHostedActionsWake.ts'));
+  const s = await fixture();
+  t.mock.method(Date, 'now', () => s.now());
+  let wakeCalls = 0,
+    providerTicks = 0;
+  const baseline = s.dbCounts.length;
+  const savedUrl = process.env.FORGE_HOSTED_ACTIONS_CONTROLLER_URL;
+  const savedKey = process.env.FORGE_HOSTED_ACTIONS_CONTROLLER_KEY;
+  process.env.FORGE_HOSTED_ACTIONS_CONTROLLER_URL = 'https://synthetic-controller.invalid/observe';
+  process.env.FORGE_HOSTED_ACTIONS_CONTROLLER_KEY = 'synthetic-controller-key';
+  t.after(() => {
+    if (savedUrl === undefined) delete process.env.FORGE_HOSTED_ACTIONS_CONTROLLER_URL;
+    else process.env.FORGE_HOSTED_ACTIONS_CONTROLLER_URL = savedUrl;
+    if (savedKey === undefined) delete process.env.FORGE_HOSTED_ACTIONS_CONTROLLER_KEY;
+    else process.env.FORGE_HOSTED_ACTIONS_CONTROLLER_KEY = savedKey;
+  });
+  t.mock.method(globalThis, 'fetch', async (_url, input) => {
+    assert.equal(JSON.parse(input.body).runId, s.input.id);
+    providerTicks++;
+    const before = s.commands.length;
+    await cleanupHostedActions(s.store, s.remote);
+    wakeCalls += s.commands.length - before;
+    return new Response(null, { status: 204 });
+  });
+  const delivered = new Set();
+  const drain = async () => {
+    for (let i = 0; i < s.scheduled.length; i++) {
+      const task = s.scheduled[i];
+      if (delivered.has(i)) continue;
+      // Fixtures retain relative delays; mapping wakeAt is the current deadline.
+      if (task.args.generation === s.mapping().wakeGeneration && s.mapping().wakeAt > s.now()) continue;
+      delivered.add(i);
+      wakeCalls++;
+      await wake.observe._handler(
+        {
+          runMutation: async (_ref, input) => {
+            wakeCalls++;
+            return s.run(
+              'actionsWakeBudget',
+              (ctx, args) => wake.prepareActionsWake({ ...ctx, scheduler: s.scheduler }, args, s.now()),
+              input,
+            );
+          },
+        },
+        task.args,
+      );
+    }
+  };
+  let run = await s.status(s.input.id);
+  s.advance(240000);
+  const running = { ...s.shard(run, 0, 'running'), provider: 'github-actions' };
+  run = await s.callback(running);
+  const generation = s.mapping().wakeGeneration;
+  await s.callback(running); // idempotent receipt must not arm another wake
+  assert.equal(s.mapping().wakeGeneration, generation);
+  s.advance(60000);
+  await drain(); // watchdog defers to the last real callback; no provider request
+  assert.equal(providerTicks, 0);
+  s.advance(180000);
+  run = await s.callback({ ...s.shard(run, 0), provider: 'github-actions' });
+  await s.callback(
+    actionsCallback(run, s.mapping(), {
+      kind: 'complete',
+      status: 'passed',
+      exitCode: 0,
+      output: null,
+      cost: { status: 'unknown' },
+    }),
+  );
+  await drain();
+  assert.equal(providerTicks, 1, 'only terminal branch cleanup contacts the controller');
+  assert(s.mapping().deleted);
+  s.advance(600000);
+  await drain(); // stale/watchdog deliveries settle; idle creates nothing
+  const schedules = s.scheduled.length;
+  await drain();
+  assert.equal(s.scheduled.length, schedules);
+  assert(wakeCalls <= 15);
+  const measured = s.dbCounts
+    .slice(baseline)
+    .filter(c => c.name === 'actionsWakeBudget' || c.name === 'actionsControl');
+  t.diagnostic(
+    JSON.stringify({
+      durationMinutes: 8,
+      beforeWakeCallsEstimate: '60–300',
+      afterWakeCalls: wakeCalls,
+      documents: measured.reduce((n, c) => n + c.documents, 0),
+      writes: measured.reduce((n, c) => n + c.writes, 0),
+      providerProgressPolls: 0,
+      cleanupTicks: providerTicks,
+      scheduled: schedules,
+      idleNewSchedules: 0,
+    }),
+  );
 });

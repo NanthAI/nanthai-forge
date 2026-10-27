@@ -35,11 +35,13 @@ export const hostedOutputTables = {
   projectHostedOutputChunks: defineTable({
     ...identity,
     streamId: v.string(),
+    digest: v.optional(v.string()),
     sequence: v.number(),
     revision: v.number(),
     value: v.string(),
   })
     .index('by_project_and_run_and_stream_and_sequence', ['projectId', 'runId', 'streamId', 'sequence'])
+    .index('by_project_and_run_and_digest', ['projectId', 'runId', 'digest'])
     .index('by_project_and_run_and_revision', ['projectId', 'runId', 'revision'])
     .index('by_project_and_run', ['projectId', 'runId']),
 };

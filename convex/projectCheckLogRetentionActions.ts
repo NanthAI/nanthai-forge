@@ -4,14 +4,10 @@ import { v } from 'convex/values';
 import { action } from './cliServer';
 import { internalAction } from './_generated/server';
 import { internal } from './_generated/api';
-import { readLogCleanup, prepareLogCleanup } from './projectCheckLogCleanupLedger';
-import { source } from './projectWorkLoad';
-import { planProjectCheckLogs } from './projectCheckLogCleanup';
-import { purgeHostedLogStream } from './projectHostedLogCleanup';
-import { checkPin } from '../src/hosted-check';
+import { resumePlan, planStep } from './projectCheckLogCleanupPlan';
+import { snapshotReader } from './projectCheckLogCleanupSnapshot';
+import { applyPlanStep } from './projectCheckLogCleanup';
 import { runLogRecord } from '../src/check-log-policy';
-import { deleteR2Object } from './r2Operations';
-import { r2Config } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 export const registerBackup = action({
@@ -23,27 +19,44 @@ export const registerBackup = action({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to retain local log expiry.');
       const entries: { key: string; expiresAt: number }[] = [];
       if (input.hasLogs) {
-        const snapshot = await source(ctx, input.backupId, user.subject);
-        invariant(
-          snapshot.project._id === input.projectId,
-          'PROJECT_UNAVAILABLE',
-          'Select your project’s backup.',
-        );
-        for (const run of snapshot.data.runs) {
-          const record = runLogRecord(snapshot.data, run);
-          if (
-            'expiresAt' in record &&
-            record.expiresAt &&
-            snapshot.manifest.files.some(
-              file =>
-                file.path === `check-${run.id}/stdout.log` || file.path === `check-${run.id}/stderr.log`,
+        const { backup, project } = await ctx.runQuery(internal.projectBackups.get, {
+          id: input.backupId,
+          owner: user.subject,
+        });
+        invariant(project._id === input.projectId, 'PROJECT_UNAVAILABLE', 'Select your project’s backup.');
+        const read = snapshotReader(ctx, {
+          projectId: input.projectId,
+          actor: user.subject,
+          operationId: input.backupId,
+        });
+        let offset = 0;
+        do {
+          const snapshot = await read(backup, offset);
+          for (const run of snapshot.data.runs) {
+            const record = runLogRecord(snapshot.data, run);
+            if (
+              'expiresAt' in record &&
+              record.expiresAt &&
+              snapshot.files.some(
+                file =>
+                  file.path === `check-${run.id}/stdout.log` || file.path === `check-${run.id}/stderr.log`,
+              )
             )
-          )
-            entries.push({
-              key: `backup:${input.backupId}:${run.id}`,
-              expiresAt: Date.parse(record.expiresAt),
+              entries.push({
+                key: `backup:${input.backupId}:${run.id}`,
+                expiresAt: Date.parse(record.expiresAt),
+              });
+          }
+          offset += snapshot.files.length;
+          if (entries.length) {
+            await ctx.runMutation(internal.projectCheckLogRetention.register, {
+              projectId: input.projectId,
+              actor: user.subject,
+              entries: entries.splice(0),
             });
-        }
+          }
+          if (offset >= snapshot.total) break;
+        } while (true);
       }
       for (let i = 0; i < Math.max(1, entries.length); i += 50)
         await ctx.runMutation(internal.projectCheckLogRetention.register, {
@@ -59,37 +72,44 @@ export const registerBackup = action({
 });
 /** A finite event sweep. No expiry timer or periodic scan exists while idle. */
 export const sweep = internalAction({
-  args: { projectId: v.id('hostedProjects') },
+  args: { projectId: v.id('hostedProjects'), operationId: v.string(), sequence: v.number() },
   returns: v.null(),
-  handler: async (ctx, { projectId }) => {
-    const due = JSON.parse(await ctx.runQuery(internal.projectCheckLogRetention.due, { projectId }));
-    if (!due.owner || !due.entries.length) return null;
-    const hash = checkPin(due.entries.map((row: { _id: string }) => row._id));
-    const operationId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
-    const identity = { projectId, actor: due.owner, operationId };
-    const original = await readLogCleanup(ctx, identity);
-    const state =
-      original?.phase === 'ready' ? original : await planProjectCheckLogs(ctx, projectId, due.owner, true);
-    const saved = await prepareLogCleanup(ctx, identity, state);
-    for (const stream of state.hostedOutputs)
-      await purgeHostedLogStream(ctx, { projectId, actor: due.owner, ...stream });
-    while (saved.offset < saved.objects.length) {
-      const pending = JSON.parse(
-        await ctx.runMutation(internal.projectCheckLogCleanupStore.claim, {
-          ...identity,
-          offset: saved.offset,
-        }),
-      );
-      if (pending.jobs.length) for (const job of pending.jobs) await deleteR2Object(r2Config(), job.key);
-      Object.assign(
-        saved,
-        JSON.parse(await ctx.runMutation(internal.projectCheckLogCleanupStore.complete, identity)),
-      );
+  handler: async (ctx, input) => {
+    const claimed = await ctx.runMutation(internal.projectCheckLogRetention.claimSweep, input);
+    if (!claimed) return null;
+    const { actor, settling } = JSON.parse(claimed);
+    let complete = settling;
+    try {
+      if (!settling) {
+        const identity = { projectId: input.projectId, operationId: input.operationId, actor };
+        let state = await resumePlan(ctx, identity, true);
+        const snapshot = snapshotReader(ctx, identity),
+          started = Date.now();
+        for (let steps = 0; steps < 20 && Date.now() - started < 5000; steps++) {
+          state =
+            state.phase === 'ready'
+              ? await applyPlanStep(ctx, identity, state)
+              : await planStep(ctx, identity, state, snapshot);
+          complete =
+            state.phase === 'ready' &&
+            state.offset === state.counts.objects &&
+            state.outputOffset === state.counts.hostedOutputs;
+          if (complete) break;
+        }
+      }
+    } catch (error) {
+      const failure = error as { code?: string; data?: { code?: string } };
+      if ((failure.data?.code ?? failure.code) !== 'WORK_STALE') throw error;
+      // Keep the stale plan receipt. A changed source guard gets a fresh plan,
+      // never a silent rewrite of the reviewed/original deletion scope.
+      await ctx.runMutation(internal.projectCheckLogRetention.advanceSweep, {
+        ...input,
+        complete: false,
+        restart: true,
+      });
+      return null;
     }
-    await ctx.runMutation(internal.projectCheckLogRetention.settled, {
-      projectId,
-      ids: due.entries.map((row: { _id: string }) => row._id),
-    });
+    await ctx.runMutation(internal.projectCheckLogRetention.advanceSweep, { ...input, complete });
     return null;
   },
 });

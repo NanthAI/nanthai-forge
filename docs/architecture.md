@@ -1184,6 +1184,13 @@ polling, timers or paid provider calls.
 `projectHostedOutputApi` is an internal, provider-neutral collection boundary.
 Its domain-separated signed messages bind the original run/operation, authority
 epoch, controller fence, provider execution, source head and immutable plan.
+`projectHostedOutputBatch` prepares and commits up to 100 signed records in one
+window. The collector retains at most 32 chunks/2 MiB before publication and may
+include the stream seal in that window; live input flushes keep their existing
+visibility. Each chunk keeps its ordered revision and duplicate receipt. Batch replays also
+return the current aggregate root, including after a lost seal acknowledgement. Authority
+is checked once per transaction window, every message signature/pin is validated,
+and the apply transaction repeats those checks after external storage HEADs.
 `prepare` signs a create-only checksum/length-bound R2 PUT in a separate check
 namespace. `commit` verifies storage with HEAD and rechecks current project,
 actor and run authority in the publication transaction. No new stdout/artifact
@@ -1214,7 +1221,8 @@ output retention remain separate, and neither changes landing policy.
 `projectHostedOutputRead` exposes constant-size status/completeness and paged
 stream/chunk indexes. Chunk readers resume a numeric commit revision; stream
 sequence is separate so late arrivals cannot disappear behind a sequence cursor.
-Fresh signing rechecks current read access. Downloads go directly to R2 and the
+Fresh signing rechecks current read access; `downloads` signs up to 100 exact
+committed chunk/root selections in one authorized window. Downloads go directly to R2 and the
 portable reader verifies chunk digests, offsets, sequence and full sealed-stream
 hash without a whole-log server read. Existing five-minute signed GET expiry
 still bounds already-issued URL access after revocation. Reads create no timers,
@@ -1224,7 +1232,12 @@ UI, deployment, retention policy or account provisioning is supplied here.
 
 The hosted Actions adapter runs fixed export/control code outside Convex.
 `exportHostedActions` reads the exact pinned State, recipe and selection through
-the hash-verifying source-worker reader. It builds bare Git objects from streamed
+the hash-verifying source-worker reader. Export deduplicates file digests before
+requesting windows of at most 100 descriptors and direct read grants through
+`projectHostedActionsReadBatch`. Each window rechecks current actor, epoch,
+exact run/mapping and live worker lease. Grants are consumed within that window;
+verified byte files never authorize another window. Recipe leaves retain their
+exact-pin grant checks. It builds bare Git objects from streamed
 storage objects, preserving binary bytes, modes and symlink targets without a
 checkout, filters, hooks or project execution. The existing generated Actions
 workflow honors the selected GitHub-hosted or Blacksmith label. The native State
@@ -1251,8 +1264,12 @@ and ends exhaustion with an infrastructure outcome without redispatch; GitHub of
 cannot prove non-execution.
 Multiple exact matches surface an evidence error. No global project scan runs.
 The retained mapping survives terminal-result branch cleanup. Targeted,
-generation-fenced wakes observe only an adopted outstanding run and rearm before
-contacting the fixed controller. Exact State/export/run/job checks precede stable
+generation-fenced wakes target only an adopted run. Existing authenticated provider
+callbacks record progress directly and wake terminal branch cleanup; cancellation
+also wakes the retained run. One coalesced five-minute fallback deadline reconciles
+lost callbacks and defers while real callbacks continue. Before controller HTTP it
+retains a takeover deadline for lost replies. The fallback backs off with quiet time (at most hourly) and stops after a day without callbacks; a terminal callback or cancellation re-arms it. Finished cleanup stops scheduling;
+no project/history scan or 10–60 second active-run poll is created. Exact State/export/run/job checks precede stable
 signed H10 shard and terminal callbacks. Cancellation retains its request until
 provider completion. Stuck jobs reuse the local complete-log plus run-conclusion
 rule; provider logs alone never claim live output.
@@ -1485,4 +1502,12 @@ check runtime directories and declared passthrough. The self-host backend receiv
 its explicitly selected S3 file settings. These are environment boundaries, not
 OS sandboxes or protection from credentials in files accessible to the account.
 
-Check-log cleanup protects source and artifact hashes, including shared recipe chunks. Hosted source staging records object provenance before publication; a new reference changes the cleanup guard, so a reviewed cleanup cannot delete bytes that became source during the operation.
+Check-log cleanup protects source and artifact hashes, including shared recipe chunks.
+Each reachable State is verified and parsed once into a durable deduplicated reference
+union. Hash buckets split at 512 entries; propagation consumes bounded union pages,
+without rereading State bytes or treating missing projection coverage as absence.
+Hosted output chunks carry an indexed run/digest binding. Cleanup fills missing legacy
+bindings in bounded pages, then revalidates candidate windows and original stream pins
+before deletion. Digests with unusually many references continue through the existing paged safety scan.
+Automatic expiry uses the same resumable planner with one project sweep identity;
+finite continuations stop after draining due receipts, with no idle timer. Hosted source staging records object provenance before publication; a new reference changes the cleanup guard, so a reviewed cleanup cannot delete bytes that became source during the operation.

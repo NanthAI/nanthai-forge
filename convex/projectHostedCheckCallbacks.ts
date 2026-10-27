@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { notifyActionsProgress } from './projectHostedActionsWake';
 import { requireMacMachine } from './projectHostedCheckMachines';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -180,5 +181,6 @@ export async function receiveHostedCheckCallback(
     value: canonicalPayload(callback),
   });
   await writeHostedCheck(ctx, row._id, run);
+  await notifyActionsProgress(ctx, run, now);
   return run;
 }

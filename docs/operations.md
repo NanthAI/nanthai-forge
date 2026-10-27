@@ -124,7 +124,7 @@ nforge set-policy ROOT '{"checkLogs":{"uploadLocal":true,"retentionDays":90}}'
 nforge set-policy ROOT '{"checkLogs":{"uploadLocal":false}}'
 ```
 
-Uploaded local logs expire through existing check/exchange lifecycle events, with an indexed expiry wake only when an expiry is already due; idle schedules no timer or poller. Uploaded local logs default to 90 days; `retentionDays` must be an integer from
+Uploaded local logs expire through existing check/exchange lifecycle events, with an indexed expiry wake only when an expiry is already due; idle schedules no timer or poller. Concurrent wakes share one durable project sweep, and a project starts at most one automatic sweep per day, so deletion can trail expiry by up to a day after the next check or exchange. That sweep advances the resumable cleanup planner and drains its due receipts in bounded pages under the original cutoff, without rescanning for each receipt page. Uploaded local logs default to 90 days; `retentionDays` must be an integer from
 1 through 400. `never`, unlimited and larger values are rejected. Retention is
 based on the recorded run time, not refreshed by another export or exchange.
 The local seven-day lifetime can make a later export omit logs even while a

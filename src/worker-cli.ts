@@ -69,6 +69,19 @@ export async function workerCli(args: string[]) {
     signature,
   });
   const output: OutputTransport = {
+    prepareBatch: entries =>
+      mutation('projectHostedOutputBatch:workerPrepare', {
+        entries: entries.map(({ message, signature }) => outputArgs(message, signature)),
+      }),
+    commitBatch: async entries =>
+      JSON.parse(
+        await exchange.client.action(
+          makeFunctionReference<'action', Record<string, unknown>, string>(
+            'projectHostedOutputBatch:workerCommit',
+          ),
+          { projectId, entries: entries.map(({ message, signature }) => outputArgs(message, signature)) },
+        ),
+      ),
     prepare: (message, signature) =>
       mutation('projectHostedOutputApi:workerPrepare', outputArgs(message, signature)),
     commit: async (message, signature) =>

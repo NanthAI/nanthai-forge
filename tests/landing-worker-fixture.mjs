@@ -86,7 +86,25 @@ export function until(f, read, message, signal) {
   });
 }
 
-export async function childWorker(f, { filesystem = true, env = process.env } = {}) {
+// The command may connect its socket before its PID has been published in Work.
+// Restart drills must pin the durable child identity before signalling anything.
+export function runningChildRun(store) {
+  const tx = store.readRecords();
+  try {
+    return tx.all('runs', 'running', 'status').find(run => run.childPid);
+  } finally {
+    tx.dispose();
+  }
+}
+
+export function settledLandingEntries(store, ids) {
+  return ids.every(id => {
+    const entry = store.select('landingEntries', id);
+    return entry && !['queued', 'checking'].includes(entry.status);
+  });
+}
+
+export async function childWorker(f, { filesystem = true, env = process.env, ready } = {}) {
   const script = `import { watcherRuntime } from ${JSON.stringify(new URL('../dist/local-watcher.js', import.meta.url).href)};
 import { FakeWatchWorker } from ${JSON.stringify(new URL('./local-watcher-fixture.mjs', import.meta.url).href)};
 ${filesystem ? '' : `watcherRuntime.createWorker = () => new FakeWatchWorker({ silent: true });`}
@@ -115,11 +133,13 @@ await watchLandingWorker(new WorkStore(process.argv[1]),c.signal);`;
     assert.doesNotMatch(errors, /(?:Error:|Unhandled|Warning:)/, 'worker had no errors');
   };
   try {
-    // recovering only means the process wrote its first state. idle proves its
-    // watchers and initial reconciliation are ready before we submit test work.
+    // Empty-worker tests need idle before submitting work. Recovery tests already
+    // have work: observe their durable milestone instead of a transient idle
+    // publication that can be overwritten before a loaded observer reads it.
     await until(
       f,
-      () => landingWorkerStates(f.store).find(s => s.worker.pid === child.pid && s.status === 'idle'),
+      ready ??
+        (() => landingWorkerStates(f.store).find(s => s.worker.pid === child.pid && s.status === 'idle')),
       'child ready',
       controller.signal,
     );

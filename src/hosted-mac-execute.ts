@@ -118,6 +118,14 @@ export async function executeHostedMacCheck(
         ];
         const output = transport.output;
         const publisher = hostedOutputPublisher(run, key, {
+          ...(output.prepareBatch && output.commitBatch
+            ? {
+                prepareBatch: (entries: Parameters<NonNullable<OutputTransport['prepareBatch']>>[0]) =>
+                  deliverMacCallback(() => output.prepareBatch!(entries)),
+                commitBatch: (entries: Parameters<NonNullable<OutputTransport['commitBatch']>>[0]) =>
+                  deliverMacCallback(() => output.commitBatch!(entries)),
+              }
+            : {}),
           prepare: (message, signature) => deliverMacCallback(() => output.prepare(message, signature)),
           commit: (message, signature) => deliverMacCallback(() => output.commit(message, signature)),
           put: (url, headers, bytes) => deliverMacCallback(() => output.put(url, headers, bytes)),
@@ -132,6 +140,16 @@ export async function executeHostedMacCheck(
         });
         const sink = {
           ...baseSink,
+          ...(baseSink.publishBatch
+            ? {
+                publishBatch: async (...args: Parameters<NonNullable<typeof baseSink.publishBatch>>) => {
+                  const receipts = (await publisher.publishBatch(...args)) as { root?: OutputRoot }[];
+                  for (const reply of receipts)
+                    if (reply.root && (!outputRoot || reply.root.revision > outputRoot.revision))
+                      outputRoot = reply.root;
+                },
+              }
+            : {}),
           seal: async (seal: Parameters<typeof baseSink.seal>[0]) => {
             // The commit reply supplies the authoritative combined output root.
             const { outputMessage, signOutput } = await import('./hosted-check-output.js');
