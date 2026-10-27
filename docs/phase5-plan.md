@@ -302,6 +302,13 @@ Without the conditional G and replace-first I: about 13,100 non-test. To add: ab
 - **Changes:** the dogfood project moves to hosted authority; old CLIs are refused with an upgrade message.
 - **Acceptance:** Route B passes on a clean machine; Route A is re-measured after the R2 purge of push-era objects (retaining every object referenced by kept backups). Times published in [operations](operations.md). One authority: every accept on the project goes through hosted CAS for seven days. **Metrics:** must not regress 3, 5 or 7. Metric 7 switches to its after-cutover form.
 
+### B1.5c. Big-repo onboarding benchmark
+
+- **Size:** S. **Depends on:** B1.5b.
+- **Why:** the dogfood cutover found cost bugs that tests with small, plain files missed: rejected batch calls falling back silently, per-chunk lookups for large files and eager line counts (2026-10-27). New users onboarding a large GitHub repository go through the same upload, index and read paths.
+- **Changes:** import a large public GitHub repository (first candidate: `pingdotgg/t3code`, MIT, about 600 MB) into a throwaway NanthAI test project. Run the existing rate guard during the run; delete the project afterwards.
+- **Acceptance:** published Convex calls, documents read and written, peak action memory and wall time for import, index build, first Now and Code views, and opening a few large files. Each is within the budget stated before the run. Every miss becomes a slice. Idle after the run is 0 calls.
+
 ### B1.6. Delete the push and relay code
 
 Split by group; all depend on B1.5b. SP1 is decided; P5-SG lands alongside B1.6–B1.8 and deletes the native→Git projection code it replaces. B1.6 does not wait for that layer. Each reports actual LOC removed at landing; `verify` passes with no remaining import; hosted and Mac-offline landing tests still pass.
