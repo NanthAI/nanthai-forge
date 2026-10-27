@@ -73,9 +73,9 @@ Closed on 2026-10-25. Experiments E1 and E3 are published in [why-forge](why-for
 
 ## Phase 5: one authority, three bets, then private alpha (planned)
 
-Goal: Forge runs itself for the Forge team, with numbers to show it, before outside users arrive. The full plan with slices, acceptance criteria, metrics and the week-by-week critical path is in the [Phase 5 plan](phase5-plan.md). Reads that never write and automatic Lane snapshots are Phase 4 prerequisites.
+Goal: Forge runs itself for the Forge team, with numbers to show it, before outside users arrive. The full plan with slices, acceptance criteria, metrics and the stage-by-stage critical path is in the [Phase 5 plan](phase5-plan.md). Reads that never write and automatic Lane snapshots are Phase 4 prerequisites.
 
-1. **Week 1: self-metrics and decision records.** Forge records eight numbers about itself, including operator interventions per landing, and owner decisions become records shown in Now, briefs and the making-of.
+1. **Stage 5.1: self-metrics and decision records.** Forge records eight numbers about itself, including operator interventions per landing, and owner decisions become records shown in Now, briefs and the making-of.
 2. **Bet 1: one authority, now, then delete (critical path, starts day one).** Prerequisites first: the authority switch with writer fencing, finish through the hosted landing queue, a one-time hosted seed, browser accept on the hosted path, a pull-based Mac runner and recovery that folds hosted-only work. Then cutover: hosted main is the only accept path, the Mac is a runner and a cache, and about 13,000–16,000 lines of dual-master code are deleted.
 3. **Storage spike, both ways.** A native store on R2 against Git-native objects, on the same criteria; the winner is decided after. Either way, Lanes become APFS reflink clones with snapshots.
 4. **Landing without an operator.** Land is a desired state driven by a server controller; no-op entries finish themselves; a stall alarm; check reuse keyed on content, so restarts, sleep and Wi-Fi loss re-run nothing and strand nothing.
@@ -98,6 +98,18 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 - **Cross-repo coordination** with shared usage pools.
 - **Git serving** from hosted Forge, with Lane refs.
 - **Product depth**: making-of, timeline and flow views, discussions, Markdown and images, a dependency graph, an extension model and Lane-scoped undo.
+- **Landing safety beyond text conflicts.** A clean text merge can still break: today's real cases are a database test that failed after another change moved columns, two release changes that merged cleanly and then looped, and two readers that needed a hand merge. The landing queue already checks the exact composed result on current `main` and re-checks when `main` moves; these make the failures earlier, rarer and cheaper. Phase 5 Bets 2 and 3 cover contract checks, flake-aware culprit finding and overlap at first write; this list is the rest.
+  - **Order-sensitive paths**: migrations, schema, lockfiles, generated files and configuration form classes. When an entry ahead touches the same class, the queue-ahead preview is actionable even without a text overlap.
+  - **Migration collisions**: two Lanes adding the same migration number, or a migration that uses a column another entry removes, are reported at compose time with the fix.
+  - **Symbol drift**: an entry ahead that renames or removes a declaration your Lane newly uses is reported from the existing declaration index, before the check.
+  - **Opt-in early check**: on request, run the affected tests on your Lane plus the entries ahead before submitting, within a stated budget. Off by default.
+  - **Flake quarantine**: a test that fails and then passes on the same Candidate is quarantined in a visible list, stops blocking unrelated landings and opens a fix slice.
+  - **Selection blind spots**: tests that depend on data or configuration rather than imports get explicit mappings; while work is active, `main` runs a periodic combined full check, never while idle. Every miss is recorded as friction.
+  - **Release ordering**: a release refuses mixed installs and checks old-client/new-backend compatibility in both directions before switching.
+  - **Stacked Lanes**: when the Lane underneath changes, is abandoned or fails to land, dependents restack or get one clear notice.
+  - **Breakage after landing**: a failing `main` audit finds the culprit, reverts it while keeping its Lane, and tells queued entries.
+  - **Long-lived drift**: a Lane far behind `main` on paths others keep changing gets a nudge naming those landings.
+  - **Queue order**: priority and reordering, with fairness between agents.
 - **Later R2 slices**: browser bytes, imports, zones, agents and proposals, backfill, purge and backups. See the [R2 storage plan](r2-storage-plan.md). Retention or deletion changes still need an owner decision.
 
 ## Workflow friction

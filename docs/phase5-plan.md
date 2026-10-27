@@ -29,7 +29,7 @@ These landed in Phase 4 (closed 2026-10-25). Phase 5 assumes them.
 
 1. **Briefly red main is accepted** for trusted and autonomous actors, with automatic fix-forward or revert. Supervised projects keep the strict full gate.
 2. **SP1 chose neither pure arm** (2026-10-25): "Git objects for source bytes, Forge identities for everything, a Forge packed store for everything else". A State stays a Forge SHA-256 record pointing at a Git tree, with a deterministic commit derived for export; existing native States stay readable through an alias table. Source lives in a local bare Git repository and immutable packs plus a catalog on R2. Work, evidence, edit streams, decisions and analysis live in Forge's own packed, collectable store. This replaces design constraint 7 ("Native is the daily format") in [decisions](decisions.md). B1.4a remains independent; P5-RC starts now and P5-SG follows B1.5b.
-3. **Structural merge** is either mergiraf or our own merge on the existing source graph (tree-sitter declarations). SP2 compares them. Output is always gated by the contract check, never by parse success.
+3. **Structural merge** is either mergiraf or our own merge on the existing source graph (declarations from the TypeScript and Lezer parsers). SP2 compares them. Output is always gated by the contract check, never by parse success.
 4. **Web breadth is frozen** until E1 and E3 are published and Bet 1 is cut over. Hosted landing gaps G1–G10 are frozen with it, except those Bet 1 needs (G1, G2, G3, G6). See [Freeze](#freeze).
 5. **Bet 1 is imperative** and starts at Phase 5 start. Its prerequisites are the first slices built.
 6. **Trust per path per actor** (B2.6) is a new access rule. The owner approves its defaults before it is enabled.
@@ -188,7 +188,7 @@ Each spike ends in a short decision memo agreed with the owner and recorded as a
 ### SP2. Structural merge: mergiraf vs our own
 
 - **Size:** M, date-boxed to three agent-days. **Depends on:** B2.1.
-- **Arm M:** mergiraf. **Arm S:** our own merge on the source graph: tree-sitter declarations already indexed for test selection and overlap.
+- **Arm M:** mergiraf. **Arm S:** our own merge on the source graph: declarations from the TypeScript and Lezer parsers, already indexed for test selection and overlap.
 - **Method:** replay the real conflict corpus (the 33 sync-conflict episodes in coord-evidence and the conflict entries in the friction log). Measure the share of cheap conflicts (imports, registries, lists, docs) resolved, edits to different declarations in one file resolved, and the wrong-but-plausible rate, each judged by the Intent contract check. Also the dependency cost of Arm M and the lines Arm S needs.
 - **Decision rule:** adopt the arm that resolves more of the different-declaration class with no contract-passing resolution wrong on review. Arm M must also resolve at least half of the cheap class to justify a native dependency. Feeds B3.4.
 
