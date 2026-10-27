@@ -309,6 +309,14 @@ Without the conditional G and replace-first I: about 13,100 non-test. To add: ab
 - **Changes:** import a large public GitHub repository (first candidate: `pingdotgg/t3code`, MIT, about 600 MB) into a throwaway NanthAI test project. Run the existing rate guard during the run; delete the project afterwards.
 - **Acceptance:** published Convex calls, documents read and written, peak action memory and wall time for import, index build, first Now and Code views, and opening a few large files. Each is within the budget stated before the run. Every miss becomes a slice. Idle after the run is 0 calls.
 
+### B1.5d. Replayed multi-agent benchmark on a real repository
+
+- **Size:** M. **Depends on:** B1.5c (same repository), the self-metrics recorder.
+- **Why:** Forge's published wins are landing bursts on its own repository; single-agent coding cost (14% more input, 7% more time than plain Git) and coordination quality are not yet measured on someone else's code.
+- **Design:** start `pingdotgg/t3code` at an earlier commit. Pick a set of later merged pull requests that touched overlapping areas and turn each into a task prompt. Run the same agents (same models, prompts, concurrency and subscriptions) twice: on Forge, and on a fork in the NanthAI GitHub organisation using branches, pull requests and the GitHub merge queue. Randomise task order, repeat each side at least three times, and never open anything upstream. Delete the fork and project afterwards.
+- **Measures:** wall time until every task is on main, agent tokens and time, check runs, conflicts and rework, broken main, and correctness against each original pull request's tests.
+- **Acceptance:** usage estimate approved by the owner before the run (agent subscriptions and Convex); results published in [why Forge](why-forge.md) with method, including any measure where GitHub wins. Every Forge loss becomes a slice.
+
 ### B1.6. Delete the push and relay code
 
 Split by group; all depend on B1.5b. SP1 is decided; P5-SG lands alongside B1.6–B1.8 and deletes the native→Git projection code it replaces. B1.6 does not wait for that layer. Each reports actual LOC removed at landing; `verify` passes with no remaining import; hosted and Mac-offline landing tests still pass.

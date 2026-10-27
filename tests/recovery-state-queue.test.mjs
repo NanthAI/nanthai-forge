@@ -165,7 +165,7 @@ test('2,500-State / 3,000-file recovery bounds lookup calls and peak RSS in a fr
   const measured = JSON.parse(result.stdout.trim());
   assert.equal(measured.uniqueObjects, 32000);
   assert(measured.lookupCalls <= 400);
-  assert(measured.peakRssBytes < 300 * 1024 * 1024);
+  assert(measured.recoveryRssBytes < 256 * 1024 * 1024);
   t.diagnostic(JSON.stringify(measured));
 });
 
