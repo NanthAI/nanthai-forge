@@ -182,9 +182,11 @@ test('R3a: mixed committed Convex and R2 pins publish without fetching either lo
 });
 
 for (const mode of ['opt-out', 'older CLI', 'older server'])
-  test(`R3a: ${mode} preserves byte-reading publication`, async t => {
+  test(`R3a: ${mode} preserves legacy schema-1 byte-reading publication`, async t => {
     const f = await local(t, { optIn: mode !== 'opt-out' }),
       observations = observePublish(f);
+    // Fresh records checkpoints use the paged seed; this covers legacy publication.
+    f.sender.workRecords = false;
     if (mode === 'older CLI') f.sender.publishMetadata = undefined;
     if (mode === 'older server') {
       const query = f.sender.client.query;

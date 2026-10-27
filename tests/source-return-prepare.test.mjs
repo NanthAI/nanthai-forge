@@ -6,7 +6,14 @@ import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { ConvexError } from 'convex/values';
-import { fixture, checkpoint, preparedCheckpoint, modules } from './project-exchange-fixture.mjs';
+import {
+  fixture,
+  checkpoint,
+  preparedCheckpoint,
+  modules,
+  seedRecordCheckpoint,
+  commitValidatedCheckpoint,
+} from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { land } from './source-landings-fixture.mjs';
 import { workBytes } from '../dist/work-metadata.js';
@@ -41,7 +48,10 @@ const privateInput = immutableDirectory('forge-return-prepare-', async (root, re
   data.revision++;
   first.store.save(data);
   const baseline = await preparedCheckpoint(s, first.store, 0, undefined, { records });
-  const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, baseline.input);
+  const backupId = records
+    ? await seedRecordCheckpoint(s, baseline)
+    : await modules.projectExchangeActions.publish._handler(s.ctx, baseline.input);
+  if (records) s.tables.projectBackups.get(backupId).ownerDerived = baseline.input.ownerDerived;
   await modules.projectWorkActions.initialize._handler(s.ctx, {
     projectId: 'project',
     backupId,
@@ -75,7 +85,9 @@ const privateInput = immutableDirectory('forge-return-prepare-', async (root, re
     journalRevision: command.revision,
   });
   candidate.input.previous = backupId;
-  const candidateId = await modules.projectExchangeActions.publish._handler(s.ctx, candidate.input);
+  const candidateId = records
+    ? await commitValidatedCheckpoint(s, candidate)
+    : await modules.projectExchangeActions.publish._handler(s.ctx, candidate.input);
   snapshots.set(records, await hostedSnapshot(s));
   return {
     // Tests inspect the candidate's layout and journal delta, not its cached

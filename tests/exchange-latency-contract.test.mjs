@@ -85,7 +85,7 @@ test('real client original retry preserves old prepared manifest identity after 
     revision = f.store.revision();
   // This operation predates metadata-tree transport, but retains its original bytes.
   f.client.metadataTrees = false;
-  let lostReplies = 4,
+  let lostReplies = 2,
     originalBackup;
   f.client.client.action = async (fn, args) => {
     const result = await f.dispatch(fn, args);
@@ -98,7 +98,7 @@ test('real client original retry preserves old prepared manifest identity after 
   };
   await assert.rejects(
     pushNativeExchange(f.store, revision, operation, f.client),
-    error => error.code === 'HOSTED_ACTION_FAILED',
+    error => error.code === 'WORK_PUBLICATION_FAILED',
   );
   const path = join(f.store.directory, `exchange-${operation}`, 'manifest.json'),
     retained = readFileSync(path),

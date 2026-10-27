@@ -95,7 +95,8 @@ export function exchangeConvexFetch(
             ? { headerTimeoutMs: LONG_ACTION_DEADLINE_MS, totalTimeoutMs: LONG_ACTION_DEADLINE_MS }
             : {}),
           ...options,
-          retries: safe ? (options.retries ?? 3) : 0,
+          // Publication owns its small retry budget in ConvexExchange.publish.
+          retries: name === 'projectExchangeActions:publish' ? 0 : safe ? (options.retries ?? 3) : 0,
         });
         if (response.status === 429 || (response.status >= 500 && response.status !== 560))
           throw new ForgeError(

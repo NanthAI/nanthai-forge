@@ -15,7 +15,7 @@ export async function retryExchange<T>(
   phase: string,
   operationId: string,
   task: () => Promise<T>,
-  options: { retries?: number; delayMs?: number; localSnapshot?: boolean } = {},
+  options: { retries?: number; delayMs?: number; localSnapshot?: boolean; retryCodes?: string[] } = {},
 ): Promise<T> {
   const retries = options.retries ?? 3;
   for (let attempt = 0; ; attempt++) {
@@ -31,7 +31,7 @@ export async function retryExchange<T>(
           'WORK_CHANGED_DURING_PUSH',
           `Local Work changed during ${phase}. Prepared operation ${operationId} bytes and any uploaded checkpoint remain retained. Retry to reconcile its receipt; if the snapshot was never prepared, start a push from the current Work revision.`,
         );
-      if (!retryable.has(error.code)) throw error;
+      if (!retryable.has(error.code) && !options.retryCodes?.includes(error.code)) throw error;
       if (attempt >= retries)
         throw new ForgeError(
           error.code,

@@ -187,7 +187,12 @@ export const commitPage = internalMutation({
   },
 });
 export const commit = internalMutation({
-  args: { ...identity, owner: v.string(), mainDigest: v.union(v.string(), v.null()) },
+  args: {
+    ...identity,
+    owner: v.string(),
+    mainDigest: v.union(v.string(), v.null()),
+    validatedWorkRecords: v.optional(v.literal(1)),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     const project = await activeOwnedProject(ctx, input.projectId, input.owner),
@@ -241,6 +246,9 @@ export const commit = internalMutation({
       transport: 'objects',
       status: 'stored',
       validatedClosure: 1,
+      ...(request.format === 'native' && input.validatedWorkRecords
+        ? { validatedWorkRecords: 1 as const }
+        : {}),
       ...(content.storageId ? { storageId: content.storageId } : {}),
       preview: {
         ...request.preview,

@@ -124,6 +124,7 @@ export const finish = action({
         ...input,
         owner,
         mainDigest,
+        ...(request.format === 'native' && metadata.schema === 2 ? { validatedWorkRecords: 1 } : {}),
       });
     } catch (error) {
       return report(error);

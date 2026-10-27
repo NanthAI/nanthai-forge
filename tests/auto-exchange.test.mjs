@@ -353,15 +353,24 @@ test('policy disabled or binding changed while queued is reread before automatic
   assert.equal(f.state().autoExchange.projectId, 'synthetic-project');
 });
 
-test('revoked auth and journal conflicts retain pending saves and report the safe code', async t => {
+test('terminal authority, journal and publication errors retain pending saves without retrying', async t => {
   const f = fixture(t, { debounceMs: 0 });
-  for (const code of ['AUTH_REQUIRED', 'FORBIDDEN', 'WORK_CONFLICT']) {
+  for (const code of [
+    'AUTH_REQUIRED',
+    'FORBIDDEN',
+    'WORK_CONFLICT',
+    'WORK_DELTA_UNAVAILABLE',
+    'WORK_PUBLICATION_FAILED',
+  ]) {
+    let calls = 0;
     await f.run({
       push: async admission => {
         await admission();
+        calls++;
         throw new ForgeError(code, 'synthetic');
       },
     });
+    assert.equal(calls, 1);
     assert.equal(f.state().autoExchange.status, 'failed');
     assert.equal(f.state().autoExchange.code, code);
     assert.ok(f.queue().pending.length);

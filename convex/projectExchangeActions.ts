@@ -24,7 +24,7 @@ import { meteredStorage, storageMeter } from './storageMeter';
 import { CLI_UPGRADE_MESSAGE } from './projectOwnerDerived';
 import { metadataPublication } from './projectPublicationValidation';
 import { runPublication } from './projectPublicationRun';
-import { recordPublication, recordExchange, verifyRecordSeed } from './projectWorkRecordExchange';
+import { recordPublication } from './projectWorkRecordExchange';
 
 async function caller(ctx: ActionCtx) {
   const user = await ctx.auth.getUserIdentity();
@@ -244,7 +244,7 @@ export const publish = action({
           }
           const reader = exchangeObjectReader(ctx, true);
           const records = await recordPublication(ctx, input, owner, reader);
-          if (records) {
+          if (!('unavailable' in records)) {
             await validateExchangePins(ctx, input.projectId, owner, records.contentPins);
             const { deferHistory: _deferHistory, ...publication } = legacyInput;
             void _deferHistory;
@@ -267,7 +267,16 @@ export const publish = action({
             // still reuse immutable bytes after current metadata/authority checks.
             exchangeObjectReader(ctx),
           );
-          const incremental = isExchangeRoot(JSON.parse(bytes.toString('utf8'))),
+          const root: unknown = JSON.parse(bytes.toString('utf8'));
+          invariant(
+            !isExchangeRoot(root) || root.schema !== 2,
+            'WORK_DELTA_UNAVAILABLE',
+            `Records delta publication is unavailable (${records.unavailable}). Retain this operation; repair its validated base or use the paged hosted seed for a new project.`,
+          );
+          // Preserve legacy root reuse across validation helpers after the fresh
+          // storage verification above; records failures never enter this path.
+          await reader.read(input.projectId, owner, [{ sha256: input.digest, size: input.size }]);
+          const incremental = isExchangeRoot(root),
             resolved = await resolveExchangeWork(bytes, pins => reader.read(input.projectId, owner, pins));
           const manifest = sourceManifestSchema.parse(JSON.parse(resolved.manifest.toString('utf8')));
           invariant(
@@ -287,15 +296,6 @@ export const publish = action({
           const workFile = manifest.files.find(file => file.path === 'work.json');
           invariant(workFile, 'INVALID_WORK_BACKUP', 'Manifest omits Work.');
           const data = validateParsedWork(resolved.data);
-          const recordSeed = await recordExchange(input, owner, reader);
-          if (recordSeed) {
-            await verifyRecordSeed(recordSeed, resolved.data);
-            console.log('work-record exchange prepared', { mode: 'seed' });
-          } else
-            console.log('work-record publication skip', {
-              reason: 'seed-catalog-unavailable',
-              projectId: input.projectId,
-            });
           invariant(
             data.revision === manifest.revision &&
               (manifest.kind === 'forge-native-work-backup'
@@ -392,7 +392,6 @@ export const publish = action({
             preview,
             request,
             ...(deferHistory ? { historyBackfilling: true } : { validatedClosure: 1 as const }),
-            ...(recordSeed ? { validatedWorkRecords: 1 as const } : {}),
           });
         },
       );

@@ -830,7 +830,7 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
   const retainedSeedId = randomUUID();
   const { prepareNativeExchange: prepareRetainedSeed } = await import('../dist/native-exchange.js');
   await prepareRetainedSeed(f.store, f.store.revision(), retainedSeedId, true, undefined, undefined, {
-    recordMetadata: true,
+    recordMetadata: false,
   });
   updateHostState(f.store, state => {
     state.push = {
@@ -856,7 +856,8 @@ test('real CLI uses saved login deployment and bound push/pull/coordination with
   const retainedRoot = JSON.parse(
     readFileSync(join(f.store.directory, `exchange-${stuck.operationId}`, 'exchange.json')),
   );
-  assert.equal(retainedRoot.delta, undefined, 'retained immutable root can only use compatibility fallback');
+  assert.equal(retainedRoot.schema, 1, 'retained operation uses the legacy byte-tree protocol');
+  assert.equal(retainedRoot.delta, undefined, 'legacy immutable root uses compatibility validation');
   const baseBackup = stuck.returnSource.expectedBackupId;
   stopUncommittedReturn = false;
   loseSupersedeReply = true;

@@ -123,6 +123,6 @@ for (const reason of reasons)
       'owner',
       {},
     );
-    assert.equal(result, undefined);
+    assert.deepEqual(result, { unavailable: reason });
     assert.deepEqual(logs, [['work-record publication skip', { reason, projectId: 'project' }]]);
   });

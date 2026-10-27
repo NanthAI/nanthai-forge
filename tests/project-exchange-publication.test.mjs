@@ -221,7 +221,7 @@ test('the CLI transport reports a stale publish as PROJECT_CHANGED with pull-and
   };
   await assert.rejects(
     transport.publish({ sha256: 'a'.repeat(64), size: 1 }),
-    error => error.code === 'HOSTED_ACTION_FAILED',
+    error => error.code === 'WORK_PUBLICATION_FAILED',
   );
 });
 

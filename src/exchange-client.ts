@@ -354,19 +354,23 @@ export class ConvexExchange implements ExchangeTransport {
   }
   async publish(pin: ContentPin, metadataOnly = false, ownerDerived?: ContentPin): Promise<string> {
     try {
-      return await retryExchange('checkpoint publication', this.operationId, () =>
-        this.client.action(action('projectExchangeActions:publish'), {
-          ...(this.authorityEpoch === undefined ? {} : { authorityEpoch: this.authorityEpoch }),
-          displayProtocol: 3,
-          ...(ownerDerived ? { ownerDerived } : {}),
-          projectId: this.projectId,
-          operationId: this.operationId,
-          previous: this.previous,
-          ...(this.deferHistory ? { deferHistory: true } : {}),
-          ...(metadataOnly ? { metadataOnly: 1 } : {}),
-          digest: pin.sha256,
-          size: pin.size,
-        }),
+      return await retryExchange(
+        'checkpoint publication',
+        this.operationId,
+        () =>
+          this.client.action(action('projectExchangeActions:publish'), {
+            ...(this.authorityEpoch === undefined ? {} : { authorityEpoch: this.authorityEpoch }),
+            displayProtocol: 3,
+            ...(ownerDerived ? { ownerDerived } : {}),
+            projectId: this.projectId,
+            operationId: this.operationId,
+            previous: this.previous,
+            ...(this.deferHistory ? { deferHistory: true } : {}),
+            ...(metadataOnly ? { metadataOnly: 1 } : {}),
+            digest: pin.sha256,
+            size: pin.size,
+          }),
+        { retries: 1, retryCodes: ['EXCHANGE_REQUEST_FAILED', 'EXCHANGE_REQUEST_TIMEOUT'] },
       );
     } catch (error) {
       const data =
@@ -379,6 +383,11 @@ export class ConvexExchange implements ExchangeTransport {
           'PROJECT_CHANGED',
           'Another push changed this project since your previous checkpoint, so nothing was published. Pull the latest checkpoint, reconcile your changes, then push again.',
         );
+      if (
+        error instanceof ForgeError &&
+        ['HOSTED_ACTION_FAILED', 'EXCHANGE_REQUEST_FAILED', 'EXCHANGE_REQUEST_TIMEOUT'].includes(error.code)
+      )
+        throw new ForgeError('WORK_PUBLICATION_FAILED', error.message);
       throw error;
     }
   }

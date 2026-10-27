@@ -596,3 +596,28 @@ test('cooperative cancellation stops retries and aborts a header/body stall befo
     assert.equal(f.requests.length, 1);
   }
 });
+
+for (const kind of ['http failure', 'timeout', 'out of memory'])
+  test(`publication ${kind} has one retry budget across HTTP and automatic push`, async t => {
+    const f = await fixture(t, (_req, res) => {
+      if (kind === 'timeout') return;
+      if (kind === 'http failure') {
+        res.writeHead(503);
+        res.end('unavailable');
+        return;
+      }
+      res.writeHead(560);
+      res.end(JSON.stringify({ status: 'error', errorMessage: 'Action ran out of memory' }));
+    });
+    const transport = new ConvexExchange(f.url, 'synthetic', 'project', 'original', null);
+    transport.client = new ConvexHttpClient(f.url, {
+      skipConvexDeploymentUrlCheck: true,
+      logger: false,
+      fetch: exchangeConvexFetch(deadlines),
+    });
+    await assert.rejects(
+      transport.publish({ sha256: 'a'.repeat(64), size: 1 }),
+      error => error.code === 'WORK_PUBLICATION_FAILED',
+    );
+    assert.equal(f.requests.length, 2);
+  });

@@ -12,7 +12,7 @@ import {
   preparedCheckpoint,
   modules,
   upload,
-  currentOwnerDisplay,
+  seedRecordCheckpoint,
 } from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { land } from './source-landings-fixture.mjs';
@@ -33,64 +33,21 @@ const ensureIndex = s =>
 const { verifyRecordSeed } = await import(moduleUrl('../convex/projectWorkRecordExchange.ts'));
 const failCode = code => error => error.data?.code === code;
 
-test('complete record publication validates the original field order rather than schema order', async t => {
+test('records publication without a usable delta fails before whole-Work seed validation', async t => {
   const s = fixture(),
-    first = await checkpoint(t, s),
-    { schema, ...rest } = first.store.load(),
-    data = { ...rest, schema, nativeCompanionReceipts: [] },
-    work = Buffer.from(workBytes(data));
-  assert.notEqual(workBytes(parseWorkBytes(work)), work.toString('utf8'));
-  const manifest = {
-    ...first.manifest,
-    files: first.manifest.files.map(file =>
-      file.path === 'work.json' ? { ...file, sha256: digest(work), size: work.length } : file,
-    ),
-  };
-  const tree = buildExchangeRoot(Buffer.from(JSON.stringify(manifest)), work, { records: true });
-  for (const bytes of tree.objects.values()) await upload(s, bytes);
-  const pin = await upload(s, tree.bytes);
+    first = await checkpoint(t, s);
   const initialBackup = await modules.projectExchangeActions.publish._handler(s.ctx, first.input);
-  const initialized = await modules.projectWorkActions.initialize._handler(s.ctx, {
-    projectId: 'project',
-    backupId: initialBackup,
-    operationId: randomUUID(),
-  });
-  const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, {
-    ...first.input,
-    operationId: randomUUID(),
-    previous: initialBackup,
-    digest: pin.sha256,
-    size: pin.size,
-    ...(await currentOwnerDisplay(s, first.store, data)),
-  });
-  assert.equal(s.tables.projectBackups.get(backupId).validatedWorkRecords, 1);
-  const receipt = await complete(s, {
-    projectId: 'project',
-    backupId,
-    expectedBackupId: initialBackup,
-    revision: initialized.work.revision,
-    operationId: randomUUID(),
-    continuation: true,
-  });
-  const hosted = await modules.projectWorkActions.load(s.ctx, 'project', 'owner');
-  first.store.save(hosted.data);
-  const next = await preparedCheckpoint(s, first.store, 0, undefined, {
-    records: true,
-    baseline: data,
-    journalRevision: receipt.revision,
-  });
-  next.input.previous = backupId;
-  const nextBackup = await modules.projectExchangeActions.publish._handler(s.ctx, next.input);
-  await complete(s, {
-    projectId: 'project',
-    backupId: nextBackup,
-    expectedBackupId: backupId,
-    revision: receipt.revision,
-    operationId: randomUUID(),
-    continuation: true,
-  });
-  const returned = await modules.projectWorkActions.load(s.ctx, 'project', 'owner');
-  assert.equal(returned.data.hostedEvents.length, 2, 'complete fallback preserves both journal receipts');
+  const candidate = await preparedCheckpoint(s, first.store, 0, undefined, { records: true });
+  await assert.rejects(
+    modules.projectExchangeActions.publish._handler(s.ctx, {
+      ...candidate.input,
+      previous: initialBackup,
+    }),
+    error =>
+      error.data?.code === 'WORK_DELTA_UNAVAILABLE' &&
+      /previous-records-unvalidated/.test(error.data.message),
+  );
+  assert.equal(s.tables.projectBackups.size, 1);
 });
 
 test('complete record seed preserves absent defaults and rejects changed Work at the same revision', async () => {
@@ -228,7 +185,11 @@ async function setup(t, records = true, history = 3, active = false, unified = f
   }
   const baseline = first.store.load();
   const seed = await preparedCheckpoint(s, first.store, 0, undefined, { records });
-  const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, seed.input);
+  const backupId = records
+    ? await seedRecordCheckpoint(s, seed)
+    : await modules.projectExchangeActions.publish._handler(s.ctx, seed.input);
+  // Keep the record-return index fixture's existing owner display baseline.
+  if (records) s.tables.projectBackups.get(backupId).ownerDerived = seed.input.ownerDerived;
   await modules.projectWorkActions.initialize._handler(s.ctx, {
     projectId: 'project',
     backupId,
@@ -254,6 +215,7 @@ async function candidate(f, count = 1, options = {}) {
     records: true,
     baseline: f.baseline,
     journalRevision: f.baseline.revision,
+    ...(f.seed.tree.root.schema === 1 ? { records: false } : {}),
     ...options,
   });
   next.input.previous = f.backupId;
@@ -516,9 +478,7 @@ test('format-18 seed followed by routine record and mirror metadata changes publ
   const logs = [];
   t.mock.method(console, 'log', (...args) => logs.push(args));
   const f = await setup(t, true, 5, true, true, true);
-  assert.ok(
-    logs.some(([name, details]) => name === 'work-record exchange prepared' && details.mode === 'seed'),
-  );
+  assert.equal(f.s.tables.projectBackups.get(f.backupId).validatedWorkRecords, 1);
   const data = f.first.store.load();
   data.revision++;
   data.intents.at(-1).notes.push({ kind: 'comment', text: 'Routine synthetic change', at: 'later' });
@@ -586,7 +546,7 @@ for (const [from, to] of [
     const data = from === 18 ? convertWorkTo18(initial) : initial;
     first.store.save(data);
     const baseline = await preparedCheckpoint(s, first.store, 0, undefined, { records: true });
-    const backupId = await modules.projectExchangeActions.publish._handler(s.ctx, baseline.input);
+    const backupId = await seedRecordCheckpoint(s, baseline);
     await modules.projectWorkActions.initialize._handler(s.ctx, {
       projectId: 'project',
       backupId,
@@ -642,10 +602,9 @@ test('replacement publication authenticates selected Work independently of an un
   t.mock.method(console, 'log', (...args) => logs.push(args));
   const selected = s.tables.projectBackups.get(f.backupId);
   delete selected.validatedClosure;
-  assert.equal(
-    await recordPublication(s.ctx, next.input, 'owner', exchangeObjectReader(s.ctx, true)),
-    undefined,
-  );
+  assert.deepEqual(await recordPublication(s.ctx, next.input, 'owner', exchangeObjectReader(s.ctx, true)), {
+    unavailable: 'selected-base-unvalidated',
+  });
   assert.equal(logs.at(-1)[1].reason, 'selected-base-unvalidated');
   selected.validatedClosure = 1;
   // Even a legacy/unvalidated predecessor cannot hide a usable selected base.

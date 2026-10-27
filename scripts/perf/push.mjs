@@ -2,13 +2,14 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { convexToJson, jsonToConvex } from 'convex/values';
 
 /** Real exchange CLI against an in-memory loopback backend. There is no hosted URL option. */
 export async function syntheticPush(samples = 3) {
-  const { fixture, modules } = await import('../../tests/project-exchange-fixture.mjs');
+  const { fixture, modules, preparedCheckpoint, seedRecordCheckpoint } =
+    await import('../../tests/project-exchange-fixture.mjs');
   const { initNative } = await import('../../dist/native-work.js');
   const { NativeSource } = await import('../../dist/native-source.js');
   const { WorkStore } = await import('../../dist/work-store.js');
@@ -105,7 +106,20 @@ export async function syntheticPush(samples = 3) {
         },
       };
     }
-    let previous = (await push(null)).backupId; // Seed excluded from the delta budget.
+    // New records checkpoints start with the paged hosted seed, not push fallback.
+    const seeded = await preparedCheckpoint(s, store, 0, undefined, { records: true });
+    let previous = await seedRecordCheckpoint(s, seeded);
+    const { ConvexExchange } = await import('../../dist/exchange-client.js');
+    const { retainExchangeBaseline } = await import('../../dist/native-exchange-baseline.js');
+    const transport = new ConvexExchange(url, 'synthetic-only', 'project', randomUUID(), previous);
+    retainExchangeBaseline(
+      store,
+      transport.checkpointKey(),
+      seeded.manifest,
+      JSON.parse(readFileSync(join(store.directory, `exchange-${seeded.input.operationId}`, 'work.json'))),
+      [],
+      JSON.parse(readFileSync(join(store.directory, `exchange-${seeded.input.operationId}`, 'states.json'))),
+    );
     const result = [];
     for (let i = 0; i < samples; i++) {
       files[0] = { ...files[0], blob: source.put(Buffer.from(`one-file delta ${i}\n`)) };
