@@ -2,7 +2,7 @@
 import { workerPath } from './worker-install.js';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { syncUnprepared } from './agent-sync-state.js';
+import { syncIndexState } from './agent-sync-state.js';
 import { join } from 'node:path';
 import { CheckQueue, queueEntries } from './check-queue.js';
 import { processStartTime } from './local-process.js';
@@ -24,8 +24,8 @@ export function startAgentSyncWorker(store: WorkStore) {
       !state.binding ||
       state.binding.autoSync === false ||
       !state.agentSync?.pending.length ||
-      syncUnprepared(state) ||
-      (state.agentSync.nextAttemptAt ?? 0) > Date.now() ||
+      ((state.agentSync.nextAttemptAt ?? 0) > Date.now() &&
+        (!state.agentSync.unprepared || state.agentSync.unprepared === syncIndexState(state.binding))) ||
       queueEntries(join(store.directory, 'hosted-agent-sync-queue')).length
     )
       return false;
@@ -35,8 +35,7 @@ export function startAgentSyncWorker(store: WorkStore) {
       {
         detached: true,
         stdio: 'ignore',
-        // host --sync-agent publishes metadata and consumes owner requests,
-        // which can queue checks using the owner's selected backend and inputs.
+        // Metadata retry workers retain only the selected hosted credentials.
         env: checkServiceEnv(
           store.page('checks', 0, Number.MAX_SAFE_INTEGER).records,
           effectivePolicy(store.readRecords()?.data() ?? store.load()),
@@ -57,11 +56,8 @@ export function startAgentSyncWorker(store: WorkStore) {
 export function markAgentSyncPrepared(state: HostState, target: { projectId: string; deployment: string }) {
   if (state.binding?.projectId !== target.projectId || state.binding.deployment !== target.deployment) return;
   state.binding.workIndexPreparation = randomUUID();
-  if (state.agentSync?.unprepared) {
+  if (state.agentSync) {
     delete state.agentSync.unprepared;
-    if (state.agentSync.headError?.code === 'PROJECT_WORK_INDEX_MISSING') {
-      delete state.agentSync.headError;
-      delete state.agentSync.nextAttemptAt;
-    }
+    delete state.agentSync.nextAttemptAt;
   }
 }

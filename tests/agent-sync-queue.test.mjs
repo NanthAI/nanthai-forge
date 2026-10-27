@@ -13,6 +13,7 @@ import { readHostState, updateHostState } from '../dist/host-binding.js';
 import { compactAgentSync } from '../dist/agent-sync-state.js';
 import { agentSyncError } from '../dist/agent-sync-error.js';
 import { flushAgentSync } from '../dist/agent-hosted-sync.js';
+import { runAgentSyncRetries, waitAgentSyncRetry } from '../dist/agent-sync-retry.js';
 import { startAgentSyncWorker, markAgentSyncPrepared } from '../dist/agent-sync-worker.js';
 import { CheckQueue } from '../dist/check-queue.js';
 import { hostCli } from '../dist/host-command.js';
@@ -102,7 +103,7 @@ for (const phase of ['projectCoordination:publish', 'projectOwnerSync:publish'])
 }
 
 for (const phase of ['projectCoordination:publish', 'projectOwnerSync:publish']) {
-  test(`unprepared Work at ${phase} gates both publishes across time and restart, then preserves replay after prepare`, async t => {
+  test(`unprepared Work at ${phase} backs off across restart, then preserves replay after prepare`, async t => {
     const first = entry(1),
       second = entry(2),
       store = fixture(t, [first, second]);
@@ -127,11 +128,10 @@ for (const phase of ['projectCoordination:publish', 'projectOwnerSync:publish'])
     assert.equal(before, phase.includes('Owner') ? 2 : 1);
     assert.deepEqual(readHostState(store).agentSync.pending, [first, second]);
     assert.equal(readHostState(store).agentSync.rejected, undefined);
-    assert.equal(readHostState(store).agentSync.nextAttemptAt, undefined);
+    assert.equal(readHostState(store).agentSync.nextAttemptAt, Date.now() + 1000);
     const restarted = new WorkStore(store.root);
-    for (let hour = 0; hour < 24 * 7; hour++) {
-      t.mock.timers.tick(3_600_000);
-      updateHostState(restarted, () => {});
+    for (let attempt = 0; attempt < 5; attempt++) {
+      t.mock.timers.tick(100);
       assert.equal(startAgentSyncWorker(restarted), false);
       await flushAgentSync(restarted, client);
     }
@@ -433,4 +433,88 @@ test('network/timeout/5xx/rate limit retry; structured application and validatio
     { name: 'ArgumentValidationError' },
   ])
     assert.equal(agentSyncError(error).transient, false);
+});
+
+test('missing index retries on its deadline and drains 84 entries within the existing call/byte budget', async t => {
+  const store = fixture(
+    t,
+    Array.from({ length: 84 }, (_, i) => entry(i + 1)),
+  );
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  let indexReady = false,
+    calls = 0,
+    batches = 0,
+    peakHeapBytes = process.memoryUsage().heapUsed;
+  const client = {
+    mutation: async ref => {
+      calls++;
+      peakHeapBytes = Math.max(peakHeapBytes, process.memoryUsage().heapUsed);
+      if (getFunctionName(ref) === 'projectOwnerSync:publish' && !indexReady)
+        throw new ConvexError({ code: 'PROJECT_WORK_INDEX_MISSING', message: 'Index building' });
+    },
+  };
+  const started = performance.now(),
+    heapBefore = process.memoryUsage().heapUsed;
+  const result = await runAgentSyncRetries(
+    store,
+    async () => {
+      batches++;
+      return flushAgentSync(store, client);
+    },
+    async deadline => {
+      const host = await hostCli([store.root, '--status']);
+      assert.equal(host.agentSyncError.code, 'PROJECT_WORK_INDEX_MISSING');
+      assert.equal(host.agentSyncNextAttemptAt, deadline);
+      assert.equal(deadline, Date.now() + 1000);
+      assert.ok(statSync(join(store.directory, 'hosted-agent-sync.json')).size < 512 * 1024);
+      indexReady = true;
+      t.mock.timers.tick(deadline - Date.now());
+    },
+  );
+  assert.equal(result.value.pending, 0);
+  assert.equal(batches, 2);
+  assert.ok(peakHeapBytes - heapBefore < 128 * 1024 * 1024);
+  assert.equal(calls, 170); // 2 failed-attempt calls + exactly 2 per retained item.
+  const host = await hostCli([store.root, '--status']);
+  assert.equal(host.agentSyncError, null);
+  assert.equal(host.agentSyncNextAttemptAt, null);
+  assert.equal(host.pendingAgentSync, 0);
+  t.diagnostic(
+    JSON.stringify({
+      items: 84,
+      calls,
+      batches,
+      wallMs: performance.now() - started,
+      peakHeapBytes,
+      peakHeapGrowthBytes: Math.max(0, peakHeapBytes - heapBefore),
+    }),
+  );
+});
+
+test('local prepare wakes a sleeping retry immediately and permanent errors leave no timer', async t => {
+  const store = fixture(t, [entry(1)]);
+  updateHostState(store, state => {
+    state.agentSync.nextAttemptAt = Date.now() + 300_000;
+  });
+  const waiting = waitAgentSyncRetry(store, readHostState(store).agentSync.nextAttemptAt);
+  updateHostState(store, state => markAgentSyncPrepared(state, state.binding));
+  await waiting;
+  let waits = 0,
+    calls = 0;
+  await runAgentSyncRetries(
+    store,
+    () =>
+      flushAgentSync(store, {
+        mutation: async () => {
+          calls++;
+          throw new ConvexError({ code: 'BAD_ARGUMENT', message: 'Synthetic permanent rejection' });
+        },
+      }),
+    async () => {
+      waits++;
+    },
+  );
+  assert.equal(calls, 1);
+  assert.equal(waits, 0);
+  assert.equal((await hostCli([store.root, '--status'])).agentSyncError.code, 'BAD_ARGUMENT');
 });

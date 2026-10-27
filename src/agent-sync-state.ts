@@ -30,7 +30,7 @@ export const agentSyncSchema = z.object({
 });
 export type AgentSyncState = z.infer<typeof agentSyncSchema>;
 export type SyncEntry = AgentSyncState['pending'][number];
-/** Changes only when local preparation/source publication or an operator can make a retry useful. */
+/** Preparation identity fences a missing-index reply racing a local preparation. */
 export const syncIndexState = (binding?: {
   operationId: string;
   backupId: string;

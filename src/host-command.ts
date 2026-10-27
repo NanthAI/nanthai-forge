@@ -9,7 +9,7 @@ import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { readRecoveryInventory } from './recovery-inventory.js';
 import { readAutoExchangeStatus } from './auto-exchange-status.js';
 import { consumeOwnerRequests, startOwnerAcceptanceListener } from './owner-acceptance-consumer.js';
-import { flushAgentSync } from './agent-hosted-sync.js';
+import { runAgentSyncRetries } from './agent-sync-retry.js';
 import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { spawn } from 'node:child_process';
 import { isAbsolute } from 'node:path';
@@ -61,9 +61,7 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
   }
   if (flags.length === 1 && flags[0] === '--sync-agent') {
     const store = new WorkStore(root);
-    const result = await flushAgentSync(store);
-    await consumeOwnerRequests(store).catch(() => {});
-    return result;
+    return runAgentSyncRetries(store);
   }
   if (flags.length === 1 && flags[0] === '--listen') {
     const store = new WorkStore(root);

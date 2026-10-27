@@ -559,6 +559,41 @@ project and seed a replacement instead of migrating it. Only the lead performs t
    authoritative. Only the lead deploys the Convex schema/functions, hosted browser and rebuilt CLI;
    hosting itself deploys no source or executable.
 
+## Idle native owner and metadata retries
+
+A canonical native owner running `serve` or `nforge host ROOT --listen` holds an
+owner/project/authority-epoch scoped Convex WebSocket subscription to
+`ownerAcceptance:pending`. Establishing or restoring the subscription performs a
+read-only query. Once connected with no requests or metadata backlog, the owner
+sends no recurring Convex function calls: no acceptance mutation poll, heartbeat
+write, or retry timer. WebSocket protocol keepalives are not function calls.
+The machine's `lastSeen` is the last actual claim/completion observation, not an
+idle heartbeat.
+
+The query identifies the next pending request, including when one pending request
+replaces another without an empty interval. Only a pending request wakes the
+existing consumer. A normal acceptance uses three owner mutations: `poll` (the
+existing claim/observation endpoint), metadata publication, and `complete`.
+Recovery can replay the original operation/receipt and refresh newer metadata.
+The `poll` mutation writes one machine observation per call, even if a competing
+consumer has already drained the request; it does not create a request lease.
+Current authority and the original source pins remain checked at mutation time.
+The Convex client reconnects WebSockets with backoff; failed query subscriptions
+are reopened with capped backoff. Neither path falls back to idle polling.
+
+Agent metadata sync preserves each original operation UUID and payload. A missing
+Work index or other retryable failure records `agentSyncNextAttemptAt` with
+exponential backoff from one second up to five minutes. The detached sender waits
+only while delivery is pending, draining at most 100 items per batch (the existing
+queue bound). Each item still uses two mutations, activity and metadata; 84 items
+use 168 calls on a successful drain. No source/history collection is downloaded.
+Local queue storage retains its existing 512 KiB bound. Permanent errors are
+retained in `agentSyncError`/`rejectedAgentSync` in `host --status` and are not
+retried. Index readiness on the live subscription, successful local preparation,
+or the next owner listener start releases a pending retry immediately. A sleeping
+sender observes that local change without Convex polling. Draining the queue
+removes its retry timer and filesystem watch.
+
 ## Native runner selection
 
 Native checks support local, [Modal](operations/modal-checks.md), and [GitHub Actions or Blacksmith](operations/github-actions-checks.md) runners. `checks.fallback` accepts `manual` or `local` and defaults to `manual`, including existing policies. Automatic local fallback requires explicit opt-in and owner-originated work. Confirmed runner outages and budget exhaustion return retryable infrastructure outcomes rather than failed-test evidence. See [runner fallback](operations/runner-fallback.md) for policy commands and recovery.

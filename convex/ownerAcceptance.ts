@@ -145,9 +145,37 @@ export const status = query({
             }
           : null,
         request: hostedPaths(request),
+        // The owner no longer heartbeats while idle, so its machine row can be old;
+        // the hosted channel record is kept current by owner sync.
         mainHead:
-          ((input.channel ?? 'main') === 'main' ? observed?.mainHead : undefined) ??
-          (main ? JSON.parse(main.value).head : null),
+          (main ? JSON.parse(main.value).head : null) ??
+          ((input.channel ?? 'main') === 'main' ? (observed?.mainHead ?? null) : null),
+      };
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+/** Constant-size reactive wake; observing never heartbeats or claims a request. */
+export const pending = query({
+  args: { ...scope, ownerId: v.string(), authorityEpoch: v.optional(v.number()) },
+  returns: v.object({ operationId: v.union(v.string(), v.null()), indexReady: v.boolean() }),
+  handler: async (ctx, input) => {
+    try {
+      const { project } = await owned(ctx, input.projectId);
+      invariant(
+        project.key === input.ownerId && (await isNativeOwner(ctx, input.projectId)),
+        'PROJECT_UNAVAILABLE',
+        'Connect this project’s original bound native owner.',
+      );
+      requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
+      const requests = await ctx.db
+        .query('ownerAcceptanceRequests')
+        .withIndex('by_project_state', q => q.eq('projectId', input.projectId).eq('state', 'requested'))
+        .take(1);
+      return {
+        operationId: requests[0]?.operationId ?? null,
+        indexReady: Boolean(await selectedGeneration(ctx, project)),
       };
     } catch (error) {
       return report(error);

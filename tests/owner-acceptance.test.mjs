@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
+import { ConvexError } from 'convex/values';
 import { initNative, nativeChannels, nativeExecute } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
-import { queueAgentSync } from '../dist/agent-hosted-sync.js';
+import { queueAgentSync, flushAgentSync } from '../dist/agent-hosted-sync.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
@@ -24,6 +25,7 @@ import { moduleUrl } from './convex-module.mjs';
 const backend = await import(moduleUrl('../convex/ownerAcceptance.ts'));
 const lifecycleBackend = await import(moduleUrl('../convex/ownerLifecycle.ts'));
 const sync = await import(moduleUrl('../convex/projectOwnerSync.ts'));
+const coordination = await import(moduleUrl('../convex/projectCoordination.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const projectWork = await import(moduleUrl('../convex/projectWork.ts'));
 Error.stackTraceLimit = 0;
@@ -935,13 +937,141 @@ test('re-check retains an explicit conflict View instead of queuing a check or a
   assert.equal(main(f), a.head);
 });
 
-test('listener close waits for the active poll and clears future ticks, including failures', async t => {
-  t.mock.timers.enable({ apis: ['setInterval'] });
+test('reactive wake is read-only, scoped, epoch-fenced and selects the next request', async t => {
+  const f = fixture(t);
+  const input = { projectId: 'project', ownerId: f.ownerId };
+  const pending = () => backend.pending._handler(f.s.ctx, input);
+  const before = structuredClone(f.s.tables);
+  assert.deepEqual(await pending(), { operationId: null, indexReady: true });
+  assert.deepEqual(f.s.tables, before);
+  const a = await f.request(f.addView());
+  const b = await f.request(f.addView());
+  assert.equal((await pending()).operationId, a.operationId);
+  await consumeOwnerRequests(f.store, f.client);
+  assert.equal((await pending()).operationId, b.operationId);
+  await assert.rejects(
+    backend.pending._handler(f.s.ctx, { ...input, ownerId: 'other' }),
+    error => error.data.code === 'PROJECT_UNAVAILABLE',
+  );
+  await assert.rejects(
+    backend.pending._handler(f.s.ctx, { ...input, authorityEpoch: 9 }),
+    error => error.data.code === 'SOURCE_AUTHORITY_STALE',
+  );
+  f.s.tables.projectWorkGenerations.get('generation').status = 'building';
+  assert.equal((await pending()).indexReady, false);
+  f.s.ctx.auth.getUserIdentity = async () => null;
+  await assert.rejects(pending(), error => error.data.code === 'PROJECT_UNAVAILABLE');
+});
+
+function fakeSubscription() {
+  const connections = [];
+  return {
+    connections,
+    connect() {
+      const client = {
+        closed: 0,
+        unsubscribed: 0,
+        onUpdate(ref, args, update, error) {
+          assert.equal(getFunctionName(ref), 'ownerAcceptance:pending');
+          Object.assign(client, { args, update, error });
+          return () => client.unsubscribed++;
+        },
+        async close() {
+          client.closed++;
+        },
+      };
+      connections.push(client);
+      return client;
+    },
+  };
+}
+const settled = async () => {
+  for (let i = 0; i < 30; i++) await Promise.resolve();
+};
+
+test('idle acceptance owner sends zero mutation calls for an hour, then claims each request once in three calls', async t => {
+  const f = fixture(t),
+    live = fakeSubscription();
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: Date.now() });
+  let calls = 0;
+  const transport = {
+    mutation: async (...args) => {
+      calls++;
+      return f.client.mutation(...args);
+    },
+  };
+  const stop = startOwnerAcceptanceListener(
+    f.store,
+    assert.ifError,
+    () => consumeOwnerRequests(f.store, transport),
+    live.connect,
+  );
+  t.after(stop);
+  const client = live.connections[0];
+  assert.equal(client.args.ownerId, f.ownerId);
+  client.update({ operationId: null, indexReady: true });
+  t.mock.timers.tick(3_600_000);
+  await settled();
+  assert.equal(calls, 0);
+  const a = await f.request(f.addView()),
+    b = await f.request(f.addView());
+  client.update({ operationId: a.operationId, indexReady: true });
+  client.update({ operationId: a.operationId, indexReady: true });
+  await settled();
+  // Closing also waits for the real asynchronous local queue/acceptance work.
+  await stop();
+  assert.equal(calls, 3);
+  assert.equal(f.s.tables.ownerAcceptanceRequests.size, 2);
+  assert.equal(
+    [...f.s.tables.ownerAcceptanceRequests.values()].find(r => r.operationId === b.operationId).state,
+    'requested',
+  );
+});
+
+test('subscription error reconnects with backoff without idle polling or duplicate acceptance', async t => {
+  const f = fixture(t),
+    live = fakeSubscription();
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+  let calls = 0;
+  const stop = startOwnerAcceptanceListener(
+    f.store,
+    () => {},
+    async () => {
+      calls++;
+      return { consumed: 1, operationId: 'request' };
+    },
+    live.connect,
+  );
+  const first = live.connections[0];
+  first.update({ operationId: 'request', indexReady: true });
+  await settled();
+  first.error(new Error('synthetic disconnect'));
+  assert.equal(first.closed, 1);
+  t.mock.timers.tick(999);
+  await settled();
+  assert.equal(live.connections.length, 1);
+  t.mock.timers.tick(1);
+  await settled();
+  assert.equal(live.connections.length, 2);
+  live.connections[1].update({ operationId: 'request', indexReady: true });
+  await settled();
+  assert.equal(calls, 1);
+  t.mock.timers.tick(3_600_000);
+  await settled();
+  assert.equal(calls, 1);
+  await stop();
+  assert.equal(live.connections[1].closed, 1);
+});
+
+test('listener retries known interrupted requests and close waits for the active consumer', async t => {
+  const f = fixture(t),
+    live = fakeSubscription();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   let release,
     calls = 0,
     errors = 0;
   const stop = startOwnerAcceptanceListener(
-    undefined,
+    f.store,
     () => errors++,
     () => {
       calls++;
@@ -949,20 +1079,273 @@ test('listener close waits for the active poll and clears future ticks, includin
         release = reject;
       });
     },
+    live.connect,
   );
-  assert.equal(calls, 1);
+  live.connections[0].update({ operationId: 'request', indexReady: true });
   let closed = false;
   const closing = stop().then(() => {
     closed = true;
   });
-  await Promise.resolve();
+  await settled();
   assert.equal(closed, false);
   t.mock.timers.tick(10_000);
   assert.equal(calls, 1);
-  release(new Error('synthetic interrupted poll'));
+  release(new Error('synthetic interrupted consume'));
   await closing;
   assert.equal(errors, 1);
   t.mock.timers.tick(10_000);
   await stop();
   assert.equal(calls, 1);
+});
+
+test('owner start and index-ready event release sync backoff once, with no idle sync activity', async t => {
+  const f = fixture(t),
+    live = fakeSubscription();
+  const operationId = randomUUID();
+  updateHostState(f.store, state => {
+    state.binding.autoSync = true;
+    state.agentSync = {
+      sequence: 1,
+      pending: [
+        {
+          operationId,
+          projectId: 'project',
+          deployment: state.binding.deployment,
+          activity: { sessionId: 'synthetic', sequence: 1 },
+          metadata: JSON.stringify({ revision: 1, entries: [{ collection: 'lanes' }] }),
+        },
+      ],
+      unprepared: JSON.stringify([state.binding.operationId, state.binding.backupId, undefined]),
+      nextAttemptAt: Date.now() + 300_000,
+    };
+  });
+  let wakes = 0;
+  const stop = startOwnerAcceptanceListener(
+    f.store,
+    assert.ifError,
+    async () => ({ consumed: 0 }),
+    live.connect,
+    () => {
+      wakes++;
+      return false;
+    },
+  );
+  assert.equal(wakes, 1);
+  assert.equal(readHostState(f.store).agentSync.nextAttemptAt, undefined);
+  const client = live.connections[0];
+  client.update({ operationId: null, indexReady: false });
+  updateHostState(f.store, state => {
+    state.agentSync.nextAttemptAt = Date.now() + 300_000;
+  });
+  client.update({ operationId: null, indexReady: true });
+  assert.equal(wakes, 2);
+  assert.equal(readHostState(f.store).agentSync.nextAttemptAt, undefined);
+  client.update({ operationId: null, indexReady: true });
+  assert.equal(wakes, 2);
+  await stop();
+});
+
+test('pending wake reads at most five documents and writes none at double the 560-Lane dogfood scale', async t => {
+  const f = fixture(t);
+  for (let i = 0; i < 1120; i++)
+    f.s.tables.ownerAcceptanceRequests.set(`synthetic-${i}`, {
+      _id: `synthetic-${i}`,
+      _creationTime: i,
+      projectId: 'project',
+      ownerId: f.ownerId,
+      operationId: `operation-${i}`,
+      state: 'requested',
+    });
+  let reads = 0,
+    writes = 0;
+  const db = f.s.ctx.db,
+    get = db.get.bind(db),
+    query = db.query.bind(db);
+  db.get = async (...args) => {
+    const value = await get(...args);
+    reads += value ? 1 : 0;
+    return value;
+  };
+  db.query = (...args) => {
+    const q = query(...args);
+    const take = q.take.bind(q);
+    q.take = async count => {
+      const rows = await take(count);
+      reads += rows.length;
+      return rows;
+    };
+    return q;
+  };
+  for (const name of ['insert', 'patch', 'replace', 'delete']) {
+    const original = db[name].bind(db);
+    db[name] = async (...args) => {
+      writes++;
+      return original(...args);
+    };
+  }
+  const started = performance.now();
+  const wake = await backend.pending._handler(f.s.ctx, { projectId: 'project', ownerId: f.ownerId });
+  assert.equal(wake.operationId, 'operation-0');
+  assert.ok(reads <= 5);
+  assert.equal(writes, 0);
+  t.diagnostic(
+    JSON.stringify({
+      requests: 1120,
+      queryCalls: 1,
+      documentsRead: reads,
+      documentsWritten: writes,
+      wallMs: performance.now() - started,
+    }),
+  );
+});
+
+test('known-request failure retries with backoff; a following request wakes without another poll', async t => {
+  const f = fixture(t),
+    live = fakeSubscription();
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+  let calls = 0,
+    errors = 0;
+  const stop = startOwnerAcceptanceListener(
+    f.store,
+    () => errors++,
+    async () => {
+      calls++;
+      if (calls === 1) throw new Error('synthetic lost reply');
+      return { consumed: 1, operationId: calls === 2 ? 'first' : 'second' };
+    },
+    live.connect,
+  );
+  const client = live.connections[0];
+  client.update({ operationId: 'first', indexReady: true });
+  await settled();
+  assert.equal(calls, 1);
+  t.mock.timers.tick(999);
+  await settled();
+  assert.equal(calls, 1);
+  t.mock.timers.tick(1);
+  await settled();
+  assert.equal(calls, 2);
+  client.update({ operationId: 'second', indexReady: true });
+  await settled();
+  assert.equal(calls, 3);
+  client.update({ operationId: null, indexReady: true });
+  t.mock.timers.tick(3_600_000);
+  await settled();
+  assert.equal(calls, 3);
+  assert.equal(errors, 1);
+  await stop();
+});
+
+test('84-item metadata backlog retains a 168-call and bounded document budget with real backend fakes', async t => {
+  const f = fixture(t);
+  const pending = Array.from({ length: 84 }, (_, i) => ({
+    operationId: randomUUID(),
+    projectId: 'project',
+    deployment: 'http://127.0.0.1:1',
+    activity: {
+      kind: 'activity',
+      sessionId: randomUUID(),
+      sequence: 1,
+      name: 'Synthetic',
+      environment: 'Synthetic',
+      status: 'working',
+      summary: 'Synthetic budget',
+      context: {},
+    },
+    metadata: JSON.stringify({
+      ownerId: f.ownerId,
+      revision: i + 1,
+      entries: [
+        {
+          collection: 'lanes',
+          key: `lane-${i}`,
+          parent: 'intent',
+          value: { id: `lane-${i}`, state: 'active' },
+        },
+      ],
+    }),
+  }));
+  updateHostState(f.store, state => {
+    state.binding.autoSync = true;
+    state.agentSync = { sequence: 84, pending };
+  });
+  let calls = 0,
+    reads = 0,
+    writes = 0;
+  const db = f.s.ctx.db,
+    get = db.get.bind(db),
+    query = db.query.bind(db);
+  db.get = async (...args) => {
+    reads++;
+    return get(...args);
+  };
+  db.query = (...args) => {
+    const q = query(...args);
+    for (const name of ['take', 'unique', 'collect']) {
+      if (!q[name]) continue;
+      const original = q[name].bind(q);
+      q[name] = async (...args) => {
+        const result = await original(...args);
+        reads += Array.isArray(result) ? result.length : 1;
+        return result;
+      };
+    }
+    return q;
+  };
+  for (const name of ['insert', 'patch', 'replace', 'delete']) {
+    const original = db[name].bind(db);
+    db[name] = async (...args) => {
+      writes++;
+      return original(...args);
+    };
+  }
+  const start = performance.now();
+  await flushAgentSync(f.store, {
+    mutation: async (ref, args) => {
+      calls++;
+      return (getFunctionName(ref) === 'projectOwnerSync:publish' ? sync : coordination).publish._handler(
+        f.s.ctx,
+        args,
+      );
+    },
+  });
+  assert.equal(readHostState(f.store).agentSync.pending.length, 0);
+  assert.equal(calls, 168);
+  assert.ok(reads <= 84 * 30);
+  assert.ok(writes <= 84 * 12);
+  t.diagnostic(
+    JSON.stringify({
+      items: 84,
+      calls,
+      documentsRead: reads,
+      documentsWritten: writes,
+      wallMs: performance.now() - start,
+    }),
+  );
+});
+
+test('reconnect retains owner scope and refreshes an authority epoch learned from the query error', async t => {
+  const f = fixture(t),
+    live = fakeSubscription();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const stop = startOwnerAcceptanceListener(
+    f.store,
+    () => {},
+    async () => ({ consumed: 0 }),
+    live.connect,
+  );
+  live.connections[0].error(
+    new ConvexError({
+      code: 'SOURCE_AUTHORITY_STALE',
+      message: 'Synthetic epoch change',
+      authority: { mode: 'native-owner', epoch: 2 },
+    }),
+  );
+  t.mock.timers.tick(1000);
+  await settled();
+  assert.equal(live.connections.length, 2);
+  assert.equal(live.connections[1].args.projectId, 'project');
+  assert.equal(live.connections[1].args.ownerId, f.ownerId);
+  assert.equal(live.connections[1].args.authorityEpoch, 2);
+  await stop();
 });

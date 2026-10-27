@@ -90,7 +90,7 @@ export async function consumeOwnerRequests(
           throw error;
         }
       };
-      // One request per tick keeps activity sync and the local server responsive.
+      // One request per notification keeps activity sync and the local server responsive.
       const request = (await mutate('ownerAcceptance:poll', {
         ...scope,
         ...(binding.sourceAuthority ? { authorityEpoch: binding.sourceAuthority.epoch } : {}),
@@ -262,28 +262,4 @@ export async function consumeOwnerRequests(
   );
   return 'value' in queued ? queued.value : queued;
 }
-/** Hosted work is consumed while the owner server/listener runs; failures remain pending. */
-export function startOwnerAcceptanceListener(
-  store: WorkStore,
-  onError: (error: unknown) => void = () => {},
-  poll = () => consumeOwnerRequests(store),
-) {
-  let pending: Promise<unknown> | undefined;
-  let stopped = false;
-  const tick = () => {
-    if (pending || stopped) return;
-    pending = poll()
-      .catch(onError)
-      .finally(() => {
-        pending = undefined;
-      });
-  };
-  const timer = setInterval(tick, 5000);
-  // A standalone host --listen keeps its interval referenced; HTTP owns its socket.
-  void tick();
-  return async () => {
-    stopped = true;
-    clearInterval(timer);
-    await pending;
-  };
-}
+export { startOwnerAcceptanceListener } from './owner-acceptance-listener.js';

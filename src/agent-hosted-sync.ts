@@ -273,9 +273,10 @@ export async function flushAgentSync(store: WorkStore, supplied?: Pick<ConvexHtt
           pending = state.agentSync?.pending.find(item => !attempted.has(item.operationId));
         if (
           !pending ||
-          syncUnprepared(state) ||
+          attempted.size >= 100 ||
           state.binding?.autoSync === false ||
-          (state.agentSync?.nextAttemptAt ?? 0) > Date.now()
+          ((state.agentSync?.nextAttemptAt ?? 0) > Date.now() &&
+            (!state.agentSync?.unprepared || syncUnprepared(state)))
         )
           return { pending: state.agentSync?.pending.length ?? 0 };
         attempted.add(pending.operationId);
@@ -334,8 +335,8 @@ export async function flushAgentSync(store: WorkStore, supplied?: Pick<ConvexHtt
             };
             if (unprepared) {
               queue.unprepared = indexState;
-              delete queue.nextAttemptAt;
-            } else if (failure.transient)
+            }
+            if (unprepared || failure.transient)
               queue.nextAttemptAt = Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(attempts - 1, 9));
             else {
               (queue.rejected ??= []).push(queue.headError);
