@@ -21,6 +21,25 @@ export async function boundCutoverPins(store: WorkStore, supplied?: Coordination
   );
 }
 
+function requireLocalReady(store: WorkStore, request: ReturnType<typeof cutoverRequestSchema.parse>) {
+  store.locked(() => {
+    requireOwnerDrained(store);
+    const data = store.load(),
+      main = nativeChannels(data).find(c => c.name === 'main');
+    invariant(
+      main?.head === request.pins.main.head && main?.moveId === request.pins.main.receipt.id,
+      'CHANNEL_CHANGED',
+      'The prepared owner must match hosted main and its exact receipt.',
+    );
+    if (request.mode === 'server')
+      invariant(
+        store.revision() === request.pins.ownerRevision,
+        'WORK_STALE',
+        'Seed the final drained owner revision before applying cutover.',
+      );
+  });
+}
+
 export async function cutoverBoundProject(
   store: WorkStore,
   input: unknown,
@@ -35,6 +54,8 @@ export async function cutoverBoundProject(
     const observation = JSON.parse(
       (await client.query(makeFunctionReference<'query'>('projectSourceCutover:dryRun'), args)) as string,
     );
+    // A dry run that passes means apply would pass: run the same read-only local checks.
+    if (dryRun && !observation.completed) requireLocalReady(store, request);
     if (dryRun)
       return {
         ...observation,
@@ -61,23 +82,7 @@ export async function cutoverBoundProject(
       state.authorityTransition = marker;
     });
     // Close admission first. Unknown replies retain the marker and exact request.
-    if (!observation.completed)
-      store.locked(() => {
-        requireOwnerDrained(store);
-        const data = store.load(),
-          main = nativeChannels(data).find(c => c.name === 'main');
-        invariant(
-          main?.head === request.pins.main.head && main?.moveId === request.pins.main.receipt.id,
-          'CHANNEL_CHANGED',
-          'The prepared owner must match hosted main and its exact receipt.',
-        );
-        if (request.mode === 'server')
-          invariant(
-            store.revision() === request.pins.ownerRevision,
-            'WORK_STALE',
-            'Seed the final drained owner revision before applying cutover.',
-          );
-      });
+    if (!observation.completed) requireLocalReady(store, request);
     const receipt = JSON.parse(
       (await client.mutation(
         makeFunctionReference<'mutation'>('projectSourceCutover:apply'),

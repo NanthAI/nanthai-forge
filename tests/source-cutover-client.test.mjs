@@ -109,3 +109,17 @@ test('a failed dry-run preserves an existing handover marker and performs no loc
   await assert.rejects(cutoverBoundProject(f.store, f.request, true, f.client), { code: 'CHANNEL_CHANGED' });
   assert.deepEqual(readHostState(f.store), before);
 });
+test('dry-run refuses when the owner moved past the pinned revision, as apply would', async t => {
+  // Dogfood 2026-10-27: hosted held the seed pins while the owner had landed ~23 more changes;
+  // the dry run passed and only apply would have refused.
+  const f = await setup(t),
+    hosted = structuredClone(f.f.tables);
+  const data = f.store.load();
+  data.revision++;
+  f.store.save(data);
+  assert.ok(f.store.revision() > f.request.pins.ownerRevision);
+  const local = readHostState(f.store);
+  await assert.rejects(cutoverBoundProject(f.store, f.request, true, f.client), { code: 'WORK_STALE' });
+  assert.deepEqual(readHostState(f.store), local);
+  assert.deepEqual(f.f.tables, hosted);
+});
