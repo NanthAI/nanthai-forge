@@ -16,6 +16,7 @@ import { buildExchangeRoot } from '../dist/native-exchange-tree.js';
 import { digest } from '../dist/hash.js';
 const cleanup = await import(moduleUrl('../convex/projectCheckLogCleanup.ts'));
 const streamCleanup = await import(moduleUrl('../convex/projectCheckLogCleanupStream.ts'));
+const { snapshotReader } = await import(moduleUrl('../convex/projectCheckLogCleanupSnapshot.ts'));
 
 /** The general fixture deliberately scans Maps. Maintain its cleanup-page index
  * here so measuring 32k retained objects does not benchmark a quadratic fake DB. */
@@ -261,6 +262,19 @@ test('dogfood-shaped synthetic inventory measures bounded actions, calls and mem
       return run(ref, args);
     };
   }
+  const snapshot = snapshotReader(s.ctx, {
+    projectId: 'project',
+    actor: 'owner',
+    operationId: randomUUID(),
+  });
+  const selected = await snapshot(s.tables.projectBackups.get('backup'), 0);
+  assert.equal(selected.files.length, 50);
+  const snapshotResolves = counts.get('projectObjects:resolve') ?? 0;
+  assert(
+    snapshotResolves < 40,
+    `one resumed snapshot page batches its catalog chunks as well as its selected runs (${snapshotResolves})`,
+  );
+  counts.clear();
   const baselineStart = performance.now(),
     baselineHeap = process.memoryUsage().heapUsed;
   const baselinePlan = await cleanup.planProjectCheckLogs(s.ctx, 'project', 'owner');
@@ -282,7 +296,7 @@ test('dogfood-shaped synthetic inventory measures bounded actions, calls and mem
     'includes the in-memory fake database, rather than real server storage',
   );
   const resolves = counts.get('projectObjects:resolve') ?? 0;
-  assert(resolves < 400, 'batched selected run reads replace whole historical Work hydration');
+  assert(resolves < 400, `batched selected run reads replace whole historical Work hydration (${resolves})`);
   const planningCalls = Object.fromEntries(counts),
     planElapsedMs = performance.now() - start;
   counts.clear();
@@ -301,6 +315,7 @@ test('dogfood-shaped synthetic inventory measures bounded actions, calls and mem
     'S54 synthetic cleanup',
     JSON.stringify({
       runs: 1400,
+      snapshotResolves,
       retainedObjects: 32237,
       logicalLogBytes: logBytes,
       elapsedMs: planElapsedMs,

@@ -110,11 +110,16 @@ export async function executeHostedAgent(
     const command = hostedAgentCommandSchemas.start.parse(input);
     const request = await session.journal.retain('start-request', async () => {
       const main = await session.main();
+      const parent = command.stackOn ? await selectAgentLane(session, command.stackOn) : null;
       return hostedStartSchema.parse({
         operationId,
         authorityEpoch: epoch,
         expectedMain: { head: main.head, receiptId: main.receipt.id },
-        ...(command.initialHead ? { initialHead: command.initialHead } : {}),
+        ...((parent?.head ?? command.initialHead)
+          ? { initialHead: parent?.head ?? command.initialHead }
+          : {}),
+        ...(command.stackOn ? { stackOn: command.stackOn } : {}),
+        ...(command.stackEntry ? { stackEntry: command.stackEntry } : {}),
         intent: command.intentId
           ? { kind: 'existing', intentId: command.intentId }
           : {
@@ -250,6 +255,11 @@ export async function executeHostedAgent(
   }
   invariant(action === 'finish', 'HOSTED_ACTION_UNSUPPORTED', 'Unsupported hosted action.');
   const command = hostedAgentCommandSchemas.finish.parse(input);
+  if (!command.after && !command.candidateId && !command.inputs)
+    command.after = await session.journal.retain('stack-parent-entry', async () => {
+      const selected = await selectAgentLane(session, command.laneId);
+      return selected.stack && !selected.stack.detached ? (selected.stack.entryId ?? null) : null;
+    });
   const marker = session.marker();
   if (
     !command.candidateId &&
@@ -357,5 +367,19 @@ export async function executeHostedAgent(
   const result = await session.mutation('projectHostedLanding:enqueue', {
     request: canonicalPayload(request),
   });
-  return { phase: 'finish', composeOperationId, submission: result };
+  let queueAheadSelection: unknown;
+  try {
+    const read = await session.query<{ queueAheadSelection?: unknown }>('projectHostedLanding:status', {
+      submissionId: (result as { id: string }).id,
+    });
+    queueAheadSelection = read.queueAheadSelection;
+  } catch {
+    /* Advisory reads never affect admission. */
+  }
+  return {
+    phase: 'finish',
+    composeOperationId,
+    submission: result,
+    ...(queueAheadSelection ? { queueAheadSelection } : {}),
+  };
 }

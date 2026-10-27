@@ -1,3 +1,4 @@
+import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 import { dirname, basename, resolve } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
 import {
@@ -185,18 +186,18 @@ export class HostedAgentTransport {
       );
     }
   }
-  private response(
+  private async response(
     action: HostedAgentAction,
     operationId: string | null,
     result: unknown,
-  ): HostedAgentResponse {
+  ): Promise<HostedAgentResponse> {
     return {
       schema: 1,
       transport: 'hosted',
       action,
       operationId,
       resolved: operationId ? { operationId } : null,
-      result,
+      result: await enrichHostedQueueAhead(this, result),
     };
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {

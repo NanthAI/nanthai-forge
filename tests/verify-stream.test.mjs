@@ -21,6 +21,7 @@ test('verify prints a completed failing file diagnostic while another file is st
     write(`scripts/${name}`, readFileSync(`scripts/${name}`));
   write('scripts/oxc.mjs', '');
   write('scripts/check-schema-compat.mjs', '');
+  write('scripts/check-documents.mjs', '');
   write('tests/worker-budget.mjs', 'export const workerBudget = () => 2;');
   write('tests/check-runtime.mjs', '');
   write('node_modules/typescript/bin/tsc', '');

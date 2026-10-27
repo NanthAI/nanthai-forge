@@ -1,3 +1,4 @@
+import { nativeFirstAttemptLandRate } from './first-attempt-native.js';
 import { setImmediate as yieldTurn } from 'node:timers/promises';
 import { landingMatch, prepareLandingRecords } from './landing-records-index.js';
 import { assertLandingWorkerActive } from './landing-worker-context.js';
@@ -133,6 +134,7 @@ function landingSnapshot(
         ),
       ].join('\n'),
       counts,
+      firstAttemptLandRate: nativeFirstAttemptLandRate(store),
       entries,
       replay: {
         command: replay,

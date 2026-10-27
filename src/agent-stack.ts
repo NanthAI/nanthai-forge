@@ -1,3 +1,4 @@
+import { stackParentFailed } from './stack-parent-outcome.js';
 // SPDX-License-Identifier: Apache-2.0
 import { NativeSource } from './native-source.js';
 import { allRecords } from './agent-lifecycle.js';
@@ -66,19 +67,22 @@ export function stackStatus(store: WorkStore, lane: StackLane) {
   if (!stack) return undefined;
   const parent = parentId(stack) ? store.select('lanes', stack.laneId) : undefined;
   const landing = stackLanding(store, lane);
+  const failed = !landing && stackParentFailed(store, lane);
   const status = stack.detached
     ? 'main'
     : !parentId(stack)
       ? 'parent-unknown'
       : landing
         ? 'parent-landed'
-        : !parent
-          ? 'parent-missing'
-          : parent.state === 'abandoned'
-            ? 'parent-abandoned'
-            : parent.head !== stack.head
-              ? 'parent-moved'
-              : 'up-to-date';
+        : failed
+          ? 'parent-failed'
+          : !parent
+            ? 'parent-missing'
+            : parent.state === 'abandoned'
+              ? 'parent-abandoned'
+              : parent.head !== stack.head
+                ? 'parent-moved'
+                : 'up-to-date';
   const chain = ['id' in lane ? lane.id : lane.laneId];
   const seen = new Set(chain);
   let cursor = lane.stack;
@@ -109,7 +113,7 @@ export function stackStatus(store: WorkStore, lane: StackLane) {
     parentHead: parent?.head ?? null,
     target:
       landing?.head ??
-      (stack.detached
+      (stack.detached || failed
         ? (currentChannelHead(store, stack.channel) ?? store.load().nativeHead)
         : parent?.head) ??
       null,
@@ -117,7 +121,7 @@ export function stackStatus(store: WorkStore, lane: StackLane) {
     depth: chain.length,
     ...(chainStatus ? { chainStatus } : {}),
     summary: `${chain.map(id => id.slice(0, 8)).join(' → ')} · ${status}${chainStatus && chainStatus !== status ? ` · ${chainStatus}` : ''}`,
-    ...(status === 'parent-abandoned'
+    ...(['parent-abandoned', 'parent-failed'].includes(status)
       ? { next: 'sync with ontoMain:true reapplies only this Lane’s delta onto main.' }
       : {}),
   };
@@ -126,7 +130,7 @@ export function stackSyncTarget(store: WorkStore, lane: Lane, ontoMain = false, 
   const stack = lane.stack;
   if (!stack || stack.detached) return undefined;
   const landing = stackLanding(store, lane);
-  const detached = ontoMain || !!landing;
+  const detached = ontoMain || !!landing || stackParentFailed(store, lane);
   const target = detached
     ? (mainTarget ?? currentChannelHead(store, stack.channel) ?? store.load().nativeHead)
     : store.select('lanes', stack.laneId)?.head;

@@ -131,6 +131,7 @@ export const automaticActionSchema = z.object({
   policy: autonomyPolicySchema.optional(),
 });
 export const stackSchema = z.object({
+  entryId: id.optional(),
   laneId: id,
   startHead: oid,
   head: oid,

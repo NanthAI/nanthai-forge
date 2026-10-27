@@ -9,6 +9,7 @@ import { hostedStartMain } from './projectHostedChannels';
 import {
   hostedStartSchema,
   hostedIntentSchema,
+  hostedLaneSchema,
   hostedLaneSelectionSchema,
   hostedStartResultSchema,
 } from '../src/hosted-lane';
@@ -23,6 +24,8 @@ const args = {
   authorityEpoch: v.number(),
   expectedMain: v.object({ head: v.string(), receiptId: v.string() }),
   initialHead: v.optional(v.string()),
+  stackOn: v.optional(v.string()),
+  stackEntry: v.optional(v.string()),
   intent: v.union(
     v.object({ kind: v.literal('new'), outcome: v.string(), constraints: v.optional(v.string()) }),
     v.object({ kind: v.literal('existing'), intentId: v.string() }),
@@ -34,6 +37,8 @@ type Input = {
   authorityEpoch: number;
   expectedMain: { head: string; receiptId: string };
   initialHead?: string;
+  stackOn?: string;
+  stackEntry?: string;
   intent: { kind: 'new'; outcome: string; constraints?: string } | { kind: 'existing'; intentId: string };
 };
 
@@ -131,7 +136,24 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       'Commit the selected initial State before starting its hosted Lane.',
     );
   }
-  const initialHead = payload.initialHead ?? main.head;
+  let initialHead = payload.initialHead ?? main.head;
+  let stack: import('../src/hosted-lane').HostedLaneSelection['stack'];
+  if (payload.stackOn) {
+    const row = await readHostedRecord(ctx, { projectId, actor, kind: 'lane', key: payload.stackOn });
+    invariant(row, 'NOT_FOUND', 'Stack parent Lane not found.');
+    const parent = hostedLaneSchema.parse(JSON.parse(row.value));
+    invariant(
+      !payload.initialHead || payload.initialHead === parent.head,
+      'WORK_STALE',
+      'The saved stack parent changed.',
+    );
+    initialHead = parent.head;
+    stack = {
+      laneId: parent.id,
+      head: parent.head,
+      ...(payload.stackEntry ? { entryId: payload.stackEntry } : {}),
+    };
+  }
   const first = prepared.operation.firstAttempt,
     intentId = first.ids.intent!,
     laneId = first.ids.lane!;
@@ -164,6 +186,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
           intentId,
           base,
           head: initialHead,
+          ...(stack ? { stack } : {}),
           version: 0,
           sourceVersion: 0,
           lifecycleVersion: 0,
@@ -186,6 +209,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
         at: first.at,
         base,
         head: initialHead,
+        ...(stack ? { stack } : {}),
         sourceVersion: 0,
         lifecycleVersion: 0,
         state: 'active',

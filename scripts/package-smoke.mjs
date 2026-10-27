@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Optional release acceptance: installs and exercises the actual local npm archive.
+// Standard code verification: installs and exercises the actual local npm archive.
 import assert from 'node:assert/strict';
 import { cleanupOwner } from '../tests/owner-cleanup.mjs';
 import { spawn, spawnSync } from 'node:child_process';
@@ -278,16 +278,19 @@ try {
     ],
     { cwd: prefix, env },
   );
-  const status = () => command('work', owner, '--compact');
+  const status = () => command('work', owner);
   const act = input => command('work', owner, JSON.stringify(input), String(status().revision)).result;
   const intent = act({ action: 'intent', outcome: 'Installed package native workflow' });
   const lane = act({ action: 'lane', intentId: intent.id, name: 'Package Lane' });
-  const selected = () => command('work', owner).lanes.find(item => item.id === lane.id);
+  const selected = () =>
+    act({ action: 'read-work-detail', kind: 'lane', id: lane.id, expectedHead: lane.head }).lane;
   const lanePath = selected().path;
   writeFileSync(join(lanePath, 'a.ts'), 'export const answer = 2;\n');
   writeFileSync(join(lanePath, 'binary.bin'), Buffer.from([0, 128, 255]));
   writeFileSync(join(lanePath, 'executable.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
   const before = selected();
+  assert.equal(before.actualHead, lane.head);
+  assert.match(before.indexTree, /^[a-f0-9]{64}$/);
   const checkpoint = act({
     action: 'checkpoint',
     laneId: lane.id,
@@ -383,7 +386,7 @@ try {
   assert.equal(collected.removed.length, 0);
   assert.ok(collected.format >= 3);
   const proposal = act({ action: 'export-work', archive: true });
-  const original = command('work', owner);
+  const original = command('work', owner, '--compact');
   const incoming = act({
     action: 'import-native-contribution',
     operationId: randomUUID(),
@@ -394,7 +397,7 @@ try {
     archiveSha256: proposal.archive.sha256,
     name: 'Installed source contribution',
   });
-  const contributed = command('work', owner);
+  const contributed = command('work', owner, '--compact');
   assert.equal(contributed.schema, original.schema);
   assert.equal(contributed.channels[0].head, original.channels[0].head);
   assert.equal(contributed.runs.length, original.runs.length);
@@ -403,7 +406,7 @@ try {
   const backup = act({ action: 'export-work', archive: true });
   const restored = join(directory, 'restored');
   command('restore-native', backup.archive.path, restored);
-  const restoredWork = command('work', restored);
+  const restoredWork = command('work', restored, '--compact');
   assert.equal(restoredWork.schema, original.schema);
   assert.equal(restoredWork.nativeContributionReceipts[0].archiveSha256, proposal.archive.sha256);
   assert.equal(restoredWork.nativeHead, initial.head);
@@ -416,7 +419,7 @@ try {
   assert.equal(existsSync(join(restored, '.git')), false);
   command('index', restoredLane.path);
   // The shipped skill and ergonomic CLI must work from the installed closure,
-  // including original operation recovery in the opt-in versioned Work format.
+  // including original operation recovery in the current versioned Work format.
   assert.match(readFileSync(join(installed, 'skills/forge-agent/SKILL.md'), 'utf8'), /name: forge-agent/);
   assert.match(run(process.execPath, [cli, 'agent', '--help'], { env }), /checkpoint/);
   const agentOwner = join(directory, 'agent-native');
@@ -492,7 +495,7 @@ try {
   assert.equal(finished.acceptance.acceptanceId, finished.acceptance.operationId);
   assert.deepEqual(agent('finish', finishRequest), finished);
   const agentWork = command('work', agentOwner, '--compact');
-  assert.equal(agentWork.schema, 12);
+  assert.equal(agentWork.schema, 23);
   assert.equal(agentWork.runs.length, 2);
   const agentBackup = command(
     'work',

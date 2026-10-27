@@ -1,3 +1,4 @@
+import { firstAttemptLandRate } from './first-attempt-land-rate.js';
 // SPDX-License-Identifier: Apache-2.0
 import { calculateOverlapMetrics, calculateAuthorityMetrics } from './self-metrics-joins.js';
 import { calculateBillingMetrics } from './self-metrics-billing.js';
@@ -264,6 +265,28 @@ export function calculateSelfMetrics(
     incompleteReceiptRecords,
     landings: landings.length,
     ...(records.source ? { source: records.source } : {}),
+    firstAttemptLandRate: firstAttemptLandRate(
+      records.submissions.map(entry => ({
+        id: entry.entryId,
+        at: entry.entryAt ?? entry.at,
+        laneIds: entry.inputs.map(pin => pin.laneId),
+        accepted: ['accepted', 'landed'].includes(entry.entryStatus ?? entry.status),
+        pending: ['queued', 'checking', 'ready', 'composing', 'awaiting-review'].includes(
+          entry.entryStatus ?? entry.status,
+        ),
+        cause:
+          entry.retryCause ??
+          (entry.status === 'conflict'
+            ? 'conflict'
+            : entry.status === 'cancelled'
+              ? 'cancelled'
+              : entry.status === 'failed'
+                ? 'check-failure-or-flake'
+                : 'other'),
+      })),
+      period.from,
+      period.to,
+    ),
     metric1: {
       partial: rows.some(r => r.path === 'unknown') || records.landingKindsComplete === false,
       gaps: [

@@ -58,7 +58,6 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Typecheck, Oxlint, Oxfmt and build
         run: node scripts/public-verify.mjs static 24
-      - run: node scripts/check-documents.mjs
       # Preserve executable modes when sharing the exact builds with test jobs.
       - run: tar -czf "$RUNNER_TEMP/verify-build.tgz" dist hosted-web-dist
       - uses: actions/upload-artifact@v4
@@ -66,7 +65,6 @@ jobs:
           name: verify-build-${{ matrix.node }}
           path: ${{ runner.temp }}/verify-build.tgz
           if-no-files-found: error
-      - run: npm run smoke:package
 
   verify-tests:
     needs: [scope, verify-static]

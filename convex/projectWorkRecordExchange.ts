@@ -61,7 +61,15 @@ export async function recordExchange(
   if (!isExchangeRoot(value)) return;
   const root = exchangeRootSchema.parse(value);
   if (root.schema !== 2) return;
-  const recordBytes = await readByteTree(root.records, pins => reader.read(backup.projectId, owner, pins));
+  // Metadata uses small content-defined chunks. Amortize their current-authority
+  // lookups across at most 100 pins; byteTreeChunks still bounds each batch to
+  // 2 MiB and verifies every chunk and the complete logical digest.
+  const metadataOptions = { batchSize: 100 };
+  const recordBytes = await readByteTree(
+    root.records,
+    pins => reader.read(backup.projectId, owner, pins),
+    metadataOptions,
+  );
   const records = workRecordRootSchema.parse(JSON.parse(recordBytes.toString('utf8')));
   recordMap(records);
   invariant(
@@ -69,7 +77,11 @@ export async function recordExchange(
     'INVALID_WORK_BACKUP',
     'Exchange record root differs from logical Work.',
   );
-  const manifestBytes = await readByteTree(root.manifest, pins => reader.read(backup.projectId, owner, pins));
+  const manifestBytes = await readByteTree(
+    root.manifest,
+    pins => reader.read(backup.projectId, owner, pins),
+    metadataOptions,
+  );
   const manifest = sourceManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8')));
   invariant(
     new Set(manifest.files.map(pin => pin.path)).size === manifest.files.length,

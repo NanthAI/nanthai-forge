@@ -487,3 +487,20 @@ in totals. The reference model does not prove durable-driver recovery, productio
 coverage, provider behavior or production throughput. Its configured fake durations
 are model inputs; outputs are synthetic measurements, never a live speedup claim.
 No cost cap, collection delay or scheduling policy is added by accounting or replay.
+
+## Queue-ahead preview cost and applicability
+
+Submission and observation expose the advisory
+[queue-ahead preview](../agents/workflow.md#queue-ahead-conflict-advice). Each pair
+uses the existing source composition reducer: main with the earlier submitted
+Candidate, then the submitting Candidate with that projected main. The result
+names conflicting paths and the exact earlier entry; it does not predict a
+combined landing order. Existing priority, fairness and batch selection remain
+authoritative. Eight entries bound speculative composition, not admission.
+
+The disposable cache stores source verdicts only. Confidence and applicability
+come from current queue records on every read, so failed, ejected and cancelled
+entries cannot retain advice through a cached result. A peer that already conflicts
+with main is unavailable speculation, rather than a claim about the submitting
+Lane. Hosted reducers run outside Convex on the existing hash-verified object
+transport; generated preview States are never uploaded or accepted as evidence.

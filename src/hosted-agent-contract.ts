@@ -72,6 +72,8 @@ export const hostedAgentCommandSchemas = {
       constraints: z.string().optional(),
       intentId: uuid.optional(),
       initialHead: hash.optional(),
+      stackOn: uuid.optional(),
+      stackEntry: uuid.optional(),
     })
     .strict(),
   open: z
@@ -93,6 +95,7 @@ export const hostedAgentCommandSchemas = {
           z.object({ kind: z.literal('candidate'), candidateId: uuid, head: hash }).strict(),
         ])
         .optional(),
+      ontoMain: z.boolean().optional(),
       apply: z.boolean().default(true),
     })
     .strict(),

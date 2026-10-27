@@ -790,3 +790,49 @@ test('server shorthand lost enqueue reply replays the original with newer unsave
   assert.equal(f.operations.size, 3);
   assert(!existsSync(join(f.store.directory, 'hosted-inputs', operationId, f.lane.laneId, 'later.txt')));
 });
+
+for (const phase of ['terminal-failed', 'landed'])
+  test(`hosted same-head submission after ${phase} retains original replay identity`, async t => {
+    const f = fixture(t);
+    const command = { action: 'land', operationId: randomUUID(), laneIds: [f.lane.laneId] };
+    const first = await boundAgentSubmission(f.store, command, noNative, f.transport());
+    const state = [...f.operations.values()].find(value => value.id === first.result.handle.entryIds[0]);
+    state.phase = phase;
+    state.observation = {
+      state: phase,
+      pendingReason: null,
+      cause: phase === 'terminal-failed' ? 'rejected' : null,
+    };
+    const replay = await boundAgentSubmission(f.store, command, noNative, f.transport());
+    assert.deepEqual(replay.result.handle, first.result.handle);
+    assert.equal(replay.result.terminal, true);
+    const second = await boundAgentSubmission(
+      f.store,
+      { ...command, operationId: randomUUID() },
+      noNative,
+      f.transport(),
+    );
+    if (phase === 'terminal-failed') {
+      assert.notDeepEqual(second.result.handle.entryIds, first.result.handle.entryIds);
+      assert.equal(f.calls.filter(call => call.name === 'projectHostedLanding:enqueue').length, 2);
+    } else {
+      assert.deepEqual(second.result.handle, first.result.handle);
+      assert.equal(f.calls.filter(call => call.name === 'projectHostedLanding:enqueue').length, 1);
+    }
+    assert.deepEqual(
+      (await boundAgentSubmission(f.store, command, noNative, f.transport())).result.handle,
+      first.result.handle,
+    );
+  });
+
+for (const mode of ['native-owner', 'server'])
+  test(`invalid landing arguments report BAD_ARGUMENT and the accepted shape (${mode})`, async t => {
+    const f = fixture(t, mode);
+    const agent = new AgentWorkflow(f.root);
+    for (const args of [{ laneId: f.lane.laneId }, {}, { operationId: 'invalid' }])
+      await assert.rejects(agent.dispatch({ action: 'landing', ...args }), error => {
+        assert.equal(error.code, 'BAD_ARGUMENT');
+        assert.match(error.message, /landing.*operationId.*UUID/);
+        return true;
+      });
+  });

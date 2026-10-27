@@ -58,13 +58,10 @@ export function batchEdit<T>(
     assertLandingWorkerActive();
     const tx = work.store.readRecords();
     if (tx) {
-      try {
-        await prepareLandingRecords(work.store, tx);
-        if (stalePreparations < 2)
-          return await editLandingRecords(work.store, channel, edit, tx, id, fence, selection);
+      const admitCurrent = () =>
         // FIFO admission eventually owns one current pointer. The fallback
         // prepares only this selected projection, never complete Work.
-        return await work.store.lockedAsync(() => {
+        work.store.lockedAsync(() => {
           const current = work.store.readRecords();
           invariant(current, 'INVALID_WORK_STORE', 'Landing record lookup became unavailable.');
           try {
@@ -73,8 +70,19 @@ export function batchEdit<T>(
             current.dispose();
           }
         });
+      try {
+        await prepareLandingRecords(work.store, tx);
+        if (stalePreparations < 2)
+          return await editLandingRecords(work.store, channel, edit, tx, id, fence, selection);
+        return await admitCurrent();
       } catch (error) {
-        if (error instanceof ForgeError && error.code === 'WORK_STALE') stalePreparations++;
+        if (error instanceof ForgeError && error.code === 'WORK_STALE') {
+          stalePreparations++;
+          // A slow second preparation can consume the reconciliation window.
+          // Enter the existing FIFO fallback now, before the retry wrapper can
+          // end this phase without ever trying its guaranteed-current pointer.
+          if (stalePreparations >= 2) return await admitCurrent();
+        }
         throw error;
       } finally {
         tx.dispose();

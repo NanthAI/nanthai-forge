@@ -78,6 +78,7 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('start'),
     stackOn: id.optional(),
+    stackEntry: id.optional(),
     frictionIds: z.array(id).optional(),
     scope: peersScopeSchema.optional(),
     waitMs: z.number().int().nonnegative().safe().optional(),

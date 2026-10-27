@@ -1,3 +1,4 @@
+import { nativeQueueAhead } from './queue-ahead-native.js';
 import { entryStall } from './landing-entry-stall.js';
 import { checkingWait } from './landing-waiting.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -34,10 +35,12 @@ export function queuedOutcome(store: WorkStore, entry: LandingEntry) {
       : entry.status === 'queued'
         ? entry.waitingFor
         : undefined;
+  const queueAhead = nativeQueueAhead(store, entry);
   return reviewedOutcome(
     store,
     {
       ...queueObservation(entry, run, landingDiagnosis(store, entry)),
+      ...(queueAhead ? { queueAhead } : {}),
       ...(waitingFor ? { waitingFor } : {}),
       ...(stall ? { stall } : {}),
     },

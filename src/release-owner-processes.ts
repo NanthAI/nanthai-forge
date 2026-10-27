@@ -13,13 +13,13 @@ export function belowRuntime(root: string, path: string) {
   const part = relative(resolve(root), resolve(path));
   return !!part && part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part);
 }
+// Physical check controllers retain their pinned runtime until completion.
 const workerNames = new Set([
   'local-watcher-worker.js',
   'auto-exchange.js',
   'presence-worker.js',
   'post-accept-main.js',
   'agent-advisory-worker.js',
-  'check-controller-worker.js',
   'github-auto-push.js',
   'integration-preview-worker.js',
   'self-metrics-weekly-worker.js',

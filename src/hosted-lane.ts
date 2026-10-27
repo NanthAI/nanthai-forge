@@ -21,6 +21,8 @@ export const hostedStartSchema = z
     authorityEpoch: sourceAuthoritySchema.shape.epoch,
     expectedMain: mainExpectationSchema,
     initialHead: mainExpectationSchema.shape.head.optional(),
+    stackOn: z.uuid().optional(),
+    stackEntry: z.uuid().optional(),
     intent: hostedIntentInputSchema,
   })
   .strict();
@@ -38,6 +40,7 @@ export const hostedLaneSelectionSchema = z
     sourceVersion: hostedLaneSchema.shape.sourceVersion,
     lifecycleVersion: hostedLaneSchema.shape.lifecycleVersion,
     state: hostedLaneSchema.shape.state,
+    stack: hostedLaneSchema.shape.stack,
     base: mainExpectationSchema,
     authority: sourceAuthoritySchema,
   })

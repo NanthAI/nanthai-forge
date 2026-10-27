@@ -33,6 +33,15 @@ an unstarted old-runtime plan needs a new check on the fixed runtime.
 Arbitrary commands run once in the static job. Candidate sources must include the
 Actions-aware standard check script to use standard sharding.
 
+For this repository, code verification runs document validation and the installed
+package smoke in the shared `scripts/verify.mjs` entry point. Native-owner landing
+checks, hosted landing checks and the public mirror therefore exercise the same
+static and package contracts. Docs-only checks retain their documentation path.
+Package smoke runs once in the static job, after its other verification completes,
+because it rebuilds `dist` before installing the archive in a disposable directory.
+A packaging failure fails the exact-Candidate check before acceptance; the mirror
+has no separate package step that could diverge from that gate.
+
 The owner plans remote test selection with its installed selector, reading the
 pinned Candidate as data. It does not execute the Candidate's selector to plan a
 run. The merge-queue benchmark instead runs the selector shipped in its checked

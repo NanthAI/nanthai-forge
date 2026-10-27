@@ -461,9 +461,13 @@ export function nativeExecute(
                 item.id === command.viewId && item.head === command.expectedHead && item.status === 'clean',
             );
             invariant(view, 'VIEW_STALE', 'Select a retained native clean Candidate.');
-            const batchPrefix = data.landingBatches
-              ?.flatMap(batch => batch.prefixes)
-              .find(prefix => prefix.viewId === command.viewId);
+            // Shared check Views can belong to a cancelled earlier submission.
+            const acceptingBatch = data.landingBatches?.find(
+              batch => command.operationId === finishChild(batch.id, `accept:${command.viewId}`),
+            );
+            const batchPrefix = (
+              acceptingBatch?.prefixes ?? data.landingBatches?.flatMap(batch => batch.prefixes)
+            )?.find(prefix => prefix.viewId === command.viewId);
             invariant(
               (options.actor ?? localPerson()).kind === 'person' ||
                 !batchPrefix?.entryIds.some(

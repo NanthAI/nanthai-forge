@@ -1321,18 +1321,18 @@ for (const replacement of ['same-family', 'same-family-legacy', 'other-family', 
   });
 }
 
-test('controller signal observation retains SIGTERM and leaves sender unknown', async t => {
+test('explicit interrupt observation retains SIGINT and leaves sender unknown', async t => {
   const { CheckQueue } = await import('../dist/check-queue.js');
   const { work, run, path } = fixture(t);
   t.mock.method(CheckQueue.prototype, 'cancelled', () => {
-    process.emit('SIGTERM', 'SIGTERM');
+    process.emit('SIGINT', 'SIGINT');
     return false;
   });
   await launchGithubActionsRun(work.store, run, {}, async () => assert.fail('must not export'));
   const receipt = read(join(path, 'result.json'));
   assert.equal(receipt.status, 'cancelled');
   assert.equal(receipt.cancellation.reason, 'signal');
-  assert.equal(receipt.cancellation.signal, 'SIGTERM');
+  assert.equal(receipt.cancellation.signal, 'SIGINT');
   assert.equal(receipt.cancellation.actor, undefined);
 });
 
@@ -2240,4 +2240,38 @@ for (const shardResult of ['success', 'failure', 'oom'])
     );
     const { successfulCheck } = await import('../dist/check-reuse-evidence.js');
     assert.equal(successfulCheck({ ...run, ...receipt }), false);
+  });
+
+for (const signal of ['SIGTERM', 'SIGHUP'])
+  test(`service ${signal} preserves an in-flight remote check without provider cancellation`, async t => {
+    const { work, run, path } = fixture(t);
+    const api = {};
+    let calls;
+    await launchGithubActionsRun(
+      work.store,
+      run,
+      api,
+      async (plan, journal, save) => {
+        journal.commit = 'a'.repeat(40);
+        journal.runId = 10;
+        journal.pushed = true;
+        save();
+        const fake = transport(plan, journal);
+        calls = fake.calls;
+        const request = fake.api.request;
+        Object.assign(api, fake.api, {
+          request: async (...args) => {
+            process.emit(signal, signal);
+            return request(...args);
+          },
+        });
+      },
+      async () => {},
+    );
+    const receipt = read(join(path, 'result.json'));
+    assert.equal(receipt.status, 'passed');
+    assert.equal(receipt.cancellation, undefined);
+    assert.equal(work.store.select('runs', run.id).cancelRequested, undefined);
+    assert.equal(calls.filter(call => call.endpoint.endsWith('/cancel')).length, 0);
+    assert.deepEqual(receipt.backend.executionIds, ['10']);
   });

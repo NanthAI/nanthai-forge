@@ -127,6 +127,38 @@ async function submitBoundAgent(
         });
     }
   }
+  // Terminal server outcomes are immutable. Observe matching heads before the
+  // admission lock so a deliberate new request can retry failed work.
+  const failedDuplicates = new Set<string>();
+  if (raw.action === 'land' && !existsSync(path) && existsSync(directory)) {
+    for (const name of readdirSync(directory).filter(name => /^[0-9a-f-]+\.json$/.test(name))) {
+      const old = read<Retained>(join(directory, name));
+      if (
+        old.aliasOf ||
+        old.command.action !== 'land' ||
+        old.command.channel !== raw.channel ||
+        old.command.checkId !== raw.checkId ||
+        old.command.preview !== raw.preview ||
+        !Array.isArray(raw.laneIds) ||
+        old.inputs.length !== raw.laneIds.length ||
+        !old.inputs.every(
+          pin =>
+            (raw.laneIds as unknown[]).includes(pin.laneId) &&
+            store.select('lanes', pin.laneId)?.head === pin.head,
+        )
+      )
+        continue;
+      const observed = await boundLandingStatus(
+        store,
+        { operationId: old.command.operationId },
+        () => native(input),
+        supplied,
+      );
+      const result = observed.result as Command;
+      if (result.terminal === true && result.complete !== true)
+        failedDuplicates.add(String(old.command.operationId));
+    }
+  }
   const nativeDirectory = join(store.directory, 'native-submissions');
   let nativePath = join(nativeDirectory, `${operationId}.json`);
   const selection = store.locked(() => {
@@ -254,6 +286,7 @@ async function submitBoundAgent(
               old =>
                 old.command.action === 'land' &&
                 !old.aliasOf &&
+                !failedDuplicates.has(String(old.command.operationId)) &&
                 old.command.channel === command.channel &&
                 old.command.checkId === command.checkId &&
                 old.command.preview === command.preview &&

@@ -705,12 +705,16 @@ test('explicit wait settles bounded observations and never retries a check failu
       .map(r => r.id),
     before,
   );
-  // The same desired head reuses its terminal handle, even with a fresh client operation.
+  // Deliberate resubmission gets a new entry; observing the original request never retries it.
   const retry = (await f.agent.dispatch({ ...command, operationId: randomUUID(), laneIds: [bad.laneId] }))
     .result;
   assert.equal(retry.terminal, true);
   assert.deepEqual(retry.counts, { failed: 1 });
-  assert.equal(f.store.load().landingEntries.length, 2);
+  assert.equal(f.store.load().landingEntries.length, 3);
+  assert.notEqual(
+    retry.entries[0].operationId,
+    result.entries.find(entry => entry.inputs[0].laneId === bad.laneId).operationId,
+  );
 });
 
 test('two parent operations share the same pending Lane/head handle, including non-batch work', async t => {
@@ -818,4 +822,72 @@ test('native save infers its Lane and checkpoint replays the identical mutation'
   assert.equal(replay.status, 0, replay.stderr);
   assert.equal(JSON.parse(replay.stdout).result.head, head);
   assert.equal(f.store.select('lanes', a.laneId).head, head);
+});
+
+for (const batching of [true, false])
+  test(`a fresh operation retries a terminal unchanged head; original replay stays terminal (batching=${batching})`, async t => {
+    const f = await fixture(t, { batching });
+    const a = await f.lane('bad.txt');
+    const operationId = randomUUID();
+    const first = (await f.land([a], { operationId })).result;
+    assert.equal(first.terminal, true);
+    assert.equal(first.complete, false);
+    const before = f.store.load().runs.length;
+    const replay = (await f.land([a], { operationId })).result;
+    assert.deepEqual(replay.handle, first.handle);
+    assert.deepEqual(replay.entries, first.entries);
+    assert.equal(f.store.load().runs.length, before);
+    const second = (await f.land([a], { operationId: randomUUID() })).result;
+    assert.notDeepEqual(second.handle.entryIds, first.handle.entryIds);
+    assert.equal(second.entries[0].inputs[0].head, a.head);
+    assert.equal(second.terminal, true);
+    assert.equal(second.complete, false);
+    assert.equal(f.store.load().runs.length, before + 1);
+    assert.deepEqual((await f.land([a], { operationId })).result.entries, first.entries);
+  });
+
+test('cancelled same-head landing admits a fresh operation while the cancelled request replays', async t => {
+  const f = await fixture(t);
+  const a = await f.lane('after-cancel.txt');
+  const dispatch = f.agent.work.dispatch.bind(f.agent.work);
+  f.agent.work.dispatch = async (...args) => {
+    if (args[0].action === 'run-check') throw new ForgeError('WORK_BUSY', 'Synthetic pending check');
+    return dispatch(...args);
+  };
+  const operationId = randomUUID();
+  const first = (await f.agent.dispatch({ action: 'land', operationId, laneIds: [a.laneId] })).result;
+  const entryId = first.handle.entryIds[0];
+  await f.agent.dispatch({ action: 'cancel', operationId: entryId });
+  f.agent.work.dispatch = dispatch;
+  const cancelled = (await f.land([a], { operationId })).result;
+  assert.equal(cancelled.terminal, true);
+  assert.equal(cancelled.entries[0].status, 'cancelled');
+  const second = (await f.land([a], { operationId: randomUUID() })).result;
+  assert.notDeepEqual(second.handle.entryIds, first.handle.entryIds);
+  assert.equal(second.complete, true);
+  assert.equal(second.entries[0].inputs[0].head, a.head);
+  assert.equal(f.store.select('landingEntries', entryId).status, 'cancelled');
+  const beforeReplay = f.store.load().runs.length;
+  const replay = (await f.land([a], { operationId })).result;
+  assert.deepEqual(replay.handle, cancelled.handle);
+  assert.equal(replay.entries[0].status, 'cancelled');
+  assert.deepEqual(replay.entries[0].inputs, cancelled.entries[0].inputs);
+  assert.equal(f.store.load().runs.length, beforeReplay);
+  const batch = f.store.select('landingBatches', f.store.select('landingEntries', entryId).batchId);
+  const prefix = batch.prefixes[0];
+  const { batchAcceptanceId } = await import('../dist/landing-batch-step.js');
+  await assert.rejects(
+    f.agent.work.dispatch(
+      {
+        action: 'accept-channel',
+        operationId: batchAcceptanceId(batch, prefix.viewId),
+        channel: 'main',
+        viewId: prefix.viewId,
+        expectedHead: prefix.head,
+        expectedPrevious: batch.previous,
+      },
+      f.store.revision(),
+    ),
+    { code: 'LANDING_CANCELLED' },
+  );
 });

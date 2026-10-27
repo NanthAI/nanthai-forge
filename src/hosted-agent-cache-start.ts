@@ -53,6 +53,7 @@ async function selectStartSource(
         stack: {
           laneId: parent.laneId,
           startHead: parent.head,
+          ...(command.stackEntry ? { entryId: command.stackEntry } : {}),
           head: parent.head,
           channel: command.channel ?? 'main',
         },
@@ -102,6 +103,8 @@ export async function startCache(
   const initialHead = await selectStartSource(store, transport, command, retained, path);
   const response = await transport.dispatch('start', {
     ...(initialHead ? { initialHead } : {}),
+    ...(command.stackOn ? { stackOn: command.stackOn } : {}),
+    ...(command.stackEntry ? { stackEntry: command.stackEntry } : {}),
     operationId,
     outcome: command.outcome,
     constraints: command.constraints,

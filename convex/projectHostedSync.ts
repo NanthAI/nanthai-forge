@@ -1,3 +1,4 @@
+import { loadLanding } from './projectHostedLandingStore';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { mutation, query, type QueryCtx, type MutationCtx } from './cliServer';
@@ -129,10 +130,30 @@ export const prepare = mutation({
               'Select the exact clean target Candidate.',
             );
           }
+          let right = target.head;
+          let stackBase, stackAfter;
+          if (target.kind === 'main' && lane.stack && !lane.stack.detached) {
+            const parentRow = await readHostedRecord(ctx, { ...auth, kind: 'lane', key: lane.stack.laneId });
+            invariant(parentRow, 'NOT_FOUND', 'Stack parent Lane not found.');
+            const parent = hostedRecordSchema.options[1].parse(JSON.parse(parentRow.value));
+            const entry = lane.stack.entryId
+              ? (await loadLanding(ctx, { projectId: auth.projectId, submissionId: lane.stack.entryId }))
+                  .state
+              : null;
+            const detached =
+              request.ontoMain ||
+              parent.state === 'abandoned' ||
+              entry?.phase === 'landed' ||
+              entry?.phase === 'terminal-failed';
+            right = detached ? target.head : parent.head;
+            stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.stack.head });
+            stackAfter = { ...lane.stack, head: right, ...(detached ? { detached: true } : {}) };
+          }
           work = {
             mode: 'sync',
             left,
-            right: await saveObject(ctx, auth.projectId, { sha256: target.head }),
+            right: await saveObject(ctx, auth.projectId, { sha256: right }),
+            ...(stackBase ? { stackBase, stackAfter } : {}),
           };
         }
       }

@@ -180,6 +180,7 @@ const tests = coreBuild.then(ok => {
 });
 const results = await Promise.all([
   npm('check', 'check'),
+  run('documents', process.execPath, ['scripts/check-documents.mjs']),
   run('schema compatibility', process.execPath, ['scripts/check-schema-compat.mjs']),
   run('format:check (oxfmt)', process.execPath, ['scripts/oxc.mjs', 'format:check']),
   tsc('typecheck:core', '--types', '*', '--noEmit'),
@@ -191,5 +192,8 @@ const results = await Promise.all([
   build,
   tests,
 ]);
+// Packaging rebuilds dist from scratch. Wait for every build, compiler and test
+// before exercising the installed archive, for local, Modal and Actions checks.
+if (results.every(Boolean)) results.push(await npm('smoke:package', 'smoke:package'));
 console.log(`\n${timings.join('\n')}\ntotal ${((Date.now() - started) / 1000).toFixed(1)}s`);
 process.exit(results.every(Boolean) ? 0 : outOfMemory ? 137 : 1);

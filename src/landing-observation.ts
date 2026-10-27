@@ -111,6 +111,7 @@ export function projectSubmission(
     ...(result.waitingFor
       ? { waitingFor: result.waitingFor as import('./landing-batch-types.js').LandingWaiting }
       : {}),
+    ...(result.queueAhead ? { queueAhead: result.queueAhead as NonNullable<Submission['queueAhead']> } : {}),
     ...(result.diagnosis ? { diagnosis: result.diagnosis as LandingDiagnosisReport } : {}),
   };
 }

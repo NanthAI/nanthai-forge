@@ -1,3 +1,4 @@
+import { queueAheadStackSync } from './queue-ahead-stack-sync.js';
 import { settleFinish } from './landing-journal-settle.js';
 import { readLandingHandle } from './land-receipt.js';
 import { boundLandingStatus } from './hosted-agent-bound-read.js';
@@ -382,7 +383,7 @@ export class AgentWorkflow {
       });
     if (command.action === 'sync')
       return store.native
-        ? agentSync(store, command as SyncCommand)
+        ? queueAheadStackSync(store, command as SyncCommand, () => agentSync(store, command as SyncCommand))
         : agentGitSync(store, command as SyncCommand);
     if (command.action === 'finish') return this.finish(command as FinishAction, wait);
     if (command.action === 'land-ready')

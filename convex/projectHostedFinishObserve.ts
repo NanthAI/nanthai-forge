@@ -1,3 +1,4 @@
+import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { landingAlias } from './projectHostedLandingIdentity';
@@ -70,6 +71,7 @@ export const page = query({
           canonicalOperationId: state.operationId,
           authority: sourceAuthority(project),
           submission: state,
+          queueAheadSelection: await hostedQueueAheadSelection(ctx, state),
           pendingAttempt: null,
           events: [{ submission: state, pendingAttempt: null }],
           nextVersion: state.version + 1,
@@ -111,6 +113,7 @@ export const page = query({
         canonicalOperationId: state.operationId,
         authority: sourceAuthority(project),
         submission: state,
+        queueAheadSelection: await hostedQueueAheadSelection(ctx, state),
         pendingAttempt,
         events,
         nextVersion,

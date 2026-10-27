@@ -848,7 +848,10 @@ journal before the channel sweep continues with unrelated submissions.
 
 The native landing worker reconciles active check runs before replaying retained
 landing journals. A dead local runner ends as interrupted; a dead Modal or Actions
-controller is adopted with the original run and provider pins. If adoption itself
+controller is adopted with the original run and provider pins. Release keeps
+in-flight check controllers alive on their pinned runtime. SIGTERM and SIGHUP
+mean service shutdown rather than remote check cancellation; explicit check or
+landing cancellation remains available. If adoption itself
 fails, the original run gets an interrupted `CHECK_RECOVERY_FAILED` receipt rather
 than retaining a live controller PID with no execution.
 
@@ -1092,9 +1095,10 @@ the submission stays pending until the owner service starts.
 
 Read `nforge agent OWNER landing '{"operationId":"UUID"}'` after reconnecting.
 This is read-only, including for completed work. Replaying the submission keeps
-its source pins; a different operation for the same Lane/head reuses its existing
-handle and outcome. Mixed selections reuse existing entries and submit only the
-new heads. `wait` is excluded from the request identity. Synchronous `finish`
+its source pins and original outcome. A different operation for the same Lane/head
+reuses pending or landed entries. After a terminal failure (including cancellation),
+a fresh operation ID creates a new submission without requiring a save or sync.
+Mixed selections reuse pending or landed entries and submit the remaining heads. `wait` is excluded from the request identity. Synchronous `finish`
 retains its existing protocol.
 
 For a bound project under either native owner or hosted source authority, a
@@ -1278,3 +1282,50 @@ pins. A later Candidate does not inherit measurements from an earlier head.
 Contracts currently supply metadata only. Both contract-bearing and contract-less
 Intents retain the existing acceptance policy and complete check gate. This slice
 does not authorize contract-only acceptance.
+
+## Queue-ahead conflict advice
+
+Pending `land` results, Lane status submissions and `landing` reads include
+`queueAhead` when there are entries ahead. The preview says **“if entry X / Lane
+Y lands, paths conflict”**. It is advisory: it never rejects, delays or reorders
+submission. A checking entry or one whose check passed is `actionable`; a merely
+queued entry is `fyi`. Clean pairs produce no conflict advice. Unavailable source
+is reported separately and never treated as a clean merge.
+
+The preview uses immutable submitted Candidate heads against current main, rather
+than later Lane edits. It considers at most eight earlier pending entries, with
+at most sixteen logical source compositions on a cold cache. Exact
+(main, submitted head, earlier head) results are reused; `cost` reports composition
+calls, cache hits and elapsed milliseconds. Hosted cold source can require lazy
+object-resolution retries, reported as `objectResolutions`. Repository checks and
+project code do not run. `more` identifies an incomplete queue horizon.
+Native previews read selected queue, Channel, Candidate and run records. If
+selected record access is unavailable, the preview reports unavailable advice
+without loading the complete Work history or delaying the submission.
+
+Advice is joined with current queue state. A failure, conflict ejection or
+cancellation removes that entry immediately from subsequent reads; acceptance
+moves the ordinary main comparison forward. Hosted status queries depend on the
+indexed pending ranges, so those terminal transactions invalidate subscribers.
+There is no preview poller, timer, scheduled job or idle computation.
+
+Actionable advice includes an exact `next.shell` command using `start` with
+`stackOn` and `stackEntry`. This creates a new child workspace on the parent's
+saved source; reapply the intended child changes there. The existing workspace is
+preserved. This action does not sync an independent Lane onto unlanded source.
+After the parent fails, the child's next `sync` reapplies only its own delta onto
+real main; overlapping child changes retain the ordinary conflict resolution.
+An explicit `sync` with `ontoMain:true` also detaches a stack. No background
+operation rewrites dirty workspaces. These commands work with native authority,
+bound native caches and hosted agent addressing.
+
+Native `landing` results also include `firstAttemptLandRate` for the last seven
+days. The existing `metrics` read exposes the same calculation over its selected
+window for native and hosted records. The denominator is Lanes whose first-ever
+land entry was submitted in `[from,to)`; the numerator is those whose first entry
+was accepted. Pending first entries remain in the denominator and are counted
+separately. Earlier history is retained when choosing the first entry. The metric
+reports retried Lanes and preceding retry causes: conflict, check failure/flake,
+stall, cancelled and other. It does not infer that a failed check was a flake.
+Internal hosted child attempts remain part of their original land entry. All
+calculation is read-time work over landing records, with no new background job.

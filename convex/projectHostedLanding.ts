@@ -1,3 +1,4 @@
+import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
 // SPDX-License-Identifier: Apache-2.0
@@ -86,7 +87,11 @@ export const status = query({
         projectId: input.projectId,
         attemptId: state.attemptId,
       });
-      return canonicalPayload({ request: state, attempt });
+      return canonicalPayload({
+        request: state,
+        attempt,
+        queueAheadSelection: await hostedQueueAheadSelection(ctx, state),
+      });
     } catch (error) {
       return report(error);
     }

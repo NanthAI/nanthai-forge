@@ -85,6 +85,9 @@ export function remoteCancellation(
       run.cancellation = saved.cancellation;
       return true;
     }
+    // Service shutdown transfers remote execution ownership; only an explicit stop cancels it.
+    if (observation?.reason === 'signal' && ['SIGTERM', 'SIGHUP'].includes(observation.signal ?? ''))
+      return false;
     let cancellation: CheckRun['cancellation'];
     if (observation)
       cancellation = {

@@ -20,6 +20,9 @@ export type MetricMove = {
 export type MetricSubmission = {
   id: string;
   entryId: string;
+  entryAt?: string | undefined;
+  entryStatus?: string | undefined;
+  retryCause?: import('./first-attempt-land-rate.js').LandRateEntry['cause'];
   at: string;
   inputs: MetricInput[];
   status: string;

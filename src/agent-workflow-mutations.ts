@@ -243,6 +243,7 @@ export function agentStart(store: WorkStore, command: StartAction, liveMcp = fal
                   stack: {
                     laneId: parent.id,
                     startHead: parent.head,
+                    ...(command.stackEntry ? { entryId: command.stackEntry } : {}),
                     head: parent.head,
                     channel: command.channel ?? 'main',
                   },

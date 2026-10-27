@@ -1,3 +1,4 @@
+import { composeStack } from './native-stack-compose.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -46,7 +47,9 @@ export async function buildHostedSyncState(
       'WORK_STALE',
       'Resolution source no longer descends from its exact draft.',
     );
-    const pending = await calculate(() => conflictPlan(source, resolution.left, resolution.right, 'target'));
+    const pending = await calculate(() =>
+      conflictPlan(source, resolution.left, resolution.right, 'target', resolution.mergeBase),
+    );
     const state = source.state(work.left.object.sha256);
     for (const conflict of pending.conflicts.filter(item => item.kind === 'text')) {
       const file = state.files.find(file => file.path === conflict.path);
@@ -90,7 +93,9 @@ export async function buildHostedSyncState(
       right = work.right.object.sha256;
     }
     const merged = await calculate(() =>
-      source.compose(left, right, plan.message, plan.at, { insertionOrder: 'right-first' }),
+      work.mode === 'sync' && work.stackBase
+        ? composeStack(source, left, right, work.stackBase.object.sha256, plan.message, plan.at)
+        : source.compose(left, right, plan.message, plan.at, { insertionOrder: 'right-first' }),
     );
     if (merged.head) {
       invariant(work.mode === 'sync', 'SOURCE_JOB_INVALID', 'The original Candidate must retain a conflict.');
@@ -99,7 +104,15 @@ export async function buildHostedSyncState(
         state: { sha256: merged.head, size: source.object(merged.head).length },
       };
     } else {
-      const pending = await calculate(() => conflictPlan(source, left, right, 'target'));
+      const pending = await calculate(() =>
+        conflictPlan(
+          source,
+          left,
+          right,
+          'target',
+          work.mode === 'sync' ? work.stackBase?.object.sha256 : undefined,
+        ),
+      );
       const files: NativeFile[] = pending.files.map(file => ({
         path: file.path,
         mode: file.mode,
@@ -109,7 +122,14 @@ export async function buildHostedSyncState(
       const head = source.writeState(files, [left], plan.message, plan.at);
       if (!conflicts) {
         const details = await calculate(() =>
-          source.mergeFiles(left, right, undefined, undefined, undefined, { insertionOrder: 'right-first' }),
+          source.mergeFiles(
+            left,
+            right,
+            work.mode === 'sync' && work.stackBase ? new Set([work.stackBase.object.sha256]) : undefined,
+            work.mode === 'sync' && work.stackBase ? new Set([work.stackBase.object.sha256]) : undefined,
+            undefined,
+            { insertionOrder: 'right-first' },
+          ),
         );
         const byPath = new Map(details.conflicts.map(item => [item.path, item]));
         const l = new Map(source.state(left).files.map(file => [file.path, file])),

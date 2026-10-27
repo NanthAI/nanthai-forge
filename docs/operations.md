@@ -115,9 +115,13 @@ apply keeps results, summaries, provider links and exact evidence hashes. Shared
 source/artifact hashes and recipe chunks are protected. Native archive copies
 are converted through the existing exact-manifest migration before retiring the
 old compressed container. Hosted inventory and apply advance in finite action windows with persisted cursors,
-protection closures and reviewed pages. The CLI continues requested pending work;
-there is no idle timer or poller. The private plan file saves its UUID before the
-first action. Rerun an interrupted dry-run with the same file to resume it, then
+protection closures and reviewed pages. Object-backed snapshots read only the
+selected runs for each fifty-file page.
+Catalog and manifest chunks share current-authority lookups in batches of up to
+100 pins and 2 MiB, with every chunk and complete metadata digest verified.
+The CLI continues requested pending work; there is no idle timer or poller. The
+private plan file saves its UUID before the first action. Rerun an interrupted
+dry-run with the same file to resume it, then
 apply that file. Apply reads the retained server plan instead of recalculating a
 new deletion scope. If source changes, retain the receipt and prepare a fresh
 plan file. Structured server error codes and messages are shown by the CLI.

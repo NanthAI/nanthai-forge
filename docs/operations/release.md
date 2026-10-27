@@ -155,7 +155,7 @@ a dead stage child can resume it after a lost reply. Historical release receipts
 created before this stage remain historical receipts.
 
 After verification, release retires detached `local-watcher-worker.js`,
-`auto-exchange.js`, `presence-worker.js` and `post-accept-main.js` processes, plus detached check controllers, advisory,
+`auto-exchange.js`, `presence-worker.js` and `post-accept-main.js` processes, plus advisory,
 GitHub push, integration preview and weekly metrics workers in previous runtime
 installations. It matches the install path and kernel start
 identity, rechecks both before each signal, and excludes the current install,
@@ -166,6 +166,9 @@ and observed exit. Resume can repeat an interrupted signal attempt after recheck
 identity; it never applies that attempt to a reused PID. Presence and main-audit workers use nonblocking Work-lock
 admission so signal delivery cannot be trapped in a synchronous lock wait;
 shutdown aborts their observers and has a one-second exit backstop.
+Physical check controllers keep their pinned runtime until their checks finish;
+release never signals them. Queued and checking landings survive owner replacement.
+If a remote controller dies, startup adopts its original run and provider pins.
 
 To undo owner selection, first check `selectionPath` still resolves to the
 receipt's `executablePath`. Atomically restore `previousOwnerCli` as a file with

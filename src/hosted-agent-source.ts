@@ -154,6 +154,7 @@ export async function syncAgentSource(
     const main = command.target ? null : await session.main();
     return syncRequestSchema.parse({
       kind: 'sync',
+      ...(command.ontoMain === undefined ? {} : { ontoMain: command.ontoMain }),
       operationId,
       authorityEpoch: session.capabilities.authority.epoch,
       laneId: lane.laneId,

@@ -37,9 +37,13 @@ test('public shards share the Node 24 build and package smoke runs only in the s
     Array.from({ length: 24 }, (_, index) => index),
   );
   assert.match(tests, /node scripts\/public-verify\.mjs \$\{\{ matrix.shard \}\} 24/);
-  assert.match(staticJob, /node scripts\/check-documents\.mjs/);
-  assert.equal((workflow.match(/npm run smoke:package/g) ?? []).length, 1);
-  assert.match(staticJob, /npm run smoke:package/);
+  // The public and landing static jobs share verify, including documents and
+  // package smoke. Keep those contracts out of mirror-only workflow steps.
+  assert.match(staticJob, /node scripts\/public-verify\.mjs static 24/);
+  assert.doesNotMatch(staticJob, /node scripts\/check-documents\.mjs|npm run smoke:package/);
+  const verify = readFileSync('scripts/verify.mjs', 'utf8');
+  assert.match(verify, /run\('documents', process.execPath, \['scripts\/check-documents\.mjs'\]\)/);
+  assert.match(verify, /results\.push\(await npm\('smoke:package', 'smoke:package'\)\)/);
   assert.match(staticJob, /tar -czf .* dist hosted-web-dist/);
   assert.match(staticJob, /actions\/upload-artifact@v4/);
   assert.match(staticJob, /if-no-files-found: error/);

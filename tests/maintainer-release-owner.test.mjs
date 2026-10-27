@@ -369,11 +369,10 @@ test('dead owner child resumes the retained attempt; another call replays its re
   assert.equal(launches, 1);
 });
 
-test('all other detached Forge script entry points retire; build copies within runtime stay untouched', async t => {
+test('observer entry points retire; in-flight check controllers and build copies stay untouched', async t => {
   const f = fixture(t);
   const names = [
     'agent-advisory-worker.js',
-    'check-controller-worker.js',
     'github-auto-push.js',
     'integration-preview-worker.js',
     'self-metrics-weekly-worker.js',
@@ -386,13 +385,32 @@ test('all other detached Forge script entry points retire; build copies within r
       join(f.journal.request.runtimeDirectory, 'releases/build/source/dist/presence-worker.js'),
     ),
   };
-  f.setWorkers([...workers, build]);
+  const check = f.worker('check-controller-worker.js', 600);
+  f.setWorkers([...workers, build, check]);
   await f.run();
-  assert.deepEqual(f.workers(), [build]);
+  assert.deepEqual(f.workers(), [build, check]);
   assert.deepEqual(
     f.signals,
     workers.map(worker => [worker.pid, 'SIGTERM']),
   );
+});
+
+test('resuming an older retirement plan preserves its live check controller', async t => {
+  const f = fixture(t);
+  await f.run();
+  const path = join(f.directory, 'owner-selection.json');
+  const state = JSON.parse(readFileSync(path, 'utf8'));
+  const check = f.worker('check-controller-worker.js', 601);
+  state.retired.push({ ...check, signals: [], gone: false });
+  releaseSave(path, state);
+  const observer = f.worker('presence-worker.js', 602);
+  f.setWorkers([check, observer]);
+  await f.run();
+  assert.deepEqual(f.workers(), [check]);
+  assert.deepEqual(f.signals, [[602, 'SIGTERM']]);
+  const retained = JSON.parse(readFileSync(path, 'utf8')).retired.find(worker => worker.pid === check.pid);
+  assert.equal(retained.gone, false);
+  assert.deepEqual(retained.signals, []);
 });
 
 test('verification deadline includes time spent on a slow probe', async t => {
@@ -411,4 +429,74 @@ test('verification deadline includes time spent on a slow probe', async t => {
   await assert.rejects(f.run(), { code: 'RELEASE_OWNER_UNVERIFIED' });
   assert.equal(probes, 1);
   assert.equal(f.restarts(), 1);
+});
+
+test('release restart retains a checking remote landing and its replacement owner lands it', async t => {
+  const { fixture: landingFixture } = await import('./landing-batch-fixture.mjs');
+  const { batchEdit, selectBatch, composeBatch } = await import('../dist/landing-batch-store.js');
+  const { claimLandingDriver } = await import('../dist/landing-driver.js');
+  const { advanceLandingBatch } = await import('../dist/landing-batch-step.js');
+  const { drainLandingBatches } = await import('../dist/landing-batch.js');
+  const { AgentWorkflow } = await import('../dist/agent-workflow.js');
+  const { remoteCancellation } = await import('../dist/work-run-cancellation.js');
+  const release = fixture(t);
+  const f = await landingFixture(t);
+  const gate = join(f.store.directory, 'release-provider-ready');
+  writeFileSync(
+    join(f.store.directory, 'mock-modal.mjs'),
+    `#!${process.execPath}
+import fs from 'node:fs';
+const plan = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+console.log(JSON.stringify({kind:'execution', executionId:'synthetic-in-flight', image:'fixture'}));
+const waiting = setInterval(() => {
+  if (!fs.existsSync(${JSON.stringify(gate)})) return;
+  clearInterval(waiting);
+  console.log(JSON.stringify({kind:'result', pin:plan.pin, head:plan.head, definition:plan.definition, exitCode:0, estimatedCostUsd:0}));
+}, 5);
+`,
+  );
+  const input = await f.candidate('release-in-flight.txt');
+  const batch = await batchEdit(f.work, 'release-select', data => selectBatch(f.work, data, 'main'));
+  await composeBatch(f.work, batch);
+  const driver = await claimLandingDriver(f.work, 'main');
+  const checking = advanceLandingBatch(f.work, batch.id, driver);
+  // Attach the rejection handler before replacing publication ownership.
+  const oldOwner = checking.then(
+    () => undefined,
+    error => error,
+  );
+  let run;
+  try {
+    for (const deadline = performance.now() + 5000; performance.now() < deadline;) {
+      run = f.store
+        .load()
+        .runs.find(
+          item => item.status === 'running' && item.backend?.executionIds?.includes('synthetic-in-flight'),
+        );
+      if (run) break;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert(run, 'synthetic remote provider is in flight before release');
+    assert.equal(f.store.select('landingEntries', input.command.operationId).status, 'checking');
+    const worker = release.worker('check-controller-worker.js', run.runner.pid);
+    release.setWorkers([worker]);
+    const signal = release.deps.signal;
+    release.deps.signal = (target, value) => {
+      remoteCancellation(f.store, run, { reason: 'signal', signal: value });
+      return signal(target, value);
+    };
+    await release.run();
+    await claimLandingDriver(new AgentWorkflow(f.root).work, 'main');
+    assert.deepEqual(release.signals, []);
+    assert.equal(f.store.select('runs', run.id).cancelRequested, undefined);
+    assert.equal(f.store.select('landingEntries', input.command.operationId).status, 'checking');
+  } finally {
+    writeFileSync(gate, 'complete');
+  }
+  assert.equal((await oldOwner)?.code, 'LANDING_DRIVER_STALE');
+  await drainLandingBatches(new AgentWorkflow(f.root).work, 'main');
+  assert.equal(f.store.select('landingEntries', input.command.operationId).status, 'accepted');
+  assert.equal(f.store.select('runs', run.id).status, 'passed');
+  assert.equal(f.content('release-in-flight.txt'), 'release-in-flight.txt\n');
+  t.diagnostic(JSON.stringify({ operatorMutationsToSettle: 0, droppedLandings: 0, cancelledChecks: 0 }));
 });

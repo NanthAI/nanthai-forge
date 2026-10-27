@@ -29,6 +29,15 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
     .object({
       ...common,
       kind: z.literal('lane'),
+      stack: z
+        .object({
+          laneId: z.uuid(),
+          head: hash,
+          entryId: z.uuid().optional(),
+          detached: z.boolean().optional(),
+        })
+        .strict()
+        .optional(),
       intentId: z.uuid(),
       actor: z.string().min(1),
       base: main,
@@ -45,6 +54,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
           left: hash,
           right: hash,
           draftHead: hash,
+          mergeBase: hash.optional(),
           status: z.enum(['pending', 'resolved']),
         })
         .strict()

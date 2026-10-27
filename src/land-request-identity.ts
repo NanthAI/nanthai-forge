@@ -2,6 +2,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { invariant } from './errors.js';
+import { queuedOutcome, reviewedOutcome, submissionOutcome } from './landing-submission.js';
 import type { WorkStore } from './work-store.js';
 import { allRecords } from './agent-lifecycle.js';
 import type { LandingEntry } from './landing-batch-types.js';
@@ -23,8 +24,8 @@ export function resolveLandEntry(store: WorkStore, entry: LandEntry): LandEntry 
   return { ...original, inputs: entry.inputs, sourceOperationId: entry.sourceOperationId };
 }
 
-/** Called under admission's existing owner lock. Reuse each selected Lane/head,
- * including terminal outcomes; a changed head is a new desired state. */
+/** Called under admission's existing owner lock. Pending and landed heads share
+ * work; a new operation may retry terminal failures without changing source. */
 export function reuseLandSelection(
   store: WorkStore,
   operationId: string,
@@ -47,6 +48,21 @@ export function reuseLandSelection(
       ? allRecords<LandingEntry>(store, 'landingEntries')
       : []
     : (store.load().landingEntries ?? []);
+  const reusable = (entry: LandEntry) => {
+    const selected = queued.find(item => item.id === entry.command.operationId);
+    return (
+      submissionOutcome(
+        selected
+          ? queuedOutcome(store, selected)
+          : reviewedOutcome(
+              store,
+              entry.result ?? { status: 'queued' },
+              entry.single?.viewId ?? entry.viewId,
+              channel,
+            ),
+      ).state !== 'terminal-failed'
+    );
+  };
   return entries.flatMap(entry => {
     const reused = new Map<string, LandEntry>();
     const remaining = entry.inputs.filter(pin => {
@@ -55,7 +71,8 @@ export function reuseLandSelection(
           item.entry.command.preview === entry.command.preview &&
           item.entry.command.checkId === entry.command.checkId &&
           item.entry.command.expectedDefinition === entry.command.expectedDefinition &&
-          item.entry.inputs.some(old => old.laneId === pin.laneId && old.head === pin.head),
+          item.entry.inputs.some(old => old.laneId === pin.laneId && old.head === pin.head) &&
+          reusable(item.entry),
       );
       if (!existing) {
         const shared = queued.find(
@@ -66,7 +83,8 @@ export function reuseLandSelection(
             item.definition === entry.command.expectedDefinition &&
             store
               .select('views', item.viewId)
-              ?.inputs.some(old => old.laneId === pin.laneId && old.head === pin.head),
+              ?.inputs.some(old => old.laneId === pin.laneId && old.head === pin.head) &&
+            submissionOutcome(queuedOutcome(store, item)).state !== 'terminal-failed',
         );
         if (!shared) return true;
         const reference = reused.get(shared.id) ?? {

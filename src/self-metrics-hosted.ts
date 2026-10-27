@@ -170,6 +170,18 @@ export function hostedSelfMetricsReader(source: HostedMetricSource): SelfMetrics
               return (await inputs(attempt.candidate.inputs)).map(input => ({
                 id: `${attempt.id}:${input.laneId}`,
                 entryId: attempt.submissionId,
+                entryAt: request?.at,
+                entryStatus: request?.phase,
+                retryCause:
+                  request?.observation?.cause === 'conflict'
+                    ? ('conflict' as const)
+                    : ['CANCELLED', 'LANDING_CANCELLED'].includes(request?.error?.code ?? '')
+                      ? ('cancelled' as const)
+                      : request?.observation?.stall
+                        ? ('stall' as const)
+                        : request?.observation?.cause === 'check-failed'
+                          ? ('check-failure-or-flake' as const)
+                          : ('other' as const),
                 at: attempt.at,
                 inputs: [input],
                 status,

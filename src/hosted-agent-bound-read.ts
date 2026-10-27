@@ -1,3 +1,4 @@
+import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,7 +18,9 @@ export async function boundLandingStatus(
   native: () => Promise<{ revision: number; result: unknown }>,
   supplied?: HostedAgentTransport,
 ) {
-  const { operationId } = z.object({ operationId: z.uuid() }).parse(input);
+  const parsed = z.object({ operationId: z.uuid() }).safeParse(input);
+  invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid landing arguments. Use landing {"operationId":"UUID"}.');
+  const { operationId } = parsed.data;
   const path = join(store.directory, 'hosted-submissions', `${operationId}.json`);
   if (!existsSync(path)) return native();
   let retained = JSON.parse(readFileSync(path, 'utf8')) as RetainedBoundSubmission;
@@ -39,7 +42,11 @@ export async function boundLandingStatus(
       nextVersion: 0,
     });
     const parsed = z.object({ submission: hostedLandingStateSchema }).parse(page);
-    submissions.push(parsed.submission);
+    const advice = (await enrichHostedQueueAhead(transport, page)) as { queueAhead?: unknown };
+    submissions.push({
+      ...parsed.submission,
+      ...(advice.queueAhead ? { queueAhead: advice.queueAhead } : {}),
+    });
   }
   const terminal =
     submissions.length > 0 && submissions.every(state => state.observation.state !== 'pending');

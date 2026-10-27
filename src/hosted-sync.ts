@@ -29,6 +29,7 @@ export const syncRequestSchema = z.discriminatedUnion('kind', [
       ...common,
       ...lane,
       kind: z.literal('sync'),
+      ontoMain: z.boolean().optional(),
       target: z.discriminatedUnion('kind', [
         z
           .object({ kind: z.literal('main'), head: object.shape.sha256, receiptId: z.string().min(1) })
@@ -42,7 +43,15 @@ export const syncRequestSchema = z.discriminatedUnion('kind', [
 ]);
 export const syncWorkSchema = z.discriminatedUnion('mode', [
   z.object({ mode: z.literal('revert'), receiptId: z.uuid(), previous: source, accepted: source }).strict(),
-  z.object({ mode: z.literal('sync'), left: source, right: source }).strict(),
+  z
+    .object({
+      mode: z.literal('sync'),
+      left: source,
+      right: source,
+      stackBase: source.optional(),
+      stackAfter: hostedLaneSelectionSchema.shape.stack,
+    })
+    .strict(),
   z.object({ mode: z.literal('resolution'), candidateId: z.uuid(), conflicts: object }).strict(),
   z.object({ mode: z.literal('resolve'), left: source, resolution: resolutionSchema }).strict(),
 ]);

@@ -194,6 +194,8 @@ export async function selectReleaseOwner(
       }
     }
     for (const worker of state.retired) {
+      // Older plans may include an in-flight check controller; preserve it on resume too.
+      if (!oldReleaseWorker(journal.request.runtimeDirectory, installed, worker)) continue;
       const live = () => deps.processes().some(current => sameReleaseProcess(current, worker));
       const send = (signal: 'SIGTERM' | 'SIGKILL') => {
         if (!live() || !oldReleaseWorker(journal.request.runtimeDirectory, installed, worker)) return;

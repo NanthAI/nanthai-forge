@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex', 'schema']) {
+for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex', 'schema', 'documents', 'package']) {
   test(`synthetic static verification preserves ${failure} outcome with queued builds`, t => {
     const root = mkdtempSync(join(tmpdir(), 'forge-verify-static-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -22,21 +22,42 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex', 'schema']
       write(`scripts/${name}`, readFileSync(`scripts/${name}`));
     write('scripts/check-schema-compat.mjs', `process.exit(${failure === 'schema' ? 9 : 0});`);
     write(
+      'scripts/check-documents.mjs',
+      `import { writeFileSync } from 'node:fs'; writeFileSync('documents-checked', ''); process.exit(${failure === 'documents' ? 8 : 0});`,
+    );
+    write(
       'scripts/oxc.mjs',
       `import { appendFileSync } from 'node:fs'; appendFileSync('oxc.jsonl', JSON.stringify(process.argv.slice(2)) + '\\n');`,
     );
     write('tests/worker-budget.mjs', 'export const workerBudget = () => 2;');
-    write('scripts/test-files.mjs', 'export const fileTimeout = () => 1000;');
+    write(
+      'scripts/test-files.mjs',
+      `import { writeFileSync } from 'node:fs';
+      export const fileTimeout = () => 1000;
+      if (process.argv[1].endsWith('test-files.mjs')) writeFileSync('tests-ran', '');`,
+    );
+    write(
+      'scripts/package-smoke.mjs',
+      `import assert from 'node:assert/strict';
+      import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+      for (const path of ['core-built', 'tests-ran', 'documents-checked']) assert.ok(existsSync(path), path);
+      for (const [name, count] of [['native', 3], ['legacy', 2], ['oxc', 2]])
+        assert.equal(readFileSync(name + '.jsonl', 'utf8').trim().split('\\n').length, count);
+      writeFileSync('package-checked', '');
+      process.exit(${failure === 'package' ? 7 : 0});`,
+    );
     write(
       'package.json',
       JSON.stringify({
         type: 'module',
         scripts: Object.fromEntries(
-          ['build:core', 'build:web', 'check', 'format:check', 'lint'].map(name => [
+          ['build:core', 'build:web', 'check', 'format:check', 'lint', 'smoke:package'].map(name => [
             name,
             name === 'build:core'
               ? "node -e \"require('node:fs').writeFileSync('core-built', '')\""
-              : 'node -e "process.exit(0)"',
+              : name === 'smoke:package'
+                ? 'node scripts/package-smoke.mjs'
+                : 'node -e "process.exit(0)"',
           ]),
         ),
       }),
@@ -73,11 +94,19 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex', 'schema']
     assert.equal(result.error, undefined);
     assert.equal(
       result.status,
-      failure === 'none' ? 0 : ['ordinary', 'convex', 'schema'].includes(failure) ? 1 : 137,
+      failure === 'none' ? 0 : ['exit', 'signal'].includes(failure) ? 137 : 1,
       result.stdout + result.stderr,
     );
     assert.match(result.stdout, /\[build:core\] ok/);
     assert.match(result.stdout, /\[test\] ok/);
+    assert.match(result.stdout, new RegExp(`\\[documents\\] ${failure === 'documents' ? 'FAILED' : 'ok'}`));
+    if (['none', 'package'].includes(failure)) {
+      assert.match(
+        result.stdout,
+        new RegExp(`\\[smoke:package\\] ${failure === 'package' ? 'FAILED' : 'ok'}`),
+      );
+      assert.equal(readFileSync(join(root, 'package-checked'), 'utf8'), '');
+    } else assert.doesNotMatch(result.stdout, /\[smoke:package\]/);
     assert.match(
       result.stdout,
       new RegExp(`\\[schema compatibility\\] ${failure === 'schema' ? 'FAILED' : 'ok'}`),
@@ -94,7 +123,9 @@ for (const failure of ['none', 'exit', 'signal', 'ordinary', 'convex', 'schema']
     ]);
     assert.match(
       result.stdout,
-      new RegExp(`\\[typecheck:convex:tsc\\] ${['none', 'schema'].includes(failure) ? 'ok' : 'FAILED'}`),
+      new RegExp(
+        `\\[typecheck:convex:tsc\\] ${['none', 'schema', 'documents', 'package'].includes(failure) ? 'ok' : 'FAILED'}`,
+      ),
     );
     assert.deepEqual(
       calls('native').map(args => args.slice(0, 2)),

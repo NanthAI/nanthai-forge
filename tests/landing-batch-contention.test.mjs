@@ -9,6 +9,8 @@ import { prepareRunRegistration } from '../dist/work-run-preparation.js';
 import { historyFixture } from './landing-starvation-fixture.mjs';
 import { batchEdit } from '../dist/landing-batch-store.js';
 import { prepareLandingRecords } from '../dist/landing-records-index.js';
+import { ForgeError } from '../dist/errors.js';
+import { withWorkLockOptions } from '../dist/work-lock.js';
 
 test('selected batch edits progress through continuously committed peer writes, including the locked third attempt', async t => {
   let child;
@@ -118,6 +120,38 @@ test('selected batch edits progress through continuously committed peer writes, 
   t.diagnostic(
     `550 entries / 450 batches; 3 attempts, third selected under lock; progress ${elapsed.toFixed(2)} ms`,
   );
+});
+
+test('a slow second stale preparation still reaches selected FIFO admission', async t => {
+  const f = await historyFixture(t, { journals: false });
+  const locked = f.store.lockedAsync.bind(f.store);
+  let admissions = 0;
+  t.mock.method(f.store, 'lockedAsync', async (task, options) => {
+    if (++admissions <= 2) {
+      // Model peer commits invalidating both optimistic preparations. The
+      // second CAS reply arrives after the phase's contention window, so a
+      // further retry cannot be relied on to reach the locked fallback.
+      if (admissions === 2) await new Promise(resolve => setTimeout(resolve, 25));
+      throw new ForgeError('WORK_STALE', 'Synthetic peer publication.');
+    }
+    return locked(task, options);
+  });
+  t.mock.method(f.store, 'load', () => assert.fail('Fallback must retain selected-record reads'));
+  await withWorkLockOptions({ waitMs: 10 }, () =>
+    batchEdit(
+      f.work,
+      f.batch.id,
+      data => {
+        data.landingBatches.find(batch => batch.id === f.batch.id).timing.selectedAt =
+          '2026-10-27T06:00:00.000Z';
+      },
+      undefined,
+      undefined,
+      { selectedOnly: true },
+    ),
+  );
+  assert.equal(admissions, 3);
+  assert.equal(f.store.select('landingBatches', f.batch.id).timing.selectedAt, '2026-10-27T06:00:00.000Z');
 });
 
 test('main audit selection reads only selected records while holding the owner lock', async t => {

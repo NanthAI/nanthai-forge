@@ -25,6 +25,7 @@ export type Submission = {
   cause: SubmissionCause | null;
   terminal: boolean;
   complete: boolean;
+  queueAhead?: import('./queue-ahead-preview.js').QueueAheadPreview;
   diagnosis?: LandingDiagnosisReport;
   stall?: import('./landing-stall.js').LandingStall;
   message?: string;

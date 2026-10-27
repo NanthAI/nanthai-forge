@@ -131,7 +131,11 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
       head: result.state.sha256,
       state: 'active',
       authorityEpoch,
+      ...(state.work.mode === 'sync' && state.work.stackAfter ? { stack: state.work.stackAfter } : {}),
       resolution: {
+        ...(state.work.mode === 'sync' && state.work.stackBase
+          ? { mergeBase: state.work.stackBase.object.sha256 }
+          : {}),
         candidateId: request.kind === 'resolution' ? request.candidateId : null,
         conflicts: result.conflicts,
         left: result.left,
@@ -165,9 +169,11 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
   } else {
     invariant(lane, 'SOURCE_JOB_INVALID', 'A sync needs its original Lane.');
     const changed = lane.head !== result.state.sha256;
-    if (changed) {
+    const stack = state.work.mode === 'sync' ? state.work.stackAfter : undefined;
+    if (changed || (stack && canonicalPayload(stack) !== canonicalPayload(lane.stack))) {
       lane = {
         ...lane,
+        ...(stack ? { stack } : {}),
         head: result.state.sha256,
         version: lane.version + 1,
         sourceVersion: lane.sourceVersion + 1,
@@ -193,6 +199,7 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
     sourceVersion: lane.sourceVersion,
     lifecycleVersion: lane.lifecycleVersion,
     state: lane.state,
+    ...(lane.stack ? { stack: lane.stack } : {}),
     base: lane.base,
     authority: sourceAuthority((await ctx.db.get(input.projectId))!),
   });

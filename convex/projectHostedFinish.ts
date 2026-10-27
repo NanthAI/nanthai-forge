@@ -1,3 +1,4 @@
+import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
@@ -55,6 +56,7 @@ export const status = query({
         version: state.version,
         unchanged: input.version === state.version,
         submission: state,
+        queueAheadSelection: await hostedQueueAheadSelection(ctx, state),
         pendingAttempt: value.pending,
         selection: { inputs: value.source.inputs, dependencies: value.source.dependencies },
       });
