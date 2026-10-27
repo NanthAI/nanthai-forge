@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { checkArgs } from './convex-args.mjs';
 import { digest } from '../dist/hash.js';
 import { workSchema } from '../dist/work-types.js';
 import { buildWorkRecords } from '../dist/work-exchange-records.js';
@@ -174,13 +175,17 @@ export function callsFixture(scale = 1) {
     runAction: async (ref, args) => {
       const name = getFunctionName(ref);
       metrics.calls[name] = (metrics.calls[name] ?? 0) + 1;
-      if (name === 'projectWorkIndexBuildDiffstats:compare')
-        return buildDiffstats.compare._handler(ctx, args);
-      if (name === 'projectWorkIndexBuildStates:batch') return states.batch._handler(ctx, args);
-      if (name === 'projectWorkAncestry:changedStates') return ancestry.changedStates._handler(ctx, args);
-      if (name === 'projectWorkAncestry:stateBatch') return ancestry.stateBatch._handler(ctx, args);
-      if (name === 'projectDiffstats:compare') return diffstats.compare._handler(ctx, args);
-      throw new Error(`Unexpected action ${name}`);
+      const action = {
+        'projectWorkIndexBuildDiffstats:compare': buildDiffstats.compare,
+        'projectWorkIndexBuildStates:batch': states.batch,
+        'projectWorkAncestry:changedStates': ancestry.changedStates,
+        'projectWorkAncestry:stateBatch': ancestry.stateBatch,
+        'projectDiffstats:compare': diffstats.compare,
+      }[name];
+      if (!action) throw new Error(`Unexpected action ${name}`);
+      // Convex rejects arguments its validator does not describe; so does this fake.
+      checkArgs(action, args, name);
+      return action._handler(ctx, args);
     },
     storage: {
       getMetadata: async key => ({ sha256: key, size: sizes.get(key) }),

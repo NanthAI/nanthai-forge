@@ -13,8 +13,11 @@ export function buildContext(ctx: ActionCtx, selected: Selected, exchange: Excha
       'records' in f ? [[f.name, new Map(f.records.map(p => [p.key, p]))] as const] : [],
     ),
   );
+  // Pins cross Convex argument validators that accept exactly { sha256, size }.
   const pins = new Map(
-    exchange.manifest.files.filter(p => p.path === `objects/${p.sha256}`).map(p => [p.sha256, p]),
+    exchange.manifest.files
+      .filter(p => p.path === `objects/${p.sha256}`)
+      .map(p => [p.sha256, { sha256: p.sha256, size: p.size }]),
   );
   const reader = exchangeObjectReader(ctx, false, 0);
   const bodies = new Map<string, Buffer>();

@@ -14,6 +14,8 @@ test('all post-parent index phases fit the dogfood call and action memory budget
     },
   );
   const result = JSON.parse(stdout.match(/PHASE_RESULT (.+)/)[1]);
+  // A rejected batch silently falls back to per-item calls; the 2026-10-27 reseed ran 5x hot.
+  assert.equal(result.rejected, 0, 'every batched action call passes its Convex argument validator');
   assert(result.remaining.calls <= 15000, JSON.stringify(result));
   assert(result.maxSourceWindowBytes <= 2 * 1024 * 1024, JSON.stringify(result));
   assert(result.maxRpcBytes < 600000);

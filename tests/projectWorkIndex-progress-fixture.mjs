@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { checkArgs } from './convex-args.mjs';
 import { digest } from '../dist/hash.js';
 import { workSchema } from '../dist/work-types.js';
 import { buildWorkRecords } from '../dist/work-exchange-records.js';
@@ -394,6 +395,7 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
   };
   const metrics = {
     calls: {},
+    rejected: 0,
     phases: {},
     summaryCalls: { lanes: 0, views: 0, runs: 0 },
     steps: 0,
@@ -508,6 +510,19 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     const name = getFunctionName(ref);
     metrics.calls[name] = (metrics.calls[name] ?? 0) + 1;
     metric('calls');
+    const action = {
+      'projectWorkIndexBuildStates:batch': buildStates.batch,
+      'projectWorkIndexBuildStates:tree': buildStates.tree,
+      'projectWorkIndexBuildDiffstats:compare': buildDiffstats.compare,
+      'projectWorkAncestry:changedStates': ancestry.changedStates,
+      'projectWorkAncestry:stateBatch': ancestry.stateBatch,
+    }[name];
+    try {
+      if (action) checkArgs(action, args, name);
+    } catch (error) {
+      metrics.rejected++;
+      throw error;
+    }
     if (options.treeFiles) {
       if (name === 'projectWorkIndexBuildStates:batch') return buildStates.batch._handler(s.ctx, args);
       if (name === 'projectWorkIndexBuildStates:tree') return buildStates.tree._handler(s.ctx, args);
