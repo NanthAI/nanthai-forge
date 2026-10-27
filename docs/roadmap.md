@@ -103,13 +103,14 @@ Goal: open Forge to public use with a free core and sustainable hosting.
   - **Migration collisions**: two Lanes adding the same migration number, or a migration that uses a column another entry removes, are reported at compose time with the fix.
   - **Symbol drift**: an entry ahead that renames or removes a declaration your Lane newly uses is reported from the existing declaration index, before the check.
   - **Opt-in early check**: on request, run the affected tests on your Lane plus the entries ahead before submitting, within a stated budget. Off by default.
-  - **Flake quarantine**: a test that fails and then passes on the same Candidate is quarantined in a visible list, stops blocking unrelated landings and opens a fix slice.
+  - **Flake quarantine**: done early, in Phase 5 (2026-10-27), on every check provider.
   - **Selection blind spots**: tests that depend on data or configuration rather than imports get explicit mappings; while work is active, `main` runs a periodic combined full check, never while idle. Every miss is recorded as friction.
   - **Release ordering**: a release refuses mixed installs and checks old-client/new-backend compatibility in both directions before switching.
   - **Stacked Lanes**: when the Lane underneath changes, is abandoned or fails to land, dependents restack or get one clear notice.
   - **Breakage after landing**: a failing `main` audit finds the culprit, reverts it while keeping its Lane, and tells queued entries.
   - **Long-lived drift**: a Lane far behind `main` on paths others keep changing gets a nudge naming those landings.
   - **Queue order**: priority and reordering, with fairness between agents.
+- **Landing page redesign (tentative)**: the 2026-10-27 landing-page-skill trial produced a mockup with on-page proof, how it works, a FAQ, a final call to action and corrected title, description and repository links. Accept it as a tentative direction only. Before public beta, assess critically whether it is better overall than today's page, and make the page striking, not only complete. Keep `DESIGN.md` as the visual authority and never invent testimonials or logos.
 - **Later R2 slices**: browser bytes, imports, zones, agents and proposals, backfill, purge and backups. See the [R2 storage plan](r2-storage-plan.md). Retention or deletion changes still need an owner decision.
 
 ## Workflow friction
