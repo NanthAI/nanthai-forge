@@ -12,7 +12,7 @@ import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
-import { readHostState, updateHostState } from '../dist/host-binding.js';
+import { readHostState, updateHostState, abandonPendingHost } from '../dist/host-binding.js';
 import { writeAuth } from '../dist/auth-store.js';
 import { coordinationClient } from '../dist/coordination-client.js';
 import { deleteHostedProject, parseDeleteProjectOptions } from '../dist/host-delete.js';
@@ -510,4 +510,77 @@ test('CLI observation backs off modestly and stops at ten observations', async t
   );
   assert.deepEqual(delays, [2000, 4000, 8000, 10000, 10000, 10000, 10000, 10000, 10000]);
   assert.equal(f.calls.length, 11, 'one lookup plus ten finite status reads');
+});
+
+function pendingHost(projectId = 'project', selectedDeployment = deployment) {
+  return {
+    operationId: randomUUID(),
+    deployment: selectedDeployment,
+    name: 'Synthetic',
+    visibility: 'private',
+    revision: 1,
+    pushId: randomUUID(),
+    initializeId: randomUUID(),
+    projectId,
+    projectUrl: 'https://forge.example/owner/synthetic',
+  };
+}
+test('deleting the pending host project clears only matching deployment/project under the binding lock and keeps a receipt', async t => {
+  for (const match of [true, false, 'other-deployment']) {
+    const f = setup(t),
+      pending = pendingHost(
+        match === false ? 'other-project' : 'project',
+        match === 'other-deployment' ? 'https://other.convex.cloud' : deployment,
+      );
+    updateHostState(f.store, state => {
+      state.hosting = pending;
+    });
+    const result = await deleteHostedProject(f.root, f.options, { client: f.client });
+    const state = readHostState(f.store);
+    assert.equal(result.pendingHostCleared, match === true);
+    if (match === true) {
+      assert.equal(state.hosting, undefined);
+      assert.deepEqual(state.hostingReceipts[0].pending, pending);
+      assert.equal(state.hostingReceipts[0].deletionOperationId, result.operationId);
+      assert.equal(state.hostingReceipts[0].reason, 'project-deleted');
+    } else assert.deepEqual(state.hosting, pending);
+  }
+});
+test('confirmed abandon is local, replayable and cannot clear a replacement operation', async t => {
+  const f = setup(t, { bound: true }),
+    pending = pendingHost('half-seeded');
+  updateHostState(f.store, state => {
+    state.hosting = pending;
+  });
+  const binding = readHostState(f.store).binding;
+  assert.throws(
+    () => abandonPendingHost(f.store, pending.operationId, 'wrong'),
+    code('HOST_ABANDON_CONFIRM_MISMATCH'),
+  );
+  assert.deepEqual(readHostState(f.store).hosting, pending);
+  const result = abandonPendingHost(f.store, pending.operationId, pending.operationId);
+  assert.equal(result.abandoned, true);
+  assert.deepEqual(readHostState(f.store).binding, binding);
+  assert.equal(readHostState(f.store).hosting, undefined);
+  assert.deepEqual(abandonPendingHost(f.store, pending.operationId, pending.operationId), result);
+  const replacement = pendingHost('new-project');
+  updateHostState(f.store, state => {
+    state.hosting = replacement;
+  });
+  assert.throws(
+    () => abandonPendingHost(f.store, pending.operationId, pending.operationId),
+    code('WORK_OPERATION_CHANGED'),
+  );
+  assert.deepEqual(readHostState(f.store).hosting, replacement);
+  assert.equal(f.calls.length, 0);
+});
+test('confirmation mismatch says where the slug is without leaking another project', async t => {
+  const f = setup(t);
+  await assert.rejects(
+    deleteHostedProject(f.root, { ...f.options, confirm: 'wrong' }, { client: f.client }),
+    error =>
+      error.code === 'HOST_DELETE_CONFIRM_MISMATCH' &&
+      /last segment of the project URL/.test(error.message) &&
+      !error.message.includes('Synthetic'),
+  );
 });

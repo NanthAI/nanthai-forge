@@ -406,8 +406,33 @@ test('hosted cleanup dry-run/apply deletes Convex and R2 log objects, preserves 
     deletes.push(String(url));
     return new Response(null, { status: 204 });
   };
-  const operationId = randomUUID(),
-    clean = modules.projectCheckLogCleanup.clean;
+  let operationId = randomUUID();
+  const clean = {
+    _handler: async (ctx, input) => {
+      let result;
+      do {
+        result = JSON.parse(await modules.projectCheckLogCleanup.clean._handler(ctx, input));
+      } while (result.pending);
+      if (!input.apply)
+        for (const part of ['logs', 'shared', 'archives', 'hostedOutputs', 'digests']) {
+          result[part] = [];
+          let cursor = null;
+          do {
+            const page = JSON.parse(
+              await modules.projectCheckLogCleanupStore.review._handler(ctx, {
+                ...input,
+                part,
+                cursor,
+                planDigest: result.planDigest,
+              }),
+            );
+            for (const row of page.page) result[part].push(...JSON.parse(row.value));
+            cursor = page.isDone ? null : page.continueCursor;
+          } while (cursor);
+        }
+      return JSON.stringify(result);
+    },
+  };
   let dry = JSON.parse(await clean._handler(s.ctx, { projectId: 'project', operationId }));
   const { saveObject } = await import(moduleUrl('../convex/projectHostedSaveStore.ts'));
   await saveObject(s.ctx, 'project', providerPins[0]);
@@ -419,9 +444,10 @@ test('hosted cleanup dry-run/apply deletes Convex and R2 log objects, preserves 
       apply: true,
       expectedPlan: dry.planDigest,
     }),
-    /EVIDENCE_CHANGED|exact reviewed cleanup plan/,
+    /WORK_STALE|Project changed/,
   );
   assert(logRow.storageId);
+  operationId = randomUUID();
   dry = JSON.parse(await clean._handler(s.ctx, { projectId: 'project', operationId }));
   assert.equal(dry.objects, 1);
   assert(dry.shared.includes(providerPins[0].sha256));

@@ -111,6 +111,16 @@ const schema = z.object({
     })
     .optional(),
   hosting: hosting.optional(),
+  hostingReceipts: z
+    .array(
+      z.object({
+        pending: hosting,
+        reason: z.enum(['abandoned', 'project-deleted']),
+        at: z.string(),
+        deletionOperationId: z.string().optional(),
+      }),
+    )
+    .optional(),
   pulls: z.record(z.string(), z.uuid()).optional(),
   push: push.optional(),
   pendingPushes: z.array(push).optional(),
@@ -236,4 +246,53 @@ export function presenceRevision(store: WorkStore) {
   } catch {
     return '';
   }
+}
+
+/** Called only under updateHostState's binding lock. Retain the original pins
+ * so discarding local resume state never erases evidence of remote creation. */
+export function retirePendingHost(
+  state: HostState,
+  reason: 'abandoned' | 'project-deleted',
+  deletionOperationId?: string,
+) {
+  invariant(state.hosting, 'HOST_NOT_PENDING', 'There is no pending hosting operation.');
+  const receipt = {
+    pending: structuredClone(state.hosting),
+    reason,
+    at: new Date().toISOString(),
+    ...(deletionOperationId ? { deletionOperationId } : {}),
+  };
+  (state.hostingReceipts ??= []).push(receipt);
+  delete state.hosting;
+  return receipt;
+}
+export function abandonPendingHost(store: WorkStore, operationId: string, confirm: string) {
+  invariant(
+    operationId === confirm,
+    'HOST_ABANDON_CONFIRM_MISMATCH',
+    'Use --confirm with the pending operation UUID shown by nforge host ROOT --status.',
+  );
+  return updateHostState(store, state => {
+    if (!state.hosting) {
+      const prior = state.hostingReceipts?.find(
+        r => r.reason === 'abandoned' && r.pending.operationId === operationId,
+      );
+      invariant(prior, 'HOST_NOT_PENDING', 'There is no matching pending hosting operation.');
+      return {
+        ...prior,
+        abandoned: true,
+        message: 'Pending hosting operation abandoned; no hosted project was deleted.',
+      };
+    }
+    invariant(
+      state.hosting.operationId === operationId,
+      'WORK_OPERATION_CHANGED',
+      'The pending hosting operation changed. Read nforge host ROOT --status.',
+    );
+    return {
+      ...retirePendingHost(state, 'abandoned'),
+      abandoned: true,
+      message: 'Pending hosting operation abandoned; no hosted project was deleted.',
+    };
+  });
 }

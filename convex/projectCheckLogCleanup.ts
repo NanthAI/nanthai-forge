@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
-import { readLogCleanup, prepareLogCleanup } from './projectCheckLogCleanupLedger';
-import { purgeHostedLogStream } from './projectHostedLogCleanup';
+import { snapshotReader } from './projectCheckLogCleanupSnapshot';
+import { resumePlan, planStep } from './projectCheckLogCleanupPlan';
+import { stepRef, lookupRef } from './projectCheckLogCleanupTypes';
+import { cleanupStreamStep } from './projectCheckLogCleanupStream';
 import { hostedCheckRunSchema, hostedCheckTerminal } from '../src/hosted-check';
-import { v } from 'convex/values';
+import { v, ConvexError } from 'convex/values';
 import { action } from './cliServer';
 import { internal } from './_generated/api';
 import type { ActionCtx } from './_generated/server';
@@ -186,6 +188,8 @@ export async function planProjectCheckLogs(
     offset: 0,
   };
 }
+/** Each invocation advances at most twenty metadata steps or one deletion page.
+ * The caller continues immediately only while this requested operation is pending. */
 export const clean = action({
   args: {
     projectId: v.id('hostedProjects'),
@@ -200,55 +204,79 @@ export const clean = action({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in as this project owner to clean stored logs.');
       invariant(/^[0-9a-f-]{36}$/i.test(input.operationId), 'BAD_ARGUMENT', 'Use an original cleanup UUID.');
       const identity = { projectId: input.projectId, actor: user.subject, operationId: input.operationId };
-      const original = input.apply ? await readLogCleanup(ctx, identity) : null;
-      let state =
-        original?.phase === 'ready'
-          ? original
-          : await planProjectCheckLogs(ctx, input.projectId, user.subject);
-      const summary = () => ({
+      let state = await resumePlan(ctx, identity);
+      const started = Date.now(),
+        snapshot = snapshotReader(ctx, identity);
+      if (!input.apply) {
+        for (let steps = 0; state.phase !== 'ready' && steps < 20 && Date.now() - started < 5000; steps++)
+          state = await planStep(ctx, identity, state, snapshot);
+      } else {
+        invariant(
+          state.phase === 'ready' && input.expectedPlan === state.planDigest,
+          'EVIDENCE_CHANGED',
+          'Apply the exact reviewed cleanup plan.',
+        );
+        invariant(
+          !state.counts.archives,
+          'ARCHIVE_MIGRATION_REQUIRED',
+          'The cleanup client must convert the planned native archives before deleting stored log objects.',
+        );
+        if (state.outputOffset < state.counts.hostedOutputs) {
+          const body = await ctx.runQuery(lookupRef, {
+            ...identity,
+            part: 'hostedOutputs',
+            position: state.outputOffset,
+          });
+          invariant(body, 'NOT_FOUND', 'Original cleanup stream page is unavailable.');
+          const streams = JSON.parse(body);
+          const expected = JSON.stringify(state);
+          const writes = await cleanupStreamStep(ctx, identity, state, streams[0]);
+          state.step++;
+          state = JSON.parse(
+            await ctx.runMutation(stepRef, {
+              ...identity,
+              expected,
+              value: JSON.stringify(state),
+              nodes: '[]',
+              writes: JSON.stringify(writes),
+            }),
+          );
+        } else if (state.offset < state.counts.objects) {
+          const pending = JSON.parse(
+            await ctx.runMutation(internal.projectCheckLogCleanupStore.claim, {
+              ...identity,
+              offset: state.offset,
+            }),
+          );
+          if (pending.jobs.length) {
+            const config = r2Config();
+            for (const job of pending.jobs) await deleteR2Object(config, job.key);
+          }
+          state = JSON.parse(await ctx.runMutation(internal.projectCheckLogCleanupStore.complete, identity));
+        }
+      }
+      const pending =
+        state.phase !== 'ready' ||
+        (!!input.apply &&
+          (state.offset < state.counts.objects || state.outputOffset < state.counts.hostedOutputs));
+      return JSON.stringify({
         dryRun: !input.apply,
+        pending,
+        progress: JSON.stringify({
+          phase: state.phase,
+          step: state.step,
+          done: state.offset + state.outputOffset,
+        }),
         planDigest: state.planDigest,
-        logs: state.logs,
-        archives: state.archives,
-        shared: state.shared,
-        hostedOutputs: state.hostedOutputs,
-        objects: state.objects.length,
+        counts: state.counts,
+        objects: state.counts.objects,
         bytes: state.bytes,
         deleted: input.apply ? state.offset : 0,
-        complete: input.apply && state.offset === state.objects.length,
+        complete: !!input.apply && !pending,
+        actionMs: Date.now() - started,
       });
-      if (!input.apply) return JSON.stringify(summary());
-      invariant(
-        input.expectedPlan === state.planDigest,
-        'EVIDENCE_CHANGED',
-        'Apply the exact reviewed cleanup plan.',
-      );
-      invariant(
-        !state.archives.length,
-        'ARCHIVE_MIGRATION_REQUIRED',
-        'The cleanup client must convert the planned native archives before deleting stored log objects.',
-      );
-      state = await prepareLogCleanup(ctx, identity, state);
-      for (const stream of state.hostedOutputs ?? [])
-        await purgeHostedLogStream(ctx, { projectId: input.projectId, actor: user.subject, ...stream });
-      while (state.offset < state.objects.length) {
-        const pending = JSON.parse(
-          await ctx.runMutation(internal.projectCheckLogCleanupStore.claim, {
-            ...identity,
-            offset: state.offset,
-          }),
-        );
-        if (pending.jobs.length) {
-          const config = r2Config();
-          for (const job of pending.jobs) await deleteR2Object(config, job.key);
-        }
-        Object.assign(
-          state,
-          JSON.parse(await ctx.runMutation(internal.projectCheckLogCleanupStore.complete, identity)),
-        );
-      }
-      return JSON.stringify(summary());
     } catch (error) {
+      if (error instanceof ConvexError) throw error;
       return report(error);
     }
   },

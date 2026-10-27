@@ -11,18 +11,24 @@ const identity = {
   streamId: v.string(),
 };
 export const page = internalQuery({
-  args: { ...identity, cursor: v.union(v.string(), v.null()) },
+  args: {
+    ...identity,
+    cursor: v.union(v.string(), v.null()),
+    one: v.optional(v.boolean()),
+    expected: v.optional(v.string()),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     await activeOwnedProject(ctx, input.projectId, input.actor);
     const stream = await outputStream(ctx, input, input.streamId);
     invariant(stream, 'NOT_FOUND', 'Original output stream is unavailable.');
+    requireOriginal(stream, input.expected);
     const page = await ctx.db
       .query('projectHostedOutputChunks')
       .withIndex('by_project_and_run_and_stream_and_sequence', q =>
         q.eq('projectId', input.projectId).eq('runId', input.runId).eq('streamId', input.streamId),
       )
-      .paginate({ cursor: input.cursor, numItems: 50 });
+      .paginate({ cursor: input.cursor, numItems: input.one ? 1 : 50 });
     return JSON.stringify({ ...page, retired: stream.retired ?? false });
   },
 });
@@ -53,12 +59,20 @@ export const retained = internalQuery({
   },
 });
 export const summary = internalMutation({
-  args: { ...identity, position: v.number(), text: v.string(), final: v.boolean(), excerpt: v.string() },
+  args: {
+    ...identity,
+    position: v.number(),
+    text: v.string(),
+    final: v.boolean(),
+    excerpt: v.string(),
+    expected: v.optional(v.string()),
+  },
   returns: v.null(),
   handler: async (ctx, input) => {
     await activeOwnedProject(ctx, input.projectId, input.actor);
     const stream = await outputStream(ctx, input, input.streamId);
     invariant(stream, 'NOT_FOUND', 'Original output stream is unavailable.');
+    requireOriginal(stream, input.expected);
     if (stream.retired) return null;
     const existing = await ctx.db
       .query('projectHostedOutputSummaries')
@@ -88,3 +102,21 @@ export const summary = internalMutation({
     return null;
   },
 });
+
+function requireOriginal(
+  stream: { bytes: number; chunks: number; maxSequence: number; seal: string | null; descriptor: string },
+  expected?: string,
+) {
+  if (!expected) return;
+  invariant(
+    JSON.stringify({
+      bytes: stream.bytes,
+      chunks: stream.chunks,
+      maxSequence: stream.maxSequence,
+      seal: stream.seal,
+      descriptor: stream.descriptor,
+    }) === expected,
+    'EVIDENCE_CHANGED',
+    'Hosted output changed after cleanup planning; its bytes were preserved.',
+  );
+}

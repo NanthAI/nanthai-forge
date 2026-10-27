@@ -1,8 +1,8 @@
+import { projectGuard } from './projectCheckLogCleanupGuard';
 import { canonicalPayload } from '../src/hosted-source-operation';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { query } from './cliServer';
-import type { QueryCtx, MutationCtx } from './_generated/server';
 import { internalQuery, internalMutation } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
@@ -22,11 +22,12 @@ export const inventory = internalQuery({
       v.literal('check-runs'),
     ),
     cursor: v.union(v.string(), v.null()),
+    one: v.optional(v.boolean()),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, actor, kind, cursor }) => {
+  handler: async (ctx, { projectId, actor, kind, cursor, one }) => {
     const project = await activeOwnedProject(ctx, projectId, actor);
-    const options = { cursor, numItems: 50 };
+    const options = { cursor, numItems: one ? 1 : 50 };
     const page =
       kind === 'backups'
         ? await ctx.db
@@ -60,21 +61,8 @@ export const inventory = internalQuery({
     return JSON.stringify({ ...page, guard: await projectGuard(ctx, project) });
   },
 });
-export async function projectGuard(ctx: QueryCtx | MutationCtx, project: Doc<'hostedProjects'>) {
-  const [pin] = await ctx.db
-    .query('projectCheckLogSourcePins')
-    .withIndex('by_project', q => q.eq('projectId', project._id))
-    .order('desc')
-    .take(1);
-  return JSON.stringify([
-    pin?._id ?? null,
-    project.revision,
-    project.currentBackup,
-    project.work,
-    project.sourceAuthority,
-    project.autonomyPolicy,
-  ]);
-}
+export { projectGuard } from './projectCheckLogCleanupGuard';
+
 const identity = { ...address, operationId: v.string() };
 export const operation = internalQuery({
   args: identity,
@@ -296,3 +284,55 @@ export const archive = query({
     });
   },
 });
+
+/** Review only persisted plan pages, with fresh current owner authorization. */
+export const review = query({
+  args: {
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    planDigest: v.string(),
+    part: v.union(
+      v.literal('logs'),
+      v.literal('shared'),
+      v.literal('archives'),
+      v.literal('hostedOutputs'),
+      v.literal('digests'),
+    ),
+    cursor: v.union(v.string(), v.null()),
+  },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    const user = await ctx.auth.getUserIdentity();
+    invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in as this project owner to review cleanup.');
+    await activeOwnedProject(ctx, input.projectId, user.subject);
+    const ledger = await ctx.db
+      .query('projectCheckLogCleanups')
+      .withIndex('by_project_and_operation', q =>
+        q.eq('projectId', input.projectId).eq('operationId', input.operationId),
+      )
+      .unique();
+    const state = ledger && JSON.parse(ledger.value);
+    invariant(
+      state?.phase === 'ready' && state.planDigest === input.planDigest,
+      'EVIDENCE_CHANGED',
+      'Review the exact completed cleanup plan.',
+    );
+    return JSON.stringify(
+      await ctx.db
+        .query('projectCheckLogCleanupPages')
+        .withIndex('by_project_and_operation_and_part_and_position', q =>
+          q.eq('projectId', input.projectId).eq('operationId', input.operationId).eq('part', input.part),
+        )
+        .paginate({ cursor: input.cursor, numItems: 25 }),
+    );
+  },
+});
+
+export {
+  read as planRead,
+  step as planStep,
+  begin as planBegin,
+  lookup as planLookup,
+  nodes as planNodes,
+  queue as planQueue,
+} from './projectCheckLogCleanupPlanStore';

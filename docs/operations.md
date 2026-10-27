@@ -79,8 +79,14 @@ Omit `--hosted` for owner-only cleanup. The plan and retry UUID remain private;
 apply keeps results, summaries, provider links and exact evidence hashes. Shared
 source/artifact hashes and recipe chunks are protected. Native archive copies
 are converted through the existing exact-manifest migration before retiring the
-old compressed container. A lost deletion reply resumes the same recorded
-operation; R2 keys rotate before deletion so replay cannot delete a replacement
+old compressed container. Hosted inventory and apply advance in finite action windows with persisted cursors,
+protection closures and reviewed pages. The CLI continues requested pending work;
+there is no idle timer or poller. The private plan file saves its UUID before the
+first action. Rerun an interrupted dry-run with the same file to resume it, then
+apply that file. Apply reads the retained server plan instead of recalculating a
+new deletion scope. If source changes, retain the receipt and prepare a fresh
+plan file. Structured server error codes and messages are shown by the CLI.
+A lost deletion reply resumes the same recorded operation; R2 keys rotate before deletion so replay cannot delete a replacement
 upload.
 
 ### Hosted backups and return
@@ -306,10 +312,10 @@ nforge host ROOT --delete-project PROJECT_ID --confirm PROJECT_SLUG
 nforge host ROOT --delete-project PROJECT_ID --confirm PROJECT_SLUG --deployment https://DEPLOYMENT.convex.cloud
 ```
 
-`--confirm` must exactly match the current project slug. ROOT can be an unbound
+`--confirm` must exactly match the current project slug, the last segment of its project URL. ROOT can be an unbound
 local Forge owner or a local owner bound to another project; the project ID and
 current owner authentication select the hosted project. Deployment selection uses
-`--deployment`, then ROOT's binding, `FORGE_DEPLOYMENT_URL`, then the saved login's
+`--deployment`, then ROOT's binding or pending hosting deployment, `FORGE_DEPLOYMENT_URL`, then the saved login's
 default deployment. To delete the project ROOT itself is bound to, explicitly add
 `--allow-bound-project`. The check compares both deployment and project ID.
 
@@ -339,7 +345,29 @@ reuse one tracked chain per project, and completed tombstones schedule no purge.
 Permanent removal deletes the project's hosted source, Work, backups, grants and
 project settings through the existing scheduled purge. Its minimal tombstone and
 cleanup receipts remain. Deletion is permanent; local recovery copies remain
-separate. The command retains the local owner, source and hosting binding.
+separate. The command retains the local owner, source and hosting binding. When the confirmed
+tombstone matches a pending hosting operation's project **and deployment**, it
+clears that pending resume state under the binding lock and retains its original
+pins and deletion-operation receipt. A pending operation for another project or
+deployment remains intact.
+
+To discard a pending host operation without deleting a hosted project:
+
+```sh
+nforge host ROOT --status
+nforge host ROOT --abandon-pending OPERATION_UUID --confirm OPERATION_UUID
+```
+
+Use the pending operation UUID shown by status. This local, replayable command
+retains a receipt and the existing binding; a changed pending operation requires
+its own UUID. Any half-created hosted project remains available for explicit
+project deletion. An in-flight host cannot overwrite the abandoned state.
+
+During hosting, an `EXCHANGE_UPLOAD_UNKNOWN` response reconciles the original
+object window and retries missing bytes in the same invocation, with at most four
+attempts and 250/500/1000 ms backoff. Stored peers are reused. Exhaustion reports
+the selected object pins and attempt count; rerunning the original host command
+continues the saved operation.
 After deliberately replacing the hosted project, `nforge host ROOT --new` creates
 and binds a replacement.
 

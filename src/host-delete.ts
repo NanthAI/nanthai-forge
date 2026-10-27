@@ -8,7 +8,7 @@ import { ConvexError } from 'convex/values';
 import { z } from 'zod';
 import { deploymentUrl, readAuth } from './auth-store.js';
 import { coordinationClient, type CoordinationTransport } from './coordination-client.js';
-import { readHostState } from './host-binding.js';
+import { readHostState, updateHostState, retirePendingHost } from './host-binding.js';
 import { WorkStore } from './work-store.js';
 import { ForgeError, invariant } from './errors.js';
 
@@ -49,10 +49,12 @@ export async function deleteHostedProject(
   },
 ) {
   const store = new WorkStore(root),
-    binding = readHostState(store).binding,
+    initial = readHostState(store),
+    binding = initial.binding,
     selected =
       options.deployment ??
       binding?.deployment ??
+      initial.hosting?.deployment ??
       process.env.FORGE_DEPLOYMENT_URL ??
       readAuth().defaultDeployment;
   invariant(selected, 'AUTH_REQUIRED', 'Run nforge login DEPLOYMENT_URL with cli scope first.');
@@ -109,7 +111,7 @@ export async function deleteHostedProject(
     invariant(
       project.slug && options.confirm === project.slug,
       'HOST_DELETE_CONFIRM_MISMATCH',
-      'Use --confirm with the exact project slug.',
+      'Use --confirm with the exact project slug: the last segment of the project URL.',
     );
     const request = store.locked(() => {
       if (existsSync(path)) {
@@ -139,16 +141,27 @@ export async function deleteHostedProject(
       saveRequest(saved);
       return saved;
     });
-    const result = () => ({
-      projectId: options.projectId,
-      deployment,
-      operationId: request.operationId,
-      expectedRevision: request.expectedRevision,
-      purgeComplete: true,
-      project,
-      message:
-        'Project removed permanently; hosted tombstone confirmed. The local owner and binding are retained.',
-    });
+    const result = () => {
+      const retired = updateHostState(store, state => {
+        if (
+          state.hosting?.projectId !== options.projectId ||
+          deploymentUrl(state.hosting.deployment) !== deployment
+        )
+          return null;
+        return retirePendingHost(state, 'project-deleted', request.operationId);
+      });
+      return {
+        projectId: options.projectId,
+        deployment,
+        operationId: request.operationId,
+        expectedRevision: request.expectedRevision,
+        purgeComplete: true,
+        pendingHostCleared: !!retired,
+        project,
+        message:
+          'Project removed permanently; hosted tombstone confirmed. The local owner and binding are retained.',
+      };
+    };
     if (project.removal === 'deleted') return result();
     options.onProgress?.(
       `Permanent removal ${request.operationId}: submitting; retry this command to reconcile an interrupted outcome.`,

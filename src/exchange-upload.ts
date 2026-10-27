@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import type { ContentPin } from './native-exchange.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { digest } from './hash.js';
 import { mapExchange } from './exchange-parallel.js';
 import { putTarget, type ExchangeBlobs, type PutTarget } from './exchange-blobs.js';
@@ -28,7 +29,11 @@ export function uploadPhysicalObjects(
   client: Pick<ConvexHttpClient, 'mutation' | 'query'> & Partial<Pick<ConvexHttpClient, 'action'>>,
   projectId: string,
   objects: Upload[],
-  options: { batchSize?: number; blobs?: Pick<ExchangeBlobs, 'put'> } = {},
+  options: {
+    batchSize?: number;
+    blobs?: Pick<ExchangeBlobs, 'put'>;
+    wait?: (ms: number) => Promise<unknown>;
+  } = {},
 ): Promise<{ uploadedObjects: number; uploadedBytes: number }> {
   const pending = [...objects];
   let active = 0,
@@ -38,16 +43,17 @@ export function uploadPhysicalObjects(
     uploadedObjects = 0,
     uploadedBytes = 0;
   return new Promise((resolve, reject) => {
-    async function transfer(window: Upload[]) {
+    async function transfer(window: Upload[], first = true) {
       // Hosting already negotiated missing pins for this page. Prepare the full
       // window authoritatively, avoiding a redundant discovery round trip. The
       // normal concurrent-exchange scheduler retains fresh-first discovery.
-      const hints: { selected: number[]; stored: number[] } = options.batchSize
-        ? { selected: window.map((_, index) => index), stored: [] }
-        : await client.query(query('projectObjects:available'), {
-            projectId,
-            objects: window.map(({ pin }) => ({ digest: pin.sha256, size: pin.size })),
-          });
+      const hints: { selected: number[]; stored: number[] } =
+        options.batchSize || !first
+          ? { selected: window.map((_, index) => index), stored: [] }
+          : await client.query(query('projectObjects:available'), {
+              projectId,
+              objects: window.map(({ pin }) => ({ digest: pin.sha256, size: pin.size })),
+            });
       const indexes = [...hints.stored, ...hints.selected],
         seen = new Set(indexes);
       invariant(
@@ -74,7 +80,7 @@ export function uploadPhysicalObjects(
       const selected = rows.map((row, index) => ({ ...row, index: hints.selected[index]! }));
       // Put deferred work behind other untouched windows. Returning it before
       // transfer also lets this caller fill its second slot with useful work.
-      pending.push(...window.filter((_, index) => !seen.has(index)));
+      if (first) pending.push(...window.filter((_, index) => !seen.has(index)));
       schedule();
       const attempts = await mapExchange(selected, options.batchSize ? 16 : 8, async row => {
         try {
@@ -117,7 +123,13 @@ export function uploadPhysicalObjects(
             })(),
           };
         } catch (reason) {
-          return { status: 'rejected' as const, reason };
+          return {
+            status: 'rejected' as const,
+            reason:
+              reason instanceof ForgeError && reason.code === 'EXCHANGE_UPLOAD_UNKNOWN'
+                ? new ForgeError(reason.code, `Object ${window[row.index]!.pin.sha256}: ${reason.message}`)
+                : reason,
+          };
         }
       });
       const completed = attempts.flatMap(result =>
@@ -139,6 +151,24 @@ export function uploadPhysicalObjects(
       const error = attempts.find(result => result.status === 'rejected');
       if (error?.status === 'rejected') throw error.reason;
     }
+    async function recover(window: Upload[]) {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await transfer(window, attempt === 1);
+        } catch (error) {
+          if (!(error instanceof ForgeError) || error.code !== 'EXCHANGE_UPLOAD_UNKNOWN') throw error;
+          if (attempt === 4)
+            throw new ForgeError(
+              error.code,
+              `${error.message} Upload failed after ${attempt} attempts; original objects: ${window.map(o => o.pin.sha256).join(', ')}. Retry the same operation to reconcile.`,
+            );
+          // Re-prepare the exact window: stored rows are skipped, Convex pending
+          // rows reconcile before another POST, and R2's create-only PUT replays
+          // the same key before commit verification. Successful peers stay saved.
+          await (options.wait ?? sleep)(250 * 2 ** (attempt - 1));
+        }
+      }
+    }
     function schedule() {
       while (!failed && pending.length && active < (options.batchSize ? 4 : 2)) {
         let count = 0,
@@ -153,7 +183,7 @@ export function uploadPhysicalObjects(
         const window = pending.splice(0, count);
         active++;
         reserved += cost;
-        void transfer(window)
+        void recover(window)
           .catch(error => {
             if (!failed) {
               failed = true;

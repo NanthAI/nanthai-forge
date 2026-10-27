@@ -5,6 +5,7 @@ import { getFunctionName } from 'convex/server';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { fixture, modules } from './project-exchange-fixture.mjs';
+import { ForgeError } from '../dist/errors.js';
 import { digest } from '../dist/hash.js';
 import { uploadPhysicalObjects } from '../dist/exchange-upload.js';
 import { ConvexExchange } from '../dist/exchange-client.js';
@@ -439,4 +440,74 @@ test('hosting batches 64 pins with bounded posts and exact once-only lazy reads'
     { batchSize: 64 },
   );
   assert.equal(e.stats().posts, 150);
+});
+
+test('unknown upload reconciles landed bytes and retries missing objects in the same hosting run', async t => {
+  const e = environment(t),
+    objects = data(3),
+    delays = [];
+  let calls = 0;
+  const blobs = {
+    put: async (target, bytes) => {
+      calls++;
+      if (calls === 1) {
+        await e.s.ctx.storage.store(new Blob([bytes], { type: target.contentType }));
+        throw new ForgeError('EXCHANGE_UPLOAD_UNKNOWN', 'Synthetic lost upload reply');
+      }
+      if (calls === 2) throw new ForgeError('EXCHANGE_UPLOAD_UNKNOWN', 'Synthetic missing upload');
+      const storageId = await e.s.ctx.storage.store(new Blob([bytes], { type: target.contentType }));
+      return { storageId };
+    },
+  };
+  await uploadPhysicalObjects(e.client, 'project', objects, {
+    batchSize: 100,
+    blobs,
+    wait: async ms => {
+      delays.push(ms);
+    },
+  });
+  assert.deepEqual(delays, [250]);
+  assert.equal(calls, 4, 'one landed unknown object reconciles; only the missing object uploads again');
+  assert.equal([...e.s.tables.projectObjects.values()].filter(r => r.storageId).length, 3);
+});
+test('unknown upload exhausts bounded attempts with pin and attempt count; deterministic errors do not retry', async t => {
+  const e = environment(t),
+    objects = data(1),
+    delays = [];
+  let calls = 0;
+  await assert.rejects(
+    uploadPhysicalObjects(e.client, 'project', objects, {
+      batchSize: 100,
+      blobs: {
+        put: async () => {
+          calls++;
+          throw new ForgeError('EXCHANGE_UPLOAD_UNKNOWN', 'Synthetic offline upload');
+        },
+      },
+      wait: async ms => {
+        delays.push(ms);
+      },
+    }),
+    error =>
+      error.code === 'EXCHANGE_UPLOAD_UNKNOWN' &&
+      error.message.includes(objects[0].pin.sha256) &&
+      error.message.includes('4 attempts'),
+  );
+  assert.equal(calls, 4);
+  assert.deepEqual(delays, [250, 500, 1000]);
+  calls = 0;
+  await assert.rejects(
+    uploadPhysicalObjects(e.client, 'project', objects, {
+      batchSize: 100,
+      blobs: {
+        put: async () => {
+          calls++;
+          throw new ForgeError('EXCHANGE_SOURCE_CHANGED', 'Changed');
+        },
+      },
+      wait: async () => assert.fail('deterministic rejection must not back off'),
+    }),
+    error => error.code === 'EXCHANGE_SOURCE_CHANGED',
+  );
+  assert.equal(calls, 1);
 });

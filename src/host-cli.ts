@@ -17,6 +17,7 @@ import { ForgeError, invariant } from './errors.js';
 import { continueLongAction } from './long-action.js';
 export const HOST_HELP = `nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--new] [--json] [--wait]
 nforge host ROOT --delete-project PROJECT_ID --confirm SLUG [--deployment URL] [--allow-bound-project] [--json]
+nforge host ROOT --abandon-pending OPERATION_UUID --confirm OPERATION_UUID
 nforge host ROOT --listen
 nforge host ROOT --status
 nforge host ROOT --cutover-file REQUEST.json --dry-run|--apply

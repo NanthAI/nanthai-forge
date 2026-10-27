@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WorkStore } from './work-store.js';
-import { readHostState, updateHostState } from './host-binding.js';
+import { readHostState, updateHostState, abandonPendingHost } from './host-binding.js';
 import { hostProject, HOST_HELP, type HostOptions } from './host-cli.js';
 import { formatHostProgress } from './host-progress.js';
 import { ForgeError, invariant } from './errors.js';
@@ -41,6 +41,14 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
   }
   if (flags.length === 2 && flags[0] === '--source-authority')
     return transitionBoundSourceAuthority(new WorkStore(root), JSON.parse(flags[1]!));
+  if (flags[0] === '--abandon-pending') {
+    invariant(
+      flags.length === 4 && flags[2] === '--confirm' && flags[1] && flags[3],
+      'BAD_ARGUMENT',
+      'Use --abandon-pending OPERATION_UUID --confirm OPERATION_UUID.',
+    );
+    return abandonPendingHost(new WorkStore(root), flags[1], flags[3]);
+  }
   if (flags.includes('--delete-project')) {
     const result = await deleteHostedProject(root, {
       ...parseDeleteProjectOptions(flags),

@@ -19,7 +19,9 @@ import { requireHostedBinding } from './host-binding.js';
 import { coordinationClient } from './coordination-client.js';
 import { ConvexExchange } from './exchange-client.js';
 import { migrateNativeArchive } from './native-exchange-migrate.js';
-import { invariant } from './errors.js';
+import { ConvexError } from 'convex/values';
+import { continueLongAction } from './long-action.js';
+import { ForgeError, invariant } from './errors.js';
 import { digest } from './hash.js';
 import { durableReplace } from './native-durability.js';
 
@@ -43,32 +45,92 @@ export async function checkLogsCli(args: string[]) {
   const store = new WorkStore(resolve(root));
   const binding = hosted ? requireHostedBinding(store) : undefined;
   const client = binding ? coordinationClient(binding.deployment, process.env.FORGE_AUTH_TOKEN) : undefined;
-  const run = async (operationId: string, apply = false, expectedPlan?: string) =>
-    JSON.parse(
-      (await client!.action(makeFunctionReference<'action'>('projectCheckLogCleanup:clean'), {
-        projectId: binding!.projectId,
-        operationId,
-        apply,
-        ...(expectedPlan ? { expectedPlan } : {}),
-      })) as string,
-    );
+  const run = async (operationId: string, apply = false, expectedPlan?: string) => {
+    try {
+      return await continueLongAction('Hosted check-log cleanup', operationId, async () =>
+        JSON.parse(
+          (await client!.action(makeFunctionReference<'action'>('projectCheckLogCleanup:clean'), {
+            projectId: binding!.projectId,
+            operationId,
+            apply,
+            ...(expectedPlan ? { expectedPlan } : {}),
+          })) as string,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof ConvexError && error.data && typeof error.data === 'object') {
+        const data = error.data as { code?: unknown; message?: unknown };
+        if (typeof data.code === 'string' && typeof data.message === 'string')
+          throw new ForgeError(data.code, data.message);
+      }
+      if (error instanceof ForgeError) throw error;
+      throw new ForgeError(
+        'HOSTED_CLEANUP_INTERRUPTED',
+        `Hosted check-log cleanup: ${error instanceof Error && error.message ? error.message : 'The server returned an error without a diagnostic message.'} Resume with the same --plan file.`,
+      );
+    }
+  };
+  const review = async (operationId: string, summary: Record<string, unknown>) => {
+    const result: Record<string, unknown> = { ...summary };
+    for (const part of ['logs', 'shared', 'archives', 'hostedOutputs', 'digests']) {
+      const rows: unknown[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = JSON.parse(
+          (await client!.query(makeFunctionReference<'query'>('projectCheckLogCleanupStore:review'), {
+            projectId: binding!.projectId,
+            operationId,
+            planDigest: summary.planDigest,
+            part,
+            cursor,
+          })) as string,
+        );
+        for (const row of page.page) rows.push(...JSON.parse(row.value));
+        cursor = page.isDone ? null : page.continueCursor;
+      } while (cursor);
+      result[part] = rows;
+    }
+    return result;
+  };
   const local = localCheckLogPlan(store, Date.now(), true);
   if (!apply) {
-    const operationId = randomUUID();
-    const plan = {
-      schema: 1,
-      root: store.root,
-      operationId,
-      local,
-      ...(binding ? { binding, hosted: await run(operationId) } : {}),
-    };
-    writeFileSync(resolve(planPath), JSON.stringify(plan, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
-    return { ...plan, dryRun: true, planPath: resolve(planPath) };
+    const path = resolve(planPath);
+    const plan = existsSync(path)
+      ? JSON.parse(readFileSync(path, 'utf8'))
+      : {
+          schema: 1,
+          root: store.root,
+          operationId: randomUUID(),
+          local,
+          status: 'planning',
+          ...(binding ? { binding } : {}),
+        };
+    invariant(
+      plan.root === store.root && JSON.stringify(plan.binding) === JSON.stringify(binding),
+      'WORK_OPERATION_CHANGED',
+      'Resume this plan with the original ROOT and hosted binding.',
+    );
+    if (plan.status === 'reviewed') return { ...plan, dryRun: true, planPath: path };
+    invariant(
+      plan.status === 'planning',
+      'EVIDENCE_CHANGED',
+      'This plan is already reviewed. Use --apply or choose a new plan file.',
+    );
+    // Keep the UUID even if the very first action reply is lost.
+    if (!existsSync(path))
+      writeFileSync(path, JSON.stringify(plan, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+    if (binding) plan.hosted = await review(plan.operationId, await run(plan.operationId));
+    plan.status = 'reviewed';
+    durableReplace(path, JSON.stringify(plan, null, 2) + '\n');
+    return { ...plan, dryRun: true, planPath: path };
   }
   invariant(existsSync(planPath), 'BAD_ARGUMENT', 'Run --dry-run with this --plan file before applying.');
   const plan = JSON.parse(readFileSync(planPath, 'utf8'));
   invariant(
-    plan.schema === 1 && plan.root === store.root && JSON.stringify(plan.binding) === JSON.stringify(binding),
+    plan.schema === 1 &&
+      plan.status !== 'planning' &&
+      plan.root === store.root &&
+      JSON.stringify(plan.binding) === JSON.stringify(binding),
     'WORK_OPERATION_CHANGED',
     'Use this owner and the original hosted selection from the dry-run plan.',
   );
@@ -162,7 +224,13 @@ export async function checkLogsCli(args: string[]) {
       }
     }
     if (plan.hosted.archives.length) {
-      const current = await run(plan.operationId);
+      // Conversion changes the source guard. Retain the original reviewed
+      // receipt and a separately resumable post-conversion plan operation.
+      if (!plan.migrationCleanupId) {
+        plan.migrationCleanupId = randomUUID();
+        durableReplace(resolve(planPath), JSON.stringify(plan, null, 2) + '\n');
+      }
+      const current = await review(plan.migrationCleanupId, await run(plan.migrationCleanupId));
       invariant(
         digest(JSON.stringify(current.logs)) === digest(JSON.stringify(plan.hosted.logs)),
         'WORK_STALE',
@@ -172,7 +240,9 @@ export async function checkLogsCli(args: string[]) {
       durableReplace(resolve(planPath), JSON.stringify(plan, null, 2) + '\n');
     }
   }
-  const remote = binding ? await run(plan.operationId, true, plan.hosted.planDigest) : undefined;
+  const remote = binding
+    ? await run(plan.migrationCleanupId ?? plan.operationId, true, plan.hosted.planDigest)
+    : undefined;
   return {
     operationId: plan.operationId,
     local: cleanLocalCheckLogs(store, { apply: true, providers: true, files: plan.local.files }),
