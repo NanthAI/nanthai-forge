@@ -195,3 +195,50 @@ test('a source checkpoint restores through metadata trees while preserving earli
   assert.equal(readFileSync(join(restored.path(lane.id), 'a.ts'), 'utf8'), 'export const a = 2;\n');
   assert.deepEqual(restored.load().lanes, f.w.store.load().lanes);
 });
+
+test('full metadata reads batch internal pages and leaves within the existing byte window', async t => {
+  const objects = new Map(),
+    parts = [],
+    pages = [];
+  const put = bytes => {
+    const pin = { sha256: digest(bytes), size: bytes.length };
+    objects.set(pin.sha256, bytes);
+    return pin;
+  };
+  const page = children => ({
+    ...put(Buffer.from(JSON.stringify({ kind: 'forge-byte-tree', schema: 1, children }))),
+    height: Math.max(...children.map(c => c.height)) + 1,
+    length: children.reduce((n, c) => n + c.length, 0),
+  });
+  for (let i = 0; i < 100; i++) {
+    const children = [];
+    for (let j = 0; j < 2; j++) {
+      const bytes = Buffer.alloc(4096);
+      bytes.writeUInt32LE(i * 2 + j);
+      parts.push(bytes);
+      children.push({ ...put(bytes), height: 0, length: bytes.length });
+    }
+    pages.push(page(children));
+  }
+  const bytes = Buffer.concat(parts),
+    tree = page(pages);
+  const windows = [];
+  assert.deepEqual(
+    await readByteTree(
+      { sha256: digest(bytes), size: bytes.length, tree },
+      async pins => {
+        windows.push(pins);
+        return reader(objects)(pins);
+      },
+      { batchSize: 100 },
+    ),
+    bytes,
+  );
+  assert.equal(windows.length, 4);
+  assert(
+    windows.every(pins => pins.length <= 100 && pins.reduce((n, p) => n + p.size, 0) <= 2 * 1024 * 1024),
+  );
+  t.diagnostic(
+    JSON.stringify({ metadataReadWindows: windows.length, oldDepthFirstWindows: 201, maxPins: 100 }),
+  );
+});

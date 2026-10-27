@@ -39,6 +39,7 @@ test('dogfood-shaped summaries bound function calls while retaining eager diffst
     );
     const totalCalls = Object.values(calls).reduce((n, v) => n + v, 0);
     assert.equal(summaries, f.data[name].length);
+    if (name === 'views') assert(totalCalls / summaries <= 5, JSON.stringify(calls));
     assert(totalCalls / summaries <= 10, `${name}: ${totalCalls / summaries} calls/summary`);
     output[name] = {
       records: summaries,

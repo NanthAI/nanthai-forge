@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { recipeObjects } from './projectObjectRecipe-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
@@ -143,9 +144,12 @@ export function callsFixture(scale = 1) {
   }
   const built = buildWorkRecords(data);
   for (const [key, bytes] of built.objects) objects.set(key, bytes);
-  const bytes = key => objects.get(key) ?? generators.get(key)?.();
   const sizes = new Map(files.map(p => [p.sha256, p.size]));
   for (const [key, value] of objects) sizes.set(key, value.length);
+  const stored = new Map(objects);
+  const storedGet = stored.get.bind(stored);
+  stored.get = key => storedGet(key) ?? generators.get(key)?.();
+  const recipeStore = recipeObjects(stored, sizes, new Set(heads));
   const metrics = { calls: {}, storageReads: 0, storageBytes: 0, maxPins: 0, maxBatchBytes: 0 };
   const ctx = {
     runQuery: async (ref, args) => {
@@ -157,12 +161,7 @@ export function callsFixture(scale = 1) {
           metrics.maxBatchBytes,
           args.digests.reduce((n, key) => n + sizes.get(key), 0),
         );
-        return args.digests.map(key => ({
-          projectId: 'project',
-          digest: key,
-          size: sizes.get(key),
-          storageId: key,
-        }));
+        return args.digests.map(key => recipeStore.row(key));
       }
       if (name === 'projectWorkIndexBuildStore:lookups') return args.keys.map(() => null);
       if (name === 'projectWorkIndexBuildStore:lookup') return null;
@@ -190,7 +189,7 @@ export function callsFixture(scale = 1) {
     storage: {
       getMetadata: async key => ({ sha256: key, size: sizes.get(key) }),
       get: async key => {
-        const value = bytes(key);
+        const value = stored.get(key);
         metrics.storageReads++;
         metrics.storageBytes += value.length;
         return new Blob([value]);

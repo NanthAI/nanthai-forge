@@ -290,13 +290,64 @@ export async function readByteTree(
   read: (pins: BytePin[]) => Promise<Buffer[]>,
   options: { batchSize?: number; onBytes?: ((done: number, total: number) => void) | undefined } = {},
 ) {
+  invariant(
+    recipe.tree.length === recipe.size,
+    'INVALID_WORK_BACKUP',
+    'Metadata recipe size differs from its tree.',
+  );
   const bytes = Buffer.allocUnsafe(recipe.size);
-  let offset = 0;
-  for await (const chunk of byteTreeChunks(recipe, read, options)) {
-    chunk.copy(bytes, offset);
-    offset += chunk.length;
-    options.onBytes?.(offset, recipe.size);
+  let pending = [{ ref: recipe.tree, offset: 0 }],
+    copied = 0;
+  while (pending.length) {
+    const current = pending;
+    pending = [];
+    for (let start = 0; start < current.length;) {
+      let end = start,
+        size = 0;
+      while (end < current.length && end - start < (options.batchSize ?? 8)) {
+        const ref = current[end]!.ref;
+        if (end > start && size + ref.size > 2 * 1024 * 1024) break;
+        size += ref.size;
+        end++;
+      }
+      const window = current.slice(start, end);
+      const loaded = await read(window.map(({ ref }) => ({ sha256: ref.sha256, size: ref.size })));
+      invariant(loaded.length === window.length, 'INVALID_WORK_BACKUP', 'Tree download omitted content.');
+      for (const [index, { ref, offset }] of window.entries()) {
+        const content = loaded[index]!;
+        invariant(
+          content.length === ref.size && digest(content) === ref.sha256,
+          'INVALID_WORK_BACKUP',
+          'Tree content differs from its selected digest.',
+        );
+        if (ref.height === 0) {
+          invariant(ref.length === ref.size, 'INVALID_WORK_BACKUP', 'Leaf size differs from logical bytes.');
+          content.copy(bytes, offset);
+          copied += content.length;
+          options.onBytes?.(copied, recipe.size);
+        } else {
+          const page = pageSchema.parse(JSON.parse(content.toString('utf8')));
+          invariant(
+            page.children.every(child => child.height < ref.height) &&
+              page.children.reduce((sum, child) => sum + child.length, 0) === ref.length,
+            'INVALID_WORK_BACKUP',
+            'Tree ancestry or logical length is invalid.',
+          );
+          let position = offset;
+          for (const child of page.children) {
+            pending.push({ ref: child, offset: position });
+            position += child.length;
+          }
+        }
+      }
+      start = end;
+    }
   }
+  invariant(
+    copied === recipe.size && digest(bytes) === recipe.sha256,
+    'INVALID_WORK_BACKUP',
+    'Reconstructed metadata differs from its original bytes.',
+  );
   return bytes;
 }
 export async function resolveExchangeRoot(

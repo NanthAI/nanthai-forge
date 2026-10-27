@@ -5,6 +5,7 @@ const sourcePins =
   process.argv[2] === 'action' ? JSON.parse(readFileSync(process.argv[3], 'utf8')) : undefined;
 const f = progressFixture(1, undefined, undefined, {
   treeFiles: 3000,
+  recipes: true,
   journal: 5000,
   objects: 32000,
   sourcePins,
@@ -69,6 +70,9 @@ console.log(
   `PHASE_RESULT ${JSON.stringify({
     ...f.metrics,
     remaining,
+    recipeBindings: f.recipeBindings.size,
+    viewCallsPerRecord: f.metrics.summaryCalls.views / f.data.views.length,
+    viewResolvesPerRecord: f.metrics.summaryResolves.views / f.data.views.length,
     counts: JSON.parse(generation.metadata).counts,
     elapsedMs: performance.now() - started,
     maxRssBytes: process.resourceUsage().maxRSS * 1024,

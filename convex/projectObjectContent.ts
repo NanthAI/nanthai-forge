@@ -10,14 +10,8 @@ import { digest } from '../src/hash';
 import { storageDigest } from './projectStorage';
 import { isR2Object } from './projectObjectFields';
 import { r2Config, presignGet } from './r2';
-import {
-  objectRecipeSchema,
-  objectChunkPageSchema,
-  readObjectRecipe,
-  objectChunkBytes,
-  objectChunkPageBytes,
-  type ChunkPin,
-} from '../src/object-chunks';
+import { readRecipeTrees } from './projectObjectTreeRead';
+import { objectRecipeSchema, objectChunkPageBytes, type ChunkPin } from '../src/object-chunks';
 
 /** Raw bytes live in Convex storage or a committed R2 object (not a recipe). */
 export const isRaw = (row: Doc<'projectObjects'>) => !!row.storageId || isR2Object(row);
@@ -84,43 +78,143 @@ export async function rawContent(ctx: ActionCtx, row: Doc<'projectObjects'>, pin
 }
 type RawReader = typeof rawContent;
 
-async function resolved(
-  ctx: ActionCtx,
-  projectId: Id<'hostedProjects'>,
-  actor: string,
-  pin: ChunkPin,
-  ancestors: ReadonlySet<string>,
-  raw: RawReader,
-): Promise<Buffer> {
-  const args = { projectId, actor, digests: [pin.sha256] };
-  const rows: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, args);
-  const bytes = await objectContent(ctx, rows[0]!, pin, actor, ancestors, raw);
-  await ctx.runQuery(internal.projectObjects.resolve, args);
-  return bytes;
+type Selected = { pin: ChunkPin; ancestors: ReadonlySet<string> };
+
+/** Only descriptors survive a window. A transition checks the prior window after IO
+ * and the next one before IO in the same bounded resolve when they fit. */
+function resolver(ctx: ActionCtx, projectId: Id<'hostedProjects'>, actor: string, raw: RawReader) {
+  let previous: ChunkPin[] = [];
+  const resolve = async (pins: ChunkPin[]) => {
+    const unique = [...new Map(pins.map(pin => [pin.sha256, pin])).values()];
+    const rows = new Map<string, Doc<'projectObjects'>>();
+    for (let start = 0; start < unique.length;) {
+      let end = start,
+        size = 0;
+      while (end < unique.length && end - start < 100) {
+        const next = unique[end]!.size;
+        if (end > start && size + next > objectChunkPageBytes) break;
+        size += next;
+        end++;
+      }
+      const window = unique.slice(start, end);
+      const found: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, {
+        projectId,
+        actor,
+        digests: window.map(pin => pin.sha256),
+      });
+      invariant(
+        found.length === window.length,
+        'INVALID_WORK_BACKUP',
+        'Stored content lookup omitted selected bytes.',
+      );
+      found.forEach(row => rows.set(row.digest, row));
+      start = end;
+    }
+    return rows;
+  };
+  return {
+    async read(selected: Selected[], consume: (bytes: Buffer, index: number) => void) {
+      for (let start = 0; start < selected.length;) {
+        let end = start,
+          size = 0;
+        while (end < selected.length && end - start < 100) {
+          const next = selected[end]!.pin.size;
+          if (end > start && size + next > objectChunkPageBytes) break;
+          size += next;
+          end++;
+        }
+        const window = selected.slice(start, end),
+          pins = window.map(item => item.pin);
+        const rows = await resolve([...previous, ...pins]);
+        const bytes = await objectContents(
+          ctx,
+          pins.map(pin => rows.get(pin.sha256)!),
+          pins,
+          actor,
+          window.map(item => item.ancestors),
+          raw,
+        );
+        bytes.forEach((value, i) => consume(value, start + i));
+        previous = pins;
+        start = end;
+      }
+    },
+    async finish(after: ChunkPin[] = []) {
+      await resolve([...previous, ...after]);
+      previous = [];
+    },
+  };
 }
-export async function recipeContent(
+
+/** The page shares recipe-body and tree-level resolve windows, never access decisions. */
+export async function objectContents(
   ctx: ActionCtx,
-  row: Doc<'projectObjects'>,
+  rows: Doc<'projectObjects'>[],
+  pins: ChunkPin[],
   actor: string,
-  ancestors: ReadonlySet<string> = new Set(),
+  ancestors: ReadonlySet<string> | ReadonlySet<string>[] = new Set(),
   raw: RawReader = rawContent,
-) {
-  invariant(
-    row.recipe && row.recipe.size <= objectChunkPageBytes && !ancestors.has(row.digest),
-    'INVALID_WORK_BACKUP',
-    'Stored recipe ancestry is invalid.',
-  );
-  const next = new Set(ancestors);
-  next.add(row.digest);
-  const read = (pin: ChunkPin) => resolved(ctx, row.projectId, actor, pin, next, raw);
-  const bytes = await read({ sha256: row.recipe.digest, size: row.recipe.size });
-  const recipe = objectRecipeSchema.parse(JSON.parse(bytes.toString('utf8')));
-  invariant(
-    recipe.object.sha256 === row.digest && recipe.object.size === row.size,
-    'INVALID_WORK_BACKUP',
-    'Stored recipe differs from its logical content binding.',
-  );
-  return { recipe, read };
+  range?: { offset: number; length: number },
+  after: ChunkPin[] = [],
+): Promise<Buffer[]> {
+  const result: Buffer[] = [],
+    selected: Selected[] = [],
+    indexes: number[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!,
+      pin = pins[i]!;
+    invariant(
+      row && row.size === pin.size && row.digest === pin.sha256,
+      'INVALID_WORK_BACKUP',
+      'Stored content size differs from its checkpoint.',
+    );
+    if (isRaw(row)) {
+      await rawMetadata(ctx, row, pin);
+      result[i] = await raw(ctx, row, pin);
+      continue;
+    }
+    const ancestry = Array.isArray(ancestors) ? ancestors[i]! : ancestors;
+    invariant(
+      row.recipe && row.recipe.size <= objectChunkPageBytes && !ancestry.has(row.digest),
+      'INVALID_WORK_BACKUP',
+      'Stored recipe ancestry is invalid.',
+    );
+    const next = new Set(ancestry);
+    next.add(row.digest);
+    selected.push({ pin: { sha256: row.recipe.digest, size: row.recipe.size }, ancestors: next });
+    indexes.push(i);
+  }
+  const recipes: ReturnType<typeof objectRecipeSchema.parse>[] = [];
+  if (selected.length) {
+    const projectId = rows[indexes[0]!]!.projectId;
+    const reader = resolver(ctx, projectId, actor, raw);
+    await reader.read(selected, (bytes, i) => {
+      const recipe = objectRecipeSchema.parse(JSON.parse(bytes.toString('utf8')));
+      const row = rows[indexes[i]!]!;
+      invariant(
+        recipe.object.sha256 === row.digest && recipe.object.size === row.size,
+        'INVALID_WORK_BACKUP',
+        'Stored recipe differs from its logical content binding.',
+      );
+      recipes.push(recipe);
+    });
+    const values = await readRecipeTrees(
+      recipes,
+      async (requests, consume) => {
+        await reader.read(
+          requests.map(item => ({
+            pin: item.pin,
+            ancestors: selected[item.recipe]!.ancestors,
+          })),
+          consume,
+        );
+      },
+      range,
+    );
+    await reader.finish(after);
+    for (let i = 0; i < values.length; i++) result[indexes[i]!] = values[i]!;
+  }
+  return result;
 }
 export async function objectContent(
   ctx: ActionCtx,
@@ -130,22 +224,9 @@ export async function objectContent(
   ancestors: ReadonlySet<string> = new Set(),
   raw: RawReader = rawContent,
 ): Promise<Buffer> {
-  invariant(
-    row && row.size === pin.size && row.digest === pin.sha256,
-    'INVALID_WORK_BACKUP',
-    'Stored content size differs from its checkpoint.',
-  );
-  if (isRaw(row)) {
-    await rawMetadata(ctx, row, pin);
-    return raw(ctx, row, pin);
-  }
-  const { recipe, read } = await recipeContent(ctx, row, actor, ancestors, raw),
-    parts: Buffer[] = [];
-  for await (const part of readObjectRecipe(recipe, read)) parts.push(part);
-  return Buffer.concat(parts);
+  return (await objectContents(ctx, [row], [pin], actor, ancestors, raw))[0]!;
 }
-/** A bound recipe has already proved the full hash. A ranged read verifies all
- * fetched nodes and leaves, and retains at most the existing 2 MiB response. */
+/** A bound recipe already proved the full hash; ranges verify every fetched node. */
 export async function objectRange(
   ctx: ActionCtx,
   row: Doc<'projectObjects'>,
@@ -153,50 +234,14 @@ export async function objectRange(
   offset: number,
   length = 2 * 1024 * 1024,
 ): Promise<ArrayBuffer> {
-  const { recipe, read } = await recipeContent(ctx, row, actor),
-    end = Math.min(row.size, offset + length),
-    result = new Uint8Array(end - offset);
-  invariant(
-    recipe.tree.length === row.size,
-    'INVALID_WORK_BACKUP',
-    'Chunk recipe length differs from its original content.',
+  const [bytes] = await objectContents(
+    ctx,
+    [row],
+    [{ sha256: row.digest, size: row.size }],
+    actor,
+    new Set(),
+    rawContent,
+    { offset, length },
   );
-  let copied = 0;
-  const visit = async (ref: typeof recipe.tree, start: number): Promise<void> => {
-    if (start >= end || start + ref.length <= offset) return;
-    invariant(
-      ref.size <= (ref.height === 0 ? objectChunkBytes : objectChunkPageBytes),
-      'INVALID_WORK_BACKUP',
-      'Chunk recipe entry exceeds its bounded encoding.',
-    );
-    const bytes = await read(ref);
-    invariant(
-      bytes.length === ref.size && digest(bytes) === ref.sha256,
-      'INVALID_WORK_BACKUP',
-      'Tree content differs from its selected digest.',
-    );
-    if (ref.height === 0) {
-      invariant(ref.length === ref.size, 'INVALID_WORK_BACKUP', 'Leaf size differs from logical bytes.');
-      const from = Math.max(offset, start),
-        to = Math.min(end, start + ref.length);
-      result.set(bytes.subarray(from - start, to - start), from - offset);
-      copied += to - from;
-      return;
-    }
-    const page = objectChunkPageSchema.parse(JSON.parse(bytes.toString('utf8')));
-    invariant(
-      page.children.every(child => child.height < ref.height) &&
-        page.children.reduce((sum, child) => sum + child.length, 0) === ref.length,
-      'INVALID_WORK_BACKUP',
-      'Tree ancestry or logical length is invalid.',
-    );
-    let position = start;
-    for (const child of page.children) {
-      await visit(child, position);
-      position += child.length;
-    }
-  };
-  await visit(recipe.tree, 0);
-  invariant(copied === result.length, 'INVALID_WORK_BACKUP', 'Stored recipe range is incomplete.');
-  return result.buffer;
+  return Uint8Array.from(bytes!).buffer;
 }

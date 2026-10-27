@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import v8 from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
@@ -19,6 +21,8 @@ import { testReports } from '../dist/check-test-report.js';
 import { validatePassingPrefix } from '../dist/landing-diagnosis.js';
 import { passingCheckExit } from '../dist/check-backend.js';
 import { runReceipt } from '../dist/agent-receipts.js';
+v8.setFlagsFromString('--expose-gc');
+const gc = runInNewContext('gc');
 const file = 'tests/check-log-cleanup-paged.test.mjs';
 const name = `${file} :: dogfood-shaped synthetic inventory`;
 function fixture(t) {
@@ -250,6 +254,7 @@ test('dogfood ledger: 1500 runs × 500 files stream details, use zero Convex cal
   const directory = mkdtempSync(join(tmpdir(), 'forge-ledger-budget-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const now = Date.now();
+  gc();
   let reads = 0,
     peak = process.memoryUsage().heapUsed;
   const startMemory = peak,
@@ -267,7 +272,11 @@ test('dogfood ledger: 1500 runs × 500 files stream details, use zero Convex cal
             recovery: 'unchanged-source',
             evidenceRunId: `run-${index}`,
           }));
-          peak = Math.max(peak, process.memoryUsage().heapUsed);
+          // Peak live heap, not garbage the collector has not reached yet (runner-dependent).
+          if (reads % 100 === 0) {
+            gc();
+            peak = Math.max(peak, process.memoryUsage().heapUsed);
+          }
           return {
             record: {
               id: `run-${index}`,

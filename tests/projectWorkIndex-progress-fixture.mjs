@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { recipeObjects } from './projectObjectRecipe-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { state } from './hosted-fixture.mjs';
@@ -264,6 +265,7 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     project = s.tables.hostedProjects.get('project');
     backup = s.tables.projectBackups.get('backup');
   }
+  const recipeStore = options.recipes ? recipeObjects(objects, sizes, new Set(heads)) : undefined;
   // Index the fake database too: scanning every row would measure the fake, not the build.
   const byCollection = new Map(),
     byKey = new Map();
@@ -324,10 +326,12 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
           return {
             _id: digest,
             _creationTime: 1,
-            projectId: 'project',
-            digest,
-            size: sizes.get(digest) ?? objects.get(digest).length,
-            storageId: digest,
+            ...(recipeStore?.row(digest) ?? {
+              projectId: 'project',
+              digest,
+              size: sizes.get(digest) ?? objects.get(digest).length,
+              storageId: digest,
+            }),
           };
         },
       };
@@ -398,6 +402,7 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     rejected: 0,
     phases: {},
     summaryCalls: { lanes: 0, views: 0, runs: 0 },
+    summaryResolves: { lanes: 0, views: 0, runs: 0 },
     steps: 0,
     documentsRead: 0,
     documentsWritten: 0,
@@ -473,6 +478,11 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     metrics.calls[name] = (metrics.calls[name] ?? 0) + 1;
     metric('calls');
     if (name === 'projectObjects:resolve') {
+      if (phase() === 'summaries') {
+        const g = [...s.tables.projectWorkGenerations.values()].find(g => g.ensureCursor);
+        const name = ['lanes', 'views', 'runs'][JSON.parse(g.ensureCursor).field];
+        if (name) metrics.summaryResolves[name]++;
+      }
       metrics.maxSourceWindowBytes = Math.max(
         metrics.maxSourceWindowBytes,
         args.digests.reduce((n, key) => n + (sizes.get(key) ?? objects.get(key).length), 0),
@@ -547,6 +557,7 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     s,
     data,
     metrics,
+    recipeBindings: recipeStore?.bindings,
     sourcePins: heads.map(sha256 => ({ sha256, size: sizes.get(sha256) })),
     snapshot: () => ({
       data,

@@ -340,6 +340,8 @@ outcome. Each attempt has immutable pins and its own deterministic operation ID
 under the retained parent push ID. Unknown outcomes reconcile that attempt's
 receipt before any rebase; reusing an ID with changed pins remains invalid.
 
+Hosted recipe reads share bounded descriptor windows (at most 100 digests and 2 MiB per window) across recipe bodies and tree frontiers, including ranged reads; every window resolves current project access and availability before and after byte transfer, without retaining an access cache. Full metadata-tree reads also batch internal pages by frontier into the existing result buffer.
+
 Hosted publication, Work metadata loading and source-return continuation reuse verified immutable storage bytes in bounded process memos, including recipe nodes and leaves. Every reuse resolves current project authority and checks current storage metadata; recipe closures are revalidated. CLI exchange sessions retain bounded downloaded objects by content hash and size and recheck current project bindings before returning cached bytes. Warm reuse is expendable and does not establish production savings.
 
 Imported Code subscribes to source-free import/status-derivative invalidations. Changes, focus, network recovery and explicit reads trigger current GitHub authority and latest-head checks. Persisted endpoint derivatives and process-local public JWKS reuse avoid repeated derivation; idle tabs do not periodically invoke status actions.

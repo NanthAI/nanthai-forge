@@ -8,6 +8,7 @@ import {
   rawMetadata as metadata,
   rawContent as content,
   objectContent,
+  objectContents,
   isRaw,
   rawKey,
 } from './projectObjectContent';
@@ -54,15 +55,7 @@ export function exchangeObjectReader(
           const pin = pins[index]!;
           // Recipes retain no whole-object memo: each read checks its current
           // project-bound closure, while raw immutable nodes use the existing memo.
-          if (!isRaw(row))
-            return objectContent(
-              ctx,
-              row,
-              pin,
-              actor,
-              new Set(),
-              reuseImmutableBytes ? reviewBytes : content,
-            );
+          if (!isRaw(row)) return undefined;
           // Storage metadata confirms the object still exists even on a memo hit.
           await metadata(ctx, row, pin);
           const key = JSON.stringify([projectId, pin.sha256, pin.size, rawKey(row)]);
@@ -92,11 +85,23 @@ export function exchangeObjectReader(
           return Buffer.from(await pending);
         }),
       );
-      await ctx.runQuery(internal.projectObjects.resolve, args);
+      const recipeIndexes = rows.flatMap((row, i) => (isRaw(row) ? [] : [i]));
+      const recipes = await objectContents(
+        ctx,
+        recipeIndexes.map(i => rows[i]!),
+        recipeIndexes.map(i => pins[i]!),
+        actor,
+        new Set(),
+        reuseImmutableBytes ? reviewBytes : content,
+        undefined,
+        pins,
+      );
+      const recipeBytes = new Map(recipeIndexes.map((index, i) => [index, recipes[i]!]));
+      if (!recipeIndexes.length) await ctx.runQuery(internal.projectObjects.resolve, args);
       const bytes: Buffer[] = [];
-      for (const outcome of outcomes) {
+      for (const [index, outcome] of outcomes.entries()) {
         if (outcome.status === 'rejected') throw outcome.reason;
-        bytes.push(outcome.value);
+        bytes.push(outcome.value ?? recipeBytes.get(index)!);
       }
       return bytes;
     },
