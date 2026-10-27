@@ -17,12 +17,14 @@ test('all post-parent index phases fit the dogfood call and action memory budget
   // A rejected batch silently falls back to per-item calls; the 2026-10-27 reseed ran 5x hot.
   assert.equal(result.rejected, 0, 'every batched action call passes its Convex argument validator');
   assert(result.recipeBindings > 500);
+  assert.deepEqual(result.treeShape, { files: 2500, directories: 304, depth: 6 });
+  assert(result.stateBatchP50Ms < 2000, JSON.stringify(result));
   assert.equal(result.calls['projectWorkIndexBuildDiffstats:compare'] ?? 0, 0);
   assert.equal(result.sourceFileReads, 0);
   assert.equal(result.sourceFileResolves, 0);
-  assert(result.viewCallsPerRecord <= 2, JSON.stringify(result));
+  assert(result.viewCallsPerRecord <= 4, JSON.stringify(result));
   assert(result.viewResolvesPerRecord <= 4, JSON.stringify(result));
-  assert(result.remaining.calls <= 8000, JSON.stringify(result));
+  assert(result.remaining.calls <= 12000, JSON.stringify(result));
   assert(result.maxSourceWindowBytes <= 2 * 1024 * 1024, JSON.stringify(result));
   assert(result.maxRpcBytes < 600000);
   assert.equal(result.counts.views, 2167);
@@ -30,9 +32,26 @@ test('all post-parent index phases fit the dogfood call and action memory budget
   assert.equal(result.counts.events, 5000);
   assert.equal(result.counts.notes, 5000);
   assert.equal(result.counts.sourceBlobs, 32000);
-  assert.equal(result.counts.sourceTreePaths, 30);
+  assert.equal(result.counts.sourceTreePaths, 25);
   assert.equal(result.calls['projectWork:events'], 100);
   t.diagnostic(JSON.stringify(result));
+});
+
+test('owner-supplied View facts retain the existing post-parent call budgets', async t => {
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    ['--max-old-space-size=384', 'tests/projectWorkIndex-phases-worker.mjs', 'owner'],
+    { env: { ...process.env, FORGE_TEST_PRECOMPILED: '1' }, maxBuffer: 1024 * 1024 },
+  );
+  const result = JSON.parse(stdout.match(/PHASE_RESULT (.+)/)[1]);
+  assert.equal(result.rejected, 0);
+  assert.equal(result.sourceFileReads, 0);
+  assert.equal(result.sourceFileResolves, 0);
+  assert(result.viewCallsPerRecord <= 2, JSON.stringify(result));
+  assert(result.remaining.calls <= 8000, JSON.stringify(result));
+  t.diagnostic(
+    JSON.stringify({ viewCallsPerRecord: result.viewCallsPerRecord, remaining: result.remaining }),
+  );
 });
 
 test('a resumed dogfood coordinator action stays below 512 MiB without retaining historical database rows', async t => {
@@ -43,6 +62,19 @@ test('a resumed dogfood coordinator action stays below 512 MiB without retaining
   );
   const result = JSON.parse(stdout.match(/ACTION_RESULT (.+)/)[1]);
   assert.equal(result.pending, true);
+  assert(result.maxRssBytes < 512 * 1024 * 1024, JSON.stringify(result));
+  assert(result.maxSourceWindowBytes <= 2 * 1024 * 1024);
+  t.diagnostic(JSON.stringify(result));
+});
+
+test('the maximum State comparison pin window fits the action memory and resolve byte budgets', async t => {
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    ['tests/projectWorkIndex-phases-worker.mjs', 'state-memory'],
+    { env: { ...process.env, FORGE_TEST_PRECOMPILED: '1' }, maxBuffer: 1024 * 1024 },
+  );
+  const result = JSON.parse(stdout.match(/ACTION_RESULT (.+)/)[1]);
+  assert.equal(result.selectedStates, 100);
   assert(result.maxRssBytes < 512 * 1024 * 1024, JSON.stringify(result));
   assert(result.maxSourceWindowBytes <= 2 * 1024 * 1024);
   t.diagnostic(JSON.stringify(result));
@@ -349,4 +381,73 @@ test('MiB recipe-stored files make the former eager comparison exceed the zero-b
       calls: f.metrics.calls,
     }),
   );
+});
+
+test('transient storage failures retry three times, retain the summary cursor, and resume identical rows', async t => {
+  const { progressFixture } = await import('./projectWorkIndex-progress-fixture.mjs');
+  const options = { treeFiles: 2500, realisticTrees: true, recipes: true };
+  const baseline = progressFixture(0.02, undefined, undefined, options);
+  const saved = baseline.snapshot();
+  const complete = async f => {
+    let result;
+    do {
+      result = await f.drive();
+    } while (typeof result !== 'string');
+    return result;
+  };
+  const rows = f =>
+    [...f.s.tables.projectWorkRecords.values()]
+      .map(({ _id, _creationTime, generationId, ...row }) => row)
+      .sort((a, b) => `${a.collection}:${a.key}`.localeCompare(`${b.collection}:${b.key}`));
+  const expectedId = await complete(baseline);
+  const resumed = progressFixture(0.02, saved, undefined, options);
+  const action = resumed.s.ctx.runAction,
+    get = resumed.s.ctx.storage.get;
+  let failures = 0,
+    armed = true,
+    inBatch = false,
+    savedCursor,
+    savedBatch;
+  resumed.s.ctx.runAction = async (ref, args) => {
+    const selected = getFunctionName(ref) === 'projectWorkIndexBuildStates:batch' && armed;
+    if (selected) {
+      inBatch = true;
+      const g = [...resumed.s.tables.projectWorkGenerations.values()][0];
+      savedCursor = g.ensureCursor;
+      savedBatch = g.nextBatch;
+    }
+    try {
+      return await action(ref, args);
+    } finally {
+      if (selected) {
+        inBatch = false;
+        armed = false;
+      }
+    }
+  };
+  resumed.s.ctx.storage.get = async id => {
+    if (inBatch) {
+      failures++;
+      throw new Error('Transient error while running storage get url');
+    }
+    return get(id);
+  };
+  let result;
+  do {
+    result = await resumed.drive();
+  } while (result.pending && !JSON.parse(result.progress).retryable);
+  assert.equal(result.pending, true);
+  assert.equal(failures, 3, 'one failing read has three total attempts, including across action boundaries');
+  const generation = [...resumed.s.tables.projectWorkGenerations.values()][0];
+  assert.equal(generation.ensureCursor, savedCursor);
+  assert.equal(generation.nextBatch, savedBatch);
+  assert.equal(generation.status, 'building');
+  const id = await complete(resumed);
+  assert.equal(resumed.s.tables.projectWorkGenerations.get(id).status, 'ready');
+  assert.deepEqual(rows(resumed), rows(baseline));
+  assert.deepEqual(
+    JSON.parse(resumed.s.tables.projectWorkGenerations.get(id).metadata),
+    JSON.parse(baseline.s.tables.projectWorkGenerations.get(expectedId).metadata),
+  );
+  t.diagnostic(JSON.stringify({ attempts: failures, savedBatch, rows: rows(resumed).length }));
 });

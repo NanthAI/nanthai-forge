@@ -41,50 +41,87 @@ export function exchangeObjectReader(
   const verified = new Map<string, Promise<Buffer>>();
   let retained = 0;
   const reservations = new WeakMap<Promise<Buffer>, number>();
+  const resolve = async (projectId: Id<'hostedProjects'>, actor: string, pins: Pin[]) => {
+    if (!pins.length) return ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, digests: [] });
+    const rows: Doc<'projectObjects'>[] = [];
+    for (let offset = 0; offset < pins.length;) {
+      const window: Pin[] = [];
+      let bytes = 0;
+      while (offset < pins.length && window.length < 100) {
+        const pin = pins[offset]!;
+        if (window.length && bytes + pin.size > 2 * 1024 * 1024) break;
+        window.push(pin);
+        bytes += pin.size;
+        offset++;
+      }
+      rows.push(
+        ...(await ctx.runQuery(internal.projectObjects.resolve, {
+          projectId,
+          actor,
+          digests: window.map(pin => pin.sha256),
+        })),
+      );
+    }
+    return rows;
+  };
   return {
     async read(projectId, actor, pins) {
-      const args = { projectId, actor, digests: pins.map(pin => pin.sha256) };
-      const rows: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, args);
+      const rows = await resolve(projectId, actor, pins);
       invariant(
         rows.length === pins.length,
         'INVALID_WORK_BACKUP',
         'Stored content lookup omitted selected bytes.',
       );
-      const outcomes = await Promise.allSettled(
-        rows.map(async (row, index) => {
-          const pin = pins[index]!;
-          // Recipes retain no whole-object memo: each read checks its current
-          // project-bound closure, while raw immutable nodes use the existing memo.
-          if (!isRaw(row)) return undefined;
-          // Storage metadata confirms the object still exists even on a memo hit.
-          await metadata(ctx, row, pin);
-          const key = JSON.stringify([projectId, pin.sha256, pin.size, rawKey(row)]);
-          let pending = verified.get(key);
-          if (!pending) {
-            pending = reuseImmutableBytes ? reviewBytes(ctx, row, pin) : content(ctx, row, pin);
-            // Reserve by the exact pin before awaiting: concurrent batches share
-            // the same bounded budget. Oversized objects are read without caching.
-            if (pin.size <= budget) {
-              while (retained + pin.size > budget) {
-                const oldest = verified.keys().next().value!;
-                const previous = verified.get(oldest)!;
-                verified.delete(oldest);
-                retained -= reservations.get(previous) ?? 0;
+      const outcomes: PromiseSettledResult<Buffer | undefined>[] = [];
+      for (let start = 0; start < rows.length;) {
+        let end = start,
+          bytes = 0;
+        while (end < rows.length && end - start < 100) {
+          const size = pins[end]!.size;
+          if (end > start && bytes + size > 2 * 1024 * 1024) break;
+          bytes += size;
+          end++;
+        }
+        outcomes.push(
+          ...(await Promise.allSettled(
+            rows.slice(start, end).map(async (row, offset) => {
+              const index = start + offset;
+              const pin = pins[index]!;
+              // Recipes retain no whole-object memo: each read checks its current
+              // project-bound closure, while raw immutable nodes use the existing memo.
+              if (!isRaw(row)) return undefined;
+              // Storage metadata confirms the object still exists even on a memo hit.
+              await metadata(ctx, row, pin);
+              const key = JSON.stringify([projectId, pin.sha256, pin.size, rawKey(row)]);
+              let pending = verified.get(key);
+              if (!pending) {
+                pending = reuseImmutableBytes ? reviewBytes(ctx, row, pin) : content(ctx, row, pin);
+                // Reserve by the exact pin before awaiting: concurrent batches share
+                // the same bounded budget. Oversized objects are read without caching.
+                if (pin.size <= budget) {
+                  while (retained + pin.size > budget) {
+                    const oldest = verified.keys().next().value!;
+                    const previous = verified.get(oldest)!;
+                    verified.delete(oldest);
+                    retained -= reservations.get(previous) ?? 0;
+                  }
+                  verified.set(key, pending);
+                  reservations.set(pending, pin.size);
+                  retained += pin.size;
+                }
+                pending.catch(() => {
+                  if (verified.get(key) === pending) {
+                    verified.delete(key);
+                    retained -= pin.size;
+                  }
+                });
               }
-              verified.set(key, pending);
-              reservations.set(pending, pin.size);
-              retained += pin.size;
-            }
-            pending.catch(() => {
-              if (verified.get(key) === pending) {
-                verified.delete(key);
-                retained -= pin.size;
-              }
-            });
-          }
-          return Buffer.from(await pending);
-        }),
-      );
+              return Buffer.from(await pending);
+            }),
+          )),
+        );
+        start = end;
+      }
       const recipeIndexes = rows.flatMap((row, i) => (isRaw(row) ? [] : [i]));
       const recipes = await objectContents(
         ctx,
@@ -97,7 +134,7 @@ export function exchangeObjectReader(
         pins,
       );
       const recipeBytes = new Map(recipeIndexes.map((index, i) => [index, recipes[i]!]));
-      if (!recipeIndexes.length) await ctx.runQuery(internal.projectObjects.resolve, args);
+      if (!recipeIndexes.length) await resolve(projectId, actor, pins);
       const bytes: Buffer[] = [];
       for (const [index, outcome] of outcomes.entries()) {
         if (outcome.status === 'rejected') throw outcome.reason;

@@ -37,6 +37,33 @@ test('one action reuses verified immutable bytes but preserves current access an
   await assert.rejects(reader.read('project', 'owner', [pin]), code('PROJECT_UNAVAILABLE'));
 });
 
+test('logical State pins use bounded initial and final resolve windows without changing their order', async () => {
+  const s = fixture(),
+    windows = [],
+    bytes = Buffer.alloc(700000, 1);
+  const pins = [];
+  for (let i = 0; i < 6; i++) {
+    bytes[0] = i;
+    pins.push(await upload(s, Buffer.from(bytes)));
+  }
+  const query = s.ctx.runQuery;
+  s.ctx.runQuery = (ref, args) => {
+    if (getFunctionName(ref) === 'projectObjects:resolve') windows.push(args.digests);
+    return query(ref, args);
+  };
+  const values = await exchangeObjectReader(s.ctx, false, 0).read('project', 'owner', pins);
+  assert.deepEqual(
+    values.map(b => b[0]),
+    [0, 1, 2, 3, 4, 5],
+  );
+  assert.equal(windows.length, 6);
+  assert(windows.every(w => w.length === 2));
+  await assert.rejects(
+    exchangeObjectReader(s.ctx).read('project', 'stranger', []),
+    code('PROJECT_UNAVAILABLE'),
+  );
+});
+
 test('memoized bytes are isolated by project, exact pin and storage identity; removed storage is not hidden', async () => {
   const s = fixture(),
     bytes = Buffer.from('shared bytes'),

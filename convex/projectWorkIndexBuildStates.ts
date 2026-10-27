@@ -7,6 +7,7 @@ import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import type { BuildContext } from './projectWorkIndexBuildContext';
 import { exchangeObjectReader } from './projectExchangeReader';
+import { indexReadContext, indexTransient } from './projectWorkIndexRetry';
 import { indexEntry } from './projectWorkIndexFields';
 import { sourceTreeEntries } from '../src/source-tree-index';
 import type { IndexEntry } from '../src/work-hosted-index';
@@ -32,8 +33,8 @@ const batchRef = makeFunctionReference<
   },
   ChangedStates[]
 >('projectWorkIndexBuildStates:batch');
-/** Parse one byte-bounded source window in a separate action. The coordinator
- * receives only changed paths, never all of its retained source trees. */
+/** Compare at most ten Views in bounded byte windows in a separate action.
+ * The coordinator receives only changed paths, never historical source trees. */
 export const batch = internalAction({
   args: {
     projectId: v.id('hostedProjects'),
@@ -49,21 +50,21 @@ export const batch = internalAction({
     }),
   ),
   handler: async (ctx, input) => {
+    ctx = indexReadContext(ctx);
     invariant(input.requests.length <= 10, 'BAD_ARGUMENT', 'Read one View source window.');
     const pins = [
       ...new Map(
         input.requests.flatMap(r => [r.before, r.after, ...r.pins]).map(p => [p.sha256, p]),
       ).values(),
     ];
-    invariant(
-      pins.length <= 100 &&
-        (input.requests.length === 1 || pins.reduce((n, p) => n + p.size, 0) <= 2 * 1024 * 1024),
-      'BAD_ARGUMENT',
-      'Read one View source byte window.',
-    );
-    const bodies = await exchangeObjectReader(ctx, false, 0).read(input.projectId, input.actor, pins);
-    const states = new Map(pins.map((p, i) => [p.sha256, parseNativeState(bodies[i]!).files]));
-    return input.requests.map(request => {
+    invariant(pins.length <= 100, 'BAD_ARGUMENT', 'Read one View source pin window.');
+    const reader = exchangeObjectReader(ctx, false, 0);
+    const states = new Map<string, ReturnType<typeof parseNativeState>['files']>();
+    const bodies = await reader.read(input.projectId, input.actor, pins);
+    const required = new Set(input.requests.flatMap(r => [r.before.sha256, r.after.sha256]));
+    for (const [i, pin] of pins.entries())
+      if (required.has(pin.sha256)) states.set(pin.sha256, parseNativeState(bodies[i]!).files);
+    const results = input.requests.map(request => {
       const before = states.get(request.before.sha256)!,
         after = states.get(request.after.sha256)!;
       const paths = new Set(
@@ -71,14 +72,34 @@ export const batch = internalAction({
           .filter(f => f.status !== 'unchanged')
           .map(f => f.path),
       );
-      const selected = (files: typeof before) => files.filter(f => paths.has(f.path));
       return {
-        before: selected(before),
-        after: selected(after),
+        before: before.filter(f => paths.has(f.path)),
+        after: after.filter(f => paths.has(f.path)),
         paths: [...paths],
-        states: request.pins.map(p => ({ head: p.sha256, files: selected(states.get(p.sha256)!) })),
+        states: [] as { head: string; files: typeof before }[],
       };
     });
+    const paths = new Set(results.flatMap(r => r.paths));
+    for (const [head, files] of states)
+      states.set(
+        head,
+        files.filter(f => paths.has(f.path)),
+      );
+    for (const [i, pin] of pins.entries())
+      if (!required.has(pin.sha256))
+        states.set(
+          pin.sha256,
+          parseNativeState(bodies[i]!).files.filter(f => paths.has(f.path)),
+        );
+    for (const [i, request] of input.requests.entries()) {
+      const result = results[i]!,
+        selected = new Set(result.paths);
+      result.states = request.pins.map(pin => ({
+        head: pin.sha256,
+        files: states.get(pin.sha256)!.filter(f => selected.has(f.path)),
+      }));
+    }
+    return results;
   },
 });
 export const treeRef = makeFunctionReference<
@@ -94,6 +115,7 @@ export const tree = internalAction({
   args: { projectId: v.id('hostedProjects'), actor: v.string(), pin },
   returns: v.array(indexEntry),
   handler: async (ctx, input) => {
+    ctx = indexReadContext(ctx);
     const [bytes] = await exchangeObjectReader(ctx, false, 0).read(input.projectId, input.actor, [input.pin]);
     return sourceTreeEntries(input.pin.sha256, parseNativeState(bytes!).files);
   },
@@ -137,11 +159,7 @@ export async function summaryStates(
       const entry = pending[offset]!,
         r = entry[1];
       const next = new Map([...pins, ...[r.before, r.after, ...r.pins].map(p => [p.sha256, p] as const)]);
-      if (
-        window.length &&
-        (next.size > 100 || [...next.values()].reduce((n, p) => n + p.size, 0) > 2 * 1024 * 1024)
-      )
-        break;
+      if (window.length && next.size > 100) break;
       window.push(entry);
       next.forEach((p, k) => pins.set(k, p));
       offset++;
@@ -153,7 +171,8 @@ export async function summaryStates(
         requests: window.map(([, r]) => r),
       });
       window.forEach(([key], i) => changed.set(key, values[i]!));
-    } catch {
+    } catch (error) {
+      if (indexTransient(error)) throw error;
       // A missing optional save must preserve each View's existing fallback.
       await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner });
     }
@@ -210,7 +229,8 @@ export async function summaryStates(
             heads.delete(state.head);
           }
       }
-    } catch {
+    } catch (error) {
+      if (indexTransient(error)) throw error;
       await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner });
     }
   }

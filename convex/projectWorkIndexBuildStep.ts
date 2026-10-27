@@ -8,10 +8,10 @@ import { buildContext, type BuildContext } from './projectWorkIndexBuildContext'
 import { projectRecord } from './projectWorkIndexBuildProjection';
 import { projectSummaries } from './projectWorkIndexBuildSummaries';
 import { exchangeObjectReader } from './projectExchangeReader';
+import { indexTransient } from './projectWorkIndexRetry';
 import { readRecord, type RecordPin } from '../src/work-exchange-records';
 import { partialWork } from '../src/work-exchange-delta';
 import { materializeWork, indexedRecord, type IndexEntry } from '../src/work-hosted-index';
-import { parseNativeState } from '../src/native-state-format';
 import { stateParentEntries } from '../src/source-state-parent-index';
 import { treeRef } from './projectWorkIndexBuildStates';
 export async function projectStep(
@@ -95,52 +95,48 @@ export async function projectStep(
     let bytes = 0;
     for (const row of rows) {
       const pin = pinMap.get(row.key);
-      if (pin && selectedPins.length && (selectedPins.length >= 50 || bytes + pin.size > 256 * 1024)) break;
+      if (pin && selectedPins.length && (selectedPins.length >= 50 || bytes + pin.size > 2 * 1024 * 1024))
+        break;
       c.source = row.position + 1;
       if (pin) {
         selectedPins.push({ key: row.key, pin });
         bytes += pin.size;
       }
     }
-    const reader = exchangeObjectReader(ctx, false, 0);
-    let bodies: (Buffer | undefined)[];
+    const read = (pins: { sha256: string; size: number }[]) =>
+      ctx.runAction(internal.projectWorkAncestry.stateBatch, {
+        projectId: selected.projectId,
+        actor: selected.owner,
+        pins,
+      });
+    let states: { head: string; parents: string[] }[];
     try {
-      bodies = await reader.read(
-        selected.projectId,
-        selected.owner,
-        selectedPins.map(p => p.pin),
-      );
-    } catch {
+      states = await read(selectedPins.map(p => p.pin));
+    } catch (error) {
+      if (indexTransient(error)) throw error;
       // A missing optional State must not discard available parents in its page.
       await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: selected.owner });
-      bodies = [];
+      states = [];
       for (const { pin } of selectedPins) {
         try {
-          bodies.push((await reader.read(selected.projectId, selected.owner, [pin]))[0]);
-        } catch {
-          bodies.push(undefined);
+          states.push(...(await read([pin])));
+        } catch (error) {
+          if (indexTransient(error)) throw error;
         }
       }
     }
     const entries: IndexEntry[] = [];
-    for (const [i, { key }] of selectedPins.entries()) {
-      try {
-        if (!bodies[i]) continue;
-        const state = parseNativeState(bodies[i]!);
-        entries.push(
-          ...stateParentEntries(key, state.parents),
-          ...state.parents.map(head => ({
-            collection: '_buildSource',
-            key: head,
-            parent: '',
-            position: 0,
-            value: JSON.stringify({ head }),
-          })),
-        );
-      } catch {
-        await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: selected.owner });
-      }
-    }
+    for (const state of states)
+      entries.push(
+        ...stateParentEntries(state.head, state.parents),
+        ...state.parents.map(head => ({
+          collection: '_buildSource',
+          key: head,
+          parent: '',
+          position: 0,
+          value: JSON.stringify({ head }),
+        })),
+      );
     return entries;
   }
   if (c.phase === 'summaries') return projectSummaries(ctx, selected, e, backup, c, context);
@@ -161,7 +157,8 @@ export async function projectStep(
         actor: selected.owner,
         pin: { sha256: pin.sha256, size: pin.size },
       });
-    } catch {
+    } catch (error) {
+      if (indexTransient(error)) throw error;
       await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: selected.owner });
       return [];
     }

@@ -20,6 +20,7 @@ import { indexedRecord, type IndexEntry } from '../src/work-hosted-index';
 import { viewReadModels } from '../src/view-read-model';
 import { viewIndexEntries } from '../src/view-hosted-index';
 import { viewSummary, laneSummary, runSummary } from '../src/work-hosted-summary';
+import { indexTransient } from './projectWorkIndexRetry';
 import { summaryStates } from './projectWorkIndexBuildStates';
 import { viewStates } from './projectSourceProjection';
 import type { ChangedStates } from './projectDiffstatProjection';
@@ -224,7 +225,8 @@ export async function projectSummaries(
             changedStates,
             context.pins,
           );
-        } catch {
+        } catch (error) {
+          if (indexTransient(error)) throw error;
           await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: selected.owner });
         }
         derived.push(...viewIndexEntries(data, states, { index: 0, positions: new Map() }));

@@ -10,8 +10,9 @@ import {
   type ObjectRecipe,
 } from '../src/object-chunks';
 
-type Request = { pin: ChunkPin; recipe: number };
-/** Breadth-first descriptors, sequential byte consumption. No additional retained byte cache. */
+type Request = { pin: ChunkPin; recipes: number[] };
+/** Share each frontier by digest, including its destination spans. Unchanged
+ * subtrees expand once across all States; only descriptors survive a byte window. */
 export async function readRecipeTrees(
   recipes: ObjectRecipe[],
   read: (requests: Request[], consume: (bytes: Buffer, index: number) => void) => Promise<void>,
@@ -30,23 +31,39 @@ export async function readRecipeTrees(
   const copied = recipes.map(() => 0);
   let pending = recipes.map((recipe, index) => ({ ref: recipe.tree, recipe: index, start: 0 }));
   while (pending.length) {
+    const height = pending.reduce((max, item) => Math.max(max, item.ref.height), 0);
     const current = pending.filter(
       item =>
-        !range ||
-        (item.start < range.offset + results[item.recipe]!.length &&
-          item.start + item.ref.length > range.offset),
+        item.ref.height === height &&
+        (!range ||
+          (item.start < range.offset + results[item.recipe]!.length &&
+            item.start + item.ref.length > range.offset)),
     );
-    pending = [];
+    pending = pending.filter(item => item.ref.height !== height);
     for (const { ref } of current)
       invariant(
         ref.size <= (ref.height === 0 ? objectChunkBytes : objectChunkPageBytes),
         'INVALID_WORK_BACKUP',
         'Chunk recipe entry exceeds its bounded encoding.',
       );
+    const groups = new Map<string, typeof current>();
+    for (const item of current) {
+      const key = `${item.ref.sha256}:${item.ref.height}:${item.ref.length}`;
+      const group = groups.get(key) ?? [];
+      invariant(
+        !group.length || group[0]!.ref.size === item.ref.size,
+        'INVALID_WORK_BACKUP',
+        'Shared tree content has inconsistent physical sizes.',
+      );
+      group.push(item);
+      groups.set(key, group);
+    }
+    const shared = [...groups.values()];
     await read(
-      current.map(item => ({ pin: item.ref, recipe: item.recipe })),
+      shared.map(items => ({ pin: items[0]!.ref, recipes: [...new Set(items.map(i => i.recipe))] })),
       (bytes, index) => {
-        const { ref, recipe, start } = current[index]!;
+        const items = shared[index]!,
+          { ref } = items[0]!;
         invariant(
           bytes.length === ref.size && digest(bytes) === ref.sha256,
           'INVALID_WORK_BACKUP',
@@ -54,11 +71,13 @@ export async function readRecipeTrees(
         );
         if (ref.height === 0) {
           invariant(ref.length === ref.size, 'INVALID_WORK_BACKUP', 'Leaf size differs from logical bytes.');
-          const offset = range?.offset ?? 0;
-          const from = Math.max(offset, start),
-            to = Math.min(offset + results[recipe]!.length, start + ref.length);
-          bytes.copy(results[recipe]!, from - offset, from - start, to - start);
-          copied[recipe]! += to - from;
+          for (const { recipe, start } of items) {
+            const offset = range?.offset ?? 0;
+            const from = Math.max(offset, start),
+              to = Math.min(offset + results[recipe]!.length, start + ref.length);
+            bytes.copy(results[recipe]!, from - offset, from - start, to - start);
+            copied[recipe]! += to - from;
+          }
         } else {
           const page = objectChunkPageSchema.parse(JSON.parse(bytes.toString('utf8')));
           invariant(
@@ -67,10 +86,12 @@ export async function readRecipeTrees(
             'INVALID_WORK_BACKUP',
             'Tree ancestry or logical length is invalid.',
           );
-          let position = start;
-          for (const child of page.children) {
-            pending.push({ ref: child, recipe, start: position });
-            position += child.length;
+          for (const { recipe, start } of items) {
+            let position = start;
+            for (const child of page.children) {
+              pending.push({ ref: child, recipe, start: position });
+              position += child.length;
+            }
           }
         }
       },

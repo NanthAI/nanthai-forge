@@ -9,12 +9,13 @@ const { objectRange } = await import(moduleUrl('../convex/projectObjectContent.t
 const { exchangeObjectReader } = await import(moduleUrl('../convex/projectExchangeReader.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 
-async function recipe(s, count = 64, group = count, tag = 0) {
+async function recipe(s, count = 64, group = count, tag = 0, changeLast = false) {
   const parts = [],
     leaves = [];
   for (let i = 0; i < count; i++) {
     const bytes = Buffer.alloc(8192, tag);
     bytes.writeUInt32LE(i);
+    if (changeLast && i === count - 1) bytes[bytes.length - 1] = 1;
     parts.push(bytes);
     leaves.push({ ...(await upload(s, bytes)), height: 0, length: bytes.length });
   }
@@ -94,6 +95,47 @@ test('recipe rows in one reader page share first-level and leaf resolution windo
     windows.map(p => p.length),
     [2, 2, 4, 34, 34],
   );
+});
+
+test('shared recipe subtrees read and expand once across a State window', async () => {
+  const s = fixture(),
+    built = await recipe(s, 128, 16),
+    changed = await recipe(s, 128, 16, 0, true),
+    windows = measure(s);
+  const read = s.ctx.storage.get,
+    reads = new Map();
+  s.ctx.storage.get = async id => {
+    reads.set(id, (reads.get(id) ?? 0) + 1);
+    return read(id);
+  };
+  const values = await exchangeObjectReader(s.ctx, false, 0).read('project', 'owner', [
+    built.pin,
+    changed.pin,
+  ]);
+  assert.deepEqual(values, [built.bytes, changed.bytes]);
+  assert(windows.length <= 11, `one shared tree walk, got ${windows.length} resolves`);
+  for (const leaf of built.leaves) {
+    const row = [...s.tables.projectObjects.values()].find(r => r.digest === leaf.sha256);
+    assert.equal(reads.get(row.storageId), 1);
+  }
+});
+
+test('shared subtrees at different depths wait for one common height frontier', async () => {
+  const s = fixture(),
+    wide = await recipe(s, 128, 16),
+    narrow = await recipe(s, 16, 16);
+  const node = [...s.tables.projectObjects.values()].find(row => row.digest === narrow.tree.sha256);
+  const get = s.ctx.storage.get;
+  let reads = 0;
+  s.ctx.storage.get = async id => {
+    if (id === node.storageId) reads++;
+    return get(id);
+  };
+  assert.deepEqual(
+    await exchangeObjectReader(s.ctx, false, 0).read('project', 'owner', [wide.pin, narrow.pin]),
+    [wide.bytes, narrow.bytes],
+  );
+  assert.equal(reads, 1);
 });
 
 test('batched content and ranges reject tampering, wrong size, recipe ancestry cycles and cross-project nodes', async () => {

@@ -204,7 +204,7 @@ export async function objectContents(
         await reader.read(
           requests.map(item => ({
             pin: item.pin,
-            ancestors: selected[item.recipe]!.ancestors,
+            ancestors: new Set(item.recipes.flatMap(index => [...selected[index]!.ancestors])),
           })),
           consume,
         );

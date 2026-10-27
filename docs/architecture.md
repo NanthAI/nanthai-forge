@@ -291,15 +291,31 @@ and stores counts with `owner-reported` provenance and explicit exactness. It re
 the supplied provenance without rereading State or file bytes. Older uploads retain
 State-only provenance projection; index building never downloads changed-file bytes
 to count lines. Missing diffstats remain “not computed yet.” Tree parsing runs in a separate source window;
-only chunked path rows return to the coordinator. Blob rows drain in 500-row
-windows. Journal pages apply up to 50 ordered events with an overlay of preceding
+only chunked path rows return to the coordinator. State actions compare up to ten
+Views and at most 100 distinct source pins, then return only their changed paths.
+Whole base/head file maps cover at most twenty States; optional saves are filtered
+to the changed paths as they parse. Verified byte bodies cover at most
+100 selected pins and live only in that source action, not in the historical
+coordinator. Byte windows share recipe frontiers across their selected States,
+resolving at most 100 digests / 2 MiB at a time. Equal subtree digests share a single page parse and physical
+read in that frontier; destination spans reconstruct each flat State manifest
+and verify its whole digest. Directory paths are manifest entries, not separate
+Merkle directory objects. Access is rechecked before and after each byte window,
+including shared subtrees. Blob rows drain in 500-row windows. Journal pages apply up to 50 ordered events with an overlay of preceding
 updates, then commit rows and the original revision/cursor continuation together.
 Existing partial summary and single-event journal cursors retain their meaning.
 Scratch cleanup does not reread the default Intent unless a page changed Intents.
 All source reads and durable steps retain current authority and exact generation
-checks; invocation-local byte reuse is not an authorization cache. Builds have
+checks; invocation-local byte reuse is not an authorization cache. Transient
+platform/storage reads retry up to three total attempts with 50/100 ms backoff.
+Exhausted reads propagate through optional-provenance fallbacks and return a
+retryable continuation without committing the in-flight step. Only durable
+rows and cursors survive; the next ensure resumes that position. Validation,
+access and digest failures retain their existing errors/fallbacks. Builds have
 no idle timer. `tests/projectWorkIndex-phases.test.mjs` measures the remaining
-phases on synthetic dogfood-sized Work, 3,000-file trees and recipe-stored MiB files.
+phases on synthetic dogfood-sized Work, 2,500 files in 304 directories at depth
+six, shared multi-level State recipes and recipe-stored MiB files. Views change
+1–40 files and use the State projection even without owner-supplied View facts.
 
 Opening a View with missing counts invokes one finite `projectViewDiffstats:compute`
 action. It resolves the immutable base/head and changed-file pins in bounded pages,

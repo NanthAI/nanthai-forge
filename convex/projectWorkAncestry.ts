@@ -7,6 +7,7 @@ import { reviewPaths } from '../src/native-source-review';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { exchangeObjectReader } from './projectExchangeReader';
+import { indexReadContext, indexReadFailure } from './projectWorkIndexRetry';
 import { gitBundleParents } from '../src/git-bundle-parents';
 import type { ProvenanceFile } from '../src/view-provenance-plan';
 import { parseNativeState } from '../src/native-source';
@@ -36,6 +37,7 @@ export const stateBatch = internalAction({
     v.object({ head: v.string(), parents: v.array(v.string()), files: v.optional(v.array(stateFile)) }),
   ),
   handler: async (ctx, input) => {
+    ctx = indexReadContext(ctx);
     const reader = exchangeObjectReader(ctx, false, 0),
       paths = input.paths ? new Set(input.paths) : undefined;
     const result: {
@@ -81,6 +83,7 @@ export const changedStates = internalAction({
     states: v.optional(v.array(v.object({ head: v.string(), files: v.array(stateFile) }))),
   }),
   handler: async (ctx, input) => {
+    ctx = indexReadContext(ctx);
     const reader = exchangeObjectReader(ctx, false, 0);
     const pins = [input.before, input.after];
     let size = input.before.size + input.after.size;
@@ -94,6 +97,7 @@ export const changedStates = internalAction({
     try {
       bodies = await reader.read(input.projectId, input.actor, pins);
     } catch (error) {
+      if (indexReadFailure(ctx, error)) throw error;
       if (pins.length === 2) throw error;
       // Extra provenance is optional. Do not lose the available base/head diff
       // when one save is unavailable; the caller retains its ordinary fallback.
@@ -121,7 +125,8 @@ export const changedStates = internalAction({
                     files: parseNativeState(bodies[i + 2]!).files.filter(file => paths.has(file.path)),
                   },
                 ];
-              } catch {
+              } catch (error) {
+                if (indexReadFailure(ctx, error)) throw error;
                 // A malformed optional save has the same incomplete-provenance
                 // fallback as an unavailable save; base/head remain usable.
                 return [];
@@ -271,7 +276,8 @@ export async function sourceParents(
 ) {
   try {
     return await readParents(ctx, backup, manifest, data, actor, retainFiles);
-  } catch {
+  } catch (error) {
+    if (indexReadFailure(ctx, error)) throw error;
     await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: actor });
     return new Map<string, string[]>();
   }

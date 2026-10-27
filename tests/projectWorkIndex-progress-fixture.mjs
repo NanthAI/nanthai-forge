@@ -44,7 +44,9 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
       )
     : [];
   const paths = Array.from({ length: options.treeFiles ?? 0 }, (_, i) => ({
-    path: `src/file-${i}.ts`,
+    path: options.realisticTrees
+      ? `src/area-${Math.floor(i / 28) % 3}/feature-${Math.floor(i / 28) % 10}/module-${Math.floor(i / 28) % 90}/internal/files/file-${i}.ts`
+      : `src/file-${i}.ts`,
     blob: old,
     mode: 'file',
   }));
@@ -55,7 +57,11 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
           schema: 1,
           kind: 'forge-source-state',
           parents: i && i <= n(1530) ? [heads[i - 1]] : [],
-          files: i ? paths.map((f, j) => (j < 40 ? { ...f, blob: changes[j] } : f)) : paths,
+          files: i
+            ? paths.map((f, j) =>
+                j < (options.realisticTrees ? 1 + (i % 40) : 40) ? { ...f, blob: changes[j] } : f,
+              )
+            : paths,
           message: `State ${i}`,
           at,
         }),
@@ -211,14 +217,25 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
         work: records.root.work.sha256,
         stats: [...data.lanes, ...data.views].map(v => [
           `${v.base}:${v.head}`,
-          { files: v.base === v.head ? 0 : 40, add: 40, del: 40 },
+          {
+            files: v.base === v.head ? 0 : options.realisticTrees ? 1 + (heads.indexOf(v.head) % 40) : 40,
+            add: 40,
+            del: 40,
+          },
         ]),
       })
     : undefined;
   for (const [key, bytes] of companion?.objects ?? []) objects.set(key, bytes);
   const stateFiles = {
     has: head => heads.includes(head),
-    get: head => (head === heads[0] ? paths : paths.map((f, j) => (j < 40 ? { ...f, blob: changes[j] } : f))),
+    get: head => {
+      const i = heads.indexOf(head);
+      return i === 0
+        ? paths
+        : paths.map((f, j) =>
+            j < (options.realisticTrees ? 1 + (i % 40) : 40) ? { ...f, blob: changes[j] } : f,
+          );
+    },
   };
   const ownerViews = options.ownerViews
     ? data.views.map((view, index) => {
@@ -310,7 +327,12 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     backup = s.tables.projectBackups.get('backup');
   }
   const recipeStore = options.recipes
-    ? recipeObjects(objects, sizes, new Set([...heads, ...(options.largeFiles ? [old, ...changes] : [])]))
+    ? recipeObjects(
+        objects,
+        sizes,
+        new Set([...heads, ...(options.largeFiles ? [old, ...changes] : [])]),
+        options.realisticTrees,
+      )
     : undefined;
   if (options.largeFiles && recipeStore) {
     recipeStore.row(old);
@@ -464,6 +486,7 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     maxStepMs: 0,
     maxActionMs: 0,
     actionCalls: 0,
+    stateBatchMs: [],
   };
   const phase = () => {
     const generation = [...s.tables.projectWorkGenerations.values()].find(g => g.ensureCursor);
@@ -589,7 +612,14 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
       throw error;
     }
     if (options.treeFiles) {
-      if (name === 'projectWorkIndexBuildStates:batch') return buildStates.batch._handler(s.ctx, args);
+      if (name === 'projectWorkIndexBuildStates:batch') {
+        const started = performance.now();
+        try {
+          return await buildStates.batch._handler(s.ctx, args);
+        } finally {
+          metrics.stateBatchMs.push(performance.now() - started);
+        }
+      }
       if (name === 'projectWorkIndexBuildStates:tree') return buildStates.tree._handler(s.ctx, args);
       if (name === 'projectWorkIndexBuildDiffstats:compare')
         return buildDiffstats.compare._handler(s.ctx, args);
@@ -602,7 +632,12 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     if (name === 'projectWorkIndexBuildStates:batch')
       return args.requests.map(() => ({ before: [], after: [], paths: [], states: [] }));
     if (name === 'projectWorkAncestry:changedStates') return { before: [], after: [], paths: [] };
-    if (name === 'projectWorkAncestry:stateBatch') return args.pins.map(p => ({ head: p.sha256, files: [] }));
+    if (name === 'projectWorkAncestry:stateBatch')
+      return args.pins.map(p => ({
+        head: p.sha256,
+        parents: JSON.parse(objects.get(p.sha256)).parents,
+        files: [],
+      }));
     throw new Error(`Unexpected action ${name}`);
   };
   // In the memory consumer only immutable record objects are the external fake
@@ -612,12 +647,29 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     s,
     data,
     metrics,
+    treeShape: {
+      files: paths.length,
+      directories: new Set(
+        paths.flatMap(f =>
+          f.path
+            .split('/')
+            .slice(0, -1)
+            .map((_, i) =>
+              f.path
+                .split('/')
+                .slice(0, i + 1)
+                .join('/'),
+            ),
+        ),
+      ).size,
+      depth: Math.max(0, ...paths.map(f => f.path.split('/').length - 1)),
+    },
     recipeBindings: recipeStore?.bindings,
     filePins: [old, changes[0]].filter(Boolean).map(sha256 => ({ sha256, size: objects.get(sha256).length })),
     sourcePins: heads.map(sha256 => ({ sha256, size: sizes.get(sha256) })),
     snapshot: () => ({
       data,
-      objects: [...objects],
+      objects: [...objects, ...[...generators.keys()].map(key => [key, objects.get(key)])],
       tables: Object.entries(s.tables).map(([name, rows]) => [name, [...rows]]),
     }),
     async drive() {

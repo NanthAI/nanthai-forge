@@ -3,6 +3,7 @@
 import { archiveChannels } from '../src/work-archive-metadata';
 import { sourceTreeEntries } from '../src/source-tree-index';
 import { exchangeObjectReader } from './projectExchangeReader';
+import { indexReadFailure } from './projectWorkIndexRetry';
 import { parseNativeState } from '../src/native-source';
 import { type ChangedStates, type Pin } from './projectDiffstatProjection';
 import type { ActionCtx } from './_generated/server';
@@ -62,7 +63,8 @@ export async function viewStates(
     let next;
     try {
       next = pin(head);
-    } catch {
+    } catch (error) {
+      if (indexReadFailure(ctx, error)) throw error;
       break;
     }
     if (extraPins.length >= 98 || bytes + next.size > 2 * 1024 * 1024) break;
@@ -105,7 +107,8 @@ export async function viewStates(
         },
       );
       for (const summary of summaries) if (summary.files) states.set(summary.head, summary.files);
-    } catch {
+    } catch (error) {
+      if (indexReadFailure(ctx, error)) throw error;
       // Retain the existing incomplete-provenance result for unavailable States.
     }
   }
@@ -164,7 +167,8 @@ export async function workProjection(ctx: ActionCtx, snapshot: Snapshot, owner: 
           const reader = exchangeObjectReader(ctx, false, 0);
           const [bytes] = await reader.read(snapshot.backup.projectId, owner, [treePin]);
           entries.push(...sourceTreeEntries(head, parseNativeState(bytes!).files));
-        } catch {
+        } catch (error) {
+          if (indexReadFailure(ctx, error)) throw error;
           // Optional tree optimization: the exact source reader remains available.
           // Publication still checks current authority in the staging transaction.
         }
@@ -175,7 +179,8 @@ export async function workProjection(ctx: ActionCtx, snapshot: Snapshot, owner: 
         let states: Map<string, readonly ProvenanceFile[]> | undefined;
         try {
           states = await viewStates(ctx, snapshot, owner, index);
-        } catch {
+        } catch (error) {
+          if (indexReadFailure(ctx, error)) throw error;
           /* unavailable remains explicit */
         }
         const rows = viewIndexEntries(snapshot.data, states, { index, positions });

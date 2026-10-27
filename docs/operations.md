@@ -35,8 +35,9 @@ continuations and report the same counters; exchange transports report them as
 `host --status` retains the latest index counters when hosting is interrupted.
 
 Hosted native record checkpoints above 2 MiB build their disposable Work index
-from server-held record pages. Each step reads up to 50 records or parent States
-(a 256 KiB target, with one indivisible record when larger). Summary steps share
+from server-held record pages. Each step reads up to 50 records (a 256 KiB target,
+with one indivisible record when larger), or a 2 MiB window of parent States in a
+separate source action. Summary steps share
 up to ten records, stopping after a 500-row / 500 KB output target or one second
 of projection work. One unusually large record remains indivisible. Rows and
 the next cursor commit together, and that mutation returns the committed
@@ -50,6 +51,15 @@ codes/messages if indexing fails. The build and its staged-page cleanup install
 no timer, scheduler or poller: only an in-flight command advances the cursor.
 Existing post-publication retirement of obsolete derived generations remains
 separate from the build.
+
+During a reseed, transient platform/storage read errors retry in the current
+call (three total attempts, with 50 ms then 100 ms backoff). If storage is still
+unavailable, ensure returns a pending continuation with `retryable: true` in its
+progress JSON. The generation stays building at its last committed cursor;
+the running command's next ensure resumes it. Restarting the command uses that
+same saved position. An uncommitted summary step repeats instead of publishing
+incomplete provenance. Validation, access and digest errors keep their existing
+handling. Backoff exists only inside an active call; idle builds schedule nothing.
 
 Summary projection batches the common Lane/Intent record context and first
 submission/acceptance pages for up to ten records. Context queries return a

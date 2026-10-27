@@ -12,12 +12,15 @@ import { workBytes } from '../src/work-metadata';
 import { report } from './errors';
 import { ForgeError } from '../src/errors';
 import { longActionExpired } from '../src/long-action';
+import { indexReadContext, indexTransient } from './projectWorkIndexRetry';
+import { resume } from './projectWorkIndexBuildTypes';
 async function ensureIndex(
   ctx: ActionCtx,
   projectId: Id<'hostedProjects'>,
   owner: string,
   resumable = true,
 ): Promise<Id<'projectWorkGenerations'> | { pending: true; progress: string }> {
+  ctx = indexReadContext(ctx);
   const paged = await buildRecordIndex(ctx, { projectId, owner });
   if (paged) {
     if (typeof paged === 'string' || resumable) return paged;
@@ -125,9 +128,31 @@ export const ensure = action({
     v.object({ pending: v.literal(true), progress: v.string() }),
   ),
   handler: async (ctx, { projectId }) => {
+    let owner: string | undefined;
     try {
-      return await ensureIndex(ctx, projectId, await caller(ctx));
+      owner = await caller(ctx);
+      return await ensureIndex(ctx, projectId, owner);
     } catch (error) {
+      if (owner && indexTransient(error)) {
+        // Read the durable position afresh, including after an unknown CAS reply.
+        let generation: Doc<'projectWorkGenerations'> | null = null;
+        try {
+          generation = await indexReadContext(ctx).runQuery(resume, { projectId, owner });
+        } catch (resumeError) {
+          if (!indexTransient(resumeError)) throw resumeError;
+        }
+        return {
+          pending: true as const,
+          progress: JSON.stringify({
+            phase: 'index',
+            step: generation?.nextBatch ?? 0,
+            buildPhase: generation?.ensureCursor ? JSON.parse(generation.ensureCursor).phase : 'settings',
+            done: 0,
+            total: 0,
+            retryable: true,
+          }),
+        };
+      }
       // Preserve the server's application code/message at this boundary. In
       // particular, do not replace an index failure with an empty HTTP Error.
       if (error instanceof ConvexError) throw error;
