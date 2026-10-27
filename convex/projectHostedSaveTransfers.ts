@@ -103,72 +103,7 @@ export const grant = internalMutation({
     v.object({ stored: v.literal(true) }),
   ),
   handler: async (ctx, input) => {
-    const { pin, row, job } = await authorizeSaveTransfer(ctx, input);
-    if (input.action === 'read') {
-      // The fixed trusted reader requests only hash-pinned input/recipe closure.
-      // Project membership is checked for each exact object, including recipe leaves.
-      await saveObject(ctx, input.projectId, pin);
-      const object = await ctx.db
-        .query('projectObjects')
-        .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-        .unique();
-      const url =
-        object?.location === 'r2' && object.r2Key
-          ? await presignGet(r2Config(), object.r2Key)
-          : object?.storageId
-            ? await blobStore(ctx).getUrl(object.storageId)
-            : null;
-      invariant(url, 'SOURCE_UNAVAILABLE', 'Read a raw source object or its exact recipe leaves.');
-      return { url, headers: {} };
-    }
-    let object = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
-      .unique();
-    invariant(
-      !object || (!object.removed && object.size === pin.size),
-      'SOURCE_HASH_MISMATCH',
-      'Output differs from its immutable project binding.',
-    );
-    // A compose can regenerate bytes already retained in any storage format.
-    // Keep save-job replies compatible with their previously pinned worker image.
-    if (['compose', 'sync'].includes(job.jobKind) && object && isStored(object))
-      return { stored: true as const };
-    const project = await ctx.db.get(input.projectId);
-    invariant(
-      r2Enabled() && project?.r2Writes,
-      'SOURCE_WORKER_UNAVAILABLE',
-      'Hosted source output requires the configured project object-store path.',
-    );
-    // Immutable outputs may replay after a lost PUT or HEAD reply. Reuse a raw
-    // committed R2 destination; never proxy source bytes through an action.
-    invariant(
-      !object || object.location === 'r2',
-      'SOURCE_UNAVAILABLE',
-      'This output already has a different retained storage representation.',
-    );
-    if (!object) {
-      const id = await ctx.db.insert('projectObjects', {
-        projectId: input.projectId,
-        digest: pin.sha256,
-        size: pin.size,
-        nonce: crypto.randomUUID(),
-        removed: false,
-        location: 'r2',
-        r2Key: r2Key(input.projectId, pin.sha256),
-        r2PreparedAt: Date.now(),
-      });
-      object = (await ctx.db.get(id))!;
-    }
-    if (!object.r2Committed && object.r2SweepKey === object.r2Key) {
-      const key = `${r2Key(input.projectId, pin.sha256)}/u/${crypto.randomUUID()}`;
-      await ctx.db.patch(object._id, { r2Key: key, r2PreparedAt: Date.now() });
-      object = { ...object, r2Key: key };
-    }
-    invariant(object.r2Key, 'SOURCE_UNAVAILABLE', 'Output storage binding is unavailable.');
-    if (!project.r2StorageUsed) await ctx.db.patch(row.projectId, { r2StorageUsed: true });
-    const target = await presignPut(r2Config(), object.r2Key, { digest: pin.sha256, size: pin.size });
-    return { url: target.url, headers: target.headers };
+    return sourceTransferGrant(ctx, input, await authorizeSourceTransfer(ctx, input));
   },
 });
 export const pending = internalMutation({
@@ -240,3 +175,78 @@ export const commit = internalAction({
     });
   },
 });
+
+/** Shared transaction primitive: batch callers authorize once in the same transaction. */
+export async function sourceTransferGrant(
+  ctx: MutationCtx,
+  input: Transfer & { action: 'read' | 'upload' },
+  authority: Awaited<ReturnType<typeof authorizeSourceTransfer>>,
+) {
+  const { row, job } = authority;
+  const pin = saveObjectSchema.parse(input.pin);
+  if (input.action === 'read') {
+    // The fixed trusted reader requests only hash-pinned input/recipe closure.
+    // Project membership is checked for each exact object, including recipe leaves.
+    await saveObject(ctx, input.projectId, pin);
+    const object = await ctx.db
+      .query('projectObjects')
+      .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
+      .unique();
+    const url =
+      object?.location === 'r2' && object.r2Key
+        ? await presignGet(r2Config(), object.r2Key)
+        : object?.storageId
+          ? await blobStore(ctx).getUrl(object.storageId)
+          : null;
+    invariant(url, 'SOURCE_UNAVAILABLE', 'Read a raw source object or its exact recipe leaves.');
+    return { url, headers: {} };
+  }
+  let object = await ctx.db
+    .query('projectObjects')
+    .withIndex('by_project_and_digest', q => q.eq('projectId', input.projectId).eq('digest', pin.sha256))
+    .unique();
+  invariant(
+    !object || (!object.removed && object.size === pin.size),
+    'SOURCE_HASH_MISMATCH',
+    'Output differs from its immutable project binding.',
+  );
+  // A compose can regenerate bytes already retained in any storage format.
+  // Keep save-job replies compatible with their previously pinned worker image.
+  if (['compose', 'sync'].includes(job.jobKind) && object && isStored(object))
+    return { stored: true as const };
+  const project = await ctx.db.get(input.projectId);
+  invariant(
+    r2Enabled() && project?.r2Writes,
+    'SOURCE_WORKER_UNAVAILABLE',
+    'Hosted source output requires the configured project object-store path.',
+  );
+  // Immutable outputs may replay after a lost PUT or HEAD reply. Reuse a raw
+  // committed R2 destination; never proxy source bytes through an action.
+  invariant(
+    !object || object.location === 'r2',
+    'SOURCE_UNAVAILABLE',
+    'This output already has a different retained storage representation.',
+  );
+  if (!object) {
+    const id = await ctx.db.insert('projectObjects', {
+      projectId: input.projectId,
+      digest: pin.sha256,
+      size: pin.size,
+      nonce: crypto.randomUUID(),
+      removed: false,
+      location: 'r2',
+      r2Key: r2Key(input.projectId, pin.sha256),
+      r2PreparedAt: Date.now(),
+    });
+    object = (await ctx.db.get(id))!;
+  }
+  if (!object.r2Committed && object.r2SweepKey === object.r2Key) {
+    const key = `${r2Key(input.projectId, pin.sha256)}/u/${crypto.randomUUID()}`;
+    await ctx.db.patch(object._id, { r2Key: key, r2PreparedAt: Date.now() });
+    object = { ...object, r2Key: key };
+  }
+  invariant(object.r2Key, 'SOURCE_UNAVAILABLE', 'Output storage binding is unavailable.');
+  if (!project.r2StorageUsed) await ctx.db.patch(row.projectId, { r2StorageUsed: true });
+  const target = await presignPut(r2Config(), object.r2Key, { digest: pin.sha256, size: pin.size });
+  return { url: target.url, headers: target.headers };
+}

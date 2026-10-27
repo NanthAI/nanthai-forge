@@ -16,6 +16,7 @@ const names = [
   'projectHostedLanes',
   'projectObjectDownloads',
   'projectHostedCompose',
+  'projectHostedComposeSelection',
   'projectHostedComposeJobs',
   'projectHostedSync',
   'projectHostedSyncJobs',

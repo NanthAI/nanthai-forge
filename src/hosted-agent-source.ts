@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { buildComposePages, composeRequestSchema, type ComposeEntry } from './hosted-compose.js';
+import {
+  buildComposePages,
+  composeRequestSchema,
+  composeLaneSchema,
+  composeDependencySchema,
+  type ComposeEntry,
+} from './hosted-compose.js';
 import { hostedLaneSelectionSchema, type HostedLaneSelection } from './hosted-lane.js';
-import { hostedRecordSchema } from './hosted-records.js';
 import { saveExpectedSchema, savePin, saveBytes, saveWorkerObjectSchema } from './hosted-save.js';
 import { syncRequestSchema } from './hosted-sync.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -77,50 +82,36 @@ export async function composeAgentSource(
     const selected = command.inputs ?? [{ laneId: (await selectAgentLane(session, command.laneId)).laneId }];
     const inputs: ComposeEntry[] = [];
     let intentId = command.intentId;
-    for (const item of selected) {
-      const lane = await selectAgentLane(session, item.laneId);
-      if (item.expected)
-        invariant(
-          canonicalPayload(item.expected) ===
-            canonicalPayload(
-              saveExpectedSchema.parse({
-                head: lane.head,
-                version: lane.version,
-                sourceVersion: lane.sourceVersion,
-                lifecycleVersion: lane.lifecycleVersion,
-              }),
-            ),
-          'WORK_STALE',
-          'The selected Lane pins changed.',
-        );
-      intentId ??= lane.intentId;
-      inputs.push({
-        laneId: lane.laneId,
-        ...saveExpectedSchema.parse({
-          head: lane.head,
-          version: lane.version,
-          sourceVersion: lane.sourceVersion,
-          lifecycleVersion: lane.lifecycleVersion,
-        }),
-        state: await agentState(session, lane.head),
-      });
-    }
     const dependencies: ComposeEntry[] = [];
-    for (const item of command.dependencies) {
-      const candidate = hostedRecordSchema.options[3].parse(
-        await session.query('projectHostedCompose:candidate', { candidateId: item.candidateId }),
+    const selection = [
+      ...selected.map(item => ({ kind: 'inputs' as const, item })),
+      ...command.dependencies.map(item => ({ kind: 'dependencies' as const, item })),
+    ];
+    const row = z.object({ intentId: z.string(), entry: z.unknown() });
+    for (let offset = 0; offset < selection.length; offset += 100) {
+      const window = selection.slice(offset, offset + 100);
+      const page = z.object({ inputs: z.array(row), dependencies: z.array(row) }).parse(
+        await session.query('projectHostedComposeSelection:page', {
+          inputs: window.flatMap(value => (value.kind === 'inputs' ? [value.item] : [])),
+          dependencies: window.flatMap(value => (value.kind === 'dependencies' ? [value.item] : [])),
+        }),
       );
       invariant(
-        candidate.result.status === 'clean' && (!item.head || candidate.result.head === item.head),
-        'VIEW_STALE',
-        'Select an exact clean dependency Candidate.',
+        page.inputs.length === window.filter(value => value.kind === 'inputs').length &&
+          page.dependencies.length === window.filter(value => value.kind === 'dependencies').length,
+        'SOURCE_UNAVAILABLE',
+        'The selected source page is incomplete.',
       );
-      intentId ??= candidate.intentId;
-      dependencies.push({
-        candidateId: candidate.id,
-        head: candidate.result.head,
-        state: await agentState(session, candidate.result.head),
-      });
+      for (const [kind, entries] of [
+        ['inputs', page.inputs],
+        ['dependencies', page.dependencies],
+      ] as const)
+        for (const value of entries) {
+          intentId ??= value.intentId;
+          (kind === 'inputs' ? inputs : dependencies).push(
+            (kind === 'inputs' ? composeLaneSchema : composeDependencySchema).parse(value.entry),
+          );
+        }
     }
     const a = buildComposePages(inputs),
       b = buildComposePages(dependencies);

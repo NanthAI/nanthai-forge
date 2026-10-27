@@ -93,23 +93,25 @@ test('lost upload and final submit replies keep original disk bytes after subseq
   writeFileSync(join(root, 'a.txt'), 'first edit');
   let lost = true,
     finalLost = true,
-    physicalPuts = 0;
+    deltaPuts = 0;
   const retained = new Set();
   const exchange = {
     projectId: s.projectId,
     async missing(pins) {
       return pins.filter(pin => !s.objects.has(pin.sha256)).map(pin => pin.sha256);
     },
-    async uploadFile(pin, source, path) {
-      if (!retained.has(pin.sha256)) {
-        const bytes = readFileSync(join(source, path));
-        assert.equal(digest(bytes), pin.sha256);
-        s.put(bytes);
-        physicalPuts++;
-        retained.add(pin.sha256);
-        if (lost) {
-          lost = false;
-          throw Error('lost PUT reply');
+    async uploadLazyBatch(objects) {
+      for (const { pin, read } of objects) {
+        if (!retained.has(pin.sha256)) {
+          const bytes = await read();
+          assert.equal(digest(bytes), pin.sha256);
+          s.put(bytes);
+          if (pin.sha256 === digest('first edit')) deltaPuts++;
+          retained.add(pin.sha256);
+          if (lost) {
+            lost = false;
+            throw Error('lost PUT reply');
+          }
         }
       }
       return { uploadedObjects: 0, uploadedBytes: 0 };
@@ -149,7 +151,7 @@ test('lost upload and final submit replies keep original disk bytes after subseq
   await assert.rejects(saveHostedLane(root, request, exchange), /lost submit/);
   const pending = await saveHostedLane(root, request, exchange);
   assert.equal(pending.status, 'submitted');
-  assert.equal(physicalPuts, 1);
+  assert.equal(deltaPuts, 1);
   const output = await s.work({ request }),
     terminal = await s.publish(output);
   assert.deepEqual(await saveHostedLane(root, request, exchange), terminal);

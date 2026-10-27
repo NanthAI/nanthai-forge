@@ -62,6 +62,38 @@ export function sourceWorkerHttp(config: {
     );
     return { url, headers: value.headers };
   };
+  const validGrant = (value: unknown) => {
+    const parsed = grant.parse(value);
+    if ('url' in parsed) {
+      const url = new URL(parsed.url);
+      invariant(
+        url.protocol === 'https:' && !url.username && !url.password && !url.hash,
+        'SOURCE_WORKER_UNAVAILABLE',
+        'Source transfer grant must use HTTPS.',
+      );
+    }
+    return parsed;
+  };
+  const identity = { input: config.input, executionId: config.executionId };
+  const grants = async (action: 'read' | 'upload', pins: WorkerPin[]) => {
+    const response = await control('grant-batch', { ...identity, action, pins });
+    const values = z
+      .array(z.unknown())
+      .parse(await readSourceControlReply(response))
+      .map(validGrant);
+    invariant(values.length === pins.length, 'SOURCE_HASH_MISMATCH', 'Source transfer page is incomplete.');
+    return values;
+  };
+  async function* download(target: ReturnType<typeof validGrant>) {
+    invariant('url' in target, 'SOURCE_WORKER_UNAVAILABLE', 'A read requires an exact transfer URL.');
+    const response = await request(target.url, {
+      headers: target.headers,
+      redirect: 'error',
+      signal: AbortSignal.timeout(config.timeoutMs),
+    });
+    invariant(response.ok && response.body, 'SOURCE_WORKER_UNAVAILABLE', 'Source transfer is unavailable.');
+    yield* Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
+  }
   const readTarget = async (target: { url: string; headers: Record<string, string> }) => {
     const url = new URL(target.url);
     invariant(
@@ -78,6 +110,70 @@ export function sourceWorkerHttp(config: {
     return Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
   };
   const transport: SourceWorkerTransport = {
+    async describeBatch(digests) {
+      const response = await control('describe-batch', { ...identity, digests });
+      const refs = z.array(workerObjectSchema).parse(await readSourceControlReply(response));
+      invariant(
+        refs.length === digests.length && refs.every((ref, index) => ref.object.sha256 === digests[index]),
+        'SOURCE_HASH_MISMATCH',
+        'Source descriptor page selected different content.',
+      );
+      return refs;
+    },
+    async readBatch(pins) {
+      return (await grants('read', pins)).map(target => download(target));
+    },
+    async uploadBatch(objects) {
+      const targets = await grants(
+        'upload',
+        objects.map(object => object.pin),
+      );
+      const pending: WorkerPin[] = [];
+      for (const [index, object] of objects.entries()) {
+        const target = targets[index]!;
+        const hash = createHash('sha256');
+        let size = 0;
+        async function* verified() {
+          for await (const chunk of object.bytes) {
+            size += chunk.byteLength;
+            invariant(
+              size <= object.pin.size,
+              'SOURCE_HASH_MISMATCH',
+              'Output exceeds its exact committed size.',
+            );
+            hash.update(chunk);
+            yield chunk;
+          }
+          invariant(
+            size === object.pin.size && hash.digest('hex') === object.pin.sha256,
+            'SOURCE_HASH_MISMATCH',
+            'Output differs from its exact committed content.',
+          );
+        }
+        if ('stored' in target) {
+          for await (const chunk of verified()) void chunk;
+          continue;
+        }
+        const init: RequestInit & { duplex: 'half' } = {
+          method: 'PUT',
+          body: Readable.from(verified()) as unknown as BodyInit,
+          duplex: 'half',
+          redirect: 'error',
+          signal: AbortSignal.timeout(config.timeoutMs),
+          headers: target.headers,
+        };
+        const response = await request(target.url, init);
+        invariant(
+          response.ok || response.status === 412,
+          'SOURCE_WORKER_UNAVAILABLE',
+          'Source upload was not acknowledged.',
+        );
+        // A create-only replay may return 412 without consuming its request body.
+        // HEAD/commit still verifies the exact retained hash and size.
+        pending.push(object.pin);
+      }
+      if (pending.length) await control('commit-batch', { ...identity, pins: pending });
+    },
     async describe(sha256) {
       const response = await control('describe', {
         sha256,

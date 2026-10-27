@@ -31,6 +31,7 @@ export function uploadPhysicalObjects(
   objects: Upload[],
   options: {
     batchSize?: number;
+    onRaw?: (sha256: string) => void;
     blobs?: Pick<ExchangeBlobs, 'put'>;
     wait?: (ms: number) => Promise<unknown>;
   } = {},
@@ -147,6 +148,10 @@ export function uploadPhysicalObjects(
         await client.action(makeFunctionReference<'action'>('projectObjectCommit:commitBatch'), {
           objects: r2,
         });
+      }
+      for (const object of completed) {
+        const row = selected.find(row => row.id === object.id)!;
+        options.onRaw?.(window[row.index]!.pin.sha256);
       }
       const error = attempts.find(result => result.status === 'rejected');
       if (error?.status === 'rejected') throw error.reason;

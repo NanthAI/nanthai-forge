@@ -1,6 +1,5 @@
 import { composeStack } from './native-stack-compose.js';
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NativeSource, overlappingPaths, type NativeFile } from './native-source.js';
 import { compensatingState } from './compensating-revert.js';
@@ -25,15 +24,14 @@ export async function buildHostedSyncState(
   const plan = syncInputSchema.parse(value),
     work = plan.work,
     source = new LazyMergeSource(original.owner),
-    calculate = <T>(action: () => T) => lazyMerge(reader, progress, action);
+    calculate = <T>(action: () => T) => lazyMerge(reader, progress, action, source);
   const publishGenerated = async () => {
-    for (const id of source.generated) await reader.publish(readFileSync(join(source.directory, id)));
+    await reader.publishFiles([...source.generated].map(id => join(source.directory, id)));
     source.generated.clear();
   };
   let result: typeof syncOutputSchema._output.result;
   if (work.mode === 'revert') {
-    await reader.file(work.previous);
-    await reader.file(work.accepted);
+    await reader.files([work.previous, work.accepted]);
     const head = await calculate(() =>
       compensatingState(source, work.previous.object.sha256, work.accepted.object.sha256, plan.at),
     );
@@ -87,16 +85,17 @@ export async function buildHostedSyncState(
       left = page.left;
       right = page.right;
     } else {
-      await reader.file(work.left);
-      await reader.file(work.right);
+      await reader.files([work.left, work.right]);
       left = work.left.object.sha256;
       right = work.right.object.sha256;
     }
-    const merged = await calculate(() =>
-      work.mode === 'sync' && work.stackBase
+    const merged = await calculate(() => {
+      source.state(left);
+      source.state(right);
+      return work.mode === 'sync' && work.stackBase
         ? composeStack(source, left, right, work.stackBase.object.sha256, plan.message, plan.at)
-        : source.compose(left, right, plan.message, plan.at, { insertionOrder: 'right-first' }),
-    );
+        : source.compose(left, right, plan.message, plan.at, { insertionOrder: 'right-first' });
+    });
     if (merged.head) {
       invariant(work.mode === 'sync', 'SOURCE_JOB_INVALID', 'The original Candidate must retain a conflict.');
       result = {

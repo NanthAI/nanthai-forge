@@ -60,7 +60,12 @@ export const prepare = mutation({
       if (prepared.replayed) {
         const old = await saveRow(ctx, auth);
         invariant(old, 'SOURCE_UNAVAILABLE', 'The original save preparation is unavailable.');
-        return canonicalPayload({ state: JSON.parse(old.value), terminal: prepared.operation.terminal });
+        const state = JSON.parse(old.value);
+        return canonicalPayload({
+          state,
+          terminal: prepared.operation.terminal,
+          input: request.pages ? hostedSaveInput(state, prepared.operation.firstAttempt.at) : null,
+        });
       }
       const lane = await saveLane(ctx, { ...auth, laneId: request.laneId });
       invariant(
@@ -84,7 +89,11 @@ export const prepare = mutation({
         jobId: prepared.operation.firstAttempt.ids.job!,
         value: canonicalPayload(state),
       });
-      return canonicalPayload({ state, terminal: null });
+      return canonicalPayload({
+        state,
+        terminal: null,
+        input: request.pages ? hostedSaveInput(state, prepared.operation.firstAttempt.at) : null,
+      });
     } catch (error) {
       return report(error);
     }

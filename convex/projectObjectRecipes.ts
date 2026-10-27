@@ -6,7 +6,7 @@ import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { objectRecipeSchema, readObjectRecipe, objectChunkPageBytes } from '../src/object-chunks';
-import { objectContent } from './projectObjectContent';
+import { recipeValidationReader } from './projectObjectRecipeValidation';
 import { report } from './errors';
 const pin = { projectId: v.id('hostedProjects'), digest: v.string(), size: v.number() };
 const valid = (digest: string, size: number) =>
@@ -38,13 +38,7 @@ export const complete = action({
         })
       )
         return null;
-      const read = async (pin: { sha256: string; size: number }) => {
-        const args = { projectId: input.projectId, actor: user.subject, digests: [pin.sha256] };
-        const rows: Doc<'projectObjects'>[] = await ctx.runQuery(internal.projectObjects.resolve, args);
-        const bytes = await objectContent(ctx, rows[0]!, pin, user.subject);
-        await ctx.runQuery(internal.projectObjects.resolve, args);
-        return bytes;
-      };
+      const { read, prepare, finish } = recipeValidationReader(ctx, input.projectId, user.subject);
       const bytes = await read({ sha256: input.recipeDigest, size: input.recipeSize });
       const recipe = objectRecipeSchema.parse(JSON.parse(bytes.toString('utf8')));
       invariant(
@@ -52,7 +46,8 @@ export const complete = action({
         'INVALID_WORK_BACKUP',
         'Recipe differs from the original logical content pin.',
       );
-      for await (const part of readObjectRecipe(recipe, read)) void part;
+      for await (const part of readObjectRecipe(recipe, read, prepare)) void part;
+      await finish();
       return await ctx.runMutation(internal.projectObjectRecipeStore.bind, { ...input, actor: user.subject });
     } catch (error) {
       return report(error);

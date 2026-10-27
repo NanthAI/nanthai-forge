@@ -511,3 +511,27 @@ test('unknown upload exhausts bounded attempts with pin and attempt count; deter
   );
   assert.equal(calls, 1);
 });
+
+test('raw upload acknowledgements identify exact committed members despite reused recipes and retry counters', async t => {
+  const e = environment(t),
+    objects = data(3);
+  await uploadPhysicalObjects(e.client, 'project', [objects[0]], { batchSize: 100 });
+  const row = [...e.s.tables.projectObjects.values()].find(row => row.digest === objects[0].pin.sha256);
+  // An existing logical recipe is stored, but is not a newly committed raw member.
+  row.storageId = undefined;
+  row.recipe = { digest: digest('synthetic-recipe'), size: 16 };
+  const raw = new Set();
+  e.lose();
+  const upload = () =>
+    uploadPhysicalObjects(e.client, 'project', objects, {
+      batchSize: 100,
+      onRaw: id => raw.add(id),
+      wait: async () => {},
+    });
+  await assert.rejects(upload(), error => error.code === 'EXCHANGE_REQUEST_FAILED');
+  await upload();
+  assert(!raw.has(objects[0].pin.sha256));
+  assert(raw.has(objects[2].pin.sha256), 'successful raw peer has an exact acknowledgement');
+  for (const id of raw) assert(objects.slice(1).some(object => object.pin.sha256 === id));
+  assert.equal(e.stats().posts, 3, 'lost POST reconciles the original stored bytes without another upload');
+});

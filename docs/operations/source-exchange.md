@@ -798,14 +798,20 @@ advances only the matching checkout baseline marker, without installing files.
 A delta names each changed path's exact prior blob/mode and its replacement or
 explicit deletion. Unmaterialized absent paths remain unchanged. Local additions,
 rename-as-delete/add, executable modes, symlinks and binary bytes use the same
-contract. The client first discovers missing logical objects in 100-object
-windows, reuses existing chunk/recipe upload and verification, and stages ordered
-metadata pages of at most 100 changes and 128 KiB. These windows do not limit the
+contract. Small captured files (up to 2 MiB) use raw lazy upload windows: one
+batch preparation and commit, without reading bytes for stored members. Larger
+files retain missing-only file-backed chunk/recipe upload. Recipe validation
+resolves descriptor frontiers in pages of at most 100 and rechecks current access
+after each consumed window, while verifying each pin and the complete logical
+hash. Ordered delta metadata pages contain at most 100 changes and 128 KiB. These windows do not limit the
 total source size. An unchanged save records success without moving the head or
 launching a worker.
 
 `projectHostedSaves:prepare`, `stage` and `progress` retain the original operation,
-baseline, counts and exact linked page root. `projectHostedSaveJobs:submit` creates
+baseline, counts and exact linked page root. Preparation also returns the original
+server-timestamped worker input, allowing its upload to share the delta-page
+window before staging. The worker batches changed-blob read grants and State/result
+output commits. `projectHostedSaveJobs:submit` creates
 one child source job pinned to Modal, `FORGE_SOURCE_WORKER`,
 `FORGE_SOURCE_RUNTIME` and `FORGE_SOURCE_KEY_ID`. The trusted worker verifies the
 baseline State and each prior delta entry, downloads changed blobs with bounded
@@ -821,6 +827,15 @@ sign committed project objects, including verified recipe leaves; output grants
 use the existing configured R2 path and create-only checksum-bound PUTs. Commit
 performs HEAD verification and then rechecks authorization and the exact storage
 key before binding the bytes. Source bytes do not pass through a Convex action.
+The fixed worker also uses `describe-batch`, `grant-batch` and `commit-batch`.
+The authenticated ingress routes these to `projectHostedSourceTransferBatch`'s
+`describe`, `grant` and `commit`, deriving the project from the authenticated
+dispatch. Requests carry `digests` or `pins` arrays of at most 100 in original
+order; description replies decode canonical JSON to descriptor arrays. Every
+batch independently rechecks the same current authority/epoch/execution/lease
+and each exact object binding; post-HEAD commits recheck every storage key.
+Signed read grants are consumed immediately for that page, not retained as an
+authorization cache. Single-object endpoints remain available to pinned workers.
 These functions are internal: deployment, authenticated ingress routing, key and
 provider provisioning remain required operator integration, not an enabled public
 HTTP endpoint or a live end-to-end qualification.
@@ -839,6 +854,12 @@ is granted by a source upload or save.
 
 These APIs compose saved hosted source without a local Work owner. The hosted
 agent CLI stages the same exact selection pages; browser controls are separate.
+`projectHostedComposeSelection:page({projectId,inputs,dependencies})` reads up to
+100 selected canonical Lane/Candidate records and their deduplicated State
+descriptors in one authorized call, preserving selection order. Inputs accept
+optional exact expected head/version/source/lifecycle pins; dependencies accept
+an optional exact clean head. Staging still rechecks all selected pins and authority.
+No catalog or Work history is loaded to assemble a selection.
 
 - `projectHostedCompose:prepare({projectId, request})`: `request` is JSON matching
   `composeRequestSchema`: original `operationId`, `intentId`, `authorityEpoch`,
@@ -878,6 +899,13 @@ upload grant can return `{stored:true}` for an already committed logical object,
 including legacy or recipe storage. The fixed transport consumes and verifies its
 exact bytes without a redundant PUT/HEAD. Save-job grant replies retain their
 previous contract for already pinned worker images.
+Sync and compose fetch missing State parents as frontiers and batch descriptors
+and read grants for merge objects. Blob prefetch selects differing paths among
+the visited exact States; unchanged blobs remain unread. The native merge reducer
+retries after a fetched frontier instead of after each individual blob. Verified
+bytes stay on private job disk, source streams are consumed one at a time and
+generated uploads use 100-object/8-MiB windows (an oversized member runs alone).
+Only operation-local State/path metadata is retained; no Work collection is read.
 The small signed result schedules `projectHostedComposeJobs:complete`; no client
 needs to remain connected and no recurring idle worker is created. Only the small
 result manifest crosses the finalizer action. Rebuild and pin the fixed image

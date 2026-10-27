@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { readFile, rename, rm } from 'node:fs/promises';
+import { readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -21,6 +21,9 @@ export interface SourceWorkerTransport {
       read: (() => Promise<AsyncIterable<Uint8Array>>) | null;
     }[]
   >;
+  describeBatch?(sha256: string[]): Promise<WorkerObject[]>;
+  readBatch?(pins: WorkerPin[]): Promise<AsyncIterable<Uint8Array>[]>;
+  uploadBatch?(objects: { pin: WorkerPin; bytes: AsyncIterable<Uint8Array> }[]): Promise<void>;
   read(pin: WorkerPin): Promise<AsyncIterable<Uint8Array>>;
   upload(pin: WorkerPin, bytes: AsyncIterable<Uint8Array>): Promise<void>;
 }
@@ -32,45 +35,87 @@ export class SourceWorkerReader {
     uploadedBytes: 0,
     cacheHits: 0,
     maxChunkBytes: 0,
+    maxUploadWindowBytes: 0,
   };
   resolvedObjects = 0;
   async resolve(sha256: string) {
-    invariant(
-      this.transport.describe,
-      'SOURCE_WORKER_UNAVAILABLE',
-      'Compose needs the job-authorized object descriptor transport.',
-    );
-    const ref = workerObjectSchema.parse(await this.transport.describe(sha256));
-    invariant(
-      ref.object.sha256 === sha256,
-      'SOURCE_HASH_MISMATCH',
-      'Object descriptor selected different bytes.',
-    );
-    await this.file(ref);
-    this.resolvedObjects++;
+    await this.resolveMany([sha256]);
   }
-  /** Authorize each deduplicated window afresh, even when byte files exist. */
-  async resolveMany(sha256s: readonly string[]) {
-    const unique = [...new Set(sha256s)];
-    for (let start = 0; start < unique.length; start += 100) {
-      const hashes = unique.slice(start, start + 100);
-      if (!this.transport.describeAndRead) {
-        for (const hash of hashes) await this.resolve(hash);
-        continue;
+  /** Actions export authorizes each deduplicated window afresh, even when byte
+   * files exist. Other jobs describe only digests this job has not yet verified. */
+  async resolveMany(digests: readonly string[]) {
+    const unique = [...new Set(digests)];
+    if (this.transport.describeAndRead) {
+      for (let start = 0; start < unique.length; start += 100) {
+        const hashes = unique.slice(start, start + 100);
+        const window = await this.transport.describeAndRead(hashes);
+        invariant(window.length === hashes.length, 'SOURCE_HASH_MISMATCH', 'Source window is incomplete.');
+        for (let i = 0; i < window.length; i++) {
+          const entry = window[i]!;
+          const ref = workerObjectSchema.parse(entry.descriptor);
+          invariant(
+            ref.object.sha256 === hashes[i],
+            'SOURCE_HASH_MISMATCH',
+            'Source window changed order or bytes.',
+          );
+          await this.file(ref, entry.read ?? undefined);
+          this.resolvedObjects++;
+        }
       }
-      const window = await this.transport.describeAndRead(hashes);
-      invariant(window.length === hashes.length, 'SOURCE_HASH_MISMATCH', 'Source window is incomplete.');
-      for (let i = 0; i < window.length; i++) {
-        const entry = window[i]!;
-        const ref = workerObjectSchema.parse(entry.descriptor);
+      return;
+    }
+    const pending = unique.filter(id => !this.saved.has(id));
+    for (let offset = 0; offset < pending.length; offset += 100) {
+      const window = pending.slice(offset, offset + 100);
+      invariant(
+        this.transport.describeBatch || this.transport.describe,
+        'SOURCE_WORKER_UNAVAILABLE',
+        'Compose needs the job-authorized object descriptor transport.',
+      );
+      const values = this.transport.describeBatch
+        ? await this.transport.describeBatch(window)
+        : await Promise.all(window.map(id => this.transport.describe!(id)));
+      invariant(
+        values.length === window.length,
+        'SOURCE_HASH_MISMATCH',
+        'Object descriptors are incomplete.',
+      );
+      const refs = values.map((value, index) => {
+        const ref = workerObjectSchema.parse(value);
         invariant(
-          ref.object.sha256 === hashes[i],
+          ref.object.sha256 === window[index],
           'SOURCE_HASH_MISMATCH',
-          'Source window changed order or bytes.',
+          'Object descriptor selected different bytes.',
         );
-        await this.file(ref, entry.read ?? undefined);
-        this.resolvedObjects++;
+        return ref;
+      });
+      await this.files(refs);
+      this.resolvedObjects += refs.length;
+    }
+  }
+  /** Grants are scoped to this immediate page, never retained as access decisions.
+   * Raw streams are consumed one at a time, including mixed recipe pages. */
+  async files(refs: WorkerObject[]) {
+    for (let offset = 0; offset < refs.length; offset += 100) {
+      const window = refs.slice(offset, offset + 100);
+      const raw = [
+        ...new Map(
+          window
+            .filter(ref => !ref.recipe && !this.saved.has(ref.object.sha256))
+            .map(ref => [ref.object.sha256, ref.object]),
+        ).values(),
+      ];
+      if (raw.length && this.transport.readBatch) {
+        const streams = await this.transport.readBatch(raw);
+        invariant(
+          streams.length === raw.length,
+          'SOURCE_HASH_MISMATCH',
+          'Source transfer page is incomplete.',
+        );
+        for (const [index, pin] of raw.entries())
+          await this.file({ object: pin, recipe: null }, async () => streams[index]!);
       }
+      for (const ref of window) await this.file(ref);
     }
   }
   private readonly saved = new Map<string, WorkerPin>();
@@ -137,11 +182,40 @@ export class SourceWorkerReader {
     invariant(pin.size <= 2 * 1024 * 1024, 'SOURCE_PAGE_INVALID', 'Source protocol metadata must be paged.');
     return JSON.parse(await readFile(await this.file({ object: pin, recipe: null }), 'utf8'));
   }
+  async publishFiles(paths: Iterable<string>) {
+    let window: Buffer[] = [],
+      size = 0;
+    for (const path of paths) {
+      const length = (await stat(path)).size;
+      if (window.length && (window.length === 100 || size + length > 8 * 1024 * 1024)) {
+        await this.publishMany(window);
+        window = [];
+        size = 0;
+      }
+      window.push(await readFile(path));
+      size += length;
+    }
+    if (window.length) await this.publishMany(window);
+  }
+  async publishMany(bytes: Buffer[]): Promise<WorkerPin[]> {
+    const objects = bytes.map(value => ({
+      pin: { sha256: digest(value), size: value.length },
+      bytes: Readable.from([value]),
+    }));
+    for (let offset = 0; offset < objects.length; offset += 100) {
+      const window = objects.slice(offset, offset + 100);
+      this.metrics.maxUploadWindowBytes = Math.max(
+        this.metrics.maxUploadWindowBytes,
+        window.reduce((sum, object) => sum + object.pin.size, 0),
+      );
+      if (this.transport.uploadBatch) await this.transport.uploadBatch(window);
+      else for (const object of window) await this.transport.upload(object.pin, object.bytes);
+      this.metrics.uploads += window.length;
+      this.metrics.uploadedBytes += window.reduce((sum, object) => sum + object.pin.size, 0);
+    }
+    return objects.map(object => object.pin);
+  }
   async publish(bytes: Buffer): Promise<WorkerPin> {
-    const pin = { sha256: digest(bytes), size: bytes.length };
-    await this.transport.upload(pin, Readable.from([bytes]));
-    this.metrics.uploads++;
-    this.metrics.uploadedBytes += bytes.length;
-    return pin;
+    return (await this.publishMany([bytes]))[0]!;
   }
 }

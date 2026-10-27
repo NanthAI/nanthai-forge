@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { NativeSource } from './native-source.js';
 import { parseNativeState } from './native-state-format.js';
+import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { saveInputSchema, validateSavePage, savePin } from './hosted-save.js';
@@ -18,8 +19,9 @@ export async function buildHostedSaveState(
   source: NativeSource,
   progress: () => Promise<void>,
 ) {
-  const plan = saveInputSchema.parse(value),
-    baseline = parseNativeState(await readFile(await reader.file(plan.baseline)));
+  const plan = saveInputSchema.parse(value);
+  await reader.files([plan.baseline, { object: plan.pages, recipe: null }]);
+  const baseline = parseNativeState(await readFile(await reader.file(plan.baseline)));
   const files = new Map(baseline.files.map(file => [file.path, file]));
   let next: WorkerPin | null = plan.pages,
     pages = 0,
@@ -46,6 +48,7 @@ export async function buildHostedSaveState(
       'SOURCE_CLOSURE_INVALID',
       'Save delta exceeds its pinned counts.',
     );
+    await reader.files(page.changes.flatMap(change => (change.after ? [change.after.content] : [])));
     for (const change of page.changes) {
       const old = files.get(change.path),
         before = old ? { blob: old.blob, mode: old.mode } : null;
@@ -55,7 +58,6 @@ export async function buildHostedSaveState(
         'Delta does not match the registered baseline.',
       );
       if (change.after) {
-        await reader.file(change.after.content);
         files.set(change.path, { path: change.path, blob: change.after.blob, mode: change.after.mode });
       } else files.delete(change.path);
     }
@@ -87,16 +89,13 @@ export async function buildHostedSaveState(
   const head = unchanged
     ? plan.baseline.object.sha256
     : source.writeState(entries, parents, plan.message, plan.at);
-  const state = unchanged
-    ? plan.baseline.object
-    : await reader.publish(await readFile(join(source.directory, head)));
-  const output = await reader.publish(
-    Buffer.from(
-      JSON.stringify(
-        workerResultSchema.parse({ schema: 1, kind: 'forge-source-worker-result', input, state }),
-      ),
-    ),
+  const stateBytes = unchanged ? null : await readFile(join(source.directory, head));
+  const state = stateBytes ? { sha256: digest(stateBytes), size: stateBytes.length } : plan.baseline.object;
+  const outputBytes = Buffer.from(
+    JSON.stringify(workerResultSchema.parse({ schema: 1, kind: 'forge-source-worker-result', input, state })),
   );
+  const published = await reader.publishMany([...(stateBytes ? [stateBytes] : []), outputBytes]);
+  const output = published[published.length - 1]!;
   return {
     head,
     state,

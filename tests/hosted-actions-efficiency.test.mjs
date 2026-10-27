@@ -80,7 +80,8 @@ test('3000-file export uses bounded job-authorized source windows and streams ac
   } finally {
     await rm(baselineRoot, { recursive: true, force: true });
   }
-  assert.equal(beforeSourceControlCalls, 6104);
+  // The single-object fallback skips repeats this job already verified (3,000 × describe+read + 4).
+  assert.equal(beforeSourceControlCalls, 6004);
   s.advance(Date.now() - s.now());
   const args = await selected(s);
   let lastHeartbeat = Date.now(),

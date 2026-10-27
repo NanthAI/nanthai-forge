@@ -89,6 +89,37 @@ export function agentFixture(t) {
     if (name === 'projectHostedAgent:capabilities') result = caps;
     else if (name === 'projectHostedChannels:current') result = main;
     else if (name === 'projectHostedLanes:select') result = lane;
+    else if (name === 'projectHostedComposeSelection:page')
+      result = {
+        inputs: args.inputs.map(item => {
+          if (item.expected)
+            assert.deepEqual(item.expected, {
+              head: lane.head,
+              version: lane.version,
+              sourceVersion: lane.sourceVersion,
+              lifecycleVersion: lane.lifecycleVersion,
+            });
+          return {
+            intentId: lane.intentId,
+            entry: {
+              laneId: item.laneId,
+              head: lane.head,
+              version: lane.version,
+              sourceVersion: lane.sourceVersion,
+              lifecycleVersion: lane.lifecycleVersion,
+              state: { object: { sha256: head, size: bytes.length }, recipe: null },
+            },
+          };
+        }),
+        dependencies: args.dependencies.map(item => ({
+          intentId: candidate.intentId,
+          entry: {
+            candidateId: item.candidateId,
+            head: candidate.result.head,
+            state: { object: { sha256: candidate.result.head, size: bytes.length }, recipe: null },
+          },
+        })),
+      };
     else if (name === 'projectHostedLanes:head') result = { laneId: lane.laneId, head: lane.head };
     else if (name === 'projectObjectDownloads:describe')
       result = args.digests.map(digest => ({

@@ -111,6 +111,7 @@ export function buildObjectRecipe(bytes: Buffer) {
 export async function* readObjectRecipe(
   input: ObjectRecipe,
   read: (pin: ChunkPin) => Promise<Buffer>,
+  prepare?: (pins: ChunkPin[]) => Promise<void>,
 ): AsyncGenerator<Buffer> {
   const recipe = objectRecipeSchema.parse(input),
     pending = [recipe.tree],
@@ -138,6 +139,7 @@ export async function* readObjectRecipe(
       'INVALID_WORK_BACKUP',
       'Chunk recipe entry exceeds its bounded encoding; logical content has no size cap.',
     );
+    await prepare?.([ref, ...pending.slice(-99).reverse()]);
     const bytes = await read({ sha256: ref.sha256, size: ref.size });
     invariant(
       bytes.length === ref.size && digest(bytes) === ref.sha256,

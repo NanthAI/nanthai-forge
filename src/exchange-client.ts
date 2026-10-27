@@ -155,15 +155,19 @@ export class ConvexExchange implements ExchangeTransport {
     }
     return { uploadedObjects, uploadedBytes, uploadedLogicalObjects };
   }
-  async uploadLazyBatch(objects: { pin: ContentPin; read: () => Buffer | Promise<Buffer> }[]) {
-    if (objects.every(object => !chunked(object.pin))) return this.uploadPhysical(objects);
+  async uploadLazyBatch(
+    objects: { pin: ContentPin; read: () => Buffer | Promise<Buffer> }[],
+    options: { batchSize?: number; onRaw?: (sha256: string) => void } = {},
+  ) {
+    if (objects.every(object => !chunked(object.pin)))
+      return this.uploadPhysical(objects, options.batchSize, options.onRaw);
     let uploadedObjects = 0,
       uploadedBytes = 0,
       uploadedLogicalObjects = 0;
     for (const object of objects) {
       const sent = chunked(object.pin)
         ? await this.uploadChunked(object.pin, await object.read())
-        : await this.uploadPhysical([object]);
+        : await this.uploadPhysical([object], options.batchSize, options.onRaw);
       uploadedObjects += sent.uploadedObjects;
       uploadedBytes += sent.uploadedBytes;
       uploadedLogicalObjects += (
@@ -242,10 +246,15 @@ export class ConvexExchange implements ExchangeTransport {
     });
     return { uploadedObjects, uploadedBytes, uploadedLogicalObjects: uploadedObjects ? 1 : 0 };
   }
-  private uploadPhysical(objects: { pin: ContentPin; read: () => Buffer | Promise<Buffer> }[]) {
+  private uploadPhysical(
+    objects: { pin: ContentPin; read: () => Buffer | Promise<Buffer> }[],
+    batchSize = this.uploadBatchSize,
+    onRaw?: (sha256: string) => void,
+  ) {
     return uploadPhysicalObjects(this.client, this.projectId, objects, {
       blobs: this.blobs,
-      ...(this.uploadBatchSize ? { batchSize: this.uploadBatchSize } : {}),
+      ...(batchSize ? { batchSize } : {}),
+      ...(onRaw ? { onRaw } : {}),
     });
   }
   private async uploadRawBatch(

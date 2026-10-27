@@ -13,7 +13,7 @@ import { stateSchema } from './native-state-format.js';
 import { workLocked } from './work-lock.js';
 import { saveResultSchema } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { buildSavePages, saveRequestSchema, saveBytes } from './hosted-save.js';
+import { buildSavePages, saveRequestSchema, saveBytes, savePin } from './hosted-save.js';
 import { invariant } from './errors.js';
 import type { ConvexExchange } from './exchange-client.js';
 import type { SaveChange, SaveRequest } from './hosted-save.js';
@@ -24,7 +24,8 @@ import type { ContentPin } from './native-exchange.js';
 export async function saveHostedLane(
   root: string,
   command: { operationId: string; message: string },
-  exchange: Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'>,
+  exchange: Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'> &
+    Partial<Pick<ConvexExchange, 'uploadLazyBatch'>>,
 ) {
   z.object({ operationId: z.uuid(), message: z.string() }).strict().parse(command);
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
@@ -63,18 +64,37 @@ export async function saveHostedLane(
   if (checkoutPathExists(requestPath))
     request = saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8')));
   else {
-    // Reuses missing-only recipe/chunk uploads. A lost PUT/commit resumes these
+    // Raw small files share preparation/commit windows; large files retain the
+    // bounded recipe/chunk path. A lost PUT/commit resumes these
     // original disk bytes, including after the working files were edited again.
     const unique = new Map(capture.files.map(file => [file.pin.sha256, file]));
-    const candidates = [...unique.values()];
+    const candidates = [...unique.values()],
+      raw = new Set<string>();
     for (let offset = 0; offset < candidates.length; offset += 100) {
       const window = candidates.slice(offset, offset + 100);
-      const missing = new Set(await exchange.missing(window.map(file => file.pin)));
-      for (const file of window)
-        if (missing.has(file.pin.sha256)) await exchange.uploadFile(file.pin, directory, file.path);
+      // Lazy authoritative preparation skips stored raw bytes without a separate
+      // missing query. File-backed recipes still need missing-only discovery.
+      const small = exchange.uploadLazyBatch ? window.filter(file => file.pin.size <= 2 * 1024 * 1024) : [];
+      if (small.length) {
+        await exchange.uploadLazyBatch!(
+          small.map(file => ({
+            pin: file.pin,
+            read: () => readFileSync(join(directory, file.path)),
+          })),
+          { batchSize: 100, onRaw: id => raw.add(id) },
+        );
+        // Only exact committed raw members omit descriptor IO. Reused objects
+        // still need current descriptors, including after an unknown reply.
+      }
+      const large = window.filter(file => !exchange.uploadLazyBatch || file.pin.size > 2 * 1024 * 1024);
+      if (large.length) {
+        const missing = new Set(await exchange.missing(large.map(file => file.pin)));
+        for (const file of large)
+          if (missing.has(file.pin.sha256)) await exchange.uploadFile(file.pin, directory, file.path);
+      }
     }
     const changes: SaveChange[] = structuredClone(capture.changes);
-    const replacements = changes.filter(change => change.after);
+    const replacements = changes.filter(change => change.after && !raw.has(change.after.blob));
     for (let offset = 0; offset < replacements.length; offset += 100) {
       const window = replacements.slice(offset, offset + 100);
       const rows: {
@@ -136,22 +156,34 @@ export async function saveHostedLane(
   const pages: { pin: ContentPin; value: unknown }[] = JSON.parse(
     readFileSync(join(directory, 'pages.json'), 'utf8'),
   );
+  if (exchange.uploadLazyBatch && prepared.input) {
+    const metadata = [...pages.map(page => page.value), prepared.input];
+    await exchange.uploadLazyBatch(
+      metadata.map(value => ({
+        pin: savePin(value),
+        read: () => Buffer.from(saveBytes(value)),
+      })),
+      { batchSize: 100 },
+    );
+  }
   for (const [index, page] of pages.entries()) {
-    await objects.put(Buffer.from(saveBytes(page.value)));
+    if (!exchange.uploadLazyBatch || !prepared.input) await objects.put(Buffer.from(saveBytes(page.value)));
     await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaves:stage'), {
       ...args,
       index,
       page: canonicalPayload(page.value),
     });
   }
-  const progress = JSON.parse(
-    await exchange.client.query(makeFunctionReference<'query'>('projectHostedSaves:progress'), args),
-  );
-  if (progress.terminal) {
-    applyHostedSaveReceipt(root, capture, request, progress.terminal);
-    return progress.terminal;
+  if (request.pages && (!exchange.uploadLazyBatch || !prepared.input)) {
+    const progress = JSON.parse(
+      await exchange.client.query(makeFunctionReference<'query'>('projectHostedSaves:progress'), args),
+    );
+    if (progress.terminal) {
+      applyHostedSaveReceipt(root, capture, request, progress.terminal);
+      return progress.terminal;
+    }
+    if (progress.input) await objects.put(Buffer.from(saveBytes(progress.input)));
   }
-  if (progress.input) await objects.put(Buffer.from(saveBytes(progress.input)));
   const result = JSON.parse(
     await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaveJobs:submit'), args),
   );

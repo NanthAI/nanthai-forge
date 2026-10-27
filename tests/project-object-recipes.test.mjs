@@ -328,3 +328,83 @@ test('warm recipe reads reuse immutable leaves while rechecking current closure 
   s.files.delete(row(s, leaf).storageId);
   await assert.rejects(read(), code('INVALID_WORK_BACKUP'));
 });
+
+test('recipe validation batches descriptor frontiers and rechecks access after IO', async t => {
+  const s = setup(),
+    objects = new Map();
+  const leaves = Array.from({ length: 128 }, (_, i) => {
+    const bytes = Buffer.alloc(8192);
+    bytes.writeUInt32LE(i);
+    const pin = { sha256: digest(bytes), size: bytes.length };
+    objects.set(pin.sha256, bytes);
+    return { ...pin, height: 0, length: bytes.length };
+  });
+  const bytes = Buffer.concat([...objects.values()]);
+  const index = Buffer.from(JSON.stringify({ kind: 'forge-byte-tree', schema: 1, children: leaves }));
+  const tree = { sha256: digest(index), size: index.length, height: 1, length: bytes.length };
+  objects.set(tree.sha256, index);
+  const recipeBytes = Buffer.from(
+    JSON.stringify({
+      kind: 'forge-object-recipe',
+      schema: 1,
+      object: { sha256: digest(bytes), size: bytes.length },
+      tree,
+    }),
+  );
+  for (const value of objects.values()) await upload(s, value);
+  const rootPin = await upload(s, recipeBytes);
+  const built = {
+    objects,
+    input: {
+      projectId: 'project',
+      digest: digest(bytes),
+      size: bytes.length,
+      recipeDigest: rootPin.sha256,
+      recipeSize: rootPin.size,
+    },
+  };
+  const { objectContent } = await import(moduleUrl('../convex/projectObjectContent.ts'));
+  const { readObjectRecipe } = await import('../dist/object-chunks.js');
+  const { internal } = await import('../convex/_generated/api.js');
+  let calls = 0,
+    largest = 0;
+  for (const method of ['runQuery', 'runMutation']) {
+    const original = s.ctx[method];
+    s.ctx[method] = async (ref, args) => {
+      calls++;
+      largest = Math.max(largest, args.digests?.length ?? 0);
+      return original(ref, args);
+    };
+  }
+  const read = async pin => {
+    const args = { projectId: 'project', actor: 'owner', digests: [pin.sha256] };
+    const rows = await s.ctx.runQuery(internal.projectObjects.resolve, args);
+    const value = await objectContent(s.ctx, rows[0], pin, 'owner');
+    await s.ctx.runQuery(internal.projectObjects.resolve, args);
+    return value;
+  };
+  const root = await read({ sha256: built.input.recipeDigest, size: built.input.recipeSize });
+  const recipe = JSON.parse(root);
+  for await (const part of readObjectRecipe(recipe, read)) void part;
+  const before = calls;
+  calls = 1; // Include the directly invoked outer action.
+  await recipes.complete._handler(s.ctx, built.input);
+  const after = calls;
+  assert(largest <= 100);
+  assert(after <= 12);
+  assert(after < before / 10);
+  t.diagnostic(
+    JSON.stringify({
+      beforeResolveCalls: before,
+      afterCalls: after,
+      physicalObjects: built.objects.size,
+      maxDescriptorPage: largest,
+    }),
+  );
+  // A cached descriptor window is reauthorized after IO before binding.
+  const { recipeValidationReader } = await import(moduleUrl('../convex/projectObjectRecipeValidation.ts'));
+  const reader = recipeValidationReader(s.ctx, 'project', 'owner');
+  await reader.read({ sha256: built.input.recipeDigest, size: built.input.recipeSize });
+  s.tables.hostedProjects.get('project').owner = 'another';
+  await assert.rejects(reader.finish(), code('PROJECT_UNAVAILABLE'));
+});
