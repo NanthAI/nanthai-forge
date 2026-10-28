@@ -453,8 +453,12 @@ Warm native pushes keep a checksummed preparation hint per project/checkpoint. I
 Native pushes prepare a required protocol-3 owner display document alongside
 pinned Work. Selection uses the hosted source-return baseline, independently of
 the previous upload checkpoint. New States carry own-parent ancestry boundaries;
-changed comparisons, Views, selected trees and coordination paths are computed
-locally. Missing baseline metadata supplies full local facts for server selection.
+all retained Lane/View comparison pairs, changed Views, selected trees and
+coordination paths are computed locally. A partial return can reproject an unchanged
+summary whose hosted diffstat cache is absent, so its comparison remains required.
+A capture prepared before this rule must be prepared again with the current CLI
+if it fails with `stats-missing-or-unpaired`; retrying the same sidecar cannot fill
+the missing facts. Missing baseline metadata supplies full local facts for server selection.
 The disposable local cache remains bounded to 4 MiB; an uncached item is computed
 locally. The upload document has no total 4 MiB item budget: larger documents use
 hash-checked pages. Invalid or incomplete current documents fail explicitly;
@@ -471,7 +475,9 @@ reports old/new sidecar and cache bytes and delta row counts.
 Hosted source return remains owner-only. It checks sidecar shape, Work pin,
 comparison and Candidate keys, counts and object-pin membership using metadata. Valid
 complete sidecars supply the staged index rows; absent, malformed or incomplete
-current data fails explicitly. The server never fills display gaps during push. Publication
+current data fails explicitly with a named validation reason, also logged as
+`source-return owner-derived invalid`. Exact retained diffstats may be reused;
+missing display facts must be prepared locally. Publication
 retains its original operation ID, current authority checks and source/Work CAS.
 No Work format bump, hosted row migration or backfill is required. The sidecar is
 a disposable index supplied under the owner's existing source trust. Contributor
@@ -1810,3 +1816,25 @@ provider link or a retained summary after expiry. Streamed output follows the
 same policy: fixed provider collectors retain compact reports/excerpts; Mac raw
 upload carries the explicit project setting and a finite expiry. Lifecycle events
 wake already-due expiries and schedule no idle expiry timer.
+
+
+The complete offline return check needs a read-only export of the selected hosted
+index, because source bytes alone cannot prove which diffstats and provenance
+rows the hosted index retained. Export its generation rows with
+`node scripts/read-return-index.mjs DEV_DEPLOYMENT GENERATION OUTPUT.jsonl` and
+save `npx convex data projectWorkGenerations --deployment-name DEV_DEPLOYMENT
+--limit 20 --format json` to a JSON file. Then run
+`node scripts/check-work-return-capture.mjs BASE_DIRECTORY CAPTURE_DIRECTORY
+OUTPUT.jsonl GENERATIONS.json BACKUPS.json ROOTS_DIRECTORY`. Save a bounded dev
+`npx convex data projectBackups --deployment-name DEV_DEPLOYMENT --limit 20
+--format json` export as `BACKUPS.json`; both selected backups must be included. If a retry changed the local upload
+envelope, `ROOTS_DIRECTORY` must contain the exact read-only hosted envelope
+bytes, named by their SHA-256. Their catalog and manifest pins must still match
+the captures; different source revisions fail explicitly. The check runs the production return action,
+index staging, private copy/patch commits and publication handlers against a
+private disk database. It requires the original capture's named failure, then
+prepares replacement comparison facts in temporary scratch and requires final
+backup/index publication. It reports calls, database rows/bytes, action RSS and
+time; missing boundaries fail explicitly. Real deployments and retained captures
+are never written. The reported total includes scheduled display-page cleanup, superseded-partition
+reclamation and the resulting generation sweep.

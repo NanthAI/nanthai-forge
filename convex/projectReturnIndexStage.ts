@@ -299,7 +299,7 @@ export const retirePartition = internalMutation({
       const page = await ctx.db
         .query('projectWorkRecords')
         .withIndex('by_generation', q => q.eq('generationId', input.partitionId))
-        .paginate({ cursor: null, numItems: 100, maximumBytesRead: 500000, maximumRowsRead: 100 });
+        .paginate({ cursor: null, numItems: 4000, maximumBytesRead: 8000000, maximumRowsRead: 4000 });
       for (const row of page.page) await ctx.db.delete(row._id);
       if (!page.isDone)
         await ctx.scheduler.runAfter(0, internal.projectReturnIndexStage.retirePartition, input);

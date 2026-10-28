@@ -61,10 +61,10 @@ export async function ownerProjection(
     },
   } as unknown as Cursor;
   const supplied = ownerDerivedRows(c, value);
-  if (!supplied) return; // Existing hosted reads preserve their compatibility path.
+  if ('reason' in supplied) return; // Existing hosted reads preserve their compatibility path.
   const entries = [
     ...projection.entries.filter(row => row.collection !== 'lanes' && row.collection !== 'views'),
-    ...supplied,
+    ...supplied.rows,
   ];
   const counts: Record<string, number> = {};
   for (const row of entries) {

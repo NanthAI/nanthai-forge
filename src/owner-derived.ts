@@ -6,7 +6,6 @@ import { reviewPaths } from './native-source-review.js';
 import { contextualHunks } from './review-hunks.js';
 import { viewIndexEntries } from './view-hosted-index.js';
 import { workSourcePins } from './work-archive-metadata.js';
-import { laneSummary, viewSummary } from './work-hosted-summary.js';
 import { viewReadModels, viewContributors } from './view-read-model.js';
 import type { WorkData } from './work-types.js';
 import type { NativeSource } from './native-source.js';
@@ -135,37 +134,9 @@ export function computeOwnerDerived(
     parents.set(head, list);
     pending.push(...list);
   }
-  // Compare the same Lane/View summaries as the hosted delta planner, including
-  // supersession caused by a different View. Lane and View IDs have separate keys.
-  const comparisons = (work: WorkData) => {
-    const models = new Map(viewReadModels(work).map(v => [v.viewId, v]));
-    return [
-      ...work.lanes.map((record, position) => ({
-        position,
-        key: `lane:${record.id}`,
-        record,
-        summary: laneSummary(record),
-      })),
-      ...work.views.map((record, position) => ({
-        position,
-        key: `view:${record.id}`,
-        record,
-        summary: {
-          ...viewSummary(record),
-          viewStatus: models.get(record.id)!.status,
-          supersededBy: models.get(record.id)!.supersededBy,
-          inputs: models.get(record.id)!.inputs,
-        },
-      })),
-    ];
-  };
-  const priorRecords = new Map(
-    baseline?.data
-      ? comparisons(baseline.data).map(r => [r.key, JSON.stringify([r.position, r.summary])])
-      : [],
-  );
-  for (const { key: identity, record, summary, position } of comparisons(data)) {
-    if (priorRecords.get(identity) === JSON.stringify([position, summary])) continue;
+  // A partial return can reproject retained summaries that were unchanged in the
+  // full Work. Their hosted diffstat cache may never have been populated.
+  for (const record of [...data.lanes, ...data.views]) {
     if (!record.head || ('status' in record && record.status === 'conflict')) continue;
     const key = `${record.base}:${record.head}`;
     if (stats.has(key)) continue;
@@ -174,35 +145,7 @@ export function computeOwnerDerived(
       stats.set(key, cached);
       continue;
     }
-    const changed = reviewPaths(files(record.base), files(record.head)).filter(f => f.status !== 'unchanged');
-    let add = 0,
-      del = 0,
-      exact = true;
-    for (const file of changed) {
-      const before = file.before ? source.object(file.before.blob) : Buffer.alloc(0),
-        after = file.after ? source.object(file.after.blob) : Buffer.alloc(0);
-      if (before.length > 1024 * 1024 || after.length > 1024 * 1024) {
-        exact = false;
-        continue;
-      }
-      const compared = contextualHunks(before, after, 0);
-      if (compared.truncated) {
-        exact = false;
-        continue;
-      }
-      if (!file.before || !file.after) {
-        const text = new TextDecoder().decode(file.before ? before : after),
-          lines = text ? text.split('\n').length - Number(text.endsWith('\n')) : 0;
-        if (file.before) del += lines;
-        else add += lines;
-      } else
-        for (const hunk of compared.hunks)
-          for (const line of hunk.lines) {
-            if (line.kind === 'added') add++;
-            if (line.kind === 'removed') del++;
-          }
-    }
-    const changes = { files: changed.length, ...(exact ? { add, del } : {}) };
+    const changes = ownerDiffstat(files(record.base), files(record.head), hash => source.object(hash));
     stats.set(key, changes);
     states.clear();
   }
@@ -269,4 +212,41 @@ export function computeOwnerDerived(
         );
       }),
   };
+}
+
+/** Shared exact source comparison used by local display preparation and offline checks. */
+export function ownerDiffstat(
+  beforeFiles: ReturnType<NativeSource['state']>['files'],
+  afterFiles: ReturnType<NativeSource['state']>['files'],
+  object: (hash: string) => Buffer,
+) {
+  const changed = reviewPaths(beforeFiles, afterFiles).filter(f => f.status !== 'unchanged');
+  let add = 0,
+    del = 0,
+    exact = true;
+  for (const file of changed) {
+    const before = file.before ? object(file.before.blob) : Buffer.alloc(0),
+      after = file.after ? object(file.after.blob) : Buffer.alloc(0);
+    if (before.length > 1024 * 1024 || after.length > 1024 * 1024) {
+      exact = false;
+      continue;
+    }
+    const compared = contextualHunks(before, after, 0);
+    if (compared.truncated) {
+      exact = false;
+      continue;
+    }
+    if (!file.before || !file.after) {
+      const text = new TextDecoder().decode(file.before ? before : after),
+        lines = text ? text.split('\n').length - Number(text.endsWith('\n')) : 0;
+      if (file.before) del += lines;
+      else add += lines;
+    } else
+      for (const hunk of compared.hunks)
+        for (const line of hunk.lines) {
+          if (line.kind === 'added') add++;
+          if (line.kind === 'removed') del++;
+        }
+  }
+  return { files: changed.length, ...(exact ? { add, del } : {}) };
 }

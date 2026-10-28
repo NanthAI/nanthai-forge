@@ -69,8 +69,19 @@ for (const mode of ['supplied'])
           join(first.store.directory, `exchange-${next.input.operationId}`, 'owner-derived.json'),
         );
         const sidecar = JSON.parse(bytes);
-        for (const collection of ['parents', 'ancestry', 'views', 'stats'])
+        for (const collection of ['parents', 'ancestry', 'views'])
           assert.equal(sidecar[collection].length, landings, `${collection} contains only delta rows`);
+        const work = first.store.load();
+        const comparisons = new Set(
+          [...work.lanes, ...work.views]
+            .filter(row => row.head && row.status !== 'conflict')
+            .map(row => `${row.base}:${row.head}`),
+        );
+        assert.deepEqual(
+          new Set(sidecar.stats.map(([key]) => key)),
+          comparisons,
+          'All retained pairs remain available to a partial projection',
+        );
         assert.ok(bytes.length < 4 * 1024 * 1024);
         console.log(
           'INCREMENTAL_SIDECAR_BYTES',

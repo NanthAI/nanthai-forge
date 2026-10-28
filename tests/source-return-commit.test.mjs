@@ -126,7 +126,7 @@ function meter(s) {
     s.ctx.db[method] = async (...args) => {
       if (active) {
         active.writes++;
-        assert(active.writes < 2100);
+        assert(active.writes < 4100);
       }
       return call(...args);
     };
@@ -365,7 +365,7 @@ test('paged changed-output projection resumes after a lost apply reply and prese
   assert(!rows.some(row => row.key === 'key-0'));
   assert.equal(reads, 0, 'private output stays in the database during commit');
   assert(
-    Math.max(...counts.map(count => count.reads)) < 2100,
+    Math.max(...counts.map(count => count.reads)) < 4096,
     'fresh copy avoids per-row destination lookups',
   );
   t.diagnostic(
@@ -406,4 +406,65 @@ test('private output reference must exist in the original partition before any a
   );
   assert.equal(s.tables.hostedProjects.get('project').work.backupId, 'prior');
   assert.equal(s.tables.projectWorkEvents.size, 0);
+});
+
+test('private copy pages a 235 MiB, 10,352-record Work baseline within 50 calls', async t => {
+  const { offlineStore } = await import('../scripts/return-offline-store.mjs');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const directory = mkdtempSync(join(tmpdir(), 'forge-copy-budget-'));
+  const store = offlineStore(join(directory, 'db'));
+  t.after(() => {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const s = await setup(0);
+  for (const [table, rows] of Object.entries(s.tables))
+    for (const value of rows.values()) store.put(table, value);
+  s.ctx.db = store.db;
+  const count = 10352,
+    payload = 'x'.repeat(Math.ceil((235 * 1024 * 1024) / count));
+  for (let i = 0; i < count; i++)
+    store.put('projectWorkRecords', {
+      ...row(`record-${i}`, payload),
+      _id: `record-${i}`,
+      _creationTime: i,
+      projectId: 'project',
+      generationId: 'public',
+    });
+  store.reset();
+  let stage = await store.db.get('private'),
+    calls = 0;
+  while (!stage.returnCommitCopied) {
+    stage = await commit.batch._handler(s.ctx, {
+      ...s.input,
+      owner: 'owner',
+      generationId: 'public',
+      partitionId: 'private',
+      plan: 'copy-budget',
+      copy: true,
+      copyFresh: true,
+      cursor: stage.returnCommitCursor ?? null,
+      offset: 0,
+      total: 0,
+      entries: [],
+      removed: [],
+    });
+    calls++;
+    assert(calls <= 50, 'Copy call count follows bytes/pages, not records');
+  }
+  let copied = 0,
+    cursor = null;
+  do {
+    const page = await store.db
+      .query('projectWorkRecords')
+      .withIndex('by_generation', q => q.eq('generationId', 'private'))
+      .paginate({ cursor, numItems: 1000, maximumBytesRead: 8000000 });
+    copied += page.page.length;
+    cursor = page.isDone ? null : page.continueCursor;
+  } while (cursor !== null);
+  assert.equal(copied, count);
+  assert(store.accounting.writtenBytes >= 235 * 1024 * 1024);
+  t.diagnostic(JSON.stringify({ records: count, calls, writtenBytes: store.accounting.writtenBytes }));
 });

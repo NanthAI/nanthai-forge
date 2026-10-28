@@ -142,7 +142,7 @@ test('unchanged View source pairs reuse file keys while still validating and rep
 });
 test('owner rows match hosted parent, merge ancestry, View provenance and tree computation', async () => {
   const f = fixture(),
-    rows = ownerDerivedRows(f.cursor, f.derived);
+    rows = ownerDerivedRows(f.cursor, f.derived).rows;
   assert.ok(rows);
   for (const [head, state] of f.states)
     for (const expected of stateParentEntries(head, state.parents))
@@ -284,7 +284,18 @@ for (const [name, mutate] of [
   test(`invalid owner rows are rejected: ${name}`, () => {
     const f = fixture();
     mutate(f.derived);
-    assert.equal(ownerDerivedRows(f.cursor, f.derived), undefined);
+    const expected = {
+      'wrong Work pin': 'work-pin-mismatch',
+      'duplicate State': 'duplicate-key',
+      'unknown parent pin': 'parent-pin-missing',
+      'wrong pair key': 'stats-pin-missing',
+      'negative counts': 'schema-invalid',
+      'missing View': 'view-missing:view',
+      'wrong View key': 'view-detail-key-invalid',
+      'inconsistent file count': 'view-summary-invalid',
+      'unrelated collection': 'view-collection-invalid',
+    }[name];
+    assert.equal(ownerDerivedRows(f.cursor, f.derived).reason, expected);
   });
 
 test('chunked provenance payloads retain parity and reject corrupt chunks', () => {
@@ -294,9 +305,9 @@ test('chunked provenance payloads retain parity and reject corrupt chunks', () =
   assert.ok(derived.views[0][2].some(r => r.collection === 'viewFiles:payload'));
   f.cursor.final.command = JSON.stringify({ workSha256: derived.work });
   f.cursor.snapshot.manifest.files.find(file => file.path === 'work.json').sha256 = derived.work;
-  assert.ok(ownerDerivedRows(f.cursor, derived));
+  assert.ok(ownerDerivedRows(f.cursor, derived).rows);
   derived.views[0][2].find(r => r.collection === 'viewFiles:payload').value += 'changed';
-  assert.equal(ownerDerivedRows(f.cursor, derived), undefined);
+  assert.match(ownerDerivedRows(f.cursor, derived).reason, /^payload-invalid:/);
 });
 
 test('owner-derived source return retains owner-only authority before reading sidecar bytes', async () => {
@@ -379,7 +390,7 @@ test('server rejects invalid roots before reads and validates bytes and protocol
   );
 });
 
-test('sidecar rows and bytes scale with 1/20 new landings, not 10/1000 history States', () => {
+test('source and View rows scale with new landings; compact stats cover every retained pair', () => {
   const sizes = new Map();
   for (const history of [10, 1000])
     for (const delta of [1, 20]) {
@@ -424,8 +435,9 @@ test('sidecar rows and bytes scale with 1/20 new landings, not 10/1000 history S
       const baseline = { data: structuredClone(f.data), states: new Set(f.states.keys()) };
       append(delta);
       const derived = computeOwnerDerived(f.data, f.source, undefined, baseline);
-      for (const collection of ['parents', 'ancestry', 'views', 'stats'])
+      for (const collection of ['parents', 'ancestry', 'views'])
         assert.equal(derived[collection].length, delta, collection);
+      assert.equal(derived.stats.length, history + delta + 1);
       assert.equal(derived.trees.length, 1);
       for (const [head, parents] of derived.ancestry) {
         assert.deepEqual(parents, f.states.get(head).parents);
@@ -437,7 +449,10 @@ test('sidecar rows and bytes scale with 1/20 new landings, not 10/1000 history S
       console.log('SIDECAR_BYTES', JSON.stringify({ history, delta, bytes }));
     }
   for (const delta of [1, 20])
-    assert.ok(Math.abs(sizes.get(`1000/${delta}`) - sizes.get(`10/${delta}`)) < 2000);
+    assert.ok(
+      Math.abs(sizes.get(`1000/${delta}`) - sizes.get(`10/${delta}`)) < 256000,
+      'Retained pair metadata stays below 256 bytes per comparison',
+    );
 });
 
 test('selecting a previously hosted State as a new current tree still supplies that tree', () => {
@@ -506,4 +521,60 @@ test('index companions bind bounded count pages and lazy View pages to the exist
   assert.throws(() =>
     diffstatPageSchema.parse({ work: f.derived.work, stats: [[stats[0][0], { files: 1, add: 1 }]] }),
   );
+});
+
+test('600 retained Lane/View pairs supply stats even when unchanged and uncached by the hosted index', () => {
+  const f = fixture();
+  f.data.lanes = Array.from({ length: 600 }, (_, i) => ({ ...f.data.lanes[0], id: `lane-${i}` }));
+  f.data.views = Array.from({ length: 600 }, (_, i) => ({
+    ...f.data.views[0],
+    id: `view-${i}`,
+    inputs: [{ laneId: `lane-${i}`, head: f.head }],
+  }));
+  let stateReads = 0,
+    objectReads = 0;
+  const cache = { ...f.derived, views: [] };
+  // Prior fingerprints omit all Views; no full-history source work is needed.
+  const source = {
+    state: head => {
+      stateReads++;
+      return f.source.state(head);
+    },
+    object: hash => {
+      objectReads++;
+      return f.source.object(hash);
+    },
+  };
+  const derived = computeOwnerDerived(f.data, source, cache, {
+    states: new Set(f.states.keys()),
+    data: f.data,
+  });
+  assert.equal(
+    derived.stats.length,
+    1,
+    'Same immutable pair is compared once, including unchanged summaries',
+  );
+  assert.equal(stateReads, 0);
+  assert.equal(objectReads, 0);
+  const cursor = {
+    ...f.cursor,
+    snapshot: { ...f.cursor.snapshot, data: f.data },
+    delta: { ...f.cursor.delta, views: [], stopParents: [...f.states.keys()] },
+    pending: [],
+    heads: [],
+  };
+  cursor.snapshot.manifest.files.find(file => file.path === 'work.json').sha256 = derived.work;
+  const old = { ...derived, stats: [] };
+  assert.equal(ownerDerivedRows(cursor, old).reason, `stats-missing-or-unpaired:${f.base}:${f.head}`);
+  assert.ok(ownerDerivedRows(cursor, derived).rows);
+});
+
+test('pending and ancestry failures identify their exact condition', () => {
+  const f = fixture();
+  f.derived.parents = f.derived.parents.filter(([head]) => head !== f.head);
+  assert.equal(ownerDerivedRows(f.cursor, f.derived).reason, `pending-parent-missing:${f.head}`);
+  const g = fixture();
+  g.derived.ancestry = structuredClone(g.derived.ancestry);
+  g.derived.ancestry.find(([, parents]) => parents.length)[1] = [];
+  assert.match(ownerDerivedRows(g.cursor, g.derived).reason, /^ancestry-parents-differ:/);
 });

@@ -67,9 +67,11 @@ export const batch = internalMutation({
           .withIndex('by_generation', q => q.eq('generationId', recordPartition(generation)))
           .paginate({
             cursor: stage.returnCommitCursor ?? null,
-            numItems: 2000,
-            maximumRowsRead: 2000,
-            maximumBytesRead: 2000000,
+            numItems: input.copyFresh ? 4000 : 2000,
+            maximumRowsRead: input.copyFresh ? 4000 : 2000,
+            // Copy stays below the provider's 16 MiB read/write transaction
+            // limits while amortizing the real retained Work payload (~235 MB).
+            maximumBytesRead: 8000000,
           });
         if (input.copyFresh) {
           if (!stage.returnCommitCursor) {

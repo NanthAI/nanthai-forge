@@ -157,7 +157,7 @@ export async function projectSummaries(
           trees: [],
         },
       );
-      if (rows) suppliedViews.set(id, rows);
+      if ('rows' in rows) suppliedViews.set(id, rows.rows);
     }
     await summaryStates(
       ctx,
