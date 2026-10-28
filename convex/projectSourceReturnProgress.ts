@@ -18,12 +18,60 @@ import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { invariant, ForgeError } from '../src/errors';
 import { ConvexError } from 'convex/values';
-import type { IndexEntry } from '../src/work-hosted-index';
+import { type IndexEntry } from '../src/work-hosted-index';
 import { workSourcePins } from '../src/work-archive-metadata';
 import { prepareFullReturnRows, storeOutputRows } from './projectSourceReturnRows';
 import { selectedTreeHeads } from '../src/owner-derived';
 type Snapshot = Cursor['snapshot'];
 type Final = Cursor['final'];
+/** Finish pure record planning before loading display pages, then release
+ * validation bodies that the phase-done cursor will never consult again. */
+export function recordReturnCursor(
+  snapshot: Snapshot,
+  previous: Snapshot,
+  generation: Doc<'projectWorkGenerations'>,
+  final: Final,
+): Cursor {
+  const data = snapshot.data;
+  const plan = prepareDelta(previous, snapshot, generation, true);
+  const delta: NonNullable<Cursor['delta']> = plan.delta;
+  const priorPins = new Set(previous.manifest.files.map(pin => pin.sha256));
+  const heads = (data: Snapshot['data']) => [
+    ...(data.nativeHead ? [data.nativeHead] : []),
+    ...data.lanes.map(lane => lane.head),
+    ...data.channelMoves.map(move => move.head),
+    ...(data.hostedChannelMoves ?? []).map(move => move.head),
+    ...data.views.flatMap(view => (view.head ? [view.head] : [])),
+    ...data.runs.map(run => run.head),
+  ];
+  const priorHeads = new Set(heads(previous.data));
+  delta.stopParents = [...priorPins];
+  delta.views = [...new Set([...delta.views, ...delta.summaries])];
+  const c: Cursor = {
+    protocol: 3,
+    phase: 'done',
+    snapshot,
+    final,
+    generationId: generation._id,
+    metadataOnly: true,
+    delta,
+    metadata: plan.metadata,
+    parents: [],
+    pending: workSourcePins(data).filter(head => !priorPins.has(head)),
+    heads: [...new Set(heads(data))].filter(head => !priorHeads.has(head)),
+    rows: plan.entries.filter(row => row.collection !== 'lanes' && row.collection !== 'views'),
+    diffstats: {
+      records: plan.entries.filter(row => row.collection === 'lanes' || row.collection === 'views'),
+    },
+  };
+  const keep = new Set(['lanes', 'views', 'channelMoves', 'hostedChannelMoves']);
+  for (const [key, value] of Object.entries(data))
+    if (Array.isArray(value) && !keep.has(key)) (data as unknown as Record<string, unknown>)[key] = [];
+  for (const [key, value] of Object.entries(previous.data))
+    if (Array.isArray(value) && key !== 'lanes')
+      (previous.data as unknown as Record<string, unknown>)[key] = [];
+  return c;
+}
 async function advanceReturnProgress(
   ctx: ActionCtx,
   stage: Doc<'projectWorkGenerations'>,
@@ -45,6 +93,7 @@ async function advanceReturnProgress(
     metadataOnly?: boolean;
     accounting?: ReturnAccounting;
     records?: IntentRecords;
+    cursor?: Cursor;
   },
   actionStarted = Date.now(),
 ): Promise<(Doc<'projectWorkEvents'> & { accounting?: ReturnAccounting }) | null> {
@@ -71,7 +120,7 @@ async function advanceReturnProgress(
   } else {
     invariant(initial, 'WORK_STALE', 'Resume the original return preparation.');
     const { data } = initial.snapshot;
-    c = {
+    c = initial.cursor ?? {
       protocol: 3,
       snapshot: initial.snapshot,
       accounting: initial.accounting,
@@ -92,7 +141,9 @@ async function advanceReturnProgress(
       ],
       rows: [],
     };
-    if (initial.previous && initial.generation) {
+    if (initial.cursor) {
+      // Its source, journal and projection plan were prepared before display hydration.
+    } else if (initial.previous && initial.generation) {
       const plan = prepareDelta(initial.previous, initial.snapshot, initial.generation, initial.partial);
       c.delta = plan.delta;
       c.metadata = plan.metadata;
@@ -152,6 +203,28 @@ async function advanceReturnProgress(
             .map(([key]) => [key, []]),
         ),
       };
+    }
+    if (c.delta?.staged) {
+      await storeOutputRows(ctx, c, c.snapshot.output ?? [], stage._id);
+      c.delta.outputRefs = c.outputRefs;
+      delete c.outputRefs;
+      delete c.snapshot.output;
+    }
+    if (initial.partial) {
+      c.snapshot.data = {
+        ...data,
+        ...Object.fromEntries(
+          Object.entries(data)
+            .filter(([, value]) => Array.isArray(value))
+            .map(([key]) => [key, []]),
+        ),
+      };
+      c.snapshot.manifest = { ...c.snapshot.manifest, files: [], unavailable: [] };
+      c.parents = [];
+      c.pending = [];
+      c.heads = [];
+      delete c.diffstats;
+      if (c.delta) c.delta.stopParents = [];
     }
   }
 
@@ -280,6 +353,8 @@ async function advanceReturnProgress(
           ? storeReturnMetadata(ctx, input.projectId, owner, stage._id, value)
           : storeReturnJson(ctx, value);
       const snapshot = c.snapshotRef ?? (await store(c.snapshot));
+      if (typeof snapshot !== 'string' && c.delta?.outputRefs?.length)
+        snapshot.cleanup = c.delta.outputRefs.map(ref => ref.key);
       if (typeof snapshot !== 'string' && c.outputCleanup) {
         snapshot.cleanup = c.outputCleanup;
         delete c.outputCleanup;
@@ -343,14 +418,15 @@ async function advanceReturnProgress(
       batchStates = batchSourceBytes = batchFailures = derivedRows = pendingBytes = 0;
       pending = [];
       if (result.last) {
-        if (longActionExpired(actionStarted)) return null;
+        if (longActionExpired(actionStarted) || Date.now() - actionStarted >= RETURN_BUDGET.actionMs)
+          return null;
         break;
       }
       if (checkReturnBudget({ storageBytes: meter.bytes, steps: step - (stage.returnStep ?? 0) }))
         return null;
       if (
         longActionExpired(actionStarted) ||
-        Date.now() - drainStarted >= RETURN_BUDGET.actionMs ||
+        Date.now() - actionStarted >= RETURN_BUDGET.actionMs ||
         step - (stage.returnStep ?? 0) >= RETURN_BUDGET.actionSteps
       )
         return null;
@@ -359,12 +435,15 @@ async function advanceReturnProgress(
   // Legacy ready delta cursors also enter this path: their original projection
   // is immutable and the private commit resumes without a new push/return ID.
   const stagedDelta =
-    c.delta && (c.delta.entries.length + c.delta.removed.length > 1000 || stage.returnCommitPlan);
+    c.delta &&
+    (c.delta.staged || c.delta.entries.length + c.delta.removed.length > 1000 || stage.returnCommitPlan);
   if (stagedDelta && c.delta) {
     invariant(c.generationId, 'WORK_STALE', 'The return baseline is unavailable.');
     const pins = c.delta.removed,
       entries = c.delta.entries;
-    const plan = digest(JSON.stringify([c.final, c.metadata, pins, entries]));
+    const outputRefs = c.delta.outputRefs ?? [];
+    const total = pins.length + entries.length + outputRefs.reduce((sum, ref) => sum + (ref.records ?? 0), 0);
+    const plan = digest(JSON.stringify([c.final, c.metadata, pins, entries, ...outputRefs]));
     let committed = stage;
     while (!committed.returnCommitDone) {
       const offset = committed.returnCommitOffset ?? 0;
@@ -373,6 +452,18 @@ async function advanceReturnProgress(
         Math.max(0, offset - pins.length),
         Math.max(0, offset - pins.length) + 1000 - removed.length,
       );
+      let output: { key: string; parts: number; skip: number } | undefined;
+      if (committed.returnCommitCopied && !rows.length && outputRefs.length && offset >= pins.length) {
+        let skip = offset - pins.length;
+        for (const ref of outputRefs) {
+          if (skip >= (ref.records ?? 0)) {
+            skip -= ref.records ?? 0;
+            continue;
+          }
+          output = { key: ref.key, parts: ref.parts, skip };
+          break;
+        }
+      }
       committed = await ctx.runMutation(internal.projectReturnCommit.batch, {
         projectId: input.projectId,
         owner,
@@ -383,13 +474,16 @@ async function advanceReturnProgress(
         operationId: input.operationId,
         plan,
         copy: !committed.returnCommitCopied,
+        ...(c.delta.staged ? { copyFresh: true } : {}),
         cursor: committed.returnCommitCursor ?? null,
         offset,
-        total: pins.length + entries.length,
+        total,
         removed,
         entries: rows,
+        ...(output ? { output } : {}),
       });
-      if (longActionExpired(actionStarted) || Date.now() - started >= RETURN_BUDGET.actionMs) return null;
+      if (longActionExpired(actionStarted) || Date.now() - actionStarted >= RETURN_BUDGET.actionMs)
+        return null;
     }
   }
   const receipt = await ctx.runMutation(internal.projectWork.returnSource, {

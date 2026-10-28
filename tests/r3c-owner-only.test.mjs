@@ -19,13 +19,19 @@ test('owner display pages retain all bytes beyond the old cap and reject hash/si
   const { root, objects } = ownerDerivedPages(bytes);
   assert.ok(root.length < 4 * 1024 * 1024);
   assert.ok(objects.size > 1);
-  let maxBatch = 0;
+  let maxBatch = 0,
+    maxBytes = 0;
   const read = async pins => {
     maxBatch = Math.max(maxBatch, pins.length);
+    maxBytes = Math.max(
+      maxBytes,
+      pins.reduce((sum, pin) => sum + pin.size, 0),
+    );
     return pins.map(p => objects.get(p.sha256));
   };
   assert.deepEqual(await resolveOwnerDerived(root, read), value);
-  assert.ok(maxBatch <= 8);
+  assert.ok(maxBatch <= 16);
+  assert.ok(maxBytes <= 2 * 1024 * 1024);
   const pin = { sha256: digest(root), size: root.length };
   await assert.rejects(
     readOwnerDerived(

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
+import { parseJsonStream } from './json-stream.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { OWNER_DERIVED_MAX_BYTES } from './owner-derived.js';
@@ -76,16 +78,16 @@ export async function resolveOwnerDerived(
 ) {
   const value = JSON.parse(bytes.toString('utf8'));
   if (value.encoding !== 'pages') return value;
-  async function decode(value: unknown, expectedLevel?: number): Promise<Buffer> {
+  async function* decode(value: unknown, expectedLevel?: number): AsyncGenerator<Buffer> {
     const root = ownerDerivedPagesSchema.parse(value),
-      parts: Buffer[] = [];
+      hash = createHash('sha256');
     invariant(
       expectedLevel === undefined || root.level === expectedLevel,
       'INVALID_OWNER_DATA',
       'Owner display page level changed.',
     );
-    for (let offset = 0; offset < root.pages.length; offset += 8) {
-      const pins = root.pages.slice(offset, offset + 8),
+    for (let offset = 0; offset < root.pages.length; offset += 16) {
+      const pins = root.pages.slice(offset, offset + 16),
         batch = await read(pins);
       invariant(batch.length === pins.length, 'INVALID_OWNER_DATA', 'Incomplete owner display page batch.');
       for (const [i, part] of batch.entries()) {
@@ -95,12 +97,22 @@ export async function resolveOwnerDerived(
           'INVALID_OWNER_DATA',
           'Owner display page differs from its hash or size.',
         );
-        parts.push(root.level ? await decode(JSON.parse(part.toString('utf8')), root.level - 1) : part);
+        if (root.level) {
+          for await (const bytes of decode(JSON.parse(part.toString('utf8')), root.level - 1)) {
+            hash.update(bytes);
+            yield bytes;
+          }
+        } else {
+          hash.update(part);
+          yield part;
+        }
       }
     }
-    const joined = Buffer.concat(parts);
-    invariant(digest(joined) === root.sha256, 'INVALID_OWNER_DATA', 'Owner display document hash changed.');
-    return joined;
+    invariant(
+      hash.digest('hex') === root.sha256,
+      'INVALID_OWNER_DATA',
+      'Owner display document hash changed.',
+    );
   }
-  return JSON.parse((await decode(value)).toString('utf8'));
+  return parseJsonStream(decode(value));
 }

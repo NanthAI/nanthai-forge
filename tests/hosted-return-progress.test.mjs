@@ -150,7 +150,13 @@ async function setup(t, count = 24, width = 30) {
 test('cursor continuation bounds transactions and RPCs, resumes lost steps and publishes exact complete projection', async t => {
   const s = await setup(t),
     saved = { ...progress.RETURN_BUDGET };
-  Object.assign(progress.RETURN_BUDGET, { states: 3, sourceBytes: 12000, rows: 5, rowBytes: 40000 });
+  Object.assign(progress.RETURN_BUDGET, {
+    states: 3,
+    sourceBytes: 12000,
+    rows: 5,
+    rowBytes: 40000,
+    metadataPages: 1,
+  });
   t.after(() => Object.assign(progress.RETURN_BUDGET, saved));
   const mutation = s.ctx.runMutation,
     query = s.ctx.runQuery;

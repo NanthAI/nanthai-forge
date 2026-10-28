@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { checkWorkReturnCapture } from '../scripts/check-work-return-capture.mjs';
 import { checkWorkExchangeCapture } from '../scripts/check-work-exchange-capture.mjs';
 import { buildExchangeRoot } from '../dist/native-exchange-tree.js';
 import { workSchema } from '../dist/work-types.js';
@@ -146,4 +147,15 @@ test('offline capture harness reports the exact missing required target and auth
     checkWorkExchangeCapture(valid.base, valid.capture),
     error => error.code === 'ERR_ASSERTION',
   );
+});
+
+test('offline return harness runs the same record and source-return checks without modifying captures', async t => {
+  const { base, capture } = fixture(t),
+    original = [snapshot(base), snapshot(capture)];
+  const result = await checkWorkReturnCapture(base, capture);
+  assert.equal(result.status, 'PASS');
+  assert.equal(result.recordsValidated, 2);
+  assert.equal(result.events, 0);
+  assert.equal(result.convexCalls, 0);
+  assert.deepEqual([snapshot(base), snapshot(capture)], original);
 });

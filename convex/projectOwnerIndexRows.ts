@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { invariant } from '../src/errors';
 import { internal } from './_generated/api';
 import type { ActionCtx } from './_generated/server';
 import type { Cursor } from './projectSourceReturnStep';
@@ -12,14 +13,13 @@ export async function prepareOwnerIndexRows(ctx: ActionCtx, c: Cursor) {
     const delta = c.delta,
       selected = new Map<string, IndexEntry>();
     const removed = new Map(delta.removed.map(row => [identity(row), row]));
-    for (let offset = 0; offset < c.rows.length; offset += 100) {
-      const entries = c.rows.slice(offset, offset + 100);
-      const oldRows: (IndexEntry | null)[] = await ctx.runQuery(internal.projectWorkIndexStore.lookups, {
-        projectId: c.final.projectId,
-        owner: c.final.owner,
-        generationId: c.generationId,
-        keys: entries.map(({ collection, key }) => ({ collection, key })),
-      });
+    for (let offset = 0; offset < c.rows.length; offset += 1000) {
+      const entries = c.rows.slice(offset, offset + 1000);
+      const oldRows = await returnRows(
+        ctx,
+        c,
+        entries.map(({ collection, key }) => ({ collection, key })),
+      );
       for (const [i, row] of entries.entries()) {
         const key = identity(row),
           old = oldRows[i] ?? selected.get(key);
@@ -66,13 +66,8 @@ export async function prepareOwnerIndexRows(ctx: ActionCtx, c: Cursor) {
     }
     delta.removed = [...removed.values()];
     const payloads = delta.removed.filter(row => row.collection.endsWith(':payload'));
-    for (let offset = 0; offset < payloads.length; offset += 100) {
-      const oldRows: (IndexEntry | null)[] = await ctx.runQuery(internal.projectWorkIndexStore.lookups, {
-        projectId: c.final.projectId,
-        owner: c.final.owner,
-        generationId: c.generationId,
-        keys: payloads.slice(offset, offset + 100),
-      });
+    for (let offset = 0; offset < payloads.length; offset += 1000) {
+      const oldRows = await returnRows(ctx, c, payloads.slice(offset, offset + 1000));
       for (const old of oldRows)
         if (old) {
           c.metadata!.counts[old.collection] = (c.metadata!.counts[old.collection] ?? 0) - 1;
@@ -82,6 +77,14 @@ export async function prepareOwnerIndexRows(ctx: ActionCtx, c: Cursor) {
     delta.entries = [...selected.values()];
     c.rows = [];
     if (deltaFits(delta, Buffer.byteLength(JSON.stringify(c.final)))) return;
+    // Large record returns stage only changed output; private commit copies
+    // retained rows inside the database instead of returning them to the action.
+    if (delta.partial) {
+      delta.staged = true;
+      c.snapshot.output = delta.entries;
+      delta.entries = [];
+      return;
+    }
     c.snapshot.omit = [...delta.entries, ...delta.removed].map(identity);
     c.copy = { cursor: null };
     c.rows = delta.entries;
@@ -99,4 +102,19 @@ export async function prepareOwnerIndexRows(ctx: ActionCtx, c: Cursor) {
   c.snapshot.output = c.rows;
   c.offset = 0;
   c.rows = [];
+}
+
+async function returnRows(ctx: ActionCtx, c: Cursor, keys: { collection: string; key: string }[]) {
+  const result: (IndexEntry | null)[] = [];
+  while (result.length < keys.length) {
+    const page: (IndexEntry | null)[] = await ctx.runQuery(internal.projectWorkIndexStore.returnLookups, {
+      projectId: c.final.projectId,
+      owner: c.final.owner,
+      generationId: c.generationId!,
+      keys: keys.slice(result.length, result.length + 1000),
+    });
+    invariant(page.length, 'WORK_STALE', 'Return lookup omitted its page.');
+    result.push(...page);
+  }
+  return result;
 }

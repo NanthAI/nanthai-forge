@@ -623,3 +623,84 @@ test('replacement publication authenticates selected Work independently of an un
   assert.equal(logs.at(-1)[1].mode, 'delta');
   assert.equal(s.tables.hostedProjects.get('project').work.backupId, f.backupId);
 });
+
+test('validated record return refuses a missing delta without compatibility metadata writes', async t => {
+  const f = await setup(t),
+    c = await candidate(f);
+  const root = { ...c.next.tree.root };
+  delete root.delta;
+  const pin = await upload(f.s, Buffer.from(JSON.stringify(root)));
+  f.s.tables.projectBackups.get(c.input.backupId).objectManifest = { digest: pin.sha256, size: pin.size };
+  const before = f.s.tables.projectReturnPages.size;
+  await assert.rejects(
+    () => complete(f.s, c.input),
+    error => error.data?.code === 'WORK_RETURN_DELTA_UNAVAILABLE' && /delta-missing/.test(error.data.message),
+  );
+  assert.equal(f.s.tables.projectReturnPages.size, before);
+  assert.equal(f.s.tables.hostedProjects.get('project').work.backupId, f.backupId);
+});
+
+test('record return supersedes a step-zero compatibility stage and bounded cleanup drains orphan pages', async t => {
+  const f = await setup(t),
+    c = await candidate(f);
+  const stage = {
+    _id: 'abandoned',
+    projectId: 'project',
+    backupId: c.input.backupId,
+    revision: c.next.manifest.revision + 1,
+    initialRevision: c.next.manifest.revision,
+    returnOperationId: c.input.operationId,
+    returnAt: new Date().toISOString(),
+    returnStep: 0,
+    nextBatch: 0,
+    status: 'building',
+    metadata: '{}',
+    returnPrepareCursor: JSON.stringify({ key: 'partial', parts: 1, partitionId: 'abandoned' }),
+  };
+  f.s.tables.projectWorkGenerations.set(stage._id, stage);
+  for (let i = 0; i < 1900; i++)
+    f.s.tables.projectReturnPages.set(`orphan-${i}`, {
+      _id: `orphan-${i}`,
+      projectId: 'project',
+      partitionId: stage._id,
+      key: i < 900 ? 'unreferenced-output' : 'partial',
+      position: i,
+      body: 'Synthetic',
+    });
+  const receipt = await complete(f.s, c.input);
+  assert.equal(receipt.at, stage.returnAt);
+  assert.equal(f.s.tables.projectWorkGenerations.get(stage._id).returnOperationId, undefined);
+  assert.equal(receipt.revision, c.next.manifest.revision + 1);
+  const metadata = await import(moduleUrl('../convex/projectReturnMetadataStore.ts'));
+  await assert.rejects(
+    metadata.put._handler(f.s.ctx, {
+      projectId: 'project',
+      owner: 'owner',
+      partitionId: stage._id,
+      key: 'late',
+      position: 0,
+      body: 'Late writer',
+    }),
+    failCode('WORK_STALE'),
+  );
+  let cursor = 0,
+    cleanupCalls = 0;
+  while (cursor < f.s.scheduled.length) {
+    const task = f.s.scheduled[cursor++];
+    if (
+      getFunctionName(task.fn) !== 'projectReturnIndexStage:retirePartition' ||
+      task.args.partitionId !== stage._id
+    )
+      continue;
+    const before = f.s.tables.projectReturnPages.size;
+    await f.s.ctx.runMutation(task.fn, task.args);
+    assert(before - f.s.tables.projectReturnPages.size <= 200);
+    cleanupCalls++;
+  }
+  assert.equal(
+    [...f.s.tables.projectReturnPages.values()].filter(row => row.partitionId === stage._id).length,
+    0,
+  );
+  assert.equal(cleanupCalls, 10);
+  assert.deepEqual(await complete(f.s, c.input), receipt);
+});

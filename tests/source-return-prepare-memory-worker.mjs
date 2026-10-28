@@ -142,6 +142,13 @@ if (mode === 'fixture') {
           return { page: [], isDone: true, continueCursor: '' };
         case 'projectBackups:get':
           return { backup, project };
+        case 'projectReturnMetadataStore:readBatch':
+          assert(args.count <= 64);
+          return Promise.all(
+            Array.from({ length: args.count }, (_, index) =>
+              readFile(join(directory, `page-${args.key}-${args.position + index}`), 'utf8'),
+            ),
+          );
         case 'projectReturnMetadataStore:read':
           return readFile(join(directory, `page-${args.key}-${args.position}`), 'utf8');
         default:
@@ -151,6 +158,13 @@ if (mode === 'fixture') {
     runMutation: async (ref, args) => {
       sample();
       switch (getFunctionName(ref)) {
+        case 'projectReturnMetadataStore:putBatch':
+          assert(args.bodies.length <= 64);
+          assert(args.bodies.reduce((sum, body) => sum + Buffer.byteLength(body), 0) <= 2 * 1024 * 1024);
+          for (const [index, body] of args.bodies.entries()) {
+            await writeFile(join(directory, `page-${args.key}-${args.position + index}`), body);
+          }
+          return null;
         case 'projectReturnMetadataStore:put':
           await writeFile(join(directory, `page-${args.key}-${args.position}`), args.body);
           return null;

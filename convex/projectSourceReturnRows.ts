@@ -19,15 +19,16 @@ export async function storeOutputRows(
     bytes = 0;
   const flush = async () => {
     if (!batch.length) return;
-    (c.outputRefs ??= []).push(
-      await storeReturnMetadata(ctx, c.final.projectId, c.final.owner, partitionId, batch),
-    );
+    (c.outputRefs ??= []).push({
+      ...(await storeReturnMetadata(ctx, c.final.projectId, c.final.owner, partitionId, batch)),
+      records: batch.length,
+    });
     batch = [];
     bytes = 0;
   };
   for (const row of rows) {
     const size = Buffer.byteLength(JSON.stringify(row));
-    if (batch.length && (batch.length >= 100 || bytes + size > 256 * 1024)) await flush();
+    if (batch.length && (batch.length >= 2000 || bytes + size > 2 * 1024 * 1024)) await flush();
     batch.push(row);
     bytes += size;
   }

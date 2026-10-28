@@ -227,9 +227,25 @@ export async function validateChangedRecords(
   read: (pin: { sha256: string; size: number }) => Promise<Buffer>,
   sourcePins: Set<string>,
   metadataOnly = new Set<string>(),
+  authenticated?: { previous: WorkData; current: WorkData },
 ) {
   const old = recordMap(before),
     next = recordMap(after);
+  const parsed = new Map<string, Record<string, unknown>>();
+  if (authenticated)
+    for (const [data, records] of [
+      [authenticated.previous, old],
+      [authenticated.current, next],
+    ] as const)
+      for (const [collection, items] of Object.entries(data))
+        if (Array.isArray(items))
+          for (const value of items) {
+            const record = records.get(recordIdentity(collection, recordKey(value, collection)!))?.record;
+            if (record) parsed.set(JSON.stringify([collection, record.key, record.sha256]), value);
+          }
+  const readValue = (record: RecordPin, collection: string) =>
+    parsed.get(JSON.stringify([collection, record.key, record.sha256])) ??
+    readRecord(record, read, collection);
   const previous: { collection: string; value: Record<string, unknown> }[] = [],
     current: typeof previous = [];
   let validated = 0;
@@ -239,10 +255,10 @@ export async function validateChangedRecords(
     if (old.has(id))
       previous.push({
         collection: change.collection,
-        value: await readRecord(old.get(id)!.record, read, change.collection),
+        value: await readValue(old.get(id)!.record, change.collection),
       });
     if (!record) continue;
-    const value = await readRecord(record, read, change.collection),
+    const value = await readValue(record, change.collection),
       refs = recordReferences(change.collection, value, recordMetadata(after).schema as number);
     invariant(
       JSON.stringify(refs) === JSON.stringify(record.refs),
@@ -287,7 +303,7 @@ export async function validateChangedRecords(
     const target = next.get(id)!;
     sourceRecords.push({
       collection: target.collection,
-      value: await readRecord(target.record, read, target.collection),
+      value: await readValue(target.record, target.collection),
     });
   }
   for (let cursor = 0; cursor < sourceRecords.length; cursor++) {
@@ -316,7 +332,7 @@ export async function validateChangedRecords(
       selected.add(id);
       sourceRecords.push({
         collection: ref.collection,
-        value: await readRecord(target.record, read, ref.collection),
+        value: await readValue(target.record, ref.collection),
       });
     }
   }

@@ -709,7 +709,6 @@ export class ConvexExchange implements ExchangeTransport {
       let first = true;
       const guard = pendingProgressGuard('source return', operationId);
       while (true) {
-        const statusProbe = first && !!this.onReturnProgress;
         const result = await retryExchange('source return', operationId, () =>
           this.client.action(action('projectSourceReturn:returnSource'), {
             projectId: this.projectId,
@@ -719,7 +718,6 @@ export class ConvexExchange implements ExchangeTransport {
             operationId,
             continuation: true,
             ...(ownerDerived ? { ownerDerived } : {}),
-            ...(first && this.onReturnProgress ? { statusOnly: true } : {}),
           }),
         );
         if (!(result && typeof result === 'object' && 'pending' in result && result.pending === true)) {
@@ -737,15 +735,14 @@ export class ConvexExchange implements ExchangeTransport {
           });
           return result;
         }
-        // The initial status probe does no work and cannot count as a stalled continuation.
-        if (!(first && this.onReturnProgress)) guard(result.progress);
+        guard(result.progress);
         if (result.progress)
           this.onReturnProgress?.({
             ...JSON.parse(result.progress),
             resumed: first && result.resumed === true,
           });
         first = false;
-        if (!statusProbe) await new Promise<void>(resolve => setImmediate(resolve));
+        await new Promise<void>(resolve => setImmediate(resolve));
       }
     } catch (error) {
       throw hostedActionError(error, 'source return');

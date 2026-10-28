@@ -44,6 +44,60 @@ export const resume = internalQuery({
     return original;
   },
 });
+/** An uncommitted compatibility prepare is disposable when validated records can resume. */
+export const restartRecords = internalMutation({
+  args: {
+    projectId: v.id('hostedProjects'),
+    owner: v.string(),
+    partitionId: v.id('projectWorkGenerations'),
+    expectedBackupId: v.id('projectBackups'),
+    revision: v.number(),
+    operationId: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, input) => {
+    await requireActiveReturn(ctx, input.projectId, input.operationId);
+    const project = await workProject(ctx, await activeOwnedProject(ctx, input.projectId, input.owner));
+    const stage = await ctx.db.get(input.partitionId);
+    invariant(
+      project.work?.backupId === input.expectedBackupId && project.work.revision === input.revision,
+      'WORK_STALE',
+      'Hosted source or Work changed before record return.',
+    );
+    if (!stage?.returnOperationId) return false;
+    invariant(
+      stage.projectId === input.projectId && stage.returnOperationId === input.operationId,
+      'WORK_OPERATION_CHANGED',
+      'Resume the original source-return stage.',
+    );
+    if (
+      stage.status !== 'building' ||
+      stage.nextBatch !== 0 ||
+      (stage.returnStep ?? 0) !== 0 ||
+      stage.returnCursor ||
+      stage.returnMetadataCursor ||
+      stage.returnCommitPlan
+    )
+      return false;
+    const backup = await ctx.db.get(stage.backupId),
+      prior = await ctx.db.get(input.expectedBackupId);
+    invariant(
+      backup?.validatedWorkRecords === 1 && prior?.validatedWorkRecords === 1,
+      'WORK_RETURN_DELTA_UNAVAILABLE',
+      'Both checkpoints must have validated records before restarting.',
+    );
+    await ctx.db.patch(stage._id, {
+      returnOperationId: undefined,
+      returnPrepareCursor: undefined,
+      returnRetired: true,
+    });
+    await ctx.scheduler.runAfter(0, internal.projectReturnIndexStage.retirePartition, {
+      projectId: input.projectId,
+      partitionId: stage._id,
+    });
+    return true;
+  },
+});
 export const begin = internalMutation({
   args: {
     ...base,
@@ -132,6 +186,7 @@ export const batch = internalMutation({
         partition = await ctx.db.get(input.partitionId);
       if (generation?._id !== input.generationId || project.work?.revision !== input.revision) return false;
       invariant(partition?.projectId === project._id, 'WORK_STALE', 'Return index staging changed.');
+      invariant(!partition.returnRetired, 'WORK_STALE', 'Return stage was retired.');
       // An action that started before deployment must not append write-only
       // batches into a partition owned by the new computational cursor.
       if (partition.returnStep !== undefined && input.step === undefined) return false;
@@ -230,6 +285,17 @@ export const retirePartition = internalMutation({
       if (selected && recordPartition(selected) === input.partitionId) return null;
       const partition = await ctx.db.get(input.partitionId);
       if (partition?.retainedForIntentMigration) return null;
+      if (partition?.returnRetired) {
+        const pages = await ctx.db
+          .query('projectReturnPages')
+          .withIndex('by_partition_and_key_and_position', q => q.eq('partitionId', input.partitionId))
+          .paginate({ cursor: null, numItems: 200, maximumRowsRead: 200, maximumBytesRead: 6000000 });
+        for (const row of pages.page) await ctx.db.delete(row._id);
+        if (!pages.isDone) {
+          await ctx.scheduler.runAfter(0, internal.projectReturnIndexStage.retirePartition, input);
+          return null;
+        }
+      }
       const page = await ctx.db
         .query('projectWorkRecords')
         .withIndex('by_generation', q => q.eq('generationId', input.partitionId))

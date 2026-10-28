@@ -76,7 +76,7 @@ With the token set, `nforge mcp ROOT --agent` also offers `forge_exchange` and `
 
 A large backlog keeps the original push and nested source-return operation IDs,
 checkpoint pins and hosted revision through every continuation. Native returns
-with at least 100 journal revisions since their base use durable preparation even
+without validated record catalogs use durable preparation when their journal backlog grows, even
 when the base Work is small. Preparation saves replayed Work at complete event
 boundaries and resumes from that validated revision. Validation, projection and
 private index commits keep their existing shorter scheduling windows. A shared
@@ -185,11 +185,33 @@ Work JSON format stays intact. Changed records and touched references are
 validated on the hosted path; canonical whole-JSON hashing streams retained
 record segments without reconstructing both Work snapshots. Source-return
 history keeps its original whole-JSON digest semantics through an exchange-only
-journal adapter.
+journal adapter. New captures order only root fields like the journal parser;
+late optional collections keep their original record bodies and values. Existing
+prepared operations retain their exact bytes.
 
 Schema-2 records publication requires a validated delta base. An unavailable
 delta returns `WORK_DELTA_UNAVAILABLE` with its skip reason before reading full
 Work; publication never falls back to a whole-Work records seed in one action.
+When both source-return checkpoints have validated record catalogs, a skipped
+record path returns `WORK_RETURN_DELTA_UNAVAILABLE` with its reason. It does not
+start complete compatibility preparation. Record return uses a 32 MiB context
+window across both snapshots. Catalog/manifest reads resolve up to 1,000 pins
+and 2 MiB per page; context body pages retain the 100-pin/2 MiB bounds. Journal replay
+needs the latest hosted receipt per Channel and authenticates the full retained
+receipt history through catalog hashes. An uncommitted compatibility stage at
+step/batch zero is replaced under the original operation, with its timestamp
+preserved. Its unreferenced metadata pages are reclaimed in bounded scheduled
+batches. Legacy and unvalidated backups retain complete compatibility preparation.
+
+Large record returns stage changed projection output once, then copy retained
+index rows inside bounded database transactions before the final source/Work CAS.
+They do not send the retained index or staged output back through the action during commit.
+Copy/apply transactions retain the original revision, operation and offset guards. Metadata RPCs carry
+bounded groups of pages; after publication, detached pages are reclaimed by
+partition. Views with unchanged base/head trees and conflict state reuse their
+file keys while still validating and replacing owner-supplied provenance rows.
+Progress omits unknown zero totals and reports saved work when available.
+
 Use the paged hosted seed for a fresh project. Schema-1 checkpoints, recovery and the logical-manifest
 compatibility endpoint remain available. When either byte-reading native object checkpoint's
 Work exceeds 16 MiB and a current index is available, compatibility preparation
@@ -245,8 +267,8 @@ remain in the authenticated catalog, but need not have run records: composition
 assigns all prefix IDs before checking, and a passing full batch leaves its proper
 prefixes unexecuted. Diagnostic and confirmation run references remain required.
 Publication validates those records and releases the memo before
-streaming the whole-Work digest. Source return retains its separate
-4 MiB context optimization window and its resumable compatibility path. Neither
+streaming the whole-Work digest. Source return uses a 32 MiB context window and
+retains resumable compatibility preparation for legacy or unvalidated backups. Neither
 path loads complete Work to publish a records checkpoint.
 To check a retained push capture offline, after building core, run:
 

@@ -3,7 +3,12 @@
 import { digest } from '../src/portable-hash';
 import { selectedTreeHeads } from '../src/owner-derived';
 import type { Doc } from './_generated/dataModel';
-import { materializeWork, type IndexEntry, type IndexMetadata } from '../src/work-hosted-index';
+import {
+  materializeWork,
+  indexedRecord,
+  type IndexEntry,
+  type IndexMetadata,
+} from '../src/work-hosted-index';
 import { viewReadModels, viewContributors } from '../src/view-read-model';
 import type { WorkData } from '../src/work-types';
 import type { sourceManifestSchema } from '../src/work-archive-metadata';
@@ -20,12 +25,15 @@ export type Delta = {
   views: number[];
   summaries: number[];
   newViews?: string[];
+  unchangedViewFiles?: string[];
   positions: Record<string, number>;
   stopParents: string[];
   trees?: string[];
   readBytes: number;
   payloadReplacements: number;
   partial?: boolean;
+  outputRefs?: import('./projectSourceReturnMetadata').MetadataRef[];
+  staged?: boolean;
 };
 const identity = (row: { collection: string; key: string }) => JSON.stringify([row.collection, row.key]);
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -44,8 +52,19 @@ export function prepareDelta(
     previous.backup.transport,
     new Map(),
     true,
+    false,
+    true,
   );
-  const after = materializeWork(next.data, next.manifest, [], next.backup.transport, new Map(), true);
+  const after = materializeWork(
+    next.data,
+    next.manifest,
+    [],
+    next.backup.transport,
+    new Map(),
+    true,
+    false,
+    true,
+  );
   const old = new Map(before.entries.map(row => [identity(row), row]));
   const entries: IndexEntry[] = [];
   for (const row of after.entries) {
@@ -70,6 +89,28 @@ export function prepareDelta(
     )
       entries.push(row);
   }
+  // Source descriptors already carry immutable identity; avoid materializing
+  // both complete blob indexes merely to discover their small difference.
+  const oldBlobs = new Map(
+    previous.manifest.files
+      .filter(file => /^objects\/[a-f0-9]{64}$/.test(file.path))
+      .map(file => [file.sha256, file]),
+  );
+  let position = 0;
+  for (const file of next.manifest.files)
+    if (/^objects\/[a-f0-9]{64}$/.test(file.path)) {
+      const prior = oldBlobs.get(file.sha256);
+      oldBlobs.delete(file.sha256);
+      if (!prior || prior.size !== file.size)
+        entries.push(
+          ...indexedRecord('sourceBlobs', file.sha256, '', position, {
+            sha256: file.sha256,
+            size: file.size,
+          }),
+        );
+      position++;
+    }
+  const removedBlobs = [...oldBlobs.keys()].map(key => ({ collection: 'sourceBlobs', key }));
   const oldModels = new Map(viewReadModels(previous.data).map(model => [model.viewId, model]));
   const oldViews = new Map(previous.data.views.map(view => [view.id, view]));
   const fingerprint = (data: WorkData, view: WorkData['views'][number]) => [
@@ -133,9 +174,22 @@ export function prepareDelta(
       removed: [...old.values()]
         .filter(row => !partial || row.collection !== 'sourcePins')
         .map(({ collection, key }) => ({ collection, key }))
-        .concat(removedLanes),
+        .concat(removedLanes, removedBlobs),
       views,
       newViews: views.filter(i => !oldViews.has(next.data.views[i]!.id)).map(i => next.data.views[i]!.id),
+      // File keys depend on immutable base/head trees and conflict status, not
+      // contributor labels or queue metadata that can change their payloads.
+      unchangedViewFiles: next.data.views
+        .filter(view => {
+          const prior = oldViews.get(view.id);
+          return (
+            prior &&
+            prior.base === view.base &&
+            prior.head === view.head &&
+            (prior.status === 'conflict') === (view.status === 'conflict')
+          );
+        })
+        .map(view => view.id),
       summaries,
       positions: { ...counts },
       stopParents: [],

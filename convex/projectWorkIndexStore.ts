@@ -55,6 +55,7 @@ export const snapshotEntries = internalQuery({
     generationId: v.id('projectWorkGenerations'),
     revision: v.number(),
     cursor: v.union(v.string(), v.null()),
+    returnBatch: v.optional(v.boolean()),
   },
   returns: v.union(
     v.null(),
@@ -67,7 +68,11 @@ export const snapshotEntries = internalQuery({
     const page = await ctx.db
       .query('projectWorkRecords')
       .withIndex('by_generation', q => q.eq('generationId', recordPartition(generation)))
-      .paginate({ cursor: input.cursor, numItems: 100, maximumBytesRead: 500000 });
+      .paginate({
+        cursor: input.cursor,
+        numItems: input.returnBatch ? 1000 : 100,
+        maximumBytesRead: input.returnBatch ? 2000000 : 500000,
+      });
     return {
       entries: page.page.map(row => ({
         ...(row.activityAt === undefined ? {} : { activityAt: row.activityAt }),
@@ -260,6 +265,88 @@ export const retire = internalMutation({
       await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, { generationId });
     else await ctx.db.delete(generationId);
     return null;
+  },
+});
+/** Return preparation pages point lookups by response bytes as well as keys. */
+export const returnLookups = internalQuery({
+  args: {
+    projectId: v.id('hostedProjects'),
+    owner: v.string(),
+    generationId: v.id('projectWorkGenerations'),
+    keys: v.array(v.object({ collection: v.string(), key: v.string() })),
+  },
+  returns: v.array(v.union(indexEntry, v.null())),
+  handler: async (ctx, input) => {
+    const project = await workProject(ctx, await accessibleProject(ctx, input.projectId, input.owner));
+    const generation = await selectedGeneration(ctx, project);
+    invariant(generation?._id === input.generationId, 'WORK_STALE', 'Hosted Work changed.');
+    invariant(input.keys.length <= 1000, 'BAD_ARGUMENT', 'Page return lookups.');
+    const result: (import('../src/work-hosted-index').IndexEntry | null)[] = [];
+    let bytes = 0;
+    for (const key of input.keys) {
+      const row = await record(ctx, recordPartition(generation), key.collection, key.key);
+      const size = row ? new TextEncoder().encode(JSON.stringify(row)).byteLength : 4;
+      if (result.length && bytes + size > 2 * 1024 * 1024) break;
+      result.push(
+        row
+          ? {
+              collection: row.collection,
+              key: row.key,
+              parent: row.parent,
+              position: row.position,
+              value: row.value,
+              ...(row.status ? { status: row.status } : {}),
+              ...(row.actor ? { actor: row.actor } : {}),
+            }
+          : null,
+      );
+      bytes += size;
+    }
+    return result;
+  },
+});
+/** Only keys are needed to remove obsolete file rows across changed Views. */
+export const returnViewFiles = internalQuery({
+  args: {
+    projectId: v.id('hostedProjects'),
+    owner: v.string(),
+    generationId: v.id('projectWorkGenerations'),
+    viewIds: v.array(v.string()),
+    view: v.number(),
+    after: v.number(),
+  },
+  returns: v.object({ keys: v.array(v.string()), view: v.number(), after: v.number(), bytes: v.number() }),
+  handler: async (ctx, input) => {
+    const project = await workProject(ctx, await accessibleProject(ctx, input.projectId, input.owner));
+    const generation = await selectedGeneration(ctx, project);
+    invariant(generation?._id === input.generationId, 'WORK_STALE', 'Hosted Work changed.');
+    invariant(input.viewIds.length <= 100, 'BAD_ARGUMENT', 'Page changed Views.');
+    const keys: string[] = [];
+    let view = input.view,
+      after = input.after,
+      bytes = 0;
+    while (view < input.viewIds.length && keys.length < 1000 && bytes < 2 * 1024 * 1024) {
+      const rows = await ctx.db
+        .query('projectWorkRecords')
+        .withIndex('by_generation_and_collection_and_parent_and_position', q =>
+          q
+            .eq('generationId', recordPartition(generation))
+            .eq('collection', 'viewFiles')
+            .eq('parent', input.viewIds[view]!)
+            .gt('position', after),
+        )
+        .take(Math.min(100, 1000 - keys.length));
+      for (const row of rows) {
+        keys.push(row.key);
+        bytes += new TextEncoder().encode(JSON.stringify(row)).byteLength + 2048;
+        after = row.position;
+      }
+      if (rows.length < Math.min(100, 1000 - (keys.length - rows.length))) {
+        view++;
+        after = -1;
+      }
+    }
+    return { keys, view, after, bytes };
   },
 });
 export const lookups = internalQuery({

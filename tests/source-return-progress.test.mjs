@@ -23,7 +23,7 @@ test('source return reports saved resume position and phase counters without cha
   exchange.projectId = 'project';
   exchange.onReturnProgress = e => events.push(e);
   assert.equal(await exchange.returnSource('new', 'previous', 40, 'operation'), receipt);
-  assert.equal(calls[0].statusOnly, true);
+  assert.equal(calls[0].statusOnly, undefined);
   assert.equal(calls[1].statusOnly, undefined);
   assert.equal(events[0].resumed, true);
   assert.equal(events[1].resumed, false);
@@ -86,16 +86,16 @@ test('CLI probes saved inner progress while a long return action is still runnin
   };
   const running = exchange.returnSource('next', 'old', 0, 'op');
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 1);
   t.mock.timers.tick(30000);
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 2);
   assert.equal(events.at(-1).itemDone, 1000);
   complete({ revision: 1 });
   await running;
   t.mock.timers.tick(90000);
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 2);
 });
 
 test('many advancing pending responses stay healthy and preserve the one original operation', async () => {
@@ -139,4 +139,31 @@ test('repeated pending without saved progress fails with the original-operation 
     e => e.code === 'EXCHANGE_ACTION_STALLED' && /original.*Retry the original operation/.test(e.message),
   );
   assert.equal(calls, 6);
+});
+
+test('unknown source-return totals never print a fictitious 0/0 progress line', () => {
+  assert.equal(
+    formatSourceReturnProgress({
+      phase: 'preparing',
+      done: 0,
+      total: 0,
+      step: 0,
+      elapsedMs: 180000,
+      etaSeconds: null,
+      resumed: false,
+    }),
+    '',
+  );
+  assert.match(
+    formatSourceReturnProgress({
+      phase: 'committing',
+      done: 1000,
+      total: 0,
+      step: 1,
+      elapsedMs: 1000,
+      etaSeconds: null,
+      resumed: false,
+    }),
+    /1000 items processed/,
+  );
 });

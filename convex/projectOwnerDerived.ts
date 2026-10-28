@@ -245,7 +245,42 @@ function unpack(row: IndexEntry, rows: IndexEntry[]) {
 /** Keep validated rows private until the original return cursor publishes them. */
 export async function installOwnerDerived(ctx: ActionCtx, c: Cursor, value: unknown) {
   requireOwnerDerived(value);
-  const supplied = ownerDerivedRows(c, value);
+  // A partial context can change queue-derived Lane summary fields without
+  // changing its source comparison. Reuse that exact pair's retained stats.
+  const derived = value as import('../src/owner-derived').OwnerDerived;
+  invariant(Array.isArray(derived.stats), 'INVALID_OWNER_DATA', 'Owner display statistics are invalid.');
+  const known = new Set(derived.stats.map(([key]) => key));
+  const missing = [
+    ...new Set(
+      (c.diffstats?.records ?? []).flatMap(row => {
+        const summary = JSON.parse(row.value);
+        const key = `${summary.base}:${summary.head}`;
+        return summary.head && summary.status !== 'conflict' && !known.has(key) ? [key] : [];
+      }),
+    ),
+  ];
+  for (let offset = 0; offset < missing.length; offset += 100) {
+    const keys = missing.slice(offset, offset + 100);
+    const rows: (IndexEntry | null)[] = await ctx.runQuery(internal.projectWorkIndexStore.lookups, {
+      projectId: c.final.projectId,
+      owner: c.final.owner,
+      generationId: c.generationId,
+      keys: keys.map(key => ({ collection: 'diffstats', key })),
+    });
+    for (const [index, row] of rows.entries()) {
+      if (!row) continue;
+      const stats = JSON.parse(row.value);
+      derived.stats.push([
+        keys[index]!,
+        {
+          files: stats.files,
+          ...(stats.add === undefined ? {} : { add: stats.add }),
+          ...(stats.del === undefined ? {} : { del: stats.del }),
+        },
+      ]);
+    }
+  }
+  const supplied = ownerDerivedRows(c, derived);
   invariant(
     supplied,
     'INVALID_OWNER_DATA',
@@ -253,29 +288,36 @@ export async function installOwnerDerived(ctx: ActionCtx, c: Cursor, value: unkn
   );
   {
     const newViews = new Set(c.delta!.newViews);
-    for (const index of c.delta!.views) {
-      const view = c.snapshot.data.views[index]!;
-      if (c.full || newViews.has(view.id)) continue;
-      invariant(c.generationId, 'WORK_STALE', 'The original display generation is unavailable.');
-      const keys = new Set(supplied.filter(r => r.collection === 'viewFiles').map(r => r.key));
-      let cursor: string | null = null;
+    const unchangedFiles = new Set(c.delta!.unchangedViewFiles);
+    const viewIds = c
+      .delta!.views.map(index => c.snapshot.data.views[index]!.id)
+      .filter(id => !c.full && !newViews.has(id) && !unchangedFiles.has(id));
+    const keys = new Set(supplied.filter(r => r.collection === 'viewFiles').map(r => r.key));
+    for (let offset = 0; offset < viewIds.length; offset += 100) {
+      const selected = viewIds.slice(offset, offset + 100);
+      let view = 0,
+        after = -1;
       do {
-        const page: { entries: import('../src/work-hosted-index').IndexEntry[]; cursor: string | null } =
-          await ctx.runQuery(internal.projectWorkIndexStore.viewFiles, {
+        const page: { keys: string[]; view: number; after: number; bytes: number } = await ctx.runQuery(
+          internal.projectWorkIndexStore.returnViewFiles,
+          {
             projectId: c.final.projectId,
             owner: c.final.owner,
-            generationId: c.generationId,
-            viewId: view.id,
-            cursor,
-          });
-        for (const old of page.entries)
-          if (!keys.has(old.key)) {
-            c.delta!.removed.push({ collection: old.collection, key: old.key });
-            c.delta!.readBytes += Buffer.byteLength(JSON.stringify(old)) + 2048;
+            generationId: c.generationId!,
+            viewIds: selected,
+            view,
+            after,
+          },
+        );
+        for (const key of page.keys)
+          if (!keys.has(key)) {
+            c.delta!.removed.push({ collection: 'viewFiles', key });
             c.metadata!.counts.viewFiles!--;
           }
-        cursor = page.cursor;
-      } while (cursor !== null);
+        c.delta!.readBytes += page.bytes;
+        view = page.view;
+        after = page.after;
+      } while (view < selected.length);
     }
     c.rows.push(...supplied);
     c.phase = 'done';

@@ -33,7 +33,7 @@ import { hashWorkRecords } from '../dist/work-exchange-records.js';
 
 // Stream the capture once, retaining descriptors and only the prior changed bodies
 // in private scratch. Neither complete Work nor owner objects enter memory.
-async function catalog(directory, scratch, retain, validationRoot) {
+export async function catalog(directory, scratch, retain, validationRoot) {
   const manifest = sourceManifestSchema.parse(JSON.parse(readFileSync(join(directory, 'manifest.json'))));
   const work = manifest.files.find(file => file.path === 'work.json');
   assert(work, 'Manifest omits Work');

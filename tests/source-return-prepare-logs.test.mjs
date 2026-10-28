@@ -65,7 +65,7 @@ for (const reason of reasons)
     if (reason === 'delta-layout-unsupported') after.extension = 'new metadata';
     if (reason === 'context-over-budget') {
       before.intents[0].notes.push(
-        ...Array.from({ length: 600 }, () => ({ kind: 'comment', text: 'x'.repeat(4000), at: 'now' })),
+        ...Array.from({ length: 4500 }, () => ({ kind: 'comment', text: 'x'.repeat(4000), at: 'now' })),
       );
       after.intents[0].notes.push(...before.intents[0].notes);
     }
@@ -124,17 +124,28 @@ for (const reason of reasons)
         assert.fail(name);
       },
     };
-    await recordReturn(
-      ctx,
-      { projectId: 'project', expectedBackupId: 'prior', revision: 0 },
-      'owner',
-      {},
-      { _id: 'candidate', validatedWorkRecords: reason === 'candidate-records-unvalidated' ? undefined : 1 },
-      {
-        _id: 'prior',
-        digest: head,
-        validatedWorkRecords: reason === 'previous-records-unvalidated' ? undefined : 1,
-      },
-    );
+    const invoke = () =>
+      recordReturn(
+        ctx,
+        { projectId: 'project', expectedBackupId: 'prior', revision: 0 },
+        'owner',
+        {},
+        {
+          _id: 'candidate',
+          validatedWorkRecords: reason === 'candidate-records-unvalidated' ? undefined : 1,
+        },
+        {
+          _id: 'prior',
+          digest: head,
+          validatedWorkRecords: reason === 'previous-records-unvalidated' ? undefined : 1,
+        },
+      );
+    if (reason === 'candidate-records-unvalidated' || reason === 'previous-records-unvalidated')
+      assert.equal(await invoke(), undefined);
+    else
+      await assert.rejects(
+        invoke(),
+        error => error.code === 'WORK_RETURN_DELTA_UNAVAILABLE' && error.message.includes(reason),
+      );
     assert.deepEqual(logs, [['source-return record skip', { reason, revision: 0 }]]);
   });

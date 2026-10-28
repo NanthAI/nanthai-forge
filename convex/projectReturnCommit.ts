@@ -6,7 +6,7 @@ import { workProject } from './projectWorkHead';
 import { requireActiveReturn } from './projectReturnSupersede';
 import { selectedGeneration, recordPartition, record } from './projectWorkIndexStore';
 import { generationDocument, indexEntry } from './projectWorkIndexFields';
-import { indexActivity } from '../src/work-hosted-index';
+import { firstIndexBatch, type IndexEntry, indexActivity } from '../src/work-hosted-index';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 
@@ -23,10 +23,12 @@ export const batch = internalMutation({
     operationId: v.string(),
     plan: v.string(),
     copy: v.boolean(),
+    copyFresh: v.optional(v.boolean()),
     cursor: v.union(v.string(), v.null()),
     offset: v.number(),
     total: v.number(),
     entries: v.array(indexEntry),
+    output: v.optional(v.object({ key: v.string(), parts: v.number(), skip: v.number() })),
     removed: v.array(v.object({ collection: v.string(), key: v.string() })),
   },
   returns: generationDocument,
@@ -65,17 +67,42 @@ export const batch = internalMutation({
           .withIndex('by_generation', q => q.eq('generationId', recordPartition(generation)))
           .paginate({
             cursor: stage.returnCommitCursor ?? null,
-            numItems: 1000,
-            maximumRowsRead: 1000,
-            maximumBytesRead: 500000,
+            numItems: 2000,
+            maximumRowsRead: 2000,
+            maximumBytesRead: 2000000,
           });
-        for (const row of page.page) {
-          const { _id: _id, _creationTime: _time, ...entry } = row;
-          void _id;
-          void _time;
-          const old = await record(ctx, stage._id, row.collection, row.key);
-          if (old) await ctx.db.replace(old._id, { ...entry, generationId: stage._id });
-          else await ctx.db.insert('projectWorkRecords', { ...entry, generationId: stage._id });
+        if (input.copyFresh) {
+          if (!stage.returnCommitCursor) {
+            const existing = await ctx.db
+              .query('projectWorkRecords')
+              .withIndex('by_generation', q => q.eq('generationId', stage._id))
+              .take(1);
+            invariant(
+              !existing.length,
+              'WORK_OPERATION_CHANGED',
+              'Fresh record staging already contains rows.',
+            );
+          }
+          // The copy cursor commits with these inserts. Replays return above,
+          // so an empty record stage needs no per-row existence lookup.
+          for (let offset = 0; offset < page.page.length; offset += 100)
+            await Promise.all(
+              page.page.slice(offset, offset + 100).map(async row => {
+                const { _id: _id, _creationTime: _time, ...entry } = row;
+                void _id;
+                void _time;
+                await ctx.db.insert('projectWorkRecords', { ...entry, generationId: stage._id });
+              }),
+            );
+        } else {
+          for (const row of page.page) {
+            const { _id: _id, _creationTime: _time, ...entry } = row;
+            void _id;
+            void _time;
+            const old = await record(ctx, stage._id, row.collection, row.key);
+            if (old) await ctx.db.replace(old._id, { ...entry, generationId: stage._id });
+            else await ctx.db.insert('projectWorkRecords', { ...entry, generationId: stage._id });
+          }
         }
         await ctx.db.patch(stage._id, {
           returnCommitPlan: input.plan,
@@ -88,11 +115,39 @@ export const batch = internalMutation({
           'WORK_STALE',
           'Copy the private return baseline before applying replacements.',
         );
+        let entries = input.entries;
+        if (input.output) {
+          const output = input.output;
+          invariant(
+            !entries.length &&
+              !input.removed.length &&
+              Number.isSafeInteger(output.parts) &&
+              output.parts > 0 &&
+              output.parts <= 128 &&
+              Number.isSafeInteger(output.skip) &&
+              output.skip >= 0,
+            'WORK_OPERATION_CHANGED',
+            'Resume the original output page.',
+          );
+          const pages = await ctx.db
+            .query('projectReturnPages')
+            .withIndex('by_partition_and_key_and_position', q =>
+              q.eq('partitionId', stage._id).eq('key', output.key),
+            )
+            .take(output.parts);
+          invariant(
+            pages.length === output.parts && pages.every((page, i) => page.position === i),
+            'WORK_STALE',
+            'Source-return output page is unavailable.',
+          );
+          const rows = JSON.parse(pages.map(page => page.body).join('')) as IndexEntry[];
+          entries = firstIndexBatch(rows.slice(output.skip), { rows: 1000, bytes: 2 * 1024 * 1024 });
+        }
         for (const pin of input.removed) {
           const old = await record(ctx, stage._id, pin.collection, pin.key);
           if (old) await ctx.db.delete(old._id);
         }
-        for (const entry of input.entries) {
+        for (const entry of entries) {
           const old = await record(ctx, stage._id, entry.collection, entry.key);
           const value = { ...entry, ...indexActivity(entry), status: entry.status };
           if (old) await ctx.db.patch(old._id, value);
@@ -103,7 +158,7 @@ export const batch = internalMutation({
               generationId: stage._id,
             });
         }
-        const offset = input.offset + input.entries.length + input.removed.length;
+        const offset = input.offset + entries.length + input.removed.length;
         invariant(
           offset <= input.total && (offset > input.offset || offset === input.total),
           'WORK_OPERATION_CHANGED',

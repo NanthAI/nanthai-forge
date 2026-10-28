@@ -206,7 +206,7 @@ test('hosted journal reads detect a moving head and retry to a consistent snapsh
   assert.ok(reads >= 4);
 });
 
-test('source-return progress probe and continuation retries retain their exact payloads', async t => {
+test('source-return continuation retries retain their exact payloads', async t => {
   const exchange = new ConvexExchange('https://fixture.invalid', 'synthetic', 'project', randomUUID(), null),
     calls = [],
     events = [],
@@ -216,7 +216,7 @@ test('source-return progress probe and continuation retries retain their exact p
   exchange.onReturnProgress = event => events.push(event);
   t.mock.method(exchange.client, 'action', async (_ref, input) => {
     calls.push(structuredClone(input));
-    if (calls.length === 1) throw Error('INTERNAL_ERROR after status probe');
+    if (calls.length === 1) throw Error('INTERNAL_ERROR after return attempt');
     if (calls.length === 2) return { pending: true, resumed: true, progress: JSON.stringify(progress) };
     if (calls.length === 3)
       throw new ConvexError({ code: 'HOSTED_CONFLICT', message: 'Concurrent transaction.' });
@@ -226,7 +226,7 @@ test('source-return progress probe and continuation retries retain their exact p
   assert.equal(calls.length, 4);
   assert.deepEqual(calls[1], calls[0]);
   assert.deepEqual(calls[3], calls[2]);
-  assert.equal(calls[0].statusOnly, true);
+  assert.equal(calls[0].statusOnly, undefined);
   assert.equal(calls[2].statusOnly, undefined);
   assert(calls.every(input => input.operationId === operationId && input.revision === 12));
   assert.deepEqual(events[0], { ...progress, resumed: true });

@@ -408,3 +408,31 @@ test('uncached digest reads own their verified raw buffer without copying or sha
   assert.notEqual(second.buffer, first.buffer);
   assert.deepEqual(second, bytes);
 });
+
+test('return metadata resolves 1000 small pins in two bounded authority calls and rejects a mid-read revocation', async () => {
+  const s = fixture(),
+    pins = [];
+  for (let i = 0; i < 1000; i++) pins.push(await upload(s, Buffer.from(`Synthetic metadata ${i}`)));
+  const query = s.ctx.runQuery,
+    windows = [];
+  s.ctx.runQuery = async (ref, args) => {
+    if (getFunctionName(ref) === 'projectObjects:resolve') windows.push(args.digests.length);
+    return query(ref, args);
+  };
+  const reader = exchangeObjectReader(s.ctx, false, 0, 1000);
+  const values = await reader.read('project', 'owner', pins);
+  assert.equal(values.length, 1000);
+  assert.deepEqual(windows, [1000, 1000]);
+  assert.equal(values[999].toString(), 'Synthetic metadata 999');
+  const get = s.ctx.storage.get;
+  let revoked = false;
+  s.ctx.storage.get = async id => {
+    const result = await get(id);
+    if (!revoked) {
+      revoked = true;
+      s.tables.hostedProjects.get('project').owner = 'replacement';
+    }
+    return result;
+  };
+  await assert.rejects(reader.read('project', 'owner', pins), code('PROJECT_UNAVAILABLE'));
+});

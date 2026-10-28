@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { RETURN_BUDGET } from './projectReturnBudget';
+export { RETURN_BUDGET } from './projectReturnBudget';
 import type { Delta } from './projectSourceReturnDelta';
 import type { ActionCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -11,8 +13,8 @@ import { firstIndexBatch, type IndexEntry, type IndexMetadata } from '../src/wor
 import type { WorkData } from '../src/work-types';
 import type { sourceManifestSchema } from '../src/work-archive-metadata';
 import type { z } from 'zod';
-import type { FunctionArgs } from 'convex/server';
-type Final = FunctionArgs<typeof internal.projectWork.returnSource>;
+import type { Infer } from 'convex/values';
+type Final = Infer<typeof import('./projectWork').returnSourceInput>;
 type Snapshot = {
   data: WorkData;
   manifest: z.infer<typeof sourceManifestSchema>;
@@ -49,17 +51,6 @@ export type ReturnAccounting = {
   steps: number;
   invocations: number;
 };
-// Internal transaction and scheduling budgets; retained Work has no item ceiling.
-// Current snapshots/output are stored once in private database pages.
-export const RETURN_BUDGET = {
-  states: 16,
-  sourceBytes: 2 * 1024 * 1024,
-  rows: 1000,
-  rowBytes: 900000,
-  commitMs: 1000,
-  actionMs: 30000,
-  actionSteps: 1000,
-};
 export type StepUse = { states: number; sourceBytes: number; rows: number; rowBytes: number };
 const unused: StepUse = { states: 0, sourceBytes: 0, rows: 0, rowBytes: 0 };
 
@@ -95,6 +86,7 @@ export async function advance(ctx: ActionCtx, c: Cursor, _reader?: unknown, used
         generationId: c.generationId,
         revision: c.final.expectedRevision,
         cursor: c.copy.cursor,
+        returnBatch: true,
       },
     );
     invariant(page, 'WORK_STALE', 'Hosted index changed during owner display staging.');

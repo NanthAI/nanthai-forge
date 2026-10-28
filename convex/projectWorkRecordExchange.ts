@@ -35,6 +35,7 @@ export async function recordExchange(
   owner: string,
   reader: ExchangeObjectReader,
   bodyBudget = 8 * 1024 * 1024,
+  metadataBatchSize = 100,
 ) {
   // Reuse authenticated record bodies across the validation phases of this one
   // action. This cache never serves a source-read endpoint or another action;
@@ -88,9 +89,9 @@ export async function recordExchange(
   const root = exchangeRootSchema.parse(value);
   if (root.schema !== 2) return;
   // Metadata uses small content-defined chunks. Amortize their current-authority
-  // lookups across at most 100 pins; byteTreeChunks still bounds each batch to
+  // lookups across bounded pin pages; byteTreeChunks still bounds each batch to
   // 2 MiB and verifies every chunk and the complete logical digest.
-  const metadataOptions = { batchSize: 100 };
+  const metadataOptions = { batchSize: metadataBatchSize };
   const recordBytes = await readByteTree(
     root.records,
     pins => reader.read(backup.projectId, owner, pins),

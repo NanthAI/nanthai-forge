@@ -229,7 +229,7 @@ test('a concurrent hosted edit during index paging preserves current source, gen
   let raced = false;
   s.ctx.runQuery = async (ref, input) => {
     const result = await query(ref, input);
-    if (getFunctionName(ref) === 'projectWorkIndexStore:lookups' && !raced) {
+    if (getFunctionName(ref) === 'projectWorkIndexStore:returnLookups' && !raced) {
       raced = true;
       const data = await s.read();
       await s.send({
@@ -300,7 +300,7 @@ test('index optimization never bypasses final current-owner authorization', asyn
     query = s.ctx.runQuery;
   s.ctx.runQuery = async (ref, input) => {
     const result = await query(ref, input);
-    if (getFunctionName(ref) === 'projectWorkIndexStore:lookups')
+    if (getFunctionName(ref) === 'projectWorkIndexStore:returnLookups')
       s.tables.hostedProjects.get(s.projectId).owner = 'replacement-owner';
     return result;
   };
@@ -375,4 +375,33 @@ test('partial source returns preserve unchanged owner decisions in the existing 
   const removed = prepareDelta(snapshot([records[0]]), snapshot([]), generation, true);
   assert.notEqual(removed.metadata.decisionVersion, full.metadata.decisionVersion);
   assert.equal(removed.metadata.counts.decisions, 18);
+});
+
+test('only unchanged base/head and conflict state permit retained View file-key reuse', async () => {
+  const { workSchema } = await import('../dist/work-types.js');
+  const { prepareDelta } = await import(moduleUrl('../convex/projectSourceReturnDelta.ts'));
+  const head = 'a'.repeat(64),
+    id = randomUUID();
+  const data = workSchema.parse({
+    schema: 23,
+    revision: 1,
+    nativeHead: head,
+    intents: [],
+    lanes: [],
+    views: [
+      { id, intentId: randomUUID(), base: head, head, inputs: [], status: 'clean', at: 'now', details: '' },
+    ],
+  });
+  const manifest = { kind: 'forge-native-work-backup', head, files: [], revision: 1 };
+  const previous = { data, manifest, backup: { transport: 'objects' } };
+  const generation = { metadata: JSON.stringify(materializeWork(data, manifest, []).metadata) };
+  const plan = change => {
+    const next = structuredClone(data);
+    Object.assign(next.views[0], change);
+    return prepareDelta(previous, { ...previous, data: next }, generation, true).delta;
+  };
+  assert.deepEqual(plan({ details: 'Updated summary' }).unchangedViewFiles, [id]);
+  assert.deepEqual(plan({ head: 'b'.repeat(64) }).unchangedViewFiles, []);
+  assert.deepEqual(plan({ base: 'b'.repeat(64) }).unchangedViewFiles, []);
+  assert.deepEqual(plan({ status: 'conflict' }).unchangedViewFiles, []);
 });

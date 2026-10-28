@@ -140,7 +140,7 @@ export const returnSource = action({
           ),
         };
       };
-      const priorStage: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
+      let priorStage: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
         internal.projectReturnIndexStage.resume,
         {
           projectId: input.projectId,
@@ -185,16 +185,7 @@ export const returnSource = action({
       if (input.statusOnly)
         return {
           pending: true,
-          progress:
-            priorStage?.returnProgress ??
-            JSON.stringify({
-              phase: 'preparing',
-              step: 0,
-              done: 0,
-              total: 0,
-              elapsedMs: 0,
-              etaSeconds: null,
-            }),
+          ...(priorStage?.returnProgress ? { progress: priorStage.returnProgress } : {}),
           resumed: !!(
             priorStage?.returnCursor ||
             priorStage?.returnMetadataCursor ||
@@ -205,20 +196,31 @@ export const returnSource = action({
       if (priorStage?.returnCursor || priorStage?.returnMetadataCursor)
         return pending(await returnProgress(ctx, priorStage, input, owner, undefined, started));
       console.log('source-return prepare', { revision: input.revision });
-      const reader = exchangeObjectReader(ctx, true);
-      const records =
-        priorStage?.returnPrepareCursor || input.revision - previousInfo.backup.preview.revision >= 100
-          ? undefined
-          : await recordReturn(
-              ctx,
-              input,
-              owner,
-              reader,
-              candidateInfo.backup,
-              previousInfo.backup,
-              priorStage?.returnAt,
-              started,
-            );
+      const reader = exchangeObjectReader(ctx, true, 8 * 1024 * 1024, 1000);
+      const recordAt = priorStage?.returnAt;
+      const validatedRecords =
+        candidateInfo.backup.validatedWorkRecords === 1 && previousInfo.backup.validatedWorkRecords === 1;
+      if (validatedRecords && priorStage && !priorStage.returnCursor && !priorStage.returnMetadataCursor) {
+        const retired = await ctx.runMutation(internal.projectReturnIndexStage.restartRecords, {
+          projectId: input.projectId,
+          owner,
+          partitionId: priorStage._id,
+          expectedBackupId: input.expectedBackupId,
+          revision: input.revision,
+          operationId: input.operationId,
+        });
+        if (retired) priorStage = null;
+      }
+      const records = await recordReturn(
+        ctx,
+        input,
+        owner,
+        reader,
+        candidateInfo.backup,
+        previousInfo.backup,
+        recordAt,
+        started,
+      );
       if (records) return pending(records.receipt);
       const prepared = await prepareLargeReturn(
         ctx,

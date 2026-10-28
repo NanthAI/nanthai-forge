@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
 import { noteId } from './work-intent-converter.js';
-import type { WorkData } from './work-types.js';
+import { workSchema, type WorkData } from './work-types.js';
+import { isUnifiedWork, unifiedWorkSchema } from './work-unified-types.js';
 
 type Raw = Record<string, unknown>;
 type Conversation = { id: string; kind: string; index?: number; itemId?: string };
@@ -54,5 +55,15 @@ export function intentState(status: string, laneCount: number) {
 
 /** Hosted readers accept unified formats; preserve every retained record on push. */
 export function hostedPushWork(data: WorkData): WorkData {
-  return data;
+  // Late optional collections must use the journal parser's root field order.
+  // Keep every original value/body; only the new portable snapshot is ordered.
+  const shape = isUnifiedWork(data) ? unifiedWorkSchema.shape : workSchema.shape;
+  return {
+    ...Object.fromEntries(
+      Object.keys(shape)
+        .filter(key => Object.hasOwn(data, key))
+        .map(key => [key, (data as unknown as Raw)[key]]),
+    ),
+    ...data,
+  } as WorkData;
 }

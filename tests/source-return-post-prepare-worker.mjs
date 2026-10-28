@@ -182,6 +182,13 @@ if (mode === 'fixture') {
           return { ...stage };
         case 'projectWorkIndexStore:current':
           return generation;
+        case 'projectReturnMetadataStore:readBatch':
+          assert(args.count <= 64);
+          return Promise.all(
+            Array.from({ length: args.count }, (_, index) =>
+              readFile(join(directory, `${args.key}-${args.position + index}`), 'utf8'),
+            ),
+          );
         case 'projectReturnMetadataStore:read':
           return readFile(join(directory, `${args.key}-${args.position}`), 'utf8');
         case 'projectObjects:resolve':
@@ -213,6 +220,14 @@ if (mode === 'fixture') {
             });
           }
           return 'partition';
+        case 'projectReturnMetadataStore:putBatch':
+          assert(args.bodies.length <= 64);
+          assert(args.bodies.reduce((sum, body) => sum + Buffer.byteLength(body), 0) <= 2 * 1024 * 1024);
+          for (const [index, body] of args.bodies.entries()) {
+            maxPageBytes = Math.max(maxPageBytes, Buffer.byteLength(body));
+            await writeFile(join(directory, `${args.key}-${args.position + index}`), body);
+          }
+          return null;
         case 'projectReturnMetadataStore:put':
           maxPageBytes = Math.max(maxPageBytes, Buffer.byteLength(args.body));
           await writeFile(join(directory, `${args.key}-${args.position}`), args.body);

@@ -206,21 +206,22 @@ export const append = internalMutation({
   handler: appendWork,
 });
 
+export const returnSourceInput = v.object({
+  projectId: v.id('hostedProjects'),
+  owner: v.string(),
+  operationId: v.string(),
+  request: v.string(),
+  command: v.string(),
+  backupId: v.id('projectBackups'),
+  expectedBackupId: v.id('projectBackups'),
+  expectedRevision: v.number(),
+  localRevision: v.number(),
+  at: v.optional(v.string()),
+  projection: v.optional(returnProjection),
+  changes: v.optional(v.array(returnChange)),
+});
 export const returnSource = internalMutation({
-  args: {
-    projectId: v.id('hostedProjects'),
-    owner: v.string(),
-    operationId: v.string(),
-    request: v.string(),
-    command: v.string(),
-    backupId: v.id('projectBackups'),
-    expectedBackupId: v.id('projectBackups'),
-    expectedRevision: v.number(),
-    localRevision: v.number(),
-    at: v.optional(v.string()),
-    projection: v.optional(returnProjection),
-    changes: v.optional(v.array(returnChange)),
-  },
+  args: returnSourceInput.fields,
   returns: hostedWorkEventDocument,
   handler: async (ctx, input) => {
     try {

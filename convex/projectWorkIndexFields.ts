@@ -21,6 +21,7 @@ export const returnProjection = v.object({
 });
 export const generationFields = {
   ensureCursor: v.optional(v.string()),
+  returnRetired: v.optional(v.literal(true)),
   returnCleanupRefs: v.optional(v.string()),
   returnCleanupOffset: v.optional(v.number()),
   returnCommitPlan: v.optional(v.string()),

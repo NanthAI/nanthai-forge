@@ -219,6 +219,7 @@ export function* workIndexRows(
   } = new Map(),
   deferDerived = false,
   omitIntentRows = false,
+  omitSourceBlobs = false,
 ) {
   const counts: Record<string, number> = {};
   const channels = archiveChannels(manifest, data),
@@ -462,13 +463,17 @@ export function* workIndexRows(
   yield* derived;
   for (const name of ['viewDetails', 'viewFiles', 'laneViews', 'viewAcceptances'])
     counts[name] = derived.filter(entry => entry.collection === name).length;
-  yield* add(
-    'sourceBlobs',
-    manifest.files
-      .filter(file => /^objects\/[a-f0-9]{64}$/.test(file.path))
-      .map(file => ({ sha256: file.sha256, size: file.size })),
-    file => file.sha256,
-  );
+  let blobPosition = 0;
+  for (const file of manifest.files)
+    if (/^objects\/[a-f0-9]{64}$/.test(file.path)) {
+      if (!omitSourceBlobs)
+        yield* indexedRecord('sourceBlobs', file.sha256, '', blobPosition, {
+          sha256: file.sha256,
+          size: file.size,
+        });
+      blobPosition++;
+    }
+  counts.sourceBlobs = blobPosition;
   if (manifest.kind === 'forge-native-work-backup' && sourceParents.files) {
     const heads = new Set([
       manifest.head,

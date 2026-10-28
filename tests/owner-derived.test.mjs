@@ -10,6 +10,7 @@ import { sourceTreeEntries } from '../dist/source-tree-index.js';
 import { moduleUrl } from './convex-module.mjs';
 import { ancestryEntries } from './ancestry-fixture.mjs';
 const { ownerDerivedRows, readOwnerDerived } = await import(moduleUrl('../convex/projectOwnerDerived.ts'));
+const { installOwnerDerived } = await import(moduleUrl('../convex/projectOwnerDerived.ts'));
 function fixture() {
   const objects = new Map(),
     states = new Map();
@@ -111,6 +112,34 @@ function fixture() {
   };
   return { source, states, objects, data, derived, cursor, base, head };
 }
+test('unchanged View source pairs reuse file keys while still validating and replacing owner rows', async () => {
+  const ordinary = fixture(),
+    stable = fixture();
+  for (const f of [ordinary, stable]) {
+    f.cursor.delta.newViews = [];
+    f.cursor.metadata = { counts: {} };
+    f.cursor.rows = [];
+  }
+  stable.cursor.delta.unchangedViewFiles = ['view'];
+  const calls = [];
+  await installOwnerDerived(
+    { runQuery: async () => ({ keys: [], view: 1, after: -1, bytes: 0 }) },
+    ordinary.cursor,
+    ordinary.derived,
+  );
+  await installOwnerDerived(
+    {
+      runQuery: async (...args) => {
+        calls.push(args);
+        throw Error('Unneeded key read');
+      },
+    },
+    stable.cursor,
+    stable.derived,
+  );
+  assert.equal(calls.length, 0);
+  assert.deepEqual(stable.cursor.rows, ordinary.cursor.rows);
+});
 test('owner rows match hosted parent, merge ancestry, View provenance and tree computation', async () => {
   const f = fixture(),
     rows = ownerDerivedRows(f.cursor, f.derived);

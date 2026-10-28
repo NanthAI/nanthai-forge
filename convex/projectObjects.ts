@@ -287,12 +287,21 @@ export const reconcile = mutation({
   },
 });
 export const resolve = internalQuery({
-  args: { projectId: v.id('hostedProjects'), actor: v.string(), digests: v.array(v.string()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    actor: v.string(),
+    digests: v.array(v.string()),
+    pageSize: v.optional(v.literal(1000)),
+  },
   returns: v.array(objectDocument),
-  handler: async (ctx, { projectId, actor, digests }) => {
+  handler: async (ctx, { projectId, actor, digests, pageSize }) => {
     try {
       await accessibleProject(ctx, projectId, actor);
-      invariant(digests.length <= 100, 'BAD_ARGUMENT', 'Read content metadata in pages of at most 100.');
+      invariant(
+        digests.length <= (pageSize ?? 100),
+        'BAD_ARGUMENT',
+        'Read content metadata in bounded pages.',
+      );
       const rows = [];
       for (const digest of digests) {
         const row = await ctx.db

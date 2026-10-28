@@ -123,7 +123,7 @@ async function setup(t, records = true) {
 }
 
 for (const records of [true, false])
-  test(`large ${records ? 'record' : 'legacy'} context after landings and journal replay prepares durably, with lost replies and cold resume`, async t => {
+  test(`large ${records ? 'unvalidated record (after explicit validated refusal)' : 'legacy'} context prepares durably, with lost replies and cold resume`, async t => {
     const f = await setup(t, records),
       { s, input } = f;
     if (records) {
@@ -133,6 +133,16 @@ for (const records of [true, false])
         input.revision,
         'client retains advanced hosted revision',
       );
+      const pages = s.tables.projectReturnPages.size;
+      await assert.rejects(
+        modules.projectSourceReturn.returnSource._handler(s.ctx, input),
+        error =>
+          error.data?.code === 'WORK_RETURN_DELTA_UNAVAILABLE' &&
+          /context-over-budget/.test(error.data.message),
+      );
+      assert.equal(s.tables.projectReturnPages.size, pages, 'validated records never enter full preparation');
+      // An unmarked historical catalog still needs the existing compatibility path.
+      s.tables.projectBackups.get(input.backupId).validatedWorkRecords = undefined;
     } else assert.equal(f.candidate.tree.root.schema, 1);
     // Compatibility preparation must be durable regardless of the record gate.
     const saved = prepare.PREPARE_BUDGET.chunks;
@@ -212,8 +222,7 @@ for (const records of [true, false])
     assert.ok(
       logs.some(
         ([name, value]) =>
-          name === 'source-return record skip' &&
-          value.reason === (records ? 'context-over-budget' : 'candidate-records-unvalidated'),
+          name === 'source-return record skip' && value.reason === 'candidate-records-unvalidated',
       ),
     );
     assert.ok(logs.some(([name]) => name === 'source-return prepare load done'));

@@ -37,6 +37,7 @@ export function exchangeObjectReader(
   ctx: ActionCtx,
   reuseImmutableBytes = false,
   budget = 8 * 1024 * 1024,
+  resolutionPage: 100 | 1000 = 100,
 ): ExchangeObjectReader {
   const verified = new Map<string, Promise<Buffer>>();
   let retained = 0;
@@ -47,7 +48,7 @@ export function exchangeObjectReader(
     for (let offset = 0; offset < pins.length;) {
       const window: Pin[] = [];
       let bytes = 0;
-      while (offset < pins.length && window.length < 100) {
+      while (offset < pins.length && window.length < resolutionPage) {
         const pin = pins[offset]!;
         if (window.length && bytes + pin.size > 2 * 1024 * 1024) break;
         window.push(pin);
@@ -59,6 +60,7 @@ export function exchangeObjectReader(
           projectId,
           actor,
           digests: window.map(pin => pin.sha256),
+          ...(resolutionPage === 1000 ? { pageSize: 1000 as const } : {}),
         })),
       );
     }
