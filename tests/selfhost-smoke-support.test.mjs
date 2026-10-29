@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import {
+  assertSmokeImport,
   deploySmoke,
   sanitizeSmokeText,
   smokeCommand,
@@ -55,10 +56,30 @@ test('fresh native auth reproduces the unset optional issuer failure; smoke defi
       { issuer, token: 'synthetic-token', keys: 'synthetic-keyring' },
     );
     assert.equal(variables.FORGE_CLI_ISSUER, '');
+    assert.equal(variables.FORGE_BLOBS, 'convex');
     assert.equal(variables.GITHUB_PUBLIC_TOKEN, 'synthetic-token');
     assert.equal(variables.FORGE_SECRET_KEYS, 'synthetic-keyring');
     assert.deepEqual(commands.at(-1), ['deploy', '--typecheck', 'enable', '--yes']);
   }
+});
+
+test('import failures expose the job reason through redacted smoke diagnostics', () => {
+  for (const phase of ['queued', 'fetching', 'indexing', 'ready']) assertSmokeImport({ phase });
+  let failure;
+  try {
+    assertSmokeImport(
+      { phase: 'error', error: 'R2_NOT_CONFIGURED: missing R2_BUCKET; opaque-private-value' },
+      ['opaque-private-value'],
+    );
+  } catch (error) {
+    failure = error;
+  }
+  const output = smokeFailure(failure, { stage: 'public acquisition' });
+  assert.match(output, /ERR_ASSERTION/);
+  assert.match(output, /Owned native source acquisition failed: R2_NOT_CONFIGURED: missing R2_BUCKET/);
+  assert.doesNotMatch(output + failure.stack, /opaque-private-value/);
+  assert.throws(() => assertSmokeImport({ phase: 'error' }), /No import error was recorded/);
+  assert.throws(() => assertSmokeImport(null), /import is unavailable/);
 });
 
 test('diagnostics redact known opaque secrets, dotenv, JWTs, keyrings, authorization, URLs and terminal controls', () => {

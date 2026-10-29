@@ -68,9 +68,10 @@ export const run = internalAction({
           });
         },
       );
-      stored = await blobStore(ctx).store(await encodeHostedArtifact(artifact), {
-        r2Namespace: `v1/i/${id}/g/${generation}`,
-      });
+      stored = await blobStore(ctx).store(
+        await encodeHostedArtifact(artifact),
+        process.env.FORGE_BLOBS === 'convex' ? undefined : { r2Namespace: `v1/i/${id}/g/${generation}` },
+      );
       await currentAccess(ctx, id, job.owner || undefined);
       const published = await ctx.runMutation(internal.imports.update, {
         id,

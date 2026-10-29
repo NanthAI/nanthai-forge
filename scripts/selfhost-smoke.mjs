@@ -12,7 +12,7 @@ import { api, internal } from '../convex/_generated/api.js';
 import { decodeHostedArtifact } from '../dist/hosted-artifact.js';
 import { releases, release, digest, main, portNumber } from './selfhost.mjs';
 import { githubOidcIssuer, verifyGithubOidc } from './selfhost-oidc.mjs';
-import { deploySmoke, smokeCommand, smokeFailure } from './selfhost-smoke-support.mjs';
+import { assertSmokeImport, deploySmoke, smokeCommand, smokeFailure } from './selfhost-smoke-support.mjs';
 
 // ponytail: real native smoke runs one pinned public checkout; add more platforms only after this owner is measured.
 const root = await mkdtemp(join(tmpdir(), 'forge-native-smoke-')),
@@ -193,8 +193,7 @@ try {
   let job;
   for (let attempt = 0; ; attempt++) {
     job = await primary.admin.query(internal.imports.get, { id });
-    assert(job);
-    assert.notEqual(job.phase, 'error', 'Owned native source acquisition failed.');
+    assertSmokeImport(job, secrets);
     if (job.phase === 'ready') break;
     assert(attempt < 300, 'Owned native import did not finish.');
     await new Promise(done => setTimeout(done, 1000));

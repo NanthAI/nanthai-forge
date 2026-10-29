@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from 'node:child_process';
+import assert from 'node:assert/strict';
 import { stripVTControlCharacters } from 'node:util';
 import { HostedOutputRedactor } from '../dist/hosted-output-redactor.js';
+
+export function assertSmokeImport(job, secrets = []) {
+  assert(job, 'Owned native import is unavailable.');
+  assert.notEqual(
+    job.phase,
+    'error',
+    `Owned native source acquisition failed: ${sanitizeSmokeText(job.error ?? 'No import error was recorded.', secrets)}`,
+  );
+}
 
 export function sanitizeSmokeText(value, secrets = []) {
   let text = stripVTControlCharacters(String(value ?? ''));
@@ -60,6 +70,8 @@ export function deploySmoke(cli, { issuer, token, keys }) {
   cli(['env', 'set', 'CLERK_JWT_ISSUER_DOMAIN', issuer]);
   // Convex rejects reads of unset auth-config variables, including guarded optional reads.
   cli(['env', 'set', 'FORGE_CLI_ISSUER', '']);
+  // These owned native instances snapshot SQLite and native file storage together.
+  cli(['env', 'set', 'FORGE_BLOBS', 'convex']);
   cli(['env', 'set', 'GITHUB_PUBLIC_TOKEN', token]);
   cli(['env', 'set', 'FORGE_SECRET_KEYS', keys]);
   cli(['deploy', '--typecheck', 'enable', '--yes']);

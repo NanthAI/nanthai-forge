@@ -1748,6 +1748,7 @@ Always pass `--env-file DIR/deployment.env` to every `npx convex` command so you
 ```sh
 npx convex env set CLERK_JWT_ISSUER_DOMAIN '' --env-file DIR/deployment.env
 npx convex env set FORGE_CLI_ISSUER '' --env-file DIR/deployment.env
+npx convex env set FORGE_BLOBS convex --env-file DIR/deployment.env
 npx convex deploy --env-file DIR/deployment.env --typecheck enable --yes
 ```
 
@@ -1761,9 +1762,9 @@ Build the browser with `VITE_CLERK_PUBLISHABLE_KEY=''` and `node --env-file=DIR/
 
 **Backend upgrade:** create a fresh instance with the new pin and restore a snapshot into it. Keep the old instance until you accept the result. Rollback restores a snapshot into a fresh instance on the old pin.
 
-**Storage:** the launcher accepts an optional private dotenv file as a third `start` argument. It sets native S3 storage with five buckets (`S3_STORAGE_EXPORTS_BUCKET`, `_SNAPSHOT_IMPORTS_`, `_MODULES_`, `_FILES_`, `_SEARCH_`) and `AWS_*` credentials. Changing the argument on an existing database does not move its files. Restore a snapshot into a fresh instance instead.
+**Storage:** `FORGE_BLOBS=convex` explicitly stores indexed imports and their binary derivatives in native file storage, included in file-inclusive snapshots. Hosted deployments retain R2 artifact writes when this native mode is not selected; missing R2 configuration still fails explicitly, and existing R2 references still read from R2. The launcher accepts an optional private dotenv file as a third `start` argument. It sets native S3 storage with five buckets (`S3_STORAGE_EXPORTS_BUCKET`, `_SNAPSHOT_IMPORTS_`, `_MODULES_`, `_FILES_`, `_SEARCH_`) and `AWS_*` credentials. Changing the argument on an existing database does not move its files. Restore a snapshot into a fresh instance instead.
 
-`node scripts/selfhost-smoke.mjs` runs the repeatable check against the pinned public repo `sindresorhus/is-plain-obj`. It needs a read-only `GITHUB_TOKEN`. On failure it reports the stage, a command label with private arguments withheld, exit status and a bounded, secret-redacted diagnostic tail. Raw diagnostics remain in the invocation’s private temporary directory; deployment environment contents are never printed.
+`node scripts/selfhost-smoke.mjs` runs the repeatable check against the pinned public repo `sindresorhus/is-plain-obj`. It needs a read-only `GITHUB_TOKEN` and configures native file storage on each fresh or restored instance. On failure it reports the stage, a command label with private arguments withheld, exit status and a bounded, secret-redacted diagnostic tail, including the import job error when acquisition fails. Raw diagnostics remain in the invocation’s private temporary directory; deployment environment contents are never printed.
 
 **Licenses:** Forge's server is AGPL-3.0-only and the launcher and client are Apache-2.0 (see [LICENSE.md](../LICENSE.md)). The downloaded Convex backend has its own FSL-1.1-Apache-2.0 terms. Inventories: [npm](dependency-licenses.md) and [native backend](native-dependency-licenses.md). The native one is partial and not an SBOM.
 

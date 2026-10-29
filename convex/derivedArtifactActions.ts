@@ -71,7 +71,9 @@ export async function derivedArtifact(
     contentType: typeof value === 'string' ? 'application/json' : value.type,
     ...(typeof value === 'string'
       ? { inline: value }
-      : { uploadType: `application/x-forge-derived-r2-${randomUUID()}` }),
+      : {
+          uploadType: `application/x-forge-derived-${process.env.FORGE_BLOBS === 'convex' ? '' : 'r2-'}${randomUUID()}`,
+        }),
   };
   // Reconcile a lost reservation reply before beginning any storage side effect.
   let row: Derived | null;
@@ -87,10 +89,17 @@ export async function derivedArtifact(
   if (!row || row.inline !== undefined || row.storageId) return row;
   let storageId: string;
   try {
-    storageId = await blobStore(ctx).store(new Blob([bytes], { type: row.uploadType! }), {
-      r2Namespace: `v1/d/${row._id}`,
-    });
+    storageId = await blobStore(ctx).store(
+      new Blob([bytes], { type: row.uploadType! }),
+      row.uploadType!.startsWith('application/x-forge-derived-r2-')
+        ? { r2Namespace: `v1/d/${row._id}` }
+        : undefined,
+    );
   } catch (error) {
+    if (!row.uploadType!.startsWith('application/x-forge-derived-r2-')) {
+      const stored = await reconciled(ctx, row);
+      if (stored) return stored;
+    }
     // A deterministic reservation reconciles by the same R2 key on retry.
     throw error;
   }

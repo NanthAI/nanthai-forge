@@ -164,6 +164,44 @@ test('indexed imports and binary derivatives use R2 without the old flag or per-
     });
 });
 
+test('native imports and derivatives use file storage without R2 configuration', async t => {
+  const { s, fake } = await setup(t, { flag: 'convex', credentials: false });
+  indexed(s, false);
+  const text = github(t);
+  await indexer.run._handler(s.ctx, { id: 'indexed', generation: 1 });
+  const row = s.tables.imports.get('indexed');
+  assert.equal(row.phase, 'ready', row.error);
+  assert.doesNotMatch(row.artifactKey, /^r2blob:/);
+  assert.equal(
+    (await decodeHostedArtifact(await blobStore(s.ctx).get(row.artifactKey))).content['a.ts'],
+    text,
+  );
+  const record = await derivedArtifact(
+    s.ctx,
+    row.artifactKey,
+    'export',
+    '',
+    async () => new Blob(['native derivative']),
+    async () => {},
+  );
+  assert.doesNotMatch(record.uploadType, /derived-r2-/);
+  assert.equal(Buffer.from(await derivedBytes(s.ctx, record)).toString(), 'native derivative');
+  assert.equal(fake.requests.length, 0);
+  assert.equal(s.tables.artifactBlobs.size, 0);
+  assert.equal(s.files.size, 2);
+});
+
+test('hosted imports still fail explicitly when R2 is unconfigured', async t => {
+  const { s } = await setup(t, { flag: '', credentials: false });
+  indexed(s, false);
+  github(t);
+  await indexer.run._handler(s.ctx, { id: 'indexed', generation: 1 });
+  const row = s.tables.imports.get('indexed');
+  assert.equal(row.phase, 'error');
+  assert.match(row.error, /Object storage is enabled but R2_ACCOUNT_ID/);
+  assert.equal(s.files.size, 0);
+});
+
 test('R2 derivatives of legacy originals retry unknown storage outcomes and reject corrupt reads', async t => {
   const { s, fake } = await setup(t);
   s.file('old', new Blob(['original']));
