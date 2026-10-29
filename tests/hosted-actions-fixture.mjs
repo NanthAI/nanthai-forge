@@ -55,6 +55,7 @@ export async function actionsFixture(files = []) {
     environmentFingerprint: s.runner.environmentFingerprint,
     credential: { secretId: 'synthetic-installation-reference', version: 1, operation: 'github-actions' },
   };
+  await s.bindRepository(s.projectId, { repository: runner.repository, repoId: 42 });
   const configuration = await s.configure({ kind: 'runner', configuration: runner }, s.configuration.digest);
   const run = await s.enqueue(
     s.selection({

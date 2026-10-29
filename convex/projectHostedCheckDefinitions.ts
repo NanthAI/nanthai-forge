@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { bindingInstallation, requireStoredRepositoryBinding } from './githubBindingAccess';
 import { z } from 'zod';
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx } from './cliServer';
@@ -96,14 +97,17 @@ export const configure = mutation({
     try {
       const request = requestSchema.parse(JSON.parse(input.request));
       const change = request.change;
-      return await saveCheckSetting(ctx, input.projectId, request, request, (_project, at) => {
-        if (change.kind === 'runner')
+      return await saveCheckSetting(ctx, input.projectId, request, request, async (_project, at) => {
+        if (change.kind === 'runner') {
+          if (change.configuration.provider === 'github-actions')
+            await requireStoredRepositoryBinding(ctx, input.projectId, change.configuration.repository);
           return {
             kind: 'runner',
             key: 'runner',
             value: change.configuration,
             digest: checkPin(change.configuration),
           };
+        }
         const value =
           change.kind === 'import'
             ? importedHostedCheck(change.check)
@@ -116,7 +120,11 @@ export const configure = mutation({
   },
 });
 export const current = query({
-  args: { projectId: v.id('hostedProjects'), checkId: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    checkId: v.string(),
+    includeGithubBindings: v.optional(v.boolean()),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -125,7 +133,29 @@ export const current = query({
       await accessibleProject(ctx, input.projectId, user.subject);
       const definition = await checkSetting(ctx, input.projectId, 'definition', input.checkId);
       const runner = await checkSetting(ctx, input.projectId, 'runner', 'runner');
+      const bindings = input.includeGithubBindings
+        ? await ctx.db
+            .query('projectGithubBindings')
+            .withIndex('by_project_and_installation', q => q.eq('projectId', input.projectId))
+            .paginate({ cursor: null, numItems: 100 })
+        : null;
+      const installations = new Map<number, boolean>();
+      for (const row of bindings?.page ?? [])
+        if (!installations.has(row.installationId))
+          installations.set(
+            row.installationId,
+            !(await bindingInstallation(ctx, row.installationId))?.removed,
+          );
       return canonicalPayload({
+        githubBindings: bindings
+          ? {
+              ...bindings,
+              page: bindings.page.map(({ _id, _creationTime, ...row }) => ({
+                ...row,
+                active: installations.get(row.installationId),
+              })),
+            }
+          : null,
         check: definition ? JSON.parse(definition.value) : null,
         configuration: runner ? JSON.parse(runner.value) : null,
         configurationDigest: runner?.digest ?? null,

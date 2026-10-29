@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { requireStoredRepositoryBinding } from './githubBindingAccess';
 import { v } from 'convex/values';
 import {
   query,
@@ -86,6 +87,8 @@ export const set = mutation({
         'Project policy changed. Refresh it before editing.',
       );
       const policy = editedPolicy(previous, command);
+      if (command.githubMirror && policy.githubMirror?.autoPush)
+        await requireStoredRepositoryBinding(ctx, input.projectId, policy.githubMirror.repo);
       await ctx.db.patch(project._id, { autonomyPolicy: policy });
       await ctx.db.insert('projectPolicyChanges', {
         projectId: input.projectId,

@@ -10,7 +10,7 @@ import { report } from './errors';
 import { invariant } from '../src/errors';
 import {
   actionsPermissions,
-  assertRepositoryBinding,
+  requireRepositoryBinding,
   requireInstallationPermissions,
 } from './githubAppToken';
 const requestSchema = z
@@ -39,7 +39,7 @@ export const configure = action({
       const { repository, runsOn, ...request } = parsed.data;
       // Derive the installation via the App now so a missing install or a pending
       // Actions permission approval fails here, not on the first dispatch.
-      assertRepositoryBinding(input.projectId, repository);
+      await requireRepositoryBinding(ctx, input.projectId, repository);
       await requireInstallationPermissions(repository, actionsPermissions);
       return await ctx.runMutation(
         makeFunctionReference<'mutation', { projectId: typeof input.projectId; request: string }, string>(

@@ -9,6 +9,7 @@ import { recoveryCli } from './recovery-cli.js';
 // SPDX-License-Identifier: Apache-2.0
 import { ghCli, forgeVersion } from './gh-cli.js';
 import { queueCli } from './queue-control.js';
+import { githubConnectCli } from './github-connect-cli.js';
 import { githubSyncCli } from './github-sync-cli.js';
 import { WorkStore } from './work-store.js';
 import { workCliSummary } from './work-cli-summary.js';
@@ -55,6 +56,7 @@ Usage:
   nforge pr list|candidate|create|checks|merge|diff|checkout [LANE_ID] [--repo ROOT] [--json [fields]]
   nforge repo candidate [ROOT] [--json [fields]]
   nforge queue list|cancel OPERATION|prioritize OPERATION
+  nforge github connect|status|disconnect PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID]
   nforge github-sync ROOT [--repo OWNER/NAME] [--branch main] [--dry-run | --push] [--operation-id UUID] [--rebind] [--wait-audit] [--audit-timeout-ms MS]
   nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--status | --new]
   nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination]
@@ -133,6 +135,7 @@ async function main(args: string[]): Promise<unknown> {
   if (args[0] === 'pr' || args[0] === 'repo') return ghCli(args);
   if (['login', 'logout', 'auth'].includes(args[0]!)) return authCli(args[0]!, args.slice(1));
   if (args[0] === 'queue') return queueCli(args.slice(1));
+  if (args[0] === 'github') return githubConnectCli(args.slice(1));
   if (args[0] === 'github-sync') return githubSyncCli(args.slice(1));
   if (args[0] === 'recover') return recoveryCli(args.slice(1));
   if (args[0] === 'owner') {

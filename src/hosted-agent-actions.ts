@@ -97,6 +97,7 @@ const definitionPage = z.object({
   continueCursor: z.string(),
 });
 const currentSettings = z.object({
+  githubBindings: z.unknown().optional(),
   configuration: z
     .looseObject({
       provider: z.string(),
@@ -140,7 +141,7 @@ function actionsRunnerSettings(configuration: z.infer<typeof currentSettings>['c
 export async function hostedCheckSettings(query: HostedQuery, capabilities: HostedAgentCapabilities) {
   const [definitions, current, read] = await Promise.all([
     hostedDefinitions(query),
-    query('projectHostedCheckDefinitions:current', { checkId: '' }).then(value =>
+    query('projectHostedCheckDefinitions:current', { checkId: '', includeGithubBindings: true }).then(value =>
       currentSettings.parse(value),
     ),
     query('projectAutonomy:read', {}),
@@ -176,6 +177,7 @@ export async function hostedCheckSettings(query: HostedQuery, capabilities: Host
         }
       : null,
     actions: actionsRunnerSettings(current.configuration),
+    githubBindings: current.githubBindings ?? null,
     checkCallbackConfigured: capabilities.checkCallbackConfigured,
     policy: { preset: policy.preset, acceptance: policy.acceptance },
     agentLandsOnPass: review === null,

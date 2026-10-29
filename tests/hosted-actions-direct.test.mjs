@@ -11,7 +11,7 @@ import { hostedCheckRunSchema } from '../dist/hosted-check.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
 import { checkPin } from '../dist/hosted-check.js';
 import { savePin } from '../dist/hosted-save.js';
-const { githubAppJwt, mintInstallationToken, actionsPermissions } = await import(
+const { githubAppJwt, installationToken, actionsPermissions } = await import(
   moduleUrl('../convex/githubAppToken.ts')
 );
 const direct = await import(moduleUrl('../convex/projectHostedActionsDirect.ts'));
@@ -109,6 +109,7 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest') {
     runtime: hostedActionsRuntime,
     environmentFingerprint: s.runner.environmentFingerprint,
   };
+  bindRepository(t, s.projectId, repository);
   const configuration = await s.configure({ kind: 'runner', configuration: runner }, s.configuration.digest);
   const run = await s.enqueue(s.selection({ expectedConfiguration: configuration.digest }));
   const id = { projectId: s.projectId, runId: run.id };
@@ -174,9 +175,10 @@ test('App JWT uses RS256 for GitHub PKCS#1 and PKCS#8; installation is derived p
     GITHUB_APP_ID: '12345',
     GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs1', format: 'pem' }),
   });
+  bindRepository(t, 'synthetic-project', repository);
   for (let i = 0; i < 2; i++)
     assert.equal(
-      await mintInstallationToken(repository, request, Date.now(), actionsPermissions),
+      await installationToken({}, 'synthetic-project', repository, actionsPermissions, request),
       'synthetic-token',
     );
   assert.equal(calls.length, 4);

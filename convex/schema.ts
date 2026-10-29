@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { githubBindingTables } from './githubBindingFields';
 import { githubMirrorTables } from './projectGithubMirrorFields';
 import { sourceStepTables } from './projectSourceStepFields';
 import { workDetailMigration, workDetailTables } from './projectWorkDetailFields';
@@ -409,6 +410,7 @@ export const projectProposalDocument = v.object({
 });
 export default defineSchema({
   ...githubMirrorTables,
+  ...githubBindingTables,
   ...sourceStepTables,
   ...workDetailTables,
   projectCheckLogCleanupPages: defineTable({

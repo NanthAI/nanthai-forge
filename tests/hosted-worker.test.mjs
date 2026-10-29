@@ -506,12 +506,21 @@ test('signed GitHub HTTP delivery authenticates raw bytes and stores only a mini
         (
           await route._handler(
             ctx,
-            request('{"action":"deleted","sender":{"id":1}}', { 'x-github-event': event }),
+            request('{"action":"deleted","installation":{"id":9},"sender":{"id":1}}', {
+              'x-github-event': event,
+            }),
           )
         ).status,
         204,
       );
       assert.deepEqual(received.at(-1), { delivery: 'one', event });
+      if (event === 'installation')
+        assert.deepEqual(received.at(-2), {
+          delivery: 'one:0',
+          installationId: 9,
+          removed: true,
+          repoIds: [],
+        });
     }
     assert.equal((await route._handler(ctx, request('{}', { 'x-github-event': 'ping' }))).status, 204);
     delete process.env.GITHUB_WEBHOOK_SECRET;

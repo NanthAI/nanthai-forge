@@ -268,10 +268,16 @@ test('one wait follows multiple operations across owner worker shutdown and rest
       new Set(events.filter(e => e.type === 'submission' && e.status === 'landed').map(e => e.id)).size,
       2,
     );
-    const keys = events
-      .filter(e => e.type !== 'summary')
-      .map(({ cursor, ...event }) => JSON.stringify(event));
-    assert.equal(new Set(keys).size, keys.length);
+    // Deduplication suppresses unchanged observations of each identity. A live
+    // identity can return to an earlier state across worker/batch transitions;
+    // its entire event history is not a set of globally unique payloads.
+    const last = new Map();
+    for (const { cursor, ...event } of events.filter(e => e.type !== 'summary')) {
+      const key = `${event.type}:${event.id}`,
+        bytes = JSON.stringify(event);
+      assert.notEqual(last.get(key), bytes, `unchanged observation repeated for ${key}`);
+      last.set(key, bytes);
+    }
   } finally {
     f.release();
     controller.abort();

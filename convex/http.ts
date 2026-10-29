@@ -1,3 +1,4 @@
+import { callback as githubOAuthCallback } from './githubBindingOAuth';
 import { handle as actionsHttp } from './projectHostedActionsHttp';
 import { makeFunctionReference } from 'convex/server';
 // SPDX-License-Identifier: Apache-2.0
@@ -8,6 +9,7 @@ import { workerAuthorized } from '../src/worker-auth';
 import { githubWebhookAuthorized } from '../src/github-webhook';
 
 const http = httpRouter();
+http.route({ path: '/github/oauth/callback', method: 'GET', handler: githubOAuthCallback });
 http.route({ path: '/checks/actions', method: 'POST', handler: actionsHttp });
 for (const operation of ['prepare', 'update', 'uploadTarget'] as const)
   http.route({
@@ -53,6 +55,7 @@ http.route({
     const delivery = request.headers.get('x-github-delivery');
     if (!delivery) return new Response('Missing delivery ID', { status: 400 });
     let repository: string | undefined;
+    let invalidation: { installationId: number; removed: boolean; repoIds: number[] } | undefined;
     try {
       const payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
       if (!payload || typeof payload !== 'object' || Array.isArray(payload))
@@ -62,8 +65,32 @@ http.route({
         if (typeof repository !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(repository))
           throw new Error('Invalid repository');
       } else if (typeof payload.action !== 'string') throw new Error('Missing action');
+      if (
+        (event === 'installation' && payload.action === 'deleted') ||
+        (event === 'installation_repositories' && payload.action === 'removed')
+      ) {
+        const installationId = payload.installation?.id;
+        if (!Number.isSafeInteger(installationId) || installationId <= 0)
+          throw new Error('Invalid installation');
+        const repos = event === 'installation_repositories' ? payload.repositories_removed : [];
+        if (!Array.isArray(repos) || repos.some(repo => !Number.isSafeInteger(repo?.id) || repo.id <= 0))
+          throw new Error('Invalid repositories');
+        invalidation = {
+          installationId,
+          removed: event === 'installation',
+          repoIds: repos.map(repo => repo.id),
+        };
+      }
     } catch {
       return new Response('Invalid webhook payload', { status: 400 });
+    }
+    if (invalidation) {
+      for (let offset = 0; offset < Math.max(invalidation.repoIds.length, 1); offset += 100)
+        await ctx.runMutation(makeFunctionReference<'mutation'>('githubBindingWebhook:invalidate'), {
+          ...invalidation,
+          delivery: `${delivery}:${offset}`,
+          repoIds: invalidation.repoIds.slice(offset, offset + 100),
+        });
     }
     if (event === 'workflow_run') {
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsWebhook:receive'), {

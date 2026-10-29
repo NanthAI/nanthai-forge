@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs, checkDocument, insertedDocument, updatedDocument } from './convex-args.mjs';
 import { validateContext } from './convex-context.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
+const githubBindings = await import(moduleUrl('../convex/githubBindingStore.ts'));
 const bytes = value => Buffer.byteLength(JSON.stringify(value));
 const encoded = rows => JSON.stringify(rows);
 
@@ -76,6 +78,13 @@ export function lanesFixture() {
               return null;
             }
             return read(table, rows => [rows.get(id) ?? null])[0];
+          },
+          delete: async id => {
+            const table = locate(id);
+            if (!table) return;
+            local[table].delete(id);
+            writes.push([table, id, null]);
+            meter.writes++;
           },
           insert: async (table, value) => {
             const id = `${table}-${++serial}`;
@@ -193,7 +202,10 @@ export function lanesFixture() {
         if (decorate) await decorate(ctx, input, name);
         const result = await fn._handler(ctx, input);
         if (reads.every(unchanged => unchanged())) {
-          for (const [table, id, row] of writes) tables[table].set(id, row);
+          for (const [table, id, row] of writes) {
+            if (row === null) tables[table].delete(id);
+            else tables[table].set(id, row);
+          }
           counts.push(meter);
           return result;
         }
@@ -205,7 +217,28 @@ export function lanesFixture() {
       assert(++retries < 5, 'bounded fake OCC retries');
     }
   }
+  // Synthetic owner proof uses the same retained operation and store as github connect.
+  // Merely creating a Lane store leaves it unbound, including refusal-test fixtures.
+  async function bindRepository(projectId, { repository, repoId, installationId = 9 }) {
+    const state = randomUUID();
+    await call('githubBindingStart', githubBindings.start, {
+      projectId,
+      operationId: randomUUID(),
+      repository: repository.toLowerCase(),
+      installationId,
+      state,
+      verifier: 'synthetic-owner-proof',
+      authorizeUrl: `https://github.com/login/oauth/authorize?state=${state}`,
+    });
+    await call('githubBindingConsume', githubBindings.consume, { state });
+    await call('githubBindingComplete', githubBindings.complete, {
+      state,
+      repoId,
+      fullName: repository,
+    });
+  }
   return {
+    bindRepository,
     tables,
     counts,
     insert,

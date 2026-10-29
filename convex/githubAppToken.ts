@@ -2,6 +2,9 @@
 // One GitHub App access module for the hosted mirror and Actions checks. It
 // runs in the default Convex runtime (WebCrypto, no Node), so mutation-bearing
 // modules may import it. Tokens are never persisted or logged.
+import { makeFunctionReference } from 'convex/server';
+import type { Id } from './_generated/dataModel';
+import { operatorBinding } from './githubBindingAccess';
 import type { ActionCtx } from './_generated/server';
 import { githubRequest } from '../src/hosted-github-api';
 import { invariant } from '../src/errors';
@@ -43,7 +46,7 @@ export async function githubAppJwt(id: string, pem: string, now = Date.now()) {
   return `${payload}.${base64url(new Uint8Array(signature))}`;
 }
 type Installation = { id: number; permissions?: Record<string, string> };
-async function appInstallation(repo: string, request: typeof fetch, now: number) {
+export async function appInstallation(repo: string, request: typeof fetch, now: number) {
   invariant(
     /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && repo.split('/').every(p => p !== '.' && p !== '..'),
     'BAD_REPOSITORY',
@@ -65,18 +68,15 @@ async function appInstallation(repo: string, request: typeof fetch, now: number)
   );
   return { api, installation };
 }
-/** Derives the repository's installation via the App on every call (no stored
- * installation ID), then mints a repository-scoped installation token. Omitted
- * permissions keep the App's installed set (the mirror needs Contents write). */
-export async function mintInstallationToken(
-  repo: string,
-  request: typeof fetch = fetch,
-  now = Date.now(),
+/** Raw mint is deliberately private: all callers must first select proven IDs. */
+async function mintInstallationToken(
+  api: ReturnType<typeof githubRequest>,
+  installationId: number,
+  scope: { repository_ids: number[] } | { repositories: string[] },
   permissions?: GithubAppPermissions,
 ): Promise<string> {
-  const { api, installation } = await appInstallation(repo, request, now);
-  const result = await api<{ token: string }>(`/app/installations/${installation.id}/access_tokens`, 'POST', {
-    repositories: [repo.split('/')[1]],
+  const result = await api<{ token: string }>(`/app/installations/${installationId}/access_tokens`, 'POST', {
+    ...scope,
     ...(permissions ? { permissions } : {}),
   });
   invariant(
@@ -108,34 +108,107 @@ export async function requireInstallationPermissions(
     `The GitHub App installation on ${repo} lacks ${missing.join(', ')}. Approve the App's requested permissions in GitHub, then retry.`,
   );
 }
-/** The App can act on every repository it is installed on, whoever asks. Until
- * owner-proven bindings land, the deployment names each allowed project/repository
- * pair in FORGE_GITHUB_REPO_BINDINGS ("projectId=owner/repo", comma-separated).
- * Unset or unlisted denies, so one Forge project can never drive another's repo. */
+/** Explicit operator override for installations without the OAuth setup. */
 export function assertRepositoryBinding(
   projectId: string,
   repo: string,
   bindings = process.env.FORGE_GITHUB_REPO_BINDINGS,
 ) {
-  const wanted = `${projectId}=${repo}`.toLowerCase();
   invariant(
-    (bindings ?? '')
-      .split(',')
-      .map(item => item.trim().toLowerCase())
-      .includes(wanted),
+    operatorBinding(projectId, repo, bindings),
     'GITHUB_REPOSITORY_UNBOUND',
-    `This Forge project is not bound to ${repo}. Ask the deployment operator to bind it.`,
+    'Connect this repository to this Forge project with nforge github connect.',
   );
 }
-/** Stable shared API for the mirror and Actions dispatch/cancel. */
+type BindingPage = { page: { repoId: number }[]; isDone: boolean; continueCursor: string };
+/** Discovery tokens have metadata read only and contain exclusively proven IDs
+ * for this project. This handles private repository renames without first minting
+ * an unproven name-scoped token or retaining a user's OAuth credential. */
+async function repositoryScope(
+  ctx: ActionCtx,
+  projectId: string,
+  repo: string,
+  api: ReturnType<typeof githubRequest>,
+  installationId: number,
+  request: typeof fetch,
+) {
+  if (operatorBinding(projectId, repo)) return { repositories: [repo.split('/')[1]!] };
+  let cursor: string | null = null;
+  do {
+    const page: BindingPage = JSON.parse(
+      await ctx.runQuery(makeFunctionReference<'query'>('githubBindingStore:page'), {
+        projectId: projectId as Id<'hostedProjects'>,
+        installationId,
+        cursor,
+      }),
+    );
+    if (page.page.length) {
+      const ids = page.page.map(row => row.repoId);
+      const probe = await mintInstallationToken(
+        api,
+        installationId,
+        { repository_ids: ids },
+        { metadata: 'read' },
+      );
+      const response = await request(`https://api.github.com/repos/${repo}`, {
+        redirect: 'error',
+        signal: AbortSignal.timeout(30000),
+        headers: {
+          Authorization: `Bearer ${probe}`,
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'NanthAI-Forge',
+        },
+      });
+      invariant(
+        response.ok || response.status === 404,
+        'GITHUB_SYNC_API',
+        `GitHub repository lookup failed (${response.status}).`,
+      );
+      if (response.ok) {
+        const selected = (await response.json()) as { id: number; full_name: string };
+        if (ids.includes(selected.id) && selected.full_name?.toLowerCase() === repo.toLowerCase()) {
+          await ctx.runMutation(makeFunctionReference<'mutation'>('githubBindingStore:refreshName'), {
+            projectId,
+            installationId,
+            repoId: selected.id,
+            fullName: selected.full_name,
+          });
+          return { repository_ids: [selected.id] };
+        }
+      }
+    }
+    cursor = page.isDone ? null : page.continueCursor;
+  } while (cursor !== null);
+  invariant(
+    false,
+    'GITHUB_REPOSITORY_UNBOUND',
+    'Connect this repository to this Forge project with nforge github connect.',
+  );
+}
+/** Configure preflight proves identity before allowing the runner setting. */
+export async function requireRepositoryBinding(ctx: ActionCtx, projectId: string, repo: string) {
+  const { api, installation } = await appInstallation(repo, fetch, Date.now());
+  await repositoryScope(ctx, projectId, repo, api, installation.id, fetch);
+}
+/** Stable shared API for mirror, Actions dispatch and cancellation. */
 export async function installationToken(
-  _ctx: ActionCtx,
+  ctx: ActionCtx,
   projectId: string,
   repo: string,
   permissions?: GithubAppPermissions,
+  request: typeof fetch = fetch,
+  now = Date.now(),
 ): Promise<string> {
-  assertRepositoryBinding(projectId, repo);
-  return mintInstallationToken(repo, fetch, Date.now(), permissions);
+  const { api, installation } = await appInstallation(repo, request, now);
+  const scope = await repositoryScope(ctx, projectId, repo, api, installation.id, request);
+  const token = await mintInstallationToken(api, installation.id, scope, permissions);
+  if (scope.repository_ids)
+    await ctx.runQuery(makeFunctionReference<'query'>('githubBindingStore:requireId'), {
+      projectId,
+      installationId: installation.id,
+      repoId: scope.repository_ids[0],
+    });
+  return token;
 }
 /** Raw App-authenticated request for endpoints whose status matters (dispatch
  * returns 200 with run details or 204). Bodies are never echoed in errors. */

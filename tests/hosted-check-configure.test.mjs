@@ -290,7 +290,8 @@ test('CLI configures verify, a self-hosted runner and reports settings with boun
     run('configure-runner', { provider: 'mac', operationId: randomUUID(), expected: null }),
     code('EVIDENCE_CHANGED'),
   );
-  // github-actions is accepted by the same command.
+  // Legacy credential configurations still require this project's repository binding.
+  bindRepository(t, fixture.projectId, 'example/repo');
   const actions = await run('configure-runner', {
     operationId: randomUUID(),
     configuration: {

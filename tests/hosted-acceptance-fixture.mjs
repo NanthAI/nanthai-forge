@@ -15,6 +15,7 @@ export { control, landingStore, pins };
 export const maxima = {};
 export async function acceptanceFixture(source = null) {
   const f = await landingFixture(source);
+  await f.bindRepository(f.projectId, { repository: 'synthetic/checks', repoId: 43 });
   const transaction = async (name, fn, args, actor = 'owner') => {
     try {
       return await f.transaction(name, fn, args, actor);

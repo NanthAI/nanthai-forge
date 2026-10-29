@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
-const { mintInstallationToken } = await import(moduleUrl('../convex/githubAppToken.ts'));
+const { installationToken } = await import(moduleUrl('../convex/githubAppToken.ts'));
 const { githubRequest } = await import('../dist/hosted-github-api.js');
 test('App JWT uses RS256 and short expiry, then mints a token for the selected repository', async t => {
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -17,9 +17,18 @@ test('App JWT uses RS256 and short expiry, then mints a token for the selected r
     if (oldKey === undefined) delete process.env.GITHUB_APP_PRIVATE_KEY;
     else process.env.GITHUB_APP_PRIVATE_KEY = oldKey;
   });
+  const oldBindings = process.env.FORGE_GITHUB_REPO_BINDINGS;
+  process.env.FORGE_GITHUB_REPO_BINDINGS = 'p1=synthetic/mirror';
+  t.after(() => {
+    if (oldBindings === undefined) delete process.env.FORGE_GITHUB_REPO_BINDINGS;
+    else process.env.FORGE_GITHUB_REPO_BINDINGS = oldBindings;
+  });
   const calls = [];
-  const token = await mintInstallationToken(
+  const token = await installationToken(
+    {},
+    'p1',
     'synthetic/mirror',
+    undefined,
     async (url, init) => {
       calls.push({ url, init });
       const jwt = init.headers.Authorization.slice(7),
@@ -44,7 +53,7 @@ test('App JWT uses RS256 and short expiry, then mints a token for the selected r
   assert.equal(calls.length, 2);
   assert.equal(calls[1].url, 'https://api.github.com/app/installations/42/access_tokens');
   assert.deepEqual(JSON.parse(calls[1].init.body), { repositories: ['mirror'] });
-  await assert.rejects(mintInstallationToken('../mirror'), e => e.code === 'BAD_REPOSITORY');
+  await assert.rejects(installationToken({}, 'p1', '../mirror'), e => e.code === 'BAD_REPOSITORY');
 });
 test('API failures never expose response bodies or tokens and redirects are disabled', async () => {
   await assert.rejects(
