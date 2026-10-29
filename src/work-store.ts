@@ -64,7 +64,7 @@ export class WorkStore {
   readonly root: string;
   readonly directory: string;
   readonly native: boolean;
-  constructor(root: string) {
+  constructor(root: string, options: { readOnly?: boolean } = {}) {
     const input = realpathSync(root),
       owner = nativeOwner(input);
     this.native = !!owner;
@@ -75,14 +75,17 @@ export class WorkStore {
       const common = workGit(this.root, ['rev-parse', '--git-common-dir']).trim();
       this.directory = join(realpathSync(resolve(this.root, common)), 'forge-work');
     }
-    if (!existsSync(this.directory)) mkdirSync(this.directory, { mode: 0o700 });
+    if (!existsSync(this.directory) && !options.readOnly) mkdirSync(this.directory, { mode: 0o700 });
     invariant(
-      lstatSync(this.directory).isDirectory() && !lstatSync(this.directory).isSymbolicLink(),
+      (options.readOnly && !existsSync(this.directory)) ||
+        (lstatSync(this.directory).isDirectory() && !lstatSync(this.directory).isSymbolicLink()),
       'UNSAFE_WORK_STORE',
       'Work metadata must be a real directory.',
     );
-    wakeAutoExchange(this);
-    wakeLandingWorker(this);
+    if (!options.readOnly) {
+      wakeAutoExchange(this);
+      wakeLandingWorker(this);
+    }
   }
   path(id: string): string {
     return join(this.directory, `lane-${id}`);

@@ -10,7 +10,7 @@ export function mcpConfig(root: string, options: { agent?: boolean } = {}) {
       forge: {
         command: process.execPath,
         args: [
-          fileURLToPath(new URL('./cli.js', import.meta.url)),
+          fileURLToPath(new URL('./cli-entry.js', import.meta.url)),
           'mcp',
           workspace.root,
           ...(options.agent ? ['--agent'] : []),

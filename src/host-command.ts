@@ -116,11 +116,12 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
       };
     });
   }
-  if (flags.includes('--status')) {
-    invariant(flags.length === 1, 'BAD_ARGUMENT', HOST_HELP);
-    const state = readHostState(new WorkStore(root));
+  if (flags.includes('--status') || (json && flags.length === 0)) {
+    invariant(flags.length === 0 || flags.length === 1, 'BAD_ARGUMENT', HOST_HELP);
+    const store = new WorkStore(root, { readOnly: true });
+    const state = readHostState(store);
     return {
-      autoExchange: readAutoExchangeStatus(new WorkStore(root)),
+      autoExchange: readAutoExchangeStatus(store),
       recovery: await readRecoveryInventory(root),
       bound: Boolean(state.binding),
       canonicalOwner: state.binding?.acceptanceOwner === true,
@@ -162,7 +163,7 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
   };
   for (let i = 0; i < flags.length; i++) {
     const flag = flags[i]!;
-    if (flag === '--backfill' || flag === '--wait') continue;
+    if (flag === '--backfill' || flag === '--wait' || flag === '--resume') continue;
     if (flag === '--new') options.new = true;
     else if (['--deployment', '--name', '--visibility'].includes(flag)) {
       const value = flags[++i];
@@ -175,6 +176,12 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
       }
     } else invariant(false, 'BAD_ARGUMENT', HOST_HELP);
   }
+  if (!flags.includes('--resume'))
+    invariant(
+      !readHostState(new WorkStore(root, { readOnly: true })).hosting,
+      'HOST_RESUME_REQUIRED',
+      'Hosting is pending. Read host ROOT --status, or use host ROOT --resume to continue it.',
+    );
   const result = await host(root, options).catch(error => {
     // A detached worker can fail before transport starts (for example expired
     // login). Preserve a safe code for --status, never the provider's text.
@@ -191,7 +198,7 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
     // FORGE_AUTH_TOKEN authenticates this worker's hosted source/metadata requests.
     const child = spawn(
       process.execPath,
-      [workerPath(new URL('./cli.js', import.meta.url)), 'host', root, '--backfill'],
+      [workerPath(new URL('./cli.js', import.meta.url)), 'host', root, '--backfill', '--resume'],
       {
         detached: true,
         stdio: 'ignore',

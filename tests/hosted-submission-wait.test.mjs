@@ -477,3 +477,37 @@ test('live revocation, pre-cancellation and partial subscription setup failures 
   );
   assert.equal(closed, true);
 });
+
+test('a retained preparing submission resnapshots the same older version on reconnect', async () => {
+  const s = await fixture(),
+    a = await s.start();
+  s.f.tables.projectHostedLandingRequests.clear();
+  s.f.tables.projectHostedLandingDesired.set('desired', {
+    projectId: s.f.projectId,
+    actor: 'owner',
+    operationId: a.request.operationId,
+    submissionId: a.state.id,
+    composeOperationId: randomUUID(),
+    selectionKey: 'synthetic',
+    request: JSON.stringify(a.request),
+    wake: null,
+    value: JSON.stringify({ ...a.state, preparing: true }),
+  });
+  const selection = { operationIds: [a.request.operationId], timeoutSeconds: 0 };
+  await s.transport.query('projectHostedFinishObserve:page', {
+    operationId: a.request.operationId,
+    nextVersion: 0,
+  });
+  const first = await s.wait(selection);
+  const resumed = await s.wait({ ...selection, cursor: first.result.cursor });
+  assert.equal(resumed.result.status, 'timeout');
+  assert.equal(resumed.result.resnapshot, true);
+  assert.equal(s.events.length, 1, 'repeated unchanged snapshot is deduplicated');
+  const query = s.transport.query;
+  s.transport.query = async (...args) => ({ ...(await query(...args)), resnapshot: false });
+  await assert.rejects(
+    s.wait({ ...selection, cursor: first.result.cursor }),
+    code('HOSTED_PROTOCOL_INVALID'),
+  );
+  assert.equal(s.counts().opens, 0);
+});

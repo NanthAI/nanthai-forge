@@ -17,6 +17,7 @@ Use Node 24.22.1+ (24.x). A change is done when `npm run verify` passes. If you 
 ## We build Forge with Forge
 
 The canonical project is the native owner at `$FORGE_OWNER` (the local native owner directory); its `main` Channel is the real source. A separate local Git checkout is a mirror and can lag.
+For ownerless hosted ROOTs, see [Work on a hosted project](docs/quickstart.md#work-on-a-hosted-project).
 
 ```sh
 nforge agent OWNER start '{"outcome":"What you are changing"}'   # returns a Lane path

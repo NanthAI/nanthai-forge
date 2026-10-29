@@ -62,12 +62,19 @@ export const signDownloads = mutation({
   },
 });
 
-/** Location metadata only: an R2 response never proxies object bytes through Convex. */
+/** Location metadata only: an R2 response never proxies object bytes through Convex.
+ * Checkout clients request signatures in the same bounded page, avoiding a second
+ * membership/binding lookup per object. Signing writes no documents. */
 export const describe = mutation({
-  args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()) },
+  args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()), signed: v.optional(v.boolean()) },
   returns: v.array(
     v.union(
-      v.object({ digest: v.string(), size: v.number(), location: v.literal('r2') }),
+      v.object({
+        digest: v.string(),
+        size: v.number(),
+        location: v.literal('r2'),
+        url: v.optional(v.string()),
+      }),
       v.object({ digest: v.string(), size: v.number(), location: v.literal('convex'), url: v.string() }),
       v.object({
         digest: v.string(),
@@ -77,7 +84,7 @@ export const describe = mutation({
       }),
     ),
   ),
-  handler: async (ctx, { projectId, digests }) => {
+  handler: async (ctx, { projectId, digests, signed }) => {
     try {
       await readableProject(ctx, projectId);
       invariant(
@@ -85,7 +92,7 @@ export const describe = mutation({
         'BAD_ARGUMENT',
         'Read exact content identities in pages of at most 100.',
       );
-      const result: DownloadRow[] = [];
+      const result: (DownloadRow & { url?: string })[] = [];
       for (const digest of digests) {
         const row = await ctx.db
           .query('projectObjects')
@@ -103,7 +110,11 @@ export const describe = mutation({
             'INVALID_WORK_BACKUP',
             'Stored content has a different project binding.',
           );
-          result.push({ ...pin, location: 'r2' });
+          result.push({
+            ...pin,
+            location: 'r2',
+            ...(signed ? { url: await presignGet(r2Config(), row.r2Key) } : {}),
+          });
         } else if (row.storageId) {
           const metadata = await blobStore(ctx).getMetadata(row.storageId),
             url = await blobStore(ctx).getUrl(row.storageId);

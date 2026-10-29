@@ -382,8 +382,9 @@ bytes remain retained by the existing migration.
 ### Hosting progress and recovery
 
 `nforge host ROOT --json --wait` emits progress and result JSON lines; ordinary progress uses stderr.
-`nforge host ROOT --status` reads the local binding and last saved progress without making network
-calls. During native backfill it reports `historyBackfilling: true`, the last phase/counts/rate/ETA,
+`nforge host ROOT --status`, or `nforge host ROOT --json` with no action, reads the local
+binding and last saved progress without network calls, writes or worker wakeups.
+A pending operation resumes only with `--resume`. During native backfill it reports `historyBackfilling: true`, the last phase/counts/rate/ETA,
 an observation timestamp and any recorded interruption code. The hosted backup also carries
 `historyBackfilling` until complete-manifest validation succeeds. Its full manifest is pinned from
 the start; incomplete history is never described as a complete recovery copy.
@@ -392,7 +393,7 @@ A detached backfill inherits the current process environment and existing saved 
 It executes only Forge's transfer code, never repository scripts. If the machine stops, the
 connection fails or login expires, retain the entire local Work directory (including
 `hosted-binding.json` and `exchange-UUID`). Reauthenticate to the original account if necessary,
-then rerun `nforge host ROOT --wait`. Existing missing-content negotiation and nonce reconciliation
+then run `nforge host ROOT --resume --wait`. Existing missing-content negotiation and nonce reconciliation
 reuse completed uploads after unknown replies. No retained source or history is deleted. A completed
 backfill changes its completion marker only; a concurrent source push or hosted note stays intact.
 
@@ -497,8 +498,8 @@ project deletion. An in-flight host cannot overwrite the abandoned state.
 During hosting, an `EXCHANGE_UPLOAD_UNKNOWN` response reconciles the original
 object window and retries missing bytes in the same invocation, with at most four
 attempts and 250/500/1000 ms backoff. Stored peers are reused. Exhaustion reports
-the selected object pins and attempt count; rerunning the original host command
-continues the saved operation.
+the selected object pins and attempt count; `nforge host ROOT --resume` with the original
+options continues the saved operation.
 After deliberately replacing the hosted project, `nforge host ROOT --new` creates
 and binds a replacement.
 

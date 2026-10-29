@@ -8,7 +8,6 @@ import {
   renameSync,
   rmSync,
   lstatSync,
-  chmodSync,
   realpathSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -17,15 +16,13 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { parseNativeState } from './native-source.js';
 import { hostedMainSchema, type HostedMain, type MainExpectation } from './hosted-main.js';
-import { durableReplace, syncDirectory, syncFile } from './native-durability.js';
+import { durableReplace, syncDirectory } from './native-durability.js';
 import { cleanHostedCheckout, installHostedFile, flushHostedCheckout } from './hosted-checkout-files.js';
 import { workLocked } from './work-lock.js';
-import { readSource, fingerprintPrivateFile } from './files.js';
-import type { ContentPin } from './native-exchange.js';
-export interface MainTransport {
+import { readSource } from './files.js';
+import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
+export interface MainTransport extends CheckoutObjectTransport {
   current(expected?: MainExpectation): Promise<HostedMain>;
-  objects(digests: string[]): Promise<ContentPin[]>;
-  downloadToFile(pin: ContentPin, path: string): Promise<void>;
 }
 const requestSchema = z
   .object({
@@ -101,36 +98,10 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
   invariant(selection.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
   if (operation.complete)
     return { ...selection, root, downloadedObjects: 0, downloadedBytes: 0, replayed: true };
-  let downloadedObjects = 0,
-    downloadedBytes = 0;
-  async function object(id: string) {
-    const path = join(cache, 'objects', id);
-    if (existsSync(path) && (await fingerprintPrivateFile(path)).sha256 === id) return path;
-    const [pin] = await transport.objects([id]);
-    invariant(pin?.sha256 === id, 'INVALID_NATIVE_SOURCE', 'Source pin differs from selected content.');
-    const temporary = mkdtempSync(join(cache, 'download-'));
-    try {
-      const file = join(temporary, 'object');
-      await transport.downloadToFile(pin, file);
-      chmodSync(file, 0o600);
-      const actual = await fingerprintPrivateFile(file);
-      invariant(
-        actual.sha256 === id && actual.size === pin.size,
-        'INVALID_NATIVE_SOURCE',
-        'Downloaded source is truncated or corrupt.',
-      );
-      syncFile(file);
-      renameSync(file, path);
-      syncDirectory(dirname(path));
-      downloadedObjects++;
-      downloadedBytes += pin.size;
-    } finally {
-      rmSync(temporary, { recursive: true, force: true });
-    }
-    return path;
-  }
-  const state = parseNativeState(readFileSync(await object(selection.head)));
-  for (const file of state.files) await object(file.blob);
+  const objects = new HostedCheckoutCache(cache, transport);
+  await objects.ensure([selection.head]);
+  const state = parseNativeState(readFileSync(join(objects.objects, selection.head)));
+  await objects.ensure(state.files.map(file => file.blob));
   // Access can have been revoked during transfer. Cached bytes confer no authority.
   const authorized = await transport.current();
   invariant(authorized.projectId === request.projectId, 'PROJECT_UNAVAILABLE', 'Select this project.');
@@ -180,5 +151,11 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }
-  return { ...selection, root, downloadedObjects, downloadedBytes, replayed: false };
+  return {
+    ...selection,
+    root,
+    downloadedObjects: objects.downloadedObjects,
+    downloadedBytes: objects.downloadedBytes,
+    replayed: false,
+  };
 }

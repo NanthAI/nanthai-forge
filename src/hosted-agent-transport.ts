@@ -20,6 +20,8 @@ import { ConvexExchange } from './exchange-client.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedMainV2Schema } from './hosted-main.js';
+import { hostedRootLanePath, openHostedRootLane } from './hosted-root-checkout.js';
+import { hostedStartResultSchema } from './hosted-lane.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { HostedAgentJournal, hostedAgentRoot } from './hosted-agent-journal.js';
 import {
@@ -147,15 +149,16 @@ export class HostedAgentTransport {
           null,
           await this.observe(command.data as z.infer<typeof hostedAgentCommandSchemas.status>),
         );
-      const root = hostedAgentRoot(this.root),
-        journal = new HostedAgentJournal(
-          root,
-          this.address,
-          capabilities.actor,
-          action,
-          command.data,
-          operationId as string | undefined,
-        );
+      const root = hostedAgentRoot(this.root);
+      if (action === 'start' || action === 'open') hostedRootLanePath(root, this.address);
+      const journal = new HostedAgentJournal(
+        root,
+        this.address,
+        capabilities.actor,
+        action,
+        command.data,
+        operationId as string | undefined,
+      );
       metricOperationId(journal.operationId);
       const session: HostedAgentSession = {
         root,
@@ -185,7 +188,28 @@ export class HostedAgentTransport {
           return marker;
         },
       };
-      const result = await executeHostedAgent(session, action, command.data);
+      let result: unknown;
+      if (
+        action === 'open' &&
+        hostedRootLanePath(root, this.address, (command.data as { laneId: string }).laneId) !== root
+      ) {
+        const open = hostedAgentCommandSchemas.open.parse(command.data);
+        result = await openHostedRootLane(root, this.address, this.exchange, {
+          ...open,
+          operationId: journal.operationId,
+        });
+      } else {
+        result = await executeHostedAgent(session, action, command.data);
+        if (action === 'start' && hostedRootLanePath(root, this.address)) {
+          const started = hostedStartResultSchema.parse(result);
+          invariant(started.lane, 'SOURCE_UNAVAILABLE', 'Hosted start has no Lane source.');
+          const opened = await openHostedRootLane(root, this.address, this.exchange, {
+            laneId: started.lane.laneId,
+            operationId: await journal.id('checkout'),
+          });
+          result = { ...started, path: opened.root, checkout: opened };
+        }
+      }
       return this.response(action, journal.operationId, result);
     } catch (error) {
       const owner = nativeOwner(existsSync(this.root) ? realpathSync(this.root) : this.root);

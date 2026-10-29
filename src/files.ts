@@ -196,8 +196,24 @@ export async function fingerprintPrivateFile(path: string, code = 'INVALID_FILE_
     );
     const hashFile = async () => {
       const hash = createHash('sha256');
-      for await (const bytes of createReadStream(path, { fd, start: 0, autoClose: false }))
+      if (before.size <= 64 * 1024) {
+        // Most checkout objects are tiny. Avoid a stream's buffers/listeners for
+        // each one; the same descriptor and metadata checks below still apply.
+        const bytes = Buffer.allocUnsafe(before.size);
+        let offset = 0;
+        while (offset < bytes.length) {
+          const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
+          invariant(
+            count > 0,
+            code,
+            'The retained file ended during validation. Existing source is preserved.',
+          );
+          offset += count;
+        }
         hash.update(bytes);
+      } else
+        for await (const bytes of createReadStream(path, { fd, start: 0, autoClose: false }))
+          hash.update(bytes);
       return hash.digest('hex');
     };
     const sameContentMetadata = (a: typeof before, b: typeof before) =>

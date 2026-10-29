@@ -19,10 +19,11 @@ export class HostedCheckoutCache {
   constructor(
     readonly root: string,
     private readonly transport: CheckoutObjectTransport,
+    objects = join(root, 'objects'),
   ) {
     mkdirSync(root, { recursive: true, mode: 0o700 });
     invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Client cache must be real.');
-    this.objects = join(root, 'objects');
+    this.objects = objects;
     mkdirSync(this.objects, { recursive: true, mode: 0o700 });
     invariant(!lstatSync(this.objects).isSymbolicLink(), 'UNSAFE_PATH', 'Client objects must be real.');
   }

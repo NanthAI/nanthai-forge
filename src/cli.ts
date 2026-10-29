@@ -147,6 +147,7 @@ async function main(args: string[]): Promise<unknown> {
     );
     return refreshOwnerRoot(new WorkStore(args[2]));
   }
+  if (args[0] === 'clone') return (await import('./hosted-clone-cli.js')).hostedCloneCli(args.slice(1));
   if (args[0] === 'host') return hostCli(args.slice(1));
   if (args[0] === 'policy' || args[0] === 'set-policy') {
     invariant(

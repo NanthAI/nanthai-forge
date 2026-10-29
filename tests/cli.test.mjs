@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { fixture, git, write } from './helpers.mjs';
 
-const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
+const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const cli = fileURLToPath(new URL(`../${manifest.bin.nforge}`, import.meta.url));
 const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', timeout: 20_000 });
 
 test('built CLI indexes a real worktree, queries, detects edits and re-indexes', t => {

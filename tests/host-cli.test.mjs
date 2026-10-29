@@ -510,3 +510,44 @@ test('host follows durable index continuations before binding and preserves serv
   assert.equal(calls, 4);
   assert.equal(readHostState(f.store).binding.projectId, result.projectId);
 });
+
+test('host --json and --status read pending hosting without writes or resuming; --resume is explicit', async t => {
+  const f = setup(t);
+  updateHostState(f.store, state => {
+    state.hosting = {
+      operationId: randomUUID(),
+      pushId: randomUUID(),
+      initializeId: randomUUID(),
+      deployment: 'https://fixture.convex.cloud',
+      name: 'Pending',
+      visibility: 'private',
+      revision: f.store.revision(),
+    };
+  });
+  const snapshot = root => {
+    const result = [];
+    const walk = path => {
+      for (const entry of readdirSync(path, { withFileTypes: true })) {
+        const absolute = join(path, entry.name);
+        if (entry.isDirectory()) walk(absolute);
+        else result.push([absolute, readFileSync(absolute).toString('base64')]);
+      }
+    };
+    walk(root);
+    return result;
+  };
+  const before = snapshot(f.root);
+  let calls = 0;
+  const host = async () => {
+    calls++;
+    return { resumed: true };
+  };
+  assert.equal((await hostCli([f.root, '--json'], host)).pending.name, 'Pending');
+  assert.equal((await hostCli([f.root, '--status', '--json'], host)).status, 'hosting');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 0);
+  await assert.rejects(hostCli([f.root], host), { code: 'HOST_RESUME_REQUIRED' });
+  assert.deepEqual(snapshot(f.root), before);
+  assert.equal((await hostCli([f.root, '--resume', '--json'], host)).resumed, true);
+  assert.equal(calls, 1);
+});

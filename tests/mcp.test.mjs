@@ -85,7 +85,7 @@ test('doctor and emitted MCP configuration preserve existing client settings', a
   const config = mcpConfig(root);
   assert.equal(config.mcpServers.forge.command, process.execPath);
   assert.deepEqual(config.mcpServers.forge.args.slice(1), ['mcp', realpathSync(root)]);
-  assert.ok(config.mcpServers.forge.args[0].endsWith('/dist/cli.js'));
+  assert.ok(config.mcpServers.forge.args[0].endsWith('/dist/cli-entry.js'));
 });
 
 test('opt-in real stdio workflow MCP shares local work, pins exact source and leaves default source ownership intact', async t => {

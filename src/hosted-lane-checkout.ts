@@ -36,12 +36,17 @@ const operationSchema = z
   .strict();
 const json = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
 /** Thin editing directory; no native Work owner, Channel writer or acceptance authority. */
-export async function checkoutHostedLane(root: string, input: unknown, transport: LaneTransport) {
+export async function checkoutHostedLane(
+  root: string,
+  input: unknown,
+  transport: LaneTransport,
+  sharedObjects?: string,
+) {
   const request = hostedLaneCheckoutSchema.parse(input);
   root = resolve(root);
   mkdirSync(dirname(root), { recursive: true });
   root = join(realpathSync(dirname(root)), basename(root));
-  const cache = new HostedCheckoutCache(`${root}.forge-client`, transport),
+  const cache = new HostedCheckoutCache(`${root}.forge-client`, transport, sharedObjects),
     lock = join(cache.root, 'lock'),
     previous = join(cache.root, 'previous'),
     receiptPath = join(cache.root, `${request.operationId}.json`);

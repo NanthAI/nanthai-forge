@@ -71,6 +71,31 @@ establishes main. Future acceptance advances it while retaining accepted work.
 If main moved, re-check the Lane on latest main and review its new Candidate.
 No policy change is needed for this flow.
 
+## Work on a hosted project
+
+Sign in to the project's deployment with `nforge login DEPLOYMENT_URL`, then clone
+its URL or project ID into an empty directory. `--deployment DEPLOYMENT_URL`
+selects a deployment other than your saved default.
+
+```sh
+nforge clone https://forge.example/alice/project /absolute/path/to/project
+nforge agent /absolute/path/to/project start '{"outcome":"Improve the greeting"}'
+```
+
+Edit in the returned `result.path`. Each start creates a separate Lane under
+`ROOT.forge-client/lanes/LANE_ID`; main stays in ROOT. Existing single-Lane
+checkouts also support starting additional Lanes. No Mac owner or background
+process is needed.
+
+```sh
+nforge agent LANE_PATH save '{"message":"Improve greeting"}'
+nforge agent LANE_PATH finish '{"message":"Improve greeting"}'
+```
+
+Use the returned operation ID to observe or wait for hosted finish. The project's
+configured check and acceptance policy apply. Keep ROOT and its `.forge-client`
+sibling together; the sibling holds the binding, object cache and Lane directories.
+
 ## Glossary
 
 | Term | Meaning | UI label? |

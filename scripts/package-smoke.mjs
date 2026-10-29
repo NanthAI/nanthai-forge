@@ -139,10 +139,10 @@ try {
     archive,
   ]);
   const installed = join(prefix, 'node_modules', '@nanthai', 'forge'),
-    cli = join(installed, 'dist', 'cli.js');
+    manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8')),
+    cli = join(installed, manifest.bin.nforge);
   assert.equal(realpathSync(join(prefix, 'node_modules', '.bin', 'nforge')), realpathSync(cli));
   assert.ok(statSync(cli).mode & 0o111, 'Installed CLI must be executable.');
-  const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'));
   for (const notice of [...notices, ...runtimeScripts].filter(
     file => !['package.json', 'forge-package-lock.json', 'THIRD_PARTY_NOTICES.txt'].includes(file),
   ))

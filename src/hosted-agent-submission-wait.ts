@@ -214,7 +214,8 @@ export async function observeHostedSubmissions(
       resnapshot ||= page.resnapshot;
       for (const event of page.events) {
         invariant(
-          event.submission.version >= nextVersion && event.submission.version < page.nextVersion,
+          (page.resnapshot || event.submission.version >= nextVersion) &&
+            event.submission.version < page.nextVersion,
           'HOSTED_PROTOCOL_INVALID',
           'Submission page has an invalid version range.',
         );

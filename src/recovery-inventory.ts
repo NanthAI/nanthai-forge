@@ -49,7 +49,7 @@ export type RecoveryInventory = {
  * metadata write. Successful local exports never establish off-machine coverage.
  * Unknown dates and missing/corrupt inventory remain unknown, never zero exposure. */
 export async function readRecoveryInventory(root: string, now = Date.now()): Promise<RecoveryInventory> {
-  const store = new WorkStore(root);
+  const store = new WorkStore(root, { readOnly: true });
   const captures: StoredRecoveryCapture[] = [];
   let availability: RecoveryInventory['availability'] = 'available';
   const directory = join(store.directory, 'recovery-inventory');

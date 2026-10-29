@@ -167,3 +167,57 @@ test('source reads reject continuously unstable metadata even with identical byt
   syncBuiltinESMExports();
   assert.throws(() => readSource(root, 'source.ts', 4096), { code: 'SOURCE_CHANGED' });
 });
+
+test('small private fingerprints avoid streams while retaining content, ctime, path and authority checks', async t => {
+  const root = fs.mkdtempSync(join(tmpdir(), 'forge-small-fingerprint-')),
+    path = join(root, 'retained');
+  const original = fs.readSync;
+  t.after(() => {
+    fs.readSync = original;
+    syncBuiltinESMExports();
+    fs.rmSync(root, { recursive: true });
+  });
+  const bytes = Buffer.from('synthetic small retained object');
+  for (const kind of ['once', 'content', 'permissions', 'link', 'replacement', 'ongoing']) {
+    fs.rmSync(path, { force: true });
+    fs.writeFileSync(path, bytes, { mode: 0o600 });
+    let reads = 0;
+    fs.readSync = (...args) => {
+      const count = original(...args);
+      if (kind === 'ongoing' || ++reads === 1) {
+        if (kind === 'content') {
+          const { mtimeMs } = fs.statSync(path);
+          fs.writeFileSync(path, Buffer.alloc(bytes.length, 23));
+          fs.utimesSync(path, new Date(), new Date(mtimeMs + 1000));
+        } else if (kind === 'permissions') fs.chmodSync(path, 0o400);
+        else if (kind === 'link') fs.linkSync(path, join(root, 'linked'));
+        else if (kind === 'replacement') {
+          fs.renameSync(path, join(root, 'moved'));
+          fs.writeFileSync(path, bytes, { mode: 0o600 });
+        } else touchCtime(path);
+      }
+      return count;
+    };
+    syncBuiltinESMExports();
+    if (kind === 'once') {
+      assert.deepEqual(await fingerprintPrivateFile(path), {
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        size: bytes.length,
+      });
+      assert.equal(reads, 2);
+    } else await assert.rejects(fingerprintPrivateFile(path), { code: 'INVALID_FILE_EXPORT' }, kind);
+    fs.readSync = original;
+    syncBuiltinESMExports();
+    fs.rmSync(join(root, 'linked'), { force: true });
+    fs.rmSync(join(root, 'moved'), { force: true });
+  }
+  for (const size of [0, 65536]) {
+    fs.rmSync(path, { force: true });
+    const bytes = Buffer.alloc(size, 42);
+    fs.writeFileSync(path, bytes, { mode: 0o600 });
+    assert.deepEqual(await fingerprintPrivateFile(path), {
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      size,
+    });
+  }
+});

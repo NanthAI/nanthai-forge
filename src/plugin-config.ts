@@ -102,7 +102,7 @@ export function pluginConfig(root: string, directory: string): object {
     plugin: join(destination, plugin),
     marketplace: 'nanthai-forge-local',
     installed: false,
-    runtime: fileURLToPath(new URL('./cli.js', import.meta.url)),
+    runtime: fileURLToPath(new URL('./cli-entry.js', import.meta.url)),
     reused: Boolean(existing),
   };
 }
