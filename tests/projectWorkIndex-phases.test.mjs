@@ -300,10 +300,12 @@ test('lookup byte prefixes retain every payload part and cleanup leaves the defa
   const cursor = JSON.stringify({ phase: 'cleanup', field: 0, record: 0, source: 0, cleanup: 0 });
   const generation = {
     _id: 'generation',
+    _creationTime: 1,
     projectId: 'project',
     status: 'building',
     backupId: 'backup',
     revision: 1,
+    initialRevision: 1,
     ensureCursor: cursor,
     nextBatch: 0,
     metadata: JSON.stringify({ schema: 17, counts: {}, defaultIntentId: 'retained-default' }),

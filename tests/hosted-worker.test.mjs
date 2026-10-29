@@ -23,6 +23,7 @@ const repository = {
 };
 const original = () => ({
   _id: 'import',
+  _creationTime: 1,
   visibility: 'public',
   repository: repository.full_name,
   ref: 'main',

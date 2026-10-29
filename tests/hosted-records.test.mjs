@@ -245,7 +245,14 @@ test('persisted operation envelopes retain original IDs/time and terminal result
     operations.beginHostedOperation(s.ctx, { ...input, payload: { lane: randomUUID() } }),
     code('WORK_OPERATION_CHANGED'),
   );
-  const foreignProject = await s.ctx.db.insert('hostedProjects', { owner: 'other', visibility: 'private' });
+  const foreignProject = await s.ctx.db.insert('hostedProjects', {
+    owner: 'other',
+    key: 'other',
+    name: 'Other',
+    currentBackup: null,
+    revision: 0,
+    visibility: 'private',
+  });
   await assert.rejects(
     operations.beginHostedOperation(s.ctx, { ...input, projectId: foreignProject }),
     code('PROJECT_UNAVAILABLE'),
@@ -322,7 +329,10 @@ test('stage 10,050 immutable records, lose a page/final reply, rebuild disposabl
   assert.deepEqual([...s.tables.projectHostedSnapshotHeads.values()][0], pointer);
   assert.equal(s.counts.at(-1).writes, 0);
   assert(s.counts.filter(c => c.name === 'publish').every(c => c.documents < 10));
-  const current = await s.call('read-current', reads.current, s.auth);
+  const current = await s.call('read-current', reads.current, {
+    projectId: s.auth.projectId,
+    actor: s.auth.actor,
+  });
   assert.equal(current.snapshotId, p.input.snapshotId);
   let count = 0;
   for (let page = 0; page < p.input.pageCount; page++) {
@@ -429,7 +439,7 @@ test('snapshot final CAS rejects competing selection and all read paths recheck 
   await assert.rejects(s.call('stale-final', snapshots.publish, selection(p.input)), code('WORK_STALE'));
   assert.equal([...s.tables.projectHostedSnapshotHeads.values()][0].key, competing.input.snapshotId);
   for (const [fn, args] of [
-    [reads.current, s.auth],
+    [reads.current, { projectId: s.auth.projectId, actor: s.auth.actor }],
     [reads.page, { ...selection(competing.input), page: 0 }],
     [snapshots.publish, selection(competing.input)],
     [projection.rebuildPage, { ...selection(competing.input), page: 0, operationId: randomUUID() }],
@@ -471,6 +481,10 @@ test('snapshot references cannot cross projects or substitute a different seed/r
   );
   assert(s.counts.at(-1).readBytes < 10000, 'staging reads only the small canonical header');
   const projectId = await s.ctx.db.insert('hostedProjects', {
+    key: 'synthetic',
+    name: 'Synthetic',
+    currentBackup: null,
+    revision: 0,
     owner: 'owner',
     visibility: 'private',
     sourceAuthority: { mode: 'server-shadow', epoch: 1 },

@@ -13,11 +13,25 @@ function setup() {
     operationId = randomUUID();
   s.tables.hostedProjects.set('project', {
     _id: 'project',
+    _creationTime: 1,
+    key: 'synthetic',
+    name: 'Synthetic',
+    currentBackup: 'backup',
+    revision: 5,
     owner: 'owner',
-    work: { backupId: 'backup', generationId: 'old', revision: 5, initialRevision: 0 },
+    work: {
+      backupId: 'backup',
+      generationId: 'old',
+      revision: 5,
+      initialRevision: 0,
+      operationId: 'synthetic',
+    },
   });
   s.tables.projectWorkGenerations.set('old', {
     _id: 'old',
+    _creationTime: 1,
+    initialRevision: 0,
+    nextBatch: 0,
     projectId: 'project',
     backupId: 'backup',
     status: 'ready',
@@ -58,6 +72,7 @@ test('migration CAS catches a journal race and reconstructs at the caught-up rev
     first = await s.begin();
   s.tables.projectWorkHeads.set('head', {
     _id: 'head',
+    _creationTime: 1,
     projectId: 'project',
     backupId: 'backup',
     revision: 6,
@@ -227,13 +242,25 @@ test('retaining the previous generation also protects its physical record partit
   s.tables.projectWorkGenerations.get('old').recordsGenerationId = 'partition';
   s.tables.projectWorkGenerations.set('partition', {
     _id: 'partition',
+    _creationTime: 1,
     projectId: 'project',
+    backupId: 'backup',
+    revision: 5,
+    initialRevision: 0,
+    nextBatch: 0,
+    metadata: '{}',
     status: 'building',
   });
   s.tables.projectWorkRecords.set('legacy-row', {
     _id: 'legacy-row',
+    _creationTime: 1,
     projectId: 'project',
     generationId: 'partition',
+    collection: 'notes',
+    key: 'legacy-row',
+    parent: '',
+    position: 0,
+    value: '{}',
   });
   const staged = await s.begin();
   await s.publish(staged._id);

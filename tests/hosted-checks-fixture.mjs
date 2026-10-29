@@ -28,6 +28,10 @@ export async function checksFixture(source = null) {
   const projectId =
     source?.projectId ??
     s.insert('hostedProjects', {
+      key: 'synthetic',
+      name: 'Synthetic',
+      currentBackup: null,
+      revision: 0,
       owner: 'owner',
       visibility: 'private',
       sourceAuthority: { mode: 'server', epoch: 1 },

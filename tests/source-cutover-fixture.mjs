@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { backupFields, backupPreview } from './project-backup-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
@@ -12,11 +13,12 @@ export async function cutoverFixture(f) {
   Object.assign(f.main, main);
   f.patch('projectHostedChannels', f.mainId, { selection: canonicalPayload(main) });
   const backupId = f.insert('projectBackups', {
+    ...backupFields(),
     projectId: f.projectId,
     status: 'stored',
     validatedClosure: 1,
     digest: 'a'.repeat(64),
-    preview: { revision: 7, channels: [{ name: 'main', head: main.head }] },
+    preview: backupPreview({ revision: 7, channels: [{ name: 'main', head: main.head }] }),
   });
   f.patch('hostedProjects', f.projectId, {
     key: randomUUID(),

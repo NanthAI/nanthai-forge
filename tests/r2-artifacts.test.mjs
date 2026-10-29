@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { backupFields } from './project-backup-fixture.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -354,6 +355,7 @@ test('archive parts read migrated storage IDs and artifact references through th
   const artifact = s.tables.artifactBlobs.get(ref.slice(7)),
     storageId = await s.ctx.storage.store(new Blob([bytes]));
   await s.ctx.db.insert('projectBackups', {
+    ...backupFields(),
     projectId: 'project',
     ...pinOf(bytes),
     storageId,

@@ -38,6 +38,7 @@ function setup(t) {
     s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
     owner: 'owner',
+    name: 'Synthetic authority',
     key: randomUUID(),
     currentBackup: null,
     revision: 0,

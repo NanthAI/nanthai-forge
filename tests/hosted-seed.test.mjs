@@ -203,7 +203,8 @@ test('missing or mismatched page bytes, out-of-order pages, and incomplete finis
   });
   await assert.rejects(
     modules.projectHostedSeed.commitPage._handler(f.s.ctx, {
-      ...f.input,
+      projectId: f.input.projectId,
+      operationId: f.input.operationId,
       owner: 'owner',
       index: 0,
       previous: SEED_EMPTY,
@@ -212,7 +213,10 @@ test('missing or mismatched page bytes, out-of-order pages, and incomplete finis
     { code: 'INVALID_WORK_BACKUP' },
   );
   await assert.rejects(
-    modules.projectHostedSeedActions.finish._handler(f.s.ctx, f.input),
+    modules.projectHostedSeedActions.finish._handler(f.s.ctx, {
+      projectId: f.input.projectId,
+      operationId: f.input.operationId,
+    }),
     error => error.data?.code === 'INVALID_WORK_BACKUP',
   );
   assert.equal(f.s.tables.projectHostedChannels.size, 0);
@@ -300,7 +304,8 @@ test('a selected-source CAS race and a wrong final digest leave the seed staged'
     if (getFunctionName(ref).endsWith(':finish')) {
       await assert.rejects(
         modules.projectHostedSeed.commit._handler(f.s.ctx, {
-          ...f.input,
+          projectId: f.input.projectId,
+          operationId: f.input.operationId,
           owner: 'owner',
           mainDigest: '0'.repeat(64),
         }),
@@ -334,7 +339,8 @@ test('page validation rejects a hash-valid record with an invalid shape before c
   const pin = await upload(f.s, bytes);
   await assert.rejects(
     modules.projectHostedSeedActions.stage._handler(f.s.ctx, {
-      ...f.input,
+      projectId: f.input.projectId,
+      operationId: f.input.operationId,
       index: 0,
       previous: SEED_EMPTY,
       body: JSON.stringify([{ ...pin, kind: 'metadata', records: [record] }]),
@@ -361,7 +367,8 @@ test('another driver advancing the cursor skips its already committed pages', as
           if ((await f.exchange.missing([pin])).length)
             await f.exchange.upload(pin, readFileSync(locations[pin.sha256].path));
         return modules.projectHostedSeedActions.stage._handler(f.s.ctx, {
-          ...f.input,
+          projectId: f.input.projectId,
+          operationId: f.input.operationId,
           index: 1,
           previous: JSON.parse(result).chain,
           body: JSON.stringify(page),

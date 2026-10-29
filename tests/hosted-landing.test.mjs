@@ -287,6 +287,9 @@ test('current project access precedes replay and reads; device requests retain a
   await f.drain();
   assert.equal((await f.status(cs.id)).request.phase, 'terminal-failed');
   f.insert('cliCredentials', {
+    name: 'Synthetic',
+    tokenHash: 'synthetic',
+    issuedAt: Date.now(),
     credentialId: 'synthetic-device',
     owner: 'owner',
     scope: 'cli',

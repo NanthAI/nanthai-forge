@@ -24,6 +24,10 @@ const metrics = [];
 test('full/sparse checkout uses bounded indexed membership/signing with no Work or Channel-history reads', async t => {
   const s = lanesFixture(),
     projectId = s.insert('hostedProjects', {
+      key: 'synthetic',
+      name: 'Synthetic',
+      currentBackup: null,
+      revision: 0,
       owner: 'owner',
       visibility: 'private',
       sourceAuthority: { mode: 'server', epoch: 1 },

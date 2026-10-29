@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
+const allocatorRow = {
+  projectId: 'project',
+  digest: '0'.repeat(64),
+  size: 0,
+  nonce: 'snapshot-allocator',
+  removed: false,
+};
+
 const copyTask = ({ fn, ...task }) => ({ fn, ...structuredClone(task) });
 
 /** Snapshot data, never the harness functions that close over mutable state. */
 export async function hostedSnapshot(s) {
   // Read the harness's private allocator through one disposable setup row. Live
   // IDs alone cannot reveal IDs already deleted but retained in cleanup inputs.
-  const probe = await s.ctx.db.insert('projectObjects', {});
+  const probe = await s.ctx.db.insert('projectObjects', allocatorRow);
   await s.ctx.db.delete(probe);
   const nextId = Number(/^row-(\d+)$/.exec(probe)[1]) + 1;
   return {
@@ -26,7 +34,7 @@ export async function restoreHosted(s, snapshot) {
   // The harness uses one monotonic sequence for row and storage IDs. Advance its
   // private allocator before restoring rows so new writes cannot overwrite a seed ID.
   const next = snapshot.nextId;
-  for (let i = 0; i < next; i++) await s.ctx.db.insert('projectObjects', {});
+  for (let i = 0; i < next; i++) await s.ctx.db.insert('projectObjects', allocatorRow);
   Object.assign(s.tables, structuredClone(snapshot.tables));
   for (const [id, file] of snapshot.files)
     s.files.set(id, { ...file, metadata: structuredClone(file.metadata) });

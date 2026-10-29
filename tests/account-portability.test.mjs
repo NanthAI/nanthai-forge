@@ -63,6 +63,7 @@ test('full paged ownership inventory omits all other owners, credential/source b
     row('secret', {
       owner: 'owner',
       name: 'own-secret',
+      operationId: randomUUID(),
       repository: 'x/y',
       ref: 'main',
       version: 1,
@@ -75,6 +76,7 @@ test('full paged ownership inventory omits all other owners, credential/source b
     row('hidden', {
       owner: 'other',
       name: 'hidden-secret-name',
+      operationId: randomUUID(),
       repository: 'hidden/repo',
       ref: 'main',
       version: 1,
@@ -136,7 +138,7 @@ test('original selection/retry is stable; personal deletion preserves changed an
     importId: 'own',
     name: 'selected',
     operationId: creation,
-    route: { view: 'map' },
+    route: { view: 'map', state: 'synthetic', file: '', line: 0 },
   });
   const selected = await inventory(f, 'view'),
     r = await begin(f, selected);
@@ -150,7 +152,7 @@ test('original selection/retry is stable; personal deletion preserves changed an
     importId: 'own',
     name: 'later',
     operationId: randomUUID(),
-    route: { view: 'map' },
+    route: { view: 'map', state: 'synthetic', file: '', line: 0 },
   });
   assert.equal((await advance(f, r)).stage, 'completed');
   assert.ok(!f.tables.savedViews.has(id));
@@ -162,7 +164,7 @@ test('original selection/retry is stable; personal deletion preserves changed an
         importId: 'own',
         name: 'selected',
         operationId: creation,
-        route: { view: 'map' },
+        route: { view: 'map', state: 'synthetic', file: '', line: 0 },
       }),
     e => e.code === 'ACCOUNT_UNAVAILABLE',
   );
@@ -186,6 +188,7 @@ test('incoming self-leave keeps other grants/shared source and never exposes hid
     row('hidden', {
       owner: 'other',
       name: 'invisible',
+      operationId: randomUUID(),
       repository: 'private/name',
       ref: 'main',
       version: 1,
@@ -252,6 +255,7 @@ test('changed incoming grants are preserved; owned creator memberships never sel
     row('hidden', {
       owner: 'other',
       name: 'invisible',
+      operationId: randomUUID(),
       repository: 'x/y',
       ref: 'main',
       version: 1,
@@ -319,7 +323,7 @@ test('selected native project and SecretObject retain exact child receipts throu
   const f = state();
   f.tables.hostedProjects.set(
     'project',
-    row('project', { owner: 'owner', name: 'synthetic', key: 'synthetic', revision: 1 }),
+    row('project', { owner: 'owner', name: 'synthetic', key: 'synthetic', currentBackup: null, revision: 1 }),
   );
   f.tables.secretObjects.set(
     'secret',
@@ -399,7 +403,22 @@ test('bounded operation pages finish >40 preferences without touching another ow
 
 test('self-leave covers Zone, team and native project relationships without erasing other Work or access', async () => {
   const f = state([job(), { ...job('foreign'), owner: 'other' }]);
-  f.tables.sourceZones.set('zone', row('zone', { owner: 'other', importId: 'foreign', revision: 2 }));
+  f.tables.sourceZones.set(
+    'zone',
+    row('zone', {
+      owner: 'other',
+      importId: 'foreign',
+      revision: 2,
+      name: 'Shared Zone',
+      operationId: randomUUID(),
+      request: 'synthetic',
+      artifactKey: 'saved',
+      sourceId: 'synthetic',
+      gitHead: 'synthetic',
+      files: [],
+      enabled: true,
+    }),
+  );
   f.tables.zoneReaders.set('zr', row('zr', { zoneId: 'zone', reader: 'owner' }));
   f.tables.zoneReaders.set('zr-other', row('zr-other', { zoneId: 'zone', reader: 'someone' }));
   f.tables.teams.set(
@@ -410,7 +429,13 @@ test('self-leave covers Zone, team and native project relationships without eras
   f.tables.teamMembers.set('tm-other', row('tm-other', { teamId: 'foreign-team', member: 'someone' }));
   f.tables.hostedProjects.set(
     'foreign-project',
-    row('foreign-project', { owner: 'other', name: 'shared', key: 'shared', revision: 2 }),
+    row('foreign-project', {
+      owner: 'other',
+      name: 'shared',
+      key: 'shared',
+      currentBackup: null,
+      revision: 2,
+    }),
   );
   f.tables.projectContributors.set('pc', row('pc', { projectId: 'foreign-project', contributor: 'owner' }));
   f.tables.projectContributors.set(

@@ -19,6 +19,7 @@ async function setup(count = 10050) {
   const s = fixture();
   s.tables.hostedProjects.get('project').work = {
     backupId: 'prior',
+    operationId: 'initial',
     revision: 1,
     initialRevision: 1,
     generationId: 'public',
@@ -280,6 +281,14 @@ test('final cursor detachment drains thousands of output pages in bounded partit
     store = await import(moduleUrl('../convex/projectReturnMetadataStore.ts'));
   s.tables.projectWorkGenerations.set('private', {
     _id: 'private',
+    _creationTime: 1,
+    projectId: 'project',
+    backupId: 'prior',
+    revision: 1,
+    initialRevision: 1,
+    status: 'ready',
+    nextBatch: 1,
+    metadata: '{}',
     returnMetadataSnapshot: JSON.stringify({
       key: 'snapshot',
       cleanup: Array.from({ length: 5000 }, (_, i) => `output-${i}`),

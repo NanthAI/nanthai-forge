@@ -22,6 +22,7 @@ function setup() {
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
     owner: 'owner',
+    name: 'Synthetic authority',
     key: randomUUID(),
     currentBackup: null,
     revision: 0,
@@ -93,9 +94,20 @@ test('old owner completion is refused after switch and remains stale after rollb
     operationId: randomUUID(),
     receipt: JSON.stringify({ status: 'rejected', reason: 'synthetic' }),
   };
-  const requestId = s.insert('ownerAcceptanceRequests', { ...input, receipt: null, state: 'requested' });
+  const request = {
+    viewId: 'view',
+    head: 'a'.repeat(64),
+    expectedMain: null,
+    actorKind: 'person',
+    channel: 'main',
+    requester: 'owner',
+    createdAt: 1,
+    receipt: null,
+    state: 'requested',
+  };
+  const requestId = s.insert('ownerAcceptanceRequests', { ...input, ...request });
   const another = { ...input, operationId: randomUUID() };
-  const completed = s.insert('ownerAcceptanceRequests', { ...another, receipt: null, state: 'requested' });
+  const completed = s.insert('ownerAcceptanceRequests', { ...another, ...request });
   await s.call('complete-before', owner.complete, another);
   assert.equal(s.tables.ownerAcceptanceRequests.get(completed).state, 'rejected');
   assert.equal(s.counts.at(-1).touched.filter(x => x === 'hostedProjects').length, 1);
@@ -236,14 +248,21 @@ test('transition reports indexed nonterminal owner entries and batches without r
     backupId: 'backup',
     format: HOSTED_WORK_INDEX_FORMAT,
     status: 'ready',
+    revision: 0,
+    initialRevision: 0,
+    nextBatch: 0,
+    metadata: '{}',
   });
-  s.patch('hostedProjects', s.projectId, { work: { generationId, backupId: 'backup' } });
+  s.patch('hostedProjects', s.projectId, {
+    work: { generationId, backupId: 'backup', operationId: 'seed', initialRevision: 0, revision: 0 },
+  });
   const entry = s.insert('projectWorkRecords', {
     projectId: s.projectId,
     generationId,
     collection: 'landingEntries',
     key: 'waiting-entry',
     status: 'awaiting-review',
+    parent: '',
     position: 0,
     value: '{}',
   });
@@ -253,6 +272,7 @@ test('transition reports indexed nonterminal owner entries and batches without r
     collection: 'landingBatches',
     key: 'checking-batch',
     status: 'checking',
+    parent: '',
     position: 0,
     value: '{}',
   });
@@ -263,6 +283,7 @@ test('transition reports indexed nonterminal owner entries and batches without r
       collection: 'landingEntries',
       key: `done-${i}`,
       status: 'accepted',
+      parent: '',
       position: i + 1,
       value: '{}',
     });

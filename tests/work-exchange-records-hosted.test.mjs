@@ -645,6 +645,7 @@ test('record return supersedes a step-zero compatibility stage and bounded clean
     c = await candidate(f);
   const stage = {
     _id: 'abandoned',
+    _creationTime: 1,
     projectId: 'project',
     backupId: c.input.backupId,
     revision: c.next.manifest.revision + 1,
@@ -661,6 +662,7 @@ test('record return supersedes a step-zero compatibility stage and bounded clean
   for (let i = 0; i < 1900; i++)
     f.s.tables.projectReturnPages.set(`orphan-${i}`, {
       _id: `orphan-${i}`,
+      _creationTime: 1,
       projectId: 'project',
       partitionId: stage._id,
       key: i < 900 ? 'unreferenced-output' : 'partial',

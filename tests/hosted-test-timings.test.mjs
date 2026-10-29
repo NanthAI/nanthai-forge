@@ -54,7 +54,13 @@ test('hosted history uses the native EWMA, ignores malformed observations and bo
 
 test('600-file completed hosted results train one indexed document inside the result transaction, with no extra calls', async t => {
   const s = lanesFixture(),
-    projectId = s.insert('hostedProjects', { owner: 'synthetic' });
+    projectId = s.insert('hostedProjects', {
+      owner: 'synthetic',
+      key: randomUUID(),
+      name: 'Synthetic timing history',
+      currentBackup: null,
+      revision: 0,
+    });
   const run = {
     id: randomUUID(),
     status: 'passed',

@@ -28,6 +28,10 @@ function fixture() {
     scheduled = [],
     blobs = new Map();
   const projectId = f.insert('hostedProjects', {
+    key: 'synthetic',
+    name: 'Synthetic',
+    currentBackup: null,
+    revision: 0,
     owner: 'owner',
     sourceAuthority: { mode: 'server', epoch: 1 },
     autonomyPolicy: {

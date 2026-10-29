@@ -396,6 +396,7 @@ test('hosted cleanup dry-run/apply deletes Convex and R2 log objects, preserves 
   const root = await upload(s, Buffer.from(JSON.stringify(manifest)));
   s.tables.projectBackups.set('backup', {
     _id: 'backup',
+    _creationTime: 1,
     projectId: 'project',
     transport: 'objects',
     digest: root.sha256,
@@ -573,6 +574,7 @@ for (const shared of [false, true])
       original = { stream: descriptor, object, sequence: 0, offset: 0 };
     s.tables.projectHostedOutputStreams.set('stream', {
       _id: 'stream',
+      _creationTime: 1,
       projectId: 'project',
       runId,
       streamId,
@@ -584,6 +586,7 @@ for (const shared of [false, true])
     });
     s.tables.projectHostedOutputChunks.set('chunk', {
       _id: 'chunk',
+      _creationTime: 1,
       projectId: 'project',
       runId,
       streamId,
@@ -595,12 +598,14 @@ for (const shared of [false, true])
       s.tables.projectHostedOutputStreams.set('artifact', {
         ...s.tables.projectHostedOutputStreams.get('stream'),
         _id: 'artifact',
+        _creationTime: 1,
         streamId: 'artifact',
         descriptor: JSON.stringify({ ...descriptor, stream: 'artifact', name: 'build.log' }),
       });
       s.tables.projectHostedOutputChunks.set('artifact-chunk', {
         ...s.tables.projectHostedOutputChunks.get('chunk'),
         _id: 'artifact-chunk',
+        _creationTime: 1,
         streamId: 'artifact',
         value: JSON.stringify({
           ...original,

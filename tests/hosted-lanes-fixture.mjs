@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
+import { checkArgs, checkDocument, insertedDocument, updatedDocument } from './convex-args.mjs';
+import { validateContext } from './convex-context.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const bytes = value => Buffer.byteLength(JSON.stringify(value));
 const encoded = rows => JSON.stringify(rows);
@@ -15,10 +17,11 @@ export function lanesFixture() {
     decorate;
   const insert = (table, value) => {
     const _id = `${table}-${++serial}`;
-    tables[table].set(_id, { ...value, _id, _creationTime: serial });
+    tables[table].set(_id, insertedDocument(schema, table, value, _id, serial));
     return _id;
   };
   async function call(name, fn, input, actor = 'owner') {
+    if (fn.exportArgs) checkArgs(fn, input, name);
     let retries = 0;
     for (;;) {
       const baseline = structuredClone(tables),
@@ -49,6 +52,7 @@ export function lanesFixture() {
         return structuredClone(rows);
       };
       const put = (table, id, row) => {
+        row = checkDocument(schema, table, row);
         assert(bytes(row) < 1024 * 1024, `${name}: document size`);
         local[table].set(id, structuredClone(row));
         writes.push([table, id, structuredClone(row)]);
@@ -58,7 +62,7 @@ export function lanesFixture() {
         assert(meter.writes <= 8192 && meter.writeBytes < 16 * 1024 * 1024, `${name}: Convex writes`);
       };
       const locate = id => Object.keys(local).find(table => local[table].has(id));
-      const ctx = {
+      const ctx = validateContext({
         auth: {
           getUserIdentity: async () =>
             actor === null ? null : typeof actor === 'object' ? actor : { subject: actor },
@@ -75,17 +79,17 @@ export function lanesFixture() {
           },
           insert: async (table, value) => {
             const id = `${table}-${++serial}`;
-            put(table, id, { ...value, _id: id, _creationTime: serial });
+            put(table, id, insertedDocument(schema, table, value, id, serial));
             return id;
           },
           replace: async (id, value) => {
             const table = locate(id),
               old = local[table].get(id);
-            put(table, id, { ...value, _id: id, _creationTime: old._creationTime });
+            put(table, id, updatedDocument(old, value, true));
           },
           patch: async (id, value) => {
             const table = locate(id);
-            put(table, id, { ...local[table].get(id), ...value });
+            put(table, id, updatedDocument(local[table].get(id), value));
           },
           query: table => {
             let match,
@@ -184,7 +188,7 @@ export function lanesFixture() {
             return q;
           },
         },
-      };
+      });
       try {
         if (decorate) await decorate(ctx, input, name);
         const result = await fn._handler(ctx, input);
@@ -211,7 +215,7 @@ export function lanesFixture() {
       decorate = fn;
     },
     patch(table, id, value) {
-      tables[table].set(id, { ...tables[table].get(id), ...value });
+      tables[table].set(id, checkDocument(schema, table, updatedDocument(tables[table].get(id), value)));
     },
   };
 }

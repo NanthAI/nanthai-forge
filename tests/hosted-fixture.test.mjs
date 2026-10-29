@@ -6,7 +6,10 @@ import assert from 'node:assert/strict';
 import { makeFunctionReference } from 'convex/server';
 import { state } from './hosted-fixture.mjs';
 
-const project = (owner, key) => ({ owner, key, name: key });
+const scheduledRef = makeFunctionReference('projectActorNames:remember');
+const scheduledArgs = { projectId: 'project', reader: 'owner', labels: [] };
+
+const project = (owner, key) => ({ owner, key, name: key, currentBackup: null, revision: 0 });
 
 test('unique() rejects several matches instead of returning the first', async () => {
   const { ctx } = state([]);
@@ -54,7 +57,7 @@ test('a failed mutation leaves no writes or scheduled work behind', async () => 
     s.transaction(async () => {
       await ctx.db.insert('hostedProjects', project('owner', 'new'));
       await ctx.db.patch(kept, { name: 'changed' });
-      await ctx.scheduler.runAfter(0, 'later', {});
+      await ctx.scheduler.runAfter(0, scheduledRef, scheduledArgs);
       throw new Error('fails after writing');
     }),
     /fails after writing/,
@@ -82,14 +85,14 @@ test('a successful nested mutation is undone when the outer transaction fails', 
   const s = state([]),
     { ctx } = s,
     kept = await ctx.db.insert('hostedProjects', project('owner', 'kept')),
-    task = await ctx.scheduler.runAt(100, 'existing', {}),
+    task = await ctx.scheduler.runAt(100, scheduledRef, scheduledArgs),
     before = await ctx.db.get(kept);
   await assert.rejects(
     s.transaction(async () => {
       await s.transaction(async () => {
         await ctx.db.replace(kept, project('owner', 'replacement'));
         await ctx.scheduler.cancel(task);
-        await ctx.scheduler.runAt(200, 'new', {});
+        await ctx.scheduler.runAt(200, scheduledRef, scheduledArgs);
       });
       await ctx.db.delete(kept);
       throw new Error('outer failed');
@@ -125,7 +128,10 @@ test('query results stay ordered and detached when only returned pages are clone
   for (const keysetPaging of [false, true]) {
     const { ctx } = state([], { keysetPaging });
     for (const key of ['c', 'a', 'b'])
-      await ctx.db.insert('hostedProjects', { ...project('owner', key), nested: { value: key } });
+      await ctx.db.insert('hostedProjects', {
+        ...project('owner', key),
+        nameChange: { operationId: key, expectedRevision: 0, name: key },
+      });
     const query = () =>
       ctx.db.query('hostedProjects').withIndex('by_owner_and_key', q => q.eq('owner', 'owner'));
     const taken = await query().order('desc').take(1);
@@ -133,14 +139,14 @@ test('query results stay ordered and detached when only returned pages are clone
       taken.map(row => row.key),
       ['c'],
     );
-    taken[0].nested.value = 'changed';
+    taken[0].nameChange.name = 'changed';
     const first = await query().paginate({ cursor: null, numItems: 2 });
     assert.deepEqual(
       first.page.map(row => row.key),
       ['a', 'b'],
     );
     assert.equal(first.isDone, false);
-    first.page[0].nested.value = 'changed';
+    first.page[0].nameChange.name = 'changed';
     const last = await query().paginate({ cursor: first.continueCursor, numItems: 2 });
     assert.deepEqual(
       last.page.map(row => row.key),
@@ -151,13 +157,13 @@ test('query results stay ordered and detached when only returned pages are clone
       .query('hostedProjects')
       .withIndex('by_owner_and_key', q => q.eq('owner', 'owner').eq('key', 'b'))
       .unique();
-    unique.nested.value = 'changed';
+    unique.nameChange.name = 'changed';
     for await (const row of query()) {
-      assert.equal(row.nested.value, row.key);
-      row.nested.value = 'changed';
+      assert.equal(row.nameChange.name, row.key);
+      row.nameChange.name = 'changed';
     }
     assert.deepEqual(
-      (await query().take(3)).map(row => row.nested.value),
+      (await query().take(3)).map(row => row.nameChange.name),
       ['a', 'b', 'c'],
     );
   }

@@ -154,7 +154,11 @@ test('owner rows match hosted parent, merge ancestry, View provenance and tree c
   const { state } = await import('./hosted-fixture.mjs');
   const hosted = state([]);
   for (const row of rows)
-    await hosted.ctx.db.insert('projectWorkRecords', { ...row, generationId: 'generation' });
+    await hosted.ctx.db.insert('projectWorkRecords', {
+      ...row,
+      projectId: 'project',
+      generationId: 'generation',
+    });
   const expectedAncestors = new Set(
     ancestryEntries(f.head, new Map([...f.states].map(([h, s]) => [h, s.parents])))
       .filter(r => r.collection === 'sourceAncestryChunk')

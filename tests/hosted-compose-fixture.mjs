@@ -22,6 +22,10 @@ export async function composeFixture() {
     objects = new Map(),
     scheduled = [];
   const projectId = s.insert('hostedProjects', {
+    key: 'synthetic',
+    name: 'Synthetic',
+    currentBackup: null,
+    revision: 0,
     owner: 'owner',
     visibility: 'private',
     sourceAuthority: { mode: 'server', epoch: 1 },
@@ -32,6 +36,7 @@ export async function composeFixture() {
       return await s.call(
         name,
         {
+          exportArgs: fn.exportArgs,
           _handler: (ctx, input) => {
             ctx.scheduler = {
               runAfter: async (_delay, ref, args) => {

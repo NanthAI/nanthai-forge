@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { backupFields, proposalFields } from './project-backup-fixture.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -70,6 +71,7 @@ test('pages of 100 migrate objects, checkpoint roots, recipe leaves and archives
     storageId = await h.s.ctx.storage.store(new Blob([bytes]));
   for (const table of ['projectBackups', 'projectProposals'])
     h.s.tables[table].set(table, {
+      ...(table === 'projectBackups' ? backupFields() : proposalFields()),
       _id: table,
       _creationTime: 1,
       projectId: 'project',
@@ -79,6 +81,7 @@ test('pages of 100 migrate objects, checkpoint roots, recipe leaves and archives
       size: bytes.length,
     });
   h.s.tables.projectBackups.set('original', {
+    ...backupFields(),
     _id: 'original',
     _creationTime: 2,
     projectId: 'project',
@@ -384,6 +387,7 @@ test('archived bytes resolve through R2 after migration and current authority is
     bytes = Buffer.from('old backup'),
     storageId = await h.s.ctx.storage.store(new Blob([bytes]));
   h.s.tables.projectBackups.set('backup', {
+    ...backupFields(),
     _id: 'backup',
     _creationTime: 1,
     projectId: 'project',
@@ -492,11 +496,12 @@ test('full digest mode downloads every row across pages and all four kinds with 
       storageId = await h.s.ctx.storage.store(new Blob([bytes]));
     const source = { storageId, digest: digest(bytes), size: bytes.length };
     h.s.tables[table].set(kind, {
+      ...(table === 'projectBackups' ? backupFields() : proposalFields()),
       _id: kind,
       _creationTime: 1,
       projectId: 'project',
       status: 'stored',
-      ...(kind === 'archives' ? { archiveReceipt: source } : source),
+      ...(kind === 'archives' ? { archiveReceipt: { ...source, operationId: 'archive', at: 0 } } : source),
     });
   }
   await runR2Backfill(h.transport, h.options);

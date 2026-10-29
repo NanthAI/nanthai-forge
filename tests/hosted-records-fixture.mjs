@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
+import { checkArgs, checkDocument, insertedDocument, updatedDocument } from './convex-args.mjs';
+import { validateContext } from './convex-context.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const size = value => (value === null ? 0 : Buffer.byteLength(JSON.stringify(value)));
 
@@ -52,6 +54,7 @@ export function recordsFixture() {
     }
   };
   const write = (id, table, value) => {
+    value = checkDocument(schema, table, value);
     const old = tables[table].get(id);
     undo?.push(() => {
       if (old) tables[table].set(id, old);
@@ -71,7 +74,7 @@ export function recordsFixture() {
     locations.set(id, table);
     updateIndexes(table, old, tables[table].get(id));
   };
-  const ctx = {
+  const ctx = validateContext({
     db: {
       get: async id => {
         range();
@@ -79,18 +82,18 @@ export function recordsFixture() {
       },
       insert: async (table, row) => {
         const id = `record-${serial++}`;
-        write(id, table, { ...row, _id: id, _creationTime: serial });
+        write(id, table, insertedDocument(schema, table, row, id, serial));
         return id;
       },
       replace: async (id, row) => {
         const table = locations.get(id),
           old = tables[table].get(id);
-        write(id, table, { ...row, _id: id, _creationTime: old._creationTime });
+        write(id, table, updatedDocument(old, row, true));
       },
       patch: async (id, patch) => {
         const table = locations.get(id),
           old = tables[table].get(id);
-        write(id, table, { ...old, ...patch });
+        write(id, table, updatedDocument(old, patch));
       },
       query: table => {
         range();
@@ -166,7 +169,7 @@ export function recordsFixture() {
         return q;
       },
     },
-  };
+  });
   const run = async (name, action) => {
     assert.equal(meter, null);
     meter = { name, ranges: 0, documents: 0, readBytes: 0, writes: 0, writeBytes: 0 };
@@ -182,7 +185,11 @@ export function recordsFixture() {
       undo = null;
     }
   };
-  const call = (name, fn, input) => run(name, () => fn._handler(ctx, input));
+  const call = (name, fn, input) =>
+    run(name, () => {
+      if (fn.exportArgs) checkArgs(fn, input, name);
+      return fn._handler(ctx, input);
+    });
   return {
     ctx,
     tables,
@@ -191,6 +198,10 @@ export function recordsFixture() {
     call,
     async setup() {
       const projectId = await ctx.db.insert('hostedProjects', {
+        key: 'synthetic',
+        name: 'Synthetic',
+        currentBackup: null,
+        revision: 0,
         owner: 'owner',
         visibility: 'private',
         sourceAuthority: { mode: 'server-shadow', epoch: 1 },

@@ -21,6 +21,7 @@ async function removedProject() {
   });
   s.tables.projectObjects.set('object', {
     _id: 'object',
+    _creationTime: 1,
     projectId: 'project',
     nonce,
     digest: hash(bytes),
@@ -69,6 +70,7 @@ test('late-object cleanup preserves foreign, differently bound and referenced co
   const referenced = await s.ctx.storage.store(new Blob([s.bytes], { type: s.contentType }));
   s.tables.projectBackups.set('foreign-backup', {
     _id: 'foreign-backup',
+    _creationTime: 1,
     projectId: 'other',
     storageId: referenced,
   });
@@ -78,6 +80,7 @@ test('late-object cleanup preserves foreign, differently bound and referenced co
   );
   s.tables.projectObjects.set('other-object', {
     _id: 'other-object',
+    _creationTime: 1,
     projectId: 'other',
     nonce: 'other-nonce',
     digest: hash(s.bytes),
@@ -96,6 +99,7 @@ test('archive cleanup receipt continuation reaches the late-object sweep', async
   const s = await removedProject();
   s.tables.projectUploadCleanup.set('binding', {
     _id: 'binding',
+    _creationTime: 1,
     projectId: 'project',
     owner: 'owner',
     actor: 'owner',

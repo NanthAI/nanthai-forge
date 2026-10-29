@@ -48,7 +48,12 @@ for (const pin of ['receipt', 'head', 'backup', 'revision', 'journal'])
     if (pin === 'backup')
       f.patch('projectBackups', f.cutoverRequest.pins.backupId, { digest: 'c'.repeat(64) });
     if (pin === 'revision') f.patch('hostedProjects', f.projectId, { revision: 2 });
-    if (pin === 'journal') f.insert('projectWorkHeads', { projectId: f.projectId, revision: 1 });
+    if (pin === 'journal')
+      f.insert('projectWorkHeads', {
+        projectId: f.projectId,
+        backupId: f.cutoverRequest.pins.backupId,
+        revision: 1,
+      });
     await assert.rejects(f.applyCutover(), code('CHANNEL_CHANGED'));
     assert.equal(f.tables.projectSourceCutovers.size, 0);
     assert.equal(f.tables.hostedProjects.get(f.projectId).sourceAuthority.mode, 'native-owner');
@@ -59,7 +64,19 @@ for (const phase of ['queued', 'checking', 'ready'])
     const f = await setup();
     await f.applyCutover();
     const reverse = { operationId: randomUUID(), mode: 'native-owner', pins: await f.pins() };
-    f.insert('projectHostedLandingRequests', { projectId: f.projectId, channel: 'main', sequence: 1, phase });
+    f.insert('projectHostedLandingRequests', {
+      projectId: f.projectId,
+      channel: 'main',
+      sequence: 1,
+      phase,
+      submissionId: 'submission',
+      operationId: randomUUID(),
+      actor: 'owner',
+      runnable: false,
+      runId: null,
+      attemptId: 'attempt',
+      value: '{}',
+    });
     await assert.rejects(f.applyCutover(reverse), code('SOURCE_AUTHORITY_DRAIN_REQUIRED'));
     assert.equal(f.tables.hostedProjects.get(f.projectId).sourceAuthority.mode, 'server');
     assert.equal(f.tables.projectHostedLandingRequests.size, 1);

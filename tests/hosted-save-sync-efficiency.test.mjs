@@ -68,14 +68,36 @@ function dogfood(s) {
         kind,
         key: `unselected-${kind}-${i}`,
         version: 0,
+        parent: '',
+        status: 'unselected',
         recordId: `unselected-body-${i}`,
       });
   for (let i = 0; i < 575; i++)
-    s.insert('projectHostedAcceptances', { projectId: s.projectId, id: `unselected-${i}` });
+    s.insert('projectHostedAcceptances', {
+      projectId: s.projectId,
+      receiptId: `unselected-${i}`,
+      submissionId: 'unselected',
+      attemptId: 'unselected',
+      sequence: i,
+      value: '{}',
+    });
   for (let i = 0; i < 2500; i++)
-    s.insert('projectHostedStates', { projectId: s.projectId, head: `unselected-${i}` });
+    s.insert('projectHostedStates', {
+      projectId: s.projectId,
+      head: `unselected-${i}`,
+      size: 0,
+      input: '{}',
+      output: '{}',
+      jobId: 'unselected',
+    });
   for (let i = 0; i < 32000; i++)
-    s.insert('projectObjects', { projectId: s.projectId, digest: `unselected-${i}`, size: 0 });
+    s.insert('projectObjects', {
+      projectId: s.projectId,
+      digest: `unselected-${i}`,
+      size: 0,
+      nonce: 'synthetic',
+      removed: false,
+    });
 }
 async function changedSave(t, legacy, scale = false, provider = 'modal') {
   environment(t);

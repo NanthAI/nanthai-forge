@@ -293,6 +293,9 @@ test('current access and actor kind precede receipt replay; a device cannot acce
   const f = await acceptanceFixture(),
     { state } = await f.ready();
   f.insert('cliCredentials', {
+    name: 'Synthetic',
+    tokenHash: 'synthetic',
+    issuedAt: Date.now(),
     credentialId: 'synthetic-device',
     owner: 'owner',
     scope: 'cli',

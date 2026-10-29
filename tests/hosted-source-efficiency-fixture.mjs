@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict';
 import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { validateContext } from './convex-context.mjs';
+import { checkArgs } from './convex-args.mjs';
 import { digest } from '../dist/hash.js';
 import { convexStoreBlob } from './convex-storage-fake.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
@@ -83,6 +85,7 @@ export function controls(t, s) {
     calls.push(name);
     const [file, method] = name.split(':');
     const fn = modules[file][method];
+    checkArgs(fn, args, name);
     if (file === 'projectModalSource' || file === 'projectConvexSource') return fn._handler(context, args);
     if (
       ['commit', 'commitBatch', 'complete'].includes(method) &&
@@ -97,12 +100,12 @@ export function controls(t, s) {
       return fn._handler(context, args);
     return s.transaction(name, fn, args);
   };
-  const context = {
+  const context = validateContext({
     storage,
     auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
     runQuery: (ref, args) => invoke(getFunctionName(ref), args),
     runMutation: (ref, args) => invoke(getFunctionName(ref), args),
-  };
+  });
   s.decorateContext(ctx => {
     ctx.storage = storage;
     ctx.db.system = { get: async () => ({ state: { kind: 'pending' } }) };

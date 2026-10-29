@@ -184,7 +184,10 @@ test('hosted journal reads detect a moving head and retry to a consistent snapsh
   const query = s.ctx.runQuery;
   let reads = 0,
     moved = false;
-  t.mock.method(s.ctx, 'runQuery', async (ref, input) => {
+  t.after(() => {
+    s.ctx.runQuery = query;
+  });
+  s.ctx.runQuery = async (ref, input) => {
     const result = await query(ref, input);
     if (getFunctionName(ref) === 'projectWork:get' && ++reads === 2) {
       moved = true;
@@ -193,7 +196,7 @@ test('hosted journal reads detect a moving head and retry to a consistent snapsh
       return { ...result, work: { ...result.work, revision: result.work.revision + 1 } };
     }
     return result;
-  });
+  };
   const operationId = randomUUID();
   const json = await retryExchange(
     'Work journal read',

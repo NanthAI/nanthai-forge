@@ -15,6 +15,8 @@ import { createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { checkDocument, insertedDocument, updatedDocument } from './convex-args.mjs';
+import { validateContext } from './convex-context.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
 const importStorage = await import(moduleUrl('../convex/importStorage.ts'));
@@ -196,7 +198,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     });
     return entry.id;
   };
-  const ctx = {
+  const ctx = validateContext({
     auth: { getUserIdentity: async () => (caller ? { subject: caller } : null) },
     db: {
       normalizeId: (table, id) => (find(id) && !tables[table].has(id) ? null : id),
@@ -222,26 +224,35 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
       },
       insert: async (table, row) => {
         const id = `row-${count++}`;
-        tables[table].set(id, {
-          ...row,
-          _id: id,
-          _creationTime: (creationClock = Math.max(Date.now(), creationClock + 0.01)),
-        });
+        tables[table].set(
+          id,
+          insertedDocument(
+            schema,
+            table,
+            row,
+            id,
+            (creationClock = Math.max(Date.now(), creationClock + 0.01)),
+          ),
+        );
         remember(() => tables[table].delete(id));
         return id;
       },
       replace: async (id, values) => {
+        const table = Object.keys(tables).find(table => tables[table].has(id));
+        const row = checkDocument(schema, table, updatedDocument(find(id), values, true));
         restorable(id);
-        const row = find(id);
-        for (const key of Object.keys(row)) if (!key.startsWith('_')) delete row[key];
-        Object.assign(row, values);
+        const current = find(id);
+        for (const key of Object.keys(current)) delete current[key];
+        Object.assign(current, row);
       },
       patch: async (id, values) => {
+        const table = Object.keys(tables).find(table => tables[table].has(id));
+        const row = checkDocument(schema, table, updatedDocument(find(id), values));
         restorable(id);
-        const row = find(id);
+        const current = find(id);
         for (const [key, value] of Object.entries(values)) {
-          if (value === undefined) delete row[key];
-          else row[key] = value;
+          if (value === undefined) delete current[key];
+          else current[key] = row[key];
         }
       },
       delete: async id => {
@@ -435,7 +446,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
         files.delete(id);
       },
     },
-  };
+  });
   const modules = {
     ...checkLogModules,
     projectR2Backfill,

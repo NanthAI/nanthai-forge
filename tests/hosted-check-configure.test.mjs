@@ -43,6 +43,10 @@ const command = {
 function project({ verify = true } = {}) {
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
+    key: 'synthetic',
+    name: 'Synthetic',
+    currentBackup: null,
+    revision: 0,
     owner: 'owner',
     visibility: 'private',
     sourceAuthority: { mode: 'server', epoch: 1 },
@@ -53,10 +57,15 @@ function project({ verify = true } = {}) {
     projectId,
     backupId: 'backup',
     format: 11,
+    revision: 0,
+    initialRevision: 0,
+    nextBatch: 0,
     status: 'ready',
     metadata: JSON.stringify({ schema: 24 }),
   });
-  s.patch('hostedProjects', projectId, { work: { generationId, backupId: 'backup' } });
+  s.patch('hostedProjects', projectId, {
+    work: { generationId, backupId: 'backup', operationId: 'synthetic', initialRevision: 0, revision: 0 },
+  });
   let position = 0;
   const put = (collection, key, value) =>
     s.insert('projectWorkRecords', {

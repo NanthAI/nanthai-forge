@@ -352,7 +352,12 @@ test('streamed apply advances one chunk/reference page, retains split evidence a
       seal: null,
       descriptor: JSON.stringify(descriptor),
     };
-  s.tables.projectHostedOutputStreams.set('stream', { _id: 'stream', projectId: 'project', ...stream });
+  s.tables.projectHostedOutputStreams.set('stream', {
+    _id: 'stream',
+    _creationTime: 1,
+    projectId: 'project',
+    ...stream,
+  });
   const chunks = [raw.subarray(0, 38), raw.subarray(38)],
     content = new Map();
   let offset = 0;
@@ -366,6 +371,7 @@ test('streamed apply advances one chunk/reference page, retains split evidence a
     offset += bytes.length;
     s.tables.projectHostedOutputChunks.set(`chunk-${sequence}`, {
       _id: `chunk-${sequence}`,
+      _creationTime: 1,
       projectId: 'project',
       runId: stream.runId,
       streamId: stream.streamId,
@@ -576,6 +582,7 @@ test('E3 dogfood State closure parses 2,500 3,000-file States once within 15,000
     sizes.push(bytes.length);
     s.tables.projectObjects.set(`state-${i}`, {
       _id: `state-${i}`,
+      _creationTime: 1,
       projectId: 'project',
       digest: head,
       size: bytes.length,
@@ -703,12 +710,14 @@ test('E3 output cleanup indexes legacy chunks once and rechecks 1,000 candidates
   };
   s.tables.projectHostedOutputStreams.set('raw', {
     _id: 'raw',
+    _creationTime: 1,
     projectId: 'project',
     ...stream,
     retired: true,
   });
   s.tables.projectHostedOutputStreams.set('artifact', {
     _id: 'artifact',
+    _creationTime: 1,
     projectId: 'project',
     ...stream,
     streamId: 'artifact',
@@ -722,6 +731,7 @@ test('E3 output cleanup indexes legacy chunks once and rechecks 1,000 candidates
     const pin = raw || sequence < 50 ? rawPins[sequence] : digest(`E3 artifact ${sequence}`);
     s.tables.projectHostedOutputChunks.set(`chunk-${i}`, {
       _id: `chunk-${i}`,
+      _creationTime: 1,
       projectId: 'project',
       runId: stream.runId,
       streamId: raw ? stream.streamId : 'artifact',
@@ -818,6 +828,7 @@ test('E3 due expiry coalesces concurrent events and drains a backlog with one re
   for (let i = 0; i < 150; i++)
     s.tables.projectCheckLogRetentions.set(`due-${i}`, {
       _id: `due-${i}`,
+      _creationTime: 1,
       projectId: 'project',
       key: `output:${i}`,
       expiresAt: Date.now() - 10000,
@@ -871,6 +882,7 @@ test('E3 interrupted sweep resumes its original plan and source changes retain s
     retention = modules.projectCheckLogRetention;
   s.tables.projectCheckLogRetentions.set('due', {
     _id: 'due',
+    _creationTime: 1,
     projectId: 'project',
     key: 'output:expired',
     expiresAt: 1,
@@ -927,6 +939,7 @@ test('E3 heavily repeated digests complete the existing paged safety scan rather
   };
   s.tables.projectHostedOutputStreams.set('raw', {
     _id: 'raw',
+    _creationTime: 1,
     projectId: 'project',
     ...stream,
     retired: true,
@@ -934,6 +947,7 @@ test('E3 heavily repeated digests complete the existing paged safety scan rather
   for (let sequence = 0; sequence < 120; sequence++)
     s.tables.projectHostedOutputChunks.set(`chunk-${sequence}`, {
       _id: `chunk-${sequence}`,
+      _creationTime: 1,
       projectId: 'project',
       runId: stream.runId,
       streamId: stream.streamId,

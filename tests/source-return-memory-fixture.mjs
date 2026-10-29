@@ -163,7 +163,14 @@ if (mode === 'step') {
     ...saved.tables.flatMap(([, rows]) => rows.map(([id]) => id)),
   ];
   const nextId = Math.max(...ids.map(id => Number(/^(?:row|file)-(\d+)$/.exec(id)?.[1] ?? -1))) + 1;
-  for (let i = 0; i < nextId; i++) await s.ctx.db.insert('projectObjects', {});
+  for (let i = 0; i < nextId; i++)
+    await s.ctx.db.insert('projectObjects', {
+      projectId: 'project',
+      digest: '0'.repeat(64),
+      size: 0,
+      nonce: 'restore-allocator',
+      removed: false,
+    });
   for (const [name, rows] of saved.tables) {
     const table = s.tables[name];
     table.clear();

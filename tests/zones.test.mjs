@@ -310,16 +310,28 @@ test('Zone owner/reader lists use current access and paginated relations; import
   for (let n = 0; n < 21; n++)
     await s.ctx.db.insert('sourceZones', {
       ...s.tables.sourceZones.get(id),
+      _id: undefined,
+      _creationTime: undefined,
       importId: 'own',
       operationId: randomUUID(),
     });
   for (let n = 0; n < 55; n++) {
     await s.ctx.db.insert('zoneReaders', { zoneId: id, reader: `reader-${n}` });
-    await s.ctx.db.insert('zoneChanges', { zoneId: id, operationId: randomUUID() });
+    await s.ctx.db.insert('zoneChanges', {
+      zoneId: id,
+      operationId: randomUUID(),
+      request: 'synthetic',
+      previousRevision: n,
+      revision: n + 1,
+      at: n,
+      update: { kind: 'enabled', enabled: true },
+    });
   }
   s.tables.imports.set('other-import', job('other-import'));
   const other = await s.ctx.db.insert('sourceZones', {
     ...s.tables.sourceZones.get(id),
+    _id: undefined,
+    _creationTime: undefined,
     importId: 'other-import',
     artifactKey: 'other-saved',
   });

@@ -136,6 +136,7 @@ try {
   });
   const fake = lanesFixture();
   const projectId = fake.insert('hostedProjects', {
+    name: 'Synthetic rollback',
     owner: 'owner',
     key: randomUUID(),
     currentBackup: null,

@@ -302,8 +302,9 @@ test('short finalizer fetches only its signed manifest, retries once, and is ind
       kind: 'lane',
       key: randomUUID(),
       version: 0,
-      bytes: 1,
-      digest: 'f'.repeat(64),
+      parent: '',
+      status: 'unselected',
+      recordId: 'unselected-record',
     });
   let fetched = 0;
   const resultBytes = s.objects.get(output.output.sha256);

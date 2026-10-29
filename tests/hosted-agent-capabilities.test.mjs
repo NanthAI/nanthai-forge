@@ -9,6 +9,10 @@ const code = expected => error => (error.data?.code ?? error.code) === expected;
 function setup() {
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
+    key: 'synthetic',
+    name: 'Synthetic',
+    currentBackup: null,
+    revision: 0,
     owner: 'owner',
     visibility: 'private',
     sourceAuthority: { mode: 'server', epoch: 2 },
@@ -53,6 +57,9 @@ test('discovery applies current project access, removal and device credential re
   s.tables.projectReaders.delete(reader);
   await assert.rejects(s.read('reader'), code('PROJECT_UNAVAILABLE'));
   s.insert('cliCredentials', {
+    name: 'Synthetic',
+    tokenHash: 'synthetic',
+    issuedAt: Date.now(),
     credentialId: 'synthetic',
     owner: 'owner',
     scope: 'cli',

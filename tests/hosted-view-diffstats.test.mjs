@@ -31,19 +31,29 @@ async function setup() {
   const base = await state(old),
     head = await state(next);
   Object.assign(s.tables.hostedProjects.get('project'), {
-    work: { backupId: 'backup', generationId: 'generation', revision: 1 },
+    work: {
+      backupId: 'backup',
+      generationId: 'generation',
+      revision: 1,
+      initialRevision: 0,
+      operationId: 'synthetic',
+    },
   });
   s.tables.projectWorkGenerations.set('generation', {
     _id: 'generation',
+    _creationTime: 1,
     projectId: 'project',
     backupId: 'backup',
     status: 'ready',
     format: HOSTED_WORK_INDEX_FORMAT,
     revision: 1,
+    initialRevision: 0,
+    nextBatch: 0,
     metadata: '{}',
   });
   s.tables.projectWorkRecords.set('view', {
     _id: 'view',
+    _creationTime: 1,
     projectId: 'project',
     generationId: 'generation',
     collection: 'views',
@@ -55,6 +65,7 @@ async function setup() {
   for (const pin of [base, head, old, next])
     s.tables.projectWorkRecords.set(pin.sha256, {
       _id: pin.sha256,
+      _creationTime: 1,
       projectId: 'project',
       generationId: 'generation',
       collection: 'sourceBlobs',
@@ -118,6 +129,7 @@ test('owner counts retain their label until an explicit server comparison replac
   const value = { files: 1, add: 99, del: 99, exact: true, provenance: 'owner-reported' };
   s.tables.projectWorkRecords.set('stats', {
     _id: 'stats',
+    _creationTime: 1,
     projectId: 'project',
     generationId: 'generation',
     collection: 'diffstats',
@@ -142,7 +154,7 @@ test('lazy reads and saves recheck actor, project and current generation, includ
   s.caller('stranger');
   await assert.rejects(compute._handler(s.ctx, input), code('PROJECT_UNAVAILABLE'));
   s.caller('owner');
-  s.tables.hostedProjects.set('other', { _id: 'other', owner: 'owner' });
+  s.tables.hostedProjects.set('other', { ...s.tables.hostedProjects.get('project'), _id: 'other' });
   await assert.rejects(compute._handler(s.ctx, { ...input, projectId: 'other' }), code('WORK_STALE'));
   await assert.rejects(compute._handler(s.ctx, { ...input, generationId: 'different' }), code('WORK_STALE'));
   const get = s.ctx.storage.get;

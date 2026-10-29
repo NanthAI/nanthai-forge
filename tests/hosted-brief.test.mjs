@@ -311,6 +311,7 @@ test('owner-assigned maintainers can edit project guidance; ordinary members can
   const s = await setup();
   s.tables.projectContributors.set('maintainer-grant', {
     _id: 'maintainer-grant',
+    _creationTime: 1,
     projectId: s.projectId,
     contributor: 'maintainer',
   });

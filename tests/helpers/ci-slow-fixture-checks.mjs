@@ -57,29 +57,39 @@ for (const factory of [immutableDirectory, immutableDirectorySync]) {
 
 test('hosted snapshots isolate rows and storage metadata and retain allocator uniqueness', async () => {
   const seed = fixture();
-  const id = await seed.ctx.db.insert('projectObjects', { value: { count: 1 } });
+  const object = size => ({
+    projectId: 'project',
+    digest: '0'.repeat(64),
+    size: 0,
+    nonce: 'synthetic',
+    removed: false,
+    recipe: { digest: '1'.repeat(64), size },
+  });
+  const id = await seed.ctx.db.insert('projectObjects', object(1));
   const fileId = await seed.ctx.storage.store(new Blob(['seed']));
-  await seed.ctx.scheduler.runAfter(0, makeFunctionReference('synthetic:task'), { count: 1 });
-  const deletedId = await seed.ctx.db.insert('projectObjects', {});
+  await seed.ctx.scheduler.runAfter(0, makeFunctionReference('projectLifecycle:purge'), {
+    projectId: 'project',
+  });
+  const deletedId = await seed.ctx.db.insert('projectObjects', object(0));
   await seed.ctx.db.delete(deletedId);
   const snapshot = await hostedSnapshot(seed);
   const a = await restoreHosted(fixture(), snapshot),
     b = await restoreHosted(fixture(), snapshot);
-  a.tables.projectObjects.get(id).value.count++;
+  a.tables.projectObjects.get(id).recipe.size++;
   a.files.get(fileId).metadata.sha256 = 'changed';
-  a.scheduled[0].args.count++;
-  assert.equal(getFunctionName(b.scheduled[0].fn), 'synthetic:task');
-  assert.equal(b.scheduled[0].args.count, 1);
-  assert.equal(b.tables.projectObjects.get(id).value.count, 1);
-  assert.equal(seed.tables.projectObjects.get(id).value.count, 1);
+  a.scheduled[0].args.projectId = 'changed';
+  assert.equal(getFunctionName(b.scheduled[0].fn), 'projectLifecycle:purge');
+  assert.equal(b.scheduled[0].args.projectId, 'project');
+  assert.equal(b.tables.projectObjects.get(id).recipe.size, 1);
+  assert.equal(seed.tables.projectObjects.get(id).recipe.size, 1);
   assert.notEqual(b.files.get(fileId).metadata.sha256, 'changed');
   assert.equal(await b.files.get(fileId).blob.text(), 'seed');
-  const nextId = await b.ctx.db.insert('projectObjects', { value: { count: 7 } });
+  const nextId = await b.ctx.db.insert('projectObjects', object(7));
   const nextFile = await b.ctx.storage.store(new Blob(['next']));
   assert.notEqual(nextId, id);
   assert.notEqual(nextId, deletedId);
   assert.notEqual(nextFile, fileId);
-  assert.equal(b.tables.projectObjects.get(id).value.count, 1);
+  assert.equal(b.tables.projectObjects.get(id).recipe.size, 1);
   assert.equal(await b.files.get(fileId).blob.text(), 'seed');
 });
 

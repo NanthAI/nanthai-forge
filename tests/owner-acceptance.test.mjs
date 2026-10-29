@@ -43,34 +43,46 @@ function fixture(t) {
   s.tables.ownerAcceptanceMachines = new Map();
   s.tables.hostedProjects.set('project', {
     _id: 'project',
+    _creationTime: 1,
     owner: 'owner',
     key: ownerId,
     name: 'Synthetic',
+    revision: 0,
     hostingRequest: 'synthetic',
     currentBackup: 'backup',
     visibility: 'private',
-    work: { generationId: 'generation', backupId: 'backup', revision: 0 },
+    work: {
+      generationId: 'generation',
+      backupId: 'backup',
+      operationId: 'seed',
+      initialRevision: 0,
+      revision: 0,
+    },
   });
   s.tables.projectBackups.set('backup', {
     _id: 'backup',
+    _creationTime: 1,
     projectId: 'project',
     status: 'stored',
     preview: { format: 'native' },
   });
   s.tables.projectWorkGenerations.set('generation', {
     _id: 'generation',
+    _creationTime: 1,
     projectId: 'project',
     backupId: 'backup',
     format: HOSTED_WORK_INDEX_FORMAT,
     status: 'ready',
     revision: 0,
     initialRevision: 0,
+    nextBatch: 0,
     metadata: JSON.stringify({ counts: {} }),
   });
   const indexed = (collection, key, value) => {
     const id = `${collection}:${key}`;
     s.tables.projectWorkRecords.set(id, {
       _id: id,
+      _creationTime: 1,
       projectId: 'project',
       generationId: 'generation',
       collection,
@@ -377,6 +389,7 @@ test('device requests retain agent classification and current supervised policy 
     view = f.addView({ 'a.txt': 'agent proposal\n' });
   f.s.tables.cliCredentials.set('device', {
     _id: 'device',
+    _creationTime: 1,
     credentialId: 'device',
     owner: 'owner',
     scope: 'cli',
@@ -763,6 +776,7 @@ test('compensating revert accepts a new checked descendant while preserving a la
   trustAgents(f.root);
   f.s.tables.cliCredentials.set('device', {
     _id: 'device',
+    _creationTime: 1,
     credentialId: 'device',
     owner: 'owner',
     scope: 'cli',
@@ -788,6 +802,7 @@ test('an agent under trusted policy still needs passing exact-View evidence', as
   trustAgents(f.root);
   f.s.tables.cliCredentials.set('device', {
     _id: 'device',
+    _creationTime: 1,
     credentialId: 'device',
     owner: 'owner',
     scope: 'cli',

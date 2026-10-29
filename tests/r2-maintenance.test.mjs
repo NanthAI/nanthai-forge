@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { backupFields } from './project-backup-fixture.mjs';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
@@ -155,6 +156,7 @@ test('only migrated committed rows verified before the pass qualify; shared copi
   await x.s.ctx.db.insert('projectObjects', {
     ...shared,
     _id: undefined,
+    _creationTime: undefined,
     projectId: 'other',
     location: 'convex',
   });
@@ -332,6 +334,7 @@ test('purged legacy archives retain their ID alias and serve authorized R2 bytes
     key = `v1/p/project/o/${pin.digest}`;
   const storageId = await x.s.ctx.storage.store(new Blob([bytes]));
   const id = await x.s.ctx.db.insert('projectBackups', {
+    ...backupFields(),
     projectId: 'project',
     ...pin,
     storageId,
@@ -665,7 +668,7 @@ for (const [label, change] of [
     const x = await fixture(t);
     x.pass = earlyPass(x);
     const row = await x.row();
-    await x.s.ctx.db.patch(row._id, { _creationTime: Date.parse(x.pass.verifiedAt) - 1000 });
+    x.s.tables.projectObjects.get(row._id)._creationTime = Date.parse(x.pass.verifiedAt) - 1000;
     change(x.pass);
     await assert.rejects(x.purge({ dryRun: false }));
     assert.equal(x.s.deleted.length, 0);
@@ -676,7 +679,7 @@ test('approved early purge re-HEADs, dry-run deletes nothing, and rows created a
   x.pass = earlyPass(x);
   const old = await x.row('eligible'),
     fresh = await x.row('created after');
-  await x.s.ctx.db.patch(old._id, { _creationTime: Date.parse(x.pass.verifiedAt) - 1000 });
+  x.s.tables.projectObjects.get(old._id)._creationTime = Date.parse(x.pass.verifiedAt) - 1000;
   assert.equal((await x.purge()).eligible, 1);
   assert.equal(x.s.deleted.length, 0);
   assert.equal((await x.purge({ dryRun: false })).deleted, 1);
@@ -688,7 +691,7 @@ test('early purge mutation rechecks receipt age after HEAD', async t => {
   const x = await fixture(t);
   x.pass = earlyPass(x);
   const row = await x.row();
-  await x.s.ctx.db.patch(row._id, { _creationTime: 1 });
+  x.s.tables.projectObjects.get(row._id)._creationTime = 1;
   const run = x.s.ctx.runMutation;
   x.s.ctx.runMutation = (ref, args) => {
     if (getFunctionName(ref) === 'projectR2Purge:removeCopies')

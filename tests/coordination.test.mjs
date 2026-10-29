@@ -35,6 +35,7 @@ function fixture() {
   const f = state([]);
   f.tables.hostedProjects.set('project', {
     _id: 'project',
+    _creationTime: 1,
     owner: 'owner',
     key: 'key',
     name: 'Project',

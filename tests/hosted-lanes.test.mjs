@@ -17,6 +17,10 @@ const metrics = [];
 async function setup() {
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
+    key: 'synthetic',
+    name: 'Synthetic',
+    currentBackup: null,
+    revision: 0,
     owner: 'owner',
     visibility: 'private',
     sourceAuthority: { mode: 'server', epoch: 1 },
@@ -255,6 +259,10 @@ test('foreign-project Lanes/Intents and main seeds cannot cross project boundari
   const s = await setup(),
     first = await s.begin();
   const secondId = s.insert('hostedProjects', {
+    key: 'synthetic',
+    name: 'Synthetic',
+    currentBackup: null,
+    revision: 0,
     owner: 'owner',
     visibility: 'private',
     sourceAuthority: { mode: 'server', epoch: 1 },
@@ -408,6 +416,9 @@ test('CLI scope and credential revocation guards cover the new public writer and
     first = await s.begin();
   const credentialId = randomUUID();
   const id = s.insert('cliCredentials', {
+    name: 'Synthetic',
+    tokenHash: 'synthetic',
+    issuedAt: Date.now(),
     credentialId,
     owner: 'owner',
     revoked: false,

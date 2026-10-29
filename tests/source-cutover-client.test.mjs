@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { backupPreview } from './project-backup-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync, readFileSync } from 'node:fs';
@@ -20,7 +21,7 @@ async function setup(t) {
   const f = await cutoverFixture(base),
     store = r.work.store;
   f.patch('projectBackups', f.cutoverRequest.pins.backupId, {
-    preview: { revision: store.revision(), channels: [{ name: 'main', head: r.main.head }] },
+    preview: backupPreview({ revision: store.revision(), channels: [{ name: 'main', head: r.main.head }] }),
   });
   const request = { ...f.cutoverRequest, pins: await f.pins() };
   updateHostState(store, state => {

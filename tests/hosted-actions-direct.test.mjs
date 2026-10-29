@@ -375,6 +375,10 @@ test('Actions timing history is advisory, project-scoped and records completed f
   );
   const otherProject = s.insert('hostedProjects', {
     owner: 'owner',
+    key: randomUUID(),
+    name: 'Other project',
+    currentBackup: null,
+    revision: 0,
     visibility: 'private',
     sourceAuthority: { mode: 'server', epoch: 1 },
   });
@@ -878,6 +882,10 @@ test('source pack reservations bound project storage to two objects and delete o
       ...input('4'),
       projectId: s.insert('hostedProjects', {
         owner: 'other',
+        key: randomUUID(),
+        name: 'Other project',
+        currentBackup: null,
+        revision: 0,
         visibility: 'private',
         sourceAuthority: { mode: 'server', epoch: 1 },
       }),

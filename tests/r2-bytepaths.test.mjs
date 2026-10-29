@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { setup, pinOf } from './r2-harness.mjs';
+import { backupPreview } from './project-backup-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { putR2 } from '../dist/exchange-blobs.js';
 import { downloadArchiveFile } from '../dist/archive-download-file.js';
@@ -42,7 +43,7 @@ function seed(s, pin) {
     operationId: 'original',
     status: 'uploading',
     previous: null,
-    preview: {},
+    preview: backupPreview(),
     nonce: 'original',
     request: 'original',
     ...pin,

@@ -28,6 +28,7 @@ function fixture() {
   const f = state([]);
   f.tables.hostedProjects.set('project', {
     _id: 'project',
+    _creationTime: 1,
     owner: 'owner',
     key: 'key',
     name: 'Project',
@@ -238,6 +239,7 @@ test('server change events from Work, exchange and source return feed the relate
   });
   f.tables.projectObjects.set('object', {
     _id: 'object',
+    _creationTime: 1,
     projectId: 'project',
     digest: 'd'.repeat(64),
     storageId: 'file',
@@ -268,12 +270,14 @@ test('server change events from Work, exchange and source return feed the relate
   });
   f.tables.projectBackups.set('b1', {
     _id: 'b1',
+    _creationTime: 1,
     projectId: 'project',
     status: 'stored',
     preview: { revision: 4 },
   });
   f.tables.projectBackups.set('b0', {
     _id: 'b0',
+    _creationTime: 1,
     projectId: 'project',
     status: 'stored',
     preview: { revision: 3 },
@@ -436,6 +440,7 @@ test('device agents keep exact-session acknowledgement and Needs-you visibility'
   f.ctx.auth.getUserIdentity = async () => ({ subject, ...(device ? { forgeCredential: 'device' } : {}) });
   f.tables.cliCredentials.set('device', {
     _id: 'device',
+    _creationTime: 1,
     credentialId: 'device',
     owner: 'owner',
     scope: 'coordination',
