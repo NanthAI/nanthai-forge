@@ -8,15 +8,16 @@ snapshot, not unpublished local work. Keep the local owner and its portable back
 
 The tooling is fixture-tested. The owner-approved offsite policy is a weekly
 file-inclusive export to R2, keeping the newest four completed copies. Installation
-and the first real run are operator actions; no schedule is installed by this repo.
+and the first real run are lead actions. The Actions workflow schedules runs only
+after it is placed on the chosen repository's default branch and configured.
 The backup command never deploys, imports or contacts any account until invoked.
 
 A development-deployment data restore drill passed on 2026-10-20: export 146 s
 (787 MB, 27,143 stored files), import about 2 h 17 min, and comparison 243 s with
 equal tables, files and Work. Code, authentication and environment were not
 redeployed; off-machine owner recovery remains unqualified. Convex scheduled
-backups require Pro; the weekly R2 job below runs independently on the operator's
-Mac. No deployment or schedule is configured by these scripts.
+backups require Pro; the weekly R2 job below uses standard GitHub-hosted Linux
+runners. The Mac is only a manual fallback; no deployment is configured by these scripts.
 
 ## Object-storage references
 
@@ -184,19 +185,107 @@ restore/verify times. Keep the source and local owner unchanged throughout.
 
 ## Weekly R2 backup
 
-The weekly job runs on the operator's Mac using this exporter, without Convex's
-Professional scheduled-backup feature. Use an existing private operator-managed
-environment file or process environment with `R2_ACCOUNT_ID`, `R2_BUCKET`,
-`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and the existing Convex credential/login.
-These are the same R2 names used by [blob storage](../r2-storage-plan.md); credentials
-stay out of flags, the plist, manifests and logs. Do not place the environment file
-inside source. The selected bucket must already exist. No new secret store is used.
+The [Actions workflow](../../.github/workflows/hosted-backup.yml) runs Mondays at
+03:00 UTC and supports `workflow_dispatch`. It backs up only the dev deployment
+`benevolent-wildebeest-974`; the command uses an explicit deployment selector and
+never a production flag. It runs the existing exporter and format-1 backup path,
+including file storage by default, keeping four completed copies. No PR, fork,
+push or external event triggers this workflow. Its token has only `contents: read`;
+actions are SHA-pinned and checkout does not retain the token. Credentials reach
+only the freshness and backup steps, after install/build. Dependencies install
+with scripts disabled. No backup, retry state or private snapshot is uploaded to
+Actions artifacts or caches. Provider text and signed URLs remain withheld;
+`hosted-backup-mask.mjs` registers credential-derived fragments/endpoints with
+`::add-mask::` before either command, escaping workflow-command characters.
 
-Build core once (`npm ci --ignore-scripts && npm run build:core`). Choose a dedicated
-bucket prefix such as `hosted-backups/production/`, separate from blob objects, and
-a private local state directory outside source. `HOSTED_DURABILITY_R2_PREFIX` and
-`HOSTED_DURABILITY_STATE_DIR` can supply these two nonsecret settings. Deployment
-selection has the same environment fallback as export.
+The lead creates these as **secrets of the `hosted-backup` environment** (deployment branches: `main` only, so forks and pull requests never receive them). Use credentials made for the backup alone: an R2 token limited to the backup bucket, and a Convex key with export permission.
+
+| Secret | Value |
+| --- | --- |
+| `CONVEX_DEPLOY_KEY` | Backup-only key for `benevolent-wildebeest-974` (export permission) |
+| `R2_ACCOUNT_ID` | Existing backup R2 account ID |
+| `R2_BUCKET` | Existing backup bucket name |
+| `R2_ACCESS_KEY_ID` | Existing backup R2 access key ID |
+| `R2_SECRET_ACCESS_KEY` | Existing backup R2 secret access key |
+
+Set the **`hosted-backup` environment variable** `HOSTED_DURABILITY_R2_PREFIX` to the
+existing weekly backup prefix, including its trailing slash, separate from source
+blob objects. There is deliberately no guessed new prefix: freshness and retention
+must see the same four-copy history as the Mac job. The bucket already exists.
+Set the workflow's `HOSTED_DURABILITY_DATABASE_ONLY` env toggle to `'1'` only for
+the deployment-wide migration described below; the default remains `'0'`.
+`HOSTED_DURABILITY_STATE_DIR` points inside the runner's private temporary directory.
+
+The first credential-bearing step reads R2 in pages of at most 1,000 keys,
+selects the newest completed backup name, reads its manifest and checks the ZIP's
+size/checksum metadata with HEAD. It reports only `ageDays` and `overdue`. No
+Convex call or ZIP download is needed for freshness. A missing backup or age over
+**eight days** exits 2; provider failures, invalid metadata and missing ZIPs exit 1.
+Exactly eight days is current. The backup step still runs after freshness fails,
+so an overdue installation can recover while that run stays **red**. The next
+manual dispatch can confirm freshness. Installation with no completed backup
+therefore has an expected red freshness step even if its first backup succeeds.
+The existing local `backup-status` remains a separate seven-day offline check.
+
+[GitHub schedule caveats](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule):
+runs may be delayed or dropped under load, including at the start of the hour;
+schedules run only from the default branch. Public-repository schedules are
+automatically disabled after 60 days without repository activity. A disabled or
+dropped run creates no failed job and cannot email about its own absence. This
+freshness gate exposes a missed week on the **next** scheduled or manual run;
+it is not an independent dead-man monitor. No additional poller is installed.
+
+A failed step leaves the job red. Under GitHub's normal
+[workflow notification behavior](https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs),
+email depends on the recipient's Actions notification settings. Schedule messages
+go to the schedule actor (initial creator, last cron editor, or re-enabler),
+which is not necessarily the repo owner. The lead has the owner establish that
+actor and confirm Actions failure email delivery during setup; adding a workflow
+alone cannot guarantee owner email.
+
+### Workflow repository choice and first run
+
+Owner decision (2026-10-29): the workflow runs in the public `NanthAI/nanthai-forge`
+repository, with its secrets in the `hosted-backup` environment restricted to `main`.
+The Forge mirror pushes to `main` regularly, which keeps the schedule active.
+A private ops repository remains an option for operators who want private run logs.
+Run metadata and redacted logs are public, so privileged workflow changes need
+careful review: `.github/**` is a protected path that needs owner approval. Manual
+dispatch can only use the `hosted-backup` environment from `main`.
+
+First-run steps for the lead after that choice:
+
+1. Place the reviewed source and workflow on the chosen default branch, set the
+   five secrets above, and set the existing prefix variable. Keep the file-inclusive
+   default unless the whole deployment qualifies for database-only backups.
+2. Disable the installed Mac calendar agent with the `bootout` procedure below
+   before Actions dispatch; retain its private retry state. Resolve an existing
+   pending local operation using that same state before switching runners.
+3. Establish the owner's schedule notification actor/settings, then dispatch the
+   workflow manually. Inspect freshness age and the backup's `complete:true`
+   receipt. A missing/overdue prior copy keeps this run red after recovery;
+   dispatch again to confirm green and an age near zero.
+4. Confirm a later Monday run appears in Actions and notification delivery works.
+   Stop automatic runs by disabling the workflow; existing R2 copies remain.
+   Use the manual fallback only while Actions backup is stopped.
+
+Expected cost (estimate, not a hosted measurement): roughly 5–10 Linux minutes
+per run including install/build, export, upload and readback; 4–5 Mondays means
+20–50 minutes/month, plus initial dispatches. Standard Linux is
+[free in public repos; private GitHub Free includes 2,000 minutes/month](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+The private allowance is shared: the lead checks remaining included minutes before
+enabling. No paid runner, recurring poller, cache or artifact is added. Idle compute
+and Convex calls are zero. The exporter still makes one native Convex export per
+run, with its existing CLI-managed provider requests; no new Convex functions or
+application document writes are introduced. Freshness adds three R2 requests for
+a normal one-page prefix (LIST, manifest GET, ZIP HEAD); legacy retention/upload
+requests remain unchanged.
+
+For a manual local fallback, use an accepted source/lockfile, Node 24.22.1+,
+Python 3 and `npm ci --ignore-scripts && npm run build:core`. The same R2 and
+Convex names can come from an existing private operator environment file outside
+source. Choose the existing prefix and a private state directory outside source;
+`HOSTED_DURABILITY_R2_PREFIX` and `HOSTED_DURABILITY_STATE_DIR` supply those settings.
 
 ```sh
 # First real run, performed by the lead after setting the existing environment.
@@ -225,11 +314,14 @@ It deletes ZIP/manifest pairs beyond four completed backup names, preserving the
 just-written copy even if the machine clock moved backwards. Other prefixes,
 unrecognized names and incomplete uploads are untouched. Deleting those older
 copies is the approved retention behavior and is irreversible; there is no undo
-for pruned copies. Uninstall the job below to stop future automatic runs/deletion.
+for pruned copies. Disable the Actions workflow to stop future automatic runs/deletion.
 This does not delete Convex-generated snapshots or configure provider retention.
 
 `last-run.json` and the pending ZIP are private local retry state. Keep that
-directory between runs. A failed export/upload/checksum check never starts
+directory between local retries. Actions runners are ephemeral: each run starts
+a new operation, and a rerun is a new backup, not a resumption of a lost runner's
+local pending state. Unfinished remote uploads remain untouched. No cache or
+artifact retains private retry state. A failed export/upload/checksum check never starts
 retention. An interrupted multipart upload resumes its same key/upload ID and
 replaces parts deterministically; a lost completion or manifest response is
 reconciled by reading the existing bytes. Retry without a new operation id while
@@ -242,21 +334,22 @@ so a retry cannot switch destinations silently.
 
 Success prints one JSON line including `pruned` and `missedWeek`. Failure prints
 one redacted error line and exits 1; provider text and signed URLs are withheld.
-The offline status reads the last success and pending state. Check it from the
-operator's existing machine monitoring: a switched-off Mac cannot report its own
-missed week. The next successful run also reports whether the prior success was
-overdue. A fresh installation reports `missedWeek:true` until its first success.
+The offline status reads local last-success/pending state; it does not establish
+remote freshness on a fresh Actions runner. Its backup receipt can therefore say
+`missedWeek:true` on each new runner; use the preceding R2 freshness result for
+schedule health. The local manual fallback retains its original retry semantics.
 
-### Install or uninstall on macOS (lead only)
+### Manual macOS fallback (lead only)
 
 The [launchd template](../../scripts/launchd/com.nanthai.forge-hosted-backup.plist)
-runs Mondays at 03:00 local time. launchd coalesces calendar events missed during
-sleep when the Mac wakes; a logged-out user agent waits for that user's login.
-Render its nonsecret paths/settings using the environment below. Use an accepted,
-stable source directory with dependencies/core built, an absolute Node path,
-Python 3 on the template PATH, and the existing private environment-file path.
-The file's contents are never copied into the plist. This is a template, not an
-installed schedule.
+is retained **only as a manual fallback**. It has no calendar interval and does
+not run at load or wake. An already-installed copy still has its old calendar:
+retire it with the final `bootout`/remove commands below before enabling Actions.
+For a one-off run, prefer the direct command above. If using launchd manually,
+render these nonsecret paths/settings, bootstrap, then explicitly kickstart it.
+Use an accepted stable source with dependencies/core built, absolute Node path,
+Python 3 on PATH and the existing private environment-file path. File contents
+are never copied into the plist. Nothing installs this template automatically.
 
 ```sh
 # Set SOURCE, NODE, EXISTING_ENV_FILE, DEPLOYMENT, BACKUP_PREFIX and BACKUP_STATE_DIR
@@ -281,9 +374,9 @@ target.chmod(0o600)
 PYTHON
 chmod 700 "$BACKUP_STATE_DIR"
 launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.nanthai.forge-hosted-backup.plist"
-launchctl print "gui/$(id -u)/com.nanthai.forge-hosted-backup"
+launchctl kickstart "gui/$(id -u)/com.nanthai.forge-hosted-backup"
 
-# Uninstall: stops the schedule, retains backups and local retry/status records.
+# Retire an old calendar agent, or remove the manual fallback; keep private retry state.
 launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.nanthai.forge-hosted-backup.plist"
 rm "$HOME/Library/LaunchAgents/com.nanthai.forge-hosted-backup.plist"
 ```
@@ -313,7 +406,8 @@ node scripts/hosted-durability.mjs verify --left-export /private/backups/databas
 ```
 
 For the already approved weekly job, the lead may set
-`HOSTED_DURABILITY_DATABASE_ONLY=1` in its existing operator environment. The
+`HOSTED_DURABILITY_DATABASE_ONLY` to `'1'` in the workflow env (or use
+`HOSTED_DURABILITY_DATABASE_ONLY=1` in the manual operator environment). The
 schedule and keep-four completed-backup retention do not change. No job is
 installed or enabled by this option. The default continues including Convex
 file storage. A backup's pending state, manifest and receipt pin its storage

@@ -1,0 +1,56 @@
+name: Weekly hosted backup
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-backup-benevolent-wildebeest-974
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    # Secrets live only in this environment; it deploys from main alone, so forks and PRs never see them.
+    environment: hosted-backup
+    env:
+      HOSTED_DURABILITY_DEPLOYMENT: benevolent-wildebeest-974
+      # Keep file-inclusive backups unless the deployment-wide migration is complete.
+      HOSTED_DURABILITY_DATABASE_ONLY: '0'
+      HOSTED_DURABILITY_R2_PREFIX: ${{ vars.HOSTED_DURABILITY_R2_PREFIX }}
+      HOSTED_DURABILITY_STATE_DIR: ${{ runner.temp }}/hosted-backup-state
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts
+      - run: npm run build:core
+      - name: Report newest backup age; fail after eight days
+        id: freshness
+        run: |
+          node scripts/hosted-backup-mask.mjs
+          node scripts/hosted-backup-freshness.mjs
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      - name: Back up dev and verify R2 bytes, retaining four completed copies
+        # Recover even when overdue, preserving the failed freshness step/job result.
+        if: ${{ !cancelled() && (steps.freshness.outcome == 'success' || steps.freshness.outcome == 'failure') }}
+        run: |
+          node scripts/hosted-backup-mask.mjs
+          node scripts/hosted-durability.mjs backup --deployment benevolent-wildebeest-974
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

@@ -129,24 +129,28 @@ export function r2Client(env = process.env, fetcher = fetch) {
         'x-amz-meta-sha256': sha256,
       });
     },
-    async list(prefix) {
-      const keys = [];
+    async *pages(prefix) {
       let cursor;
       do {
         const query = {
           'list-type': '2',
+          'max-keys': '1000',
           prefix,
           'encoding-type': 'url',
           ...(cursor ? { 'continuation-token': cursor } : {}),
         };
         const response = await request('GET', '', query);
         const xml = await response.text();
-        keys.push(...tags(xml, 'Key').map(decodeURIComponent));
+        yield tags(xml, 'Key').map(decodeURIComponent);
         const next = tag(xml, 'NextContinuationToken');
         if (tag(xml, 'IsTruncated') !== 'true') break;
         if (!next || next === cursor) throw failure('BACKUP_R2_FAILED');
         cursor = next;
       } while (true);
+    },
+    async list(prefix) {
+      const keys = [];
+      for await (const page of this.pages(prefix)) keys.push(...page);
       return keys;
     },
     async remove(key) {

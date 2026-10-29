@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Manual fallback only: bootstrap then kickstart. No calendar or RunAtLoad. -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.nanthai.forge-hosted-backup</string>
@@ -16,8 +17,6 @@
   <key>WorkingDirectory</key><string>__SOURCE__</string>
   <key>EnvironmentVariables</key>
   <dict><key>PATH</key><string>__NODE_BIN__:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
-  <key>StartCalendarInterval</key>
-  <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>0</integer></dict>
   <key>StandardOutPath</key><string>__STATE_DIR__/launchd.log</string>
   <key>StandardErrorPath</key><string>__STATE_DIR__/launchd-error.log</string>
   <key>Umask</key><integer>63</integer>
