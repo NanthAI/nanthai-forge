@@ -1,3 +1,4 @@
+import { isMachineRunner } from '../src/hosted-machine-runner';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { query, mutation, type QueryCtx, type MutationCtx } from './cliServer';
@@ -42,12 +43,11 @@ export const manifest = query({
       return canonicalPayload({
         status: run.status,
         executionId: run.executionId,
-        fullLogs:
-          run.configuration.provider === 'mac'
-            ? run.checkLogs?.uploadLocal
-              ? 'local-retention'
-              : 'local-only'
-            : 'provider-held',
+        fullLogs: isMachineRunner(run.configuration)
+          ? run.checkLogs?.uploadLocal
+            ? 'local-retention'
+            : 'local-only'
+          : 'provider-held',
         providerUrl:
           run.configuration.provider === 'github-actions'
             ? `https://github.com/${run.configuration.repository}/actions/runs/${run.executionId ?? ''}`

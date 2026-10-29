@@ -1,3 +1,4 @@
+import { isMachineRunner } from '../src/hosted-machine-runner';
 import { requestDirectCancel } from './projectHostedActionsDirect';
 import { scheduleDirectActions } from './projectHostedActionsDirect';
 import { semanticPayload } from '../src/semantic-payload';
@@ -81,9 +82,9 @@ export const cancel = mutation({
         run.cancelRequested = true;
         // Nothing external was submitted: cancellation is already certain. Once
         // dispatch is reserved, only the provider can acknowledge cancellation.
-        if (!run.dispatchStarted || run.configuration.provider === 'mac') {
+        if (!run.dispatchStarted || isMachineRunner(run.configuration)) {
           // Fencing makes cancellation immediate even when the Mac is gone.
-          if (run.configuration.provider === 'mac') {
+          if (isMachineRunner(run.configuration)) {
             run.fence++;
             run.lease = null;
           }
@@ -222,7 +223,7 @@ export async function enqueueHostedCheck(
     lease: null,
     plan: null,
     planDigest: null,
-    ...(runner.provider === 'mac' ? { ownerDeadline: Date.now() + macLeaseMs } : {}),
+    ...(isMachineRunner(runner) ? { ownerDeadline: Date.now() + macLeaseMs } : {}),
     status: 'queued',
     cancelRequested: false,
     counts: { completed: 0, passed: 0, failed: 0 },
@@ -236,7 +237,7 @@ export async function enqueueHostedCheck(
     projectId: input.projectId,
     runId: id,
     candidateId: request.candidateId,
-    ...(runner.provider === 'mac' ? { machineId: runner.machineId } : {}),
+    ...(isMachineRunner(runner) ? { machineId: runner.machineId } : {}),
     status: run.status,
     value: semanticPayload(run, true),
   });

@@ -26,12 +26,13 @@ test.after(() => {
     else process.env[key] = value;
 });
 
-async function fixture(preset = 'trusted') {
+async function fixture(preset = 'trusted', provider = 'mac') {
   const f = await acceptanceFixture();
   f.patch('hostedProjects', f.projectId, { autonomyPolicy: policyPreset(preset) });
   const c = f.rawChecks;
   const configuration = {
-    provider: 'mac',
+    provider,
+    ...(provider === 'self-hosted' ? { platform: { os: 'linux', arch: 'x64' }, labels: ['build'] } : {}),
     machineId: randomUUID(),
     runtime: c.runner.runtime,
     environmentFingerprint: c.runner.environmentFingerprint,
@@ -107,8 +108,8 @@ async function fixture(preset = 'trusted') {
         result: { status: 'accepted', executionId: `mac-${queued.id}` },
       })
     ).run;
-    await c.callback({ ...c.shard(run, 0, 'passed', { attempt: run.fence }), provider: 'mac' });
-    return c.callback({ ...c.complete(run), provider: 'mac' });
+    await c.callback({ ...c.shard(run, 0, 'passed', { attempt: run.fence }), provider });
+    return c.callback({ ...c.complete(run), provider });
   };
   const submit = async (item, run, actor = 'owner', agent = true) => {
     const state = await f.enqueue(
@@ -128,35 +129,36 @@ async function fixture(preset = 'trusted') {
   return { ...f, configuration, sessionId, register, revoke, passMac: pass, submit };
 }
 
-for (const preset of ['trusted', 'autonomous'])
-  test(`${preset} owner work lands with a completed Mac receipt and no additional idle work`, async () => {
-    const f = await fixture(preset),
-      item = await f.makeCandidate();
-    const run = await f.passMac(item);
-    assert.deepEqual(run.macEvidence, {
-      provider: 'mac',
-      machineId: f.configuration.machineId,
-      machineOwner: 'owner',
-      registrationId: f.sessionId,
-      reuseKey: null,
-      runnerFingerprint: checkPin({
-        runtime: f.configuration.runtime,
-        environmentFingerprint: f.configuration.environmentFingerprint,
-      }),
+for (const provider of ['mac', 'self-hosted'])
+  for (const preset of ['trusted', 'autonomous'])
+    test(`${preset} owner work lands with a completed ${provider} receipt and no additional idle work`, async () => {
+      const f = await fixture(preset, provider),
+        item = await f.makeCandidate();
+      const run = await f.passMac(item);
+      assert.deepEqual(run.macEvidence, {
+        provider: 'mac',
+        machineId: f.configuration.machineId,
+        machineOwner: 'owner',
+        registrationId: f.sessionId,
+        reuseKey: null,
+        runnerFingerprint: checkPin({
+          runtime: f.configuration.runtime,
+          environmentFingerprint: f.configuration.environmentFingerprint,
+        }),
+      });
+      const state = await f.submit(item, run);
+      assert.equal(state.phase, 'ready');
+      const accepted = await f.accept(state);
+      assert.equal(accepted.status, 'landed');
+      assert.deepEqual(accepted.receipt.check.macEvidence, run.macEvidence);
+      await f.drain();
+      const before = f.metrics.scheduled;
+      await f.rawChecks.evidence(run);
+      await f.rawChecks.status(run.id);
+      await f.status(state.id);
+      assert.equal(f.metrics.scheduled, before);
+      assert.equal(f.pendingTasks().length, 0);
     });
-    const state = await f.submit(item, run);
-    assert.equal(state.phase, 'ready');
-    const accepted = await f.accept(state);
-    assert.equal(accepted.status, 'landed');
-    assert.deepEqual(accepted.receipt.check.macEvidence, run.macEvidence);
-    await f.drain();
-    const before = f.metrics.scheduled;
-    await f.rawChecks.evidence(run);
-    await f.rawChecks.status(run.id);
-    await f.status(state.id);
-    assert.equal(f.metrics.scheduled, before);
-    assert.equal(f.pendingTasks().length, 0);
-  });
 
 test('supervised Mac-only evidence is refused even for a person acceptance request', async () => {
   const f = await fixture('supervised'),
@@ -210,25 +212,26 @@ test('an outside accepting actor still needs hosted-runner evidence', async () =
   assert.equal(state.error.code, 'HOSTED_RUNNER_REQUIRED');
 });
 
-test('revocation after ready is checked again at publication and names the machine', async () => {
-  const f = await fixture(),
-    item = await f.makeCandidate();
-  const run = await f.passMac(item),
-    state = await f.submit(item, run);
-  const claim = await f.claimAcceptance(state),
-    main = f.currentMain();
-  const revoked = await f.revoke();
-  assert.deepEqual(await f.revoke(), revoked, 'same-operation retry retains the original outcome');
-  await assert.rejects(f.commit(claim), error => {
-    assert.equal(error.code, 'MAC_MACHINE_REVOKED');
-    assert(error.message.includes(f.configuration.machineId));
-    return true;
+for (const provider of ['mac', 'self-hosted'])
+  test(`revocation after ready is checked again at publication and names the machine (${provider})`, async () => {
+    const f = await fixture('trusted', provider),
+      item = await f.makeCandidate();
+    const run = await f.passMac(item),
+      state = await f.submit(item, run);
+    const claim = await f.claimAcceptance(state),
+      main = f.currentMain();
+    const revoked = await f.revoke();
+    assert.deepEqual(await f.revoke(), revoked, 'same-operation retry retains the original outcome');
+    await assert.rejects(f.commit(claim), error => {
+      assert.equal(error.code, 'MAC_MACHINE_REVOKED');
+      assert(error.message.includes(f.configuration.machineId));
+      return true;
+    });
+    await assert.rejects(f.rawChecks.evidence(run), code('MAC_MACHINE_REVOKED'));
+    await assert.rejects(f.register(randomUUID()), code('MAC_MACHINE_REVOKED'));
+    assert.deepEqual(f.currentMain(), main);
+    assert.equal(f.tables.projectHostedAcceptances.size, 0);
   });
-  await assert.rejects(f.rawChecks.evidence(run), code('MAC_MACHINE_REVOKED'));
-  await assert.rejects(f.register(randomUUID()), code('MAC_MACHINE_REVOKED'));
-  assert.deepEqual(f.currentMain(), main);
-  assert.equal(f.tables.projectHostedAcceptances.size, 0);
-});
 
 test('only the owner revokes a machine; revocation does not rewrite an accepted receipt', async () => {
   const f = await fixture(),
@@ -283,3 +286,14 @@ for (const provider of ['modal', 'github-actions'])
     assert.equal(result.status, 'landed');
     assert.equal(result.receipt.check.macEvidence, undefined);
   });
+
+test('Linux self-hosted evidence preserves the existing supervised acceptance policy', async () => {
+  const f = await fixture('supervised', 'self-hosted');
+  const item = await f.makeCandidate();
+  const run = await f.passMac(item);
+  assert.equal(run.configuration.platform.os, 'linux');
+  const state = await f.submit(item, run, 'owner', false);
+  assert.equal(state.phase, 'terminal-failed');
+  assert.equal(state.error.code, 'HOSTED_RUNNER_REQUIRED');
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+});

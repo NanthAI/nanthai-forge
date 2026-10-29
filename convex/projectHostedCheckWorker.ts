@@ -1,3 +1,4 @@
+import { isMachineRunner } from '../src/hosted-machine-runner';
 // SPDX-License-Identifier: Apache-2.0
 import { macMachine, requireMacMachine } from './projectHostedCheckMachines';
 import { macHeartbeatSchema, verifyMacHeartbeat } from '../src/hosted-mac-lease';
@@ -16,7 +17,7 @@ import {
 import { controlHostedCheck, hostedCheckControlSchema } from './projectHostedCheckDispatch';
 import { receiveHostedCheckCallback } from './projectHostedCheckCallbacks';
 import { outputSigningKey } from './projectHostedOutputApi';
-import { hostedMacRunnerSchema, checkPin, hostedCheckTerminal } from '../src/hosted-check';
+import { hostedMachineRunnerSchema, checkPin, hostedCheckTerminal } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -54,7 +55,7 @@ export const register = mutation({
         .object({
           operationId: z.uuid(),
           authorityEpoch: z.number().safe().nonnegative(),
-          configuration: hostedMacRunnerSchema,
+          configuration: hostedMachineRunnerSchema,
         })
         .strict()
         .parse(JSON.parse(input.request));
@@ -92,7 +93,7 @@ export const register = mutation({
       invariant(
         !old || old.revokedAt === undefined,
         'MAC_MACHINE_REVOKED',
-        `Mac machine ${row.machineId} is revoked; register a new machine identity.`,
+        `Runner machine ${row.machineId} is revoked; register a new machine identity.`,
       );
       if (old) await ctx.db.replace(old._id, row);
       else await ctx.db.insert('projectHostedCheckWorkers', row);
@@ -131,7 +132,7 @@ export const control = mutation({
       const registered = await worker(ctx, input);
       const { run } = await loadHostedCheck(ctx, input);
       invariant(
-        run.configuration.provider === 'mac' &&
+        isMachineRunner(run.configuration) &&
           run.configuration.machineId === input.machineId &&
           run.request.expectedConfiguration === registered.configuration &&
           run.keyId === registered.keyId,
@@ -176,7 +177,7 @@ export const heartbeat = mutation({
       invariant(value.projectId === input.projectId, 'EVIDENCE_CHANGED', 'Heartbeat project differs.');
       const { row, run } = await writableHostedCheck(ctx, { projectId: input.projectId, runId: value.runId });
       verifyMacHeartbeat(value, input.signature, outputSigningKey(run.keyId));
-      invariant(run.configuration.provider === 'mac', 'EVIDENCE_CHANGED', 'Select a Mac execution.');
+      invariant(isMachineRunner(run.configuration), 'EVIDENCE_CHANGED', 'Select a machine execution.');
       await worker(ctx, {
         projectId: input.projectId,
         machineId: run.configuration.machineId,

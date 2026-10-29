@@ -81,6 +81,8 @@
   "files": [
     "skills/forge-agent/SKILL.md",
     "scripts/child-env.mjs",
+    "scripts/self-hosted-runner/start.mjs",
+    "scripts/self-hosted-runner/Dockerfile",
     "scripts/child-env.d.mts",
     "scripts/node-runtime.mjs",
     "scripts/check-quarantine.mjs",

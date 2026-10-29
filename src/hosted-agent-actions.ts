@@ -1,3 +1,4 @@
+import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
 import { hostedLandingDesiredSchema } from './hosted-landing-desired.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
@@ -11,7 +12,7 @@ import { saveHostedLane } from './hosted-save-client.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { hostedLifecycleRequestSchema } from './hosted-lifecycle.js';
 import { randomUUID } from 'node:crypto';
-import { hostedCheckRequestSchema, hostedMacRunnerSchema } from './hosted-check.js';
+import { hostedCheckRequestSchema, hostedSelfHostedRunnerSchema } from './hosted-check.js';
 import { hostedMacRuntime } from './hosted-mac-lease.js';
 import { checkEnvironment } from './check-environment.js';
 import { autonomyPolicySchema, reviewReason } from './autonomy-policy.js';
@@ -166,7 +167,13 @@ export async function hostedCheckSettings(query: HostedQuery, capabilities: Host
     })),
     finishCheck: selected ? selected.check.id : null,
     runner: current.configuration
-      ? { digest: current.configurationDigest, configuration: current.configuration }
+      ? {
+          digest: current.configurationDigest,
+          configuration: current.configuration,
+          ...(isMachineRunner(current.configuration)
+            ? { description: machineRunnerDescription(current.configuration) }
+            : {}),
+        }
       : null,
     actions: actionsRunnerSettings(current.configuration),
     checkCallbackConfigured: capabilities.checkCallbackConfigured,
@@ -220,11 +227,12 @@ async function configureRunnerRequest(
 ) {
   invariant(
     Boolean(command.configuration) !== Boolean(command.provider) &&
-      !(command.machineId && command.provider !== 'mac') &&
+      !(command.machineId && !['mac', 'self-hosted'].includes(command.provider ?? '')) &&
+      !(command.labels && !['mac', 'self-hosted'].includes(command.provider ?? '')) &&
       !(command.repository && command.provider !== 'github-actions') &&
       !(command.runsOn !== undefined && command.provider !== 'github-actions'),
     'BAD_ARGUMENT',
-    'Choose provider:"mac" (optional machineId), provider:"github-actions" (repository, optional runsOn), or a full configuration for another provider.',
+    'Choose provider:"self-hosted" (optional machineId and labels; mac is a legacy alias), provider:"github-actions" (repository, optional runsOn), or a full configuration for another provider.',
   );
   const current = currentSettings.parse(
     await session.query('projectHostedCheckDefinitions:current', { checkId: '' }),
@@ -253,13 +261,20 @@ async function configureRunnerRequest(
   }
   // The worker registers with the same values computed from its own package and
   // process, so they are never typed by hand. Run both in the same environment.
+  const labels =
+    command.labels ??
+    (current.configuration?.provider === 'self-hosted' ? current.configuration.labels : undefined);
   const configuration = command.configuration
     ? command.configuration
-    : hostedMacRunnerSchema.parse({
-        provider: 'mac',
+    : hostedSelfHostedRunnerSchema.parse({
+        provider: 'self-hosted',
+        platform: { os: process.platform, arch: process.arch },
+        ...(labels !== undefined ? { labels } : {}),
         machineId:
           command.machineId ??
-          (current.configuration?.provider === 'mac' ? current.configuration.machineId : randomUUID()),
+          (current.configuration && isMachineRunner(current.configuration)
+            ? current.configuration.machineId
+            : randomUUID()),
         runtime: hostedMacRuntime,
         environmentFingerprint: checkEnvironment().fingerprint,
       });

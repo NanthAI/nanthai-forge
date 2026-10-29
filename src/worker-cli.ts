@@ -9,7 +9,7 @@ import { ConvexExchange } from './exchange-client.js';
 import { hostedRunSubscription } from './hosted-agent-observe.js';
 import { checkEnvironment } from './check-environment.js';
 import { hostedMacRuntime } from './hosted-mac-lease.js';
-import { hostedCheckRunSchema, hostedMacRunnerSchema } from './hosted-check.js';
+import { hostedCheckRunSchema, hostedMachineRunnerSchema } from './hosted-check.js';
 import { runHostedMacWorker } from './hosted-mac-worker.js';
 import { executeHostedMacCheck } from './hosted-mac-execute.js';
 import { invariant } from './errors.js';
@@ -17,7 +17,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import type { OutputTransport } from './hosted-output-transfer.js';
 
 /** The collector key comes from FORGE_HOSTED_CHECK_KEY_<id>, or from an owner-only
- * file named by FORGE_HOSTED_CHECK_KEY_FILE so it never sits in a launchd plist or
+ * file named by FORGE_HOSTED_CHECK_KEY_FILE so it never sits in a service definition or
  * shell history. The child check environment drops both names. */
 export function hostedCheckKey(keyId: string, env: NodeJS.ProcessEnv = process.env) {
   const direct = env[`FORGE_HOSTED_CHECK_KEY_${keyId}`];
@@ -45,6 +45,23 @@ export function hostedCheckKey(keyId: string, env: NodeJS.ProcessEnv = process.e
   invariant(key, 'RUNNER_UNAVAILABLE', 'The collector key file is empty.');
   return key;
 }
+/** Preserve the selected wire format (including legacy Mac), labels and digest.
+ * Never guess a different environment or downgrade a self-hosted registration. */
+export function workerConfiguration(value: unknown, machineId: string) {
+  const configuration = hostedMachineRunnerSchema.parse(value);
+  const environment = checkEnvironment();
+  invariant(
+    configuration.machineId === machineId &&
+      configuration.runtime === hostedMacRuntime &&
+      configuration.environmentFingerprint === environment.fingerprint &&
+      (configuration.provider === 'mac' ||
+        !configuration.platform ||
+        (configuration.platform.os === process.platform && configuration.platform.arch === process.arch)),
+    'EVIDENCE_CHANGED',
+    'Run configure-runner in this worker’s exact environment and use its machine identity.',
+  );
+  return configuration;
+}
 export async function workerCli(args: string[]) {
   invariant(
     args.length === 3 && args[0] && args[1] && args[2],
@@ -65,12 +82,15 @@ export async function workerCli(args: string[]) {
         }),
       ),
     );
-  const configuration = hostedMacRunnerSchema.parse({
-    provider: 'mac',
-    machineId,
-    runtime: hostedMacRuntime,
-    environmentFingerprint: checkEnvironment().fingerprint,
-  });
+  const current = JSON.parse(
+    await exchange.client.query(
+      makeFunctionReference<'query', { projectId: string; checkId: string }, string>(
+        'projectHostedCheckDefinitions:current',
+      ),
+      { projectId, checkId: '' },
+    ),
+  );
+  const configuration = workerConfiguration(current.configuration, machineId);
   const capabilities: { authority: { epoch: number } } = JSON.parse(
     await exchange.client.query(
       makeFunctionReference<'query', { projectId: string; clientVersion: string }, string>(
@@ -134,7 +154,9 @@ export async function workerCli(args: string[]) {
     },
   };
   try {
-    process.stderr.write(`Mac runner registered: ${machineId}; waiting for hosted work.\n`);
+    process.stderr.write(
+      `Self-hosted runner registered: ${machineId} (${process.platform}/${process.arch}); waiting for hosted work.\n`,
+    );
     await runHostedMacWorker(
       {
         sessionId,

@@ -1,3 +1,4 @@
+import { isMachineRunner } from './hosted-machine-runner.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
 import { ContractTimingReader } from './contract-test-timings.js';
 import { semanticTests } from './intent-semantic-conflict.js';
@@ -40,9 +41,10 @@ export async function executeHostedMacCheck(
   transport: MacExecutionTransport,
   key: string,
 ) {
+  invariant(isMachineRunner(initial.configuration), 'EVIDENCE_CHANGED', 'Select a machine runner.');
   let run = initial;
   const localLogs = localMacLogFiles(initial.projectId, initial.id);
-  const root = await mkdtemp(join(tmpdir(), 'forge-mac-check-'));
+  const root = await mkdtemp(join(tmpdir(), 'forge-machine-check-'));
   let cleanup = false;
   const owner = run.lease!.owner,
     token = run.lease!.token;
@@ -54,9 +56,13 @@ export async function executeHostedMacCheck(
   try {
     const environment = checkEnvironment();
     invariant(
-      environment.fingerprint === run.request.expectedEnvironment,
+      environment.fingerprint === run.request.expectedEnvironment &&
+        (initial.configuration.provider === 'mac' ||
+          !initial.configuration.platform ||
+          (initial.configuration.platform.os === environment.platform &&
+            initial.configuration.platform.arch === environment.arch)),
       'EVIDENCE_CHANGED',
-      'The configured Mac environment changed.',
+      'The configured machine environment changed.',
     );
     const cache = new HostedCheckoutCache(join(root, 'cache'), transport);
     await cache.ensure([run.request.expectedHead]);
@@ -109,7 +115,7 @@ export async function executeHostedMacCheck(
       installHostedFile(checkout, cache.objects, file);
     }
     await save({ kind: 'reserve' });
-    const executionId = `mac:${run.id}:${run.fence}:${owner}`;
+    const executionId = `${run.configuration.provider}:${run.id}:${run.fence}:${owner}`;
     await save({ kind: 'observe', result: { status: 'accepted', executionId } });
     const provider = new HostedMacProvider(
       run,
@@ -261,7 +267,7 @@ export async function executeHostedMacCheck(
               operationId: run.request.operationId,
               authorityEpoch: run.request.authorityEpoch,
               fence: run.fence,
-              provider: 'mac',
+              provider: initial.configuration.provider,
               executionId,
               head: run.request.expectedHead,
               definition: run.check.definition,

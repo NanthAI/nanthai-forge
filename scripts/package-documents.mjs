@@ -31,6 +31,7 @@ export const packageDocuments = [
   'docs/operations/modal-checks.md',
   'docs/operations/github-actions-checks.md',
   'docs/operations/runner-fallback.md',
+  'docs/operations/self-hosted-runner.md',
   'docs/operations/source-exchange.md',
   'docs/operations/r2-backfill.md',
   'docs/operations/recovery-drill.md',

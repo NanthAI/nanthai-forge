@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { isMachineRunner } from '../src/hosted-machine-runner';
 import { snapshotReader } from './projectCheckLogCleanupSnapshot';
 import { resumePlan, planStep } from './projectCheckLogCleanupPlan';
 import { stepRef, lookupRef } from './projectCheckLogCleanupTypes';
@@ -77,7 +78,7 @@ export async function planProjectCheckLogs(
       descriptor.kind === 'summary'
     )
       return [];
-    const rawLocal = run.configuration.provider === 'mac';
+    const rawLocal = isMachineRunner(run.configuration);
     const expiresAt =
       descriptor.expiresAt ??
       Date.parse(run.endedAt ?? run.at) + (run.checkLogs?.retentionDays ?? 90) * 86400000;

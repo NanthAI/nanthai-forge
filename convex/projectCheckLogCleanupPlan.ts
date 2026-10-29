@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { isMachineRunner } from '../src/hosted-machine-runner';
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -311,7 +312,7 @@ export async function planStep(
         const expiresAt =
           descriptor.expiresAt ??
           Date.parse(run.endedAt ?? run.at) + (run.checkLogs?.retentionDays ?? 90) * 86400000;
-        if (run.configuration.provider === 'mac' && run.checkLogs?.uploadLocal && state.now < expiresAt)
+        if (isMachineRunner(run.configuration) && run.checkLogs?.uploadLocal && state.now < expiresAt)
           continue;
         append('hostedOutputs', [
           {

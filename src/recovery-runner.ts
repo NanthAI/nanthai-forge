@@ -9,7 +9,7 @@ import { invariant } from './errors.js';
 import { withQueueSlot } from './landing-queue.js';
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 import { hostedMainSchema } from './hosted-main.js';
-import { hostedMacRunnerSchema } from './hosted-check.js';
+import { hostedMachineRunnerSchema } from './hosted-check.js';
 import {
   recoveryRequestSchema,
   recoverySelectionSchema,
@@ -23,7 +23,7 @@ import { validateRunnerRecovery } from './recovery-runner-cache.js';
 import { syncDirectory } from './native-durability.js';
 import { runnerRecoveryTransport, type RunnerRecoveryTransport } from './recovery-runner-transport.js';
 
-export type HostedMacRunner = z.infer<typeof hostedMacRunnerSchema>;
+export type HostedMacRunner = z.infer<typeof hostedMachineRunnerSchema>;
 const requestSchema = recoveryRequestSchema.omit({ archivePath: true, cacheRoot: true });
 type Progress = {
   schema: 1;
@@ -118,7 +118,7 @@ export async function recoverRunner(target: string, input: unknown, supplied?: R
           schema: 1,
           requestHash,
           selection: prepared.selection,
-          configuration: hostedMacRunnerSchema.parse(await transport.configuration()),
+          configuration: hostedMachineRunnerSchema.parse(await transport.configuration()),
           timings: { select: Math.round(performance.now() - start) },
         };
         writeRecoveryState(path, progress);

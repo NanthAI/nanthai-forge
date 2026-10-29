@@ -62,8 +62,16 @@ export const hostedMacRunnerSchema = z
     environmentFingerprint: checkHash,
   })
   .strict();
+/** Additive wire format: old Mac records keep their original bytes/digests.
+ * New writers always include platform; optional here for staged server upgrades. */
+export const hostedSelfHostedRunnerSchema = hostedMacRunnerSchema.extend({
+  provider: z.literal('self-hosted'),
+  platform: z.object({ os: text, arch: text }).strict().optional(),
+  labels: z.array(text).optional(),
+});
+export const hostedMachineRunnerSchema = z.union([hostedMacRunnerSchema, hostedSelfHostedRunnerSchema]);
 export const hostedCheckRunnerSchema = z.union([
-  hostedMacRunnerSchema,
+  hostedMachineRunnerSchema,
   z
     .object({
       provider: z.literal('modal'),

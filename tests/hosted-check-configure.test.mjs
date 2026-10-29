@@ -221,7 +221,7 @@ function cli(t, fixture) {
   return { state, run };
 }
 
-test('CLI configures verify, a mac runner and reports settings with bounded calls', async t => {
+test('CLI configures verify, a self-hosted runner and reports settings with bounded calls', async t => {
   const fixture = project();
   const { state, run } = cli(t, fixture);
   // Released clients parse advertised actions strictly; owner commands are not advertised.
@@ -250,12 +250,20 @@ test('CLI configures verify, a mac runner and reports settings with bounded call
   assert.equal([...fixture.s.tables.projectHostedCheckSettingVersions.values()].length, 1);
 
   const runner = await run('configure-runner', { provider: 'mac' });
-  assert.equal(runner.value.provider, 'mac');
+  assert.equal(runner.value.provider, 'self-hosted');
+  assert.deepEqual(runner.value.platform, { os: process.platform, arch: process.arch });
+  const displayed = await run('check-settings');
+  assert.match(displayed.runner.description, /runner: self-hosted/);
+  assert(
+    displayed.runner.description.includes(
+      `${process.platform}/${process.arch}, your machine; you pay nothing to Forge`,
+    ),
+  );
   assert.equal(runner.value.runtime, hostedMacRuntime);
   assert.equal(runner.value.environmentFingerprint, checkEnvironment().fingerprint);
   assert.equal(runner.digest, checkPin(runner.value));
   // A fresh operation keeps the configured machine and CASes on the current digest.
-  const moved = await run('configure-runner', { provider: 'mac', operationId: randomUUID() });
+  const moved = await run('configure-runner', { provider: 'self-hosted', operationId: randomUUID() });
   assert.equal(moved.value.machineId, runner.value.machineId);
   assert.equal(moved.version, 1);
   await assert.rejects(
@@ -507,5 +515,31 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
       operationId: randomUUID(),
     }),
     code('PROJECT_UNAVAILABLE'),
+  );
+});
+
+test('CLI self-hosted labels remain pinned on replay and explicit empty labels clear the selection metadata', async t => {
+  const fixture = project();
+  const { run } = cli(t, fixture);
+  const first = await run('configure-runner', { provider: 'self-hosted', labels: ['linux', 'build'] });
+  assert.deepEqual(first.value.labels, ['linux', 'build']);
+  assert.deepEqual(
+    await run('configure-runner', { provider: 'self-hosted', labels: ['linux', 'build'] }),
+    first,
+  );
+  const retained = await run('configure-runner', { provider: 'self-hosted', operationId: randomUUID() });
+  assert.deepEqual(retained.value.labels, ['linux', 'build']);
+  assert.equal(retained.value.machineId, first.value.machineId);
+  const cleared = await run('configure-runner', {
+    provider: 'self-hosted',
+    labels: [],
+    operationId: randomUUID(),
+  });
+  assert.deepEqual(cleared.value.labels, []);
+  assert.notEqual(cleared.digest, first.digest);
+  assert.deepEqual((await run('check-settings')).runner.configuration.labels, []);
+  await assert.rejects(
+    run('configure-runner', { provider: 'github-actions', labels: ['build'] }),
+    code('BAD_ARGUMENT'),
   );
 });

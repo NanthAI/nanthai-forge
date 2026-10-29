@@ -418,9 +418,10 @@ Pointers: `convex/projectHostedFinish.ts` (`resume`),
 
 `nforge worker DEPLOYMENT_URL PROJECT_ID MACHINE_UUID` registers an authenticated
 project-owner collector session and subscribes to its configured machine's queue.
-Configure the runner through `projectHostedCheckDefinitions:configure` with provider
-`mac`, the stable `machineId`, `hostedMacRuntime` from `hosted-mac-lease`, and the
-machine's `checkEnvironment().fingerprint`. The fixed collector uses the existing
+Configure the runner with provider `self-hosted`, the stable `machineId`, runtime,
+platform and the machine's `checkEnvironment().fingerprint`. Legacy `mac` settings
+remain readable without changing their pinned digests. See the
+[self-hosted runner setup and container recipe](self-hosted-runner.md). The fixed collector uses the existing
 `FORGE_HOSTED_CHECK_KEY_ID` / `FORGE_HOSTED_CHECK_KEY_<ID>` signing configuration;
 project commands receive neither that key nor the collector's account token.
 

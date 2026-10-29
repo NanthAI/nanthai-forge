@@ -177,13 +177,14 @@ export const hostedAgentCommandSchemas = {
       expected: hash.nullable().optional(),
     })
     .strict(),
-  /** Owner-only. provider mac fills runtime and environment from this installed package and process;
+  /** Owner-only. provider self-hosted (legacy mac alias) fills runtime and environment from this installed package and process;
    * provider github-actions selects the Convex-dispatched App runner (installation derived via the App). */
   'configure-runner': z
     .object({
-      provider: z.enum(['mac', 'github-actions']).optional(),
+      provider: z.enum(['mac', 'self-hosted', 'github-actions']).optional(),
       runsOn: githubActionsRunsOnSchema.optional(),
       machineId: uuid.optional(),
+      labels: z.array(z.string().min(1)).optional(),
       repository: z
         .string()
         .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)

@@ -1,3 +1,4 @@
+import { isMachineRunner } from '../src/hosted-machine-runner';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { query, type QueryCtx, type MutationCtx } from './cliServer';
@@ -109,7 +110,7 @@ export async function requireHostedCheckEvidence(
     'The current check definition or runner configuration changed.',
   );
   exactHostedCheckEvidence(run, input);
-  if (run.configuration.provider === 'mac') {
+  if (isMachineRunner(run.configuration)) {
     const machineId = run.configuration.machineId;
     const machine = await requireMacMachine(ctx, input.projectId, machineId);
     const evidence = run.macEvidence;
@@ -123,7 +124,7 @@ export async function requireHostedCheckEvidence(
             environmentFingerprint: run.configuration.environmentFingerprint,
           }),
       'EVIDENCE_CHANGED',
-      `Mac machine ${machineId} has no matching completed-run receipt.`,
+      `Runner machine ${machineId} has no matching completed-run receipt.`,
     );
     const head = await recordHead(ctx, input.projectId, 'candidate', input.candidateId);
     const candidate = head ? await ctx.db.get(head.recordId) : null;
@@ -134,7 +135,7 @@ export async function requireHostedCheckEvidence(
         input.actor === project.owner &&
         candidate?.creatorAccountId === project.owner,
       'HOSTED_RUNNER_REQUIRED',
-      `Mac machine ${machineId} evidence requires owner-controlled trusted or autonomous work; supervised projects and outside contributors need hosted-runner evidence.`,
+      `Runner machine ${machineId} evidence requires owner-controlled trusted or autonomous work; supervised projects and outside contributors need hosted-runner evidence.`,
     );
   }
   return run;

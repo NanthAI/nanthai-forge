@@ -23,7 +23,7 @@ export async function requireMacMachine(
   invariant(
     machine && machine.revokedAt === undefined,
     'MAC_MACHINE_REVOKED',
-    `Mac machine ${machineId} has no active registration.`,
+    `Runner machine ${machineId} has no active registration.`,
   );
   return machine;
 }
@@ -58,7 +58,7 @@ export const revoke = mutation({
       });
       if (operation.replayed) return canonicalPayload(operation.operation.terminal?.outcome);
       const machine = await macMachine(ctx, input.projectId, request.machineId);
-      invariant(machine, 'NOT_FOUND', `Mac machine ${request.machineId} is not registered.`);
+      invariant(machine, 'NOT_FOUND', `Runner machine ${request.machineId} is not registered.`);
       const result = { machineId: request.machineId, revokedAt: machine.revokedAt ?? Date.now() };
       await ctx.db.patch(machine._id, { revokedAt: result.revokedAt });
       await completeCheckOperation(ctx, operation.operation, result);

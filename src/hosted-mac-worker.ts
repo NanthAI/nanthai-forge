@@ -1,3 +1,4 @@
+import { isMachineRunner } from './hosted-machine-runner.js';
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from 'node:crypto';
 import { hostedCheckTerminal, type HostedCheckRun } from './hosted-check.js';
@@ -8,7 +9,9 @@ import { invariant } from './errors.js';
 /** The local provider starts only after hosted has recorded its live owner and
  * exact execution. Concurrent delivery shares the same in-process execution. */
 export class HostedMacProvider implements HostedCheckProvider {
-  readonly id = 'mac';
+  get id() {
+    return this.run.configuration.provider;
+  }
   private execution: Promise<void> | undefined;
   constructor(
     private readonly run: HostedCheckRun,
@@ -19,7 +22,7 @@ export class HostedMacProvider implements HostedCheckProvider {
   async dispatch(input: HostedCheckDispatch) {
     const run = this.run;
     invariant(
-      run.configuration.provider === this.id &&
+      isMachineRunner(run.configuration) &&
         input.id === run.id &&
         input.fence === run.fence &&
         input.dispatchKey === run.dispatchKey &&
@@ -32,7 +35,7 @@ export class HostedMacProvider implements HostedCheckProvider {
         run.lease.until > this.now() &&
         !this.signal.aborted,
       'WORK_STALE',
-      'Start only the exact Mac execution with a live owner.',
+      'Start only the exact machine execution with a live owner.',
     );
     this.execution ??= this.execute();
     await this.execution;

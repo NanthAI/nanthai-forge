@@ -10,20 +10,20 @@ import { writeFile } from 'node:fs/promises';
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
-import { checkPin } from '../dist/hosted-check.js';
+import { checkPin, hostedMacRunnerSchema, hostedMachineRunnerSchema } from '../dist/hosted-check.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { checkEnvironment } from '../dist/check-environment.js';
 import { executeHostedMacCheck } from '../dist/hosted-mac-execute.js';
 import { deliverMacCallback } from '../dist/hosted-mac-delivery.js';
-import { workerCli } from '../dist/worker-cli.js';
+import { workerCli, workerConfiguration } from '../dist/worker-cli.js';
 import { runHostedMacWorker, HostedMacProvider } from '../dist/hosted-mac-worker.js';
-import { signMacHeartbeat } from '../dist/hosted-mac-lease.js';
+import { signMacHeartbeat, hostedMacRuntime } from '../dist/hosted-mac-lease.js';
 const worker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
 const lease = await import(moduleUrl('../convex/projectHostedCheckLease.ts'));
 const outputStore = await import(moduleUrl('../convex/projectHostedOutputStore.ts'));
 const secret = 'synthetic-mac-fixed-collector';
 
-async function fixture(t, actualEnvironment = false) {
+async function fixture(t, actualEnvironment = false, provider = 'mac') {
   const localLogs = mkdtempSync(join(tmpdir(), 'forge-mac-log-test-'));
   const oldLogs = process.env.FORGE_LOCAL_CHECK_LOG_DIR;
   process.env.FORGE_LOCAL_CHECK_LOG_DIR = localLogs;
@@ -57,7 +57,10 @@ async function fixture(t, actualEnvironment = false) {
   const machineId = randomUUID(),
     sessionId = randomUUID();
   const configuration = {
-    provider: 'mac',
+    provider,
+    ...(provider === 'self-hosted'
+      ? { platform: { os: process.platform, arch: process.arch }, labels: ['build'] }
+      : {}),
     machineId,
     runtime: f.runner.runtime,
     environmentFingerprint: actualEnvironment
@@ -311,127 +314,215 @@ test('provider refuses a run with no live owner and deduplicates concurrent deli
   await assert.rejects(provider.dispatch(run), code('WORK_STALE'));
 });
 
-for (const uploadLocal of [false, true])
-  test(`direct hosted/R2 execution preserves local logs and uploads them only with opt-in (${uploadLocal})`, async t => {
-    const f = await fixture(t, true);
-    const definition = await f.configure(
-      {
-        kind: 'definition',
-        checkId: f.checkId,
-        command: {
-          name: 'synthetic-process',
-          executable: process.execPath,
-          args: [
-            '-e',
-            'console.log("synthetic success"); console.error("diagnostic"); if(process.env.FORGE_HOSTED_CHECK_KEY_SYNTHETIC) process.exit(99);',
-          ],
-          environmentLabel: 'clean',
-        },
-      },
-      f.definition.digest,
-    );
-    f.tables.hostedProjects.get(f.projectId).autonomyPolicy = {
-      ...policyPreset('supervised'),
-      checkLogs: { uploadLocal, retentionDays: 90 },
-    };
-    const run = (await f.claim((await f.enqueue({ expectedDefinition: definition.digest })).id)).run;
-    const state = Buffer.from(
-      JSON.stringify({
-        schema: 1,
-        kind: 'forge-source-state',
-        parents: [],
-        files: [],
-        message: 'synthetic check source',
-        at: '2026-01-01T00:00:00.000Z',
-      }),
-    );
-    assert.equal(digest(state), run.request.expectedHead);
-    const uploaded = [],
-      outputObjects = new Map();
-    let lostChunkReply = false,
-      lostCompletionReply = false;
-    const transport = {
-      objects: async ids =>
-        ids.map(sha256 => {
-          assert.equal(sha256, run.request.expectedHead);
-          return { sha256, size: state.length };
-        }),
-      downloadToFile: async (_, path) => writeFile(path, state),
-      upload: async (pin, bytes) => {
-        uploaded.push(pin);
-        f.put(bytes);
-      },
-      callback: async (callback, signature) => {
-        const result = JSON.parse(
-          await f.call('macCallback', worker.callback, {
-            projectId: f.projectId,
-            callback: JSON.stringify(callback),
-            signature,
-          }),
-        );
-        if (callback.result.kind === 'complete' && !lostCompletionReply) {
-          lostCompletionReply = true;
-          throw new TypeError('Completion committed; reply lost.');
-        }
-        return result;
-      },
-      output: {
-        prepare: async message => {
-          const object =
-            message.body.kind === 'chunk'
-              ? message.body.chunk.object
-              : (await import('../dist/hosted-check-output.js')).outputRootObject(message.body.root);
-          return {
-            object,
-            target: { kind: 'r2', url: `https://synthetic.invalid/${object.sha256}`, headers: {} },
-          };
-        },
-        put: async (url, _, bytes) => {
-          outputObjects.set(url.split('/').at(-1), Buffer.from(bytes));
-          return { status: 200 };
-        },
-        commit: async (message, signature) => {
-          const result = await f.run(
-            'macOutput',
-            (ctx, input) => outputStore.commitHostedOutput(ctx, input, () => secret),
-            {
-              projectId: f.projectId,
-              message,
-              signature,
-            },
+for (const provider of ['mac', 'self-hosted'])
+  for (const uploadLocal of [false, true])
+    test(`direct hosted/R2 execution preserves local logs and uploads them only with opt-in (${provider}, ${uploadLocal})`, async t => {
+      if (provider === 'self-hosted') {
+        const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+        Object.defineProperty(process, 'platform', { value: 'linux' });
+        t.after(() => Object.defineProperty(process, 'platform', descriptor));
+        const { syncBuiltinESMExports } = await import('node:module');
+        const childProcess = await import('node:child_process');
+        const original = childProcess.default.execFileSync;
+        t.mock.method(childProcess.default, 'execFileSync', (...args) => {
+          assert(
+            !['/bin/ps', 'security', 'launchctl', 'sandbox-exec', 'xcodebuild'].includes(args[0]),
+            'No Darwin tool on Linux',
           );
-          if (message.body.kind === 'chunk' && !lostChunkReply) {
-            lostChunkReply = true;
-            throw new TypeError('Chunk committed; reply lost.');
+          return original(...args);
+        });
+        syncBuiltinESMExports();
+        t.after(() => {
+          t.mock.restoreAll();
+          syncBuiltinESMExports();
+        });
+      }
+      const f = await fixture(t, true, provider);
+      const definition = await f.configure(
+        {
+          kind: 'definition',
+          checkId: f.checkId,
+          command: {
+            name: 'synthetic-process',
+            executable: process.execPath,
+            args: [
+              '-e',
+              'console.log("synthetic success"); console.error("diagnostic"); if(process.env.FORGE_HOSTED_CHECK_KEY_SYNTHETIC) process.exit(99);',
+            ],
+            environmentLabel: 'clean',
+          },
+        },
+        f.definition.digest,
+      );
+      f.tables.hostedProjects.get(f.projectId).autonomyPolicy = {
+        ...policyPreset('supervised'),
+        checkLogs: { uploadLocal, retentionDays: 90 },
+      };
+      if (provider === 'self-hosted')
+        for (let i = 0; i < 1500; i++)
+          f.insert('projectHostedCheckRuns', {
+            projectId: f.projectId,
+            runId: randomUUID(),
+            candidateId: randomUUID(),
+            machineId: randomUUID(),
+            status: 'passed',
+            value: '{}',
+          });
+      const meterStart = f.counts.length,
+        wallStart = performance.now();
+      const run = (await f.claim((await f.enqueue({ expectedDefinition: definition.digest })).id)).run;
+      const state = Buffer.from(
+        JSON.stringify({
+          schema: 1,
+          kind: 'forge-source-state',
+          parents: [],
+          files: [],
+          message: 'synthetic check source',
+          at: '2026-01-01T00:00:00.000Z',
+        }),
+      );
+      assert.equal(digest(state), run.request.expectedHead);
+      const uploaded = [],
+        outputObjects = new Map();
+      let lostChunkReply = false,
+        lostCompletionReply = false;
+      const transport = {
+        objects: async ids =>
+          ids.map(sha256 => {
+            assert.equal(sha256, run.request.expectedHead);
+            return { sha256, size: state.length };
+          }),
+        downloadToFile: async (_, path) => writeFile(path, state),
+        upload: async (pin, bytes) => {
+          uploaded.push(pin);
+          f.put(bytes);
+        },
+        callback: async (callback, signature) => {
+          if (provider === 'self-hosted')
+            await assert.rejects(
+              f.call('badSelfCallback', worker.callback, {
+                projectId: f.projectId,
+                callback: JSON.stringify(callback),
+                signature: '0'.repeat(64),
+              }),
+              code('EVIDENCE_CHANGED'),
+            );
+          const result = JSON.parse(
+            await f.call('macCallback', worker.callback, {
+              projectId: f.projectId,
+              callback: JSON.stringify(callback),
+              signature,
+            }),
+          );
+          if (callback.result.kind === 'complete' && !lostCompletionReply) {
+            lostCompletionReply = true;
+            throw new TypeError('Completion committed; reply lost.');
           }
           return result;
         },
-      },
-    };
-    await executeHostedMacCheck(
-      run,
-      new AbortController().signal,
-      async command => (await f.control(run.id, command)).run,
-      transport,
-      secret,
-    );
-    assert.equal((await f.status(run.id)).status, 'passed');
-    assert(lostCompletionReply);
-    assert.equal(lostChunkReply, uploadLocal);
-    assert.equal(uploaded.length, 2);
-    if (uploadLocal) assert(outputObjects.size >= 3);
-    assert.equal(
-      [...outputObjects.values()].some(bytes => bytes.toString().includes('synthetic success')),
-      uploadLocal,
-    );
-    const localFiles = readdirSync(f.localLogs, { recursive: true }).filter(name =>
-      String(name).endsWith('.log'),
-    );
-    assert(
-      localFiles.some(name => readFileSync(join(f.localLogs, name), 'utf8').includes('synthetic success')),
-    );
-    assert.equal(f.tables.projectHostedActionsExports.size, 0);
-  });
+        output: {
+          prepare: async message => {
+            const object =
+              message.body.kind === 'chunk'
+                ? message.body.chunk.object
+                : (await import('../dist/hosted-check-output.js')).outputRootObject(message.body.root);
+            return {
+              object,
+              target: { kind: 'r2', url: `https://synthetic.invalid/${object.sha256}`, headers: {} },
+            };
+          },
+          put: async (url, _, bytes) => {
+            outputObjects.set(url.split('/').at(-1), Buffer.from(bytes));
+            return { status: 200 };
+          },
+          commit: async (message, signature) => {
+            const result = await f.run(
+              'macOutput',
+              (ctx, input) => outputStore.commitHostedOutput(ctx, input, () => secret),
+              {
+                projectId: f.projectId,
+                message,
+                signature,
+              },
+            );
+            if (message.body.kind === 'chunk' && !lostChunkReply) {
+              lostChunkReply = true;
+              throw new TypeError('Chunk committed; reply lost.');
+            }
+            return result;
+          },
+        },
+      };
+      await f.heartbeat(run);
+      if (provider === 'self-hosted') {
+        const stop = new AbortController();
+        await runHostedMacWorker(
+          {
+            sessionId: f.address.sessionId,
+            key: secret,
+            work: update => {
+              update([run.id]);
+              return () => {};
+            },
+            watch: () => () => {},
+            control: f.control,
+            heartbeat: async (callback, signature) =>
+              JSON.parse(
+                await f.call('heartbeat', worker.heartbeat, {
+                  projectId: f.projectId,
+                  callback: JSON.stringify(callback),
+                  signature,
+                }),
+              ),
+            execute: async (owned, signal, control) => {
+              await executeHostedMacCheck(owned, signal, control, transport, secret);
+              stop.abort();
+            },
+            close: async () => {},
+          },
+          stop.signal,
+        );
+      } else
+        await executeHostedMacCheck(
+          run,
+          new AbortController().signal,
+          async command => (await f.control(run.id, command)).run,
+          transport,
+          secret,
+        );
+      const completed = await f.status(run.id);
+      assert.equal(completed.status, 'passed');
+      assert.equal(completed.configuration.provider, provider);
+      assert.equal(completed.macEvidence.machineId, f.configuration.machineId);
+      assert.equal(completed.macEvidence.registrationId, f.address.sessionId);
+      assert(lostCompletionReply);
+      assert.equal(lostChunkReply, uploadLocal);
+      assert.equal(uploaded.length, 2);
+      if (uploadLocal) assert(outputObjects.size >= 3);
+      assert.equal(
+        [...outputObjects.values()].some(bytes => bytes.toString().includes('synthetic success')),
+        uploadLocal,
+      );
+      const localFiles = readdirSync(f.localLogs, { recursive: true }).filter(name =>
+        String(name).endsWith('.log'),
+      );
+      assert(
+        localFiles.some(name => readFileSync(join(f.localLogs, name), 'utf8').includes('synthetic success')),
+      );
+      assert.equal(f.tables.projectHostedActionsExports.size, 0);
+      if (provider === 'self-hosted') {
+        const meters = f.counts.slice(meterStart);
+        const reads = meters.reduce((sum, meter) => sum + meter.documents, 0);
+        const writes = meters.reduce((sum, meter) => sum + meter.writes, 0);
+        assert(
+          meters.length <= 40 && reads <= 200 && writes <= 100,
+          'bounded single-run control/evidence traffic',
+        );
+        t.diagnostic(
+          `Linux fake, 1500 retained runs, uploadLocal=${uploadLocal}: ${meters.length} function calls (includes lost-reply retries and signature-negative probes), ${reads} document reads, ${writes} writes; wall ${Math.round(performance.now() - wallStart)}ms; process maxRSS ${process.resourceUsage().maxRSS} KiB`,
+        );
+      }
+    });
 
 test('active renewal is signed, cancel stops the live process through its subscription, then idle stops calling', async t => {
   const f = await fixture(t),
@@ -615,4 +706,138 @@ test('lease failure settles after requester access is revoked without returning 
   const stored = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === first.id);
   assert.equal(JSON.parse(stored.value).status, 'runner-unavailable');
   assert.equal(await f.claim(first.id).catch(error => error.data?.code ?? error.code), 'PROJECT_UNAVAILABLE');
+});
+
+test('machine schemas retain legacy bytes while new configurations round-trip platform and labels', () => {
+  const legacy = {
+    provider: 'mac',
+    machineId: randomUUID(),
+    runtime: 'a'.repeat(64),
+    environmentFingerprint: 'b'.repeat(64),
+  };
+  assert.deepEqual(hostedMacRunnerSchema.parse(legacy), legacy);
+  assert.equal(checkPin(hostedMachineRunnerSchema.parse(legacy)), checkPin(legacy));
+  const current = {
+    ...legacy,
+    provider: 'self-hosted',
+    platform: { os: 'linux', arch: 'x64' },
+    labels: ['linux', 'build'],
+  };
+  assert.deepEqual(hostedMachineRunnerSchema.parse(current), current);
+  // Optional metadata permits additive server-first deployment; new CLI writes it.
+  assert(hostedMachineRunnerSchema.safeParse({ ...legacy, provider: 'self-hosted' }).success);
+  assert(!hostedMachineRunnerSchema.safeParse({ ...current, platform: { os: 'linux' } }).success);
+});
+
+test('new worker keeps the exact legacy or self-hosted registration and refuses pin drift', () => {
+  const machineId = randomUUID();
+  const environmentFingerprint = checkEnvironment().fingerprint;
+  const legacy = { provider: 'mac', machineId, runtime: hostedMacRuntime, environmentFingerprint };
+  assert.deepEqual(workerConfiguration(legacy, machineId), legacy);
+  const current = {
+    ...legacy,
+    provider: 'self-hosted',
+    platform: { os: process.platform, arch: process.arch },
+    labels: ['build'],
+  };
+  assert.deepEqual(workerConfiguration(current, machineId), current);
+  assert.throws(
+    () => workerConfiguration({ ...current, environmentFingerprint: 'f'.repeat(64) }, machineId),
+    code('EVIDENCE_CHANGED'),
+  );
+  assert.throws(
+    () => workerConfiguration({ ...current, platform: { os: 'different', arch: process.arch } }, machineId),
+    code('EVIDENCE_CHANGED'),
+  );
+  assert.throws(() => workerConfiguration(current, randomUUID()), code('EVIDENCE_CHANGED'));
+});
+
+test('one-command setup configures and starts in the same environment with replayable parameters', async t => {
+  const { startSelfHostedRunner } = await import('../scripts/self-hosted-runner/start.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'forge-setup-test-'));
+  const old = process.env.FORGE_RUNNER_STATE_DIR;
+  process.env.FORGE_RUNNER_STATE_DIR = root;
+  t.after(() => {
+    if (old === undefined) delete process.env.FORGE_RUNNER_STATE_DIR;
+    else process.env.FORGE_RUNNER_STATE_DIR = old;
+    rmSync(root, { recursive: true, force: true });
+  });
+  const machineId = randomUUID(),
+    calls = [];
+  const services = {
+    transport: { dispatch: async (action, parameters) => calls.push({ action, parameters }) },
+    worker: async args => calls.push(args),
+  };
+  const args = ['https://synthetic.invalid', 'synthetic-project', machineId, '["build"]'];
+  await startSelfHostedRunner(args, services);
+  const selected = calls[0].parameters.configuration;
+  assert.equal(calls[0].action, 'configure-runner');
+  assert.equal(selected.provider, 'self-hosted');
+  assert.deepEqual(selected.labels, ['build']);
+  assert.deepEqual(workerConfiguration(selected, machineId), selected);
+  assert.deepEqual(calls[1], args.slice(0, 3));
+  await startSelfHostedRunner(args, services);
+  assert.deepEqual(calls[2], calls[0], 'same pins retain the journal operation identity');
+  await assert.rejects(startSelfHostedRunner([], services));
+  await assert.rejects(startSelfHostedRunner([...args.slice(0, 3), '{}'], services));
+});
+
+test('dogfood-sized idle queue is bounded and a settled empty subscription makes zero further calls', async t => {
+  const f = await fixture(t, false, 'self-hosted');
+  for (let i = 0; i < 1500; i++)
+    f.insert('projectHostedCheckRuns', {
+      projectId: f.projectId,
+      runId: randomUUID(),
+      candidateId: randomUUID(),
+      machineId: randomUUID(),
+      status: 'passed',
+      value: '{}',
+    });
+  const before = f.counts.length,
+    start = performance.now();
+  const queue = JSON.parse(await f.call('idleWork', worker.work, f.address));
+  assert.deepEqual(queue, []);
+  const startup = f.counts.slice(before);
+  assert.equal(startup.length, 1);
+  assert(startup[0].documents <= 6);
+  assert.equal(startup[0].writes, 0);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const stop = new AbortController();
+  let calls = 0;
+  const running = runHostedMacWorker(
+    {
+      sessionId: f.address.sessionId,
+      key: secret,
+      work: update => {
+        update(queue);
+        return () => {};
+      },
+      watch: () => {
+        calls++;
+        return () => {};
+      },
+      control: async () => {
+        calls++;
+        throw new Error('unexpected idle control');
+      },
+      heartbeat: async () => {
+        calls++;
+        throw new Error('unexpected idle heartbeat');
+      },
+      execute: async () => {
+        calls++;
+      },
+      close: async () => {},
+    },
+    stop.signal,
+  );
+  t.mock.timers.tick(86400000);
+  await Promise.resolve();
+  assert.equal(calls, 0);
+  assert.equal(f.counts.length - before, 1, 'only the initial work subscription query');
+  stop.abort();
+  await running;
+  t.diagnostic(
+    `1500 retained runs: initial work query ${startup[0].documents} document reads, 0 writes; idle 24h: 0 calls/reads/writes; fixture wall ${Math.round(performance.now() - start)}ms; process maxRSS ${process.resourceUsage().maxRSS} KiB`,
+  );
 });

@@ -1,3 +1,4 @@
+import { isMachineRunner } from '../src/hosted-machine-runner';
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
@@ -17,7 +18,7 @@ const expireRef = makeFunctionReference<'mutation', CheckIdentity & { fence: num
   'projectHostedCheckLease:expire',
 );
 export async function watchMacLease(ctx: MutationCtx, run: HostedCheckRun, now = Date.now()) {
-  if (run.configuration.provider !== 'mac' || hostedCheckTerminal(run)) return;
+  if (!isMachineRunner(run.configuration) || hostedCheckTerminal(run)) return;
   const until = run.lease?.until ?? run.ownerDeadline!;
   await ctx.scheduler.runAfter(Math.max(0, until - now), expireRef, {
     projectId: run.projectId as CheckIdentity['projectId'],
@@ -35,7 +36,7 @@ export async function expireMacLease(
 ) {
   const { row, run } = await loadHostedCheck(ctx, input);
   if (
-    run.configuration.provider !== 'mac' ||
+    !isMachineRunner(run.configuration) ||
     hostedCheckTerminal(run) ||
     run.fence !== input.fence ||
     (run.lease?.until ?? run.ownerDeadline) !== input.until ||

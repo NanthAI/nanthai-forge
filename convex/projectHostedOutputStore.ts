@@ -1,3 +1,4 @@
+import { isMachineRunner } from '../src/hosted-machine-runner';
 import { retainLogExpiry } from './projectCheckLogRetention';
 // SPDX-License-Identifier: Apache-2.0
 import type { QueryCtx, MutationCtx } from './_generated/server';
@@ -69,7 +70,7 @@ async function validateOutput(
     if (stream.stream !== 'artifact')
       invariant(
         stream.kind === 'summary' ||
-          (run.configuration.provider === 'mac' && stream.kind === 'local-log' && run.checkLogs?.uploadLocal),
+          (isMachineRunner(run.configuration) && stream.kind === 'local-log' && run.checkLogs?.uploadLocal),
         'LOG_PROVIDER_HELD',
         'CI providers retain full logs; collectors send compact test evidence. Local log upload requires the project opt-in.',
       );
@@ -86,7 +87,7 @@ async function validateOutput(
     'EVIDENCE_CHANGED',
     'Output differs from the retained check execution and source pins.',
   );
-  if (run.configuration.provider === 'mac' && message.body.kind !== 'final') {
+  if (isMachineRunner(run.configuration) && message.body.kind !== 'final') {
     const stream = message.body.kind === 'chunk' ? message.body.chunk.stream : message.body.seal.stream;
     if (stream.kind === 'local-log')
       invariant(
@@ -98,11 +99,11 @@ async function validateOutput(
     if (stream.kind === 'local-log' && stream.expiresAt)
       await retainLogExpiry(ctx, input.projectId, `output:${run.id}`, stream.expiresAt);
   }
-  if (run.configuration.provider === 'mac' && !hostedCheckTerminal(run))
+  if (isMachineRunner(run.configuration) && !hostedCheckTerminal(run))
     invariant(
       run.lease && run.lease.until > Date.now() && !run.cancelRequested,
       'WORK_STALE',
-      'Output requires the live Mac execution owner.',
+      'Output requires the live machine execution owner.',
     );
   const stream =
     message.body.kind === 'chunk'

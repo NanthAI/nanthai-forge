@@ -1,3 +1,4 @@
+import { isMachineRunner } from '../src/hosted-machine-runner';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { watchMacLease, expireMacLease, macLeaseMs } from './projectHostedCheckLease';
@@ -61,7 +62,7 @@ export async function controlHostedCheck(
   const command = hostedCheckControlSchema.parse(input.command);
   let { row, run } = await writableHostedCheck(ctx, input);
   if (
-    run.configuration.provider === 'mac' &&
+    isMachineRunner(run.configuration) &&
     !hostedCheckTerminal(run) &&
     (run.lease?.until ?? run.ownerDeadline ?? Infinity) <= now
   ) {
@@ -77,12 +78,12 @@ export async function controlHostedCheck(
     const old = run.lease;
     if (old && old.until > now && old.owner !== command.owner)
       return { run, acquired: false, dispatch: false };
-    if (run.configuration.provider === 'mac' && old && old.owner === command.owner && old.until > now)
+    if (isMachineRunner(run.configuration) && old && old.owner === command.owner && old.until > now)
       return { run, acquired: true, dispatch: false };
     run.lease = {
       owner: command.owner,
-      token: (old?.token ?? (run.configuration.provider === 'mac' ? run.fence : 0)) + 1,
-      until: now + (run.configuration.provider === 'mac' ? macLeaseMs : command.leaseMs),
+      token: (old?.token ?? (isMachineRunner(run.configuration) ? run.fence : 0)) + 1,
+      until: now + (isMachineRunner(run.configuration) ? macLeaseMs : command.leaseMs),
     };
     await watchMacLease(ctx, run, now);
     run.emptyLookups = [];

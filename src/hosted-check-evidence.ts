@@ -34,7 +34,7 @@ export const hostedCheckCallbackSchema = z
     operationId: z.uuid(),
     authorityEpoch: checkNumber,
     fence: checkNumber,
-    provider: z.enum(['modal', 'github-actions', 'mac']),
+    provider: z.enum(['modal', 'github-actions', 'mac', 'self-hosted']),
     executionId: z.string().min(1),
     head: checkHash,
     definition: checkHash,
