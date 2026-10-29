@@ -1,0 +1,36 @@
+name: Deploy dev Convex
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'convex/**'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer main replaces a queued one, never interrupts a running one.
+concurrency:
+  group: convex-deploy-benevolent-wildebeest-974
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # The deploy key lives only in this environment; it deploys from main alone, so forks and PRs never see it.
+    environment: convex-dev
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts
+      - name: Deploy functions and schema to dev
+        run: npx --no-install convex deploy --typecheck enable
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
