@@ -75,6 +75,7 @@ export const hostedLandingTables = {
     actor: v.string(),
     sequence: v.number(),
     selectionKey: v.optional(v.string()),
+    hold: v.optional(v.literal('main-red')),
     runnable: v.boolean(),
     phase,
     runId: v.union(v.string(), v.null()),
@@ -83,6 +84,7 @@ export const hostedLandingTables = {
   })
     .index('by_project', ['projectId'])
     .index('by_project_and_submission', ['projectId', 'submissionId'])
+    .index('by_project_and_hold', ['projectId', 'hold'])
     .index('by_project_and_revert_and_sequence', ['projectId', 'revertOf', 'sequence'])
     .index('by_project_and_candidate_and_sequence', ['projectId', 'candidateId', 'sequence'])
     .index('by_project_and_selection', ['projectId', 'selectionKey'])

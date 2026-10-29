@@ -26,6 +26,7 @@ import {
   hostedCheckRequestSchema,
   hostedCheckRunnerSchema,
   hostedCheckRunSchema,
+  type HostedCheckRun,
   hostedCheckTerminal,
   checkPin,
   checkNumber,
@@ -233,11 +234,17 @@ export async function enqueueHostedCheck(
     output: null,
     cost: { status: 'unknown' },
   });
+  return insertHostedCheckRun(ctx, run);
+}
+
+/** Insert an already prepared run and retain the existing provider dispatch hooks. */
+export async function insertHostedCheckRun(ctx: MutationCtx, run: HostedCheckRun): Promise<HostedCheckRun> {
   await ctx.db.insert('projectHostedCheckRuns', {
-    projectId: input.projectId,
-    runId: id,
-    candidateId: request.candidateId,
-    ...(isMachineRunner(runner) ? { machineId: runner.machineId } : {}),
+    projectId: run.projectId as Id<'hostedProjects'>,
+    runId: run.id,
+    candidateId: run.request.candidateId,
+    ...(isMachineRunner(run.configuration) ? { machineId: run.configuration.machineId } : {}),
+    ...(run.gate ? { gate: run.gate } : {}),
     status: run.status,
     value: semanticPayload(run, true),
   });

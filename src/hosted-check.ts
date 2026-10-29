@@ -1,3 +1,4 @@
+import { checkGateSchema } from './bet2-gate.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticPlanSchema, semanticReportsSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -87,6 +88,7 @@ export const hostedCheckRunnerSchema = z.union([
 ]);
 export const hostedCheckRequestSchema = z
   .object({
+    gate: checkGateSchema.optional(),
     operationId: z.uuid(),
     authorityEpoch: checkNumber,
     candidateId: z.uuid(),
@@ -166,6 +168,7 @@ export const hostedCheckRunSchema = z
       .strict(),
     check: checkSchema.strict(),
     configuration: hostedCheckRunnerSchema,
+    gate: checkGateSchema.optional(),
     semanticPlan: semanticPlanSchema.optional(),
     contractReports: semanticReportsSchema.optional(),
     testFiles: checkFileSummarySchema.optional(),

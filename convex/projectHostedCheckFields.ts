@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+import { checkGate } from './projectHostedMainAuditFields';
 
 const setting = {
   projectId: v.id('hostedProjects'),
@@ -46,6 +47,7 @@ export const hostedCheckTables = {
     machineId: v.optional(v.string()),
     status: v.string(),
     value: v.string(),
+    gate: v.optional(checkGate),
   })
     .index('by_project', ['projectId'])
     .index('by_run', ['runId'])

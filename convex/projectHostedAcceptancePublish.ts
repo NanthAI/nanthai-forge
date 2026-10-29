@@ -1,3 +1,5 @@
+import { noteMainLanding } from './projectHostedMainAuditState';
+import type { HostedCheckRun } from '../src/hosted-check';
 // SPDX-License-Identifier: Apache-2.0
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import type { MutationCtx } from './_generated/server';
@@ -133,9 +135,10 @@ export async function publishAcceptance(
     'WORK_STALE',
     'Stage the complete immutable inclusion/completion plan before publication.',
   );
+  let run: HostedCheckRun | null = null;
   let check = null;
   if (attempt.check) {
-    const run = await requireHostedCheckEvidence(ctx, {
+    run = await requireHostedCheckEvidence(ctx, {
       projectId: claim.projectId,
       actor: attempt.actor.id,
       candidateId: candidate.id,
@@ -253,6 +256,7 @@ export async function publishAcceptance(
   await writeLanding(ctx, row, next, false);
   await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, queue, now);
+  await noteMainLanding(ctx, { project, receipt, run });
   await enqueueGithubMirror(ctx, project, receipt);
   if (receipt.completion.enabled && plan.inputPages) await scheduleAcceptanceCompletion(ctx, identity);
   return { status: 'landed' as const, receipt };

@@ -178,6 +178,7 @@ import type * as projectHostedComposeJobs from "../projectHostedComposeJobs.js";
 import type * as projectHostedComposePublish from "../projectHostedComposePublish.js";
 import type * as projectHostedComposeSelection from "../projectHostedComposeSelection.js";
 import type * as projectHostedComposeStore from "../projectHostedComposeStore.js";
+import type * as projectHostedCulprit from "../projectHostedCulprit.js";
 import type * as projectHostedFinish from "../projectHostedFinish.js";
 import type * as projectHostedFinishCompose from "../projectHostedFinishCompose.js";
 import type * as projectHostedFinishControl from "../projectHostedFinishControl.js";
@@ -186,6 +187,7 @@ import type * as projectHostedFinishFields from "../projectHostedFinishFields.js
 import type * as projectHostedFinishObserve from "../projectHostedFinishObserve.js";
 import type * as projectHostedFinishStore from "../projectHostedFinishStore.js";
 import type * as projectHostedFinishWake from "../projectHostedFinishWake.js";
+import type * as projectHostedGate from "../projectHostedGate.js";
 import type * as projectHostedLanding from "../projectHostedLanding.js";
 import type * as projectHostedLandingCancel from "../projectHostedLandingCancel.js";
 import type * as projectHostedLandingControl from "../projectHostedLandingControl.js";
@@ -207,6 +209,9 @@ import type * as projectHostedLifecycleOverlay from "../projectHostedLifecycleOv
 import type * as projectHostedLifecycleStore from "../projectHostedLifecycleStore.js";
 import type * as projectHostedLogCleanup from "../projectHostedLogCleanup.js";
 import type * as projectHostedLogCleanupStore from "../projectHostedLogCleanupStore.js";
+import type * as projectHostedMainAudit from "../projectHostedMainAudit.js";
+import type * as projectHostedMainAuditFields from "../projectHostedMainAuditFields.js";
+import type * as projectHostedMainAuditState from "../projectHostedMainAuditState.js";
 import type * as projectHostedOperations from "../projectHostedOperations.js";
 import type * as projectHostedOutputApi from "../projectHostedOutputApi.js";
 import type * as projectHostedOutputBatch from "../projectHostedOutputBatch.js";
@@ -569,6 +574,7 @@ declare const fullApi: ApiFromModules<{
   projectHostedComposePublish: typeof projectHostedComposePublish;
   projectHostedComposeSelection: typeof projectHostedComposeSelection;
   projectHostedComposeStore: typeof projectHostedComposeStore;
+  projectHostedCulprit: typeof projectHostedCulprit;
   projectHostedFinish: typeof projectHostedFinish;
   projectHostedFinishCompose: typeof projectHostedFinishCompose;
   projectHostedFinishControl: typeof projectHostedFinishControl;
@@ -577,6 +583,7 @@ declare const fullApi: ApiFromModules<{
   projectHostedFinishObserve: typeof projectHostedFinishObserve;
   projectHostedFinishStore: typeof projectHostedFinishStore;
   projectHostedFinishWake: typeof projectHostedFinishWake;
+  projectHostedGate: typeof projectHostedGate;
   projectHostedLanding: typeof projectHostedLanding;
   projectHostedLandingCancel: typeof projectHostedLandingCancel;
   projectHostedLandingControl: typeof projectHostedLandingControl;
@@ -598,6 +605,9 @@ declare const fullApi: ApiFromModules<{
   projectHostedLifecycleStore: typeof projectHostedLifecycleStore;
   projectHostedLogCleanup: typeof projectHostedLogCleanup;
   projectHostedLogCleanupStore: typeof projectHostedLogCleanupStore;
+  projectHostedMainAudit: typeof projectHostedMainAudit;
+  projectHostedMainAuditFields: typeof projectHostedMainAuditFields;
+  projectHostedMainAuditState: typeof projectHostedMainAuditState;
   projectHostedOperations: typeof projectHostedOperations;
   projectHostedOutputApi: typeof projectHostedOutputApi;
   projectHostedOutputBatch: typeof projectHostedOutputBatch;

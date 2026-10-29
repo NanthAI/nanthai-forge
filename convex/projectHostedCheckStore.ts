@@ -1,3 +1,4 @@
+import { onGateRunTerminal } from './projectHostedMainAuditState';
 import { semanticPayload } from '../src/semantic-payload';
 import { wakeExpiredLogs } from './projectCheckLogRetention';
 // SPDX-License-Identifier: Apache-2.0
@@ -114,6 +115,7 @@ export async function writeHostedCheck(
   await notifyLandingCheck(ctx, { projectId: run.projectId as Id<'hostedProjects'>, runId: run.id });
 }
 export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {
+  await onGateRunTerminal(ctx, run);
   await wakeExpiredLogs(ctx, run.projectId as Id<'hostedProjects'>);
   const row = await hostedOperationRow(
     ctx,
