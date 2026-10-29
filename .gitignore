@@ -18,6 +18,8 @@ private-artifacts/
 evals/private/
 *.pem
 *.key
+*.orig
+*.rej
 web-dist/
 hosted-web-dist/
 

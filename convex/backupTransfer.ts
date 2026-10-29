@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { v } from 'convex/values';
+import { v, type Infer } from 'convex/values';
+import type { Doc } from './_generated/dataModel';
 import { mutation, action } from './cliServer';
 import { internal } from './_generated/api';
 import { backupItem, item, registerBackup } from './projectBackups';
@@ -42,7 +43,8 @@ export const complete = action({
     size: v.number(),
   },
   returns: backupItem,
-  handler: async (ctx, input) => {
+  // Explicit types break the internal-API inference cycle through projectBackups.
+  handler: async (ctx, input): Promise<Infer<typeof backupItem>> => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use your Forge project backups.');
@@ -52,7 +54,10 @@ export const complete = action({
         'Use exact archive content pins.',
       );
       const key = `v1/p/${input.projectId}/archives/${input.id}/a/${input.digest}`;
-      const original = await ctx.runQuery(internal.projectBackups.get, { id: input.id, owner: user.subject });
+      const original: { backup: Doc<'projectBackups'> } = await ctx.runQuery(internal.projectBackups.get, {
+        id: input.id,
+        owner: user.subject,
+      });
       invariant(
         original.backup.projectId === input.projectId &&
           original.backup.digest === input.digest &&
