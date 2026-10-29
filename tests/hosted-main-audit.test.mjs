@@ -8,6 +8,80 @@ import { checkArgs } from './convex-args.mjs';
 const readGate = f => f.run('mainGate', ctx => state.mainGate(ctx, f.projectId));
 const readStatus = f => f.call('auditStatus', audit.status, { projectId: f.projectId }).then(JSON.parse);
 
+for (const effective of ['docs', 'contract'])
+  test(`a passed ${effective} audit cannot re-green main or erase its unaudited clock`, async () => {
+    const f = await auditFixture();
+    await f.land('full');
+    const green = f.row().lastGreen;
+    const at = new Date(Date.now() - 2 * 3600000).toISOString();
+    await f.land('contract', { at });
+    await f.start();
+    const selected = f.currentRun();
+    const finished = await f.terminal('passed', { ...selected, gate: { ...selected.gate, effective } });
+    assert.deepEqual(f.row().lastGreen, green);
+    assert.deepEqual(f.row().unaudited, { count: 1, firstAt: at });
+    assert.equal(f.row().audit.status, 'passed', 'retain the actual check result');
+    assert.equal((await readStatus(f)).alarm.step, 'not-full');
+    assert.equal(f.pending().length, 0, 'no immediate retry of an inconclusive scope');
+    const events = f.tables.projectHostedMainAuditEvents.size;
+    await f.run('duplicateNotFull', ctx => state.onGateRunTerminal(ctx, finished));
+    await f.start();
+    assert.equal(f.tables.projectHostedMainAuditEvents.size, events);
+    assert.equal(f.tables.projectHostedCheckRuns.size, 2, 'same-head replay does not dispatch again');
+    assert.equal(f.pending().length, 0);
+    await f.land();
+    assert.equal(f.pending().length, 1, 'next landing resumes normal cadence');
+    assert.equal(f.row().wake.at, Date.parse(at) + 24 * 3600000);
+    await f.tick(f.pending()[0]);
+    assert.equal(f.currentRun().gate.mode, 'audit');
+    assert.notEqual(f.currentRun().id, selected.id);
+    await f.terminal('passed', {
+      ...f.currentRun(),
+      gate: { ...f.currentRun().gate, effective: 'full' },
+    });
+    assert.equal(f.row().lastGreen.sequence, 3);
+    assert.equal(f.row().unaudited.count, 0);
+    assert.equal((await readStatus(f)).alarm, null);
+    assert.equal(f.pending().length, 0);
+  });
+
+test('a passed not-full audit preserves red main, debt and all outstanding landings', async () => {
+  const f = await auditFixture();
+  await f.land('full');
+  const green = f.row().lastGreen;
+  const at = new Date(Date.now() - 49 * 3600000).toISOString();
+  await f.land('contract', { at });
+  await f.start();
+  await f.terminal('failed');
+  const red = f.row().red;
+  await f.land('contract', { actorKind: 'person' });
+  await f.start();
+  for (let i = 0; i < 18; i++) await f.land('contract', { actorKind: 'person' });
+  assert.equal(f.row().debt, true);
+  const selected = f.currentRun();
+  await f.terminal('passed', { ...selected, gate: { ...selected.gate, effective: 'docs' } });
+  assert.deepEqual(f.row().lastGreen, green);
+  assert.deepEqual(f.row().red, red);
+  assert.equal(f.row().debt, true);
+  assert.deepEqual(f.row().unaudited, { count: 20, firstAt: at });
+  assert.equal((await readGate(f)).hold, 'main-red');
+  assert.equal((await readStatus(f)).alarm.step, 'not-full');
+  assert.equal(f.pending().length, 0);
+  assert.equal(f.pending('projectHostedMainAudit:releaseHeld').length, 0);
+});
+
+test('legacy audit runs without an effective field retain full-suite evidence semantics', async () => {
+  const f = await auditFixture();
+  await f.land('full');
+  await f.land();
+  await f.start();
+  assert.equal(f.currentRun().gate.effective, undefined);
+  await f.terminal();
+  assert.equal(f.row().lastGreen.sequence, 2);
+  assert.equal(f.row().unaudited.count, 0);
+  assert.equal(f.pending().length, 0);
+});
+
 test('owner-approved cadence, deadline and debt are explicit', () => {
   assert.deepEqual(defaultMainAuditSettings, { landings: 10, minutes: 1440 });
   assert.equal(auditDebt(19, new Date().toISOString()), false);

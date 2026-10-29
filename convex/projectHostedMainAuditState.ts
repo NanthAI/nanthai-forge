@@ -228,7 +228,10 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
     return;
   }
   const at = run.endedAt ?? new Date().toISOString();
-  if (run.status === 'passed') {
+  // Legacy audit runners ran full by default. An explicit effective scope takes
+  // precedence over that declaration, including an old Actions planner's docs pass.
+  const fullAudit = run.gate.effective === undefined || run.gate.effective === 'full';
+  if (run.status === 'passed' && fullAudit) {
     const count = Math.max(0, (row.unaudited?.count ?? 0) - meta.count);
     const firstAt = count ? row.unaudited!.firstAt : null;
     await ctx.db.patch(row._id, {
@@ -269,6 +272,9 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
         : row.unaudited!.firstAt;
     await ctx.db.patch(row._id, { unaudited: { count: row.unaudited!.count, firstAt } });
     await auditEvent(ctx, row, 'stalled', at, run.request.expectedHead, run.id, meta.sequence);
+    // A reduced pass is inconclusive, not a runner outage. Keep the actual run
+    // result and debt; the next landing re-evaluates cadence without a hot retry.
+    if (run.status === 'passed') return;
     if (row.red)
       await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedMainAudit:stallHeld'), {
         projectId,
@@ -331,7 +337,10 @@ export async function mainAuditStatus(ctx: QueryCtx | MutationCtx, projectId: Id
       retainedStall || overdue
         ? {
             code: 'MAIN_AUDIT_STALLED',
-            step: active?.status ?? row?.audit?.status ?? 'dispatch',
+            step:
+              retainedStall && row?.audit?.status === 'passed' && events[0]?.runId === row.audit.runId
+                ? 'not-full'
+                : (active?.status ?? row?.audit?.status ?? 'dispatch'),
             runId: overdue ? active!.id : events[0]!.runId,
           }
         : null,

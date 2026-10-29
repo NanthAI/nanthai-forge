@@ -458,6 +458,14 @@ it does not dispatch another check. An unavailable, interrupted or cancelled
 audit gets one separate retry. A newer main does not cancel an active audit,
 and an older result cannot overwrite a newer full-passed landing.
 
+Only an audit with effective scope `full` re-greens main. Legacy audit runs with
+no effective field retain their full-suite default; an explicit `docs` or
+`contract` scope never inherits that default. A reduced passed audit retains its
+actual run result but records a stalled outcome with status alarm step `not-full`.
+It preserves the last green boundary, red state, debt and counted landings,
+including their original age. It schedules no immediate retry; the next landing
+re-evaluates the normal cadence for a full audit of the latest main.
+
 The single owned wake is used for pending audit cadence. Active audits use the
 existing provider watchdogs, with no additional audit timer. Status reports
 `MAIN_AUDIT_STALLED` and the current step after 15 minutes without observed

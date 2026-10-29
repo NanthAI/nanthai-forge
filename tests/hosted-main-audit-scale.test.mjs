@@ -139,4 +139,42 @@ test('600 Intents, 575 receipts and 3k files: a 30-landing day runs three bounde
       maxRssBytes: process.resourceUsage().maxRSS * 1024,
     }),
   );
+
+  // The same dogfood-size history must not turn a reduced pass into another
+  // dispatch or an idle retry loop, even when the count already exceeds cadence.
+  for (let i = 0; i < 10; i++) await f.land();
+  await f.tick(f.pending()[0]);
+  const selected = f.currentRun();
+  const terminalBefore = f.counts.length;
+  const terminalBegan = performance.now();
+  const finished = await f.terminal('passed', {
+    ...selected,
+    gate: { ...selected.gate, effective: 'docs' },
+  });
+  const terminal = f.counts.slice(terminalBefore);
+  assert.equal(terminal.length, 1, 'scope guard stays inside the existing completion call');
+  assert(terminal[0].documents <= 10 && terminal[0].writes <= 10);
+  assert.equal(f.row().unaudited.count, 10);
+  assert.equal(f.row().lastGreen.sequence, 605);
+  assert.equal(f.pending().length, 0);
+  for (const task of f.pending('projectHostedActionsDirect:dispatch'))
+    f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
+  const events = f.tables.projectHostedMainAuditEvents.size;
+  await f.run('duplicateNotFull', ctx => state.onGateRunTerminal(ctx, finished));
+  await f.start();
+  assert.equal(f.tables.projectHostedMainAuditEvents.size, events);
+  assert.equal(
+    [...f.tables._scheduled_functions.values()].filter(row => row.state.kind === 'pending').length,
+    0,
+  );
+  t.diagnostic(
+    JSON.stringify({
+      notFullCompletionCalls: terminal.length,
+      notFullDocumentsRead: terminal[0].documents,
+      notFullDocumentsWritten: terminal[0].writes,
+      idleScheduledFunctions: 0,
+      notFullWallMs: performance.now() - terminalBegan,
+      maxRssBytes: process.resourceUsage().maxRSS * 1024,
+    }),
+  );
 });
