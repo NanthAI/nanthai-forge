@@ -16,6 +16,8 @@ import { receiveHostedCheckCallback } from './projectHostedCheckCallbacks';
 import { signHostedCheckCallback } from '../src/hosted-check-evidence';
 import { checkPin, hostedCheckTerminal } from '../src/hosted-check';
 import { writeHostedCheck } from './projectHostedCheckStore';
+import { applyCheckRetryBudget, capCheckReports } from '../src/check-report-cap';
+import { checkFileSummary } from '../src/check-file-summary';
 import { invariant } from '../src/errors';
 export const output = internalMutation({
   args: { ...sessionArgs, index: v.number(), log: v.string() },
@@ -89,7 +91,9 @@ export const result = internalMutation({
       },
       outputSigningKey,
     );
-    run.contractReports = { ...run.contractReports, ...result.contractReports };
+    const combined = applyCheckRetryBudget({ ...run.contractReports, ...result.contractReports });
+    run.contractReports = capCheckReports(combined).reports;
+    run.testFiles = checkFileSummary(run.contractReports);
     await writeHostedCheck(ctx, row._id, run);
     await ctx.db.insert('projectHostedActionsResults', {
       projectId: input.projectId,
@@ -98,10 +102,12 @@ export const result = internalMutation({
       digest,
     });
     if (run.counts.completed === run.plan!.shardCount) {
+      const failed =
+        run.counts.failed > 0 || Object.values(run.contractReports).some(report => report.failed);
       const complete = directCallback(run, {
         kind: 'complete',
-        status: run.cancelRequested ? 'cancelled' : run.counts.failed ? 'failed' : 'passed',
-        exitCode: run.cancelRequested ? null : run.counts.failed ? 1 : 0,
+        status: run.cancelRequested ? 'cancelled' : failed ? 'failed' : 'passed',
+        exitCode: run.cancelRequested ? null : failed ? 1 : 0,
         output: null,
         cost: { status: 'unknown' },
         contractReports: run.contractReports,

@@ -101,11 +101,14 @@ test('every runner request extension has a registered capability gate', () => {
     let node = command;
     for (const part of parts.slice(0, -1)) node = node[part] = {};
     node[parts.at(-1)] = true;
-    assert.deepEqual(actionsCommandForCapabilities(command, [capability]), command);
+    const required = Object.entries(actionsCapabilityFields)
+      .filter(([parent]) => path === parent || path.startsWith(`${parent}.`))
+      .map(([, capability]) => capability);
+    assert.deepEqual(actionsCommandForCapabilities(command, required), command);
     const gated = actionsCommandForCapabilities(command, []);
     node = gated;
-    for (const part of parts.slice(0, -1)) node = node[part];
-    assert.equal(parts.at(-1) in node, false);
+    for (const part of parts.slice(0, -1)) node = node?.[part];
+    assert.equal(!!node && parts.at(-1) in node, false);
   }
   // Prove this guard catches an accidental schema addition, including nested fields.
   const added = z.discriminatedUnion(

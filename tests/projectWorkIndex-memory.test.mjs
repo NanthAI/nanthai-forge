@@ -7,6 +7,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import './hosted-fixture.mjs'; // Compile outside the measured action process.
+import { moduleUrl } from './convex-module.mjs';
+// The validating fake resolves these query targets lazily, even when the worker
+// supplies their results. Precompile them before the memory-limited process.
+for (const name of ['projectWork', 'projectBackups', 'projectObjects'])
+  await import(moduleUrl(`../convex/${name}.ts`));
 const exec = promisify(execFile);
 const worker = new URL('./projectWorkIndex-memory-worker.mjs', import.meta.url).pathname;
 test('128 MB server-held record index stays below the Node action memory limit', async t => {

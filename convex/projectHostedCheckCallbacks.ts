@@ -1,5 +1,6 @@
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { checkFileSummary } from '../src/check-file-summary';
+import { capCheckReports } from '../src/check-report-cap';
 // SPDX-License-Identifier: Apache-2.0
 import { notifyActionsProgress } from './projectHostedActionsWake';
 import { requireMacMachine } from './projectHostedCheckMachines';
@@ -161,7 +162,7 @@ export async function receiveHostedCheckCallback(
       run.output = result.output;
       run.cost = result.cost;
       if (result.contractReports) {
-        run.contractReports = result.contractReports;
+        run.contractReports = capCheckReports(result.contractReports).reports;
         run.testFiles = checkFileSummary(result.contractReports);
       }
       if (machine)

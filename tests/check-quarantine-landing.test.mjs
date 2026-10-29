@@ -121,7 +121,7 @@ function outcome(current, { passed = true, retry = true, staticCode = 0, names =
 const assess = (store, current, options) =>
   checkQuarantineResult(store, current, outcome(current, options), [[file]], new Date().toISOString());
 
-test('incident replay: two same-source recoveries quarantine, next unrelated failure passes and names ignored evidence', t => {
+test('incident replay: quarantined single failures can pass, but fail-twice always fails', t => {
   const { store, run, next, save } = fixture(t);
   for (let i = 0; i < 2; i++) {
     const current = next();
@@ -138,7 +138,7 @@ test('incident replay: two same-source recoveries quarantine, next unrelated fai
   }
   assert.equal(checkQuarantine(store).needsYou.length, 1);
   const current = next(),
-    result = assess(store, current, { passed: false });
+    result = assess(store, current, { passed: false, retry: false });
   assert.equal(result.blocked, false);
   assert.equal(result.verdict, 'quarantined');
   assert.match(result.details, /Ignored quarantined test: tests\/check-log-cleanup-paged/);
@@ -146,12 +146,37 @@ test('incident replay: two same-source recoveries quarantine, next unrelated fai
   assert.deepEqual(runReceipt({ ...current, backend: { ...run.backend, ...result } }).backend.ignoredTests, [
     name,
   ]);
-  const replay = assess(store, current, { passed: false });
+  const replay = assess(store, current, { passed: false, retry: false });
   assert.deepEqual(replay, result, 'replaying the same result cannot change its verdict');
   assert.throws(
-    () => assess(store, current, { retry: false }),
+    () => assess(store, current, { retry: true }),
     error => error.code === 'EVIDENCE_CHANGED',
   );
+  const persistent = assess(store, next(), { passed: false, retry: true });
+  assert.equal(persistent.blocked, true);
+  assert.equal(persistent.verdict, 'failed');
+  assert.deepEqual(persistent.ignoredTests, []);
+  assert.deepEqual(
+    persistent.testVerdicts[0].attempts.map(item => item.passed),
+    [false, false],
+  );
+  const providerRun = next();
+  const provider = outcome(providerRun, { passed: false, retry: false });
+  provider.executions.splice(1, 0, {
+    ...provider.executions[0],
+    executionId: `${providerRun.id}:retry`,
+    attempt: 1,
+  });
+  const providerFailure = checkQuarantineResult(
+    store,
+    providerRun,
+    provider,
+    [[file]],
+    new Date().toISOString(),
+  );
+  assert.equal(providerFailure.blocked, true);
+  assert.equal(providerFailure.verdict, 'failed');
+  assert.deepEqual(providerFailure.ignoredTests, []);
   const events = store.records().manifest.collections.frictionEvents.count;
   assert.equal(events, 1, 'new quarantine records one retry-safe friction item');
 });
@@ -382,7 +407,7 @@ test('the actual landing prefix gate accepts explicit quarantine evidence while 
     save(current, assess(store, current));
   }
   const current = next(),
-    assessment = assess(store, current, { passed: false });
+    assessment = assess(store, current, { passed: false, retry: false });
   const run = {
     ...current,
     status: 'passed',

@@ -2276,13 +2276,13 @@ for (const signal of ['SIGTERM', 'SIGHUP'])
     assert.deepEqual(receipt.backend.executionIds, ['10']);
   });
 
-test('Actions landing verdict shares same-job flake quarantine and preserves a quarantined failing exit', async t => {
+test('Actions landing verdict preserves single-failure quarantine but fails repeated failures', async t => {
   const file = 'tests/flake.test.mjs',
     identity = `${file} :: synthetic flake`;
   const { work, run } = fixture(t, { [file]: '// synthetic flake' });
   run.check.args = ['scripts/forge-check.mjs'];
   run.comparisonBase = run.base;
-  async function execute(passed, staticFailed = false) {
+  async function execute(passed, staticFailed = false, retry = true) {
     const current = {
       ...run,
       id: randomUUID(),
@@ -2326,7 +2326,7 @@ test('Actions landing verdict shares same-job flake quarantine and preserves a q
             ? staticFailed
               ? 'typecheck FAILED\n'
               : 'static passed\n'
-            : `__FORGE_TESTS__${JSON.stringify({ file, complete: true, results: [{ name: 'synthetic flake', passed }], retry: { complete: true, results: [{ name: 'synthetic flake', passed: false }] } })}\n`;
+            : `__FORGE_TESTS__${JSON.stringify({ file, complete: true, results: [{ name: 'synthetic flake', passed }], ...(retry ? { retry: { complete: true, results: [{ name: 'synthetic flake', passed: false }] } } : {}) })}\n`;
       },
       async () => {},
     );
@@ -2345,7 +2345,7 @@ test('Actions landing verdict shares same-job flake quarantine and preserves a q
     assert.equal(receipt.status, 'passed');
     assert.equal(receipt.backend.verdict, 'flake');
   }
-  const quarantined = await execute(false);
+  const quarantined = await execute(false, false, false);
   assert.equal(
     quarantined.status,
     'passed',
@@ -2355,5 +2355,16 @@ test('Actions landing verdict shares same-job flake quarantine and preserves a q
   assert.equal(quarantined.backend.verdict, 'quarantined');
   assert.deepEqual(quarantined.backend.ignoredTests, [identity]);
   assert.match(quarantined.details, /Ignored quarantined test/);
-  assert.equal((await execute(false, true)).status, 'failed');
+  assert.equal((await execute(false, true, false)).status, 'failed');
+  const persistent = await execute(false);
+  assert.equal(persistent.status, 'failed');
+  assert.equal(persistent.exitCode, 1);
+  assert.equal(persistent.backend.verdict, 'failed');
+  assert.deepEqual(persistent.backend.ignoredTests, []);
+  assert.deepEqual(persistent.backend.quarantine, [{ test: identity, consecutivePasses: 0 }]);
+  assert.deepEqual(
+    persistent.backend.testVerdicts[0].attempts.map(attempt => attempt.passed),
+    [false, false],
+  );
+  assert.doesNotMatch(persistent.details, /Ignored quarantined test/);
 });

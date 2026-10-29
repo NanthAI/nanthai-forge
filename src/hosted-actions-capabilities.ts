@@ -5,12 +5,14 @@ import { invariant } from './errors.js';
 /** Advertise only implemented extensions. Absent advertisement means the oldest protocol. */
 export const hostedActionsCapabilities = [
   'results.testFiles',
+  'results.testFiles.truncated',
   'session.timingHistory',
   'sourcePack',
 ] as const;
 export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'session.timings': 'session.timingHistory',
   'result.result.testFiles': 'results.testFiles',
+  'result.result.testFiles.truncated': 'results.testFiles.truncated',
 };
 /** Whole-command extensions gate every nested runner-sent field. */
 export const actionsCapabilityCommands: Readonly<Record<string, string>> = { sourcePack: 'sourcePack' };
@@ -27,7 +29,7 @@ export function actionsCommandForCapabilities(
   let result = command as Record<string, unknown>;
   const omit = (value: Record<string, unknown>, path: string[]): Record<string, unknown> => {
     const [key, ...rest] = path;
-    if (!key || !(key in value)) return value;
+    if (!value || typeof value !== 'object' || !key || !(key in value)) return value;
     const copy = { ...value };
     if (!rest.length) delete copy[key];
     else copy[key] = omit(value[key] as Record<string, unknown>, rest);

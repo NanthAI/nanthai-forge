@@ -933,11 +933,11 @@ test('safe network loss records manual recovery with retained completed shards',
   assert.doesNotMatch(readFileSync(join(path, 'controller-summary.txt'), 'utf8'), /local fallback/);
 });
 
-test('Modal uses in-job flake evidence, retains exact verdicts and ignores only quarantined failures', async t => {
+test('Modal retains flake evidence and single-failure quarantine but fails repeated failures', async t => {
   const { work, run } = fixture(t, { 'tests/flake.test.mjs': '// synthetic fixture' });
   run.check.args = ['scripts/forge-check.mjs'];
   const identity = 'tests/flake.test.mjs :: intermittent';
-  const execute = async ({ passed = true, staticCode = 0, extraFailure = false } = {}) => {
+  const execute = async ({ passed = true, staticCode = 0, extraFailure = false, retry = true } = {}) => {
     const current = { ...run, id: randomUUID(), backend: { requested: 'modal', actual: 'modal' } };
     work.store.locked(() => {
       const tx = work.store.records();
@@ -955,7 +955,7 @@ test('Modal uses in-job flake evidence, retains exact verdicts and ignores only 
         file: 'tests/flake.test.mjs',
         complete: true,
         results,
-        retry: { complete: true, results: [{ name: 'intermittent', passed: false }] },
+        ...(retry ? { retry: { complete: true, results: [{ name: 'intermittent', passed: false }] } } : {}),
       };
       const executions = [
         {
@@ -987,14 +987,25 @@ test('Modal uses in-job flake evidence, retains exact verdicts and ignores only 
   const second = await execute();
   assert.equal(second.status, 'passed');
   assert.deepEqual(second.backend.quarantine, [{ test: identity, consecutivePasses: 0 }]);
+  const quarantined = await execute({ passed: false, retry: false });
+  assert.equal(quarantined.status, 'passed');
+  assert.equal(quarantined.exitCode, 1);
+  assert.equal(quarantined.backend.verdict, 'quarantined');
+  assert.deepEqual(quarantined.backend.ignoredTests, [identity]);
+  assert.match(quarantined.details, /Ignored quarantined test/);
+  assert.equal((await execute({ passed: false, staticCode: 2, retry: false })).status, 'failed');
+  assert.equal((await execute({ passed: false, extraFailure: true, retry: false })).status, 'failed');
   const persistent = await execute({ passed: false });
-  assert.equal(persistent.status, 'passed');
+  assert.equal(persistent.status, 'failed');
   assert.equal(persistent.exitCode, 1);
-  assert.equal(persistent.backend.verdict, 'quarantined');
-  assert.deepEqual(persistent.backend.ignoredTests, [identity]);
-  assert.match(persistent.details, /Ignored quarantined test/);
-  assert.equal((await execute({ passed: false, staticCode: 2 })).status, 'failed');
-  assert.equal((await execute({ passed: false, extraFailure: true })).status, 'failed');
+  assert.equal(persistent.backend.verdict, 'failed');
+  assert.deepEqual(persistent.backend.ignoredTests, []);
+  assert.deepEqual(persistent.backend.quarantine, [{ test: identity, consecutivePasses: 0 }]);
+  assert.deepEqual(
+    persistent.backend.testVerdicts[0].attempts.map(attempt => attempt.passed),
+    [false, false],
+  );
+  assert.doesNotMatch(persistent.details, /Ignored quarantined test/);
 });
 
 for (const scenario of [

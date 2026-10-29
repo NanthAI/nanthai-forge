@@ -146,7 +146,11 @@ export function assessTestQuarantine(
     const quarantined = new Set(quarantine.map(item => item.test));
     const tooMany = quarantine.length > 10;
     const ignored = verdicts.filter(
-      item => item.verdict === 'failed' && quarantined.has(item.test) && evidence.canQuarantine(item.test),
+      item =>
+        item.verdict === 'failed' &&
+        (item.attempts?.filter(attempt => !attempt.passed).length ?? 0) < 2 &&
+        quarantined.has(item.test) &&
+        evidence.canQuarantine(item.test),
     );
     const ignoredNames = new Set(ignored.map(item => item.test));
     const blocked =
@@ -222,7 +226,7 @@ export function checkQuarantineResult(
   const observed = testExecutionVerdicts(result, groups);
   // Retained provider retries also ran the same pinned Candidate. No new job is launched.
   for (const item of observed.verdicts)
-    if (item.verdict === 'recovered') {
+    if (item.verdict === 'recovered' || item.verdict === 'failed') {
       const file = item.test.split(' :: ')[0]!;
       const executions = (result.executions ?? []).filter(execution => execution.tests?.[file]);
       const last = executions.sort((a, b) => a.attempt - b.attempt).at(-1);
@@ -238,7 +242,7 @@ export function checkQuarantineResult(
         item.evidenceRunId = first.executionId;
         item.attempts = [
           { runId: first.executionId, attempt: first.attempt, passed: false },
-          { runId: last.executionId, attempt: last.attempt, passed: true },
+          { runId: last.executionId, attempt: last.attempt, passed: item.verdict !== 'failed' },
         ];
       }
     }
