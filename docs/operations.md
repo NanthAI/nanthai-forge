@@ -116,12 +116,26 @@ An older CLI refuses an owner it cannot preserve. Upgrade by installing the new 
 ### Flake evidence and quarantine
 
 Native checks, GitHub Actions/BYOCI shards and Modal use the same test verdict
-assessment. The existing pinned impact selector identifies files affected by the
-Candidate. A shard retries only complete, named failures in unrelated files once,
-inside the same job with the same Candidate bytes. Fail then pass records a
-`flake` with `recovery: unchanged-source`; two supported flakes within seven days
-quarantine the exact `file :: test name`. A persistent failure stays `failed`.
-Affected tests and unknown impact are never eligible for retry or quarantine.
+assessment. The file supervisor waits for the initial files to settle, then
+retries each failed file once, sequentially in the same workspace and environment.
+The default budget is three files (`FORGE_TEST_MAX_RETRIES` overrides it). If more
+files fail, none are retried. This budget belongs to one supervisor invocation;
+separate hosted shard jobs do not share it. Each attempt keeps the existing
+600-second per-file timeout (`FORGE_TEST_FILE_TIMEOUT_MS` overrides it).
+
+Fail then pass records a `flake`, including its first error (up to 2,048 UTF-8 bytes)
+and both attempt durations. This same-execution evidence uses unchanged Candidate
+bytes, including when the Candidate changed test dependencies from its base.
+Two supported flakes within seven days feed the existing quarantine ledger for
+the exact `file :: test name`; a recovered import or timeout uses the file execution
+identity. A persistent failure stays `failed`.
+
+Hosted `contractReports` retain every named failure, including incomplete files;
+only complete files contribute contract timings. `testFiles` in run and landing
+receipts separates failed and flaky file lists and their counts. The existing
+`counts` field still counts shards. Clean summarized files remain represented even
+when their passing test names have been removed. All file evidence travels in the
+existing result writes; a clean check adds no Convex calls.
 
 Quarantined tests continue to run. A check passes with quarantine only when all
 remaining failures are named, quarantined and unrelated, and every non-test step

@@ -1,3 +1,4 @@
+import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticConflictsSchema, semanticPlanSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
@@ -113,6 +114,7 @@ export const hostedLandingStateSchema = z
     preparing: z.literal(true).optional(),
     semanticConflicts: semanticConflictsSchema.optional(),
     checkProgress: hash.optional(),
+    testFiles: checkFileSummarySchema.optional(),
     timing: z
       .object({
         submittedAt: z.iso.datetime(),

@@ -45,6 +45,8 @@ for (const failed of [false, true])
       );
     }
     assert.equal(result.request.phase, failed ? 'terminal-failed' : 'ready');
+    assert.equal(result.request.testFiles.counts.failed, failed ? 1 : 0);
+    assert.equal(result.request.testFiles.counts.total, f.tests.length);
     if (failed) {
       assert.equal(result.request.observation.cause, 'conflict');
       assert.equal(result.request.error.code, 'INTENT_SEMANTIC_CONFLICT');

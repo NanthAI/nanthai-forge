@@ -1,3 +1,4 @@
+import { checkFileSummary } from './check-file-summary.js';
 import { providerLogUrl } from './check-log-policy.js';
 // SPDX-License-Identifier: Apache-2.0
 import type { CheckRun, Lane, WorkView, WorkData } from './work-types.js';
@@ -29,6 +30,7 @@ export const viewReceipt = (view: WorkView) => ({
 });
 export const runReceipt = (run: CheckRun) => ({
   ...(run.backend ? { backend: run.backend } : {}),
+  ...(run.backend?.fileReports ? { testFiles: checkFileSummary(run.backend.fileReports) } : {}),
   ...(run.detailRef ? { detailRef: run.detailRef, detailSummary: run.detailSummary } : {}),
   operationId: run.id,
   runId: run.id,

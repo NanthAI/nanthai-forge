@@ -77,7 +77,18 @@ export const semanticConflictSchema = z.object({
 });
 export const semanticReportsSchema = z.record(
   contractTestPath,
-  z.object({ durationMs: z.number().finite().positive(), failed: z.boolean() }).strict(),
+  z
+    .object({
+      durationMs: z.number().finite().positive().optional(),
+      failed: z.boolean(),
+      firstError: z.string().max(2048).optional(),
+      flaky: z.boolean().optional(),
+      attempts: z
+        .array(z.object({ durationMs: z.number().finite().positive(), failed: z.boolean() }).strict())
+        .max(2)
+        .optional(),
+    })
+    .strict(),
 );
 export type SemanticPlan = z.infer<typeof semanticPlanSchema>;
 export type SemanticConflict = z.infer<typeof semanticConflictSchema>;
@@ -177,7 +188,7 @@ export const semanticTests = (plan?: SemanticPlan) => {
 };
 export function semanticVerdict(
   plan: SemanticPlan | undefined,
-  reports: Record<string, { durationMs: number; failed: boolean }>,
+  reports: Record<string, { durationMs?: number | undefined; failed: boolean }>,
   pins: { candidateId: string; head: string; runId: string },
 ) {
   const conflicts: SemanticConflict[] = [];
@@ -186,8 +197,8 @@ export function semanticVerdict(
   for (const right of activeSemanticMembers(plan)) {
     if (!left || left.intentId === right.intentId) continue;
     const tests = [...new Set([...left.tests, ...right.tests].map(test => test.path))].sort();
-    if (!tests.length || tests.some(test => !reports[test])) continue;
-    const measuredMs = tests.reduce((total, test) => total + reports[test]!.durationMs, 0);
+    if (!tests.length || tests.some(test => !reports[test]?.durationMs)) continue;
+    const measuredMs = tests.reduce((total, test) => total + reports[test]!.durationMs!, 0);
     if (measuredMs >= 90_000) {
       overBudget = { measuredMs, intents: [left.intentId, right.intentId] };
       continue;

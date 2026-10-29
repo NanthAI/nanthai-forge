@@ -1,6 +1,8 @@
+import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticPlanSchema, semanticReportsSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
 import { checkLogsSchema } from './check-log-policy.js';
 import { checkSchema } from './work-types.js';
 import { digest } from './portable-hash.js';
@@ -46,7 +48,7 @@ export const hostedActionsRunnerSchema = z
     provider: z.literal('github-actions'),
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     installationId: text.optional(),
-    runsOn: text,
+    runsOn: githubActionsRunsOnSchema,
     runtime: checkHash,
     environmentFingerprint: checkHash,
     credential: credential.optional(),
@@ -158,6 +160,7 @@ export const hostedCheckRunSchema = z
     configuration: hostedCheckRunnerSchema,
     semanticPlan: semanticPlanSchema.optional(),
     contractReports: semanticReportsSchema.optional(),
+    testFiles: checkFileSummarySchema.optional(),
     checkLogs: checkLogsSchema.optional(),
     keyId: z.string().regex(/^[A-Z0-9_]+$/),
     actions: z

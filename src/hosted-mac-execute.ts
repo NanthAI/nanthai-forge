@@ -200,7 +200,7 @@ export async function executeHostedMacCheck(
         if (signal.aborted) kill();
         try {
           const observe = async function* (stream: AsyncIterable<Uint8Array>) {
-            const contractReader = new ContractTimingReader();
+            const contractReader = new ContractTimingReader({ secrets, paths: [root, homedir()] });
             const decoder = new TextDecoder();
             for await (const bytes of stream) {
               contractReader.accept(decoder.decode(bytes, { stream: true }));

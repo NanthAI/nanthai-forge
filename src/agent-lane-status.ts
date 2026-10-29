@@ -1,3 +1,4 @@
+import { checkFileSummary } from './check-file-summary.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readLaneSubmissions } from './landing-submission-read.js';
 import { stackStatus } from './agent-stack.js';
@@ -122,6 +123,9 @@ export function agentLaneStatus(
           head: lastCheck.head,
           checkId: lastCheck.check.id,
           status: lastCheck.status,
+          ...(lastCheck.backend?.fileReports
+            ? { testFiles: checkFileSummary(lastCheck.backend.fileReports) }
+            : {}),
           startedAt: lastCheck.startedAt,
           endedAt: lastCheck.endedAt ?? null,
           exitCode: lastCheck.exitCode ?? null,

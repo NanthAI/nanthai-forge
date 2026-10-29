@@ -167,7 +167,12 @@ test('workflow keeps the native plan branch and uses OIDC without GitHub secrets
   assert.match(workflow, /inputs.deployment == '' && inputs.plan != '\[\]'/);
   assert.match(workflow, /hosted-plan:/);
   assert.match(workflow, /id-token: write/);
-  assert.match(workflow, /runs-on: ubuntu-latest/);
+  assert.equal(
+    (workflow.match(/runs-on: \$\{\{ fromJSON\(inputs\.runs_on \|\| '"ubuntu-latest"'\) \}\}/g) ?? []).length,
+    2,
+  );
+  assert.equal((workflow.match(/runs-on: "ubuntu-latest"/g) ?? []).length, 2);
+  assert.match(workflow, /runs_on:\n\s+description: JSON runner label or label array/);
   assert.doesNotMatch(workflow, /secrets\.|CONTROLLER|forge-check\/\$\{\{ inputs.runId \}\}.*ref:/);
 });
 
@@ -209,3 +214,36 @@ test('recipe-backed source batches metadata and leaf descriptors instead of call
   assert.equal(s.calls.filter(call => call.kind === 'source').length, 4);
   assert.equal(readFileSync(join(cache, logical[99].sha256), 'utf8'), 'left-99right-99');
 });
+
+for (const flaky of [false, true])
+  test(`600 file reports (${flaky ? 'one flake' : 'clean'}) post exactly one existing result and add no source/session calls`, async t => {
+    const s = fixture(t),
+      candidate = join(s.directory, 'candidate');
+    const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+    const path = join(s.directory, 'plan.json');
+    writeFileSync(path, JSON.stringify(prepared.recipe));
+    const posted = [];
+    s.client.call = async command => {
+      posted.push(command);
+      if (command.kind === 'output') return { url: 'https://output.invalid/log', headers: {} };
+      assert.equal(command.kind, 'result');
+      return {};
+    };
+    t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+    t.mock.method(process.stdout, 'write', () => true);
+    const program = `for(let i=0;i<600;i++)console.log('__FORGE_TESTS__'+JSON.stringify({file:'tests/synthetic-'+i+'.test.mjs',complete:true,durationMs:5,failed:false,results:[{name:'contract',passed:true}],...(${flaky}&&i===0?{flaky:true,retry:{complete:true,durationMs:10,firstError:'first assertion',results:[{name:'contract',passed:false}]}}:{})}));`;
+    assert.equal(
+      await executeActionsJob(s.client, candidate, path, 'static', [process.execPath, '--eval', program]),
+      0,
+    );
+    assert.equal(posted.filter(command => command.kind === 'result').length, 1);
+    assert.equal(posted.filter(command => command.kind === 'output').length, 1);
+    assert.equal(posted.length, 2);
+    const reports = posted.find(command => command.kind === 'result').result.contractReports;
+    assert.equal(Object.keys(reports).length, 600);
+    if (flaky) {
+      assert.equal(reports['tests/synthetic-0.test.mjs'].flaky, true);
+      assert.equal(reports['tests/synthetic-0.test.mjs'].firstError, 'first assertion');
+      assert.equal(reports['tests/synthetic-0.test.mjs'].attempts.length, 2);
+    }
+  });

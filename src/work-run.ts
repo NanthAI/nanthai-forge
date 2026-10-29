@@ -449,6 +449,7 @@ async function launchLocal(
       backend: {
         ...(assessment
           ? {
+              fileReports: assessment.fileReports,
               testVerdicts: assessment.testVerdicts,
               ignoredTests: assessment.ignoredTests,
               quarantine: assessment.quarantine,

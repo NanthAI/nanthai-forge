@@ -4,9 +4,20 @@ export const testReportSchema = z.object({
   file: z.string(),
   complete: z.boolean(),
   durationMs: z.number().positive().finite().optional().catch(undefined),
+  failed: z.boolean().optional(),
+  flaky: z.boolean().optional(),
+  firstError: z.string().max(2048).optional(),
+  counts: z
+    .object({ total: z.number().int().nonnegative(), failed: z.number().int().nonnegative() })
+    .optional(),
   results: z.array(z.object({ name: z.string(), passed: z.boolean() })),
   retry: z
-    .object({ complete: z.boolean(), results: z.array(z.object({ name: z.string(), passed: z.boolean() })) })
+    .object({
+      durationMs: z.number().positive().finite().optional(),
+      firstError: z.string().max(2048).optional(),
+      complete: z.boolean(),
+      results: z.array(z.object({ name: z.string(), passed: z.boolean() })),
+    })
     .optional(),
 });
 export function testReports(lines: Iterable<string>) {

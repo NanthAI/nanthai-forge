@@ -1,3 +1,4 @@
+import { semanticReportsSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { modalUsageCost } from './modal-cost.js';
@@ -24,6 +25,7 @@ export const checkBackendSchema = z.object({
   credentialsRef: modalCredentialsRefSchema.nullable().optional(),
   retryable: z.boolean().optional(),
   verdict: z.enum(['clean', 'recovered', 'flake', 'quarantined', 'failed']).optional(),
+  fileReports: semanticReportsSchema.optional(),
   testVerdicts: z
     .array(
       z.object({

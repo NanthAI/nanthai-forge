@@ -34,17 +34,35 @@ export function summarizeTestReport(report: {
   results?: { name: string; passed: boolean; durationMs?: number }[];
   counts?: { total: number; failed: number };
   evidence?: string;
+  failed?: boolean;
+  flaky?: boolean;
+  firstError?: string;
+  retry?: {
+    complete: boolean;
+    durationMs?: number;
+    firstError?: string;
+    results: { name: string; passed: boolean }[];
+  };
 }) {
   const results = report.results ?? [];
   return {
     file: report.file,
     complete: report.complete,
     durationMs: report.durationMs,
+    ...(report.failed !== undefined ? { failed: report.failed } : {}),
+    ...(report.flaky ? { flaky: true } : {}),
+    ...(report.firstError ? { firstError: report.firstError.slice(0, 2048) } : {}),
+    ...(report.retry ? { retry: report.retry } : {}),
     counts: report.counts ?? {
       total: results.length,
       failed: results.filter(test => test.passed === false).length,
     },
-    results: results.filter(test => test.passed === false).map(test => ({ name: test.name, passed: false })),
+    results: results
+      .filter(
+        test =>
+          test.passed === false || report.retry?.results.some(old => old.name === test.name && !old.passed),
+      )
+      .map(test => ({ name: test.name, passed: test.passed })),
     evidence: report.evidence ?? digest(JSON.stringify(report)),
   };
 }

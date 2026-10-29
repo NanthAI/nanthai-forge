@@ -160,12 +160,12 @@ retained recipe refuses adoption.
 ## Flakes and quarantine
 
 Standard test shards emit per-file, named test reports, including nested test
-names. A failed shard retries once; a named test that passes after failing has a
+names. A failed shard may retry once; a named test that passes after a shard retry has a
 `recovered` verdict, never a clean verdict. Original exits, named results and
 attempt summaries and test reports remain available, with full logs held by Modal. A recovery on a change that touches the test or
 its statically identified code is labelled **Recovered, related change**, never
 `flake`. Missing source or inconclusive impact data stays recovered with unknown
-cause. A retry alone does not establish flakiness.
+cause. A shard retry alone does not establish flakiness. A file retry inside one supervisor execution uses the exact same Candidate bytes and records a flake directly, including the first error and both attempt durations; see [file retry budgets and reporting](../operations.md#flake-evidence-and-quarantine).
 
 A `flake` verdict needs another completed run of the same named test and check
 runtime/definition: a failure or recovery on unchanged source bytes, or a recovery

@@ -9,6 +9,12 @@ import { tmpdir } from 'node:os';
 import { coverageMarker, v8Touched } from './test-coverage.mjs';
 import { workerBudget } from '../tests/worker-budget.mjs';
 
+const errorExcerpt = text =>
+  Buffer.from(text)
+    .subarray(0, 2048)
+    .toString('utf8')
+    .replace(/\uFFFD$/, '');
+
 export function fileTimeout(env = process.env) {
   const value = env.FORGE_TEST_FILE_TIMEOUT_MS ?? '600000';
   if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) > 2147483647)
@@ -21,9 +27,11 @@ export async function runFiles(
   {
     workers = workerBudget(),
     timeoutMs = fileTimeout(),
-    retryFiles = JSON.parse(process.env.FORGE_TEST_RETRY_FILES ?? '[]'),
+    maxRetries = Number(process.env.FORGE_TEST_MAX_RETRIES ?? 3),
   } = {},
 ) {
+  if (!Number.isSafeInteger(maxRetries) || maxRetries < 0)
+    throw new Error('FORGE_TEST_MAX_RETRIES must be a nonnegative safe integer.');
   const totals = Object.fromEntries(
     ['tests', 'pass', 'fail', 'cancelled', 'skipped', 'todo'].map(k => [k, 0]),
   );
@@ -93,18 +101,27 @@ export async function runFiles(
       const results = [],
         diagnostics = [];
       const headings = new Map();
-      let timedOut = false;
+      let timedOut = false,
+        firstError = '',
+        captureError = false;
+      const counts = Object.fromEntries(Object.keys(totals).map(key => [key, 0]));
       const timer = setTimeout(() => {
         timedOut = true;
         process.stdout.write(`not ok - ${file}: exceeded per-file timeout (${timeoutMs}ms)\n`);
         // Kill descendants too: an MCP child may be holding a pipe open after tests finish.
-        totals.tests++;
-        totals.fail++;
+        counts.tests++;
+        counts.fail++;
+        firstError ||= `Exceeded per-file timeout (${timeoutMs}ms)`;
         kill(child);
       }, timeoutMs);
       for (const stream of [child.stdout, child.stderr]) {
         createInterface({ input: stream }).on('line', line => {
           if (process.env.FORGE_TEST_DIAGNOSTICS === '1') diagnostics.push(line);
+          if (/^\s*error:/.test(line) && !firstError) captureError = true;
+          if (captureError && firstError.length < 2048) {
+            if (/^\s*(?:code|stack|operator|failureType):/.test(line)) captureError = false;
+            else firstError = errorExcerpt(firstError + line.trim() + '\n');
+          }
           const heading = /^(\s*)# Subtest: (.*)$/.exec(line);
           if (heading) {
             const depth = heading[1].length;
@@ -119,11 +136,12 @@ export async function runFiles(
             results.push({ name: [...parents, result[3]].join(' > '), passed: result[2] === 'ok' });
           }
           const summary = /^# (tests|pass|fail|cancelled|skipped|todo) (\d+)$/.exec(line);
-          if (summary) totals[summary[1]] += Number(summary[2]);
+          if (summary) counts[summary[1]] += Number(summary[2]);
           else process.stdout.write(`${line}\n`);
         });
       }
       child.once('error', error => {
+        firstError ||= errorExcerpt(error.message);
         process.stdout.write(`not ok - ${file}: ${error.message}\n`);
       });
       child.once('close', (code, signal) => {
@@ -152,11 +170,29 @@ export async function runFiles(
           file,
           results,
           durationMs,
+          counts: { total: counts.tests, failed: counts.fail },
+          totals: counts,
+          failed: code !== 0 || timedOut || !!signal,
+          ...(firstError ? { firstError } : {}),
           complete:
             !timedOut && !signal && (code === 0 || (code === 1 && results.some(item => !item.passed))),
         };
+        if (report.failed && !report.firstError)
+          report.firstError = signal ? `Process terminated by ${signal}` : `Process exited with code ${code}`;
         const previous = reports.get(file);
-        if (retrying) report.retry = { complete: previous.complete, results: previous.results };
+        if (retrying) {
+          report.retry = {
+            complete: previous.complete,
+            results: previous.results,
+            durationMs: previous.durationMs,
+            ...(previous.firstError ? { firstError: previous.firstError } : {}),
+          };
+          report.flaky = !report.failed;
+          if (report.flaky)
+            process.stdout.write(
+              `# Flaky test file: ${file}; passed isolated retry; first error: ${previous.firstError ?? 'Process failed'}\n`,
+            );
+        }
         reports.set(file, report);
         if (code !== 0 || timedOut) {
           failed = true;
@@ -176,29 +212,22 @@ export async function runFiles(
       while (next < files.length) await runFile(files[next++]);
     }),
   );
-  const retry = files.filter(file => {
-    const report = reports.get(file);
-    return retryFiles.includes(file) && report?.complete && report.results.some(test => !test.passed);
-  });
-  if (retry.length && !stopped) {
+  const retry = files.filter(file => reports.get(file)?.failed);
+  if (retry.length && retry.length <= maxRetries && !stopped) {
     retrying = true;
-    // A single retry phase stays in this shard and uses the exact same source bytes.
-    await Promise.all(
-      Array.from({ length: Math.min(workers, retry.length) }, async (_, i) => {
-        for (let index = i; index < retry.length; index += workers) await runFile(retry[index]);
-      }),
+    // Sequential retries isolate each file from all other test-file processes.
+    for (const file of retry) {
+      if (stopped) break;
+      await runFile(file);
+    }
+    failed = stopped || [...reports.values()].some(report => report.failed);
+  } else if (retry.length > maxRetries) {
+    process.stdout.write(
+      `# Retry budget exceeded: ${retry.length} failed files; limit ${maxRetries}; no retries.\n`,
     );
-    failed =
-      stopped ||
-      [...reports.values()].some(
-        report =>
-          !report.complete ||
-          report.results.some(test => !test.passed) ||
-          report.retry?.results.some(
-            old => !old.passed && !report.results.some(test => test.name === old.name && test.passed),
-          ),
-      );
   }
+  for (const report of reports.values())
+    for (const key of Object.keys(totals)) totals[key] += report.totals[key];
   if (process.env.FORGE_TEST_EVENTS === '1')
     for (const report of reports.values()) process.stdout.write(`__FORGE_TESTS__${JSON.stringify(report)}\n`);
   process.off('SIGTERM', stop);

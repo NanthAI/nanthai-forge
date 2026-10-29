@@ -195,6 +195,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
           ? { ciObservedAt: new Date(now).toISOString() }
           : {}),
       };
+      if (run.testFiles) state.testFiles = run.testFiles;
       const semantic = semanticVerdict(attempt.semanticPlan ?? run.semanticPlan, run.contractReports ?? {}, {
         candidateId: attempt.candidate.id,
         head: attempt.candidate.head,

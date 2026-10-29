@@ -64,7 +64,7 @@ const jwks = () =>
       },
     ],
   });
-async function fixture(t, shards = 2) {
+async function fixture(t, shards = 2, runsOn = 'ubuntu-latest') {
   variables(t, {
     CONVEX_SITE_URL: audience,
     FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-check-key',
@@ -91,7 +91,7 @@ async function fixture(t, shards = 2) {
   const runner = {
     provider: 'github-actions',
     repository,
-    runsOn: 'ubuntu-latest',
+    runsOn,
     runtime: hostedActionsRuntime,
     environmentFingerprint: s.runner.environmentFingerprint,
   };
@@ -189,6 +189,18 @@ test('OIDC cryptography and all pinned claims reject substitution', async () => 
     assert.throws(() =>
       validateActionsClaims(claims(changes), { audience, repository, executionId: '123', workflowSha: sha }),
     );
+  const pinned = { audience, repository, executionId: '123', workflowSha: sha };
+  // A run configured for GitHub-hosted labels never accepts a self-hosted runner's token.
+  assert.throws(
+    () =>
+      validateActionsClaims(claims({ runner_environment: 'self-hosted' }), { ...pinned, selfHosted: false }),
+    code('EVIDENCE_CHANGED'),
+  );
+  assert.equal(
+    validateActionsClaims(claims({ runner_environment: 'self-hosted' }), { ...pinned, selfHosted: true })
+      .run_id,
+    '123',
+  );
   const token = oidc(),
     [h, p, s] = token.split('.');
   const bad = `${h}.${p}.${(s[0] === 'a' ? 'b' : 'a') + s.slice(1)}`;
@@ -212,6 +224,7 @@ test('concurrent dispatch reservation and lost reply send one GitHub dispatch wi
     assert.equal(body.ref, 'main');
     assert.equal(body.inputs.runId, s.run.id);
     assert.equal(body.inputs.deployment, audience);
+    assert.equal(body.inputs.runs_on, JSON.stringify('ubuntu-latest'));
     dispatches++;
     throw new Error('Synthetic lost reply after GitHub accepted the dispatch.');
   });
@@ -225,6 +238,42 @@ test('concurrent dispatch reservation and lost reply send one GitHub dispatch wi
   assert.equal(s.scheduled.filter(item => item.id === retained && item.name.endsWith(':expire')).length, 1);
   await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'requested', null)) });
   assert.equal((await s.call(sessions, 'session', s.input())).executionId, '123');
+});
+test('dispatch retains custom and array runner labels, and self-hosted OIDC completes the session', async t => {
+  variables(t, {
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  let expected;
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (url.endsWith('/installation')) return Response.json({ id: 9 });
+    if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    assert(url.endsWith('/forge-check.yml/dispatches'));
+    assert.deepEqual(JSON.parse(JSON.parse(init.body).inputs.runs_on), expected);
+    return Response.json({ workflow_run_id: 123 });
+  });
+  for (const runsOn of ['blacksmith-4vcpu-ubuntu-2404', ['self-hosted', 'linux', 'x64']]) {
+    expected = runsOn;
+    const s = await fixture(t, 2, runsOn);
+    const ctx = { runMutation: (ref, input) => s.call(direct, getFunctionName(ref).split(':')[1], input) };
+    await direct.dispatch._handler(ctx, s.id);
+    assert.equal((await s.status(s.run.id)).executionId, '123');
+    const selfHosted = claims({ runner_environment: 'self-hosted' });
+    assert.equal(
+      (await verifyActionsOidc(oidc(selfHosted), audience, async () => jwks())).runner_environment,
+      'self-hosted',
+    );
+    const session = await s.call(sessions, 'session', s.input({ claims: JSON.stringify(selfHosted) }));
+    assert.equal(session.executionId, '123');
+    await assert.rejects(
+      s.call(
+        sessions,
+        'session',
+        s.input({ claims: JSON.stringify({ ...selfHosted, repository: 'other/repo' }) }),
+      ),
+      code('EVIDENCE_CHANGED'),
+    );
+  }
 });
 function webhook(s, action = 'completed', conclusion = 'cancelled', overrides = {}) {
   return {
@@ -488,7 +537,9 @@ test('App runner configuration derives runtime and environment without installat
     GITHUB_APP_ID: '12345',
     GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs1', format: 'pem' }),
   });
+  let lookups = 0;
   t.mock.method(globalThis, 'fetch', async url => {
+    lookups++;
     assert.equal(url, 'https://api.github.com/repos/synthetic/project/installation');
     return Response.json({ id: 9, permissions: { actions: 'write', contents: 'write' } });
   });
@@ -497,6 +548,19 @@ test('App runner configuration derives runtime and environment without installat
   assert.equal(first.value.provider, 'github-actions');
   assert.equal(first.value.runsOn, 'ubuntu-latest');
   assert.equal(first.value.runtime, hostedActionsRuntime);
+  const beforeInvalid = { lookups, transactions: s.counts.length };
+  for (const runsOn of ['', 'bad\nlabel', [], [''], 'x'.repeat(257), { labels: ['linux'] }]) {
+    await assert.rejects(
+      configure.configure._handler(ctx, {
+        projectId: s.projectId,
+        request: JSON.stringify({ ...request, operationId: randomUUID(), runsOn }),
+      }),
+      code('BAD_ARGUMENT'),
+    );
+  }
+
+  assert.equal(lookups, beforeInvalid.lookups);
+  assert.equal(s.counts.length, beforeInvalid.transactions);
   assert.equal(first.value.credential, undefined);
   assert.equal(first.value.installationId, undefined);
   assert.deepEqual(JSON.parse(await configure.configure._handler(ctx, input)), first);

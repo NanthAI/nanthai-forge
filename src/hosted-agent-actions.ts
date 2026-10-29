@@ -1,6 +1,7 @@
 import { hostedLandingDesiredSchema } from './hosted-landing-desired.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { githubActionsRunsOnSchema, githubActionsRunnerDescription } from './github-actions-runner-label.js';
 import { makeFunctionReference } from 'convex/server';
 import { hostedAgentCommandSchemas, type HostedAgentAction } from './hosted-agent-contract.js';
 import { hostedStartSchema, hostedStartResultSchema } from './hosted-lane.js';
@@ -100,7 +101,7 @@ const currentSettings = z.object({
       provider: z.string(),
       machineId: z.string().optional(),
       repository: z.string().optional(),
-      runsOn: z.string().optional(),
+      runsOn: githubActionsRunsOnSchema.optional(),
       credential: z.unknown().optional(),
     })
     .nullable(),
@@ -128,7 +129,8 @@ function actionsRunnerSettings(configuration: z.infer<typeof currentSettings>['c
     repository: configuration.repository ?? null,
     workflow: '.github/workflows/forge-check.yml',
     ref: 'main',
-    runsOn: configuration.runsOn ?? null,
+    runsOn: configuration.runsOn ?? 'ubuntu-latest',
+    runner: githubActionsRunnerDescription(configuration.runsOn ?? 'ubuntu-latest'),
     installation: direct ? 'derived per operation via the GitHub App' : 'from the credential reference',
     results: direct ? 'OIDC session plus workflow_run webhook' : 'controller callback',
   };
@@ -219,9 +221,10 @@ async function configureRunnerRequest(
   invariant(
     Boolean(command.configuration) !== Boolean(command.provider) &&
       !(command.machineId && command.provider !== 'mac') &&
-      !(command.repository && command.provider !== 'github-actions'),
+      !(command.repository && command.provider !== 'github-actions') &&
+      !(command.runsOn !== undefined && command.provider !== 'github-actions'),
     'BAD_ARGUMENT',
-    'Choose provider:"mac" (optional machineId), provider:"github-actions" (repository), or a full configuration for another provider.',
+    'Choose provider:"mac" (optional machineId), provider:"github-actions" (repository, optional runsOn), or a full configuration for another provider.',
   );
   const current = currentSettings.parse(
     await session.query('projectHostedCheckDefinitions:current', { checkId: '' }),
@@ -244,6 +247,7 @@ async function configureRunnerRequest(
         authorityEpoch: session.capabilities.authority.epoch,
         expected: command.expected !== undefined ? command.expected : current.configurationDigest,
         repository,
+        runsOn: command.runsOn ?? 'ubuntu-latest',
       },
     };
   }

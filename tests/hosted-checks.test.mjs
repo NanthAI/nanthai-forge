@@ -405,3 +405,32 @@ test('a Candidate published by the H08 trusted worker goes through the pinned pr
   assert.equal(passed.candidate.algorithm, candidate.algorithm);
   assert.equal(source.tables.projectHostedChannels.size, 1);
 });
+
+test('one failed shard reports all four failed files and keeps flaky files separate in status', async () => {
+  const s = await checksFixture();
+  const r = await s.activate((await s.enqueue(s.selection())).id, 1);
+  await s.callback(s.shard(r, 0, 'failed'));
+  const contractReports = Object.fromEntries(
+    Array.from({ length: 4 }, (_, i) => [
+      `tests/failure-${i}.test.mjs`,
+      { failed: true, firstError: `first assertion ${i}`, ...(i ? { durationMs: 10 } : {}) },
+    ]),
+  );
+  contractReports['tests/flaky.test.mjs'] = {
+    durationMs: 5,
+    failed: false,
+    flaky: true,
+    firstError: 'first attempt',
+    attempts: [
+      { durationMs: 8, failed: true },
+      { durationMs: 5, failed: false },
+    ],
+  };
+  await s.callback(s.complete(r, 'failed', { contractReports }));
+  const result = await s.status(r.id);
+  assert.equal(result.counts.failed, 1, 'legacy counts describe shards');
+  assert.deepEqual(result.testFiles.counts, { total: 5, failed: 4, flaky: 1 });
+  assert.equal(result.testFiles.failed.length, 4);
+  assert.equal(result.testFiles.flaky[0].report.attempts.length, 2);
+  assert.deepEqual(result.contractReports, contractReports);
+});

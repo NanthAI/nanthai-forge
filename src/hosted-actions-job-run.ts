@@ -48,7 +48,7 @@ export async function executeActionsJob(
     env: { ...childEnv({ allow: ['CI', 'PATH'] }), FORGE_ACTIONS_PLAN: planPath, FORGE_ACTIONS_SHARD: shard },
   });
   let tail = Buffer.alloc(0);
-  const reports = new ContractTimingReader();
+  const reports = new ContractTimingReader({ secrets: [], paths: [directory, process.env.HOME ?? ''] });
   const redactor = new HostedOutputRedactor({ secrets: [], paths: [directory, process.env.HOME ?? ''] });
   const observe = (bytes: Buffer) => {
     const clean = redactor.write(bytes);

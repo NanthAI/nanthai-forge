@@ -156,7 +156,7 @@ test('incident replay: two same-source recoveries quarantine, next unrelated fai
   assert.equal(events, 1, 'new quarantine records one retry-safe friction item');
 });
 
-test('affected and unknown-impact failures never gain quarantine; persistent failures stay failed', t => {
+test('same-check passing retries are flakes even for changed paths; persistent failures stay failed', t => {
   const { root, store, source, run, next } = fixture(t);
   let current = next();
   assert.equal(assess(store, current, { passed: false }).blocked, true);
@@ -169,11 +169,11 @@ test('affected and unknown-impact failures never gain quarantine; persistent fai
   );
   current = next();
   const result = assess(store, current);
-  assert.equal(result.blocked, true);
-  assert.equal(result.testVerdicts[0].verdict, 'recovered');
-  assert.equal(result.testVerdicts[0].recovery, 'related-change');
+  assert.equal(result.blocked, false);
+  assert.equal(result.testVerdicts[0].verdict, 'flake');
+  assert.equal(result.testVerdicts[0].recovery, 'unchanged-source');
   run.base = run.comparisonBase = '0'.repeat(64);
-  assert.equal(assess(store, next()).blocked, true);
+  assert.equal(assess(store, next()).blocked, false);
 });
 
 test('more than ten quarantines and every static failure block', t => {

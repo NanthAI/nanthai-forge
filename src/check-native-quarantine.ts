@@ -1,3 +1,4 @@
+import { ContractTimingReader } from './contract-test-timings.js';
 // SPDX-License-Identifier: Apache-2.0
 import { checkEvidenceLines } from './check-compact-output.js';
 import { testReports } from './check-test-report.js';
@@ -17,7 +18,9 @@ export function nativeQuarantine(
   let staticPassed = false;
   for (const line of checkEvidenceLines(path))
     if (line.trim() === '__FORGE_STATIC__{"passed":true}') staticPassed = true;
-  return checkQuarantineResult(
+  const reader = new ContractTimingReader();
+  for (const report of Object.values(reports)) reader.report(report);
+  const assessment = checkQuarantineResult(
     store,
     run,
     {
@@ -35,4 +38,5 @@ export function nativeQuarantine(
     [run.checkSelection?.tests ?? Object.keys(reports)],
     at,
   );
+  return { ...assessment, fileReports: reader.reports };
 }

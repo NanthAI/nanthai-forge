@@ -6,6 +6,7 @@ import { writableHostedCheck, writeHostedCheck } from './projectHostedCheckStore
 import { directActions } from './projectHostedActionsDirect';
 import { actionsClaimsSchema, validateActionsClaims } from '../src/github-actions-oidc';
 import { invariant } from '../src/errors';
+import { githubHostedRunsOn } from '../src/github-actions-runner-label';
 export const sessionArgs = {
   projectId: v.id('hostedProjects'),
   runId: v.string(),
@@ -33,6 +34,7 @@ export async function actionsSession(ctx: MutationCtx, input: SessionInput) {
     repository: run.configuration.repository,
     executionId: run.executionId,
     workflowSha: run.actions.workflowSha,
+    selfHosted: !githubHostedRunsOn(run.configuration.runsOn ?? 'ubuntu-latest'),
   });
   // Binding is provided by dispatch response or HMAC webhook, never "first JWT wins".
   invariant(

@@ -122,7 +122,7 @@ test('machine reports keep file attribution and nested names despite concurrent 
   );
 });
 
-test('one in-shard retry runs only eligible failing files and retains both named attempts', async t => {
+test('one isolated retry runs every failing file within budget and retains both named attempts', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-test-retry-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const files = ['flake', 'persistent', 'affected', 'clean'].map(name => join(root, `${name}.mjs`));
@@ -146,7 +146,7 @@ test('one in-shard retry runs only eligible failing files and retains both named
   const { readFileSync } = await import('node:fs');
   assert.deepEqual(
     files.map(file => Number(readFileSync(file + '.count'))),
-    [2, 2, 1, 1],
+    [2, 2, 2, 1],
   );
   const reports = result.output
     .split('\n')
@@ -158,5 +158,11 @@ test('one in-shard retry runs only eligible failing files and retains both named
   ]);
   assert.equal(reports.find(report => report.file === files[0]).results[0].passed, true);
   assert.equal(reports.find(report => report.file === files[1]).results[0].passed, false);
-  assert.equal(reports.find(report => report.file === files[2]).retry, undefined);
+  assert.ok(reports.find(report => report.file === files[2]).retry);
+  assert.equal(reports.find(report => report.file === files[3]).retry, undefined);
+  const flake = reports.find(report => report.file === files[0]);
+  assert.equal(flake.flaky, true);
+  assert.ok(flake.retry.durationMs > 0);
+  assert.match(flake.retry.firstError, /error:/);
+  assert.match(result.output, /Flaky test file:/);
 });

@@ -1,3 +1,4 @@
+import { checkFileSummary } from '../src/check-file-summary';
 // SPDX-License-Identifier: Apache-2.0
 import { notifyActionsProgress } from './projectHostedActionsWake';
 import { requireMacMachine } from './projectHostedCheckMachines';
@@ -158,7 +159,10 @@ export async function receiveHostedCheckCallback(
       run.exitCode = result.exitCode;
       run.output = result.output;
       run.cost = result.cost;
-      if (result.contractReports) run.contractReports = result.contractReports;
+      if (result.contractReports) {
+        run.contractReports = result.contractReports;
+        run.testFiles = checkFileSummary(result.contractReports);
+      }
       if (machine)
         run.macEvidence = {
           provider: 'mac',

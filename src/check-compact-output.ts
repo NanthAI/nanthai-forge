@@ -54,6 +54,10 @@ export function compactCheckText(text: string): string {
                 file: report.file,
                 complete: report.complete,
                 durationMs: report.durationMs,
+                ...(report.counts ? { counts: report.counts } : {}),
+                ...(report.failed !== undefined ? { failed: report.failed } : {}),
+                ...(report.flaky ? { flaky: true } : {}),
+                ...(report.firstError ? { firstError: report.firstError.slice(0, 2048) } : {}),
                 ...(report.retry ? { retry: report.retry } : {}),
                 results: Array.isArray(report.results)
                   ? report.results.map((test: { name: string; passed: boolean; durationMs?: number }) => ({

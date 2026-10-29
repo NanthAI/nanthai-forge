@@ -10,6 +10,11 @@ on:
         default: '[]'
         required: false
         type: string
+      runs_on:
+        description: JSON runner label or label array for hosted jobs
+        required: false
+        default: '"ubuntu-latest"'
+        type: string
       deployment:
         description: Convex site URL for the hosted App/OIDC path
         required: false
@@ -59,7 +64,7 @@ jobs:
 
   hosted-plan:
     if: ${{ inputs.deployment != '' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runs_on || '"ubuntu-latest"') }}
     permissions:
       contents: read
       id-token: write
@@ -91,7 +96,7 @@ jobs:
   hosted-check:
     needs: hosted-plan
     name: forge-hosted-${{ matrix.shard }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runs_on || '"ubuntu-latest"') }}
     permissions:
       contents: read
       id-token: write

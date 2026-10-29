@@ -68,6 +68,10 @@ function runCommand(name, command, args) {
       const lines = pending.split('\n');
       pending = lines.pop();
       for (const raw of lines) {
+        if (raw.startsWith('# Flaky test file:')) {
+          process.stdout.write(`[test] ${raw.slice(2)}\n`);
+          continue;
+        }
         if (raw.startsWith('__FORGE_COVERAGE__') || raw.startsWith('__FORGE_TESTS__')) {
           process.stdout.write(`${raw}\n`);
           continue;

@@ -44,8 +44,25 @@ export function testExecutionVerdicts(result: Extract<ModalEvent, { kind: 'resul
         if (execution.exitCode !== 0 || previous.length > 0) unknownFailure = true;
         continue;
       }
-      if (report.retry && !report.retry.complete) unknownFailure = true;
+      const fileRecovered =
+        report.flaky === true &&
+        !!report.retry &&
+        !report.failed &&
+        report.results.every(test => test.passed);
+      if (report.retry && !report.retry.complete && !fileRecovered) unknownFailure = true;
+      if (fileRecovered && !report.retry!.complete)
+        verdicts.set(`${file} :: [file execution]`, {
+          test: `${file} :: [file execution]`,
+          verdict: 'flake',
+          recovery: 'unchanged-source',
+          evidenceRunId: execution.executionId,
+          attempts: [
+            { runId: execution.executionId, attempt: 0, passed: false },
+            { runId: execution.executionId, attempt: 1, passed: true },
+          ],
+        });
       if (
+        !fileRecovered &&
         report.retry?.results.some(old => !old.passed && !report.results.some(test => test.name === old.name))
       )
         unknownFailure = true;

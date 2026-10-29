@@ -15,12 +15,19 @@ export const actionsClaimsSchema = z.object({
   event_name: z.literal('workflow_dispatch'),
   run_id: z.string().regex(/^[1-9][0-9]*$/),
   run_attempt: z.literal('1'),
-  runner_environment: z.literal('github-hosted'),
+  runner_environment: z.enum(['github-hosted', 'self-hosted']),
 });
 export type ActionsClaims = z.infer<typeof actionsClaimsSchema>;
 export function validateActionsClaims(
   value: unknown,
-  expected: { audience: string; repository?: string; executionId?: string | null; workflowSha?: string },
+  expected: {
+    audience: string;
+    repository?: string;
+    executionId?: string | null;
+    workflowSha?: string;
+    /** Self-hosted claims are accepted only for a run configured with non-GitHub-hosted labels. */
+    selfHosted?: boolean;
+  },
   now = Date.now(),
 ) {
   const c = actionsClaimsSchema.parse(value);
@@ -32,7 +39,8 @@ export function validateActionsClaims(
       c.workflow_ref === `${c.repository}/.github/workflows/forge-check.yml@refs/heads/main` &&
       (!expected.repository || c.repository === expected.repository) &&
       (!expected.executionId || c.run_id === expected.executionId) &&
-      (!expected.workflowSha || c.workflow_sha === expected.workflowSha),
+      (!expected.workflowSha || c.workflow_sha === expected.workflowSha) &&
+      (c.runner_environment === 'github-hosted' || expected.selfHosted !== false),
     'EVIDENCE_CHANGED',
     'GitHub OIDC claims differ from the dispatched workflow.',
   );

@@ -177,7 +177,12 @@ export const dispatch = internalAction({
         {
           ref: 'main',
           return_run_details: true,
-          inputs: { runId: run.id, deployment: site, projectId: run.projectId },
+          inputs: {
+            runId: run.id,
+            deployment: site,
+            projectId: run.projectId,
+            runs_on: JSON.stringify(run.configuration.runsOn),
+          },
         },
       );
       if (response.status === 200) {

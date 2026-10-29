@@ -440,10 +440,64 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
     workflow: '.github/workflows/forge-check.yml',
     ref: 'main',
     runsOn: 'ubuntu-latest',
+    runner: 'runner: ubuntu-latest',
     installation: 'derived per operation via the GitHub App',
     results: 'OIDC session plus workflow_run webhook',
   });
   assert(!shown.blockers.some(blocker => blocker.includes('runner')));
+
+  // The dogfood-shaped Work fixture remains irrelevant to runner configuration.
+  for (const runsOn of ['blacksmith-4vcpu-ubuntu-2404', ['self-hosted', 'linux', 'x64']]) {
+    const start = fixture.s.counts.length;
+    const labeled = await run('configure-runner', {
+      provider: 'github-actions',
+      runsOn,
+      operationId: randomUUID(),
+    });
+    assert.deepEqual(labeled.value.runsOn, runsOn);
+    assert.notEqual(labeled.digest, configured.digest);
+    assert.notEqual(labeled.value.environmentFingerprint, configured.value.environmentFingerprint);
+    assert.equal(state.calls.length, 3); // capabilities, current, action: no per-record calls.
+    const meters = fixture.s.counts.slice(start);
+    const reads = meters.reduce((n, meter) => n + meter.documents, 0);
+    const writes = meters.reduce((n, meter) => n + meter.writes, 0);
+    assert(reads < 30, `configuration reads ${reads}`);
+    assert(writes <= 6, `configuration writes ${writes}`);
+    const display = await run('check-settings');
+    assert.deepEqual(display.actions.runsOn, runsOn);
+    assert.match(display.actions.runner, /not GitHub-hosted: billed by your runner provider/);
+    assert.equal(state.calls.length, 4); // capabilities plus three existing settings reads.
+    t.diagnostic(
+      `labeled configuration: 3 client calls, ${reads} document reads, ${writes} writes; settings: 4 client calls; idle: 0`,
+    );
+  }
+  const reset = await run('configure-runner', { provider: 'github-actions', operationId: randomUUID() });
+  assert.equal(reset.digest, configured.digest); // omission still means ubuntu-latest.
+  const lookups = github.length,
+    versions = settings(fixture.s).length;
+  for (const runsOn of [
+    '',
+    '   ',
+    'bad\nlabel',
+    [],
+    [42],
+    42,
+    null,
+    'x'.repeat(257),
+    Array(101).fill('linux'),
+  ]) {
+    await assert.rejects(
+      run('configure-runner', {
+        provider: 'github-actions',
+        runsOn,
+        operationId: randomUUID(),
+      }),
+      code('BAD_ARGUMENT'),
+    );
+  }
+  await assert.rejects(run('configure-runner', { provider: 'mac', runsOn: 'linux' }), code('BAD_ARGUMENT'));
+  assert.equal(github.length, lookups);
+  assert.equal(settings(fixture.s).length, versions);
 
   state.actor = 'peer';
   await assert.rejects(

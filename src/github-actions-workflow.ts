@@ -2,7 +2,7 @@
 import type { ModalPlan } from './modal-plan.js';
 
 /** Only generated in the run export; never changes the accepted candidate. */
-export function githubActionsWorkflow(runsOn = 'ubuntu-latest') {
+export function githubActionsWorkflow(runsOn: string | string[] = 'ubuntu-latest') {
   return `name: Forge check
 run-name: forge-check/\${{ inputs.runId }}
 on:

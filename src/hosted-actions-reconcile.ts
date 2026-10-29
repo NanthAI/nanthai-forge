@@ -181,7 +181,7 @@ export async function reconcileHostedActions(
               ? 'passed'
               : 'interrupted';
       }
-      if (terminal && run.semanticPlan && remote.log) {
+      if (terminal && (run.semanticPlan || retainedLog !== undefined) && remote.log) {
         const text = retainedLog ?? (await remote.log(job.id, m.repository));
         contractReader.accept(text.endsWith('\n') ? text : text + '\n');
       }
@@ -213,7 +213,7 @@ export async function reconcileHostedActions(
               : 'interrupted';
       await emit({
         kind: 'complete',
-        ...(run.semanticPlan ? { contractReports: contractReader.reports } : {}),
+        ...(Object.keys(contractReader.reports).length ? { contractReports: contractReader.reports } : {}),
         status,
         exitCode: status === 'passed' ? 0 : status === 'failed' ? 1 : null,
         output: null,

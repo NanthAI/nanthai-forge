@@ -1,6 +1,7 @@
 import { contractTestsInput } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { revertTargetSchema } from './hosted-sync.js';
 import { saveExpectedSchema } from './hosted-save.js';
@@ -181,6 +182,7 @@ export const hostedAgentCommandSchemas = {
   'configure-runner': z
     .object({
       provider: z.enum(['mac', 'github-actions']).optional(),
+      runsOn: githubActionsRunsOnSchema.optional(),
       machineId: uuid.optional(),
       repository: z
         .string()

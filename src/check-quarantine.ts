@@ -126,9 +126,13 @@ export function assessTestQuarantine(
     const evidence = testFlakeEvidence(store, run, []);
     const verdicts = observed.verdicts.map(item => ({
       ...(item.attempts && ['recovered', 'flake'].includes(item.verdict)
-        ? evidence.canQuarantine(item.test)
-          ? { ...item, verdict: 'flake' as const, recovery: 'unchanged-source' as const }
-          : { ...item, verdict: 'recovered' as const, recovery: evidence.recovery(item.test).recovery }
+        ? item.verdict === 'flake' &&
+          item.attempts?.length === 2 &&
+          item.attempts[0]!.runId === item.attempts[1]!.runId
+          ? item
+          : evidence.canQuarantine(item.test)
+            ? { ...item, verdict: 'flake' as const, recovery: 'unchanged-source' as const }
+            : { ...item, verdict: 'recovered' as const, recovery: evidence.recovery(item.test).recovery }
         : item.verdict === 'recovered'
           ? evidence.recovery(item.test)
           : item.verdict === 'flake' && !evidence.canQuarantine(item.test)

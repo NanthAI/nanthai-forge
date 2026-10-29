@@ -280,8 +280,9 @@ credential-reference runners retain the export/controller path; the
 
 `projectHostedActionsConfigure:configure` accepts `projectId` and a JSON `request`
 containing `operationId`, `authorityEpoch`, `expected` (current configuration digest
-or null), and `repository`. It reuses the owner-only idempotent configuration
-mutation and derives `ubuntu-latest`, the runtime, and the environment fingerprint.
+or null), `repository`, and optional `runsOn`. It reuses the owner-only idempotent
+configuration mutation and derives the runtime and environment fingerprint;
+`runsOn` defaults to `ubuntu-latest`.
 It accepts no installation ID or credential secret. Before writing, it derives the
 repository's App installation (one read-only GitHub call, no token minted) and
 refuses with `GITHUB_APP_PERMISSIONS` when the accepted installation permissions
@@ -290,7 +291,24 @@ still pending approval. The CLI routes
 `nforge agent ROOT configure-runner '{"provider":"github-actions","repository":"OWNER/NAME"}'`
 to this action; the Mac provider continues through its existing configuration
 path. `check-settings` reports the selected runner under `actions` (`app-direct`
-or `legacy-credential`, repository, workflow and ref).
+or `legacy-credential`, repository, workflow and ref). Add `"runsOn":"blacksmith-4vcpu-ubuntu-2404"`
+or `"runsOn":["self-hosted","linux","x64"]` to select your runner; omission selects
+`ubuntu-latest`. Labels are nonblank strings of at most 256 characters with no
+control characters, or an array of 1–100 such labels (all must match one runner).
+The setting is stored in the existing runner configuration and included in its
+configuration and environment fingerprints; changing it invalidates old evidence.
+Invalid labels fail configuration before any GitHub request or settings write.
+`check-settings.actions.runner` displays `runner: LABEL`; custom labels include
+`(not GitHub-hosted: billed by your runner provider)`. This is based on standard
+GitHub label names, not a live billing lookup: custom GitHub larger-runner labels
+also get the provider notice. No runner is blocked based on this notice.
+
+Hosted dispatch passes `runs_on` as a JSON string or array. Both hosted jobs use
+`fromJSON(inputs.runs_on || '"ubuntu-latest"')` in `runs-on`. GitHub supports
+[dispatch inputs in runs-on expressions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idruns-on).
+The native/BYOCI jobs and generated single-label workflows retain their behavior.
+OIDC accepts GitHub's `github-hosted` and `self-hosted` runner environments with
+the same signature, repository, workflow, execution and SHA checks.
 
 App JWT signing and installation-token minting live in one module,
 `convex/githubAppToken.ts` (`installationToken(ctx, repo, permissions?)`), shared
@@ -308,7 +326,7 @@ Metadata read, and the Workflow run event. Its webhook remains `/github/webhook`
 
 The checked-in workflow branches on `deployment`. Empty deployment preserves the
 native/BYOCI `plan` input and export jobs. Convex dispatches on `main` with
-`runId`, `projectId`, and `deployment`; the run name is `forge-check/<runId>`.
+`runId`, `projectId`, `deployment`, and JSON-encoded `runs_on`; the run name is `forge-check/<runId>`.
 The fixed workflow checkout verifies and materializes the pinned Candidate using
 hash/size-checked storage downloads, including recipe-backed content, in windows
 of at most 400 descriptors. Source bytes go directly from object storage to the
@@ -320,7 +338,7 @@ Arbitrary commands run once, including the existing composed Intent contract uni
 
 `/checks/actions` accepts only GitHub-signed OIDC tokens for this exact site audience,
 repository, `forge-check.yml@refs/heads/main`, `workflow_dispatch`, first attempt,
-and GitHub-hosted runner. The execution ID must already be bound by the dispatch
+and a GitHub-hosted or self-hosted runner. The execution ID must already be bound by the dispatch
 response or an HMAC-verified Workflow run event; an arbitrary first JWT cannot
 claim a Forge run. Every transaction rechecks original actor authority, source
 authority epoch, fence, and execution. Results and compact log receipts are atomic
