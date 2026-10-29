@@ -11,7 +11,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { makeFunctionReference } from 'convex/server';
+import { makeFunctionReference, getFunctionName } from 'convex/server';
+import { checkArgs } from './convex-args.mjs';
+import { moduleUrl } from './convex-module.mjs';
 import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 import { hostedAgentCommandSchemas, hostedAgentAction } from '../dist/hosted-agent-contract.js';
 import { startMcp } from '../dist/mcp.js';
@@ -250,4 +252,35 @@ test('the existing stdio CLI accepts explicit hosted addressing and discovers to
   assert(tools.some(tool => tool.name === 'forge_task'));
   assert(!existsSync(s.root));
   assert(!existsSync(`${s.root}.forge-client`));
+});
+
+test('MCP hosted metrics accepts the shared schema and performs only finite paged queries', async t => {
+  const s = agentFixture(t);
+  const api = await import(moduleUrl('../convex/projectSelfMetrics.ts'));
+  const original = s.exchange.client.query.bind(s.exchange.client);
+  let pages = 0;
+  t.mock.method(s.exchange.client, 'query', async (ref, args) => {
+    if (getFunctionName(ref) !== 'projectSelfMetrics:page') return original(ref, args);
+    checkArgs(api.page, args, 'metrics');
+    pages++;
+    return JSON.stringify({
+      page: [],
+      isDone: true,
+      continueCursor: '',
+      cutover: '2026-10-28T00:00:00.000Z',
+      authority: { mode: 'server', epoch: 1 },
+    });
+  });
+  const tool = registry(t, s).get('forge_work_overview');
+  const command = { action: 'metrics', from: '2026-10-28', to: '2026-11-04' };
+  const parsed = z.object(tool.inputSchema).parse({ command });
+  const response = await tool.call(parsed);
+  assert(!response.isError, response.content[0].text);
+  const result = body(response);
+  assert.equal(result.action, 'metrics');
+  assert.equal(result.operationId, null);
+  assert.equal(result.result.source.kind, 'hosted');
+  assert.equal(pages, 4);
+  assert(s.calls.every(call => call.name === 'projectHostedAgent:capabilities'));
+  assert(!existsSync(`${s.root}.forge-metrics.jsonl`));
 });

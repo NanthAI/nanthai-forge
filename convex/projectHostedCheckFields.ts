@@ -47,6 +47,7 @@ export const hostedCheckTables = {
     status: v.string(),
     value: v.string(),
   })
+    .index('by_project', ['projectId'])
     .index('by_run', ['runId'])
     .index('by_project_and_run', ['projectId', 'runId'])
     .index('by_project_and_candidate', ['projectId', 'candidateId'])

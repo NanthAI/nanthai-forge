@@ -4,7 +4,7 @@ const number = (value: number | null | undefined) =>
   value == null ? 'unknown' : Number(value.toFixed(3)).toString();
 export function metricValues(t: MetricTotals): Record<keyof typeof metricNames, string> {
   return {
-    '5.1': `${t['5.1'].landings} (${t['5.1'].days.reduce((n, d) => n + d.firstTry, 0)} first-try, ${t['5.1'].days.reduce((n, d) => n + d.afterRetry, 0)} retry, ${t['5.1'].days.reduce((n, d) => n + d.afterFixer, 0)} fixer, ${t['5.1'].days.reduce((n, d) => n + d.unknown, 0)} unknown); reverts ${number(t['5.1'].reverts)}, compensating ${number(t['5.1'].compensating)}`,
+    '5.1': `${number(t['5.1'].landings)} (${t['5.1'].days.reduce((n, d) => n + d.firstTry, 0)} first-try, ${t['5.1'].days.reduce((n, d) => n + d.afterRetry, 0)} retry, ${t['5.1'].days.reduce((n, d) => n + d.afterFixer, 0)} fixer, ${t['5.1'].days.reduce((n, d) => n + d.unknown, 0)} unknown); reverts ${number(t['5.1'].reverts)}, compensating ${number(t['5.1'].compensating)}`,
     '5.2': `${number(t['5.2'].errors)} / ${number(t['5.2'].finishes)} finishes; ${t['5.2'].byCode.map(c => `${c.code} ${number(c.per100Finishes)}/100`).join(', ') || 'rates unknown'}`,
     '5.3': number(t['5.3'].dropped),
     '5.4': `${number(t['5.4'].delivered)}/${number(t['5.4'].overlappingSaves)} delivered; acknowledgement ${number(t['5.4'].acknowledgementRate)}; median ${number(t['5.4'].medianDeliverySeconds)} s`,
@@ -42,6 +42,7 @@ export function formatMetricReport(current: MetricsSurface, before?: MetricsSurf
     columns,
     previous ? '| --- | --- | --- | --- | --- |' : '| --- | --- | --- | --- |',
     ...rows,
+    `Finish-to-main p50 (trusted actors): ${number(current.totals.finishToMain.p50Minutes)} minutes. ${cell(current.totals.finishToMain.gaps.join(' '))}`,
     '',
   ].join('\n');
 }
@@ -54,12 +55,14 @@ export function formatMetrics(current: MetricsSurface) {
   return [
     `Metrics UTC [${current.period.from}, ${current.period.to})`,
     ...rows,
+    `Finish-to-main p50 (trusted actors): ${number(current.totals.finishToMain.p50Minutes)} min · partial`,
     'Daily values and named gaps: --json; report: --report FILE.md',
   ].join('\n');
 }
 export function metricsHeadline(t: MetricTotals) {
   return {
     landings: t['5.1'].landings,
+    finishToMainP50Minutes: t.finishToMain.p50Minutes,
     firstTryShare: t['5.1'].firstTryShare,
     interventionsPerLanding: t['5.5'].perLanding,
     redMainMinutes: Object.fromEntries(t.R.sources.map(s => [s.source, s.minutes])),
@@ -77,7 +80,7 @@ export function metricsHeadline(t: MetricTotals) {
 export type MetricsHeadline = ReturnType<typeof metricsHeadline>;
 export function formatMetricsHeadline(value: MetricsHeadline) {
   return [
-    `Metrics · last 7 days${value.partial ? ' · partial (metrics --json for gaps)' : ''}: ${value.landings} landings · first-try ${value.firstTryShare === null ? 'unknown' : `${number(value.firstTryShare * 100)}%`} · interventions/landing ${number(value.interventionsPerLanding)}`,
+    `Metrics · last 7 days${value.partial ? ' · partial (metrics --json for gaps)' : ''}: ${number(value.landings)} landings · first-try ${value.firstTryShare === null ? 'unknown' : `${number(value.firstTryShare * 100)}%`} · interventions/landing ${number(value.interventionsPerLanding)}`,
     `Checks/landing ${number(value.checkMinutesPerLanding)} min · dollars/landing ${value.dollarsPerLanding.map(m => `${m.month} $${number(m.billed)}`).join(', ') || 'unknown'} · red-main ${Object.entries(
       value.redMainMinutes,
     )

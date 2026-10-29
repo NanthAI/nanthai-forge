@@ -73,9 +73,9 @@ export function registerHostedAgentWorkflow(
     },
     {
       name: 'forge_work_overview',
-      actions: ['status', 'capabilities'],
+      actions: ['status', 'capabilities', 'metrics'],
       description:
-        'Read constant-size hosted capabilities or one selected Lane/run/source operation/submission. No Work hydration, worker wake or idle observer.',
+        'Read hosted metrics in bounded pages, constant-size capabilities or one selected Lane/run/source operation/submission. No Work hydration, worker wake or idle observer.',
     },
   ];
   for (const group of groups) {

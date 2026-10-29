@@ -31,6 +31,7 @@ export type MetricSubmission = {
   runIds: string[];
   delivered?: 'landed' | 'terminal-failed';
   noOwner?: boolean | undefined;
+  landedAt?: string | undefined;
 };
 export type MetricRun = {
   head?: string;
@@ -49,6 +50,9 @@ export type MetricRun = {
   started?: boolean | undefined;
 };
 export type MetricRecords = {
+  fullResultsUnavailable?: string;
+  error?: { code: 'METRICS_UNAVAILABLE'; message: string };
+  finishTimings?: { id: string; at: string; trusted: boolean; minutes: number | null }[];
   surfaceGaps?: string[];
   observations?: MetricObservation[];
   diskSamples?: DiskSample[];
@@ -76,7 +80,7 @@ export type MetricRecords = {
   lifecycleCoverageGaps?: string[];
   mutationCoverageGaps?: string[];
   source?: {
-    kind: 'native' | 'hosted';
+    kind: 'native' | 'hosted' | 'joined';
     revision?: number | string | undefined;
     collections?: Record<string, number>;
   };

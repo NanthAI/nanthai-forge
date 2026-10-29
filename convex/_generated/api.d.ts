@@ -292,6 +292,7 @@ import type * as projectReturnMetadataStore from "../projectReturnMetadataStore.
 import type * as projectReturnSupersede from "../projectReturnSupersede.js";
 import type * as projectReviewBytes from "../projectReviewBytes.js";
 import type * as projectSemanticContracts from "../projectSemanticContracts.js";
+import type * as projectSelfMetrics from "../projectSelfMetrics.js";
 import type * as projectSourceAuthority from "../projectSourceAuthority.js";
 import type * as projectSourceAuthorityDrain from "../projectSourceAuthorityDrain.js";
 import type * as projectSourceAuthorityFields from "../projectSourceAuthorityFields.js";
@@ -682,6 +683,7 @@ declare const fullApi: ApiFromModules<{
   projectReturnSupersede: typeof projectReturnSupersede;
   projectReviewBytes: typeof projectReviewBytes;
   projectSemanticContracts: typeof projectSemanticContracts;
+  projectSelfMetrics: typeof projectSelfMetrics;
   projectSourceAuthority: typeof projectSourceAuthority;
   projectSourceAuthorityDrain: typeof projectSourceAuthorityDrain;
   projectSourceAuthorityFields: typeof projectSourceAuthorityFields;

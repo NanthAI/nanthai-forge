@@ -69,6 +69,9 @@ export async function beginHostedOperation(
       projectId: input.projectId,
       actor: input.actor,
       operationId: request.operationId,
+      ...((input.payload as { kind?: string }).kind === 'hosted-landing-cancel'
+        ? { metricAction: 'cancel' as const }
+        : {}),
       value: canonicalPayload(prepared.operation),
     });
   return prepared;
@@ -90,6 +93,19 @@ export async function finishHostedOperation(
     hostedTerminalReceiptSchema.parse(JSON.parse(semanticPayload(input.receipt))),
   );
   const value = semanticPayload(operation);
-  if (value !== row.value) await ctx.db.patch(row._id, { value });
+  if (value !== row.value)
+    await ctx.db.patch(row._id, {
+      value,
+      ...(row.metricAction === 'cancel' && operation.terminal?.outcome.status === 'completed'
+        ? {
+            metricMutation: {
+              action: 'cancel' as const,
+              actor: input.actor,
+              operationId: input.operationId,
+              at: operation.terminal.at,
+            },
+          }
+        : {}),
+    });
   return operation;
 }

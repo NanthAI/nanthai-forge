@@ -11,6 +11,7 @@ export const hostedAcceptanceTables = {
     sequence: v.number(),
     value: v.string(),
   })
+    .index('by_project', ['projectId'])
     .index('by_project_and_receipt', ['projectId', 'receiptId'])
     .index('by_project_and_submission', ['projectId', 'submissionId'])
     .index('by_project_and_sequence', ['projectId', 'sequence']),

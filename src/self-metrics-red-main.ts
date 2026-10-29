@@ -81,20 +81,24 @@ export function calculateRedMainMetrics(records: MetricRecords, period: MetricPe
     }
     if (red) add(last, to);
     const complete = records.coverage?.[source === 'forge' ? 'fullResults' : 'mirrorResults'];
+    const unavailable = source === 'forge' && records.fullResultsUnavailable;
     return {
       source,
-      partial: !complete || time(complete) > from,
+      partial: !!unavailable || !complete || time(complete) > from,
       minutes:
-        days.size || (complete && time(complete) <= from)
+        !unavailable && (days.size || (complete && time(complete) <= from))
           ? [...days.values()].reduce((n, m) => n + m, 0)
           : null,
-      days: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([day, minutes]) => ({ day, minutes })),
-      open: red,
+      days: unavailable
+        ? []
+        : [...days].sort(([a], [b]) => a.localeCompare(b)).map(([day, minutes]) => ({ day, minutes })),
+      open: unavailable ? null : red,
     };
   });
   return {
     partial: bySource.some(row => row.partial),
     gaps: [
+      ...(records.fullResultsUnavailable ? [records.fullResultsUnavailable] : []),
       'Forge full-suite results and public GitHub Verify are reported separately. Missing exact-State or mirror-to-State mappings remain partial; no result is inferred from a Candidate status. Culprit descendants count from their accepted main records.',
     ],
     sources: bySource,

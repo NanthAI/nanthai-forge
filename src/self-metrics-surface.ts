@@ -53,13 +53,29 @@ export function metricTotals(
     gaps: [...value.gaps, ...globalGaps],
   });
   return {
+    finishToMain: (() => {
+      const rows = (records.finishTimings ?? []).filter(row => row.trusted && during(row.at, period));
+      return {
+        p50Minutes: percentile(
+          rows.flatMap(row => (row.minutes === null ? [] : [row.minutes])),
+          0.5,
+        ),
+        sourceRecords: rows.length,
+        partial: true,
+        gaps: [
+          ...globalGaps,
+          'Finish-to-main uses retained hosted submission and acceptance timestamps under the attempt auto-on-pass policy; native trust/timing and missing submissions remain unknown.',
+        ],
+      };
+    })(),
     '5.1': wrap(
       {
         ...result.metric1,
-        landings: result.landings,
-        firstTryShare: result.landings
-          ? result.metric1.rows.filter(row => row.path === 'first-try').length / result.landings
-          : null,
+        landings: records.error ? null : result.landings,
+        firstTryShare:
+          result.landings && !result.metric1.rows.some(row => row.path === 'unknown')
+            ? result.metric1.rows.filter(row => row.path === 'first-try').length / result.landings
+            : null,
       },
       count(records.moves),
     ),
@@ -76,7 +92,18 @@ export function metricTotals(
     '5.3': wrap(result.metric3, count(records.submissions)),
     '5.4': wrap(result.metric4, observed('save', 'overlap-delivery', 'overlap-answer')),
     '5.5': wrap(result.metric5, count(records.receipts.filter(row => row.kind === 'mutation'))),
-    '5.6': wrap(result.metric6, count(records.runs) + count(records.checkRequests ?? [])),
+    '5.6': wrap(
+      records.error
+        ? {
+            ...result.metric6,
+            runnerMinutes: null,
+            wallMinutes: null,
+            runnerMinutesPerLanding: null,
+            wallMinutesPerLanding: null,
+          }
+        : result.metric6,
+      count(records.runs) + count(records.checkRequests ?? []),
+    ),
     '5.7': wrap(
       {
         ...result.metric7,
@@ -144,6 +171,7 @@ export function metricsSurface(records: MetricRecords, period: MetricPeriod) {
   return {
     schema: 1,
     period,
+    ...(records.error ? { error: records.error } : {}),
     ...(records.source ? { source: records.source } : {}),
     totals: metricTotals(records, period),
     days,

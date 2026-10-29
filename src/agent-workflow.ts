@@ -9,6 +9,7 @@ import { queueAheadStackSync } from './queue-ahead-stack-sync.js';
 import { settleFinish } from './landing-journal-settle.js';
 import { readLandingHandle } from './land-receipt.js';
 import { boundLandingStatus } from './hosted-agent-bound-read.js';
+import { hostedStatusMetrics } from './self-metrics-source.js';
 import { readMetrics } from './metrics-cli.js';
 import { statusMetrics } from './self-metrics-status.js';
 import { agentResponseAdvisory } from './agent-response-advisory.js';
@@ -101,7 +102,11 @@ export class AgentWorkflow {
       this.callerLaneId = process.cwd().slice(prefix.length).split('/')[0]!;
   }
   async dispatch(input: unknown) {
-    const response = await this.dispatchCore(input);
+    let response = await this.dispatchCore(input);
+    if ((input as { action?: string })?.action === 'status') {
+      const metrics = await hostedStatusMetrics(this.work.store.root);
+      if (metrics) response = { ...response, result: { ...(response.result as object), metrics } };
+    }
     const selected = input as { laneId?: string };
     const laneId =
       selected?.laneId ??

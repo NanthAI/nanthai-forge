@@ -63,6 +63,12 @@ export const hostedRecordTables = {
     projectId: v.id('hostedProjects'),
     actor: v.string(),
     operationId: v.string(),
+    metricAction: v.optional(v.literal('cancel')),
+    metricMutation: v.optional(
+      v.object({ action: v.literal('cancel'), actor: v.string(), operationId: v.string(), at: v.string() }),
+    ),
     value: v.string(),
-  }).index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId']),
+  })
+    .index('by_project_and_metric_action', ['projectId', 'metricMutation.action'])
+    .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId']),
 };

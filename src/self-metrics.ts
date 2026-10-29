@@ -147,7 +147,8 @@ export function calculateSelfMetrics(
   const dropped = (options.headline ? [] : records.submissions)
     .filter(s => inPeriod(s.at, period) && instant(s.at) <= instant(asOf))
     .filter(s => {
-      if (s.delivered || delivered.has(s.entryId)) return false;
+      if (s.delivered || delivered.has(s.entryId) || (s.landedAt && instant(s.landedAt) <= instant(asOf)))
+        return false;
       if (
         records.moves.some(
           m =>

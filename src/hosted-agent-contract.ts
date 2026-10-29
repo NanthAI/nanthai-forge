@@ -28,7 +28,12 @@ export const hostedAgentActions = [
 ] as const;
 /** Owner settings commands. Not advertised in capabilities: released clients parse
  * that list strictly, and the server enforces owner authority on each call. */
-export const hostedAgentOwnerActions = ['configure-check', 'configure-runner', 'check-settings'] as const;
+export const hostedAgentOwnerActions = [
+  'configure-check',
+  'configure-runner',
+  'check-settings',
+  'metrics',
+] as const;
 export const hostedAgentAddressSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
 export type HostedAgentAddress = z.infer<typeof hostedAgentAddressSchema>;
 export const hostedAgentCapabilitiesSchema = z
@@ -167,6 +172,7 @@ export const hostedAgentCommandSchemas = {
       version: z.number().int().nonnegative().optional(),
     })
     .strict(),
+  metrics: z.object({ from: z.string().optional(), to: z.string().optional() }).strict(),
   capabilities: z.object({}).strict(),
   /** Owner-only. Default imports the hosted Work check named verify; command defines one. */
   'configure-check': z

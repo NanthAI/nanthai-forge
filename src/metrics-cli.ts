@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { writeFileSync } from 'node:fs';
 import { invariant } from './errors.js';
-import { nativeSelfMetricsReader } from './self-metrics-native.js';
+import { readMetricRecords } from './self-metrics-source.js';
 import { metricPeriod, metricsSurface } from './self-metrics-surface.js';
 import { formatMetrics, formatMetricReport } from './self-metrics-format.js';
 export async function readMetrics(
@@ -10,7 +10,7 @@ export async function readMetrics(
   pointer?: Buffer | null,
 ) {
   const period = metricPeriod(options.from, options.to);
-  return metricsSurface(await nativeSelfMetricsReader(owner, pointer ? { pointer } : {}).read(), period);
+  return metricsSurface(await readMetricRecords(owner, period, { pointer }), period);
 }
 export async function metricsCli(args: string[]) {
   if (!args.length || args[0] === '--help') {
@@ -45,9 +45,10 @@ export async function metricsCli(args: string[]) {
     'Use --compare FROM..TO.',
   );
   const beforePeriod = compare ? metricPeriod(compare[0], compare[1]) : undefined;
-  const records = await nativeSelfMetricsReader(owner).read(),
-    result = metricsSurface(records, period);
-  const before = beforePeriod ? metricsSurface(records, beforePeriod) : undefined;
+  const result = metricsSurface(await readMetricRecords(owner, period), period);
+  const before = beforePeriod
+    ? metricsSurface(await readMetricRecords(owner, beforePeriod), beforePeriod)
+    : undefined;
   if (options['--report'])
     writeFileSync(options['--report'], formatMetricReport(result, before), { mode: 0o600 });
   if (options['--json'] || (!options['--text'] && !process.stdout.isTTY))

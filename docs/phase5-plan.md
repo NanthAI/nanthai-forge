@@ -98,7 +98,20 @@ text table (`--text` also selects it explicitly).
 
 `nforge agent ROOT metrics '{"from":"2026-10-14","to":"2026-10-25"}'`
 and MCP `forge_work_overview` action `metrics` expose the same JSON. Owner status
-includes a compact last-seven-day summary. Status reuses its selected Work rows,
+includes a compact last-seven-day summary. With source authority mode `server`,
+metrics read the hosted project through owner/maintainer-only, indexed pages of
+at most 100 rows. Status reads at most four hosted pages and labels omitted
+records. Native-owner and server-shadow bindings keep native metric reads.
+Spanning windows join native evidence before the recorded cutover timestamp and
+hosted evidence at/after it, naming that authority seam. Hosted context is bounded
+to one day before the window; pages are live observations, not a cross-page
+snapshot. Missing inputs, caller delivery, full-suite selection, reuse keys,
+requester history and billing evidence stay named gaps. Trusted finish-to-main
+p50 uses submission/acceptance timestamps under the recorded attempt policy,
+never free text. An older deployment without `projectSelfMetrics` returns
+`METRICS_UNAVAILABLE` with coverage gaps. Deploy Convex before the client.
+
+For native authority, status reuses its selected Work rows,
 reads at most 256 KiB of receipt history, and never reads source trees or scans
 disk. If that receipt tail omits older records, its summary names the gap; the
 full metrics command reads the retained records. Status reuse keys are omitted
@@ -109,7 +122,7 @@ writes all metrics with before/after values, record counts and coverage gaps.
 Without `--compare`, the report has one value column. Report export writes only
 the named output file; metric reads never wake an owner service or write receipts.
 
-On the first existing committed Work write in a UTC week, Forge queues a detached
+For native authority, on the first existing committed Work write in a UTC week, Forge queues a detached
 worker to write the previous completed ISO week's report to
 `.forge/work/metrics/weekly-YYYY-Www.json`. Existing snapshots are retained on
 retry. The write does not wait for record collection or hold its writer lock for
@@ -120,6 +133,11 @@ and later observations so its JSON is reproducible from that week's records.
 Remove that generated file to undo the automatic snapshot; a subsequent write
 can regenerate it. Completed snapshots describe retained evidence at collection
 time; newly supplied historical evidence can change a later recomputation.
+
+Server-authority weekly snapshots on local reads are not yet written: a complete
+previous-week collection can exceed the four-page status budget. A truncated
+current-window status sample must not be saved as a completed-week report. There
+is no hosted schedule, timer, background collector or idle Convex usage.
 
 ### Published baseline
 

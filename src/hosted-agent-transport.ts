@@ -1,3 +1,4 @@
+import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 import { dirname, basename, resolve } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
@@ -67,7 +68,9 @@ export class HostedAgentTransport {
     ),
   ) {}
   async dispatch(requestedAction: string, input: Record<string, unknown>): Promise<HostedAgentResponse> {
-    if (['capabilities', 'status', 'observe', 'landing', 'check-settings'].includes(requestedAction))
+    if (
+      ['capabilities', 'status', 'observe', 'landing', 'check-settings', 'metrics'].includes(requestedAction)
+    )
       return this.dispatchRequest(requestedAction, input);
     const metricRoot = resolve(this.root);
     return withLifecycleMetric(
@@ -126,6 +129,15 @@ export class HostedAgentTransport {
         'HOSTED_ACTION_UNSUPPORTED',
         'The project does not support this hosted action under its current source authority.',
       );
+      if (action === 'metrics')
+        return this.response(
+          action,
+          null,
+          await executeHostedMetrics(
+            { root: this.root, address: this.address, query: this.query.bind(this) },
+            command.data,
+          ),
+        );
       if (action === 'capabilities') return this.response(action, null, capabilities);
       if (action === 'check-settings')
         return this.response(action, null, await hostedCheckSettings(this.query.bind(this), capabilities));

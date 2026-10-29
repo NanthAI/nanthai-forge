@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { Workspace } from './workspace.js';
 import { ForgeError } from './errors.js';
 import { WorkService } from './work.js';
+import { withHostedStatusMetrics } from './self-metrics-source.js';
 import { readPendingStatus } from './pending-status-read.js';
 import { registerAgentWorkflow } from './mcp-agent-workflow.js';
 import type { RepositoryQuery } from './query.js';
@@ -230,7 +231,7 @@ export async function startMcp(
       'forge_work_status',
       {
         description:
-          'Read local Intents, Lanes, exact Candidates and publication observations. pending:true reads indexed pending-work/recovery summary pages without the writer lock; offset/limit page records and detail:true includes the named skipped sections. No recovery, remote calls or archive export. Optional compact:true defers full review bodies with explicit markers; read-work-detail returns original pinned detail. Reconciles interrupted local journals.',
+          'Read local Intents, Lanes, exact Candidates and publication observations. pending:true reads indexed pending-work/recovery summary pages without the writer lock; offset/limit page records and detail:true includes the named skipped sections. Server-authority metric summaries read at most four hosted pages. No recovery or archive export. Optional compact:true defers full review bodies with explicit markers; read-work-detail returns original pinned detail. Reconciles interrupted local journals.',
         inputSchema: {
           compact: z.boolean().optional(),
           pending: z.boolean().optional(),
@@ -243,7 +244,10 @@ export async function startMcp(
       ({ compact, pending, detail, offset, limit }) =>
         result(() =>
           pending
-            ? readPendingStatus(work.store, undefined, undefined, { detail, offset, limit })
+            ? withHostedStatusMetrics(
+                root,
+                readPendingStatus(work.store, undefined, undefined, { detail, offset, limit }),
+              )
             : work.status({ compact: compact ?? false }),
         ),
     );

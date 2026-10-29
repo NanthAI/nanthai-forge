@@ -45,7 +45,21 @@ test('queued cancellation keeps original pins, settles both operations and repai
   assert.deepEqual((await f.status(state.id)).attempt, attempt);
   assert.equal(operation(f, request.operationId).terminal.outcome.error.code, 'LANDING_CANCELLED');
   assert.deepEqual(operation(f, operationId).terminal.outcome.result, result);
+  const metric = [...f.tables.projectHostedOperations.values()].find(
+    row => row.operationId === operationId,
+  ).metricMutation;
+  assert.deepEqual(metric, {
+    action: 'cancel',
+    actor: 'owner',
+    operationId,
+    at: operation(f, operationId).terminal.at,
+  });
   assert.deepEqual(await cancel(f, state.id, operationId), result);
+  assert.deepEqual(
+    [...f.tables.projectHostedOperations.values()].find(row => row.operationId === operationId)
+      .metricMutation,
+    metric,
+  );
   assert.deepEqual(await cancel(f, state.id), result);
   await assert.rejects(cancel(f, randomUUID(), operationId), code('WORK_OPERATION_CHANGED'));
   assert.deepEqual(await f.enqueue(request), result);

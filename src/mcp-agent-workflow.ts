@@ -15,6 +15,7 @@ import { AgentWorkflow, agentActionSchema } from './agent-workflow.js';
 import { briefInputSchema } from './agent-brief-types.js';
 import { agentBrief } from './agent-brief.js';
 import { ForgeError } from './errors.js';
+import { withHostedStatusMetrics } from './self-metrics-source.js';
 import { readPendingStatus, type PendingStatusOptions } from './pending-status-read.js';
 import { hostedAgentAddress } from './hosted-agent-cli.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
@@ -201,7 +202,7 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
         'report',
       ],
       description:
-        'metrics {from?,to?} reports all self-metrics per UTC day and window with source counts and named partial gaps. decisions {target?} lists all retained decisions or one project/Intent target with status and replacement links. handoff-read {laneId} reads the latest portable delivery note. pending-status reads indexed local pending-work/recovery summary pages from one pinned revision without the writer lock. offset/limit page records; detail:true includes submission journals, evidence-file metadata and overlap planning. Skipped sections are named. No remote calls, process recovery or archive export. Read Forge URLs with link (laneId, viewId or save; optional path/line), policy, concise Work pins and counts, or page one retained collection directly with records without reconstructing all Work history. making-of reads one Intent’s derived record: Lanes, saves, check runs with queued/running time, landings, sessions, wall clock and active time. report records cumulative self-reported harness, model and token totals for a Lane session (advisory). All source and history remain retained.',
+        'metrics {from?,to?} reports all self-metrics per UTC day and window with source counts and named partial gaps. decisions {target?} lists all retained decisions or one project/Intent target with status and replacement links. handoff-read {laneId} reads the latest portable delivery note. pending-status reads indexed local pending-work/recovery summary pages from one pinned revision without the writer lock. offset/limit page records; detail:true includes submission journals, evidence-file metadata and overlap planning. Skipped sections are named. Server-authority metrics read at most four hosted pages. No process recovery or archive export. Read Forge URLs with link (laneId, viewId or save; optional path/line), policy, concise Work pins and counts, or page one retained collection directly with records without reconstructing all Work history. making-of reads one Intent’s derived record: Lanes, saves, check runs with queued/running time, landings, sessions, wall clock and active time. report records cumulative self-reported harness, model and token totals for a Lane session (advisory). All source and history remain retained.',
     },
     {
       name: 'forge_review',
@@ -286,7 +287,10 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
           );
           const response =
             command.action === 'pending-status'
-              ? readPendingStatus(agent.work.store, undefined, undefined, command as PendingStatusOptions)
+              ? await withHostedStatusMetrics(
+                  root,
+                  readPendingStatus(agent.work.store, undefined, undefined, command as PendingStatusOptions),
+                )
               : await agent.dispatch(command);
           if (command.action === 'start')
             notifications.select((response as { result: { laneId: string } }).result.laneId);

@@ -81,6 +81,7 @@ export const hostedLandingTables = {
     attemptId: v.string(),
     value: v.string(),
   })
+    .index('by_project', ['projectId'])
     .index('by_project_and_submission', ['projectId', 'submissionId'])
     .index('by_project_and_revert_and_sequence', ['projectId', 'revertOf', 'sequence'])
     .index('by_project_and_candidate_and_sequence', ['projectId', 'candidateId', 'sequence'])

@@ -1,3 +1,4 @@
+import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
 import { hostedLandingDesiredSchema } from './hosted-landing-desired.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -304,6 +305,7 @@ export async function executeHostedAgent(
   action: HostedAgentAction,
   input: unknown,
 ): Promise<unknown> {
+  if (action === 'metrics') return executeHostedMetrics(session, input);
   const operationId = session.journal.operationId,
     epoch = session.capabilities.authority.epoch;
   if (action === 'tests' || action === 'confirm-tests') {
