@@ -246,6 +246,74 @@ test('handoffs and overlap groups share the 15-line budget without truncating JS
     }
   }
 });
+test('ignore counts and metrics keep submission identities visible within the compact budget', () => {
+  const submission = {
+    submissionId: 'submission-id',
+    attemptId: 'attempt-id',
+    state: 'pending',
+    pendingReason: 'checking',
+  };
+  const status = pendingStatus(
+    data({ lanes: [{ id: 'lane', name: 'Pending Lane', head, state: 'ready' }] }),
+    {
+      recovery: capture,
+      metrics: {
+        landings: 0,
+        firstTryShare: null,
+        interventionsPerLanding: null,
+        checkMinutesPerLanding: null,
+        dollarsPerLanding: [],
+        redMainMinutes: { forge: null },
+        partial: true,
+      },
+    },
+    now,
+  );
+  status.lanes[0].submission = submission;
+  status.lanes[0].submissions = [submission];
+  status.ignored = {
+    counts: { '.gitignore': 1, '.forgeignore': 2, builtin: 3 },
+    scope: 'local-paths-pruned-directories',
+  };
+  for (const crowded of [false, true]) {
+    if (crowded) {
+      status.lanes[0].handoff = {
+        summary: 'Current delivery',
+        tests: { commands: 1 },
+        recordedChecks: [],
+      };
+      status.lanes[0].stack = { summary: 'base → pending' };
+      status.metrics.diskWarning = 'Disk: synthetic metrics warning';
+      status.disk = { warning: 'Disk: distinct local warning' };
+    }
+    const before = JSON.stringify(status);
+    const text = formatPendingStatus(status);
+    assert.ok(text.split('\n').length <= 15, text);
+    assert.match(text, /lane pending \(checking\).*submission submissi.*attempt attempt-/);
+    assert.match(text, /^Ignored: 1 .gitignore · 2 .forgeignore · 3 built-in$/m);
+    for (const label of [
+      'Hosted main:',
+      'Recovery:',
+      'Pending:',
+      'Transfers:',
+      'Automatic hosted push:',
+      'GitHub main:',
+      'Checks:',
+      'Audits:',
+      'Deployment:',
+      'Metrics · last 7 days',
+      'Checks/landing',
+    ])
+      assert.ok(text.includes(label), label);
+    if (crowded) {
+      assert.match(text, /Handoff lane: Current delivery/);
+      assert.match(text, /Stack: base → pending/);
+      assert.match(text, /^Disk: synthetic metrics warning$/m);
+      assert.match(text, /^Disk: distinct local warning$/m);
+    }
+    assert.equal(JSON.stringify(status), before, 'formatting preserves full JSON');
+  }
+});
 test('dependency waits, review and failed audits retain their recorded state', () => {
   const status = pendingStatus(
     data({

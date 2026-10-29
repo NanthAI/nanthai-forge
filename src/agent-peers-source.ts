@@ -159,28 +159,18 @@ export class PeersSource extends NativeSource {
     );
     if (this.store.native)
       invariant(nativeOwner(path) === this.store.root, 'LANE_UNAVAILABLE', 'Peer Lane owner differs.');
-    const retained = new Set(saved.map(file => file.path));
     let paths: string[];
     if (!this.store.native) {
       paths = workGit(path, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
         .split('\0')
         .filter(Boolean);
-    } else if (
-      !scope ||
-      scope.some(item => {
-        try {
-          return lstatSync(join(path, item)).isDirectory() || !retained.has(item);
-        } catch {
-          return false;
-        }
-      })
-    ) {
-      const key = `paths-v2:${lane.id}:${lane.head}:${JSON.stringify(scope)}`;
+    } else {
+      const key = `paths-v3:${lane.id}:${lane.head}:${JSON.stringify(scope)}`;
       type Paths = { paths: string[]; stamps: [string, string][] };
       // A start/checkpoint observation may already have indexed this exact
       // retained path set without scope. Filtering that fresh inventory is safe
       // and avoids rebuilding every peer inventory on the first scoped read.
-      const fullKey = `paths-v2:${lane.id}:${lane.head}:undefined`;
+      const fullKey = `paths-v3:${lane.id}:${lane.head}:undefined`;
       const prior = this.cache.read<Paths>(key) ?? (scope ? this.cache.read<Paths>(fullKey) : undefined);
       const stamp = (file: string) => {
         try {
@@ -204,12 +194,16 @@ export class PeersSource extends NativeSource {
           undefined,
           scope,
           dir => {
-            stamps.push([dir, stamp(dir)], [join(dir, '.gitignore'), stamp(join(dir, '.gitignore'))]);
+            stamps.push(
+              [dir, stamp(dir)],
+              [join(dir, '.gitignore'), stamp(join(dir, '.gitignore'))],
+              [join(dir, '.forgeignore'), stamp(join(dir, '.forgeignore'))],
+            );
           },
         );
         this.cache.write(key, { paths, stamps });
       }
-    } else paths = [...new Set([...saved.map(file => file.path), ...scope])];
+    }
     const cacheKey = `live-v2:${lane.id}`;
     type Entry = { stamp: string; file: NativeState['files'][number] };
     const cached = this.store.native ? this.cache.read<Record<string, Entry>>(cacheKey) : undefined;

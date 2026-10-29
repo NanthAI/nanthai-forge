@@ -20,6 +20,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { LegacyWorkService as WorkService } from './autonomy-fixture.mjs';
 import { initLegacyNative as initNative } from './autonomy-fixture.mjs';
 import { NativeSource } from '../dist/native-source.js';
+import { snapshotLane } from '../dist/lane-auto-snapshot.js';
 import { importNativeGit, exportNativeGit } from '../dist/native-git.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
 import { serveRepository } from '../dist/http.js';
@@ -66,7 +67,7 @@ function git(root, args, { input, fail = false } = {}) {
     child.stdin.end(input);
   });
 }
-async function fixture(t, kind = 'plain', { wireClone = false } = {}) {
+async function fixture(t, kind = 'plain', { wireClone = false, snapshotDirty = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-native-git-return-'));
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
@@ -117,6 +118,9 @@ async function fixture(t, kind = 'plain', { wireClone = false } = {}) {
   });
   const dirty = act({ action: 'lane', intentId: intent.id, name: 'Preserve owner work' });
   writeFileSync(join(w.store.path(dirty.id), 'a.ts'), 'Preserve unfinished owner edits\n');
+  // The rejection test compares the complete object set. Establish the dirty
+  // Lane's legitimate recovery objects before the owner observer can race it.
+  if (snapshotDirty) assert.equal(snapshotLane(w.store, dirty.id).status, 'snapshot');
   const server = await serveRepository(root, 0);
   t.after(() => server.close());
   const u = new URL(server.url),
@@ -518,7 +522,7 @@ test(
   'native contribution ingress rejects unrelated scope, altered input, incompatible ancestry/formats and unsupported source without changing owner work',
   { timeout: 120000 },
   async t => {
-    const f = await fixture(t),
+    const f = await fixture(t, 'plain', { snapshotDirty: true }),
       command = await candidate(f),
       originalWork = readWorkBytes(join(f.w.store.directory, 'work.json'));
     const originalObjects = readdirSync(f.source.directory).sort(),

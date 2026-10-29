@@ -90,7 +90,7 @@ Usage:
   nforge local-checks ROOT DEPLOYMENT PROJECT_ID [--name NAME]
   nforge doctor <git-worktree-root>
   nforge index <git-worktree-root>
-  nforge status ROOT [--pending] [--detail] [--offset N] [--limit N] [--json]
+  nforge status ROOT [--pending] [--detail] [--ignored] [--offset N] [--limit N] [--json]
   nforge status <git-worktree-root>   # existing graph JSON; --pending selects owner summary
   nforge context <git-worktree-root> [search] [--limit N]
   nforge inspect <git-worktree-root> <name-or-id> [--limit N]
@@ -305,10 +305,11 @@ async function main(args: string[]): Promise<unknown> {
     return undefined;
   }
   if (args[0] === 'status' && args[1] && (args.includes('--pending') || !!nativeOwner(resolve(args[1])))) {
-    const options: { detail?: boolean; offset?: number; limit?: number } = {};
+    const options: { detail?: boolean; ignored?: boolean; offset?: number; limit?: number } = {};
     for (let index = 2; index < args.length; index++) {
       const arg = args[index];
       if (arg === '--detail') options.detail = true;
+      else if (arg === '--ignored') options.ignored = true;
       else if (arg === '--offset' || arg === '--limit') {
         invariant(/^\d+$/.test(args[index + 1] ?? ''), 'BAD_ARGUMENT', `${arg} requires an integer.`);
         options[arg === '--offset' ? 'offset' : 'limit'] = Number(args[++index]);
@@ -316,7 +317,7 @@ async function main(args: string[]): Promise<unknown> {
         invariant(
           ['--pending', '--json'].includes(arg!),
           'BAD_ARGUMENT',
-          'Use status ROOT [--pending] [--detail] [--offset N] [--limit N] [--json].',
+          'Use status ROOT [--pending] [--detail] [--ignored] [--offset N] [--limit N] [--json].',
         );
     }
     const status = readPendingStatus(new WorkStore(args[1]), undefined, undefined, options);
@@ -326,6 +327,8 @@ async function main(args: string[]): Promise<unknown> {
     process.stdout.write(formatPendingStatus(status) + '\n');
     return undefined;
   }
+  const ignored = args[0] === 'status' && args.includes('--ignored');
+  if (args[0] === 'status') args = args.filter(arg => arg !== '--ignored' && arg !== '--json');
   const flag = args.indexOf('--limit');
   let limit = 20;
   if (flag >= 0) {
@@ -389,7 +392,7 @@ async function main(args: string[]): Promise<unknown> {
   const query = new RepositoryQuery(root);
   switch (command) {
     case 'status':
-      return query.status();
+      return query.status(ignored);
     case 'context':
       return query.context(subject, limit);
     case 'inspect':

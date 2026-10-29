@@ -1,3 +1,4 @@
+import { readIgnoredStatus } from './ignored-status.js';
 import { runLogRecord } from './check-log-policy.js';
 import { statusMetrics } from './self-metrics-status.js';
 import { readSelfMetricDisk } from './self-metrics-disk.js';
@@ -20,6 +21,7 @@ import { invariant } from './errors.js';
 
 export type PendingStatusOptions = {
   detail?: boolean | undefined;
+  ignored?: boolean | undefined;
   offset?: number | undefined;
   limit?: number | undefined;
 };
@@ -203,6 +205,7 @@ export function readPendingStatus(
     );
     return {
       ...pending,
+      ignored: readIgnoredStatus(store.root, options.ignored ?? false),
       pagination,
       queue: {
         ...(pagination.landingEntries ?? {

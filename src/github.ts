@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { sourceLanguage } from './languages.js';
-import ignore from 'ignore';
+import { ignoreLayer, ignoredBy, ignoreNames } from './source-ignore.js';
 import { posix } from 'node:path';
 import { createHash } from 'node:crypto';
 import { analyze, analysisProvider } from './analyze.js';
@@ -13,7 +13,7 @@ import type { GraphPack, Snapshot } from './types.js';
 
 export const githubAnalysisVersion = (): string => {
   const provider = analysisProvider();
-  return `${provider.version}:${provider.configVersion}:github-4`;
+  return `${provider.version}:${provider.configVersion}:github-5`;
 };
 
 export type GithubFetch = typeof fetch;
@@ -177,27 +177,31 @@ export async function captureGithub(
     .filter(e => e.type === 'blob' && e.mode !== '120000' && safeRelative(e.path) && !exclusion(e.path))
     .sort((a, b) => a.path.localeCompare(b.path, 'en'));
   const selected = entries.filter(
-    e => !!sourceLanguage(e.path) || posix.basename(e.path) === '.gitignore' || isRepositoryDocument(e.path),
+    e =>
+      !!sourceLanguage(e.path) ||
+      ignoreNames.some(name => posix.basename(e.path) === name) ||
+      isRepositoryDocument(e.path),
   );
   let totalBytes = 0,
     done = 0;
   const downloaded = new Map<string, string>();
-  const rules: { directory: string; matcher: ReturnType<typeof ignore> }[] = [];
+  const rules: ReturnType<typeof ignoreLayer> = [];
   const matches = (path: string) => {
-    let ignored = false;
-    for (const rule of rules)
-      if (path.startsWith(rule.directory) && path !== rule.directory) {
-        const result = rule.matcher.test(path.slice(rule.directory.length));
-        if (result.ignored) ignored = true;
-        if (result.unignored) ignored = false;
-      }
-    return ignored;
+    const directory = path.endsWith('/');
+    const candidate = directory ? path.slice(0, -1) : path;
+    return ignoredBy(
+      rules.filter(rule => !rule.directory || candidate.startsWith(rule.directory + '/')),
+      candidate,
+      directory,
+    );
   };
   const ignored = (path: string) =>
-    path
-      .split('/')
-      .slice(0, -1)
-      .some((_, i, parts) => matches(`${parts.slice(0, i + 1).join('/')}/`)) || matches(path);
+    !!(
+      path
+        .split('/')
+        .slice(0, -1)
+        .some((_, i, parts) => matches(`${parts.slice(0, i + 1).join('/')}/`)) || matches(path)
+    );
   await progress(0, selected.length);
   const download = async (entry: TreeEntry) => {
     invariant(
@@ -245,17 +249,29 @@ export async function captureGithub(
     downloaded.set(entry.path, text);
     done++;
   };
-  for (const entry of selected
-    .filter(e => posix.basename(e.path) === '.gitignore')
-    .sort((a, b) => a.path.split('/').length - b.path.split('/').length)) {
-    if (ignored(entry.path)) continue;
-    await download(entry);
-    rules.push({
-      directory: posix.dirname(entry.path) === '.' ? '' : `${posix.dirname(entry.path)}/`,
-      matcher: ignore().add(downloaded.get(entry.path)!),
-    });
+  const ignoreEntries = new Map(
+    selected
+      .filter(e => ignoreNames.some(name => posix.basename(e.path) === name))
+      .map(entry => [entry.path, entry]),
+  );
+  const directories = [...new Set([...ignoreEntries.keys()].map(path => posix.dirname(path)))].sort(
+    (a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b, 'en'),
+  );
+  for (const directory of directories) {
+    if (directory !== '.' && ignored(directory + '/')) continue;
+    for (const name of ignoreNames) {
+      const entry = ignoreEntries.get(directory === '.' ? name : `${directory}/${name}`);
+      if (entry) await download(entry);
+    }
+    rules.push(
+      ...ignoreLayer(directory === '.' ? '' : directory, name =>
+        downloaded.get(directory === '.' ? name : `${directory}/${name}`),
+      ),
+    );
   }
-  const included = selected.filter(e => posix.basename(e.path) !== '.gitignore' && !ignored(e.path));
+  const included = selected.filter(
+    e => !ignoreNames.some(name => posix.basename(e.path) === name) && !ignored(e.path),
+  );
   invariant(
     included.filter(e => !!sourceLanguage(e.path)).length <= DEFAULT_LIMITS.maxFiles,
     'SOURCE_LIMIT',
@@ -270,7 +286,7 @@ export async function captureGithub(
   for (const [path, text] of [...downloaded].sort(([a], [b]) => a.localeCompare(b, 'en'))) {
     if (ignored(path)) continue;
     if (!!sourceLanguage(path)) content.set(path, text);
-    else if (posix.basename(path) !== '.gitignore') documents[path] = text;
+    else if (!ignoreNames.some(name => posix.basename(path) === name)) documents[path] = text;
   }
   const excluded: Record<string, number> = {};
   for (const entry of tree.tree) {
@@ -281,7 +297,9 @@ export async function captureGithub(
         (entry.mode === '120000' || entry.type === 'commit'
           ? 'missing-symlink-or-special'
           : ignored(entry.path)
-            ? 'gitignored'
+            ? matches(entry.path)?.source === '.forgeignore'
+              ? 'forgeignored'
+              : 'gitignored'
             : !sourceLanguage(entry.path)
               ? 'unsupported-language'
               : null));

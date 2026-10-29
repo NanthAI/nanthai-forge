@@ -1,3 +1,4 @@
+import { scanSourcePaths } from './source-paths.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
   existsSync,
@@ -14,7 +15,7 @@ import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { TextDecoder } from 'node:util';
 import { policyPreset } from './autonomy-policy.js';
-import { NativeSource, nativeMarker, nativePaths, type NativeFile } from './native-source.js';
+import { NativeSource, nativeMarker, type NativeFile } from './native-source.js';
 import { WorkStore } from './work-store.js';
 import { workSchema, type GitProjection } from './work-types.js';
 import { workGit } from './work-git.js';
@@ -161,10 +162,10 @@ export async function importNativeGit(input: string, commit: string, target: str
     source.materialize(head, workspace, false);
     invariant(
       JSON.stringify(
-        nativePaths(
-          workspace,
-          files.map(file => file.path),
-        ),
+        scanSourcePaths(workspace, {
+          retained: files.map(file => file.path),
+          preserveRetained: true,
+        }),
       ) === JSON.stringify(files.map(file => file.path)),
       'UNSUPPORTED_NATIVE_GIT_FILE',
       'Tracked Git files cannot be represented in this native workspace. Original repository is preserved; no partial source is imported.',

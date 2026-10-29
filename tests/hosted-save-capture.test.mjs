@@ -196,3 +196,31 @@ test('128 MiB source capture is disk-backed with bounded stream chunks', async t
     }),
   );
 });
+
+test('hosted capture uses nested Forge/Git rules and never re-includes new credentials', async t => {
+  const base = directory(t),
+    root = join(base, 'checkout');
+  mkdirSync(root);
+  const s = await saveFixture();
+  marker(root, s);
+  writeFileSync(join(root, 'a.txt'), 'original');
+  writeFileSync(join(root, '.gitignore'), '*.tmp\n');
+  writeFileSync(join(root, '.forgeignore'), '!keep.tmp\na.txt\n!.env\n');
+  writeFileSync(join(root, 'drop.tmp'), 'SYNTHETIC_IGNORED');
+  writeFileSync(join(root, 'keep.tmp'), 'included');
+  writeFileSync(join(root, '.env'), 'SYNTHETIC_CREDENTIAL');
+  mkdirSync(join(root, 'nested'));
+  writeFileSync(join(root, 'nested/.forgeignore'), '*.txt\n');
+  writeFileSync(join(root, 'nested/hidden.txt'), 'SYNTHETIC_IGNORED');
+  const captured = await captureHostedSave(root, join(base, 'capture'));
+  assert(captured.changes.some(c => c.path === 'keep.tmp' && c.after));
+  assert(captured.changes.some(c => c.path === '.forgeignore' && c.after));
+  assert(captured.changes.some(c => c.path === 'a.txt' && c.after === null));
+  for (const path of ['drop.tmp', '.env', 'nested/hidden.txt'])
+    assert(!captured.changes.some(c => c.path === path));
+  for (const file of captured.files) {
+    const text = readFileSync(join(base, 'capture', file.path), 'utf8');
+    assert(!text.includes('SYNTHETIC_IGNORED'));
+    assert(!text.includes('SYNTHETIC_CREDENTIAL'));
+  }
+});

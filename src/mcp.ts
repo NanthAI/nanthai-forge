@@ -146,10 +146,10 @@ export async function startMcp(
       'forge_current',
       {
         description: 'Report indexed/current source identities, freshness and supported coverage.',
-        inputSchema: scope,
+        inputSchema: { ...scope, ignored: z.boolean().optional() },
         annotations: read,
       },
-      ({ laneId }) => sourceResult(laneId, source => source.status()),
+      ({ laneId, ignored }) => sourceResult(laneId, source => source.status(ignored)),
     );
     server.registerTool(
       'forge_context',
@@ -235,18 +235,19 @@ export async function startMcp(
         inputSchema: {
           compact: z.boolean().optional(),
           pending: z.boolean().optional(),
+          ignored: z.boolean().optional(),
           detail: z.boolean().optional(),
           offset: z.number().int().nonnegative().optional(),
           limit: z.number().int().positive().optional(),
         },
         annotations: { ...read, readOnlyHint: false },
       },
-      ({ compact, pending, detail, offset, limit }) =>
+      ({ compact, pending, ignored, detail, offset, limit }) =>
         result(() =>
           pending
             ? withHostedStatusMetrics(
                 root,
-                readPendingStatus(work.store, undefined, undefined, { detail, offset, limit }),
+                readPendingStatus(work.store, undefined, undefined, { detail, ignored, offset, limit }),
               )
             : work.status({ compact: compact ?? false }),
         ),

@@ -1,3 +1,4 @@
+import { formatIgnoredStatus, type IgnoredStatus } from './ignored-status.js';
 import { formatMetricsHeadline } from './self-metrics-format.js';
 // SPDX-License-Identifier: Apache-2.0
 import { submissionLine } from './landing-submission.js';
@@ -9,6 +10,7 @@ export function formatPendingStatus(
   value: PendingStatus & {
     sections?: { skipped: string[]; request: string };
     countsScope?: string;
+    ignored?: IgnoredStatus;
     queue?: { total: number; items: unknown[] };
   },
 ) {
@@ -62,15 +64,31 @@ export function formatPendingStatus(
     `Audits: ${value.audits.filter(a => ['pending', 'queued', 'preparing', 'running'].includes(a.status)).length} pending · ${value.audits.filter(a => a.status === 'failed').length} failed`,
     `Deployment: ${pin(value.deployment?.head ?? null)} · ${value.deployment?.source ?? 'unknown'} (last observation); installed source unknown`,
   ];
-  // Delivery and overlap summaries share the compact view's existing line budget.
-  if (examples.length && lines.length >= 15) {
-    const recovery = lines.findIndex(line => line.startsWith('Recovery:'));
-    lines[recovery - 1] += ` · ${lines[recovery]}`;
-    lines.splice(recovery, 1);
-  }
-  lines.splice(3, 0, ...examples.slice(0, Math.min(3, Math.max(0, 15 - lines.length))));
+  const ignored = value.ignored ? formatIgnoredStatus(value.ignored) : [];
+  if (ignored[0]) lines.splice(2, 0, ignored[0]);
   if (value.metrics) lines.push(...formatMetricsHeadline(value.metrics).map(oneLine));
   if (value.disk?.warning && value.disk.warning !== value.metrics?.diskWarning)
     lines.push(oneLine(value.disk.warning));
+  // Reserve a Lane example even when ignore counts, metrics and delivery facts
+  // fill the headline. Fold related facts without discarding their contents.
+  const headlineLimit = 15 - (examples.length ? 1 : 0);
+  for (const [from, into] of [
+    ['Recovery:', 'Hosted main:'],
+    ['Pending:', 'Hosted main:'],
+    ['Audits:', 'Checks:'],
+    ['Automatic hosted push:', 'Transfers:'],
+    ['Checks/landing ', 'Metrics ·'],
+    ['Deployment:', 'GitHub main:'],
+  ]) {
+    if (lines.length <= headlineLimit) break;
+    const source = lines.findIndex(line => line.startsWith(from!));
+    const target = lines.findIndex(line => line.startsWith(into!));
+    if (source < 0 || target < 0) continue;
+    lines[target] += ` · ${lines[source]}`;
+    lines.splice(source, 1);
+  }
+  lines.splice(ignored[0] ? 4 : 3, 0, ...examples.slice(0, Math.min(3, Math.max(0, 15 - lines.length))));
+  // Explicit ignored-path listings may grow with the inventory.
+  lines.push(...ignored.slice(1));
   return lines.join('\n');
 }

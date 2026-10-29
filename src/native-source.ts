@@ -14,17 +14,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
-import ignore from 'ignore';
+import { nativePaths } from './source-paths.js';
+export { nativePaths } from './source-paths.js';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { digest } from './hash.js';
-import {
-  exclusion,
-  sourceExclusion,
-  readSource,
-  safeRelative,
-  sourceRealpath as realpathSync,
-} from './files.js';
+import { readSource, sourceRealpath as realpathSync } from './files.js';
 import { invariant } from './errors.js';
 import {
   mergeNativeFiles,
@@ -95,74 +90,6 @@ export type NativeCaptureCoverage = {
   excludedCount: number;
   excluded: { path: string; reason: string }[];
 };
-export function nativePaths(
-  root: string,
-  retained: string[] = [],
-  excluded?: { path: string; reason: string }[],
-  scope?: string[],
-  visitDirectory?: (path: string) => void,
-): string[] {
-  const paths: string[] = [];
-  const retainedFiles = new Set(retained),
-    retainedDirectories = new Set<string>();
-  for (const file of retainedFiles)
-    for (let index = file.indexOf('/'); index !== -1; index = file.indexOf('/', index + 1))
-      retainedDirectories.add(file.slice(0, index));
-  function walk(dir: string, patterns: { rule: ReturnType<typeof ignore>; dir: string }[]) {
-    visitDirectory?.(dir);
-    const bytes = readSource(root, join(dir, '.gitignore'), 1024 * 1024);
-    const next = bytes
-      ? [
-          ...patterns,
-          ...bytes
-            .toString('utf8')
-            .split(/\r?\n/)
-            .filter(Boolean)
-            .map(line => ({ rule: ignore().add(line), dir })),
-        ]
-      : patterns;
-    const rules = next;
-    for (const name of readdirSync(join(root, dir)).sort()) {
-      const path = dir ? `${dir}/${name}` : name;
-      if (
-        scope &&
-        !scope.some(item => item === path || item.startsWith(path + '/') || path.startsWith(item + '/'))
-      )
-        continue;
-      invariant(safeRelative(path), 'UNSAFE_PATH', 'Native source paths must be portable relative paths.');
-      const selected = retainedFiles.has(path),
-        descendant = retainedDirectories.has(path);
-      const stat = lstatSync(join(root, path));
-      // Analysis name heuristics must not drop source modules such as secrets.ts.
-      // Real credential/config names and explicit ignore rules stay excluded.
-      const reason = stat.isDirectory() ? exclusion(path) : sourceExclusion(path);
-      if (reason && !selected && !descendant) {
-        excluded?.push({ path, reason });
-        continue;
-      }
-      let ignored = false;
-      for (const rule of rules) {
-        const local = rule.dir ? path.slice(rule.dir.length + 1) : path;
-        const result = rule.rule.test(local + (stat.isDirectory() ? '/' : ''));
-        if (result.ignored) ignored = true;
-        if (result.unignored) ignored = false;
-      }
-      if (ignored && !selected && !descendant) {
-        excluded?.push({ path, reason: 'gitignored' });
-        continue;
-      }
-      invariant(
-        stat.isDirectory() || stat.isSymbolicLink() || (stat.isFile() && stat.nlink === 1),
-        'UNSUPPORTED_NATIVE_FILE',
-        `Native source cannot capture this special or linked path: ${path}. Original files are preserved.`,
-      );
-      if (stat.isDirectory()) walk(path, next);
-      else paths.push(path);
-    }
-  }
-  walk('', []);
-  return paths.sort();
-}
 export const nativeSourceTestHooks: {
   beforePublish?: (path: string) => void;
   afterPublish?: (path: string) => void;

@@ -8,7 +8,6 @@ import {
   mkdirSync,
   readFileSync,
   readlinkSync,
-  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -20,7 +19,7 @@ import { SourceFileReader } from './source-file-reader.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { digest } from './hash.js';
-import { exclusion } from './files.js';
+import { nativePaths } from './source-paths.js';
 import { durableReplace, syncFile } from './native-durability.js';
 import { invariant } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
@@ -95,29 +94,7 @@ export async function captureHostedSave(root: string, directory: string) {
   invariant(marker, 'NOT_FOUND', 'Open a hosted Lane before preparing a save.');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const baseline = new Map(marker.state.files.map(file => [file.path, file])),
-    local: string[] = [];
-  const retainedDirectories = new Set<string>();
-  for (const path of baseline.keys()) {
-    const parts = path.split('/');
-    for (let i = 1; i < parts.length; i++) retainedDirectories.add(parts.slice(0, i).join('/'));
-  }
-  function visit(path: string) {
-    for (const name of readdirSync(join(root, path))) {
-      const relative = path ? `${path}/${name}` : name;
-      if (
-        relative
-          .toLowerCase()
-          .split('/')
-          .some(part => part === '.forge' || part === '.git')
-      )
-        continue;
-      const stat = lstatSync(join(root, relative));
-      if (!baseline.has(relative) && !retainedDirectories.has(relative) && exclusion(relative)) continue;
-      if (stat.isDirectory() && !stat.isSymbolicLink()) visit(relative);
-      else local.push(relative);
-    }
-  }
-  visit('');
+    local = nativePaths(root, [...baseline.keys()]);
   const changes: SaveChange[] = [],
     files: { pin: { sha256: string; size: number }; path: string }[] = [];
   for (const path of local.sort()) {

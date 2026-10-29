@@ -54,6 +54,8 @@ corresponding View spellings retained as aliases.
 
 Overview `status` and `records` both return `items`, `total`, `more`, `nextOffset` (`records` also keeps `records`). Lane items show `merged` and `mergedInto` when their own head is contained in an accepted Channel. Filters: `state`/`status`, `merged`. Continue with `nextOffset`; compare revisions when consistency across pages matters.
 
+Nested `.forgeignore` files use Git ignore syntax after `.gitignore` in each directory; `!` can restore Git-ignored paths but cannot override built-in credential exclusions. Ignored working files are not stored, backed up or shared; historical States remain intact. `nforge status ROOT --ignored` (MCP pending status `ignored:true`) shows local exclusion counts and matching rules without file contents.
+
 Native checkpoint receipts include capture coverage and excluded-path reasons; confirm intended files were captured. Use `start` with `intentId` to add a sibling Lane, checkpoint siblings then `finish` with `with:[laneId]` to land them together; `after:{intentId}` or `after:{viewId}` records a dependency wait, resumed with the original request plus `resolved` or `land-ready` on the same owner.
 
 `making-of {intentId}` returns that Intent's derived record (Lanes, saves, check queue/running time, landings, sessions); `report {laneId, harness?, model?, tokens?}` adds self-declared cumulative totals. Missing facts are omitted.

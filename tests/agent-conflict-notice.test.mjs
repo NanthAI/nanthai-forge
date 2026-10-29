@@ -173,11 +173,11 @@ test('write path primes scoped inventories and only republishes changed Lane pag
   const { PeersCache } = await import('../dist/agent-peers-cache.js');
   const { PeersSource } = await import('../dist/agent-peers-source.js');
   const cache = new PeersCache(agent.work.store.root);
-  assert.ok(cache.read(`paths-v2:${a.laneId}:${a.head}:undefined`));
+  assert.ok(cache.read(`paths-v3:${a.laneId}:${a.head}:undefined`));
   const lane = agent.work.store.select('lanes', a.laneId, 'id', true);
   const source = new PeersSource(agent.work.store, lane.base);
   source.live(lane, ['src']);
-  assert.equal(cache.read(`paths-v2:${a.laneId}:${a.head}:["src"]`), undefined);
+  assert.equal(cache.read(`paths-v3:${a.laneId}:${a.head}:["src"]`), undefined);
   const writes = [],
     original = PeersCache.prototype.write;
   PeersCache.prototype.write = function (key, value) {

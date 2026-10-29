@@ -348,3 +348,26 @@ test('Hosted reads retain imported attribution while checking current provider m
     cleanup();
   }
 });
+
+test('GitHub analysis shares nested Forge rules and never downloads excluded source or credentials', async () => {
+  const files = {
+    '.gitignore': '*.tmp.ts\n',
+    '.forgeignore': '!keep.tmp.ts\nprivate/\n!.env.ts\n',
+    'nested/.forgeignore': 'hidden.ts\n!keep.tmp.ts\n',
+    'keep.tmp.ts': 'export const kept = 1;',
+    'drop.tmp.ts': 'export const dropped = "SYNTHETIC_DROP";',
+    'nested/keep.tmp.ts': 'export const nested = 1;',
+    'nested/hidden.ts': 'export const hidden = "SYNTHETIC_HIDDEN";',
+    'private/hidden.ts': 'export const privateValue = "SYNTHETIC_PRIVATE";',
+    '.env.ts': 'export const credential = "SYNTHETIC_CREDENTIAL";',
+  };
+  const f = fixture(files);
+  const artifact = await captureGithub(f.repository, undefined, undefined, async () => {}, f.request);
+  assert.deepEqual(Object.keys(artifact.content), ['keep.tmp.ts', 'nested/keep.tmp.ts']);
+  const requested = new Set(f.requests.map(request => new URL(request.url).pathname.split('/').at(-1)));
+  for (const path of ['drop.tmp.ts', 'nested/hidden.ts', 'private/hidden.ts', '.env.ts']) {
+    const bytes = Buffer.from(files[path]);
+    const blob = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+    assert(!requested.has(blob), path);
+  }
+});

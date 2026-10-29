@@ -2,6 +2,8 @@
 import { childEnv } from '../scripts/child-env.mjs';
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
+import { isAbsolute, posix } from 'node:path';
+import { scanSourcePaths } from './source-paths.js';
 import { nativeOwner, nativePaths } from './native-source.js';
 import { ForgeError, invariant } from './errors.js';
 
@@ -61,21 +63,28 @@ export function gitHead(root: string): string | null {
 }
 export function sourcePaths(root: string): string[] {
   if (nativeOwner(root)) return nativePaths(root);
-  return [
-    ...new Set(
-      run(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
-        .split('\0')
-        .filter(path => Boolean(path) && path !== '.forge' && !path.startsWith('.forge/')),
-    ),
-  ].sort();
+  const paths = run(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
+    .split('\0')
+    .filter(path => Boolean(path) && path !== '.forge' && !path.startsWith('.forge/'));
+  const known = new Set(paths);
+  // Git's initial listing omits files restored by a Forge negation. Add the
+  // shared local inventory, preserving Git's private info/exclude settings.
+  const extra = scanSourcePaths(root, { validate: false }).filter(path => !known.has(path));
+  const external = externalGitIgnores(root, extra);
+  return [...new Set([...paths, ...extra.filter(path => !external.has(path))])].sort();
 }
 export function ignoredPaths(root: string, paths: string[]): Set<string> {
   if (!paths.length) return new Set();
-  if (nativeOwner(root)) {
-    const included = new Set(nativePaths(root));
-    return new Set(paths.filter(path => !included.has(path)));
-  }
-  // check-ignore exits 1 for no matches; use --non-matching and verbose records instead.
+  const native = nativeOwner(root);
+  const included = new Set(native ? nativePaths(root) : scanSourcePaths(root, { validate: false }));
+  const ignored = new Set(paths.filter(path => !included.has(path)));
+  if (!native) for (const path of externalGitIgnores(root, paths)) ignored.add(path);
+  return ignored;
+}
+/** Repository .gitignore rules use the shared matcher. Retain Git's other local
+ * exclusions without allowing a Forge negation to override those settings. */
+function externalGitIgnores(root: string, paths: string[]): Set<string> {
+  if (!paths.length) return new Set();
   const output = run(
     root,
     ['check-ignore', '--no-index', '--stdin', '-z', '-v', '--non-matching'],
@@ -85,9 +94,11 @@ export function ignoredPaths(root: string, paths: string[]): Set<string> {
   const fields = output.split('\0');
   const ignored = new Set<string>();
   for (let i = 0; i + 3 < fields.length; i += 4) {
-    const pattern = fields[i + 2];
-    const path = fields[i + 3];
-    if (pattern && !pattern.startsWith('!') && path) ignored.add(path);
+    const source = fields[i]!,
+      pattern = fields[i + 2],
+      path = fields[i + 3];
+    const repositoryRule = !isAbsolute(source) && posix.basename(source) === '.gitignore';
+    if (!repositoryRule && pattern && !pattern.startsWith('!') && path) ignored.add(path);
   }
   return ignored;
 }

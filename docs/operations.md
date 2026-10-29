@@ -113,6 +113,34 @@ A release export (source only, empty Work) is much narrower and is not a backup 
 
 An older CLI refuses an owner it cannot preserve. Upgrade by installing the new package in a separate directory and pointing it at a backed-up owner. To roll back, restore the backup with the old tools. Never let an older writer rewrite an upgraded owner.
 
+### Source exclusions
+
+Native capture and hosted checkout saves read nested `.gitignore` and
+`.forgeignore` files without Git. In each directory, `.forgeignore` follows
+`.gitignore`, with the same patterns, anchored paths, directory rules and `!`
+negation. A Forge negation can re-include a Git-ignored path; excluded parent
+directories must first be re-included. Built-in credential/configuration and
+protected-directory exclusions take precedence for new files. `.forgeignore`
+itself is an ordinary source file. Local Git-worktree and GitHub source analysis
+use the same nested rules; Git-worktree analysis also preserves local Git
+info/exclude settings.
+
+Ignored files are never stored, backed up or shared by a new capture. Ignore is
+not privacy or access control: historical States and imported history keep their
+original bytes. Already retained Git-ignored paths keep their existing capture
+behavior; explicit `.forgeignore` exclusions also remove them from subsequent
+captures. Source materialization, exports and hosted exchange use the resulting
+immutable States, rather than re-reading ignored working files.
+
+`nforge status ROOT` reports local ignored-path counts for `.gitignore`,
+`.forgeignore` and built-in rules. `--ignored` lists the excluded paths and matching
+rule/file/line, without reading their contents. JSON includes `ignored.counts` and,
+when requested, `ignored.paths`; MCP pending status accepts `ignored:true`.
+These are filesystem-rule counts: a pruned directory counts once, its children
+are not traversed, and historical retained-path exceptions are not included in
+this local inventory. Built-in counts include protected metadata/build directories.
+Status makes no hosted calls.
+
 ### Flake evidence and quarantine
 
 Native checks, GitHub Actions/BYOCI shards and Modal use the same test verdict
