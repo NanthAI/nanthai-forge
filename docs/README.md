@@ -21,5 +21,5 @@ code at the same time. Start with the guide that matches your task.
 
 Run `nforge docs` to list every installed document and `nforge docs why-forge` to
 read the comparison offline. The hosted build generates `/llms.txt`,
-`/llms-full.txt` and the linked Markdown files from the same explicit packaged
-inventory; see [documentation for agents and LLMs](why-forge.md#documentation-for-agents-and-llms).
+`/llms-full.txt` (a curated, size-budgeted subset) and the linked Markdown files
+from the explicit packaged inventory; see [documentation for agents and LLMs](why-forge.md#documentation-for-agents-and-llms).

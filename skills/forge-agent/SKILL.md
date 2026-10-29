@@ -10,6 +10,7 @@ Use ordinary search/read/edit tools on the selected source. For recorded deliver
 - Run the set from `nforge agent <owner> tests '{"laneId":"…"}'` (plus typecheck/lint/Prettier). Checkpoint edits first: selection compares the saved head to current main, using the landing check’s shared scoped selector; full audits and combined Lanes may widen it. Run the returned `command` in the Lane after building; `command:null` means no test files (documentation checks still apply). Ask again after sync or main advances. Never run the full suite locally: `finish` runs the project's check on the project's runner for the combined work of concurrent Lanes.
 - Let `finish` compose concurrent Lanes into one check. If a Lane fails, Forge drops it from the batch and the others still land after passing; a failed candidate never turns main red. Do not rebase, babysit a merge queue or rerun CI per PR. Configured native runners batch code changes; other paths retain ordinary checks and project acceptance policy.
 - Read peers and presence before editing to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
+- Governance: contributors propose and cannot write source or Channels directly; the owner accepts. Protected paths and review-required policy stop at `awaiting-review` for a person; never change policy to bypass review.
 
 ## Short forms
 

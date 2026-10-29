@@ -7,13 +7,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { packageDocuments } from '../scripts/package-documents.mjs';
-import { llmDocuments } from '../scripts/llm-documents.mjs';
+import { llmDocuments, llmsFullPaths, llmsFullBudgetBytes } from '../scripts/llm-documents.mjs';
 import { cleanUrl } from '../dist/project-routes.js';
 import { moduleUrl } from './convex-module.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const { projectTabs, hostedSections, entryFor } = await import(moduleUrl('../web/src/shell/route.ts'));
 const read = path => readFileSync(join(root, path), 'utf8');
+const githubBlob = 'https://github.com/NanthAI/nanthai-forge/blob/main/';
 
 // Robots uses longest matching rule; an equally specific Allow wins. Match the full
 // path + query so legacy signed-in destinations at / cannot inherit the root Allow.
@@ -50,28 +51,96 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   });
   const llms = readFileSync(join(output, 'llms.txt'), 'utf8');
   const full = readFileSync(join(output, 'llms-full.txt'), 'utf8');
+  const robots = readFileSync(join(output, 'robots.txt'), 'utf8');
   assert.match(llms, /^# NanthAi:Forge\n\n> Forge/);
-  for (const section of ['Start here', 'Documentation', 'Full text'])
-    assert.ok(llms.includes(`## ${section}\n\n`));
+  for (const section of [
+    'Start here',
+    'For agents',
+    'Measured results',
+    'Reference',
+    'Optional',
+    'Full text',
+  ])
+    assert.ok(llms.includes(`## ${section}\n\n`), section);
   const links = [...llms.matchAll(/^- \[[^\n]+\]\(([^)]+)\): (.+)$/gm)];
-  assert.equal(links.length, packageDocuments.length + 1);
-  for (const [, path, note] of links) {
+  // Every packaged doc, the README and skill on GitHub, and the full-text file are linked once.
+  assert.equal(links.length, packageDocuments.length + 3);
+  for (const [, target, note] of links) {
     assert.ok(note.length > 0);
-    assert.ok(readFileSync(join(output, path), 'utf8').length > 0, path);
-    assert.ok(crawlable(readFileSync(join(output, 'robots.txt'), 'utf8'), path), path);
+    if (target.startsWith(githubBlob)) {
+      assert.ok(read(target.slice(githubBlob.length)).length > 0, target);
+      continue;
+    }
+    assert.ok(target.startsWith('/'), `${target} is a site route or a repository link`);
+    assert.ok(readFileSync(join(output, target), 'utf8').length > 0, target);
+    assert.ok(crawlable(robots, target), target);
   }
-  let previous = -1;
   for (const path of packageDocuments) {
     assert.ok(llms.includes(`](/${path}): `), path);
     assert.equal(readFileSync(join(output, path), 'utf8'), read(path));
-    const marker = `Source: /${path}\n\n`;
+  }
+  let previous = -1;
+  for (const path of llmsFullPaths) {
+    const marker = `Source: ${path === 'README.md' ? `${githubBlob}README.md` : `/${path}`}\n\n`;
     const position = full.indexOf(marker);
-    assert.ok(position > previous, `${path} follows inventory order`);
+    assert.ok(position > previous, `${path} follows list order`);
     assert.ok(full.startsWith(read(path), position + marker.length), `${path} retains full text`);
     previous = position;
   }
-  assert.equal((full.match(/^Source: \/docs\//gm) ?? []).length, packageDocuments.length);
-  assert.equal(readFileSync(join(output, 'robots.txt'), 'utf8'), read('web/public/robots.txt'));
+  assert.equal((full.match(/^Source: /gm) ?? []).length, llmsFullPaths.length);
+  assert.ok(Buffer.byteLength(full) <= llmsFullBudgetBytes);
+  for (const internal of [
+    'docs/phase5-plan.md',
+    'docs/status.md',
+    'docs/r2-storage-plan.md',
+    'docs/research/',
+  ])
+    assert.ok(!full.includes(`Source: /${internal}`), `${internal} stays out of llms-full`);
+  assert.equal(robots, read('web/public/robots.txt'));
+});
+
+test('llms-full is curated: listed in the package inventory, within budget and without internal plans', () => {
+  assert.ok(llmsFullBudgetBytes <= 400 * 1024);
+  for (const path of llmsFullPaths)
+    assert.ok(path === 'README.md' || packageDocuments.includes(path), `${path} is a packaged document`);
+  for (const internal of [
+    'docs/phase5-plan.md',
+    'docs/status.md',
+    'docs/backlog.md',
+    'docs/roadmap.md',
+    'docs/r2-storage-plan.md',
+    'docs/research/sp1-storage.md',
+    'docs/decisions.md',
+  ])
+    assert.ok(!llmsFullPaths.includes(internal), `${internal} is not concatenated`);
+  const bytes = llmsFullPaths.reduce((sum, path) => sum + Buffer.byteLength(read(path)), 0);
+  assert.ok(bytes < llmsFullBudgetBytes, `sources total ${bytes} bytes`);
+  const first = llmDocuments(root);
+  assert.deepEqual(llmDocuments(root), first);
+  assert.ok(Buffer.byteLength(first[1].source) <= llmsFullBudgetBytes);
+});
+
+test('llms.txt quotes only dated figures that why-forge.md states, and reports the failed bar', () => {
+  const llms = llmDocuments(root)[0].source;
+  const why = read('docs/why-forge.md');
+  const measured = llms.slice(llms.indexOf('## Measured results'), llms.indexOf('## Reference'));
+  const figures = measured
+    .match(/\d[\d,.]*(?: \/ \d+|\s?s\b|×)?/g)
+    .map(figure => figure.replace(/[.,]$/, ''));
+  assert.ok(figures.length > 12);
+  for (const figure of figures) assert.ok(why.includes(figure), `${figure} appears in docs/why-forge.md`);
+  assert.match(measured, /GitHub was faster[^\n]*189 s[^\n]*989 s/);
+  assert.match(measured, /2026-10-24 \(E3\)/);
+  assert.match(measured, /Not established: a token or time advantage/);
+  assert.doesNotMatch(measured, /\b(?:fastest|best|revolutionary|blazing|seamless|powerful|game-chang)/i);
+  for (const rule of [
+    /affects/,
+    /full suite locally/,
+    /`finish`/,
+    /peers and presence/,
+    /contributors propose/,
+  ])
+    assert.match(llms, rule);
 });
 
 test('generation uses only the explicit inventory and reflects source edits deterministically', t => {
@@ -82,20 +151,31 @@ test('generation uses only the explicit inventory and reflects source edits dete
     writeFileSync(join(fixture, path), text);
   };
   for (const path of packageDocuments) put(path, `# ${path}\n\nPublic text for ${path}.\n`);
+  for (const path of ['README.md', 'skills/forge-agent/SKILL.md'])
+    put(path, `# ${path}\n\nPublic text for ${path}.\n`);
   for (const path of ['docs/internal-only.md', 'docs/vendor-notices/private.md', 'private-output.md'])
     put(path, 'EXCLUDED_INTERNAL_CONTENT');
   const first = llmDocuments(fixture);
   assert.deepEqual(llmDocuments(fixture), first);
   assert.ok(!JSON.stringify(first).includes('EXCLUDED_INTERNAL_CONTENT'));
   assert.equal(first.length, packageDocuments.length + 2);
-  for (const path of ['docs/status.md', 'docs/backlog.md', 'docs/roadmap.md'])
-    assert.ok(first[1].source.includes(`Public text for ${path}.`), `${path} is already public`);
+  for (const path of llmsFullPaths) assert.ok(first[1].source.includes(`Public text for ${path}.`), path);
+  for (const path of ['docs/status.md', 'docs/backlog.md', 'docs/roadmap.md', 'docs/phase5-plan.md'])
+    assert.ok(!first[1].source.includes(`Public text for ${path}.`), `${path} is linked, not concatenated`);
   put('docs/why-forge.md', '# Why Forge now?\n\nChanged public documentation.\n');
   const next = llmDocuments(fixture);
   assert.match(next[0].source, /\[Why Forge now\?\]\(\/docs\/why-forge.md\): Changed public documentation\./);
   assert.match(next[1].source, /Changed public documentation\./);
-  rmSync(join(fixture, packageDocuments[0]));
-  assert.throws(() => llmDocuments(fixture), { code: 'ENOENT' });
+  // A listed source that is missing fails the build instead of shipping a partial file.
+  for (const path of [packageDocuments[0], llmsFullPaths[0], 'docs/security.md']) {
+    const copy = readFileSync(join(fixture, path), 'utf8');
+    rmSync(join(fixture, path));
+    assert.throws(() => llmDocuments(fixture), { code: 'ENOENT' }, path);
+    put(path, copy);
+  }
+  // The size budget fails the build rather than truncating.
+  put('docs/security.md', `# Security\n\n${'x'.repeat(llmsFullBudgetBytes)}\n`);
+  assert.throws(() => llmDocuments(fixture), /budget is/);
 });
 
 test('robots permits public static resources for all named crawlers without a sitemap', () => {
@@ -110,6 +190,11 @@ test('robots permits public static resources for all named crawlers without a si
     'CCBot',
   ])
     assert.ok(robots.split('\n').includes(`User-agent: ${bot}`));
+  // All named crawlers share one group with `*`, so the same Allow/Disallow rules bind each of them.
+  const lines = robots.split('\n').filter(line => line && !line.startsWith('#'));
+  const firstRule = lines.findIndex(line => !line.startsWith('User-agent:'));
+  assert.equal(lines.slice(0, firstRule).length, 7);
+  assert.ok(lines.slice(firstRule).every(line => !line.startsWith('User-agent:')));
   assert.match(robots, /^# .*Convex reads\./m);
   assert.doesNotMatch(robots, /^Sitemap:/m);
   for (const path of [

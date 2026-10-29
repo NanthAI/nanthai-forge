@@ -99,14 +99,15 @@ Native source also works without Git. See [workflows](workflows.md) and
 
 ## Documentation for agents and LLMs
 
-The web build generates `/llms.txt` as a linked guide and `/llms-full.txt` as the
-complete text of every document in `scripts/package-documents.mjs`, in that
-inventory's stable order. It also serves those Markdown files under `/docs/`.
-The inventory includes this page, the documentation index, agent guidance,
-concepts, architecture, workflows, operations, security, development, decisions,
-license disclosures and the already-public status, backlog and roadmap.
-Unlisted documents, vendor notice trees, root files and agent skills are excluded
-from these generated files; the installed agent skill ships separately.
+The web build generates `/llms.txt` as a linked guide: a summary, the rules agents
+should follow, the dated measurements on this page (including the E3 bar Forge
+failed) and links to every document in `scripts/package-documents.mjs`, served
+under `/docs/`. It generates `/llms-full.txt` from a fixed list in
+`scripts/llm-documents.mjs`: the README and the user and agent guides, in that
+list's order and within a 400 KB budget. A missing listed source or an oversize
+file fails the build. Plans, status, backlog, roadmap, research, license
+disclosures and the architecture reference stay linked from `/llms.txt`, not
+concatenated. The installed agent skill ships separately and is linked on GitHub.
 
 `robots.txt` permits the public landing and static documentation for all crawlers,
 including AI crawlers. App and project URLs, including legacy query routes, are
