@@ -55,3 +55,19 @@ test('API failures never expose response bodies or tokens and redirects are disa
     e => e.code === 'GITHUB_SYNC_API' && !e.message.includes('synthetic-token'),
   );
 });
+
+test('the App acts only on repositories bound to the requesting project', async () => {
+  const { assertRepositoryBinding } = await import(moduleUrl('../convex/githubAppToken.ts'));
+  const bindings = 'p1=NanthAI/forge, p2=other/repo';
+  assertRepositoryBinding('p1', 'nanthai/Forge', bindings);
+  for (const [project, repo, value] of [
+    ['p1', 'other/repo', bindings],
+    ['p3', 'NanthAI/forge', bindings],
+    ['p1', 'NanthAI/forge', undefined],
+    ['p1', 'NanthAI/forge', ''],
+  ])
+    assert.throws(
+      () => assertRepositoryBinding(project, repo, value),
+      e => e.code === 'GITHUB_REPOSITORY_UNBOUND',
+    );
+});

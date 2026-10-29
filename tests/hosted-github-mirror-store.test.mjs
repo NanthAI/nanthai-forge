@@ -12,6 +12,17 @@ const queue = await import(moduleUrl('../convex/projectGithubMirrorQueue.ts'));
 const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
 const objects = await import(moduleUrl('../convex/projectGithubMirrorObjects.ts'));
 const action = await import(moduleUrl('../convex/projectGithubMirror.ts'));
+
+/** Owner-proven repository bindings are a deployment setting; tests bind their own synthetic project. */
+const bindRepository = (t, projectId, repo) => {
+  const prior = process.env.FORGE_GITHUB_REPO_BINDINGS;
+  process.env.FORGE_GITHUB_REPO_BINDINGS = `${projectId}=${repo}`;
+  t.after(() => {
+    if (prior === undefined) delete process.env.FORGE_GITHUB_REPO_BINDINGS;
+    else process.env.FORGE_GITHUB_REPO_BINDINGS = prior;
+  });
+};
+
 function fixture() {
   const f = lanesFixture(),
     scheduled = [],
@@ -235,6 +246,7 @@ test('source action verifies raw hashes and reconstructs recipes using project-b
 for (const files of [0, 2, 5000])
   test(`real Convex action mirrors ${files} changed files with bounded calls`, async t => {
     const f = await acceptanceFixture();
+    bindRepository(t, f.projectId, 'synthetic/mirror');
     const project = f.tables.hostedProjects.get(f.projectId);
     f.patch('hostedProjects', f.projectId, {
       autonomyPolicy: {

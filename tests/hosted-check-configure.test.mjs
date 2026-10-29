@@ -19,6 +19,17 @@ const definitions = await import(moduleUrl('../convex/projectHostedCheckDefiniti
 const imports = await import(moduleUrl('../convex/projectHostedCheckImport.ts'));
 const autonomy = await import(moduleUrl('../convex/projectAutonomy.ts'));
 const actionsConfigure = await import(moduleUrl('../convex/projectHostedActionsConfigure.ts'));
+
+/** Owner-proven repository bindings are a deployment setting; tests bind their own synthetic project. */
+const bindRepository = (t, projectId, repo) => {
+  const prior = process.env.FORGE_GITHUB_REPO_BINDINGS;
+  process.env.FORGE_GITHUB_REPO_BINDINGS = `${projectId}=${repo}`;
+  t.after(() => {
+    if (prior === undefined) delete process.env.FORGE_GITHUB_REPO_BINDINGS;
+    else process.env.FORGE_GITHUB_REPO_BINDINGS = prior;
+  });
+};
+
 const code = value => error => (error.data?.code ?? error.code) === value;
 const command = {
   name: 'verify',
@@ -363,6 +374,7 @@ test('the worker reads its collector key from env or an owner-only file', t => {
 test('CLI configure-runner github-actions routes to the App action, derives the installation and reports it', async t => {
   const fixture = project();
   const { state, run } = cli(t, fixture);
+  bindRepository(t, fixture.projectId, 'NanthAI/nanthai-forge');
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const prior = { id: process.env.GITHUB_APP_ID, key: process.env.GITHUB_APP_PRIVATE_KEY };
   process.env.GITHUB_APP_ID = '12345';

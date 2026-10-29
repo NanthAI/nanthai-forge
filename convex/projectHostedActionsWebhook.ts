@@ -96,7 +96,12 @@ export const cancel = internalAction({
       input,
     )) as import('../src/hosted-check').HostedCheckRun | null;
     if (!run || run.configuration.provider !== 'github-actions') return null;
-    const token = await installationToken(ctx, run.configuration.repository, actionsPermissions);
+    const token = await installationToken(
+      ctx,
+      input.projectId,
+      run.configuration.repository,
+      actionsPermissions,
+    );
     await githubAppRequest(
       `repos/${run.configuration.repository}/actions/runs/${run.executionId}/cancel`,
       token,

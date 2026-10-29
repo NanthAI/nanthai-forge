@@ -100,7 +100,9 @@ export const begin = internalMutation({
   returns: v.union(v.string(), v.null()),
   handler: async (ctx, input) => {
     const value = await seed(ctx, input);
-    return value ? canonicalPayload(value) : null;
+    const job = value && (await ctx.db.get(input.jobId));
+    // The action binds its App token to the job's project.
+    return value && job ? canonicalPayload({ ...value, projectId: job.projectId }) : null;
   },
 });
 export const commit = internalMutation({

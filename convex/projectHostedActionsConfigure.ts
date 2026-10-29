@@ -8,7 +8,11 @@ import { checkHash, checkNumber, checkPin } from '../src/hosted-check';
 import { hostedActionsRuntime } from '../src/hosted-actions';
 import { report } from './errors';
 import { invariant } from '../src/errors';
-import { actionsPermissions, requireInstallationPermissions } from './githubAppToken';
+import {
+  actionsPermissions,
+  assertRepositoryBinding,
+  requireInstallationPermissions,
+} from './githubAppToken';
 const requestSchema = z
   .object({
     operationId: z.uuid(),
@@ -35,6 +39,7 @@ export const configure = action({
       const { repository, runsOn, ...request } = parsed.data;
       // Derive the installation via the App now so a missing install or a pending
       // Actions permission approval fails here, not on the first dispatch.
+      assertRepositoryBinding(input.projectId, repository);
       await requireInstallationPermissions(repository, actionsPermissions);
       return await ctx.runMutation(
         makeFunctionReference<'mutation', { projectId: typeof input.projectId; request: string }, string>(

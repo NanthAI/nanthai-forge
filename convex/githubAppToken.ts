@@ -108,12 +108,33 @@ export async function requireInstallationPermissions(
     `The GitHub App installation on ${repo} lacks ${missing.join(', ')}. Approve the App's requested permissions in GitHub, then retry.`,
   );
 }
+/** The App can act on every repository it is installed on, whoever asks. Until
+ * owner-proven bindings land, the deployment names each allowed project/repository
+ * pair in FORGE_GITHUB_REPO_BINDINGS ("projectId=owner/repo", comma-separated).
+ * Unset or unlisted denies, so one Forge project can never drive another's repo. */
+export function assertRepositoryBinding(
+  projectId: string,
+  repo: string,
+  bindings = process.env.FORGE_GITHUB_REPO_BINDINGS,
+) {
+  const wanted = `${projectId}=${repo}`.toLowerCase();
+  invariant(
+    (bindings ?? '')
+      .split(',')
+      .map(item => item.trim().toLowerCase())
+      .includes(wanted),
+    'GITHUB_REPOSITORY_UNBOUND',
+    `This Forge project is not bound to ${repo}. Ask the deployment operator to bind it.`,
+  );
+}
 /** Stable shared API for the mirror and Actions dispatch/cancel. */
 export async function installationToken(
   _ctx: ActionCtx,
+  projectId: string,
   repo: string,
   permissions?: GithubAppPermissions,
 ): Promise<string> {
+  assertRepositoryBinding(projectId, repo);
   return mintInstallationToken(repo, fetch, Date.now(), permissions);
 }
 /** Raw App-authenticated request for endpoints whose status matters (dispatch

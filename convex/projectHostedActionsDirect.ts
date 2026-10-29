@@ -167,7 +167,12 @@ export const dispatch = internalAction({
         'RUNNER_UNAVAILABLE',
         'Convex site URL is unavailable.',
       );
-      const token = await installationToken(ctx, run.configuration.repository, actionsPermissions);
+      const token = await installationToken(
+        ctx,
+        input.projectId,
+        run.configuration.repository,
+        actionsPermissions,
+      );
       // Mark unknown before the non-idempotent call. Never retry a lost response.
       outcome = 'unknown';
       const response = await githubAppRequest(

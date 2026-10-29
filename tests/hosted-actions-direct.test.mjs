@@ -19,6 +19,17 @@ const plans = await import(moduleUrl('../convex/projectHostedActionsPlan.ts'));
 const results = await import(moduleUrl('../convex/projectHostedActionsResults.ts'));
 const webhooks = await import(moduleUrl('../convex/projectHostedActionsWebhook.ts'));
 const { handle } = await import(moduleUrl('../convex/projectHostedActionsHttp.ts'));
+
+/** Owner-proven repository bindings are a deployment setting; tests bind their own synthetic project. */
+const bindRepository = (t, projectId, repo) => {
+  const prior = process.env.FORGE_GITHUB_REPO_BINDINGS;
+  process.env.FORGE_GITHUB_REPO_BINDINGS = `${projectId}=${repo}`;
+  t.after(() => {
+    if (prior === undefined) delete process.env.FORGE_GITHUB_REPO_BINDINGS;
+    else process.env.FORGE_GITHUB_REPO_BINDINGS = prior;
+  });
+};
+
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const sha = 'a'.repeat(40),
   repository = 'synthetic/project',
@@ -211,6 +222,7 @@ test('OIDC cryptography and all pinned claims reject substitution', async () => 
 });
 test('concurrent dispatch reservation and lost reply send one GitHub dispatch with no retry', async t => {
   const s = await fixture(t);
+  bindRepository(t, s.id.projectId, 'synthetic/project');
   variables(t, {
     GITHUB_APP_ID: '12345',
     GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
@@ -255,6 +267,7 @@ test('dispatch retains custom and array runner labels, and self-hosted OIDC comp
   for (const runsOn of ['blacksmith-4vcpu-ubuntu-2404', ['self-hosted', 'linux', 'x64']]) {
     expected = runsOn;
     const s = await fixture(t, 2, runsOn);
+    bindRepository(t, s.id.projectId, 'synthetic/project');
     const ctx = { runMutation: (ref, input) => s.call(direct, getFunctionName(ref).split(':')[1], input) };
     await direct.dispatch._handler(ctx, s.id);
     assert.equal((await s.status(s.run.id)).executionId, '123');

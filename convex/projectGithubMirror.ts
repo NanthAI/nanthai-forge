@@ -83,7 +83,7 @@ export const step = internalAction({
       const raw: string | null = await ctx.runMutation(mutation('projectGithubMirrorStore:begin'), input);
       if (!raw) return null;
       const loaded = JSON.parse(raw);
-      const token = await installationToken(ctx, loaded.repository);
+      const token = await installationToken(ctx, loaded.projectId, loaded.repository);
       const io: MirrorIO = { ...mirrorSource(ctx, input), api: githubRequest(token) };
       let plan: MirrorPlan;
       if (loaded.cursor) {
