@@ -29,7 +29,7 @@ test('compact immutable ancestry closures remain exact across bounded chunks', a
   assert.equal(await sourceMembership(s.ctx, 'generation', heads.at(-1), 'f'.repeat(64)), false);
   s.tables.projectWorkRecords.delete(`sourceAncestryChunk:${heads.at(-1)}:0`);
   assert.equal(
-    await sourceMembership(s.ctx, 'generation', heads.at(-1), heads[0]),
+    await sourceMembership({ ...s.ctx }, 'generation', heads.at(-1), heads[0]),
     null,
     'a missing chunk never becomes a negative proof',
   );

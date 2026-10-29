@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
@@ -65,26 +65,50 @@ export async function saveObject(
   projectId: Id<'hostedProjects'>,
   pin: { sha256: string; size?: number },
 ) {
-  const row = await ctx.db
-    .query('projectObjects')
-    .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', pin.sha256))
-    .unique();
-  invariant(
-    row && !row.removed && isStored(row) && (pin.size === undefined || row.size === pin.size),
-    'SOURCE_UNAVAILABLE',
-    'Commit the exact project source object before staging it.',
-  );
-  // Source staging can reuse an old log hash before its State is registered.
-  // Mark that provenance in the same transaction: cleanup's exact row binding
-  // then fences a concurrent stage, without coordinating independent Lanes.
-  if ('patch' in ctx.db && !row.sourceReferenced) {
-    await ctx.db.patch(row._id, { sourceReferenced: true });
-    await ctx.db.insert('projectCheckLogSourcePins', { projectId, digest: row.digest });
+  return (await saveObjects(ctx, projectId, [pin]))[0]!;
+}
+/** The caller supplies one already-bounded source window. Each exact object is
+ * checked and marked, but cleanup needs just one new fence for this transaction,
+ * irrespective of how many source references the batch introduces. */
+export async function saveObjects(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  pins: readonly { sha256: string; size?: number }[],
+) {
+  const rows = new Map<string, Doc<'projectObjects'>>();
+  const result = [];
+  let fence: string | undefined;
+  for (const pin of pins) {
+    let row = rows.get(pin.sha256);
+    if (!row) {
+      row =
+        (await ctx.db
+          .query('projectObjects')
+          .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', pin.sha256))
+          .unique()) ?? undefined;
+    }
+    invariant(
+      row && !row.removed && isStored(row) && (pin.size === undefined || row.size === pin.size),
+      'SOURCE_UNAVAILABLE',
+      'Commit the exact project source object before staging it.',
+    );
+    if ('patch' in ctx.db && !row.sourceReferenced) {
+      await ctx.db.patch(row._id, { sourceReferenced: true });
+      fence = row.digest;
+      row = { ...row, sourceReferenced: true };
+    }
+    rows.set(pin.sha256, row);
+    result.push({
+      object: { sha256: row.digest, size: row.size },
+      recipe: row.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null,
+    });
   }
-  return {
-    object: { sha256: row.digest, size: row.size },
-    recipe: row.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null,
-  };
+  // This append changes the latest-pin guard even when another transaction also
+  // stages source. It is not a per-digest reference table. All marks and the fence
+  // commit atomically, so an earlier cleanup plan must replan as before.
+  if (fence && 'patch' in ctx.db)
+    await ctx.db.insert('projectCheckLogSourcePins', { projectId, digest: fence });
+  return result;
 }
 export async function writeSaveState(
   ctx: MutationCtx,

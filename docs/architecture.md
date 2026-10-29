@@ -596,8 +596,9 @@ records complete availability, including an empty tree. Current source and main
 are prepared during source indexing; older or unavailable tree indexes use the
 existing exact-source review reader. File text is read only for the selected
 file, independently of the tree. The project frame shares summary pages and
-coordination subscriptions with its child pages. Summary pages start with 20 rows and continue through all history in 100-record
-pages. Non-summary readers retain the backend's existing 100-record page size. Code and Candidate
+coordination subscriptions with its child pages. Summary and non-summary pages use the backend's existing 100-record window,
+continuing through all history. Ancestry closure, chunk and pair reads share one
+request-local cache across summary rows; it never outlives that authorized query. Code and Candidate
 chunks are warmed when their navigation links receive hover or keyboard focus;
 module preloading never caches project data.
 
@@ -1622,4 +1623,4 @@ Hosted output chunks carry an indexed run/digest binding. Cleanup fills missing 
 bindings in bounded pages, then revalidates candidate windows and original stream pins
 before deletion. Digests with unusually many references continue through the existing paged safety scan.
 Automatic expiry uses the same resumable planner with one project sweep identity;
-finite continuations stop after draining due receipts, with no idle timer. Hosted source staging records object provenance before publication; a new reference changes the cleanup guard, so a reviewed cleanup cannot delete bytes that became source during the operation.
+finite continuations stop after draining due receipts, with no idle timer. Hosted source staging records object provenance before publication; each bounded save or publication batch marks every newly referenced object and appends one cleanup fence atomically. A new source batch changes the cleanup guard, so a reviewed cleanup cannot delete bytes that became source during the operation. Replaying an already marked batch performs no protection writes.

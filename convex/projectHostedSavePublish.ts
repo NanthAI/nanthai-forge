@@ -6,7 +6,7 @@ import {
   loadSave,
   saveLane,
   sameSaveLane,
-  saveObject,
+  saveObjects,
   writeSaveState,
   type SaveIdentity,
 } from './projectHostedSaveStore';
@@ -64,8 +64,7 @@ export async function publishHostedSave(ctx: MutationCtx, input: SaveIdentity & 
       'SOURCE_JOB_INVALID',
       'The source result selected different original inputs.',
     );
-    await saveObject(ctx, input.projectId, job.output);
-    await saveObject(ctx, input.projectId, output.state);
+    await saveObjects(ctx, input.projectId, [job.output, output.state]);
     head = output.state.sha256;
     size = output.state.size;
   } else invariant(state.status === 'ready', 'SOURCE_JOB_INVALID', 'Complete save preparation first.');

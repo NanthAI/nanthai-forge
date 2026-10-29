@@ -10,6 +10,7 @@ import {
   saveLane,
   sameSaveLane,
   saveObject,
+  saveObjects,
   saveRow,
   writeSaveState,
   type SaveIdentity,
@@ -134,16 +135,14 @@ export const stage = mutation({
         'WORK_OPERATION_CHANGED',
         'Stage the next exact original delta page.',
       );
-      await saveObject(ctx, input.projectId, pin);
-      for (const change of page.changes)
-        if (change.after) {
-          const stored = await saveObject(ctx, input.projectId, change.after.content.object);
-          invariant(
-            canonicalPayload(stored) === canonicalPayload(change.after.content),
-            'WORK_OPERATION_CHANGED',
-            'Delta content differs from its committed project binding.',
-          );
-        }
+      const contents = page.changes.flatMap(change => (change.after ? [change.after.content] : []));
+      const stored = await saveObjects(ctx, input.projectId, [pin, ...contents.map(value => value.object)]);
+      for (let i = 0; i < contents.length; i++)
+        invariant(
+          canonicalPayload(stored[i + 1]) === canonicalPayload(contents[i]),
+          'WORK_OPERATION_CHANGED',
+          'Delta content differs from its committed project binding.',
+        );
       const stagedPages = state.stagedPages + 1,
         stagedChanges = state.stagedChanges + page.changes.length;
       invariant(

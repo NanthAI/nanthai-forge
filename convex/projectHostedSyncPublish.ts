@@ -3,7 +3,7 @@ import type { MutationCtx } from './_generated/server';
 import { loadSync, hostedSyncInput, writeSyncState } from './projectHostedSyncStore';
 import { finishHostedOperation } from './projectHostedOperations';
 import { writeHostedRecord } from './projectHostedRecords';
-import { saveObject, saveLane, sameSaveLane, type SaveIdentity } from './projectHostedSaveStore';
+import { saveObjects, saveLane, sameSaveLane, type SaveIdentity } from './projectHostedSaveStore';
 import { loadSourceJob } from './projectSourceJobs';
 import { syncOutputSchema, syncResultSchema } from '../src/hosted-sync';
 import { hostedLaneSelectionSchema } from '../src/hosted-lane';
@@ -72,9 +72,11 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
       'SOURCE_JOB_INVALID',
       'Original resolution pins changed.',
     );
-  await saveObject(ctx, input.projectId, job.output);
-  await saveObject(ctx, input.projectId, result.state);
-  if (result.status === 'conflict') await saveObject(ctx, input.projectId, result.conflicts);
+  await saveObjects(ctx, input.projectId, [
+    job.output,
+    result.state,
+    ...(result.status === 'conflict' ? [result.conflicts] : []),
+  ]);
   const first = operation.firstAttempt;
   const finish = async (outcome: HostedTerminalReceipt['outcome'], status: 'completed' | 'stale') => {
     const terminal = { attemptId: first.id, at: first.at, outcome };

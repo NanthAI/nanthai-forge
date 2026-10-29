@@ -101,6 +101,8 @@ function dogfood(s) {
 }
 async function changedSave(t, legacy, scale = false, provider = 'modal') {
   environment(t);
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   process.env.FORGE_SOURCE_PROVIDER = provider;
   const s = await composeFixture();
   const files = Array.from({ length: 3000 }, (_, i) =>
@@ -217,6 +219,7 @@ test('ten changed files in a 3,000-file tree fit the complete save budget at dog
       }),
     );
     assert(run.stats.calls <= 30, JSON.stringify(run.calls));
+    assert(run.stats.writes <= 98, JSON.stringify(run.stats));
     const prior = run.c.calls.length;
     await saveHostedLane(run.root, run.command, run.transport);
     assert.equal(run.c.calls.length - prior, 1, 'same-op terminal retry only prepares/returns the receipt');
@@ -283,6 +286,8 @@ test('sync batches missing merge objects at 3,000-file scale and leaves unchange
   const { sourceDispatch } = await import('../dist/hosted-source-job-controller.js');
   const run = async (t, legacy) => {
     environment(t);
+    const now = Date.now();
+    t.mock.method(Date, 'now', () => now);
     const s = await syncFixture();
     const files = Array.from({ length: 3000 }, (_, i) =>
       s.file(`f${String(i).padStart(4, '0')}`, `a-${i}\nb\nc\n`),
@@ -342,6 +347,7 @@ test('sync batches missing merge objects at 3,000-file scale and leaves unchange
 test('Convex source provider: complete 10-file save including new object uploads stays below 30 calls at dogfood scale', async t => {
   const run = await changedSave(t, false, true, 'convex');
   assert(run.stats.totalCalls <= 30, JSON.stringify({ stats: run.stats, functions: run.calls }));
+  assert(run.stats.writes <= 97, JSON.stringify(run.stats));
   t.diagnostic(
     JSON.stringify({
       convex: run.stats,

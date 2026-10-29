@@ -4,7 +4,7 @@ import type { MutationCtx } from './_generated/server';
 import { loadCompose, hostedComposeInput, writeComposeState } from './projectHostedComposeStore';
 import { finishHostedOperation } from './projectHostedOperations';
 import { writeHostedRecord } from './projectHostedRecords';
-import { saveObject, type SaveIdentity } from './projectHostedSaveStore';
+import { saveObjects, type SaveIdentity } from './projectHostedSaveStore';
 import { loadSourceJob } from './projectSourceJobs';
 import { composeResultSchema } from '../src/hosted-compose';
 import { savePin } from '../src/hosted-save';
@@ -46,10 +46,12 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
     'SOURCE_JOB_INVALID',
     'The result selected different original compose inputs.',
   );
-  await saveObject(ctx, input.projectId, job.output);
   const result = output.result;
+  await saveObjects(ctx, input.projectId, [
+    job.output,
+    result.status === 'clean' ? result.state : result.conflicts,
+  ]);
   if (result.status === 'clean') {
-    await saveObject(ctx, input.projectId, result.state);
     const prior = await ctx.db
       .query('projectHostedStates')
       .withIndex('by_project_and_head', q =>
@@ -70,7 +72,7 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
         jobId: job.id,
         output: job.output.sha256,
       });
-  } else await saveObject(ctx, input.projectId, result.conflicts);
+  }
   const candidate = {
     kind: 'candidate' as const,
     ...(result.status === 'clean' && result.paths

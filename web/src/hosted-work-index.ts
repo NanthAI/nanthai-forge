@@ -137,17 +137,9 @@ function useWorkRows(
           ...(parentId === undefined ? {} : { parentId }),
         }
       : 'skip';
-  const initialNumItems = [
-    'intents',
-    'lanes',
-    'views',
-    'runs',
-    'planningItems',
-    'channelMoves',
-    'hostedChannelMoves',
-  ].includes(collection)
-    ? 20
-    : 100;
+  // Match the server's existing 100-row window. Smaller pages kept the same
+  // complete histories but multiplied queries and ancestry/authority reads.
+  const initialNumItems = 100;
   const { results, status, loadMore } = usePaginatedQuery(workIndex.records, selection, { initialNumItems });
   // Convex splits any page longer than twice `initialNumItems` into two new subscriptions; larger
   // continuation pages would each be re-read and split twice before the page settles.

@@ -16,7 +16,7 @@ const { createLiveReads, HIDDEN_GRACE_MS, IDLE_MS } = await import(moduleUrl('..
 test.after(() => host.restore());
 
 // Synthetic volumes shaped like a busy project (hundreds of Views and runs).
-const sizes = { intents: 306, lanes: 258, views: 831, runs: 691, channelMoves: 204, hostedChannels: 25 };
+const sizes = { intents: 600, lanes: 560, views: 2200, runs: 1500, channelMoves: 575, hostedChannels: 25 };
 const summaries = ['intents', 'lanes', 'views', 'runs', 'channelMoves'];
 const workspace = JSON.stringify({
   generationId: 'g1',
@@ -93,7 +93,7 @@ async function mount(fake, children, client = fake.client) {
   await settle();
   return { root, rerender: () => rerender() };
 }
-const pagesFor = count => 1 + Math.ceil(Math.max(0, count - 20) / 40);
+const pagesFor = count => Math.max(1, Math.ceil(count / 100));
 const ranges = fake =>
   [...fake.live.values()]
     .filter(entry => entry.name === 'projectWorkIndex:records')
@@ -135,20 +135,24 @@ test('asleep holds zero subscriptions and keeps values; waking subscribes each r
   const live = fake.count();
   assert.ok(live > 20);
   assert.equal(reads.subscriptions, live);
-  assert.deepEqual(seen, { views: 831, hostedChannels: 25 });
+  assert.deepEqual(seen, { views: sizes.views, hostedChannels: sizes.hostedChannels });
   fake.reset();
   await React.act(async () => reads.sleep());
   await settle();
   assert.equal(fake.count(), 0, 'no Convex subscription while asleep');
   assert.equal(reads.subscriptions, 0);
-  assert.deepEqual(seen, { views: 831, hostedChannels: 25 }, 'mounted pages keep their last values');
+  assert.deepEqual(
+    seen,
+    { views: sizes.views, hostedChannels: sizes.hostedChannels },
+    'mounted pages keep their last values',
+  );
   assert.equal(fake.stats.adds, 0);
   await React.act(async () => reads.wake());
   await settle();
   assert.equal(fake.count(), live);
   assert.equal(fake.stats.adds, live, 'each mounted read subscribes exactly once on wake');
   assert.equal(fake.stats.executions, live, 'one fresh read per subscription, no pagination restart');
-  assert.deepEqual(seen, { views: 831, hostedChannels: 25 });
+  assert.deepEqual(seen, { views: sizes.views, hostedChannels: sizes.hostedChannels });
   await React.act(async () => root.unmount());
   assert.equal(reads.subscriptions, 0);
 });

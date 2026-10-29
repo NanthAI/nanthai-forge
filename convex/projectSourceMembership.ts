@@ -2,9 +2,41 @@
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { record } from './projectWorkIndexStore';
-// Query contexts are request-local. Share immutable parent reads across a page,
+// Query contexts are request-local. Share immutable ancestry reads across a page,
 // after the caller has checked this request's current project authority.
 const requests = new WeakMap<QueryCtx, Map<string, Promise<string[] | null>>>();
+type MembershipRow = {
+  chunks?: number;
+  complete?: boolean;
+  ancestors?: Set<string>;
+  boundaries?: string[];
+  parents?: string[];
+};
+const metadata = new WeakMap<QueryCtx, Map<string, Promise<MembershipRow | null>>>();
+function membershipRow(
+  ctx: QueryCtx,
+  partition: Id<'projectWorkGenerations'>,
+  collection: string,
+  key: string,
+) {
+  let cache = metadata.get(ctx);
+  if (!cache) {
+    cache = new Map();
+    metadata.set(ctx, cache);
+  }
+  const identity = JSON.stringify([partition, collection, key]);
+  let pending = cache.get(identity);
+  if (!pending) {
+    pending = (async () => {
+      const row = await record(ctx, partition, collection, key);
+      if (!row) return null;
+      const value = JSON.parse(row.value);
+      return { ...value, ...(value.ancestors ? { ancestors: new Set<string>(value.ancestors) } : {}) };
+    })();
+    cache.set(identity, pending);
+  }
+  return pending;
+}
 export async function sourceMembership(
   ctx: QueryCtx,
   partition: Id<'projectWorkGenerations'>,
@@ -15,16 +47,15 @@ export async function sourceMembership(
   if (descendant === ancestor) return true;
   if (visiting.has(descendant)) return null;
   visiting.add(descendant);
-  const closure = await record(ctx, partition, 'sourceAncestryClosure', descendant);
+  const closure = await membershipRow(ctx, partition, 'sourceAncestryClosure', descendant);
   if (closure) {
-    const summary = JSON.parse(closure.value);
+    const summary = closure;
     const boundaries: string[] = [];
-    for (let i = 0; i < summary.chunks; i++) {
-      const chunk = await record(ctx, partition, 'sourceAncestryChunk', `${descendant}:${i}`);
-      if (!chunk) return null;
-      const value = JSON.parse(chunk.value);
-      if (value.ancestors.includes(ancestor)) return true;
-      boundaries.push(...(value.boundaries ?? []));
+    for (let i = 0; i < (summary.chunks ?? 0); i++) {
+      const chunk = await membershipRow(ctx, partition, 'sourceAncestryChunk', `${descendant}:${i}`);
+      if (!chunk?.ancestors) return null;
+      if (chunk.ancestors.has(ancestor)) return true;
+      boundaries.push(...(chunk.boundaries ?? []));
     }
     if (summary.complete) return false;
     let complete = boundaries.length > 0;
@@ -35,7 +66,8 @@ export async function sourceMembership(
     }
     return complete ? false : null;
   }
-  if (await record(ctx, partition, 'sourceAncestry', JSON.stringify([descendant, ancestor]))) return true;
+  if (await membershipRow(ctx, partition, 'sourceAncestry', JSON.stringify([descendant, ancestor])))
+    return true;
   let cache = requests.get(ctx);
   if (!cache) {
     cache = new Map();
@@ -46,15 +78,15 @@ export async function sourceMembership(
     let pending = cache!.get(key);
     if (!pending) {
       pending = (async () => {
-        const row = await record(ctx, partition, 'sourceStateParents', head);
+        const row = await membershipRow(ctx, partition, 'sourceStateParents', head);
         if (!row) return null;
-        const value = JSON.parse(row.value);
+        const value = row;
         if (value.parents) return value.parents as string[];
         const result: string[] = [];
-        for (let i = 0; i < value.chunks; i++) {
-          const chunk = await record(ctx, partition, 'sourceStateParentChunks', `${head}:${i}`);
-          if (!chunk) return null;
-          result.push(...JSON.parse(chunk.value).parents);
+        for (let i = 0; i < (value.chunks ?? 0); i++) {
+          const chunk = await membershipRow(ctx, partition, 'sourceStateParentChunks', `${head}:${i}`);
+          if (!chunk?.parents) return null;
+          result.push(...chunk.parents);
         }
         return result;
       })();
@@ -79,5 +111,5 @@ export async function sourceMembership(
     }
     return complete ? false : null;
   }
-  return (await record(ctx, partition, 'sourceAncestryHeads', descendant)) ? false : null;
+  return (await membershipRow(ctx, partition, 'sourceAncestryHeads', descendant)) ? false : null;
 }
