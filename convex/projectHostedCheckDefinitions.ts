@@ -1,3 +1,4 @@
+import { mainAuditStatus } from './projectHostedMainAuditState';
 // SPDX-License-Identifier: Apache-2.0
 import { bindingInstallation, requireStoredRepositoryBinding } from './githubBindingAccess';
 import { z } from 'zod';
@@ -159,6 +160,7 @@ export const current = query({
         check: definition ? JSON.parse(definition.value) : null,
         configuration: runner ? JSON.parse(runner.value) : null,
         configurationDigest: runner?.digest ?? null,
+        mainAudit: await mainAuditStatus(ctx, input.projectId),
       });
     } catch (error) {
       return report(error);

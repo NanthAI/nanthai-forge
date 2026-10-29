@@ -104,3 +104,59 @@ export function calculateRedMainMetrics(records: MetricRecords, period: MetricPe
     sources: bySource,
   };
 }
+
+/** Revision-pinned hosted audit exports. Classification can move the start back
+ * to a named culprit's landing; an unknown culprit never invents a landing time. */
+export type HostedMainAuditEvent = {
+  projectId: string;
+  kind: 'red' | 'green' | 'flake' | 'stalled' | 'culprit';
+  at: string;
+  head: string;
+  runId: string;
+  sequence: number;
+  culprit?: string;
+};
+export function calculateHostedRedMainMetrics(
+  events: HostedMainAuditEvent[],
+  period: MetricPeriod,
+  moves: MetricRecords['moves'] = [],
+  coverageFrom?: string,
+) {
+  const from = time(period.from),
+    to = Math.min(time(period.to), time(period.asOf ?? period.to));
+  const landings = new Map(moves.map(move => [move.id, time(move.at)]));
+  const byProject = new Map<string, HostedMainAuditEvent[]>();
+  for (const event of events) {
+    if (time(event.at) > to) continue;
+    const rows = byProject.get(event.projectId) ?? [];
+    rows.push(event);
+    byProject.set(event.projectId, rows);
+  }
+  let minutes = 0;
+  const open: string[] = [];
+  for (const [projectId, rows] of byProject) {
+    rows.sort((a, b) => time(a.at) - time(b.at));
+    let since: number | undefined;
+    let greenSequence = -1;
+    let redSequence = -1;
+    for (const event of rows) {
+      if (event.kind === 'red' && event.sequence > greenSequence) {
+        since ??= time(event.at);
+        redSequence = Math.max(redSequence, event.sequence);
+      }
+      if (event.kind === 'culprit' && since !== undefined && event.culprit && landings.has(event.culprit))
+        since = Math.min(since, landings.get(event.culprit)!);
+      if ((event.kind === 'green' || event.kind === 'flake') && event.sequence >= redSequence) {
+        greenSequence = Math.max(greenSequence, event.sequence);
+        if (since !== undefined)
+          minutes += Math.max(0, Math.min(to, time(event.at)) - Math.max(from, since)) / 60_000;
+        since = undefined;
+      }
+    }
+    if (since !== undefined) {
+      minutes += Math.max(0, to - Math.max(from, since)) / 60_000;
+      open.push(projectId);
+    }
+  }
+  return { minutes, open, partial: !coverageFrom || time(coverageFrom) > from };
+}

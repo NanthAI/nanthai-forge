@@ -16,7 +16,6 @@ import { moduleUrl } from './convex-module.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const state = await import(moduleUrl('../convex/projectHostedMainAuditState.ts'));
 const { insertHostedCheckRun } = await import(moduleUrl('../convex/projectHostedChecks.ts'));
-const audit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 const gate = await import(moduleUrl('../convex/projectHostedGate.ts'));
 const culprit = await import(moduleUrl('../convex/projectHostedCulprit.ts'));
 const forbiddenContext = new Proxy(
@@ -224,7 +223,6 @@ test('mainGate performs one indexed read and reports absent, green and red rows'
 
 test('internal placeholders validate real arguments and never access context', async () => {
   for (const [fn, args] of [
-    [audit.start, { projectId: 'project' }],
     [gate.noop, { projectId: 'project' }],
     [culprit.startRedClassification, { projectId: 'project', runId: randomUUID() }],
   ]) {

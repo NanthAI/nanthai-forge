@@ -70,6 +70,7 @@ async function checkSelection(
       check: z.object({ definition: z.string() }).nullable(),
       configuration: z.object({ environmentFingerprint: z.string() }).nullable(),
       configurationDigest: z.string().nullable(),
+      mainAudit: z.unknown().optional(),
     })
     .parse(await session.query('projectHostedCheckDefinitions:current', { checkId: command.checkId }));
   invariant(
@@ -109,6 +110,7 @@ const currentSettings = z.object({
     })
     .nullable(),
   configurationDigest: z.string().nullable(),
+  mainAudit: z.unknown().optional(),
 });
 /** Definitions are a handful of rows, paged 100 at a time. */
 async function hostedDefinitions(query: HostedQuery) {
@@ -179,6 +181,7 @@ export async function hostedCheckSettings(query: HostedQuery, capabilities: Host
       : null,
     actions: actionsRunnerSettings(current.configuration),
     githubBindings: current.githubBindings ?? null,
+    ...(current.mainAudit === undefined ? {} : { mainAudit: current.mainAudit }),
     checkCallbackConfigured: capabilities.checkCallbackConfigured,
     policy: { preset: policy.preset, acceptance: policy.acceptance },
     agentLandsOnPass: review === null,

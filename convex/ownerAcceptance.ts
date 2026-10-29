@@ -1,3 +1,4 @@
+import { mainAuditStatus } from './projectHostedMainAuditState';
 import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { hostedPaths } from '../src/hosted-paths';
 // SPDX-License-Identifier: Apache-2.0
@@ -111,6 +112,7 @@ export const status = query({
     machine: v.union(ownerMachine, v.null()),
     request: v.union(acceptanceRequestDocument, v.null()),
     mainHead: v.union(v.string(), v.null()),
+    mainAudit: v.optional(v.any()),
   }),
   handler: async (ctx, input) => {
     try {
@@ -135,6 +137,9 @@ export const status = query({
       const observed = await machine(ctx, input.projectId, project.key);
       return {
         native: await isNativeOwner(ctx, input.projectId),
+        ...(project.sourceAuthority?.mode === 'server'
+          ? { mainAudit: await mainAuditStatus(ctx, input.projectId) }
+          : {}),
         machine: observed
           ? {
               ownerId: observed.ownerId,

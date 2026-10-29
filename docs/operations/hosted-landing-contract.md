@@ -441,3 +441,52 @@ verified commits. Local failed transfers retain their private spool. An idle
 worker retains only subscriptions: it performs no polling or periodic Convex
 calls. Provider execution records do not themselves grant acceptance; current
 landing policy and exact-Candidate evidence are still checked separately.
+
+## Hosted main audit
+
+Hosted main keeps one audit row per project. A passed full-gated landing adopts
+its exact run as green evidence, clears red main and cancels the pending audit
+wake. A docs-only pass inherits an already green parent. Contract and scoped
+landings count toward an audit of the newest accepted Candidate: **10 counted
+landings or 24 hours**, whichever comes first. A full-gate failure requests an
+early audit when counted landings are outstanding. Repeated requests coalesce.
+
+Audits use the configured hosted check runner and `gate.mode: "audit"`. The
+content key pins project, source head, check definition, runner configuration,
+environment and authority epoch. Replaying that key adopts the original run;
+it does not dispatch another check. An unavailable, interrupted or cancelled
+audit gets one separate retry. A newer main does not cancel an active audit,
+and an older result cannot overwrite a newer full-passed landing.
+
+The single owned wake is used for pending audit cadence. Active audits use the
+existing provider watchdogs, with no additional audit timer. Status reports
+`MAIN_AUDIT_STALLED` and the current step after 15 minutes without observed
+progress; an interrupted or unavailable terminal result retains a stalled event.
+There is no wake after all counted landings are covered, and no idle polling. New submissions
+use full checks when unaudited debt reaches twice the configured count or age;
+`mainGate` exposes that evidence to the gate decision. A failed audit records
+red main and requests culprit classification. Contract acceptance reads that
+red state; passing audit evidence or a full-passed fix clears it and releases
+held requests in pages of 100.
+
+Owner acceptance status and `check-settings` include `mainAudit` with head,
+result, last green evidence, counted landings, settings, red start/minutes and a
+retained stall alarm. The owner can configure cadence through
+`projectHostedMainAudit:configure` with a retained operation UUID, current
+authority epoch, expected settings digest (initially `null`) and
+`settings: {landings: 10, minutes: 1440}`. The versioned execution setting uses
+runner-kind key `main-audit`; key `runner` remains the runner configuration.
+The configure receipt returns the settings digest for the next compare-and-swap.
+
+Rollout can seed green evidence through internal `projectHostedMainAudit:seed`
+from the last accepted, retained full-passed run. It checks current check and
+runner pins before adoption. Historical runs without gate metadata do not claim
+full-suite evidence. No initial audit is dispatched by this seed.
+
+Audit events retain red, green and stalled outcomes.
+`calculateHostedRedMainMetrics` consumes revision-pinned exported events and,
+when supplied, culprit acceptance times to calculate metric R over a requested
+period. The event source must be authenticated and its coverage stated by the
+caller; missing history never establishes zero historical red time. Free
+GitHub-hosted runners on a public repository incur no runner charge; private
+repository minutes and other configured providers follow their own billing.
