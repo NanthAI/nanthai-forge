@@ -88,7 +88,8 @@ export { agentActionSchema, type AgentAction } from './agent-workflow-schema.js'
 import type { AgentAction } from './agent-workflow-schema.js';
 import { SNAPSHOT_READ_ACTIONS } from './agent-read-actions.js';
 import { boundAgentCache } from './hosted-agent-cache.js';
-import { boundAgentSubmission } from './hosted-agent-bound.js';
+import { boundAgentRecords, boundAgentSubmission } from './hosted-agent-bound.js';
+import { hostedAgentRecordActions } from './hosted-agent-contract.js';
 export class AgentWorkflow {
   readonly work: WorkService;
   private callerLaneId?: string;
@@ -151,6 +152,8 @@ export class AgentWorkflow {
     }
     if (action === 'landing')
       return boundLandingStatus(this.work.store, input, () => this.dispatchRequest(input));
+    if (hostedAgentRecordActions.some(recordAction => recordAction === action))
+      return boundAgentRecords(this.work.store, input, selected => this.dispatchRequest(selected));
     if (action !== 'finish' && action !== 'land') return this.dispatchRequest(input);
     return boundAgentSubmission(this.work.store, input, selected => this.dispatchRequest(selected));
   }

@@ -1,3 +1,5 @@
+import { sourceAuthority } from './hosted-source-authority.js';
+import { readHostState } from './host-binding.js';
 import { ensureWorkIndex } from './work-index-client.js';
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
@@ -17,8 +19,10 @@ export async function agentBrief(store: WorkStore, input: unknown, liveMcp = fal
 async function readBrief(store: WorkStore, input: unknown, liveMcp: boolean): Promise<Briefing> {
   const parsed = briefInputSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Choose a briefing situation and linked records.');
-  const deployment = process.env.FORGE_DEPLOYMENT,
-    projectId = process.env.FORGE_PROJECT_ID;
+  const binding = readHostState(store).binding;
+  const serverBinding = binding && sourceAuthority(binding).mode === 'server' ? binding : undefined;
+  const deployment = process.env.FORGE_DEPLOYMENT ?? serverBinding?.deployment,
+    projectId = process.env.FORGE_PROJECT_ID ?? serverBinding?.projectId;
   if (!deployment && !projectId) return localBrief(store, input, liveMcp);
   invariant(
     deployment && projectId,
@@ -67,6 +71,10 @@ async function readBrief(store: WorkStore, input: unknown, liveMcp: boolean): Pr
         },
         liveMcp,
       );
+      if (sourceAuthority(readHostState(store).binding ?? {}).mode === 'server') {
+        if (context.decisions) local.context.decisions = context.decisions;
+        else delete local.context.decisions;
+      }
       local.context.guidance = context.guidance;
       local.context.autonomyPolicy = context.autonomyPolicy;
       local.context.claims = context.claims;

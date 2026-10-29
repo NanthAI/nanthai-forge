@@ -1,3 +1,5 @@
+import { executeHostedRecords } from './hosted-agent-records.js';
+import { hostedAgentRecordActions } from './hosted-agent-contract.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 import { dirname, basename, resolve } from 'node:path';
@@ -94,6 +96,8 @@ export class HostedAgentTransport {
       'Select one complete hosted project address and matching transport.',
     );
     try {
+      if ((hostedAgentRecordActions as readonly string[]).includes(action))
+        return await executeHostedRecords(this, action as (typeof hostedAgentRecordActions)[number], input);
       const observation = action === 'status' || action === 'observe';
       const { operationId, ...parameters } = input;
       const command = hostedAgentCommandSchemas[action].safeParse(observation ? input : parameters);

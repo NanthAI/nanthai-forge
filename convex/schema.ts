@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedFrictionTables } from './projectHostedFrictionFields';
+import { hostedDecisionTables } from './projectHostedDecisionsFields';
 import { githubBindingTables } from './githubBindingFields';
 import { githubMirrorTables } from './projectGithubMirrorFields';
 import { sourceStepTables } from './projectSourceStepFields';
@@ -677,6 +679,8 @@ export default defineSchema({
     .index('by_importId', ['importId'])
     .index('by_owner', ['owner'])
     .index('by_owner_and_operationId', ['owner', 'operationId']),
+  ...hostedFrictionTables,
+  ...hostedDecisionTables,
   imports: defineTable(jobFields)
     .index('by_scope_and_repository_and_ref', ['scope', 'repository', 'ref'])
     .index('by_repository', ['repository'])

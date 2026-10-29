@@ -469,3 +469,47 @@ test('portable delivery context uses current hosted authority on every read', as
   s.tables.projectContributors.delete('delivery-reader');
   await assert.rejects(briefs.brief._handler(s.ctx, input), code('PROJECT_UNAVAILABLE'));
 });
+
+test('server-authority brief includes hosted-created decisions with one extra indexed query', async () => {
+  const s = await setup();
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  s.tables.projectHostedDecisions = new Map();
+  const decisions = await import(moduleUrl('../convex/projectHostedDecisions.ts'));
+  const { checkArgs } = await import('./convex-args.mjs');
+  const create = async extra => {
+    const args = {
+      projectId: s.projectId,
+      request: JSON.stringify({
+        operationId: randomUUID(),
+        target: { kind: 'project' },
+        decidedBy: 'Owner',
+        what: 'Hosted-created context',
+        why: 'Read the hosted authority',
+        ...extra,
+      }),
+    };
+    checkArgs(decisions.decide, args, 'projectHostedDecisions:decide');
+    return JSON.parse(await s.transaction(() => decisions.decide._handler(s.ctx, args)));
+  };
+  const old = await create({}),
+    replacement = await create({ supersedes: old.id, what: 'Replacement hosted context' });
+  let queries = 0;
+  const query = s.ctx.db.query;
+  s.ctx.db.query = table => {
+    if (table === 'projectHostedDecisions') queries++;
+    return query(table);
+  };
+  const result = await briefs.brief._handler(s.ctx, {
+    projectId: s.projectId,
+    situation: 'continue-lane',
+    laneId: ids.lane,
+    agent: 'codex',
+  });
+  assert.equal(queries, 1);
+  assert.deepEqual(
+    result.context.decisions.active.map(record => record.id),
+    [replacement.id],
+  );
+  assert.deepEqual(result.context.decisions.superseded[0].supersededBy, [replacement.id]);
+  assert.match(result.full, /Replacement hosted context/);
+});

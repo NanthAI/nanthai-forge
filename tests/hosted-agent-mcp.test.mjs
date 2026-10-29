@@ -174,7 +174,14 @@ test('real MCP discovery preserves agent-only authority with strict schemas and 
     'forge_wait',
     'forge_work_overview',
   ]);
-  assert(!JSON.stringify(tools).includes('"agent"'));
+  // Decision conversation attribution has a legitimate nested agent field.
+  // Acceptance authority must remain absent from the finish command itself.
+  const task = tools.find(tool => tool.name === 'forge_task');
+  const variants = task.inputSchema.properties.command.anyOf;
+  assert.ok(Array.isArray(variants));
+  const finish = variants.find(option => option.properties?.action?.const === 'finish');
+  assert.ok(finish);
+  assert(!Object.hasOwn(finish.properties, 'agent'));
   for (const command of [
     { action: 'accept', candidateId: s.candidate.id },
     { action: 'finish', laneId: s.lane.laneId, agent: false },

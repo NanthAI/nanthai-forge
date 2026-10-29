@@ -61,6 +61,10 @@ export function registerHostedAgentWorkflow(
         'revert',
         'abandon',
         'reopen',
+        'friction',
+        'decide',
+        'peer-ack',
+        'overlap-acks',
       ],
       description:
         'Hosted Lane actions over the same CLI transport and recovery journal. checkpoint aliases save. Retain original parameters/operationId after unknown replies; a new UUID starts new work. Finish always requests agent acceptance under current project policy, including with account credentials. Pending is not accepted.',
@@ -73,9 +77,9 @@ export function registerHostedAgentWorkflow(
     },
     {
       name: 'forge_work_overview',
-      actions: ['status', 'capabilities', 'metrics'],
+      actions: ['status', 'capabilities', 'metrics', 'decisions'],
       description:
-        'Read hosted metrics in bounded pages, constant-size capabilities or one selected Lane/run/source operation/submission. No Work hydration, worker wake or idle observer.',
+        'Read hosted metrics or decisions in bounded pages, constant-size capabilities or one selected Lane/run/source operation/submission. Decisions accepts target? and cursor?. No Work hydration, worker wake or idle observer.',
     },
   ];
   for (const group of groups) {

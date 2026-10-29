@@ -8,6 +8,14 @@
  * @module
  */
 
+import type * as projectHostedFrictionFields from "../projectHostedFrictionFields.js";
+import type * as projectHostedDecisionsFields from "../projectHostedDecisionsFields.js";
+import type * as projectHostedFrictionStore from "../projectHostedFrictionStore.js";
+import type * as projectHostedFriction from "../projectHostedFriction.js";
+import type * as projectHostedDecisionsStore from "../projectHostedDecisionsStore.js";
+import type * as projectHostedDecisions from "../projectHostedDecisions.js";
+import type * as projectHostedOverlapAcks from "../projectHostedOverlapAcks.js";
+import type * as projectHostedFrictionImport from "../projectHostedFrictionImport.js";
 import type * as access from "../access.js";
 import type * as accountActions from "../accountActions.js";
 import type * as accountExecute from "../accountExecute.js";
@@ -393,6 +401,14 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  projectHostedFrictionFields: typeof projectHostedFrictionFields;
+  projectHostedDecisionsFields: typeof projectHostedDecisionsFields;
+  projectHostedFrictionStore: typeof projectHostedFrictionStore;
+  projectHostedFriction: typeof projectHostedFriction;
+  projectHostedDecisionsStore: typeof projectHostedDecisionsStore;
+  projectHostedDecisions: typeof projectHostedDecisions;
+  projectHostedOverlapAcks: typeof projectHostedOverlapAcks;
+  projectHostedFrictionImport: typeof projectHostedFrictionImport;
   access: typeof access;
   accountActions: typeof accountActions;
   accountExecute: typeof accountExecute;

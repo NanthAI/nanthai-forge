@@ -1,3 +1,4 @@
+import { hostedRecordCommands } from './hosted-record-input.js';
 import { contractTestsInput } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
@@ -33,6 +34,14 @@ export const hostedAgentOwnerActions = [
   'configure-runner',
   'check-settings',
   'metrics',
+] as const;
+// Kept outside the strictly parsed advertised capability list.
+export const hostedAgentRecordActions = [
+  'friction',
+  'decide',
+  'decisions',
+  'peer-ack',
+  'overlap-acks',
 ] as const;
 export const hostedAgentAddressSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
 export type HostedAgentAddress = z.infer<typeof hostedAgentAddressSchema>;
@@ -71,6 +80,7 @@ const check = z
   })
   .strict();
 export const hostedAgentCommandSchemas = {
+  ...hostedRecordCommands,
   tests: contractTestsInput.omit({ operationId: true, laneId: true }).extend({ candidateId: uuid }).strict(),
   'confirm-tests': contractTestsInput
     .omit({ operationId: true, laneId: true })

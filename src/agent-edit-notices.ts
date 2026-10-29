@@ -40,8 +40,13 @@ export function overlapAnswers(directory: string, laneId: string) {
     lookupKey('id', String(lane.fields.intentId)),
   )[0];
   const notes = intentPosition === undefined ? undefined : fragment('intents', intentPosition).arrays.notes;
+  const hostedDirectory = join(directory, 'hosted-overlap-answers', laneId);
+  // Like the native notes above, select available answers once per lookup.
+  // Native owners without hosted answers need no per-notice filesystem probes.
+  const hosted = existsSync(hostedDirectory);
   return (noticeId: string) =>
-    !!notes && indexGet(io, notes.lookup, lookupKey('id', overlapAnswerId(laneId, noticeId))).length > 0;
+    (hosted && existsSync(join(hostedDirectory, `${noticeId}.json`))) ||
+    (!!notes && indexGet(io, notes.lookup, lookupKey('id', overlapAnswerId(laneId, noticeId))).length > 0);
 }
 export function unacknowledgedOverlaps(directory: string, laneId: string) {
   let names: string[];

@@ -28,6 +28,24 @@ test('dispatch reports missing review pins and malformed full digests before rea
   assert.equal(parseAgentAction({ ...review, expectedHead: null }).expectedHead, null);
 });
 
+test('non-record dispatch validates actions before accessing Work', async () => {
+  const workflow = Object.create(AgentWorkflow.prototype);
+  for (const input of [
+    { ...review, expectedHead: 'abcdef' },
+    { action: 'status', limit: 101 },
+    {
+      action: 'compose',
+      operationId: id,
+      intentId: id,
+      inputs: [{ laneId: 'invalid-private-value', head: 'a'.repeat(64) }],
+    },
+    { action: 'private-action' },
+    null,
+  ]) {
+    await assert.rejects(workflow.dispatch(input), error => error.code === 'BAD_ARGUMENT');
+  }
+});
+
 test('validation identifies nested fields and existing bounds without echoing unknown values or keys', () => {
   assert.throws(() => parseAgentAction({ action: 'status', limit: 101 }), /limit:.*100/);
   assert.throws(

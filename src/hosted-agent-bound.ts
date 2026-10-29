@@ -48,6 +48,39 @@ const read = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8'));
 /** The common native CLI/MCP boundary. Admission and the cutover marker share
  * the owner lock; any request admitted before the marker must drain under its
  * original native IDs. Requests after it retain exact bytes for hosted routing. */
+export async function boundAgentRecords(
+  store: WorkStore,
+  input: unknown,
+  native: (input: unknown) => Promise<Response>,
+  supplied?: HostedAgentTransport,
+): Promise<Response> {
+  if (!input || typeof input !== 'object') return native(input);
+  const { action, ...command } = input as Command;
+  if (!['friction', 'decide', 'decisions', 'peer-ack', 'overlap-acks'].includes(String(action)))
+    return native(input);
+  const binding = readHostState(store).binding;
+  if (!binding || sourceAuthority(binding).mode !== 'server') return native(input);
+  const transport =
+    supplied ??
+    new HostedAgentTransport(store.root, { url: binding.deployment, projectId: binding.projectId });
+  const response = await transport.dispatch(String(action), command);
+  if (action === 'peer-ack' || action === 'overlap-acks') {
+    const answers = z
+      .object({
+        answers: z.array(
+          z.object({ laneId: z.uuid(), noticeId: z.string().regex(/^[a-f0-9]{64}$/) }).passthrough(),
+        ),
+      })
+      .parse(response.result).answers;
+    for (const answer of answers) {
+      const directory = join(store.directory, 'hosted-overlap-answers', answer.laneId);
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      durableReplace(join(directory, `${answer.noticeId}.json`), canonicalPayload(answer));
+    }
+  }
+  return { revision: store.revision(), result: response.result };
+}
+
 export async function boundAgentSubmission(
   store: WorkStore,
   input: unknown,

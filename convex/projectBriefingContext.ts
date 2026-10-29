@@ -1,3 +1,5 @@
+import { hostedBriefDecisions } from './projectHostedDecisionsStore';
+import { sourceAuthority } from '../src/hosted-source-authority';
 // SPDX-License-Identifier: Apache-2.0
 import { planningBriefIntent } from '../src/work-planning-lifecycle';
 import type { PlanningItem } from '../src/work-planning-types';
@@ -127,7 +129,14 @@ export async function hostedBriefRecords(ctx: QueryCtx, project: Doc<'hostedProj
   const hostedChannels = await page('hostedChannels');
   const byName = new Map(channels.map(c => [c.name, { name: c.name, head: c.head ?? null }]));
   for (const c of hostedChannels) byName.set(c.channel, { name: c.channel, head: c.head });
+  const decisionWindow =
+    sourceAuthority(project).mode !== 'native-owner' ? await hostedBriefDecisions(ctx, project._id) : null;
+  if (decisionWindow?.more)
+    coverage.push(
+      'Decisions: latest hosted context page (up to 100 records) shown; older context may exist. Read the paged decisions list.',
+    );
   const records: BriefRecords = {
+    ...(decisionWindow ? { decisions: decisionWindow.decisions } : {}),
     intents: intent ? [intent] : [],
     lanes: intentId
       ? [...(lane ? [lane] : []), ...(await page('lanes', intentId)).filter(item => item.id !== lane?.id)]
