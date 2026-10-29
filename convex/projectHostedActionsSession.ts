@@ -7,6 +7,7 @@ import { directActions } from './projectHostedActionsDirect';
 import { actionsClaimsSchema, validateActionsClaims } from '../src/github-actions-oidc';
 import { invariant } from '../src/errors';
 import { githubHostedRunsOn } from '../src/github-actions-runner-label';
+import { hostedTimingHistory } from './projectHostedTestTimings';
 export const sessionArgs = {
   projectId: v.id('hostedProjects'),
   runId: v.string(),
@@ -49,7 +50,12 @@ export async function actionsSession(ctx: MutationCtx, input: SessionInput) {
   return selected;
 }
 export const session = internalMutation({
-  args: sessionArgs,
+  args: { ...sessionArgs, timings: v.optional(v.boolean()) },
   returns: v.any(),
-  handler: async (ctx, input) => (await actionsSession(ctx, input)).run,
+  handler: async (ctx, input) => {
+    const { run } = await actionsSession(ctx, input);
+    if (!input.timings) return run;
+    const { history } = await hostedTimingHistory(ctx, input.projectId);
+    return { run, timingHistory: JSON.stringify(history) };
+  },
 });

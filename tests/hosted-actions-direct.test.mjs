@@ -309,11 +309,104 @@ test('duplicate results are immutable and complete shard evidence is needed to p
   const terminal = await send({ index: 1, exitCode: 0 });
   assert.equal(terminal.status, 'passed');
   assert.equal(terminal.contractReports['tests/synthetic-0.test.mjs'].durationMs, 5);
+  const histories = [...s.tables.projectHostedTestTimings.values()];
+  assert.equal(histories.length, 1);
+  const history = JSON.parse(histories[0].history);
+  assert.equal(history.files['tests/synthetic-0.test.mjs'].durationMs, 5);
+  assert.deepEqual(history.runs, [s.run.id]);
+  const session = await s.call(sessions, 'session', { ...s.input(), timings: true });
+  assert.equal(session.run.id, s.run.id);
+  assert.deepEqual(JSON.parse(session.timingHistory), history);
   assert.equal((await send(first)).status, 'passed');
+  assert.equal([...s.tables.projectHostedTestTimings.values()][0].history, histories[0].history);
   assert.equal(s.cancelled.length, 1);
   const scheduled = s.scheduled.length;
   await s.call(direct, 'expire', { ...s.id, fence: terminal.fence });
   assert.equal(s.scheduled.length, scheduled);
+});
+
+test('Actions timing history is advisory, project-scoped and records completed failures only once', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  await s.prepare();
+  const firstSession = await s.call(sessions, 'session', { ...s.input(), timings: true });
+  assert.deepEqual(JSON.parse(firstSession.timingHistory), { version: 1, files: {}, runs: [] });
+  const send = result => s.call(results, 'result', { ...s.input(), result: JSON.stringify(result) });
+  const file = 'tests/synthetic-0.test.mjs';
+  const first = {
+    index: 0,
+    exitCode: 1,
+    contractReports: {
+      [file]: { durationMs: 250, failed: true },
+      'tests/incomplete.test.mjs': { failed: true },
+    },
+  };
+  await send(first);
+  assert.equal(s.tables.projectHostedTestTimings.size, 0);
+  const terminal = await send({ index: 1, exitCode: 0 });
+  assert.equal(terminal.status, 'failed');
+  const session = await s.call(sessions, 'session', { ...s.input(), timings: true });
+  const history = JSON.parse(session.timingHistory);
+  assert.deepEqual(Object.keys(history.files), [file]);
+  assert.equal(history.files[file].durationMs, 250);
+  await send(first);
+  assert.equal([...s.tables.projectHostedTestTimings.values()][0].history, session.timingHistory);
+  await assert.rejects(
+    s.call(sessions, 'session', { ...s.input({ fence: 99 }), timings: true }),
+    code('WORK_STALE'),
+  );
+  const otherProject = s.insert('hostedProjects', {
+    owner: 'owner',
+    visibility: 'private',
+    sourceAuthority: { mode: 'server', epoch: 1 },
+  });
+  await assert.rejects(s.call(sessions, 'session', { ...s.input(), projectId: otherProject, timings: true }));
+  assert.equal(s.tables.projectHostedTestTimings.size, 1);
+});
+
+test('first planning session bootstraps weights from bounded, already retained terminal reports', async t => {
+  const s = await fixture(t);
+  const previousId = randomUUID(),
+    file = 'tests/synthetic-0.test.mjs';
+  s.insert('projectHostedCheckRuns', {
+    projectId: s.projectId,
+    runId: previousId,
+    candidateId: s.run.request.candidateId,
+    status: 'passed',
+    value: JSON.stringify({
+      ...s.run,
+      id: previousId,
+      status: 'passed',
+      endedAt: '2026-01-01T00:00:00.000Z',
+      contractReports: { [file]: { durationMs: 300, failed: false } },
+    }),
+  });
+  await s.bind();
+  const session = await s.call(sessions, 'session', { ...s.input(), timings: true });
+  const history = JSON.parse(session.timingHistory);
+  assert.equal(history.files[file].durationMs, 300);
+  assert.deepEqual(history.runs, [previousId]);
+  assert.equal(s.tables.projectHostedTestTimings.size, 0, 'planning does not write history');
+  const meter = s.counts.at(-1);
+  assert(meter.documents < 10);
+  assert.equal(
+    meter.touched.filter(table => table === 'projectHostedCheckRuns').length,
+    3,
+    'current run and two bounded terminal lookups',
+  );
+  await s.prepare();
+  await s.call(results, 'result', {
+    ...s.input(),
+    result: JSON.stringify({
+      index: 0,
+      exitCode: 0,
+      contractReports: { [file]: { durationMs: 100, failed: false } },
+    }),
+  });
+  await s.call(results, 'result', { ...s.input(), result: JSON.stringify({ index: 1, exitCode: 0 }) });
+  const stored = JSON.parse([...s.tables.projectHostedTestTimings.values()][0].history);
+  assert.equal(stored.files[file].durationMs, 240);
+  assert.deepEqual(stored.runs, [previousId, s.run.id]);
 });
 test('webhook backstops cancellation, failure, timeout and missing evidence; does not fabricate a pass', async t => {
   for (const [conclusion, status] of [

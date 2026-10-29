@@ -329,12 +329,30 @@ native/BYOCI `plan` input and export jobs. Convex dispatches on `main` with
 `runId`, `projectId`, `deployment`, and JSON-encoded `runs_on`; the run name is `forge-check/<runId>`.
 The fixed workflow checkout verifies and materializes the pinned Candidate using
 hash/size-checked storage downloads, including recipe-backed content, in windows
-of at most 400 descriptors. Source bytes go directly from object storage to the
-runner. The Candidate is transferred once as an artifact, preserving modes and
+of at most 400 descriptors. Three pages overlap resolution, verified streaming
+downloads and disk copies; symlinks are created only after all pages succeed.
+Failures drain in-flight pages before returning without publishing a plan.
+Each completed page logs files, downloaded bytes and elapsed time. Source bytes
+go directly from object storage to the runner. The Candidate is transferred once as an artifact, preserving modes and
 symlinks. The plan and run pins remain outside the Candidate directory. Planning
 reads source as data with the installed selector and shared eight-way partitioner;
 existing default full selection remains full. Docs scope uses only the static job.
 Arbitrary commands run once, including the existing composed Intent contract union.
+
+The planning session includes the project's advisory timing history without a
+separate request. Eight-way LPT partitioning models the two test workers on each
+runner; unknown files use the historical p75, or the existing sorted round-robin
+split when history is missing or invalid. Complete per-file reports already carried
+by shard results train that history once when a check passes or fails. Hosted Mac
+completions use the same store and algorithm. Cancelled and interrupted checks do
+not train it. The indexed `projectHostedTestTimings` document uses the same JSON
+format and EWMA as native `.forge/work/test-timings.json`, with `timingHistoryLimits`
+(4,096 files, 128 runs, 1 MiB) and space reserved for the containing Convex document.
+Native owner-local history is not automatically uploaded. On a missing hosted
+history document, the session bootstraps from at most the latest passed and latest
+failed hosted run's retained reports through their status indexes. With no usable
+reports, planning uses round-robin. Partial hosted selections
+retain earlier samples for unselected paths, bounded by those limits.
 
 `/checks/actions` accepts only GitHub-signed OIDC tokens for this exact site audience,
 repository, `forge-check.yml@refs/heads/main`, `workflow_dispatch`, first attempt,
@@ -364,7 +382,13 @@ a two-job scoped check uses 41, and docs-only uses 36. The formula is
 manifest window. Recipe metadata/leaves add their actual bounded descriptor
 windows; issued download grants expire after five minutes. GitHub API and object
 storage requests are separate from Convex function calls. A 6,000-object full
-fixture budgets 90 calls. Plan retries can retain unused small storage objects;
+fixture budgets 90 calls. Page concurrency does not change these call counts:
+raw content needs one descriptor request per page (two function invocations,
+including its HTTP action). Recipe and leaf windows are unchanged. Timing history
+adds one indexed document read to the existing planning session and one read/write
+to terminal result processing, with no additional function calls or idle activity.
+Before the first history write, bootstrap adds at most two indexed run reads.
+Plan retries can retain unused small storage objects;
 this path adds no deletion or retention policy.
 
 Deploy this backend and publish this workflow on GitHub `main` before configuring

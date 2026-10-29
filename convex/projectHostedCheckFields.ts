@@ -11,6 +11,10 @@ const setting = {
   value: v.string(),
 };
 export const hostedCheckTables = {
+  projectHostedTestTimings: defineTable({
+    projectId: v.id('hostedProjects'),
+    history: v.string(),
+  }).index('by_project', ['projectId']),
   projectHostedActionsResults: defineTable({
     projectId: v.id('hostedProjects'),
     runId: v.string(),

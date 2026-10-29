@@ -22,7 +22,7 @@ export const directResultSchema = z
   })
   .strict();
 export const directCommandSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('session') }).strict(),
+  z.object({ kind: z.literal('session'), timings: z.boolean().optional() }).strict(),
   z
     .object({ kind: z.literal('source'), digests: z.array(checkHash).min(1).max(directSourceWindow) })
     .strict(),

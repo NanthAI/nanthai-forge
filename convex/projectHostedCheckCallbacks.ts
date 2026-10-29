@@ -13,6 +13,7 @@ import {
 import { hostedCheckTerminal, checkPin } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { recordHostedTestTimings } from './projectHostedTestTimings';
 
 /** Only fixed trusted collection code holds the signing key. Project-code
  * stdout, display records and source-job callbacks cannot supply this evidence.
@@ -176,6 +177,7 @@ export async function receiveHostedCheckCallback(
           }),
         };
       await completeHostedCheck(ctx, run);
+      await recordHostedTestTimings(ctx, input.projectId, run);
     }
   }
   await ctx.db.insert('projectHostedCheckCallbacks', {

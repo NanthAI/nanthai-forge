@@ -74,7 +74,7 @@ export const handle = httpAction(async (ctx, request) => {
     else if (command.kind === 'session')
       value = await ctx.runMutation(
         makeFunctionReference<'mutation'>('projectHostedActionsSession:session'),
-        input,
+        { ...input, ...(command.timings ? { timings: true } : {}) },
       );
     else if (command.kind === 'plan') {
       // Recheck before and after storage IO; only immutable small plan metadata crosses this action.

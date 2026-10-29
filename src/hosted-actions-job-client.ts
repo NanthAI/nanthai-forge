@@ -4,10 +4,13 @@ import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { digest } from './hash.js';
 import { objectRecipeSchema, objectChunkPageSchema } from './object-chunks.js';
 import { invariant } from './errors.js';
+import { parseTimingHistory, timingDurations } from '../scripts/test-shards.mjs';
 export class ActionsJobClient {
   run: HostedCheckRun | null = null;
+  timings: Record<string, number> = {};
   private token = '';
   private expires = 0;
+  private refreshing: Promise<void> | null = null;
   constructor(
     readonly site: string,
     readonly projectId: string,
@@ -16,18 +19,10 @@ export class ActionsJobClient {
   ) {}
   async call(command: unknown) {
     if (this.expires < Date.now() + 30_000) {
-      const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL!);
-      url.searchParams.set('audience', this.site);
-      const response = await this.request(url, {
-        headers: { authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
-        signal: AbortSignal.timeout(20_000),
-        redirect: 'error',
+      this.refreshing ??= this.refreshToken().finally(() => {
+        this.refreshing = null;
       });
-      invariant(response.ok, 'RUNNER_UNAVAILABLE', 'GitHub OIDC token request failed.');
-      const result = (await response.json()) as { value: string };
-      this.token = result.value;
-      this.expires =
-        (JSON.parse(Buffer.from(this.token.split('.')[1]!, 'base64url').toString()).exp as number) * 1000;
+      await this.refreshing;
     }
     const response = await this.request(`${this.site}/checks/actions`, {
       method: 'POST',
@@ -44,8 +39,29 @@ export class ActionsJobClient {
     invariant(response.ok, 'RUNNER_UNAVAILABLE', `Convex Actions request failed (${response.status}).`);
     return response.json();
   }
-  async session() {
-    this.run = (await this.call({ kind: 'session' })) as HostedCheckRun;
+  private async refreshToken() {
+    const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL!);
+    url.searchParams.set('audience', this.site);
+    const response = await this.request(url, {
+      headers: { authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
+      signal: AbortSignal.timeout(20_000),
+      redirect: 'error',
+    });
+    invariant(response.ok, 'RUNNER_UNAVAILABLE', 'GitHub OIDC token request failed.');
+    const result = (await response.json()) as { value: string };
+    this.token = result.value;
+    this.expires =
+      (JSON.parse(Buffer.from(this.token.split('.')[1]!, 'base64url').toString()).exp as number) * 1000;
+  }
+  async session(timings = false) {
+    if (timings) {
+      const result = (await this.call({ kind: 'session', timings: true })) as {
+        run: HostedCheckRun;
+        timingHistory: string;
+      };
+      this.run = result.run;
+      this.timings = timingDurations(parseTimingHistory(result.timingHistory));
+    } else this.run = (await this.call({ kind: 'session' })) as HostedCheckRun;
     return this.run;
   }
   transport() {
@@ -59,29 +75,41 @@ export class ActionsJobClient {
         url: string | null;
       }
     >();
+    const pending = new Map<string, Promise<void>>();
     const resolve = async (digests: string[]) => {
-      const missing = [...new Set(digests)].filter(id => !rows.has(id));
-      for (let start = 0; start < missing.length; start += 400) {
-        const page = missing.slice(start, start + 400);
-        const found = (await this.call({ kind: 'source', digests: page })) as (typeof rows extends Map<
-          string,
-          infer T
-        >
-          ? T
-          : never)[];
-        invariant(
-          found.length === page.length,
-          'SOURCE_HASH_MISMATCH',
-          'Source descriptor window is incomplete.',
-        );
-        found.forEach((row, index) => {
+      const unique = [...new Set(digests)],
+        waiting = unique.flatMap(id => (pending.has(id) ? [pending.get(id)!] : [])),
+        missing = unique.filter(id => !rows.has(id) && !pending.has(id));
+      const request = (async () => {
+        for (let start = 0; start < missing.length; start += 400) {
+          const page = missing.slice(start, start + 400);
+          const found = (await this.call({ kind: 'source', digests: page })) as (typeof rows extends Map<
+            string,
+            infer T
+          >
+            ? T
+            : never)[];
           invariant(
-            row.descriptor.object.sha256 === page[index],
+            found.length === page.length,
             'SOURCE_HASH_MISMATCH',
-            'Source descriptor changed.',
+            'Source descriptor window is incomplete.',
           );
-          rows.set(page[index]!, row);
-        });
+          found.forEach((row, index) => {
+            invariant(
+              row.descriptor.object.sha256 === page[index],
+              'SOURCE_HASH_MISMATCH',
+              'Source descriptor changed.',
+            );
+            rows.set(page[index]!, row);
+          });
+        }
+      })();
+      for (const id of missing) pending.set(id, request);
+      try {
+        const results = await Promise.allSettled([request, ...waiting]);
+        for (const result of results) if (result.status === 'rejected') throw result.reason;
+      } finally {
+        for (const id of missing) pending.delete(id);
       }
     };
     const transport: SourceWorkerTransport = {

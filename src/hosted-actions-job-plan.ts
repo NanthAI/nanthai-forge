@@ -9,6 +9,7 @@ import { semanticTests } from './intent-semantic-conflict.js';
 import { digest } from './hash.js';
 import { standardSelection } from '../scripts/test-impact.mjs';
 import { partitionTests } from '../scripts/test-shards.mjs';
+import { directSourceWindow } from './hosted-actions-direct.js';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { invariant } from './errors.js';
@@ -35,7 +36,9 @@ class SourceFiles extends Map<string, string> {
   }
 }
 export async function prepareActionsJob(client: ActionsJobClient, directory: string, cache: string) {
-  const run = await client.session();
+  console.log('Actions source: preparing pinned Candidate');
+  const started = Date.now(),
+    run = await client.session(true);
   invariant(run.configuration.provider === 'github-actions', 'RUNNER_UNAVAILABLE', 'Select Actions.');
   await mkdir(directory, { recursive: true });
   await mkdir(cache, { recursive: true });
@@ -49,19 +52,40 @@ export async function prepareActionsJob(client: ActionsJobClient, directory: str
   ]);
   const state = parseNativeState(await reader.bytes(candidateRef!)),
     base = parseNativeState(await reader.bytes(baseRef!));
-  for (let start = 0; start < state.files.length; start += 400) {
-    const page = state.files.slice(start, start + 400);
-    await resolve(page.map(file => file.blob));
-    await prepareRecipes(page.map(file => file.blob));
-    await reader.resolveMany(page.map(file => file.blob));
-    for (const file of page) {
-      if (file.mode === 'symlink') continue;
-      const path = join(directory, file.path);
-      await mkdir(dirname(path), { recursive: true });
-      await copyFile(join(cache, file.blob), path);
-      if (file.mode === 'executable') await chmod(path, 0o755);
+  let next = 0,
+    completed = 0,
+    failed = false;
+  const worker = async () => {
+    try {
+      while (!failed && next < state.files.length) {
+        const start = next;
+        next += directSourceWindow;
+        const page = state.files.slice(start, start + directSourceWindow),
+          hashes = page.map(file => file.blob);
+        await resolve(hashes);
+        await prepareRecipes(hashes);
+        await reader.resolveMany(hashes);
+        for (const file of page) {
+          if (file.mode === 'symlink') continue;
+          const path = join(directory, file.path);
+          await mkdir(dirname(path), { recursive: true });
+          await copyFile(join(cache, file.blob), path);
+          if (file.mode === 'executable') await chmod(path, 0o755);
+        }
+        completed += page.length;
+        console.log(
+          `Actions source: ${completed}/${state.files.length} files, ${reader.metrics.downloadedBytes} bytes, ${((Date.now() - started) / 1000).toFixed(1)}s`,
+        );
+      }
+    } catch (error) {
+      failed = true;
+      throw error;
     }
-  }
+  };
+  // Drain in-flight work on failure before returning; links and plan publication
+  // happen only after every page has succeeded. Bytes stay in streamed disk files.
+  const pages = await Promise.allSettled(Array.from({ length: 3 }, worker));
+  for (const page of pages) if (page.status === 'rejected') throw page.reason;
   // Create links after every regular file, so no source path can redirect writes.
   for (const file of state.files.filter(file => file.mode === 'symlink')) {
     await mkdir(dirname(join(directory, file.path)), { recursive: true });
@@ -80,7 +104,8 @@ export async function prepareActionsJob(client: ActionsJobClient, directory: str
     ? standardSelection({ paths, files, semanticTests: semanticTests(run.semanticPlan), env: {} })
     : { scope: 'full', reason: 'Exact configured command', tests: [] };
   const selection = { scope: selected.scope, reason: selected.reason, tests: selected.tests };
-  const groups = standard && selection.scope !== 'docs' ? partitionTests(selection.tests, 8) : [];
+  const groups =
+    standard && selection.scope !== 'docs' ? partitionTests(selection.tests, 8, client.timings) : [];
   const pins = {
     head: run.request.expectedHead,
     definition: run.check.definition,
