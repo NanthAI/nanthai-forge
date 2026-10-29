@@ -31,7 +31,7 @@ const projectWork = await import(moduleUrl('../convex/projectWork.ts'));
 Error.stackTraceLimit = 0;
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-owner-acceptance-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.txt'), 'base a\n');
   writeFileSync(join(root, 'b.txt'), 'base b\n');
   const base = initNative(root).head,

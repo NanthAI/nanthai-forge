@@ -22,7 +22,7 @@ function fixture(t) {
   mkdirSync(root);
   writeFileSync(join(root, 'a.txt'), 'source\n');
   initNative(root);
-  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  t.after(() => rmSync(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const work = new WorkService(root),
     store = work.store;
   const orphan = recordIO(store.directory).put({ old: 'superseded '.repeat(300) });

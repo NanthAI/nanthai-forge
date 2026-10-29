@@ -215,7 +215,7 @@ test('pr merge runs exact checks and uses finish acceptance, including protected
 });
 test('auth status signed out/in, hostname, hosts JSON and environment source never expose tokens', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-gh-auth-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const server = createServer(async (request, response) => {
     for await (const _chunk of request) {
       /* consume synthetic request */

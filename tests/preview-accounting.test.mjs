@@ -15,7 +15,7 @@ import { agentCostSummary } from '../dist/agent-cost-summary.js';
 
 test('local preview measurements survive cache loss and shared-input replay without Work writes', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-preview-cost-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.txt'), 'synthetic');
   initNative(root);
   const store = new WorkStore(root),

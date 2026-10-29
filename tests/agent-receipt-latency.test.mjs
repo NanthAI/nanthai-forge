@@ -17,7 +17,7 @@ import { CoordinationJournal } from '../dist/agent-coordination-journal.js';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-receipt-latency-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'shared.txt'), 'original\n');
   writeFileSync(join(root, 'shared.ts'), "export type Shared = 'original';\n");
   initNative(root);

@@ -34,7 +34,7 @@ const deferred = () => {
 };
 function fixture(t, policy = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-auto-exchange-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'source.txt'), 'synthetic\n');
   initNative(root);
   const store = new WorkStore(root);

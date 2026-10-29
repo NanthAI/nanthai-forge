@@ -13,7 +13,7 @@ import { resolveExchangeRoot } from '../dist/native-exchange-tree.js';
 import { digest } from '../dist/hash.js';
 test('production native v2 push pins concurrent Work for the next push and reuses original retry bytes', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-record-push-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   const work = new WorkService(root),
@@ -62,7 +62,7 @@ test('production native v2 push pins concurrent Work for the next push and reuse
   assert.equal(retry.uploadedBytes, 0);
   const restored = `${root}-received`;
   const logical = new Map();
-  t.after(() => rmSync(restored, { recursive: true, force: true }));
+  t.after(() => rmSync(restored, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await pullNativeExchange(next.backupId, restored, {
     ...transport,
     manifest: async id => {
@@ -83,7 +83,7 @@ test('production native v2 push pins concurrent Work for the next push and reuse
 
 test('publication receipt replay repairs a missing hint and the next format promotion sends a delta', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-record-replay-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   const store = new WorkStore(root),
@@ -127,7 +127,7 @@ test('legacy unified baseline recovery preserves exact catalog property order an
   const { convertWorkTo18 } = await import('../dist/work-intent-converter.js');
   const { unifyIntent } = await import('../dist/work-intent-local.js');
   const directory = mkdtempSync(join(tmpdir(), 'forge-unified-hint-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const head = 'a'.repeat(64),
     source = convertWorkTo18(
       workSchema.parse({ schema: 17, revision: 7, nativeHead: head, intents: [], lanes: [], views: [] }),
@@ -175,7 +175,7 @@ test('legacy unified baseline recovery preserves exact catalog property order an
 
 test('record reseed uploads exact Work-bound count and View companions from existing owner facts', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-owner-index-pages-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'old\n');
   initNative(root);
   const work = new WorkService(root),

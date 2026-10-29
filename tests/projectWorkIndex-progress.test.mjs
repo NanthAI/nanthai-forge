@@ -41,7 +41,7 @@ test('a killed driver resumes from its committed cursor in a fresh process', asy
   const { join } = await import('node:path');
   const { spawnSync } = await import('node:child_process');
   const root = mkdtempSync(join(tmpdir(), 'forge-index-kill-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const path = join(root, 'saved.bin');
   const run = mode =>
     spawnSync(process.execPath, ['tests/projectWorkIndex-progress-worker.mjs', mode, path], {

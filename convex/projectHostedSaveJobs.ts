@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import { sourceWorkerPlan } from '../src/convex-source-provider';
 import { wakeLifecycleSave } from './projectHostedLifecycleCascade';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, internalMutation, internalAction } from './cliServer';
@@ -38,25 +39,13 @@ export const submit = mutation({
       if (state.status === 'ready') {
         const inputPin = savePin(hostedSaveInput(state, operation.firstAttempt.at));
         await saveObject(ctx, input.projectId, inputPin);
-        const worker = process.env.FORGE_SOURCE_WORKER,
-          runtime = process.env.FORGE_SOURCE_RUNTIME,
-          keyId = process.env.FORGE_SOURCE_KEY_ID;
-        invariant(
-          worker && runtime && keyId,
-          'SOURCE_WORKER_UNAVAILABLE',
-          'The pinned Modal source worker is not configured.',
-        );
         const expected = operation.expected,
           operationId = state.jobOperationId,
           payload = {
             jobKind: 'save',
             input: inputPin,
             inputDigest: inputPin.sha256,
-            provider: 'modal',
-            worker,
-            runtime,
-            keyId,
-            workerLeaseMs: 60000,
+            ...sourceWorkerPlan(process.env),
           };
         await enqueueSourceJob(ctx, {
           ...auth,
@@ -87,7 +76,9 @@ export const submit = mutation({
         makeFunctionReference<'action'>(
           job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
             ? 'projectHostedSaveJobs:complete'
-            : 'projectModalSource:dispatch',
+            : job.control.provider === 'convex'
+              ? 'projectConvexSource:dispatch'
+              : 'projectModalSource:dispatch',
         ),
         { projectId: input.projectId, jobId: row.jobId },
       );

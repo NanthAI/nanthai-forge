@@ -11,6 +11,12 @@ const setting = {
   value: v.string(),
 };
 export const hostedCheckTables = {
+  projectHostedActionsResults: defineTable({
+    projectId: v.id('hostedProjects'),
+    runId: v.string(),
+    index: v.number(),
+    digest: v.string(),
+  }).index('by_project_and_run_and_index', ['projectId', 'runId', 'index']),
   projectHostedCheckWorkers: defineTable({
     projectId: v.id('hostedProjects'),
     machineId: v.string(),
@@ -37,6 +43,7 @@ export const hostedCheckTables = {
     status: v.string(),
     value: v.string(),
   })
+    .index('by_run', ['runId'])
     .index('by_project_and_run', ['projectId', 'runId'])
     .index('by_project_and_candidate', ['projectId', 'candidateId'])
     .index('by_project_and_status', ['projectId', 'status'])

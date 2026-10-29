@@ -25,7 +25,7 @@ const at = '2026-01-01T00:00:00.000Z';
 const hash = value => createHash('sha256').update(value).digest('hex');
 function fixture(t, count = 2) {
   const root = mkdtempSync(join(tmpdir(), 'forge-write-amp-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'synthetic source\n');
   initNative(root);
   const store = new WorkStore(root),

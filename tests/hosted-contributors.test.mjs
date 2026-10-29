@@ -40,7 +40,7 @@ const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.t
 const unavailable = e => e.data?.code === 'PROJECT_UNAVAILABLE';
 async function setup(t, { retained = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-contributors-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'a.ts'), 'export const a=1;\n');

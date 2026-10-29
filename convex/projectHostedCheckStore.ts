@@ -14,7 +14,7 @@ import {
   type HostedExpectedPins,
   type HostedOperation,
 } from '../src/hosted-source-operation';
-import { hostedCheckRunSchema, type HostedCheckRun } from '../src/hosted-check';
+import { hostedCheckRunSchema, hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
 import { invariant } from '../src/errors';
 
 export type CheckIdentity = { projectId: Id<'hostedProjects'>; runId: string };
@@ -103,6 +103,10 @@ export async function writeHostedCheck(
   id: Id<'projectHostedCheckRuns'>,
   run: HostedCheckRun,
 ) {
+  if (run.actions?.watchdog && hostedCheckTerminal(run)) {
+    await ctx.scheduler.cancel(run.actions.watchdog as Id<'_scheduled_functions'>);
+    run.actions.watchdog = null;
+  }
   await ctx.db.patch(id, {
     status: run.status,
     value: semanticPayload(hostedCheckRunSchema.parse(run), true),

@@ -20,7 +20,7 @@ import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { digest } from '../dist/hash.js';
 async function fixture(t, paths) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'forge-sync-client-')));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'client'),
     objects = new Map(),
     reads = [];

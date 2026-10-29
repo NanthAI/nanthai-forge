@@ -13,7 +13,7 @@ import { digest } from '../dist/hash.js';
 
 function fixture(t, dangling = false) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-offline-capture-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const head = 'a'.repeat(64),
     intentId = randomUUID(),
     laneId = randomUUID(),

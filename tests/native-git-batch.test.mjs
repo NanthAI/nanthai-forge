@@ -18,7 +18,7 @@ function fixture(t) {
     root = join(dir, 'owner');
   mkdirSync(root);
   nativeMarker(root);
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return { dir, root, source: new NativeSource(root) };
 }
 function trackedGit(f, behavior = '') {

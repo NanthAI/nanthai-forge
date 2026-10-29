@@ -12,7 +12,7 @@ import { updateHostState } from '../dist/host-binding.js';
 
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-notice-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'src'));
   writeFileSync(join(root, 'src/a.txt'), 'one\ntwo\nthree\n');
   initNative(root);

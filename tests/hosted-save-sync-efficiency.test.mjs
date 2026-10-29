@@ -18,7 +18,7 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 function checkout(t, s, entry, state, changed = true) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-efficiency-')),
     root = join(directory, 'checkout');
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, '.forge'), { recursive: true });
   writeFileSync(
     join(root, '.forge/hosted-lane.json'),
@@ -77,8 +77,9 @@ function dogfood(s) {
   for (let i = 0; i < 32000; i++)
     s.insert('projectObjects', { projectId: s.projectId, digest: `unselected-${i}`, size: 0 });
 }
-async function changedSave(t, legacy, scale = false) {
+async function changedSave(t, legacy, scale = false, provider = 'modal') {
   environment(t);
+  process.env.FORGE_SOURCE_PROVIDER = provider;
   const s = await composeFixture();
   const files = Array.from({ length: 3000 }, (_, i) =>
     s.file(`f${String(i).padStart(4, '0')}`, `first\noriginal-${i}\nlast\n`),
@@ -112,6 +113,17 @@ async function changedSave(t, legacy, scale = false) {
     : exchange;
   const pending = await saveHostedLane(root, command, transport);
   const args = { projectId: s.projectId, jobId: pending.jobId };
+  if (provider === 'convex') {
+    await c.call('projectConvexSource:dispatch', args);
+    await c.call('projectConvexSource:step', { ...args, step: 0 });
+    await c.call('projectHostedSaveJobs:complete', args);
+    const terminal = await saveHostedLane(root, command, exchange);
+    const output = terminal.outcome.result;
+    assert.equal(JSON.parse(s.objects.get(output.head)).files.length, 3000);
+    const stats = { ...c.stats(), storageCalls: c.storageCalls(), wallMs: performance.now() - started };
+    stats.totalCalls = stats.calls + stats.storageCalls;
+    return { stats, calls: c.calls, s, c, root, command, transport };
+  }
   await c.call('projectModalSource:dispatch', args);
   const dispatch = c.dispatch();
   const callback = async result => {
@@ -303,4 +315,17 @@ test('sync batches missing merge objects at 3,000-file scale and leaves unchange
   });
   assert(after.calls <= 20 + 2 * Math.ceil(after.worker.resolvedObjects / 100));
   assert(after.calls < before.calls / 10);
+});
+
+test('Convex source provider: complete 10-file save including new object uploads stays below 30 calls at dogfood scale', async t => {
+  const run = await changedSave(t, false, true, 'convex');
+  assert(run.stats.totalCalls <= 30, JSON.stringify({ stats: run.stats, functions: run.calls }));
+  t.diagnostic(
+    JSON.stringify({
+      convex: run.stats,
+      functions: Object.fromEntries(
+        [...new Set(run.calls)].map(name => [name, run.calls.filter(v => v === name).length]),
+      ),
+    }),
+  );
 });

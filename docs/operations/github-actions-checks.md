@@ -269,3 +269,90 @@ private repository in about 29 s end to end (one static job).
 
 This sends only synthetic source, creates a run-owned ref, dispatches one tiny job
 and removes the ref after recording success. It does not land Forge source.
+
+## Convex dispatch with the GitHub App
+
+An App runner configured without a `credential` uses the Convex dispatch path.
+`installationId` is optional: each operation resolves the selected repository's
+App installation and mints a short-lived token with WebCrypto RS256. Existing
+credential-reference runners retain the export/controller path; the
+`FORGE_HOSTED_ACTIONS_CONTROLLER_*` seam is unselected for App runners.
+
+`projectHostedActionsConfigure:configure` accepts `projectId` and a JSON `request`
+containing `operationId`, `authorityEpoch`, `expected` (current configuration digest
+or null), and `repository`. It reuses the owner-only idempotent configuration
+mutation and derives `ubuntu-latest`, the runtime, and the environment fingerprint.
+It accepts no installation ID or credential secret. Before writing, it derives the
+repository's App installation (one read-only GitHub call, no token minted) and
+refuses with `GITHUB_APP_PERMISSIONS` when the accepted installation permissions
+lack Actions write or Contents read, for example while a permission request is
+still pending approval. The CLI routes
+`nforge agent ROOT configure-runner '{"provider":"github-actions","repository":"OWNER/NAME"}'`
+to this action; the Mac provider continues through its existing configuration
+path. `check-settings` reports the selected runner under `actions` (`app-direct`
+or `legacy-credential`, repository, workflow and ref).
+
+App JWT signing and installation-token minting live in one module,
+`convex/githubAppToken.ts` (`installationToken(ctx, repo, permissions?)`), shared
+with the hosted GitHub mirror. Check dispatch and cancellation request only
+Actions write and Contents read.
+
+Backend configuration needs `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (PKCS#1 or
+PKCS#8 PEM), `GITHUB_WEBHOOK_SECRET`, `FORGE_HOSTED_CHECK_KEY_ID`, and its matching
+`FORGE_HOSTED_CHECK_KEY_<ID>`. The existing object-store configuration is also
+required. `CONVEX_SITE_URL` is Convex's system-provided site URL and the exact OIDC
+audience. No callback key, App key, storage key, or source URL is sent in workflow
+inputs or stored as a GitHub Actions secret. The existing App needs repository
+Actions read/write, Contents read/write (the check token requests only read),
+Metadata read, and the Workflow run event. Its webhook remains `/github/webhook`.
+
+The checked-in workflow branches on `deployment`. Empty deployment preserves the
+native/BYOCI `plan` input and export jobs. Convex dispatches on `main` with
+`runId`, `projectId`, and `deployment`; the run name is `forge-check/<runId>`.
+The fixed workflow checkout verifies and materializes the pinned Candidate using
+hash/size-checked storage downloads, including recipe-backed content, in windows
+of at most 400 descriptors. Source bytes go directly from object storage to the
+runner. The Candidate is transferred once as an artifact, preserving modes and
+symlinks. The plan and run pins remain outside the Candidate directory. Planning
+reads source as data with the installed selector and shared eight-way partitioner;
+existing default full selection remains full. Docs scope uses only the static job.
+Arbitrary commands run once, including the existing composed Intent contract union.
+
+`/checks/actions` accepts only GitHub-signed OIDC tokens for this exact site audience,
+repository, `forge-check.yml@refs/heads/main`, `workflow_dispatch`, first attempt,
+and GitHub-hosted runner. The execution ID must already be bound by the dispatch
+response or an HMAC-verified Workflow run event; an arbitrary first JWT cannot
+claim a Forge run. Every transaction rechecks original actor authority, source
+authority epoch, fence, and execution. Results and compact log receipts are atomic
+and idempotent. The supervisor passes no OIDC or provider credentials into project
+commands. Full logs stay in Actions; Forge retains a redacted tail of at most
+64 KiB per job through checksum-bound R2 PUT and verified commit.
+
+A dispatch reservation is committed before GitHub IO. Unknown replies retain that
+reservation and are never dispatched again. GitHub has no dispatch idempotency
+key: a process failure between reservation and the HTTP call can therefore leave
+zero executions, while a lost HTTP reply can leave one. Neither case silently
+creates a second execution. The Workflow run event binds the original execution
+when its dispatch reply was lost. Failed/cancelled/timed-out workflows, including
+bootstrap failures before a plan exists, settle through that event; a successful
+workflow without complete per-job evidence is interrupted, never passed. One
+12-hour watchdog bounds a missing completion event and is cancelled on terminal
+results. There are no project scans, active-run pollers, or idle scheduled functions.
+
+For 3,000 raw source objects, a full nine-job check uses 76 Convex function
+invocations including HTTP actions, nested functions, enqueue, dispatch and webhook;
+a two-job scoped check uses 41, and docs-only uses 36. The formula is
+`15 + 2 * ceil(sourceObjects / 400) + 5 * jobs`, including one Candidate/base
+manifest window. Recipe metadata/leaves add their actual bounded descriptor
+windows; issued download grants expire after five minutes. GitHub API and object
+storage requests are separate from Convex function calls. A 6,000-object full
+fixture budgets 90 calls. Plan retries can retain unused small storage objects;
+this path adds no deletion or retention policy.
+
+Deploy this backend and publish this workflow on GitHub `main` before configuring
+the App runner. Keep the Mac interim selected until one hosted Candidate completes
+with exact shard evidence and its failure/cancellation paths have been qualified.
+Then change the runner configuration with its expected digest; already-enqueued
+Mac runs keep their original configuration and execution owner. Acceptance policy
+and outbound GitHub mirroring are independent prerequisites and are not changed
+by configuring this runner.

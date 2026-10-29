@@ -21,7 +21,7 @@ import { initNative } from '../dist/native-work.js';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-lane-tree-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   nativeMarker(root);
   const source = new NativeSource(root),
     blob = source.put(Buffer.from('original bytes\n'));
@@ -121,7 +121,7 @@ test('source cache follows the exact selected State and does not accumulate old 
 
 test('eight simultaneous start processes all publish independent Lanes outside the owner writer lock', async t => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-eight-starts-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (let i = 0; i < 200; i++) writeFileSync(join(root, `file-${i}.txt`), `file ${i}\n`.repeat(100));
   initNative(root);
   const module = new URL('../dist/agent-workflow.js', import.meta.url).href;

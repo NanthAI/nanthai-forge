@@ -19,7 +19,7 @@ function fixture(t) {
   mkdirSync(root);
   writeFileSync(join(root, 'a.txt'), 'source\n');
   initNative(root);
-  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  t.after(() => rmSync(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const work = new WorkService(root);
   return { parent, root, work, store: work.store };
 }
@@ -234,7 +234,7 @@ test('lock-free pointer reads survive a concurrent atomic replace of work.json',
   const { spawn } = await import('node:child_process');
   const { readWorkFile } = await import('../dist/work-records.js');
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'forge-pointer-')));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const body = JSON.stringify({ revision: 1, pad: 'x'.repeat(4096) });
   writeFileSync(join(dir, 'work.json'), body);
   const writer = spawn(

@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 const at = '2026-10-18T00:00:00.000Z';
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-merge-bases-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const source = new NativeSource(root);
   const file = (text, path = 'f', mode = 'file') => ({ path, mode, blob: source.put(Buffer.from(text)) });
   const state = (files, parents = [], message = 'synthetic') =>

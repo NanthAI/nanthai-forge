@@ -25,12 +25,13 @@ import {
   hostedAgentAction,
   hostedAgentAddressSchema,
   hostedAgentCapabilitiesSchema,
+  hostedAgentOwnerActions,
   hostedAgentCommandSchemas,
   type HostedAgentAddress,
   type HostedAgentAction,
   type HostedAgentCapabilities,
 } from './hosted-agent-contract.js';
-import { executeHostedAgent } from './hosted-agent-actions.js';
+import { executeHostedAgent, hostedCheckSettings } from './hosted-agent-actions.js';
 export type HostedAgentExchange = Pick<
   ConvexExchange,
   | 'client'
@@ -66,7 +67,7 @@ export class HostedAgentTransport {
     ),
   ) {}
   async dispatch(requestedAction: string, input: Record<string, unknown>): Promise<HostedAgentResponse> {
-    if (['capabilities', 'status', 'observe', 'landing'].includes(requestedAction))
+    if (['capabilities', 'status', 'observe', 'landing', 'check-settings'].includes(requestedAction))
       return this.dispatchRequest(requestedAction, input);
     const metricRoot = resolve(this.root);
     return withLifecycleMetric(
@@ -119,11 +120,15 @@ export class HostedAgentTransport {
         'Capabilities belong to a different project.',
       );
       invariant(
-        capabilities.actions.includes(action),
+        capabilities.actions.includes(action as (typeof capabilities.actions)[number]) ||
+          (capabilities.authority.mode !== 'native-owner' &&
+            (hostedAgentOwnerActions as readonly string[]).includes(action)),
         'HOSTED_ACTION_UNSUPPORTED',
         'The project does not support this hosted action under its current source authority.',
       );
       if (action === 'capabilities') return this.response(action, null, capabilities);
+      if (action === 'check-settings')
+        return this.response(action, null, await hostedCheckSettings(this.query.bind(this), capabilities));
       if (observation)
         return this.response(
           action,

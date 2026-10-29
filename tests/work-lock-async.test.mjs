@@ -17,7 +17,7 @@ import {
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-async-lock-')),
     path = join(root, 'lock');
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   t.mock.method(process.stderr, 'write', () => true);
   return { root, path };
 }

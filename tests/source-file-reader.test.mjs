@@ -10,7 +10,7 @@ import { ObjectRecipeBuilder, buildObjectRecipe, readObjectRecipe } from '../dis
 import { digest } from '../dist/hash.js';
 const fixture = t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-source-reader-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return root;
 };
 test('bounded scan produces identical recipes regardless of read boundaries and exact missing-range reads', async t => {

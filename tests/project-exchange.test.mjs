@@ -153,7 +153,7 @@ test('incremental checkpoints use existing hosted Work and source-return authori
     dir = mkdtempSync(join(tmpdir(), 'forge-hosted-exchange-')),
     root = join(dir, 'owner');
   mkdirSync(root);
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   const store = new WorkStore(root),
@@ -237,7 +237,7 @@ test('a completed source return predating a new optional collection survives lat
     dir = mkdtempSync(join(tmpdir(), 'forge-settled-return-')),
     root = join(dir, 'owner');
   mkdirSync(root);
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   const work = new WorkService(root),
@@ -402,7 +402,7 @@ test('explicit native archive migration keeps backup IDs and old journals, verif
     { migrateNativeArchive } = await import('../dist/native-exchange-migrate.js');
   const { readFileSync } = await import('node:fs');
   const dir = mkdtempSync(join(tmpdir(), 'forge-archive-migration-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'source.bin'), Buffer.alloc(65536, 71));
@@ -666,7 +666,7 @@ test('metadata trees publish through existing authority; fresh clients and legac
     dir = mkdtempSync(join(tmpdir(), 'forge-hosted-tree-')),
     root = join(dir, 'owner');
   mkdirSync(root);
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   const work = new WorkService(root);

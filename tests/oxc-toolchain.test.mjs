@@ -36,7 +36,7 @@ const rules = {
 
 function fixture(t) {
   const owner = mkdtempSync(join(tmpdir(), 'forge-oxc-'));
-  t.after(() => rmSync(owner, { recursive: true, force: true }));
+  t.after(() => rmSync(owner, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(owner, '.gitignore'), '.forge/\n');
   const root = join(owner, '.forge/work/lane');
   mkdirSync(root, { recursive: true });

@@ -15,7 +15,7 @@ function fixture(
   expression = "z.object({ name: z.string(), state: z.enum(['open', 'closed']), note: z.string().optional() })",
 ) {
   const root = mkdtempSync(join(tmpdir(), 'forge-schema-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const path of ['src', 'scripts/schema-compat']) mkdirSync(join(root, path), { recursive: true });
   const write = (path, value) => writeFileSync(join(root, path), value);
   write('package.json', JSON.stringify({ version: '1.0.0' }));

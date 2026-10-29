@@ -31,6 +31,7 @@ import {
   nativeMergeMessage,
   type NativeMergeOptions,
   type NativeMergeResolution,
+  type NativeMergeConflict,
 } from './native-merge.js';
 import { diskGuard } from './disk-guard.js';
 import { nativeFile } from './native-file.js';
@@ -168,11 +169,25 @@ export const nativeSourceTestHooks: {
   afterRename?: (path: string) => void;
 } = {};
 export class NativeSource {
+  /** Hosted execution journals these byte calculations between bounded actions. */
+  mergeConflictReason?: (path: string) => string | undefined;
+  resolvedContent?: (file: NativeFile) => void;
+  mergeContent?: (
+    base: NativeFile,
+    left: NativeFile,
+    right: NativeFile,
+    options: NativeMergeOptions,
+    resolutions: NativeMergeResolution[],
+  ) => string | null;
+  conflictContent?: (
+    item: NativeMergeConflict,
+    channel: string,
+  ) => { file?: NativeFile; kind: 'text' | 'binary' };
   private batchingObjects = false;
   readonly directory: string;
   readonly owner: string;
-  constructor(owner: string) {
-    this.owner = realpathSync(owner);
+  constructor(owner: string | null) {
+    this.owner = owner === null ? '' : realpathSync(owner);
     this.directory = join(this.owner, '.forge', 'work', 'objects');
   }
   object(id: string): Buffer {

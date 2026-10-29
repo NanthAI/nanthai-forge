@@ -219,7 +219,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const push = process.argv[3]
       ? (JSON.parse(process.argv[3]) as { channel: string; checkId: string })
       : undefined;
-    await drainPostAccept(new WorkStore(process.argv[2]!), push, { signal });
+    // detachedWorker zeroes the synchronous lock wait; queue admission polls, so it keeps the env wait.
+    const waitMs = Number(
+      process.env.FORGE_LANDING_LOCK_WAIT_MS ?? process.env.FORGE_WORK_LOCK_WAIT_MS ?? 600000,
+    );
+    await drainPostAccept(new WorkStore(process.argv[2]!), push, { signal, waitMs });
   }).then(
     () => process.exit(0),
     error => {

@@ -13,7 +13,7 @@ import { readWorkBytes } from './work-store-fixture.mjs';
 
 function fixture(t, native) {
   const root = native ? mkdtempSync(join(tmpdir(), 'forge-source-read-')) : gitFixture(t);
-  if (native) t.after(() => rmSync(root, { recursive: true, force: true }));
+  if (native) t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.txt'), '\ufeffone\r\nlast');
   mkdirSync(join(root, 'nested'));
   writeFileSync(join(root, 'nested', 'colon:name.txt'), 'nested');

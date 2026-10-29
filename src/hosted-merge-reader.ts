@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { NativeSource } from './native-source.js';
 import type { SourceWorkerReader } from './hosted-source-worker-reader.js';
-class NeededObject extends Error {
+export class NeededObject extends Error {
   state = false;
   constructor(readonly id: string) {
     super('Fetch exact immutable merge input.');

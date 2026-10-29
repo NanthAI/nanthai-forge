@@ -151,7 +151,7 @@ async function setup(t, runCheck = true) {
     archive = readFileSync(exported.archive.path),
     originalWork = readWorkBytes(join(old.store.directory, 'work.json'));
   const dir = mkdtempSync(join(tmpdir(), 'forge-historical-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'native');
   mkdirSync(root);
   writeFileSync(join(root, 'a.ts'), 'export const a=2;\n');

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { join } from 'node:path';
 import { NativeSource, overlappingPaths } from './native-source.js';
 import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -24,7 +23,7 @@ export async function buildHostedComposeState(
   progress: () => Promise<void>,
 ) {
   const plan = composeInputSchema.parse(value),
-    source = new LazyMergeSource(original.owner);
+    source = original instanceof LazyMergeSource ? original : new LazyMergeSource(original.owner);
   await reader.file(plan.main);
   invariant(plan.main.object.sha256 === plan.base.head, 'SOURCE_JOB_INVALID', 'Compose main pins differ.');
   const calculate = <T>(action: () => T) => lazyMerge(reader, progress, action, source);
@@ -33,7 +32,7 @@ export async function buildHostedComposeState(
     selected = 0;
   let result: ReturnType<typeof composeResultSchema.parse>['result'] | undefined;
   const publishGenerated = async () => {
-    await reader.publishFiles([...source.generated].map(id => join(source.directory, id)));
+    await reader.publishGenerated(source, source.generated);
     source.generated.clear();
   };
   // Local composition applies dependencies before Lane inputs, in declared order.
@@ -93,6 +92,7 @@ export async function buildHostedComposeState(
             const item = byPath.get(path),
               entry = {
                 path,
+                ...(item?.reason ? { reason: item.reason } : {}),
                 base: item?.base ?? null,
                 left: item?.left ?? leftFiles.get(path) ?? null,
                 right: item?.right ?? rightFiles.get(path) ?? null,

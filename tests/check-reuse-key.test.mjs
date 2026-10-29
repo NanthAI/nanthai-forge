@@ -130,7 +130,7 @@ test('Git receipts use exact tree and lockfile bytes in the same key contract', 
   const { selfMetricReuseKey } = await import('../dist/self-metrics-reuse-key.js');
   const { digest } = await import('../dist/hash.js');
   const root = mkdtempSync(join(tmpdir(), 'forge-key-git-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const git = args =>
     execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args], {
       cwd: root,

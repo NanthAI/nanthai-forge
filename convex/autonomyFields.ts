@@ -48,6 +48,7 @@ export const autonomyPolicy = v.object({
   laneUpdates: v.union(v.literal('auto'), v.literal('ask')),
   lifecycle: v.object({ completeOnAccept: v.boolean(), cleanRegenerableCopies: v.boolean() }),
   notify: v.object({ awaySummary: v.boolean() }),
+  githubMirror: v.optional(v.object({ repo: v.string(), autoPush: v.boolean(), laneRefs: v.literal(false) })),
 });
 export const automaticAction = v.object({
   actor: v.string(),

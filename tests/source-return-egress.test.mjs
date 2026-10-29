@@ -145,7 +145,7 @@ async function push(t, { cold }) {
   // for each warm/cold case so process-wide raw-byte caches cannot mask reads.
   const s = fixture(),
     root = mkdtempSync(join(tmpdir(), 'forge-return-egress-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   const first = { store: new WorkStore(root) };

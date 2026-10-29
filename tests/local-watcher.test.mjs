@@ -291,7 +291,7 @@ for (const userlandRecursive of [false, true])
   test(`real recursive watcher (userland=${userlandRecursive}) delivers events and last close exits helper`, async t => {
     const workers = nativeFake(t, { real: true, userlandRecursive });
     const directory = realpathSync(mkdtempSync('/tmp/forge-watcher-real-'));
-    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     let resolveEvent;
     const event = new Promise(resolve => {
       resolveEvent = resolve;
@@ -330,7 +330,7 @@ for (const userlandRecursive of [false, true])
 test('20 real subscriptions share a healthy probe and cancelling its first subscriber preserves the others', async t => {
   const workers = nativeFake(t, { real: true });
   const directory = realpathSync(mkdtempSync('/tmp/forge-watcher-many-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const watchers = Array.from({ length: 20 }, (_, i) => {
     const path = join(directory, String(i));
     mkdirSync(path);

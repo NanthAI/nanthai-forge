@@ -9,6 +9,7 @@ export const syncJobs = await import(moduleUrl('../convex/projectHostedSyncJobs.
 export { code } from './hosted-finish-fixture.mjs';
 export const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
+  FORGE_SOURCE_PROVIDER: 'modal',
   FORGE_SOURCE_WORKER: 'fixed-worker',
   FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
   FORGE_SOURCE_KEY_ID: 'SYNTHETIC',

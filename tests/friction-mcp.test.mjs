@@ -11,7 +11,7 @@ import { initNative } from '../dist/native-work.js';
 
 test('MCP captures, triages and reads friction through the same owner Work', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-friction-mcp-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'original\n');
   initNative(root);
   const client = new Client({ name: 'friction-test', version: '1' });

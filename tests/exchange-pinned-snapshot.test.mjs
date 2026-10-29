@@ -18,7 +18,7 @@ function owner(t) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-pinned-push-')),
     root = join(dir, 'owner');
   mkdirSync(root);
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   return { dir, store: new WorkStore(root) };

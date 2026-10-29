@@ -28,11 +28,14 @@ export const capabilities = query({
           authority,
           actions: authority.mode === 'native-owner' ? ['capabilities'] : hostedAgentActions,
           mainReady: (await channelRow(ctx, projectId)) !== null,
-          sourceWorkerConfigured: Boolean(
-            process.env.FORGE_SOURCE_WORKER &&
-            process.env.FORGE_SOURCE_RUNTIME &&
-            process.env.FORGE_SOURCE_KEY_ID,
-          ),
+          sourceWorkerConfigured:
+            (process.env.FORGE_SOURCE_PROVIDER ?? 'convex') === 'convex' ||
+            (process.env.FORGE_SOURCE_PROVIDER === 'modal' &&
+              Boolean(
+                process.env.FORGE_SOURCE_WORKER &&
+                process.env.FORGE_SOURCE_RUNTIME &&
+                process.env.FORGE_SOURCE_KEY_ID,
+              )),
           checkCallbackConfigured: Boolean(process.env.FORGE_HOSTED_CHECK_KEY_ID),
           nativeOwnerRequired: false,
           observation: 'finite',

@@ -32,7 +32,7 @@ const capture = (agent, input = {}) =>
   });
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-friction-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'original\n');
   initNative(root);
   trustAgents(root);

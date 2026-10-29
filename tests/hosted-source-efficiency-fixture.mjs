@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
+import { convexStoreBlob } from './convex-storage-fake.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { sourceWorkerHttp } from '../dist/hosted-source-worker-http.js';
 
@@ -20,6 +21,9 @@ const names = [
   'projectHostedSaveTransfers',
   'projectHostedSourceTransferBatch',
   'projectHostedComposeSelection',
+  'projectConvexSource',
+  'projectConvexSourceStore',
+  'projectConvexSourceObjects',
 ];
 export const modules = Object.fromEntries(
   await Promise.all(names.map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))])),
@@ -31,6 +35,7 @@ export function environment(t) {
     R2_BUCKET: 'synthetic',
     R2_ACCESS_KEY_ID: 'synthetic',
     R2_SECRET_ACCESS_KEY: 'synthetic',
+    FORGE_SOURCE_PROVIDER: 'modal',
     FORGE_SOURCE_WORKER: 'fixed-worker',
     FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
     FORGE_SOURCE_KEY_ID: 'SYNTHETIC',
@@ -50,12 +55,35 @@ export function environment(t) {
 /** Real function handlers/nested calls and storage checks, with local R2 bytes. */
 export function controls(t, s) {
   const calls = [];
-  let dispatch;
+  let dispatch,
+    storageCalls = 0;
+  const blobs = new Map();
+  const storage = {
+    async get(id) {
+      storageCalls++;
+      return blobs.get(id) ?? null;
+    },
+    async store(blob, options) {
+      storageCalls++;
+      const bytes = await convexStoreBlob(blob, options),
+        id = `convex-${digest(bytes)}`;
+      blobs.set(id, blob);
+      s.objects.set(digest(bytes), bytes);
+      return id;
+    },
+    async getMetadata(id) {
+      const blob = blobs.get(id);
+      return blob ? { size: blob.size, sha256: digest(Buffer.from(await blob.arrayBuffer())) } : null;
+    },
+    async getUrl(id) {
+      return blobs.has(id) ? `https://convex.invalid/${id}` : null;
+    },
+  };
   const invoke = async (name, args) => {
     calls.push(name);
     const [file, method] = name.split(':');
     const fn = modules[file][method];
-    if (file === 'projectModalSource') return fn._handler(context, args);
+    if (file === 'projectModalSource' || file === 'projectConvexSource') return fn._handler(context, args);
     if (
       ['commit', 'commitBatch', 'complete'].includes(method) &&
       [
@@ -70,11 +98,14 @@ export function controls(t, s) {
     return s.transaction(name, fn, args);
   };
   const context = {
+    storage,
     auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
     runQuery: (ref, args) => invoke(getFunctionName(ref), args),
     runMutation: (ref, args) => invoke(getFunctionName(ref), args),
   };
   s.decorateContext(ctx => {
+    ctx.storage = storage;
+    ctx.db.system = { get: async () => ({ state: { kind: 'pending' } }) };
     ctx.scheduler = { runAfter: async () => 'synthetic-task' };
   });
   const client = {
@@ -84,6 +115,10 @@ export function controls(t, s) {
   };
   const fetch = async (url, init = {}) => {
     const parsed = new URL(url);
+    if (parsed.hostname === 'convex.invalid') {
+      storageCalls++;
+      return new Response(blobs.get(parsed.pathname.slice(1)) ?? null);
+    }
     if (parsed.hostname === 'bridge.invalid') {
       dispatch = JSON.parse(init.body).input;
       const args = {
@@ -151,6 +186,16 @@ export function controls(t, s) {
     documents: s.counts.reduce((n, row) => n + row.documents, 0),
     writes: s.counts.reduce((n, row) => n + row.writes, 0),
   });
-  return { invoke, client, http, call, calls, stats, context, dispatch: () => dispatch };
+  return {
+    invoke,
+    client,
+    http,
+    call,
+    calls,
+    stats,
+    context,
+    dispatch: () => dispatch,
+    storageCalls: () => storageCalls,
+  };
 }
 export const ref = name => makeFunctionReference(name);

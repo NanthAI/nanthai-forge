@@ -98,7 +98,7 @@ test('quiet sessions remain visible, old sessions fold, and copy records activit
 
 test('Lane watcher coalesces real edits, ignores build noise, and stops on explicit completion', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one');
   initNative(root);
   const agent = new AgentWorkflow(root);
@@ -145,7 +145,7 @@ test('Lane watcher coalesces real edits, ignores build noise, and stops on expli
 
 test('Lane observation reconciles macOS edits without notifications and retains the native path elsewhere', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-dropped-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one');
   initNative(root);
   const agent = new AgentWorkflow(root);
@@ -233,7 +233,7 @@ test('metadata reconciliation detects edits without native events and ignores pr
   assert.equal(observe(), true, 'deletions are observed');
   const moved = root + '-moved';
   renameSync(root, moved);
-  t.after(() => rmSync(moved, { recursive: true, force: true }));
+  t.after(() => rmSync(moved, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   assert.equal(observe(), false, 'unavailable is not empty');
   writeFileSync(join(moved, 'new/added.txt'), 'changed while unavailable');
   renameSync(moved, root);
@@ -312,7 +312,7 @@ test("day-old sessions leave Who's working and older last-seen shows a date", as
 
 test('one owner observer reconciles new Lanes and rejects a duplicate observer without a second watcher', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-owner-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one');
   initNative(root);
   const agent = new AgentWorkflow(root);
@@ -362,7 +362,7 @@ test('one owner observer reconciles new Lanes and rejects a duplicate observer w
 
 test('owner observer reconciles edits made before the helper attaches without a later timer or native event', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-attach-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one');
   initNative(root);
   const agent = new AgentWorkflow(root);
@@ -404,7 +404,7 @@ test('owner observer reconciles edits made before the helper attaches without a 
 
 test('owner observer does not revive a completed duplicate after binding changes while its Lane stays open', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-duplicate-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one');
   initNative(root);
   const agent = new AgentWorkflow(root);
@@ -431,7 +431,7 @@ test('owner observer does not revive a completed duplicate after binding changes
 
 test('owned presence close drains Lane queues and leaves no later writes or handles', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-close-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one');
   initNative(root);
   const agent = new AgentWorkflow(root);
@@ -455,7 +455,7 @@ test('owned presence close drains Lane queues and leaves no later writes or hand
 for (const phase of ['opening', 'healthy'])
   test(`owner close during ${phase} releases its real shared helper and IPC`, async t => {
     const root = mkdtempSync(join(tmpdir(), 'forge-presence-helper-close-'));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     writeFileSync(join(root, 'file.txt'), 'one');
     initNative(root);
     const agent = new AgentWorkflow(root);
@@ -511,7 +511,7 @@ for (const phase of ['opening', 'healthy'])
 
 test('immediate owned presence close never starts a deferred observer', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-immediate-close-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   initNative(root);
   const agent = new AgentWorkflow(root);
   const stop = startOwnerPresence(agent.work.store);
@@ -521,7 +521,7 @@ test('immediate owned presence close never starts a deferred observer', async t 
 
 test('a new owner handle during close waits for the old observer before starting', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-reopen-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one');
   initNative(root);
   const agent = new AgentWorkflow(root);
@@ -540,7 +540,7 @@ test('a new owner handle during close waits for the old observer before starting
 
 test('unsupported Work never creates owner or Lane presence tickets, including owned close', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-format-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   initNative(root);
   const agent = new AgentWorkflow(root);
   const store = agent.work.store;
@@ -558,7 +558,7 @@ test('unsupported Work never creates owner or Lane presence tickets, including o
 
 test('degraded presence keeps the minute fallback and stays quiet when idle', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-presence-degraded-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one');
   initNative(root);
   const agent = new AgentWorkflow(root);

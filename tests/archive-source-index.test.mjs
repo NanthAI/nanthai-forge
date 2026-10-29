@@ -111,7 +111,7 @@ test('manifest membership preserves pin order, exact path/hash pairs and latest 
 
 function journalFixture(t, change = () => {}) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-index-journal-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const data = empty();
   change(data);
   const bytes = workBytes(data),

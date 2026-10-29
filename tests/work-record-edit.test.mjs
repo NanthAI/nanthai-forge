@@ -11,7 +11,7 @@ import { editRecordProjection } from '../dist/work-record-edit.js';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-projection-edit-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'source.txt'), 'synthetic source\n');
   initNative(root);
   const store = new WorkStore(root),

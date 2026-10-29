@@ -49,6 +49,7 @@ Hosted addressing: pass {url,projectId,...} on this same command surface, or use
 a hosted Lane checkout ROOT. No native owner/listener is needed. Read capabilities
 and use status/observe for finite reads. Hosted checkpoint/save and run/check are aliases.
 Hosted also supports open, save, check, revert and capabilities.
+Hosted owners configure checks with configure-check, configure-runner and check-settings.
 Hosted commands retain generated UUIDs and exact pins in ROOT.forge-client/agent;
 retry identical parameters after a lost reply. A new explicit operationId starts new work.
 Hosted start returns Lane pins; open materializes it; finish saves an opened Lane,
@@ -177,6 +178,9 @@ const strict: Record<string, unknown> = {
     accept: { expectedPrevious: 'CURRENT_CHANNEL_HEAD' },
   },
   accept: { operationId: 'UUID', viewId: 'CANDIDATE_ID', expectedHead: 'HEAD', expectedPrevious: null },
+  'configure-check': { name: 'verify' },
+  'configure-runner': { provider: 'mac' },
+  'check-settings': {},
 };
 function actionHelp(action: string): string {
   invariant(action in examples, 'BAD_ARGUMENT', 'Unknown agent action. Use agent --help.');
@@ -185,6 +189,9 @@ function actionHelp(action: string): string {
   if (action === 'start' || action === 'sync')
     result +=
       'start stackOn:LANE_ID uses the parent’s saved head; sync restacks onto its latest save, or main after its receipt. sync ontoMain:true detaches and reapplies only the child delta. Resolve conflicts then checkpoint. Child finish/land waits for the parent; land-ready resumes waiting finishes.\n';
+  if (action === 'configure-check' || action === 'configure-runner' || action === 'check-settings')
+    result +=
+      'Hosted project owner only. configure-check imports the named check (default verify) from hosted Work, checkId selects one by id, or command:{name,executable,args,environmentLabel} defines one. configure-runner provider:"mac" fills machineId (kept from the current mac runner), runtime and environment from this package and process, so run it in the worker\'s exact environment; provider:"github-actions" with repository:"OWNER/NAME" selects the Convex-dispatched GitHub Actions runner (the server derives runtime and environment and checks the App installation and its Actions permission; no installation ID or secret); configuration:{...} sets another provider. expected pins the current digest (default: read now; null for none). Identical parameters replay their first result; pass a new operationId to change again. check-settings is read-only and lists blockers.\n';
   if (action === 'integrate')
     result +=
       'Compose main plus latest saved active Lanes and run local static checks. Omit laneIds for all checkpointed active Lanes. No acceptance or remote runner. set-policy integrationPreview:{auto:true} enables debounced previews after saves and before landing; default false. Cached by exact source and check inputs.\n';
@@ -267,6 +274,9 @@ function actionHelp(action: string): string {
       'capabilities',
       'tests',
       'confirm-tests',
+      'configure-check',
+      'configure-runner',
+      'check-settings',
     ].includes(action)
   )
     result +=

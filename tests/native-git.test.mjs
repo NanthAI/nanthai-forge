@@ -28,7 +28,7 @@ for (const format of ['sha1', 'sha256'])
     { timeout: 120000 },
     async t => {
       const dir = mkdtempSync(join(tmpdir(), 'forge-native-git-'));
-      t.after(() => rmSync(dir, { recursive: true, force: true }));
+      t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
       const root = join(dir, 'original');
       mkdirSync(root);
       git(dir, 'init', '--template=', `--object-format=${format}`, '--initial-branch=main', root);
@@ -191,7 +191,7 @@ for (const format of ['sha1', 'sha256'])
   );
 test('native import retains tracked ignored source and symlink targets', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-native-git-unsupported-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'git');
   mkdirSync(root);
   git(dir, 'init', '--template=', '--initial-branch=main', root);
@@ -247,7 +247,7 @@ for (const format of ['sha1', 'sha256'])
     { timeout: 120000 },
     async t => {
       const dir = mkdtempSync(join(tmpdir(), 'forge-native-git-many-'));
-      t.after(() => rmSync(dir, { recursive: true, force: true }));
+      t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
       const root = join(dir, 'original');
       mkdirSync(root);
       git(dir, 'init', '--template=', `--object-format=${format}`, '--initial-branch=main', root);

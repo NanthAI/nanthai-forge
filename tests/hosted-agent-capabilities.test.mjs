@@ -63,3 +63,33 @@ test('discovery applies current project access, removal and device credential re
   s.patch('hostedProjects', s.projectId, { removal: 'deleted' });
   await assert.rejects(s.read('owner'), code('PROJECT_UNAVAILABLE'));
 });
+
+test('default Convex discovery needs no worker configuration and explicit Modal still reports missing pins', async () => {
+  const keys = [
+      'FORGE_SOURCE_PROVIDER',
+      'FORGE_SOURCE_WORKER',
+      'FORGE_SOURCE_RUNTIME',
+      'FORGE_SOURCE_KEY_ID',
+    ],
+    prior = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+  try {
+    for (const key of keys) delete process.env[key];
+    const s = setup();
+    assert.equal((await s.read('owner')).sourceWorkerConfigured, true);
+    process.env.FORGE_SOURCE_PROVIDER = 'modal';
+    assert.equal((await s.read('owner')).sourceWorkerConfigured, false);
+    Object.assign(process.env, {
+      FORGE_SOURCE_WORKER: 'synthetic',
+      FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
+      FORGE_SOURCE_KEY_ID: 'SYNTHETIC',
+    });
+    assert.equal((await s.read('owner')).sourceWorkerConfigured, true);
+    process.env.FORGE_SOURCE_PROVIDER = 'unknown';
+    assert.equal((await s.read('owner')).sourceWorkerConfigured, false);
+  } finally {
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});

@@ -1,3 +1,5 @@
+import { readHostState } from './host-binding.js';
+import { serverRecoveryAuthority } from './recovery-authority.js';
 import { retryWorkEdit } from './work-edit.js';
 import { waitPushAudit } from './push-audit-wait.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -43,6 +45,12 @@ export async function githubSync(
   } = {},
 ) {
   const store = new WorkStore(input);
+  if (options.autoPush)
+    invariant(
+      !serverRecoveryAuthority(readHostState(store)),
+      'SOURCE_AUTHORITY_CHANGED',
+      'Hosted main owns this GitHub mirror; the Mac automatic pusher has stopped.',
+    );
   invariant(store.native, 'BAD_ARGUMENT', 'github-sync requires a native Forge owner or Lane.');
   if (options.push) {
     const timeoutMs = options.auditTimeoutMs ?? 30 * 60_000;
@@ -77,8 +85,14 @@ export async function githubSync(
       'The owner is already bound to this repository and branch.',
     );
   }
-  if (options.autoPush)
+  if (options.autoPush) {
+    invariant(
+      !serverRecoveryAuthority(readHostState(store)),
+      'SOURCE_AUTHORITY_CHANGED',
+      'Hosted main owns this GitHub mirror; the Mac automatic pusher has stopped.',
+    );
     invariant(isGreenMain(data), 'GITHUB_SYNC_CHECK_PENDING', 'Current main has no passing check.');
+  }
   return withSyncGit(store.directory, async root => {
     const repository = options.repository ?? original?.repository ?? (await defaultSyncRepository(input));
     invariant(
@@ -275,6 +289,11 @@ export async function githubSync(
     }
     if (!plan.alreadyPushed) {
       if (options.autoPush) {
+        invariant(
+          !serverRecoveryAuthority(readHostState(store)),
+          'SOURCE_AUTHORITY_CHANGED',
+          'Hosted main owns this GitHub mirror; the Mac automatic pusher has stopped.',
+        );
         const policy = store.load().autonomyPolicy?.githubMirror;
         invariant(
           policy?.autoPush && policy.repo === repository,
@@ -290,6 +309,12 @@ export async function githubSync(
       );
       await retrySyncGit(
         async () => {
+          if (options.autoPush)
+            invariant(
+              !serverRecoveryAuthority(readHostState(store)),
+              'SOURCE_AUTHORITY_CHANGED',
+              'Hosted main owns this GitHub mirror; the Mac automatic pusher has stopped.',
+            );
           remoteHead = await remoteSyncHead(root, remote, ref, !expected);
           if (remoteHead === head) return;
           if (remoteHead !== expected) throw changed({ expectedHead: expected, remoteHead, localHead: head });

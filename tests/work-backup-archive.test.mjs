@@ -32,7 +32,7 @@ function fixture(t) {
     else process.env.OPENAI_API_KEY = previousSecret;
   });
   const root = mkdtempSync(join(tmpdir(), 'forge-archive-extraction-test-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return root;
 }
 function listingProbe(root) {

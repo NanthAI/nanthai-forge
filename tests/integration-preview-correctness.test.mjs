@@ -16,7 +16,7 @@ import { agentPeers } from '../dist/agent-peers.js';
 
 async function fixture(t, { script, files = {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-preview-correctness-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const [path, bytes] of Object.entries({ 'a.txt': '0', 'b.txt': '0', 'c.txt': '0', ...files })) {
     writeFileSync(join(root, path), bytes);
   }

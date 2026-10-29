@@ -1,3 +1,5 @@
+import { requestDirectCancel } from './projectHostedActionsDirect';
+import { scheduleDirectActions } from './projectHostedActionsDirect';
 import { semanticPayload } from '../src/semantic-payload';
 import { mergeSemanticMembers, semanticMember } from './projectSemanticContracts';
 // SPDX-License-Identifier: Apache-2.0
@@ -92,6 +94,7 @@ export const cancel = mutation({
         }
         await writeHostedCheck(ctx, row._id, run);
         await notifyActionsProgress(ctx, run);
+        await requestDirectCancel(ctx, run);
       }
       await completeCheckOperation(ctx, prepared.operation, {
         runId: run.id,
@@ -105,7 +108,7 @@ export const cancel = mutation({
 });
 
 /** Shared transaction seam: caller resolves actor from current authentication.
- * No provider work or scheduling runs here. */
+ * Provider IO stays outside this transaction. */
 export async function enqueueHostedCheck(
   ctx: MutationCtx,
   input: {
@@ -238,5 +241,6 @@ export async function enqueueHostedCheck(
     value: semanticPayload(run, true),
   });
   await watchMacLease(ctx, run);
+  await scheduleDirectActions(ctx, run);
   return run;
 }

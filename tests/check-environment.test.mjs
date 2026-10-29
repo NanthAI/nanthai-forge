@@ -27,7 +27,7 @@ function environment(t, values) {
 }
 function setup(t, files = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-clean-env-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'a.txt'), 'source');

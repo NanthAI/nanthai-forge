@@ -12,7 +12,7 @@ const { checkInputFields } = await import(moduleUrl('../web/src/check-input-form
 
 function setup(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-check-input-ui-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const selectedInput=1;\n');
   initNative(root);
   const w = new WorkService(root),

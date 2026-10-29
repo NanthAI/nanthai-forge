@@ -28,7 +28,7 @@ import {
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-pending-exchange-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'source.txt'), 'initial\n');
   initNative(root);
   const agent = new AgentWorkflow(root),
@@ -228,7 +228,7 @@ test('capture preparation, transport bookkeeping and reconciliation receipts nev
 test('saved pending work survives immediate process exit and a fresh owner instance', t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-pending-restart-')),
     root = join(dir, 'owner');
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(root);
   const script = `import { initNative } from ${JSON.stringify(new URL('../dist/native-work.js', import.meta.url).href)};
     import { WorkService } from ${JSON.stringify(new URL('../dist/work.js', import.meta.url).href)};

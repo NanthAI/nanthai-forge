@@ -21,7 +21,7 @@ import { terminalReceipt } from '../dist/clean-terminal-receipt.js';
 
 function fixture(t, backend = 'modal') {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'forge-remote-clean-')));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const run = {
     id: randomUUID(),
     viewId: randomUUID(),

@@ -16,7 +16,7 @@ test('whole-file timeout defaults to ten minutes and validates its override', ()
 
 test('file supervisor kills module hangs and leaked children, names failures and continues queued files', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-test-files-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const blocked = join(root, 'blocked.mjs'),
     leaked = join(root, 'leaked.mjs'),
     passed = join(root, 'passed.mjs');
@@ -52,7 +52,7 @@ test('file supervisor kills module hangs and leaked children, names failures and
 
 test('file supervisor preserves assertion failures and successful file totals', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-test-files-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const file = join(root, 'assertion.mjs');
   writeFileSync(
     file,
@@ -90,7 +90,7 @@ function run(files, overrides) {
 
 test('machine reports keep file attribution and nested names despite concurrent console output', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-test-events-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const first = join(root, 'first.mjs'),
     second = join(root, 'second.mjs');
   writeFileSync(
@@ -124,7 +124,7 @@ test('machine reports keep file attribution and nested names despite concurrent 
 
 test('one in-shard retry runs only eligible failing files and retains both named attempts', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-test-retry-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const files = ['flake', 'persistent', 'affected', 'clean'].map(name => join(root, `${name}.mjs`));
   for (const [index, file] of files.entries())
     writeFileSync(

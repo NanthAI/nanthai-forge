@@ -13,7 +13,7 @@ import { digest } from '../dist/hash.js';
 
 function fixture(t, count = 250) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-recovery-queue-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const source = new NativeSource(directory),
     receipts = join(directory, 'receipts');
   mkdirSync(receipts);

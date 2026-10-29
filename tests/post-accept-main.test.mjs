@@ -9,7 +9,7 @@ import { drainPostAccept } from '../dist/post-accept-main.js';
 for (const completed of [false, true])
   test(`an idle audit drain takes no Work writer lock (${completed ? 'already audited' : 'no requests'})`, async t => {
     const directory = mkdtempSync(join(tmpdir(), 'forge-idle-audit-'));
-    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     const data = {
       channelMoves: completed
         ? [
@@ -53,7 +53,7 @@ for (const completed of [false, true])
 
 test('bounded audit observation expires without replacing an active audit', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-audit-timeout-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const data = {
     channelMoves: [],
     runs: [{ id: 'retained', status: 'running', mainCheck: { channel: 'main' } }],
@@ -83,7 +83,7 @@ for (const code of ['WORK_BUSY', 'WORK_STALE'])
     const { ForgeError } = await import('../dist/errors.js');
     const { readMainAuditState } = await import('../dist/post-accept-state.js');
     const root = mkdtempSync(join(tmpdir(), 'forge-stalled-audit-'));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     const data = {
       revision: 1,
       channelMoves: [],
@@ -131,7 +131,7 @@ test('main audit progress uses provider evidence and ignores unrelated Work revi
   const { mkdirSync, writeFileSync } = await import('node:fs');
   const { readMainAuditState } = await import('../dist/post-accept-state.js');
   const root = mkdtempSync(join(tmpdir(), 'forge-audit-provider-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const store = { directory: root };
   const data = {
@@ -185,7 +185,7 @@ test('regression: a wake during an outstanding snapshot is observed again', asyn
   const { wakePostAccept } = await import('../dist/post-accept-main.js');
   const { policyPreset } = await import('../dist/autonomy-policy.js');
   const directory = mkdtempSync(join(tmpdir(), 'forge-review-wake-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const calls = interceptSpawn(t);
   let data = {
     channelMoves: [],
@@ -223,7 +223,7 @@ test('regression: GitHub controller diagnostics do not reset the audit stall tim
   const { MainAuditWatchdog } = await import('../dist/post-accept-watchdog.js');
   const { readMainAuditState } = await import('../dist/post-accept-state.js');
   const directory = mkdtempSync(join(tmpdir(), 'forge-review-diagnostic-progress-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const store = { directory };
   const output = join(directory, 'check-audit');
@@ -269,7 +269,7 @@ test('local command output keeps an active main audit progressing', async t => {
   const { mkdirSync, appendFileSync } = await import('node:fs');
   const { readMainAuditState } = await import('../dist/post-accept-state.js');
   const directory = mkdtempSync(join(tmpdir(), 'forge-local-audit-progress-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(directory, 'check-audit'));
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   const store = { directory },

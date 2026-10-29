@@ -27,7 +27,7 @@ const file = 'tests/check-log-cleanup-paged.test.mjs';
 const name = `${file} :: dogfood-shaped synthetic inventory`;
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-landing-quarantine-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const [path, content] of Object.entries({
     'src/cleanup.ts': 'export const value = 1;',
     'src/other.ts': 'export const value = 1;',
@@ -252,7 +252,7 @@ test('pinned Actions and Modal recipes reuse exact impact selection and deny ret
 
 test('dogfood ledger: 1500 runs × 500 files stream details, use zero Convex calls, and resume without rereading history', t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-ledger-budget-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const now = Date.now();
   gc();
   let reads = 0,
@@ -330,7 +330,7 @@ test('clean receipts never consult history and a pending run is counted when it 
 
 test('bootstrap reads only recent detail, and reused receipts never invent new observations', t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-ledger-window-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   let reads = 0;
   const store = {
     directory,
@@ -452,7 +452,7 @@ test('the ten-test guard also applies to clean checks without adding ledger writ
 
 test('a pinned older observation ignores a quarantine cache from a later Work revision', t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-quarantine-snapshot-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(
     join(directory, 'check-quarantine-ledger.json'),
     JSON.stringify({

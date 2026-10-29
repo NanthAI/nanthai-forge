@@ -22,7 +22,7 @@ function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-exchange-test-')),
     root = join(dir, 'owner');
   mkdirSync(root);
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'source.ts'), 'export const value = 1;\n');
   writeFileSync(join(root, 'large.bin'), Buffer.alloc(256 * 1024, 25));
   initNative(root);
@@ -233,7 +233,7 @@ test('optional agent exchange tools disclose migration semantics and require acc
     savedConfig = process.env.XDG_CONFIG_HOME,
     config = mkdtempSync(join(tmpdir(), 'forge-exchange-auth-')),
     tools = [];
-  t.after(() => rmSync(config, { recursive: true, force: true }));
+  t.after(() => rmSync(config, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   try {
     delete process.env.FORGE_AUTH_TOKEN;
     process.env.XDG_CONFIG_HOME = config;

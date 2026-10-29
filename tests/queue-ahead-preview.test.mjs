@@ -20,7 +20,7 @@ async function fixture(t) {
   initNative(root);
   const agent = new AgentWorkflow(root),
     store = agent.work.store;
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const call = async (action, body = {}) =>
     (await withLandingController(() => agent.dispatch({ action, operationId: randomUUID(), ...body })))
       .result;

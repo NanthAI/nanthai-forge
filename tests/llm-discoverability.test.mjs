@@ -39,7 +39,7 @@ function crawlable(robots, url) {
 
 test('the hosted Vite build emits linked LLM files, every packaged doc and crawler rules', async t => {
   const output = mkdtempSync(join(tmpdir(), 'forge-llm-build-'));
-  t.after(() => rmSync(output, { recursive: true, force: true }));
+  t.after(() => rmSync(output, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await build({
     root: join(root, 'web'),
     configFile: join(root, 'web/vite.config.ts'),
@@ -76,7 +76,7 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
 
 test('generation uses only the explicit inventory and reflects source edits deterministically', t => {
   const fixture = mkdtempSync(join(tmpdir(), 'forge-llm-docs-'));
-  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  t.after(() => rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const put = (path, text) => {
     mkdirSync(dirname(join(fixture, path)), { recursive: true });
     writeFileSync(join(fixture, path), text);

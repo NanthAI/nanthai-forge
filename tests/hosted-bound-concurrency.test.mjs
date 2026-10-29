@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
+  FORGE_SOURCE_PROVIDER: 'modal',
   FORGE_SOURCE_WORKER: 'synthetic-worker',
   FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
   FORGE_SOURCE_KEY_ID: 'SYNTHETIC',
@@ -47,7 +48,7 @@ for (const count of [2, 8])
       );
     }
     const directory = mkdtempSync(join(tmpdir(), 'forge-offline-finishes-'));
-    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     const transport = new HostedAgentTransport(
       join(directory, 'offline-client'),
       { url: 'https://fixture.invalid', projectId: f.projectId },

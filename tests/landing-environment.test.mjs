@@ -41,7 +41,7 @@ test('runtime, platform and check setting differences remain names-only incompat
 });
 test('runtime identity follows executable bytes for CLI and canonical location for Node', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-landing-runtime-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const dist = join(root, 'dist');
   cpSync(fileURLToPath(new URL('../dist', import.meta.url)), dist, { recursive: true });
   symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(root, 'node_modules'));
@@ -67,7 +67,7 @@ for (const changed of ['cli', 'nodeExecutable'])
     const f = await fixture(t, { remote: false });
     const input = await f.candidate('other-runtime.txt', undefined, false);
     const root = mkdtempSync(join(tmpdir(), 'forge-other-controller-'));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     let executable = process.execPath;
     let module = new URL('../dist/agent-workflow.js', import.meta.url).href;
     if (changed === 'cli') {

@@ -24,7 +24,7 @@ const journal = await import(moduleUrl('../convex/projectWorkJournal.ts'));
 
 async function fixture(t, { workSize = 0, events = 3, received = 1 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-journal-delta-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   const store = new WorkStore(root),

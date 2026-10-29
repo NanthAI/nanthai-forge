@@ -114,7 +114,7 @@ const privateInput = immutableDirectory('forge-return-prepare-', async (root, re
 async function setup(t, records = true) {
   const { root, value } = await privateInput(records);
   value.input.operationId = randomUUID();
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return {
     ...value,
     s: await restoreHosted(fixture(), snapshots.get(records)),

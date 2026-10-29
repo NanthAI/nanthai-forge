@@ -73,7 +73,9 @@ test('package and active remote check recipes agree on the fixed Node release', 
     const versions = [...workflow.matchAll(/^\s*node-version:\s*(.+)$/gm)].map(([, value]) =>
       value.trim().replace(/^(['"])(.*)\1$/, '$2'),
     );
-    assert.deepEqual(versions, ['24.22.1', '24.22.1'], recipe);
+    // Every job that sets up Node pins the patched release; the hosted Actions workflow has more jobs.
+    assert(versions.length >= 2, recipe);
+    assert.deepEqual(new Set(versions), new Set(['24.22.1']), recipe);
     assert.doesNotMatch(workflow, /24\.19\.0/);
   }
   assert.equal(

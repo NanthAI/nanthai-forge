@@ -43,7 +43,7 @@ function data(extra = {}) {
 }
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-pending-status-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const n = 1;\n');
   initNative(root);
   return new WorkStore(root);

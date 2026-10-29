@@ -288,7 +288,7 @@ test('native conflicts, undo, invalid source and interrupted metadata retain ori
 });
 test('interrupted native initialization and checkpoint save reconcile without changing original States', t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-native-crash-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const wroot = join(dir, 'owner');
   mkdirSync(wroot);
   writeFileSync(join(wroot, 'a.ts'), 'export const a=1;');

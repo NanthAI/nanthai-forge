@@ -1,3 +1,5 @@
+import { serverRecoveryAuthority } from './recovery-authority.js';
+import { readHostState } from './host-binding.js';
 import { workerPath } from './worker-install.js';
 import { retryWorkEdit } from './work-edit.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -23,7 +25,7 @@ const undo =
  * later acceptances recover lost wakeups, using the original pending push UUID. */
 export function wakeGithubPush(store: WorkStore) {
   try {
-    if (!store.native) return;
+    if (!store.native || serverRecoveryAuthority(readHostState(store))) return;
     const summary = store.readRecords()?.data() ?? store.load();
     if (!effectivePolicy(summary).githubMirror?.autoPush) return;
     const data = store.load();
@@ -61,6 +63,7 @@ export async function drainGithubPush(
     sleep?: (ms: number) => Promise<unknown>;
   } = {},
 ) {
+  if (serverRecoveryAuthority(readHostState(store))) return;
   const sleep = options.sleep ?? delay;
   await sleep(options.debounceMs ?? 200);
   try {
@@ -69,7 +72,7 @@ export async function drainGithubPush(
       async () => {
         for (;;) {
           const selected = await retryWorkEdit(store, 'github-auto-push-select', data => {
-            if (!pendingGithubPush(data)) return;
+            if (serverRecoveryAuthority(readHostState(store)) || !pendingGithubPush(data)) return;
             const move = latestMain(data)!,
               policy = effectivePolicy(data).githubMirror!;
             const old = data.githubAutoPush,
@@ -105,7 +108,7 @@ export async function drainGithubPush(
           await publishGithubStatus(store);
           for (;;) {
             const data = store.load();
-            if (!pendingGithubPush(data)) return;
+            if (serverRecoveryAuthority(readHostState(store)) || !pendingGithubPush(data)) return;
             const policy = effectivePolicy(data).githubMirror;
             if (!policy?.autoPush || policy.repo !== selected.repository) return;
             if (selected.nextAttemptAt)
@@ -113,6 +116,7 @@ export async function drainGithubPush(
             // Re-read policy/main after backoff; a disabled policy never starts another push.
             const current = store.load();
             if (
+              serverRecoveryAuthority(readHostState(store)) ||
               !pendingGithubPush(current) ||
               effectivePolicy(current).githubMirror?.repo !== selected.repository
             )

@@ -13,7 +13,7 @@ import { processIdentity } from '../dist/local-process.js';
 for (const worker of ['post-accept-main', 'presence-worker'])
   test(`${worker} handles SIGTERM with a busy owner and leaves retained work intact`, async t => {
     const root = mkdtempSync(join(tmpdir(), 'forge-worker-term-'));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     writeFileSync(join(root, 'a.txt'), 'source');
     initNative(root);
     const directory = join(root, '.forge/work');
@@ -54,7 +54,7 @@ test('detached worker lock admission yields instead of blocking signal delivery'
   const { detachedWorker } = await import('../dist/detached-worker-shutdown.js');
   const { workLocked } = await import('../dist/work-lock.js');
   const root = mkdtempSync(join(tmpdir(), 'forge-worker-lock-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const lock = join(root, 'lock');
   writeFileSync(lock, JSON.stringify({ ...processIdentity(), host: hostname() }));
   await detachedWorker(async () => {

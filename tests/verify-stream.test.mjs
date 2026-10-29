@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 
 test('verify prints a completed failing file diagnostic while another file is still running', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-verify-stream-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const write = (path, text) => writeFileSync(join(root, path), text);
   for (const dir of [
     'scripts',

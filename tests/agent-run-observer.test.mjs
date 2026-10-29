@@ -50,7 +50,7 @@ function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-selected-run-'));
   writeFileSync(join(root, 'a.txt'), 'source');
   initNative(root);
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const store = new WorkStore(root),
     peer = new WorkStore(root),
     data = store.load();

@@ -18,7 +18,7 @@ import { WorkStore } from '../dist/work-store.js';
 import { ForgeError } from '../dist/errors.js';
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-lock-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'source.txt'), 'original\n');
   initNative(root);
   return new AgentWorkflow(root);

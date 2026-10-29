@@ -86,6 +86,8 @@
     "scripts/check-quarantine.mjs",
     "scripts/check-documentation.mjs",
     "scripts/github-actions-check.mjs",
+    "scripts/hosted-actions-execute.mjs",
+    "scripts/hosted-actions-job.mjs",
     "scripts/modal-check/runner.py",
     "scripts/modal-check/collect.py",
     "scripts/modal-check/cost.py",

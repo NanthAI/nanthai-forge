@@ -91,7 +91,7 @@ test('native import merge conflicts instead of deleting order-sensitive require 
 
 test('native State composition uses import reconciliation and preserves ambiguous conflicts', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-native-imports-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const origin = initNative(root).head,
     source = new NativeSource(root),
     baseText =
@@ -118,7 +118,7 @@ test('native State composition uses import reconciliation and preserves ambiguou
 
 test('native retained Views expose shared paths and compose non-overlapping text edits', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-native-collab-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'one\ntwo\nthree\nfour\n');
   initNative(root);
   const w = new WorkService(root),
@@ -194,7 +194,7 @@ test('native retained Views expose shared paths and compose non-overlapping text
 
 test('native composition keeps non-adjacent file/directory collisions explicit', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-native-path-overlap-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   initNative(root);
   const source = new NativeSource(root),
     store = new WorkService(root).store,
@@ -212,7 +212,7 @@ test('native composition keeps non-adjacent file/directory collisions explicit',
 
 test('native composition preserves executable modes and conservative add/delete/rename/binary outcomes', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-native-composition-matrix-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   initNative(root);
   const source = new NativeSource(root),
     origin = new WorkService(root).store.load().nativeHead;

@@ -15,7 +15,7 @@ import { duplicateStartWarnings } from '../dist/agent-ownership.js';
 import { PRESENCE } from '../dist/presence.js';
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-ownership-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'src'));
   writeFileSync(join(root, 'src/a.txt'), 'one\ntwo\n');
   writeFileSync(join(root, 'src/b.txt'), 'other\n');

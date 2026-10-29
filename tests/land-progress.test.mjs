@@ -146,7 +146,7 @@ test('live stderr reporter emits only phase/progress/queue changes, including mu
 });
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-progress-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const data = { landingEntries: [], landingBatches: [], runs: [], views: [], channelMoves: [] };
   let revision = 1;
   const store = {

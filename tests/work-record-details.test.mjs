@@ -35,7 +35,7 @@ function fixture(t) {
   mkdirSync(root);
   writeFileSync(join(root, 'a.txt'), 'Synthetic source\n');
   initNative(root);
-  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  t.after(() => rmSync(parent, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return { parent, store: new WorkStore(root) };
 }
 function memoryObjects() {

@@ -22,7 +22,7 @@ test('timing replay accepts complete selected-file reports only, including prefi
 
 test('read-only replay distinguishes literal imports, runtime paths and fail-closed timing estimates', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-selection-replay-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const put = (path, value) =>
     writeFileSync(join(root, path), typeof value === 'string' ? value : JSON.stringify(value));
   mkdirSync(join(root, 'modal-source'));

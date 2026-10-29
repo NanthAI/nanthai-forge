@@ -25,7 +25,7 @@ import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 
 function fixture(t, native = true) {
   const root = mkdtempSync(join(tmpdir(), 'forge-peers-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'src'));
   writeFileSync(join(root, 'src/a.txt'), 'one\ntwo\nthree\n');
   writeFileSync(join(root, 'src/b.txt'), 'other\n');

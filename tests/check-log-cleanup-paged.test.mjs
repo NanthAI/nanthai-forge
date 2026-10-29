@@ -104,7 +104,7 @@ function indexCleanupPages(s) {
 }
 async function seeded(t, runs = 1, objectCount = 0) {
   const root = mkdtempSync(join(tmpdir(), 'forge-cleanup-paged-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   const store = new WorkStore(root),
@@ -454,7 +454,7 @@ test('CLI saves the original UUID before IO, resumes dry-run pages, and surfaces
   const { checkLogsCli } = await import('../dist/check-logs-cli.js');
   const { updateHostState } = await import('../dist/host-binding.js');
   const root = mkdtempSync(join(tmpdir(), 'forge-cleanup-cli-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   let fail = true,

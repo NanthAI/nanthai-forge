@@ -66,6 +66,23 @@ Domain failures roll back admission before a separate terminal
 failure publication. Upload/save preparation remains an explicit pre-admission
 phase. Hosted aliases and observations recheck current project access.
 
+Server-authority main publication also records an indexed GitHub mirror job and
+schedules its first fixed Convex action atomically. A single active job per
+project serializes accepted States; immutable job rows use the existing
+`githubSyncCommitSchema` State/commit mapping. The latest mapping is a constant
+size pointer. Bootstrap verifies the entire exported Git tree against exact
+Forge source before trusting the imported native mapping or GitHub commit's
+State trailer. Later jobs resolve two State manifests and only changed blobs,
+in 100-object/8 MiB windows. Source recipes reuse the fixed source worker's
+hash-verifying reader; the cache holds one logical file at a time. Compact
+continuations live in storage, not growing Convex documents. Git Data tree
+creation uses the last mapped `base_tree`; commit dates and bytes are pinned to
+the acceptance so replay retains its SHA. Ref publication observes expected
+main and updates with `force:false`. Errors remain on the original job for
+explicit same-step recovery, with zero idle scheduling. GitHub App installation
+tokens are transient and scoped to the selected repository. Server-authority
+bindings stop the native Mac pusher. See [mirror operation](workflows.md#automatic-main-mirror).
+
 ## Local filesystem watching
 
 All native filesystem hints use `src/local-watcher.ts`. Processes attached to the
@@ -833,7 +850,7 @@ lookup immediately before reservation. It reuses the same execution key and
 worker pins. Accepted executions are only reconciled. A rejected recovery request
 cannot prove that the original ambiguous request created no execution.
 
-Callbacks use HMAC-SHA-256 with a backend-resolved key identified by the pinned
+Modal callbacks use HMAC-SHA-256 with a backend-resolved key identified by the pinned
 worker configuration (`FORGE_SOURCE_JOB_KEY_<keyId>`). The signature binds project,
 job, operation, attempt, fence, authority epoch, input digest, provider, worker,
 runtime, execution identity and the completed output manifest digest/size or
@@ -847,11 +864,12 @@ takeover preserves a running worker's execution fence.
 
 Recovery reads only a selected project's pending/dispatching/running status
 index in bounded pages; it does not scan terminal history or every project.
-There is no persistent idle source worker. The dispatch seam is exercised with a
-local fake provider; a real provider action, its bounded HTTP transport, callback
-ingress, key provisioning and trusted object/State validation are subsequent
-worker-adapter work. Verified output references alone grant no source publication
-or landing authority.
+There is no persistent idle source worker. The default Convex provider reserves
+its fixed execution and schedules its first bounded Node action atomically. Each
+step commits its durable cursor and successor schedule together; terminal jobs
+schedule no successor. Internal results keep the same execution, fence, epoch
+and manifest checks without an HTTP callback or HMAC. Verified output references
+alone grant no source publication or landing authority.
 
 ## Integration preview
 
@@ -993,14 +1011,24 @@ the pins. See [stacked Lanes](agents/workflow.md#stacked-lanes).
 
 ## Trusted remote source computation
 
-The first fixed-code Modal source adapter reuses hosted source jobs and short
-control actions. An optional per-job transactional provider reservation permits
-one paid create across lost replies and competing bridge instances. Signed
-callbacks retain their original execution and authority pins. The worker verifies
-hash-pinned raw/recipe objects into temporary disk storage and constructs States
-through NativeSource without materializing or executing repository code. Direct
-transfer grants and publication remain with the source-operation reducers; no
-public writer or deployment is enabled. See [trusted hosted source worker](operations/hosted-source-worker.md).
+The default fixed-code Convex source provider runs bounded Node actions over the
+existing project object store. Durable progress lives in a job-scoped storage
+blob, with one small CAS row holding the exact dispatch, execution, step and
+cursor reference. Compressed immutable metadata sections are reused across steps;
+queue advancement writes only the small cursor. A global completion-driven pool
+limits independent child calculations to four computation slots, configurable
+downward. Children persist exact outcomes; the last completion schedules the
+join without polling. Native text calculations are journaled per path, while
+final State assembly and source publication remain serial. Raw/recipe verification proceeds in windows of at most 100
+objects or about 8 MiB. Recipe traversal and SHA-256 progress survive action
+boundaries. Ancestry retains verified parent links; full file trees are read only
+when the native merge needs them. Derived ancestry rows are prefetch hints, never
+closure evidence. No temporary disk, repository execution, worker credential,
+HTTP control ingress, idle poller or Workflow component is required.
+
+The optional Modal adapter retains its reservation, signed callbacks and direct
+transfer grants. Source-operation reducers still own publication for both
+providers. See [trusted hosted source worker](operations/hosted-source-worker.md).
 
 ### Hosted Lane and Intent lifecycle APIs
 
@@ -1047,11 +1075,11 @@ The hosted save APIs retain one original operation and a separate small staging
 record per save. Immutable linked delta pages are project objects; bounded staging
 transactions validate their order, counts and committed blob/recipe pins. A
 server-pinned input binds the exact baseline State, delta root, message and first
-attempt time. Source construction runs through the fixed Modal worker, using the
-native State format and streaming changed blobs to private disk. Unchanged paths
-are preserved from the verified baseline; no repository code runs.
+attempt time. Source construction defaults to the fixed Convex worker, using the
+native State format and bounded, resumable changed-blob verification. Unchanged
+paths are preserved from the verified baseline; no repository code runs.
 
-A signed source-job completion schedules the save finalizer independently of the
+A trusted source-job completion schedules the save finalizer independently of the
 editing client. Only its small result manifest passes through the finalizing
 action. One publication transaction verifies the original job/input/output and
 committed State, compares Lane source/record/lifecycle versions, appends the save,

@@ -12,7 +12,7 @@ type Configuration = Extract<HostedCheckRun['configuration'], { provider: 'githu
  * It must resolve this version/reference for this installation and repository.
  * No registration, account discovery, personal-token or gh fallback is provided. */
 export type ActionsCredentialUse = <T>(
-  reference: Configuration['credential'],
+  reference: NonNullable<Configuration['credential']>,
   installationId: string,
   repository: string,
   use: (installationToken: string) => Promise<T>,
@@ -38,8 +38,13 @@ export function hostedActionsRemote(
   request: typeof fetch = fetch,
   runGit = hostedActionsGit,
 ): HostedActionsRemote {
-  const use = <T>(operation: (token: string) => Promise<T>) =>
-    credentials(
+  const use = <T>(operation: (token: string) => Promise<T>) => {
+    invariant(
+      configuration.credential && configuration.installationId,
+      'RUNNER_UNAVAILABLE',
+      'Legacy export requires its retained credential reference.',
+    );
+    return credentials(
       configuration.credential,
       configuration.installationId,
       configuration.repository,
@@ -48,6 +53,7 @@ export function hostedActionsRemote(
         return operation(token);
       },
     );
+  };
   const call = async (
     endpoint: string,
     method = 'GET',

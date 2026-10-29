@@ -2,6 +2,7 @@ import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 // SPDX-License-Identifier: Apache-2.0
 import { deliverMacCallback } from './hosted-mac-delivery.js';
 import { randomUUID } from 'node:crypto';
+import { lstatSync, readFileSync } from 'node:fs';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { ConvexExchange } from './exchange-client.js';
@@ -15,6 +16,35 @@ import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import type { OutputTransport } from './hosted-output-transfer.js';
 
+/** The collector key comes from FORGE_HOSTED_CHECK_KEY_<id>, or from an owner-only
+ * file named by FORGE_HOSTED_CHECK_KEY_FILE so it never sits in a launchd plist or
+ * shell history. The child check environment drops both names. */
+export function hostedCheckKey(keyId: string, env: NodeJS.ProcessEnv = process.env) {
+  const direct = env[`FORGE_HOSTED_CHECK_KEY_${keyId}`];
+  if (direct) return direct;
+  const path = env.FORGE_HOSTED_CHECK_KEY_FILE;
+  invariant(
+    path,
+    'RUNNER_UNAVAILABLE',
+    `Configure this fixed collector’s signing key: set FORGE_HOSTED_CHECK_KEY_FILE to a chmod 600 file holding key ${keyId}.`,
+  );
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    invariant(false, 'RUNNER_UNAVAILABLE', 'The collector key file could not be read.');
+  }
+  invariant(
+    stat.isFile() &&
+      (stat.mode & 0o077) === 0 &&
+      (typeof process.getuid !== 'function' || stat.uid === process.getuid()),
+    'RUNNER_UNAVAILABLE',
+    'The collector key file must be a regular file you own with mode 600.',
+  );
+  const key = readFileSync(path, 'utf8').trim();
+  invariant(key, 'RUNNER_UNAVAILABLE', 'The collector key file is empty.');
+  return key;
+}
 export async function workerCli(args: string[]) {
   invariant(
     args.length === 3 && args[0] && args[1] && args[2],
@@ -57,8 +87,7 @@ export async function workerCli(args: string[]) {
     }),
   });
   const keyId: string = registered.result.keyId,
-    key = process.env[`FORGE_HOSTED_CHECK_KEY_${keyId}`];
-  invariant(key, 'RUNNER_UNAVAILABLE', 'Configure this fixed collector’s existing signing key.');
+    key = hostedCheckKey(keyId);
   const subscriptions = hostedRunSubscription({ url, projectId });
   const stop = new AbortController();
   const abort = () => stop.abort();

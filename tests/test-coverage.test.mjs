@@ -172,7 +172,7 @@ test('artifact decoding rejects wrong source, missing test completions and trunc
 
 test('V8 decoder merges workers and children, maps built core paths, and rejects missing/truncated data', t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-v8-fixture-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const script = (path, count = 1) => ({
     url: pathToFileURL(resolve(path)).href,
     functions: [{ ranges: [{ count }] }],
@@ -189,7 +189,7 @@ test('V8 decoder merges workers and children, maps built core paths, and rejects
 
 test('real supervisor attributes inherited child-process coverage to its test file', t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-coverage-run-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const dir of ['src', 'dist', 'tests', 'scripts', 'web', 'convex', 'netlify'])
     mkdirSync(join(directory, dir));
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
@@ -216,7 +216,7 @@ test('real supervisor attributes inherited child-process coverage to its test fi
 
 test('native retained artifact is source pinned and requires accepted full-run provenance and digest integrity', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-coverage-owner-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const [path, text] of files) {
     mkdirSync(join(root, path.slice(0, path.lastIndexOf('/'))), { recursive: true });
     writeFileSync(join(root, path), text);
@@ -269,7 +269,7 @@ test('observed dynamic execution can add a recommendation absent from the import
 
 test('unavailable advisory source inventory does not prevent the selected tests from running', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-coverage-unavailable-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'tests'));
   writeFileSync(
     join(root, 'tests/standalone.test.mjs'),
@@ -293,7 +293,7 @@ test('unavailable advisory source inventory does not prevent the selected tests 
 
 test('a narrowed runtime recommendation does not erase a type-level interface failure', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-coverage-types-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const path = join(root, 'interface.ts');
   writeFileSync(path, 'interface Model { value: string; } const sample: Model = { value: 1 };');
   const result = select();

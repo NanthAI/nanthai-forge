@@ -16,7 +16,7 @@ import { readSelfMetricReceipts } from '../dist/self-metrics-journal.js';
 
 function fixture(t, files = { 'file.txt': 'initial\n' }) {
   const root = mkdtempSync(join(tmpdir(), 'forge-command-return-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const [path, text] of Object.entries(files)) writeFileSync(join(root, path), text);
   initNative(root);
   return { root, agent: new AgentWorkflow(root) };

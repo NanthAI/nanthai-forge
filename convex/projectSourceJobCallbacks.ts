@@ -21,6 +21,23 @@ export async function receiveSourceJobCallback(
   key: (keyId: string) => string,
   now = Date.now(),
 ) {
+  return applySourceJobCallback(ctx, input, key, now);
+}
+/** Internal Convex execution has no credential or network callback boundary. */
+export async function receiveConvexSourceJobCallback(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  callback: unknown,
+  now = Date.now(),
+) {
+  return applySourceJobCallback(ctx, { projectId, callback, signature: '' }, null, now);
+}
+async function applySourceJobCallback(
+  ctx: MutationCtx,
+  input: { projectId: Id<'hostedProjects'>; callback: unknown; signature: string },
+  key: ((keyId: string) => string) | null,
+  now: number,
+) {
   const callback = sourceJobCallbackSchema.parse(input.callback);
   invariant(
     callback.projectId === input.projectId,
@@ -30,7 +47,13 @@ export async function receiveSourceJobCallback(
   const job = await loadSourceJob(ctx, input.projectId, callback.jobId),
     control = job.control;
   await hostedWriteProject(ctx, input.projectId, control.actor, job.authorityEpoch);
-  verifySourceJobCallback(callback, input.signature, key(control.keyId));
+  if (key) verifySourceJobCallback(callback, input.signature, key(control.keyId));
+  else
+    invariant(
+      control.provider === 'convex',
+      'SOURCE_PROVIDER_CHANGED',
+      'Select the internal Convex source provider.',
+    );
   invariant(
     callback.operationId === job.operationId &&
       callback.attempt === job.attempt &&

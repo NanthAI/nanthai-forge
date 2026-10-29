@@ -57,7 +57,7 @@ test('hosted horizon is eight entries and never hydrates source or retained Work
 test('hosted preview uses verified bytes and native merge, caches composes, and never uploads source', async t => {
   const f = agentFixture(t),
     root = mkdtempSync(join(tmpdir(), 'forge-ahead-source-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const source = new NativeSource(root);
   const state = (text, parents) =>
     source.writeState(

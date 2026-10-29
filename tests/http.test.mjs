@@ -10,7 +10,7 @@ import { initNative } from '../dist/native-work.js';
 
 async function local(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-http-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   const server = await serveRepository(root, 0);

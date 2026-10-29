@@ -9,7 +9,7 @@ import { digest } from '../dist/hash.js';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-source-performance-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return root;
 }
 

@@ -20,7 +20,7 @@ import { githubWorkflow } from '../scripts/bench-landing-workflow.mjs';
 
 function fixture(t, respond = () => ({ code: 0, stdout: '', stderr: '' })) {
   const dir = mkdtempSync(join(tmpdir(), 'bench-v3-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const options = {
     manifest: join(dir, 'run.manifest.json'),
     visibility: 'public',

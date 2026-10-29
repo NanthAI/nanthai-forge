@@ -43,7 +43,7 @@ export async function pollUntil({
 
 export function mcpTestEnvironment(t) {
   const home = mkdtempSync(join(tmpdir(), 'forge-mcp-home-'));
-  t.after(() => rmSync(home, { recursive: true, force: true }));
+  t.after(() => rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const fallback = join(home, '.config', 'forge');
   mkdirSync(fallback, { recursive: true });
   // If XDG_CONFIG_HOME is dropped, this synthetic login changes tool discovery.

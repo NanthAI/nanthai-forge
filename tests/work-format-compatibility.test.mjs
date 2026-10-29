@@ -26,7 +26,7 @@ import { callTool, mcpTestEnvironment } from './mcp-runtime.mjs';
 // pre-guard binaries cannot acquire a new error message retroactively.
 async function fixture(t, format = 15, readerFormat = 14) {
   const root = mkdtempSync(join(tmpdir(), 'forge-format15-compat-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'source.txt'), 'retained evidence\n');
   initNative(root);
   const agent = new AgentWorkflow(root),

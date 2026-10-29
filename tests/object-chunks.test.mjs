@@ -183,7 +183,7 @@ test('client uploads physical chunk deltas, reconciles an unknown finalize and l
 
 test('private downloads use bounded waves, exact file hashes and preserve existing destinations', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-stream-download-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const bytes = noise(9 * exchangeRangeBytes + 7),
     path = join(directory, 'content'),
     calls = [];
@@ -215,7 +215,7 @@ test('private downloads use bounded waves, exact file hashes and preserve existi
 
 test('download failures drain active ranges before cleanup and reject incorrect full content', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-stream-failure-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const bytes = noise(5 * exchangeRangeBytes),
     path = join(directory, 'content');
   let active = 0,
@@ -249,7 +249,7 @@ test('download failures drain active ranges before cleanup and reject incorrect 
 
 test('Convex streaming transport retains logical response pins and propagates current authority failures', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-convex-stream-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const bytes = noise(5 * exchangeRangeBytes + 1),
     expected = pin(bytes),
     client = new ConvexExchange('https://fixture.convex.cloud', 'fixture', 'project', 'operation', null);
@@ -319,7 +319,7 @@ test('identical content can appear as an index page and as original source leaf 
 
 test('large source upload reads bounded source chunks, preserves recipes and rejects changed source before binding', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-file-upload-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const f = clientFixture(),
     bytes = noise(13 * 1024 * 1024 + 7),
     path = join(directory, 'source');

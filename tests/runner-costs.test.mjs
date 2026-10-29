@@ -16,7 +16,7 @@ import { initNative } from '../dist/native-work.js';
 
 function directory(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-runner-cost-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return root;
 }
 const job = (id, seconds, patch = {}) => ({

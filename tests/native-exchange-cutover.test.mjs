@@ -81,7 +81,7 @@ function journalFixture(base, archiveSha256, manifestBytes, original) {
 
 test('push reconciliation, object pull and archive restore replay legacy source returns before the cutover', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-exchange-cutover-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'source.ts'), 'export const synthetic = true;\n');

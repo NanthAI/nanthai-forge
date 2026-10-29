@@ -27,7 +27,7 @@ function scoped(source, roots) {
 }
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-validation-qualification-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const source = new NativeSource(root),
     blob = source.put(Buffer.from('shared source bytes\n')),
     other = source.put(Buffer.from('independent source bytes\n'));

@@ -11,7 +11,7 @@ const exec = promisify(execFile);
 moduleUrl('../convex/projectSourceReturn.ts');
 test('post-prepare fallback and original-operation recovery fit 256 MiB with 100 MB Work and 1.46 GB logical source', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-post-prepare-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const worker = new URL('./source-return-post-prepare-worker.mjs', import.meta.url).pathname;
   await exec(process.execPath, [worker, 'fixture', directory], { maxBuffer: 1024 * 1024 });
   // Collect within the asserted RSS budget instead of allowing a 384 MiB old

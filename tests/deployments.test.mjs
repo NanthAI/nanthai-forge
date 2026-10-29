@@ -49,7 +49,7 @@ async function setup(t, { native = false } = {}) {
     );
     chmodSync(executable, 0o700);
     process.env.PATH = blocked;
-    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     write(root, 'a.ts', 'export const a = 1;\n');
     initNative(root);
   } else {

@@ -72,7 +72,7 @@ function disk(path) {
 }
 test('link repeats without changing source, Work, transport, or restoring a cleaned Lane', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-links-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'example.ts'), 'one\ntwo\nthree\n');
   initNative(root);
   const agent = new AgentWorkflow(root),
@@ -165,7 +165,7 @@ test('generated hosted URL uses the app codec and opens Code source at the exact
 });
 test('legacy binding resolves the actual hosted owner without changing local metadata', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-link-owner-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'example.ts'), 'one\ntwo\n');
   initNative(root);
   const agent = new AgentWorkflow(root);
@@ -208,7 +208,7 @@ test('legacy binding resolves the actual hosted owner without changing local met
 
 test('optional receipt links do not change checkpoint success when hosted identity is unavailable', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-link-receipt-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'example.ts'), 'one\n');
   initNative(root);
   const agent = new AgentWorkflow(root);

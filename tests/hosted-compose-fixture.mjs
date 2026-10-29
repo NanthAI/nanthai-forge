@@ -227,6 +227,7 @@ export async function composeFixture() {
     const p = await progress(x);
     if (p.input) put(saveBytes(p.input));
     const env = {
+      FORGE_SOURCE_PROVIDER: 'modal',
       FORGE_SOURCE_WORKER: 'fixed-worker',
       FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
       FORGE_SOURCE_KEY_ID: 'SYNTHETIC',

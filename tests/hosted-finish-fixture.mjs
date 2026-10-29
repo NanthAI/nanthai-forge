@@ -8,6 +8,7 @@ import { driver as landingDriver, control as landingControl } from './hosted-lan
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { digest } from '../dist/hash.js';
+import { convexStoreBlob } from './convex-storage-fake.mjs';
 export const desired = await import(moduleUrl('../convex/projectHostedLandingDesired.ts'));
 export const driver = await import(moduleUrl('../convex/projectHostedFinishDriver.ts'));
 export const api = await import(moduleUrl('../convex/projectHostedFinish.ts'));
@@ -15,6 +16,17 @@ export const control = await import(moduleUrl('../convex/projectHostedFinishCont
 export const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 export const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 const stallApi = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
+const convexSourceModules = Object.fromEntries(
+  await Promise.all(
+    [
+      'projectConvexSource',
+      'projectConvexSourceTask',
+      'projectConvexSourceFanout',
+      'projectConvexSourceStore',
+      'projectConvexSourceObjects',
+    ].map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))]),
+  ),
+);
 const sourceJobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 export const maxima = {};
@@ -25,12 +37,23 @@ export async function compose(c, selection) {
   await c.submit(selection);
   return (await c.publish(await c.work(selection))).outcome.result;
 }
-export async function finishFixture(t, { overlap = false, inputCount = 1 } = {}) {
+export async function finishFixture(t, { overlap = false, inputCount = 1, selectedFileCount = 0 } = {}) {
   let now = Date.now();
   t.mock.method(Date, 'now', () => now);
   const c = await composeFixture();
+  const largePin = selectedFileCount ? c.put(Buffer.alloc(100 * 1024, 65)) : null;
+  const largeFiles = Array.from({ length: selectedFileCount }, (_, i) => ({
+    path: `deep/a/b/c/d/${String(i).padStart(6, '0')}`,
+    blob: largePin.sha256,
+    mode: 'file',
+  }));
   const selectedState = c.state(
-    [overlap ? c.file('a.txt', 'ours\nb\nc\n') : c.baseFile, c.hidden, c.file('selected.txt', 'selected\n')],
+    [
+      overlap ? c.file('a.txt', 'ours\nb\nc\n') : c.baseFile,
+      c.hidden,
+      c.file('selected.txt', 'selected\n'),
+      ...largeFiles,
+    ],
     [c.baseline.sha256],
   );
   const lane = await c.lane(selectedState),
@@ -46,13 +69,41 @@ export async function finishFixture(t, { overlap = false, inputCount = 1 } = {})
   });
   f.patch('hostedProjects', f.projectId, { autonomyPolicy: policyPreset('trusted') });
   const blobs = new Map(),
-    metrics = { transfers: 0, downloadBytes: 0, uploadBytes: 0, sourceJobs: 0, ticks: 0, stepCalls: [] };
+    metrics = {
+      transfers: 0,
+      downloadBytes: 0,
+      uploadBytes: 0,
+      sourceJobs: 0,
+      ticks: 0,
+      stepCalls: [],
+      convexSourceCalls: [],
+      convexStorageCalls: 0,
+    };
+  const sourceStorage = {
+    async getMetadata(id) {
+      return blobs.get(id)?.metadata ?? null;
+    },
+    async getUrl(id) {
+      return `https://metadata.invalid/${blobs.get(id)?.metadata.sha256 ?? id}`;
+    },
+    async get(id) {
+      metrics.convexStorageCalls++;
+      const row = blobs.get(id);
+      return row ? new Blob([c.objects.get(row.metadata.sha256)]) : null;
+    },
+    async store(blob, options) {
+      metrics.convexStorageCalls++;
+      const bytes = await convexStoreBlob(blob, options),
+        sha256 = digest(bytes),
+        id = `source-${randomUUID()}`;
+      blobs.set(id, { metadata: { sha256, size: bytes.length } });
+      c.objects.set(sha256, bytes);
+      return id;
+    },
+  };
   f.decorateContext(ctx => {
     ctx.db.system = { get: ctx.db.get };
-    ctx.storage = {
-      getMetadata: async id => blobs.get(id)?.metadata ?? null,
-      getUrl: async id => `https://metadata.invalid/${id}`,
-    };
+    ctx.storage = sourceStorage;
     ctx.scheduler = {
       runAfter: async (delay, ref, args) =>
         ctx.db.insert('_scheduled_functions', {
@@ -153,8 +204,8 @@ export async function finishFixture(t, { overlap = false, inputCount = 1 } = {})
               return tx('finishResume', driver.resume, args);
             },
             storage: {
-              store: async blob => {
-                const bytes = Buffer.from(await blob.arrayBuffer()),
+              store: async (blob, options) => {
+                const bytes = await convexStoreBlob(blob, options),
                   sha256 = digest(bytes),
                   id = `blob-${randomUUID()}`;
                 blobs.set(id, { metadata: { sha256, size: bytes.length } });
@@ -187,6 +238,25 @@ export async function finishFixture(t, { overlap = false, inputCount = 1 } = {})
         await tx('finishDependents', driver.dependents, input);
       } else if (task.name === 'projectHostedAcceptance:complete') {
         await f.materialize(input.receiptId);
+      } else if (
+        task.name.startsWith('projectConvexSource:') ||
+        task.name.startsWith('projectConvexSourceTask:') ||
+        task.name.startsWith('projectConvexSourceFanout:')
+      ) {
+        metrics.convexSourceCalls.push(task.name);
+        if (task.name.endsWith(':dispatch')) metrics.sourceJobs++;
+        await convexSourceModules[task.name.split(':')[0]][task.name.split(':')[1]]._handler(
+          {
+            storage: sourceStorage,
+            runMutation: (ref, args) => {
+              const name = getFunctionName(ref),
+                [file, method] = name.split(':');
+              metrics.convexSourceCalls.push(name);
+              return tx(name, convexSourceModules[file][method], args);
+            },
+          },
+          input,
+        );
       } else if (task.name === 'projectModalSource:dispatch') {
         if (stop === 'before-source') throw new Error('synthetic crash before source job');
         metrics.sourceJobs++;

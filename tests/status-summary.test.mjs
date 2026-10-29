@@ -19,7 +19,7 @@ import { checkEnvironment } from '../dist/work-run.js';
 
 function fixture(t, count = 1) {
   const root = mkdtempSync(join(tmpdir(), 'forge-status-summary-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.txt'), 'synthetic\n');
   const { head } = initNative(root),
     store = new WorkStore(root),

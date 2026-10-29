@@ -1,6 +1,5 @@
 import { composeStack } from './native-stack-compose.js';
 // SPDX-License-Identifier: Apache-2.0
-import { join } from 'node:path';
 import { NativeSource, overlappingPaths, type NativeFile } from './native-source.js';
 import { compensatingState } from './compensating-revert.js';
 import { conflictPlan } from './agent-sync.js';
@@ -23,10 +22,10 @@ export async function buildHostedSyncState(
 ) {
   const plan = syncInputSchema.parse(value),
     work = plan.work,
-    source = new LazyMergeSource(original.owner),
+    source = original instanceof LazyMergeSource ? original : new LazyMergeSource(original.owner),
     calculate = <T>(action: () => T) => lazyMerge(reader, progress, action, source);
   const publishGenerated = async () => {
-    await reader.publishFiles([...source.generated].map(id => join(source.directory, id)));
+    await reader.publishGenerated(source, source.generated);
     source.generated.clear();
   };
   let result: typeof syncOutputSchema._output.result;
@@ -52,6 +51,10 @@ export async function buildHostedSyncState(
     for (const conflict of pending.conflicts.filter(item => item.kind === 'text')) {
       const file = state.files.find(file => file.path === conflict.path);
       if (!file) continue;
+      if (source.resolvedContent) {
+        source.resolvedContent(file);
+        continue;
+      }
       const bytes = await calculate(() => source.object(file.blob));
       invariant(
         !/^(<<<<<<< |>>>>>>> |=======\r?$)/m.test(bytes.toString('utf8')),
@@ -140,6 +143,7 @@ export async function buildHostedSyncState(
           const item = byPath.get(path),
             entry = {
               path,
+              ...(item?.reason ? { reason: item.reason } : {}),
               base: item?.base ?? null,
               left: item?.left ?? l.get(path) ?? null,
               right: item?.right ?? r.get(path) ?? null,

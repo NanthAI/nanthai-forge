@@ -16,7 +16,7 @@ const { log } = await import(moduleUrl('../convex/projectViewActions.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 test('hosted log pages read only retained run bytes and recheck current read authority', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-hosted-log-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'source');
   mkdirSync(root);
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import type { MutationCtx } from './_generated/server';
 import { activeProject } from './projectAuthority';
 import { requireLandingLease, type LandingClaim } from './projectHostedLandingControl';
@@ -237,6 +238,7 @@ export async function publishAcceptance(ctx: MutationCtx, claim: LandingClaim, n
   await writeLanding(ctx, row, next, false);
   await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, queue, now);
+  await enqueueGithubMirror(ctx, project, receipt);
   if (receipt.completion.enabled && plan.inputPages) await scheduleAcceptanceCompletion(ctx, identity);
   return { status: 'landed' as const, receipt };
 }

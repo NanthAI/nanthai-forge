@@ -24,7 +24,7 @@ import { digest } from '../dist/hash.js';
 import { saveFixture, api, jobApi } from './hosted-saves-fixture.mjs';
 function directory(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-save-fixture-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return root;
 }
 function marker(root, s, materialized = ['a.txt']) {

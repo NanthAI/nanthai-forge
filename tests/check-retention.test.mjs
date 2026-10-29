@@ -43,7 +43,7 @@ function replace(p, collection, id, patch) {
 async function fixture(t) {
   const scan = mockProcessCoverage(t),
     root = mkdtempSync(join(tmpdir(), 'forge-retention-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'synthetic\n');
   initNative(root);
   const agent = new AgentWorkflow(root),

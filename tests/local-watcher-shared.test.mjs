@@ -48,7 +48,7 @@ test(
   { timeout: 15000 },
   async t => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-shared-watch-')));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     const directory = join(root, '.forge', 'work');
     mkdirSync(directory, { recursive: true });
     const clients = Array.from({ length: 5 }, () => watching(t, root));
@@ -138,7 +138,7 @@ test(
 
 test('a shared helper never recreates an owner deleted before startup', t => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-deleted-watch-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const directory = join(root, '.forge', 'work');
   mkdirSync(directory, { recursive: true });
   rmSync(root, { recursive: true, force: true });
@@ -156,7 +156,7 @@ test(
   { timeout: 15000 },
   async t => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-watch-handshake-')));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     const directory = join(root, '.forge', 'work');
     mkdirSync(directory, { recursive: true });
     const prefix = join(root, '.forge', 'handshake');
@@ -197,7 +197,7 @@ test(
 
 test('closing the last subscription joins an in-flight helper election without killing peer service', async t => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-watch-startup-close-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const directory = join(root, '.forge', 'work');
   mkdirSync(directory, { recursive: true });
   let kills = 0;

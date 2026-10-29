@@ -21,7 +21,7 @@ function fixture(t) {
   mkdirSync(root);
   writeFileSync(join(root, 'a.ts'), 'source original\n');
   initNative(root);
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return { directory, store: new WorkStore(root), source: new NativeSource(root) };
 }
 test('shared roots validate each unique State and blob once, with fresh checks in a new scope', t => {

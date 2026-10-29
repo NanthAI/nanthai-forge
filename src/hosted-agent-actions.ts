@@ -9,7 +9,12 @@ import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { saveHostedLane } from './hosted-save-client.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { hostedLifecycleRequestSchema } from './hosted-lifecycle.js';
-import { hostedCheckRequestSchema } from './hosted-check.js';
+import { randomUUID } from 'node:crypto';
+import { hostedCheckRequestSchema, hostedMacRunnerSchema } from './hosted-check.js';
+import { hostedMacRuntime } from './hosted-mac-lease.js';
+import { checkEnvironment } from './check-environment.js';
+import { autonomyPolicySchema, reviewReason } from './autonomy-policy.js';
+import type { HostedAgentCapabilities } from './hosted-agent-contract.js';
 import { hostedLandingRequestSchema, hostedLandingCancelSchema } from './hosted-landing.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -77,6 +82,193 @@ async function checkSelection(
     expectedEnvironment: command.expectedEnvironment ?? settings.configuration.environmentFingerprint,
   };
 }
+type HostedQuery = HostedAgentSession['query'];
+type HostedDefinition = { version: number; check: { id: string; name: string; definition: string } };
+const definitionPage = z.object({
+  page: z.array(
+    z.object({
+      version: z.number(),
+      check: z.looseObject({ id: z.string(), name: z.string(), definition: z.string() }),
+    }),
+  ),
+  isDone: z.boolean(),
+  continueCursor: z.string(),
+});
+const currentSettings = z.object({
+  configuration: z
+    .looseObject({
+      provider: z.string(),
+      machineId: z.string().optional(),
+      repository: z.string().optional(),
+      runsOn: z.string().optional(),
+      credential: z.unknown().optional(),
+    })
+    .nullable(),
+  configurationDigest: z.string().nullable(),
+});
+/** Definitions are a handful of rows, paged 100 at a time. */
+async function hostedDefinitions(query: HostedQuery) {
+  const found: HostedDefinition[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = definitionPage.parse(await query('projectHostedCheckDefinitions:list', { cursor }));
+    found.push(...page.page);
+    cursor = page.isDone ? null : page.continueCursor;
+  } while (cursor !== null);
+  return found;
+}
+/** The GitHub Actions runner as the server will use it. app-direct: Convex
+ * dispatches forge-check.yml on main with an App token whose installation is
+ * derived per operation; legacy-credential: the older export/controller path. */
+function actionsRunnerSettings(configuration: z.infer<typeof currentSettings>['configuration']) {
+  if (configuration?.provider !== 'github-actions') return null;
+  const direct = configuration.credential === undefined;
+  return {
+    mode: direct ? ('app-direct' as const) : ('legacy-credential' as const),
+    repository: configuration.repository ?? null,
+    workflow: '.github/workflows/forge-check.yml',
+    ref: 'main',
+    runsOn: configuration.runsOn ?? null,
+    installation: direct ? 'derived per operation via the GitHub App' : 'from the credential reference',
+    results: direct ? 'OIDC session plus workflow_run webhook' : 'controller callback',
+  };
+}
+/** Read-only: check definitions, runner and acceptance policy, and what still blocks an agent landing. */
+export async function hostedCheckSettings(query: HostedQuery, capabilities: HostedAgentCapabilities) {
+  const [definitions, current, read] = await Promise.all([
+    hostedDefinitions(query),
+    query('projectHostedCheckDefinitions:current', { checkId: '' }).then(value =>
+      currentSettings.parse(value),
+    ),
+    query('projectAutonomy:read', {}),
+  ]);
+  const policy = autonomyPolicySchema.parse(read);
+  const review = reviewReason(policy, { kind: 'agent', id: capabilities.actor }, null);
+  const selected =
+    definitions.find(d => d.check.name === 'verify') ??
+    (definitions.length === 1 ? definitions[0] : undefined);
+  const blockers = [
+    ...(selected ? [] : ['No verify (or single) hosted check definition: run configure-check.']),
+    ...(current.configuration ? [] : ['No hosted check runner: run configure-runner.']),
+    ...(capabilities.checkCallbackConfigured
+      ? []
+      : ['FORGE_HOSTED_CHECK_KEY_ID is not set on the deployment.']),
+    ...(review ? [`Agent landings wait for review: ${review}.`] : []),
+  ];
+  return {
+    definitions: definitions.map(({ version, check }) => ({
+      checkId: check.id,
+      name: check.name,
+      definition: check.definition,
+      version,
+    })),
+    finishCheck: selected ? selected.check.id : null,
+    runner: current.configuration
+      ? { digest: current.configurationDigest, configuration: current.configuration }
+      : null,
+    actions: actionsRunnerSettings(current.configuration),
+    checkCallbackConfigured: capabilities.checkCallbackConfigured,
+    policy: { preset: policy.preset, acceptance: policy.acceptance },
+    agentLandsOnPass: review === null,
+    blockers,
+  };
+}
+async function configureCheckRequest(
+  session: HostedAgentSession,
+  command: z.infer<(typeof hostedAgentCommandSchemas)['configure-check']>,
+  operationId: string,
+) {
+  invariant(
+    [command.name, command.checkId, command.command].filter(Boolean).length <= 1 ||
+      Boolean(command.checkId && command.command && !command.name),
+    'BAD_ARGUMENT',
+    'Choose one check: name, checkId, or command (optionally with the checkId it replaces).',
+  );
+  const definitions = await hostedDefinitions(session.query);
+  const name = command.command?.name ?? command.name ?? (command.checkId ? undefined : 'verify');
+  const prior = command.checkId
+    ? definitions.find(d => d.check.id === command.checkId)
+    : definitions.find(d => d.check.name === name);
+  const pins = {
+    operationId,
+    authorityEpoch: session.capabilities.authority.epoch,
+    expected: command.expected !== undefined ? command.expected : (prior?.check.definition ?? null),
+  };
+  if (command.command)
+    return {
+      name: 'projectHostedCheckDefinitions:configure',
+      request: {
+        ...pins,
+        change: {
+          kind: 'definition',
+          checkId: command.checkId ?? prior?.check.id ?? randomUUID(),
+          command: command.command,
+        },
+      },
+    };
+  return {
+    name: 'projectHostedCheckImport:fromWork',
+    request: { ...pins, select: command.checkId ? { checkId: command.checkId } : { name: name! } },
+  };
+}
+async function configureRunnerRequest(
+  session: HostedAgentSession,
+  command: z.infer<(typeof hostedAgentCommandSchemas)['configure-runner']>,
+  operationId: string,
+) {
+  invariant(
+    Boolean(command.configuration) !== Boolean(command.provider) &&
+      !(command.machineId && command.provider !== 'mac') &&
+      !(command.repository && command.provider !== 'github-actions'),
+    'BAD_ARGUMENT',
+    'Choose provider:"mac" (optional machineId), provider:"github-actions" (repository), or a full configuration for another provider.',
+  );
+  const current = currentSettings.parse(
+    await session.query('projectHostedCheckDefinitions:current', { checkId: '' }),
+  );
+  if (command.provider === 'github-actions') {
+    // Secretless App runner: the server derives runtime/environment and resolves
+    // the installation through the App; no installation ID or credential is sent.
+    const repository =
+      command.repository ??
+      (current.configuration?.provider === 'github-actions' ? current.configuration.repository : undefined);
+    invariant(
+      typeof repository === 'string',
+      'BAD_ARGUMENT',
+      'Pass repository:"OWNER/NAME" for the github-actions runner.',
+    );
+    return {
+      name: 'projectHostedActionsConfigure:configure' as const,
+      request: {
+        operationId,
+        authorityEpoch: session.capabilities.authority.epoch,
+        expected: command.expected !== undefined ? command.expected : current.configurationDigest,
+        repository,
+      },
+    };
+  }
+  // The worker registers with the same values computed from its own package and
+  // process, so they are never typed by hand. Run both in the same environment.
+  const configuration = command.configuration
+    ? command.configuration
+    : hostedMacRunnerSchema.parse({
+        provider: 'mac',
+        machineId:
+          command.machineId ??
+          (current.configuration?.provider === 'mac' ? current.configuration.machineId : randomUUID()),
+        runtime: hostedMacRuntime,
+        environmentFingerprint: checkEnvironment().fingerprint,
+      });
+  return {
+    name: 'projectHostedCheckDefinitions:configure' as const,
+    request: {
+      operationId,
+      authorityEpoch: session.capabilities.authority.epoch,
+      expected: command.expected !== undefined ? command.expected : current.configurationDigest,
+      change: { kind: 'runner', configuration },
+    },
+  };
+}
 function checkLocalLane(session: HostedAgentSession, laneId?: string) {
   const marker = session.marker();
   invariant(
@@ -105,6 +297,27 @@ export async function executeHostedAgent(
       { projectId: session.address.projectId, request: canonicalPayload(request) },
     );
     return typeof result === 'string' ? JSON.parse(result) : result;
+  }
+  if (action === 'configure-check') {
+    const command = hostedAgentCommandSchemas['configure-check'].parse(input);
+    const selected = await session.journal.retain('configure-check-request', () =>
+      configureCheckRequest(session, command, operationId),
+    );
+    return session.mutation(selected.name, { request: canonicalPayload(selected.request) });
+  }
+  if (action === 'configure-runner') {
+    const command = hostedAgentCommandSchemas['configure-runner'].parse(input);
+    const selected = await session.journal.retain('configure-runner-target', () =>
+      configureRunnerRequest(session, command, operationId),
+    );
+    if (selected.name === 'projectHostedActionsConfigure:configure') {
+      const result = await session.exchange.client.action(makeFunctionReference<'action'>(selected.name), {
+        projectId: session.address.projectId,
+        request: canonicalPayload(selected.request),
+      });
+      return typeof result === 'string' ? JSON.parse(result) : result;
+    }
+    return session.mutation(selected.name, { request: canonicalPayload(selected.request) });
   }
   if (action === 'start') {
     const command = hostedAgentCommandSchemas.start.parse(input);

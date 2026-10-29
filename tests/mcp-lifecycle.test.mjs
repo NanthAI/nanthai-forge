@@ -9,7 +9,7 @@ import { mcpProcess, processes, eventually } from './mcp-lifecycle-fixture.mjs';
 
 function owner(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-mcp-lifecycle-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const synthetic = 1;\n');
   initNative(root);
   return { root, directory: join(root, '.forge', 'work') };

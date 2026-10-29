@@ -7,13 +7,23 @@ on:
         required: true
         type: string
       plan:
-        required: true
+        default: '[]'
+        required: false
+        type: string
+      deployment:
+        description: Convex site URL for the hosted App/OIDC path
+        required: false
+        default: ''
+        type: string
+      projectId:
+        required: false
+        default: ''
         type: string
 permissions:
   contents: read
 jobs:
   shard:
-    if: ${{ inputs.plan != '[]' }}
+    if: ${{ inputs.deployment == '' && inputs.plan != '[]' }}
     name: forge-shard-${{ matrix.shard }}
     runs-on: "ubuntu-latest"
     strategy:
@@ -32,6 +42,7 @@ jobs:
           FORGE_ACTIONS_PLAN: .github/forge-check-plan.json
           FORGE_ACTIONS_SHARD: ${{ matrix.shard }}
   static:
+    if: ${{ inputs.deployment == '' }}
     name: forge-static
     runs-on: "ubuntu-latest"
     steps:
@@ -45,3 +56,69 @@ jobs:
         env:
           FORGE_ACTIONS_PLAN: .github/forge-check-plan.json
           FORGE_ACTIONS_SHARD: static
+
+  hosted-plan:
+    if: ${{ inputs.deployment != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: control
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts && npm run build:core
+        working-directory: control
+      - id: plan
+        run: node control/scripts/hosted-actions-job.mjs plan
+        env:
+          FORGE_CONVEX_SITE: ${{ inputs.deployment }}
+          FORGE_PROJECT_ID: ${{ inputs.projectId }}
+          FORGE_RUN_ID: ${{ inputs.runId }}
+          FORGE_CANDIDATE: ${{ runner.temp }}/candidate
+      - run: tar -cf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP" candidate forge-actions-plan.json forge-actions-run.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: forge-candidate
+          path: ${{ runner.temp }}/candidate.tar
+  hosted-check:
+    needs: hosted-plan
+    name: forge-hosted-${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.hosted-plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: control
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts && npm run build:core
+        working-directory: control
+      - uses: actions/download-artifact@v4
+        with:
+          name: forge-candidate
+          path: ${{ runner.temp }}
+      - run: tar -xf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP"
+      - run: node control/scripts/hosted-actions-job.mjs run
+        env:
+          FORGE_CONVEX_SITE: ${{ inputs.deployment }}
+          FORGE_PROJECT_ID: ${{ inputs.projectId }}
+          FORGE_RUN_ID: ${{ inputs.runId }}
+          FORGE_CANDIDATE: ${{ runner.temp }}/candidate
+          FORGE_ACTIONS_SHARD: ${{ matrix.shard }}

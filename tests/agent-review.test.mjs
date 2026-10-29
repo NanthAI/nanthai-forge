@@ -16,7 +16,7 @@ function fixture(t, native = true) {
   let root;
   if (native) {
     const dir = mkdtempSync(join(tmpdir(), 'forge-agent-review-'));
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     root = join(dir, 'owner');
     mkdirSync(root);
   } else root = gitFixture(t);

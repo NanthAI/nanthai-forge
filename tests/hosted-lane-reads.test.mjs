@@ -152,7 +152,7 @@ test('full/sparse checkout uses bounded indexed membership/signing with no Work 
   exchange.client = { query: run, mutation: run, action: run };
   const transport = new ConvexLaneTransport(exchange),
     directory = mkdtempSync(join(tmpdir(), 'forge-lane-reads-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const request = paths => ({
     url: 'https://fixture.invalid',
     projectId,

@@ -15,7 +15,7 @@ import { WorkService } from '../dist/work.js';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-work-edit-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.txt'), 'synthetic\n');
   initNative(root);
   return new WorkStore(root);

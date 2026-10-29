@@ -23,7 +23,7 @@ import { readAutoSnapshot, snapshotLane } from '../dist/lane-auto-snapshot.js';
 
 async function fixture(t, files = { 'file.txt': 'one\n' }) {
   const root = mkdtempSync(join(tmpdir(), 'forge-auto-snapshot-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(join(root, path, '..'), { recursive: true });
     writeFileSync(join(root, path), text);

@@ -19,7 +19,7 @@ for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 function setup(t, count = 220) {
   const root = mkdtempSync(join('/tmp', 'forge-seed-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (let i = 0; i < count; i++) writeFileSync(join(root, `file-${i}.ts`), `export const value = ${i};\n`);
   initNative(root);
   const store = new WorkStore(root);

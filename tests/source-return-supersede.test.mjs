@@ -98,7 +98,7 @@ for (const crash of ['before server', 'lost server reply', 'before local commit'
       else process.env.FORGE_AUTH_TOKEN = previousToken;
     });
     const root = mkdtempSync(join(tmpdir(), 'forge-supersede-'));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     writeFileSync(join(root, 'a.ts'), 'export const a = 1;');
     initNative(root);
     const store = new WorkStore(root),

@@ -76,9 +76,7 @@ export const drive = internalAction({
     if (!raw) return null;
     const command = JSON.parse(raw) as FinishCommand;
     if (command.kind === 'plan') {
-      const storageId = await ctx.storage.store(new Blob([command.value], { type: 'application/json' }), {
-        sha256: command.pin.sha256,
-      });
+      const storageId = await ctx.storage.store(new Blob([command.value], { type: 'application/json' }));
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedFinishDriver:resume'), {
         ...input,
         command: raw,

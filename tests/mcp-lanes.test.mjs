@@ -32,12 +32,17 @@ const files = {
   'a.ts': 'export const value = 1;\n',
   'b.ts': 'import { value } from "./a"; export const answer = value;\n',
 };
+// node:test runs after hooks in registration order; the root must outlive the MCP server.
+const closers = new WeakMap();
 function setup(t, native) {
   const root = native ? mkdtempSync(join(tmpdir(), 'forge-mcp-native-lanes-')) : fixture(t, files);
   let env = process.env,
     called;
   if (native) {
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(async () => {
+      await closers.get(t)?.();
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    });
     for (const [path, bytes] of Object.entries(files)) write(root, path, bytes);
     initNative(root);
     const bin = join(root, '.forge', 'no-git');
@@ -65,8 +70,11 @@ async function connect(t, root, env, work = true) {
     stderr += chunk;
   });
   await client.connect(transport);
+  let closing;
+  const close = () => (closing ??= client.close());
+  closers.set(t, close);
   t.after(async () => {
-    await client.close();
+    await close();
     // Concurrent owner observers can legitimately report FIFO lock progress on
     // stderr. Protocol output is still parsed by the SDK; other diagnostics fail.
     const diagnostics = stderr.split('\n').filter(line => line && !line.startsWith('waiting for lock: '));

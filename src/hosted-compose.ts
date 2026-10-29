@@ -76,7 +76,13 @@ export const composeConflictPageSchema = z
     paths: z
       .array(
         z
-          .object({ path: z.string(), base: file.nullable(), left: file.nullable(), right: file.nullable() })
+          .object({
+            path: z.string(),
+            base: file.nullable(),
+            left: file.nullable(),
+            right: file.nullable(),
+            reason: z.string().optional(),
+          })
           .strict(),
       )
       .min(1)

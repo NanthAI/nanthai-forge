@@ -25,7 +25,7 @@ import { policyPreset, editedPolicy } from '../dist/autonomy-policy.js';
 const at = () => new Date().toISOString();
 function fixture(t, enabled = true) {
   const root = mkdtempSync(join(tmpdir(), 'forge-owner-root-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.txt'), 'base a');
   writeFileSync(join(root, 'b.txt'), 'base b');
   writeFileSync(join(root, '.gitignore'), 'ignored/\n');

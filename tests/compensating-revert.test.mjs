@@ -27,7 +27,7 @@ for (const variant of ['binary', 'mode', 'symlink', 'delete', 'add']) {
         [accepted.sha256],
       );
     const root = mkdtempSync(join(tmpdir(), 'forge-compensation-parity-'));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     const source = new NativeSource(root);
     for (const bytes of f.objects.values()) source.put(bytes);
     const expected = compensatingState(source, previous.sha256, accepted.sha256, at),
@@ -67,7 +67,7 @@ for (const variant of ['binary', 'mode', 'symlink', 'delete', 'add']) {
 
 test('native compensation still surfaces later overlap as conflict', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-compensation-conflict-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const source = new NativeSource(root),
     file = text => ({ path: 'f', blob: source.put(Buffer.from(text)), mode: 'file' });
   const previous = source.writeState([file('base\n')], [], 'base', at),

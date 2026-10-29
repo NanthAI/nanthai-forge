@@ -31,7 +31,7 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const invalid = error => error.code === 'INVALID_WORK_BACKUP';
 function temporary(t) {
   const path = realpathSync(mkdtempSync(join(tmpdir(), 'forge-artifact-alias-')));
-  t.after(() => rmSync(path, { recursive: true, force: true }));
+  t.after(() => rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return path;
 }
 async function retainedOutputs(t) {

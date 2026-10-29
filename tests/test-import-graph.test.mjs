@@ -233,3 +233,17 @@ test('known adapter filenames never hide unknown module loading', () => {
   assert.ok(selected(files).tests.includes('tests/consumer.test.mjs'));
   assert.equal(selected(files).reasons['tests/consumer.test.mjs'].kind, 'dynamic');
 });
+
+test('source-backed maps read files individually without materializing the source inventory', () => {
+  const bytes = fixture();
+  class LazyFiles extends Map {
+    get(path) {
+      return bytes.get(path);
+    }
+    [Symbol.iterator]() {
+      throw new Error('Whole source text inventory must stay on disk.');
+    }
+  }
+  const lazy = new LazyFiles([...bytes.keys()].map(path => [path, '']));
+  assert.deepEqual([...testImportGraph(lazy).reverse], [...testImportGraph(bytes).reverse]);
+});

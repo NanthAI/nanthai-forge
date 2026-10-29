@@ -74,33 +74,30 @@ export function classifyCheckPath(path, files) {
     const folder = path.slice(0, path.lastIndexOf('/'));
     const name = path.slice(folder.length + 1);
     // Packagers run in CI (package-smoke), not under the test suite; manifests list everything.
-    const readers = [...files].filter(
-      ([file, text]) =>
-        !/^package(?:-lock)?\.json$|^scripts\/package-/.test(file) &&
-        (text.includes(path) || (text.includes(`${folder}/`) && text.includes(name))),
-    );
+    const readers = [...files.keys()].filter(file => {
+      if (/^package(?:-lock)?\.json$|^scripts\/package-/.test(file)) return false;
+      const text = files.get(file);
+      return text.includes(path) || (text.includes(`${folder}/`) && text.includes(name));
+    });
     if (!readers.length) return null;
     // Product code that reads the document is covered by the tests naming that module.
     const modules = readers
-      .filter(([file]) => file.startsWith('src/'))
-      .map(([file]) => posix.basename(file).replace(/\.[^.]+$/, ''));
+      .filter(file => file.startsWith('src/'))
+      .map(file => posix.basename(file).replace(/\.[^.]+$/, ''));
     return {
       domain: 'skills',
-      seeds: [path, ...readers.filter(([file]) => !file.startsWith('src/')).map(([file]) => file)],
-      tests: [...files]
-        .filter(
-          ([file, text]) =>
-            /^tests\/[^/]+\.test\.mjs$/.test(file) &&
-            modules.some(
-              module =>
-                text.includes(module) ||
-                // A `*-cli` module serves the command of that name: tests spawning the CLI with it.
-                (/-cli$/.test(module) &&
-                  text.includes(`'${module.slice(0, -4)}'`) &&
-                  /dist\/cli|nforge/.test(text)),
-            ),
-        )
-        .map(([file]) => file),
+      seeds: [path, ...readers.filter(file => !file.startsWith('src/'))],
+      tests: [...files.keys()].filter(file => {
+        if (!/^tests\/[^/]+\.test\.mjs$/.test(file)) return false;
+        const text = files.get(file);
+        return modules.some(
+          module =>
+            text.includes(module) ||
+            (/-cli$/.test(module) &&
+              text.includes(`'${module.slice(0, -4)}'`) &&
+              /dist\/cli|nforge/.test(text)),
+        );
+      }),
       reason: 'Agent skill document and the tests that read it directly or through the module that does',
     };
   }

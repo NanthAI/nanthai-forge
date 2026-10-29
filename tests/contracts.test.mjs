@@ -183,7 +183,7 @@ test('export scanner agrees with the TypeScript parser on every source module', 
 });
 function world(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-contracts-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'src'));
   writeFileSync(join(root, 'src/lib.ts'), LIB);
   writeFileSync(

@@ -26,7 +26,7 @@ function fixture(t, files = {}) {
     });
   }
   const root = mkdtempSync(join(tmpdir(), 'forge-modal-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'fixture.txt'), 'synthetic source\n');
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -1215,7 +1215,7 @@ test('project token values stay out of Work, plans, receipts and logs', async t 
 test('external project file tokens are redacted even when controller exceptions contain them', async t => {
   const { work, run, path } = fixture(t);
   const external = mkdtempSync(join(tmpdir(), 'forge-project-modal-secret-'));
-  t.after(() => rmSync(external, { recursive: true, force: true }));
+  t.after(() => rmSync(external, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const file = join(external, 'credentials.json');
   writeFileSync(
     file,

@@ -16,7 +16,7 @@ export async function recoveryFixture(t, archive = false) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-recover-')),
     root = join(directory, 'original');
   mkdirSync(root);
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'source.ts'), 'export const value = 1;\n');
   initNative(root);
   const work = new WorkService(root, { kind: 'person', id: 'synthetic' });

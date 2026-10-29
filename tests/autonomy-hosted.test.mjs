@@ -22,7 +22,7 @@ const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
 async function hosted(t, partial = false) {
   const root = mkdtempSync(join(tmpdir(), 'forge-hosted-autonomy-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'original\n');
   initNative(root);
   const agent = new AgentWorkflow(root);

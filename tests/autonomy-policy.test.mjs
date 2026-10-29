@@ -34,7 +34,7 @@ import { allRecords } from '../dist/agent-lifecycle.js';
 import { git } from './helpers.mjs';
 async function project(t, native = true) {
   const root = mkdtempSync(join(tmpdir(), 'forge-autonomy-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.txt'), 'initial\n');
   writeFileSync(join(root, 'b.txt'), 'initial\n');
   if (native) initNative(root);

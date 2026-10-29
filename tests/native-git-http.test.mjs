@@ -62,7 +62,7 @@ for (const kind of ['plain', 'sha1', 'sha256'])
     { timeout: 900000 },
     async t => {
       const directory = mkdtempSync(join(tmpdir(), 'forge-native-http-'));
-      t.after(() => rmSync(directory, { recursive: true, force: true }));
+      t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
       const root = join(directory, 'native'),
         binary = randomBytes(1024 * 1024),
         clientRoot = join(directory, 'client');
@@ -349,7 +349,7 @@ for (const kind of ['plain', 'sha1', 'sha256'])
 
 test('Git-unavailable native edits/checkpoints/Views/acceptance/source remain usable while explicit compatibility fails', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-native-no-git-http-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'native');
   mkdirSync(root);
   writeFileSync(join(root, 'a.ts'), 'export const value = 1;\n');

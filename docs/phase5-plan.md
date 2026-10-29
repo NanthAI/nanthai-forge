@@ -301,6 +301,7 @@ Without the conditional G and replace-first I: about 13,100 non-test. To add: ab
 - **Size:** S–M. **Depends on:** B1.2e, B1.3b, B1.4b, B1.5a.
 - **Changes:** the dogfood project moves to hosted authority; old CLIs are refused with an upgrade message.
 - **Acceptance:** Route B passes on a clean machine; Route A is re-measured after the R2 purge of push-era objects (retaining every object referenced by kept backups). Times published in [operations](operations.md). One authority: every accept on the project goes through hosted CAS for seven days. **Metrics:** must not regress 3, 5 or 7. Metric 7 switches to its after-cutover form. No background process: like Git, a user needs no always-on local process after cutover (browser accepts and metadata sync work with the Mac asleep), and the dogfood login service is retired. Anything still kept running is opt-in, has one stated job and sends 0 Convex calls while idle.
+- **Status:** cutover applied 2026-10-28. The dogfood project now has server authority (epoch 1) on a fresh seed at owner revision 30028, taken during a write freeze, with main `77232cfe`. Hosted source work (save, compose, sync, finish) runs inside Convex in bounded, fanned-out steps; Modal is not used. Route B, the R2 purge, Route A and the seven-day watch are still open.
 
 ### B1.5c. Big-repo onboarding benchmark
 
@@ -518,6 +519,28 @@ Frozen under decision 4:
 ## After the bets
 
 The rest of the old Phase 5 list follows: an outside-user trial, a polished first project through GitHub import, and newcomer docs. Carried friction stays documented in the roadmap's Workflow friction section and is not scheduled; the hub-module split for test selection is likely dissolved by B2.1.
+
+## Gate parity (G1–G8, added 2026-10-28)
+
+**Target:** a full check of 10 minutes or less on free GitHub-hosted Actions, a scoped check of 5 minutes or less, $0
+for public repositories, and idle 0. **Reference point:** an outside multi-agent project cut its gate from 40–70 minutes to
+about 6 minutes with paid on-demand VMs, warm snapshots and parallel boxes. These slices run after the hosted Actions
+runner is qualified.
+
+| # | Slice |
+| --- | --- |
+| G1 | Warm dependencies and build on Actions: cache keyed by lockfile and toolchain; build once, reuse it across shards. |
+| G2 | Shard count from measured timings, toward the free concurrent-job limit. |
+| G3 | Scoped checks on, with post-accept full main checks active. Merged with B2.5. |
+| G4 | Flake containment: retry a failed test file once; a pass on retry is recorded as flaky and surfaced, never silently green. Merged with B2.4. |
+| G5 | The check report lists every failed test file. |
+| G6 | A runner label for the hosted Actions runner, so hosted projects can keep their own runners (BYOCI parity). |
+| G7 | Per-machine content cache and direct R2 reads for Mac and self-hosted check workers. |
+| G8 | Measure and publish gate time (p50/p90), dollars per landing, and grouped landings against a GitHub merge queue. Re-run E3. |
+
+Paid compute providers need owner approval and a spend limit first.
+
+A check must not share its machine with agents' builds or test runs: on 2026-10-28 a Mac check that overlapped five builders' test suites failed three timing-sensitive files that pass when the machine is quiet. Hosted Actions shards avoid this by design.
 
 ## Exit criteria
 

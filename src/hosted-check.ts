@@ -45,11 +45,11 @@ export const hostedActionsRunnerSchema = z
   .object({
     provider: z.literal('github-actions'),
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
-    installationId: text,
+    installationId: text.optional(),
     runsOn: text,
     runtime: checkHash,
     environmentFingerprint: checkHash,
-    credential,
+    credential: credential.optional(),
   })
   .strict();
 export const hostedMacRunnerSchema = z
@@ -160,6 +160,17 @@ export const hostedCheckRunSchema = z
     contractReports: semanticReportsSchema.optional(),
     checkLogs: checkLogsSchema.optional(),
     keyId: z.string().regex(/^[A-Z0-9_]+$/),
+    actions: z
+      .object({
+        reservedAt: checkNumber,
+        fence: checkNumber,
+        watchdog: z.string().nullable(),
+        outcome: z.enum(['accepted', 'unknown', 'rejected']),
+        cancelScheduled: z.boolean().optional(),
+        workflowSha: z.string().optional(),
+      })
+      .strict()
+      .optional(),
     dispatchKey: checkHash,
     dispatchStarted: z.boolean(),
     recoveryUsed: z.boolean(),

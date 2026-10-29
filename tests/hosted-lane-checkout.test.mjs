@@ -25,7 +25,7 @@ import { nativeFile } from '../dist/native-file.js';
 import { digest } from '../dist/hash.js';
 function setup(t) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-lane-checkout-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'client'),
     objects = new Map(),
     calls = { select: 0, objects: [], downloads: [] };

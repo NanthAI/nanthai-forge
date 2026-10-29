@@ -20,7 +20,7 @@ import { fixture as landingFixture } from './landing-batch-fixture.mjs';
 
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-repair-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const name of ['a', 'b', 'c']) writeFileSync(join(root, `${name}.txt`), '0\n');
   initNative(root);
   const agent = new AgentWorkflow(root),

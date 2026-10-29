@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { githubMirrorTables } from './projectGithubMirrorFields';
+import { sourceStepTables } from './projectSourceStepFields';
 import { workDetailMigration, workDetailTables } from './projectWorkDetailFields';
 import { hostedSeedTables } from './projectHostedSeedFields';
 import { backfillFields } from './r2BackfillFields';
@@ -406,6 +408,8 @@ export const projectProposalDocument = v.object({
   ...projectProposalFields,
 });
 export default defineSchema({
+  ...githubMirrorTables,
+  ...sourceStepTables,
   ...workDetailTables,
   projectCheckLogCleanupPages: defineTable({
     projectId: v.id('hostedProjects'),

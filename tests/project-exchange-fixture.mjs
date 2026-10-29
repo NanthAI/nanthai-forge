@@ -94,7 +94,7 @@ export async function checkpoint(t, s, additionalObjects = 0) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-publication-')),
     root = join(dir, 'owner');
   mkdirSync(root);
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
   return preparedCheckpoint(s, new WorkStore(root), additionalObjects);

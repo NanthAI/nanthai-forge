@@ -69,7 +69,7 @@ function setup(t, git = false, empty = false) {
     value: { intent },
   } = privateOwner(JSON.stringify({ git, empty }));
   const root = join(directory, 'owner');
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const store = new WorkStore(root);
   const s = fixture();
   s.tables.hostedProjects.clear();

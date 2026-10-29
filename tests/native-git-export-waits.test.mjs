@@ -21,7 +21,7 @@ function fixture(t) {
   writeFileSync(join(root, 'source.txt'), 'immutable source\n');
   const { head } = initNative(root),
     target = join(directory, 'export');
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return { directory, root, head, target };
 }
 function fakeGit(directory, script) {

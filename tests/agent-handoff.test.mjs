@@ -19,7 +19,7 @@ import { records, ids, states, guidance } from './agent-brief-fixture.mjs';
 const cli = resolve('dist/cli.js');
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-handoff-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'example.txt'), 'synthetic source\n');
   initNative(root);
   const agent = new AgentWorkflow(root);

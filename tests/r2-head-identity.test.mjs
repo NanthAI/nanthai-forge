@@ -59,7 +59,7 @@ test('CLI direct download and backfill spool/sample request identity and verify 
     pin = { digest: digest(bytes), size: bytes.length },
     directory = mkdtempSync(join(tmpdir(), 'forge-identity-')),
     file = join(directory, 'spool');
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     identity(init);

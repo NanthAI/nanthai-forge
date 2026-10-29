@@ -12,7 +12,7 @@ import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 const main = await import(moduleUrl('../convex/projectMain.ts'));
 function setup(t) {
   const dir = mkdtempSync(join(tmpdir(), 'hosted-main-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'client'),
     objects = new Map();
   const blob = text => {

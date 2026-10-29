@@ -29,7 +29,11 @@ type Transfer = {
 };
 /** Authenticated control ingress only. Every grant AND post-HEAD commit rechecks
  * original execution/fence/epoch and current contributor/project authority. */
-export async function authorizeSourceTransfer(ctx: MutationCtx, request: Omit<Transfer, 'pin'>) {
+export async function authorizeSourceTransfer(
+  ctx: MutationCtx,
+  request: Omit<Transfer, 'pin'>,
+  { lease = true }: { lease?: boolean } = {},
+) {
   const input = JSON.parse(request.input),
     job = await loadSourceJob(ctx, request.projectId, input.jobId);
   const row =
@@ -77,7 +81,7 @@ export async function authorizeSourceTransfer(ctx: MutationCtx, request: Omit<Tr
     canonicalPayload(input) === canonicalPayload(expected) &&
       job.status === 'running' &&
       job.executionId === request.executionId &&
-      job.control.workerUntil > Date.now(),
+      (!lease || job.control.workerUntil > Date.now()),
     'SOURCE_JOB_FENCED',
     'The source transfer execution changed or expired.',
   );

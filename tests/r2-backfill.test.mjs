@@ -17,7 +17,7 @@ const allRows = s => [...s.tables.projectObjects.values()];
 async function harness(t) {
   const { s, fake } = await setup(t),
     dir = mkdtempSync(join(tmpdir(), 'forge-r2-backfill-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const run = (name, args) => backend[name]._handler(s.ctx, { projectId: 'project', ...args });
   const transport = {
     page: (kind, cursor, verify) => run('page', { kind, cursor, verify }),

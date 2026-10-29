@@ -27,7 +27,7 @@ import { digest } from '../dist/hash.js';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-github-source-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const repo = join(root, 'repo');
   mkdirSync(repo);
   const git = args =>

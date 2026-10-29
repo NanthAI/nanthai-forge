@@ -13,7 +13,7 @@ const loader = new URL('./convex-module.mjs', import.meta.url).href;
 
 function workspace(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-module-cache-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const cache = join(root, 'cache');
   const src = join(root, 'sources');
   mkdirSync(src);

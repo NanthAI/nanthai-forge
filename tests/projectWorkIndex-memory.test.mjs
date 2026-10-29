@@ -11,7 +11,7 @@ const exec = promisify(execFile);
 const worker = new URL('./projectWorkIndex-memory-worker.mjs', import.meta.url).pathname;
 test('128 MB server-held record index stays below the Node action memory limit', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-index-memory-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await exec(process.execPath, [worker, 'fixture', directory]);
   const run = async mode => {
     const { stdout } = await exec(process.execPath, ['--max-old-space-size=384', worker, mode, directory], {

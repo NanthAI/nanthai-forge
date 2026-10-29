@@ -32,7 +32,7 @@ import {
 
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-release-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const owner = join(dir, 'owner');
   mkdirSync(owner);
   writeFileSync(join(owner, 'a.ts'), 'export const a = 1;\n');

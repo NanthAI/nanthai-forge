@@ -10,7 +10,7 @@ import { observeSpend, SPEND_WINDOW_MS } from '../dist/auto-exchange-spend.js';
 const context = { projectId: 'synthetic', deployment: 'https://synthetic.invalid' };
 function script(t, body) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-fake-usage-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const command = join(directory, 'usage command');
   writeFileSync(command, `#!${process.execPath}\n${body}\n`, { mode: 0o700 });
   return command;

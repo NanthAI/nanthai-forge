@@ -32,7 +32,7 @@ import { digest } from '../dist/hash.js';
 const now = Date.now();
 function fixture(t, runner = 'github-actions', count = 1, bytes = 1024) {
   const root = mkdtempSync(join(tmpdir(), 'forge-byoci-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const value = 1;\n');
   initNative(root);
   const work = new WorkService(root),
@@ -237,7 +237,7 @@ test('old exchange pull never downloads provider logs and preserves original man
 });
 test('compact framing retains split machine reports, coverage and bounded failure context, drops passing chatter', t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-compact-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const file = join(directory, 'output.evidence'),
     writer = new CompactCheckWriter(file);
   const marker =
@@ -648,7 +648,7 @@ for (const shared of [false, true])
 test('Mac pipe logs stay in private machine files and expire on a later check start', async t => {
   const { localMacLogFiles } = await import('../dist/check-local-log-files.js');
   const root = mkdtempSync(join(tmpdir(), 'forge-local-mac-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const runId = randomUUID(),
     logs = localMacLogFiles('synthetic', runId, root);
   async function* bytes() {

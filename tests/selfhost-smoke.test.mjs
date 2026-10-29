@@ -18,7 +18,7 @@ test('smoke entrypoint reports sanitized configuration failures and retains priv
   assert.doesNotMatch(result.stdout + result.stderr, /synthetic-private-token|CONVEX_SELF_HOSTED_ADMIN_KEY=/);
   const directory = /Private diagnostic data retained at (.+); credentials/.exec(result.stderr)?.[1];
   assert(directory);
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   assert.equal(statSync(directory).mode & 0o777, 0o700);
   assert.equal(statSync(join(directory, 'failure.log')).mode & 0o777, 0o600);
 });

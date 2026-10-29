@@ -26,7 +26,7 @@ test('Modal collection detects silent streams, reconnects and requires confirmed
 
 test('installed remote worker preserves command failure and streams only safe selected output', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-modal-worker-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'output.bin'), 'synthetic artifact');
   const command = {
     command: [process.execPath, '-e', 'process.exitCode = 7'],

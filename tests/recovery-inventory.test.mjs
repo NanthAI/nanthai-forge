@@ -32,7 +32,7 @@ for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-recovery-inventory-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'source.ts'), 'export const value = 1;\n');

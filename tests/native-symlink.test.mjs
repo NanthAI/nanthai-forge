@@ -21,7 +21,7 @@ import { syncWorkspace, syncTestHooks } from '../dist/native-sync-workspace.js';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-native-symlink-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const owner = join(root, 'owner');
   mkdirSync(owner);
   nativeMarker(owner);

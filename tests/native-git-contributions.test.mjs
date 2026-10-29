@@ -68,7 +68,7 @@ function git(root, args, { input, fail = false } = {}) {
 }
 async function fixture(t, kind = 'plain', { wireClone = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-native-git-return-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
   let rawBase;
   if (kind === 'plain') {

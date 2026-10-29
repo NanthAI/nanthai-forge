@@ -19,7 +19,7 @@ const plan = (left, right) => ({
 });
 async function parity(t, s, left, right) {
   const root = mkdtempSync(join(tmpdir(), 'forge-sync-parity-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const source = new NativeSource(root);
   for (const bytes of s.objects.values()) source.put(bytes);
   const merged = source.compose(left.sha256, right.sha256, message, at, { insertionOrder: 'right-first' });

@@ -10,7 +10,7 @@ import { withLandingWorker } from '../dist/landing-worker-context.js';
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-journal-reads-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const folder = join(directory, 'agent-finish');
   mkdirSync(folder);
   return { store: { directory }, folder };

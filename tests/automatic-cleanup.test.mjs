@@ -30,7 +30,7 @@ const run = (agent, action, body = {}) =>
   agent.dispatch({ action, ...(action === 'set-policy' ? { operationId: randomUUID() } : {}), ...body });
 async function fixture(t, enabled = true, script = "console.log('retained log')", artifactPaths) {
   const root = mkdtempSync(join(tmpdir(), 'forge-auto-clean-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'original\n');
   initNative(root);
   const agent = new AgentWorkflow(root),

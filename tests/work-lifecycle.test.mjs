@@ -61,7 +61,7 @@ test('historical status replay retains exact old schema and fields; completion a
 });
 test('native Intent and Lane completion preserve source, dirty files, pins and recoverable lifecycle; reopening is explicit', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-lifecycle-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'source.ts'), 'export const value=1;\n');
@@ -125,7 +125,7 @@ test('Git-backed lifecycle uses the same explicit completion and reopening witho
 
 test('ordinary indexed writes preserve minimal portable formats1 through7 and a stored8 owner cannot be downgraded', t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-format-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'source.ts'), 'export const value=1;');

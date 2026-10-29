@@ -88,7 +88,7 @@ function capture(t) {
 }
 function stub(t, data) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-child-env-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return {
     root: directory,
     directory,
@@ -104,7 +104,7 @@ async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-env-owner-'));
   writeFileSync(join(root, 'a.txt'), 'base');
   const initial = initNative(root);
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return { root, initial, workflow: new AgentWorkflow(root) };
 }
 function bind(store) {
@@ -366,7 +366,7 @@ test('release stage worker launch and ordinary command both drop planted unrelat
     syncBuiltinESMExports();
   });
   const directory = mkdtempSync(join(tmpdir(), 'forge-release-env-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   releaseChild(
     { node: process.execPath, stages: [{ name: 'package', attempts: [{ id: randomUUID(), directory }] }] },
     'package',
@@ -407,7 +407,7 @@ test('Actions check launcher drops unrelated credentials from its runner environ
 });
 test('fixed Modal supervisor drops planted secrets before starting a project command', t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-modal-env-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(directory, 'modal-check'));
   copyFileSync(
     new URL('../scripts/modal-check/worker.mjs', import.meta.url),

@@ -31,7 +31,7 @@ const isStale = error => (error.data?.code ?? error.code) === 'SOURCE_AUTHORITY_
 const isHosted = error => error.code === 'HOSTED_AUTHORITY';
 function setup(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-source-authority-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.txt'), 'synthetic source\n');
   const head = initNative(root).head,
     store = new WorkStore(root),

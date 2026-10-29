@@ -93,7 +93,7 @@ test('computed module domains widen; unknown dynamic imports conservatively incl
 });
 test('pins must match the runner inputs; malformed and absent manifests fall back', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-impact-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const path = join(root, 'changes.json');
   const base = 'a'.repeat(64),
     head = 'b'.repeat(64);
@@ -365,7 +365,7 @@ test('interaction missing, malformed, ineligible, deleted and tooling pins fail 
 });
 test('malformed interaction envelope never becomes an ordinary scoped comparison', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-interaction-pins-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const path = join(root, 'changes.json'),
     pins = interaction(['src/leaf.ts'], ['src/middle.ts']);
   const input = {
@@ -589,7 +589,7 @@ test('forge-check dependencies and build config importers require full selection
 
 test('source inventory includes package commands for script selection', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-script-inventory-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const dir of ['src', 'web', 'convex', 'netlify', 'tests', 'scripts']) mkdirSync(join(root, dir));
   writeFileSync(
     join(root, 'package.json'),

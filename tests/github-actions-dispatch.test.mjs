@@ -290,7 +290,7 @@ test('reopening a stranded batch restores all interrupted members and retains or
 test('same-op recovery excludes completed outcomes, cancellation and changed dispatch evidence', async t => {
   const { strandedActionsRun } = await import('../dist/github-actions-recovery.js');
   const root = mkdtempSync(join(tmpdir(), 'forge-actions-recovery-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const { mkdirSync } = await import('node:fs');
   const path = join(root, 'check-run');
   mkdirSync(path);

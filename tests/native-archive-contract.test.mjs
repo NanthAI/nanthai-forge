@@ -101,7 +101,7 @@ const entry = (name, bytes) =>
   Buffer.concat([header(name, bytes.length), bytes, Buffer.alloc((512 - (bytes.length % 512)) % 512)]);
 async function nativeFixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-schema2-metadata-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'a.ts'), 'export const a=1;\n');

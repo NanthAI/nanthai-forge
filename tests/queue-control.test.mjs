@@ -17,7 +17,7 @@ import { checkEnvironment } from '../dist/work-run.js';
 
 function fixture(t) {
   const path = mkdtempSync(join(tmpdir(), 'forge-queue-control-'));
-  t.after(() => rmSync(path, { recursive: true, force: true }));
+  t.after(() => rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const queues = [];
   return {
     path,
@@ -238,7 +238,7 @@ test('restarting finish retains its live View/run and completed evidence', { tim
   const { initNative } = await import('../dist/native-work.js');
   const { trustAgents } = await import('./autonomy-fixture.mjs');
   const root = mkdtempSync(join(tmpdir(), 'forge-finish-adopt-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'source.txt'), 'base');
   initNative(root);
   trustAgents(root);
@@ -286,7 +286,7 @@ test(
     const { initNative } = await import('../dist/native-work.js');
     const { AgentWorkflow } = await import('../dist/agent-workflow.js');
     const root = mkdtempSync(join(tmpdir(), 'forge-queue-signal-'));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     writeFileSync(join(root, 'source.txt'), 'source');
     initNative(root);
     const agent = new AgentWorkflow(root);

@@ -20,11 +20,16 @@ type Variant = NativeFile | undefined;
 type Tree = Map<string, Variant[]>;
 export type NativeMergeConflict = {
   path: string;
+  reason?: string;
   base?: NativeFile;
   left?: NativeFile;
   right?: NativeFile;
 };
 const same = (x: Variant, y: Variant) => x === y || (!!x && !!y && x.blob === y.blob && x.mode === y.mode);
+const conflictReason = (source: NativeSource, path: string) => {
+  const reason = source.mergeConflictReason?.(path);
+  return reason ? { reason } : {};
+};
 const unique = (items: Variant[]) => items.filter((item, i) => !items.slice(0, i).some(x => same(x, item)));
 
 /** Virtual bases live only for this operation: no synthetic State or timestamp is persisted. */
@@ -63,6 +68,10 @@ export function mergeNativeFiles(
     let blob =
       x.blob === original.blob ? y.blob : y.blob === original.blob || x.blob === y.blob ? x.blob : undefined;
     if (!blob && ![original, x, y].some(file => file.mode === 'symlink')) {
+      if (source.mergeContent) {
+        blob = source.mergeContent(original, x, y, options, resolved) ?? undefined;
+        return blob ? { path: x.path, mode, blob } : null;
+      }
       const resolutions: NativeTextResolution[] = [];
       const bytes = mergeNativeText(
         source.object(original.blob),
@@ -101,6 +110,7 @@ export function mergeNativeFiles(
         result.set(path, unique([...xs, ...ys, ...outcomes]));
         conflicts.push({
           path,
+          ...conflictReason(source, path),
           ...(originals[0] ? { base: originals[0] } : {}),
           ...(xs[0] ? { left: xs[0] } : {}),
           ...(ys[0] ? { right: ys[0] } : {}),
@@ -173,6 +183,7 @@ export function mergeNativeFiles(
       if (selected === null)
         conflicts.push({
           path,
+          ...conflictReason(source, path),
           ...(before ? { base: before } : {}),
           ...(x ? { left: x } : {}),
           ...(y ? { right: y } : {}),

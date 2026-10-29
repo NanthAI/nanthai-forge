@@ -31,7 +31,7 @@ const git = (root, ...args) =>
   }).trim();
 async function fixture(t, native = true) {
   const root = mkdtempSync(join(tmpdir(), 'forge-prepared-publication-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.txt'), 'a\n');
   writeFileSync(join(root, 'b.txt'), 'b\n');
   if (native) initNative(root);

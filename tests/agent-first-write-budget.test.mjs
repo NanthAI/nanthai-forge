@@ -17,7 +17,7 @@ import { PeersCache } from '../dist/agent-peers-cache.js';
 
 test('560 Lanes and 2200 Views: zero network calls, header-page reads, bounded memory and first-edit p95 under 200 ms', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-first-write-budget-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'Synthetic\n');
   initNative(root);
   const agent = new AgentWorkflow(root),

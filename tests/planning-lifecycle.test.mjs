@@ -23,7 +23,7 @@ function upgrade(work) {
 }
 async function native(t, unified = false) {
   const root = mkdtempSync(join(tmpdir(), 'forge-planning-lifecycle-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'synthetic\n');
   initNative(root);
   const work = new WorkService(root),

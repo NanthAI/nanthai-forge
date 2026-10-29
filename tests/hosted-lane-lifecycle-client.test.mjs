@@ -15,7 +15,7 @@ async function fixture(t) {
   const f = await lifecycleFixture(),
     base = mkdtempSync(join(tmpdir(), 'forge-lifecycle-client-')),
     root = join(base, 'client');
-  t.after(() => rmSync(base, { recursive: true, force: true }));
+  t.after(() => rmSync(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, '.forge'), { recursive: true });
   writeFileSync(join(root, 'a.txt'), 'original');
   writeFileSync(

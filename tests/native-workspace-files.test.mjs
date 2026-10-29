@@ -21,7 +21,7 @@ import { digest } from '../dist/hash.js';
 
 function fixture(t, size = 32 * 1024 * 1024) {
   const owner = realpathSync(mkdtempSync(join(tmpdir(), 'forge-clone-materialization-')));
-  t.after(() => rmSync(owner, { recursive: true, force: true }));
+  t.after(() => rmSync(owner, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const source = new NativeSource(owner),
     bytes = Buffer.alloc(size, 23),
     blob = source.put(bytes);

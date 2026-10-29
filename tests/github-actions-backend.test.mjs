@@ -25,7 +25,7 @@ import { editedPolicy, policyPreset } from '../dist/autonomy-policy.js';
 const read = path => JSON.parse(readFileSync(path, 'utf8'));
 function fixture(t, files = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-actions-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const [path, text] of Object.entries({ 'fixture.txt': 'synthetic source', ...files })) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
@@ -152,7 +152,7 @@ function transport(plan, journal, options = {}) {
 }
 function controllerFixture(t, groups = []) {
   const root = mkdtempSync(join(tmpdir(), 'forge-actions-control-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const plan = { runId: randomUUID(), output: root, groups };
   const journal = {
     commit: 'a'.repeat(40),
@@ -1846,7 +1846,7 @@ for (const mode of [
 test('stale check-ref sweep reads bounded pages and rotates through retained history', async t => {
   const { sweepActionsRefs } = await import('../dist/github-actions-cleanup.js');
   const root = mkdtempSync(join(tmpdir(), 'forge-actions-sweep-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const offsets = [];
   const store = {
     directory: root,

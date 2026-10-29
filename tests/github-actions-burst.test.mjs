@@ -40,7 +40,7 @@ function fakeRemote({ limit = 2, flaky = true } = {}) {
 }
 function controller(t, index) {
   const output = mkdtempSync(join(tmpdir(), 'forge-burst-'));
-  t.after(() => rmSync(output, { recursive: true, force: true }));
+  t.after(() => rmSync(output, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const plan = { runId: randomUUID(), output, source: output, groups: [], pin: 'p' };
   const journal = {
     pin: 'p',

@@ -19,7 +19,7 @@ for (const failure of [
 ]) {
   test(`synthetic static verification preserves ${failure} outcome with queued builds`, t => {
     const root = mkdtempSync(join(tmpdir(), 'forge-verify-static-'));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     const write = (path, text) => writeFileSync(join(root, path), text);
     for (const directory of [
       'scripts',

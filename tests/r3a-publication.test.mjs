@@ -18,7 +18,7 @@ async function local(t, harnessOptions, count = 2) {
   const h = await setup(t, harnessOptions),
     dir = mkdtempSync(join(tmpdir(), 'forge-r3a-')),
     root = join(dir, 'owner');
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(root);
   for (let i = 0; i < count; i++) writeFileSync(join(root, `file-${i}.txt`), `retained ${i}\n`);
   initNative(root);

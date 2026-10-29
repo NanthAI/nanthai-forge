@@ -14,6 +14,8 @@ import { workerObjectSchema, type WorkerObject, type WorkerPin } from './hosted-
 /** Trusted transport resolves current job-scoped grants; repo bytes supply no URL.
  * upload consumes the stream completely and commits only the supplied exact pin. */
 export interface SourceWorkerTransport {
+  publishRecipe?(object: WorkerPin, recipe: WorkerPin): Promise<void>;
+  prepareRead?(pins: WorkerPin[]): Promise<void>;
   describe?(sha256: string): Promise<WorkerObject>;
   describeAndRead?(sha256s: string[]): Promise<
     {
@@ -178,9 +180,27 @@ export class SourceWorkerReader {
       await rm(temporary, { force: true });
     }
   }
+  async bytes(input: WorkerObject): Promise<Buffer> {
+    return readFile(await this.file(input));
+  }
+  async publishGenerated(source: { object(id: string): Buffer }, ids: Iterable<string>) {
+    let window: Buffer[] = [],
+      size = 0;
+    for (const id of ids) {
+      const bytes = source.object(id);
+      if (window.length && (window.length === 100 || size + bytes.length > 8 * 1024 * 1024)) {
+        await this.publishMany(window);
+        window = [];
+        size = 0;
+      }
+      window.push(bytes);
+      size += bytes.length;
+    }
+    if (window.length) await this.publishMany(window);
+  }
   async json(pin: WorkerPin): Promise<unknown> {
     invariant(pin.size <= 2 * 1024 * 1024, 'SOURCE_PAGE_INVALID', 'Source protocol metadata must be paged.');
-    return JSON.parse(await readFile(await this.file({ object: pin, recipe: null }), 'utf8'));
+    return JSON.parse((await this.bytes({ object: pin, recipe: null })).toString('utf8'));
   }
   async publishFiles(paths: Iterable<string>) {
     let window: Buffer[] = [],

@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 
 export function fixture(t, files = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-test-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   git(root, ['init', '-q']);
   for (const [name, text] of Object.entries(files)) write(root, name, text);
   return root;

@@ -16,7 +16,7 @@ const git = (root, args) => execFileSync('git', ['-C', root, ...args], { encodin
 
 async function fixture(t, native = true) {
   const root = mkdtempSync(join(tmpdir(), 'forge-lane-tests-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const files = {
     'src/leaf.ts': 'export const answer = 1;\n',
     'src/importer.ts': "export { answer } from './leaf.js';\n",

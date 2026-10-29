@@ -21,7 +21,7 @@ const indexStore = await import(moduleUrl('../convex/projectWorkIndexStore.ts'))
 
 async function setup(t, size = 3 * 1024 * 1024, changed = false) {
   const root = mkdtempSync('/tmp/forge-index-large-');
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const value = 1;\n');
   initNative(root);
   const store = new WorkStore(root),

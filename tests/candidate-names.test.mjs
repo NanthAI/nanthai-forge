@@ -26,7 +26,7 @@ async function setup(t, engine = 'native') {
       ? fixture(t, { 'a.ts': 'export const a = 1;\n' })
       : mkdtempSync(join(tmpdir(), 'forge-candidate-'));
   if (engine === 'native') {
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
     initNative(root);
   } else {

@@ -184,7 +184,7 @@ test('provider metadata checks original size/digest before URL access, cancels i
 });
 async function nativeFixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-streamed-metadata-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'a.ts'), 'export const a=1;\n');

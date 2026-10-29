@@ -10,7 +10,7 @@ import { writeCheckScope } from '../dist/work-check-scope.js';
 import { fixture, write, git } from './helpers.mjs';
 const output = t => {
   const path = mkdtempSync(join(tmpdir(), 'forge-scope-'));
-  t.after(() => rmSync(path, { recursive: true, force: true }));
+  t.after(() => rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return path;
 };
 test('native comparison includes additions, removals, modifications and modes against pinned composed main', t => {

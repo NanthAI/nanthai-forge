@@ -15,6 +15,7 @@ import {
 import { hostedFinishBackoff } from '../dist/hosted-finish.js';
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
+  FORGE_SOURCE_PROVIDER: 'modal',
   FORGE_SOURCE_WORKER: 'fixed-worker',
   FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
   FORGE_SOURCE_KEY_ID: 'SYNTHETIC',
@@ -747,4 +748,68 @@ test('a main-race recompose retains newly accepted peer contracts in its named c
     1,
   );
   assert.equal((await f.current(state.id)).submission.observation.pendingReason, 'checking');
+});
+
+test('Convex source recompose reaches the ordinary checked finish receipt without Modal configuration or idle source wakes', async t => {
+  const f = await finishFixture(t);
+  const keys = [
+      'FORGE_SOURCE_PROVIDER',
+      'FORGE_SOURCE_WORKER',
+      'FORGE_SOURCE_RUNTIME',
+      'FORGE_SOURCE_KEY_ID',
+    ],
+    old = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+  for (const key of keys) delete process.env[key];
+  process.env.FORGE_SOURCE_PROVIDER = 'convex';
+  try {
+    const { state } = await begin(f);
+    assert.equal((await f.current(state.id)).submission.observation.pendingReason, 'checking');
+    f.moveMain();
+    await complete(f);
+    await complete(f);
+    const landed = await f.current(state.id);
+    assert.equal(landed.submission.phase, 'landed');
+    assert.equal(f.tables.projectSourceSteps.size, 1);
+    assert(f.metrics.convexSourceCalls.includes('projectConvexSource:step'));
+    assert.equal(f.pending().length, 0);
+    t.diagnostic(
+      JSON.stringify({
+        convexSourceCalls: f.metrics.convexSourceCalls,
+        convexStorageCalls: f.metrics.convexStorageCalls,
+        sourceExecutions: f.tables.projectSourceSteps.size,
+      }),
+    );
+  } finally {
+    for (const [key, value] of Object.entries(old)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('5,000-file / 512 MB finish recomposes after main advances and lands through one atomic acceptance', async t => {
+  const f = await finishFixture(t, { selectedFileCount: 5000 });
+  const previous = process.env.FORGE_SOURCE_PROVIDER;
+  process.env.FORGE_SOURCE_PROVIDER = 'convex';
+  try {
+    const { state } = await begin(f);
+    f.moveMain();
+    await complete(f);
+    await complete(f);
+    const landed = await f.current(state.id);
+    assert.equal(landed.submission.phase, 'landed');
+    assert.equal(f.tables.projectSourceSteps.size, 1);
+    assert.equal(f.pending().length, 0);
+    t.diagnostic(
+      JSON.stringify({
+        files: 5000,
+        logicalChangedBytes: 5000 * 100 * 1024,
+        convexCalls: f.metrics.convexSourceCalls.length,
+        storage: f.metrics.convexStorageCalls,
+      }),
+    );
+  } finally {
+    if (previous === undefined) delete process.env.FORGE_SOURCE_PROVIDER;
+    else process.env.FORGE_SOURCE_PROVIDER = previous;
+  }
 });

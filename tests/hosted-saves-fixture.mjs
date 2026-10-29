@@ -155,9 +155,12 @@ export async function saveFixture() {
     );
     if (progress.input) put(saveBytes(progress.input));
     const before = Object.fromEntries(
-      ['FORGE_SOURCE_WORKER', 'FORGE_SOURCE_RUNTIME', 'FORGE_SOURCE_KEY_ID'].map(k => [k, process.env[k]]),
+      ['FORGE_SOURCE_PROVIDER', 'FORGE_SOURCE_WORKER', 'FORGE_SOURCE_RUNTIME', 'FORGE_SOURCE_KEY_ID'].map(
+        k => [k, process.env[k]],
+      ),
     );
     Object.assign(process.env, {
+      FORGE_SOURCE_PROVIDER: 'modal',
       FORGE_SOURCE_WORKER: 'fixed-worker',
       FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
       FORGE_SOURCE_KEY_ID: 'SYNTHETIC',

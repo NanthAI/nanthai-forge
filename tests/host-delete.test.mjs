@@ -23,7 +23,7 @@ const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const deployment = 'https://fixture.convex.cloud';
 function setup(t, { bound = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-delete-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'hello.ts'), 'export const hello = 1;\n');
   initNative(root);
   const store = new WorkStore(root);

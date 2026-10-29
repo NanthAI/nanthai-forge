@@ -19,7 +19,7 @@ const archivedSource = [
 const content = 'export const synthetic = 1;\n';
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-capture-omission-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return root;
 }
 function put(root, path, bytes = content) {

@@ -18,7 +18,7 @@ function fixture(t) {
   mkdirSync(root);
   writeFileSync(join(root, 'base.txt'), 'unchanged source\n');
   const { head } = initNative(root);
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return { dir, root, source: new NativeSource(root), head };
 }
 function next(f, parents = [f.head], message = 'Synthetic edit') {

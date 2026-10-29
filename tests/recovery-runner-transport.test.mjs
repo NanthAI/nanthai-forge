@@ -75,7 +75,7 @@ test('opaque source recovery streams a large blob without reading it into a Buff
   const { NativeSource } = await import('../dist/native-source.js');
   const { RecoveryObjects } = await import('../dist/recovery-hosted-objects.js');
   const directory = mkdtempSync(join(tmpdir(), 'forge-route-b-stream-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'cache'),
     receipts = join(directory, 'receipts');
   mkdirSync(root);

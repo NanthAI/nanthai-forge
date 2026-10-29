@@ -14,7 +14,7 @@ import { pushNativeExchange, prepareNativeExchange } from '../dist/native-exchan
 import { digest } from '../dist/hash.js';
 function owner(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-small-scheduling-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (let i = 0; i < 64; i++) writeFileSync(join(root, `file-${i}.txt`), Buffer.alloc(65536, i + 1));
   initNative(root);
   return new WorkStore(root);

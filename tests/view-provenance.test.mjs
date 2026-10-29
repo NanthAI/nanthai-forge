@@ -15,7 +15,7 @@ import { alignment } from '../dist/view-line-attribution.js';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-provenance-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'a\nb\nc\nd\ne\nf\ng\nh\n');
   writeFileSync(join(root, 'private.txt'), 'REPOSITORY_TEXT_MUST_NOT_APPEAR');
   initNative(root);

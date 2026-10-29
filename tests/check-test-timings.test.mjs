@@ -23,7 +23,7 @@ const report = (file, durationMs, complete = true) => ({
 const marker = value => `__FORGE_TESTS__${JSON.stringify(value)}\n`;
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-test-timings-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'tests'));
   for (const file of [a, b]) writeFileSync(join(root, file), '// Synthetic source\n');
   initNative(root);

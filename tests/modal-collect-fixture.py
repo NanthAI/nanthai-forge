@@ -115,13 +115,13 @@ class CollectionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unconfirmed_termination_never_authorizes_retry(self):
         sandbox = Sandbox('unknown')
-        with self.assertRaises(TimeoutError): await self.run_collect(sandbox, sandbox)
+        with self.assertRaises((TimeoutError, asyncio.TimeoutError)): await self.run_collect(sandbox, sandbox)
         self.assertNotIn('stopped', self.item)
         self.assertNotIn('exitCode', self.item)
 
     async def test_termination_without_exit_confirmation_never_authorizes_retry(self):
         sandbox = Sandbox('unacknowledged')
-        with self.assertRaises(TimeoutError): await self.run_collect(sandbox, sandbox)
+        with self.assertRaises((TimeoutError, asyncio.TimeoutError)): await self.run_collect(sandbox, sandbox)
         self.assertNotIn('stopped', self.item)
         self.assertFalse(await collect.stop_all([sandbox]))
 

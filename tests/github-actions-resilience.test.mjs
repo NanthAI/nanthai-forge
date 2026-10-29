@@ -15,7 +15,7 @@ import { ForgeError } from '../dist/errors.js';
 const limited = () => new ForgeError('GITHUB_ACTIONS_RATE_LIMITED', 'synthetic rate limit');
 function setup(t, groups = [['a']]) {
   const root = mkdtempSync(join(tmpdir(), 'forge-actions-resilience-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const plan = { runId: randomUUID(), output: root, groups };
   const journal = {
     commit: 'a'.repeat(40),

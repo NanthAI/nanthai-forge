@@ -11,7 +11,7 @@ const compilers = ['@typescript/native', 'typescript'].map(name =>
 );
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-native-toolchain-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'package.json'), '{"type":"module"}');
   return root;
 }

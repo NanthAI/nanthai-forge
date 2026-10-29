@@ -1,3 +1,5 @@
+import { handle as actionsHttp } from './projectHostedActionsHttp';
+import { makeFunctionReference } from 'convex/server';
 // SPDX-License-Identifier: Apache-2.0
 import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
@@ -6,6 +8,7 @@ import { workerAuthorized } from '../src/worker-auth';
 import { githubWebhookAuthorized } from '../src/github-webhook';
 
 const http = httpRouter();
+http.route({ path: '/checks/actions', method: 'POST', handler: actionsHttp });
 for (const operation of ['prepare', 'update', 'uploadTarget'] as const)
   http.route({
     path: `/worker/${operation}`,
@@ -38,7 +41,13 @@ http.route({
     const event = request.headers.get('x-github-event');
     if (
       !event ||
-      !['push', 'installation', 'installation_repositories', 'github_app_authorization'].includes(event)
+      ![
+        'push',
+        'installation',
+        'installation_repositories',
+        'github_app_authorization',
+        'workflow_run',
+      ].includes(event)
     )
       return new Response(null, { status: 204 });
     const delivery = request.headers.get('x-github-delivery');
@@ -55,6 +64,12 @@ http.route({
       } else if (typeof payload.action !== 'string') throw new Error('Missing action');
     } catch {
       return new Response('Invalid webhook payload', { status: 400 });
+    }
+    if (event === 'workflow_run') {
+      await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsWebhook:receive'), {
+        payload: new TextDecoder().decode(body),
+      });
+      return new Response(null, { status: 204 });
     }
     // Store only the reconciliation trigger, never source, commit messages or the raw payload.
     await ctx.runMutation(internal.sync.receive, { delivery, event, ...(repository ? { repository } : {}) });

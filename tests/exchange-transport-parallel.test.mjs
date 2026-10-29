@@ -29,7 +29,7 @@ function owner(t, files = 1) {
   mkdirSync(root);
   for (let i = 0; i < files; i++) writeFileSync(join(root, `source-${i}.ts`), `export const value = ${i};\n`);
   initNative(root);
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return { directory, root, store: new WorkStore(root) };
 }
 

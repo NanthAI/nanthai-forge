@@ -10,7 +10,7 @@ import { cloneNativePath } from '../dist/native-clone.js';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-clone-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const source = join(root, 'source'),
     target = join(root, 'target');
   writeFileSync(source, 'source bytes');

@@ -103,7 +103,7 @@ test('pass-after-fail names the recovered test without claiming a flake; missing
 
 test('only named quarantined failures become nonblocking, static and unrelated failures still block', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-quarantine-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'synthetic.txt'), 'fixture');
   initNative(root);
   const store = new WorkStore(root);
@@ -148,7 +148,7 @@ test('quarantine receipts feed Needs you and an empty later snapshot clears atte
 
 function evidenceFixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-flake-evidence-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const [file, text] of Object.entries({
     'src/synthetic.ts': 'export const value = 1;',
     'src/unrelated.ts': 'export const unrelated = 1;',

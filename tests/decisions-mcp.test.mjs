@@ -15,7 +15,7 @@ import { decisionRecords } from '../dist/decisions.js';
 
 test('CLI and MCP create and replay the same native decision records with attribution', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-decisions-mcp-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'synthetic\n');
   initNative(root);
   const cli = resolve('dist/cli.js');

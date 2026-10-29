@@ -118,7 +118,7 @@ test('cyclic parent records stop before repeating an id and disclose incomplete 
 
 test('project and Intent status annotate stacked receipts through records and legacy storage', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-stack-status-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'original\n');
   initNative(root);
   const agent = new AgentWorkflow(root);

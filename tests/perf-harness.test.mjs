@@ -119,7 +119,7 @@ test('arguments keep live measurement explicit and reject invalid timing or cred
 
 async function run(t, extra = []) {
   const directory = mkdtempSync(resolve('node_modules/perf-test-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const output = join(directory, 'result.json');
   const child = spawn(
     process.execPath,

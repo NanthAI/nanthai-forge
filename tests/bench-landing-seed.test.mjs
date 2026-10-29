@@ -12,7 +12,7 @@ import { prepareGithubClone, seedNativeGit } from '../scripts/bench-landing-seed
 
 test('benchmark seed has one commit and the exact main tree without retained history or filters', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'bench-seed-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
   mkdirSync(root);
   const initial = initNative(root);

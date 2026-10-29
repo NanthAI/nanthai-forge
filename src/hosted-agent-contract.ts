@@ -6,6 +6,7 @@ import { revertTargetSchema } from './hosted-sync.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
+import { hostedCheckCommandSchema, hostedCheckRunnerSchema } from './hosted-check.js';
 export const hostedAgentActions = [
   'tests',
   'confirm-tests',
@@ -24,6 +25,9 @@ export const hostedAgentActions = [
   'observe',
   'capabilities',
 ] as const;
+/** Owner settings commands. Not advertised in capabilities: released clients parse
+ * that list strictly, and the server enforces owner authority on each call. */
+export const hostedAgentOwnerActions = ['configure-check', 'configure-runner', 'check-settings'] as const;
 export const hostedAgentAddressSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
 export type HostedAgentAddress = z.infer<typeof hostedAgentAddressSchema>;
 export const hostedAgentCapabilitiesSchema = z
@@ -163,6 +167,30 @@ export const hostedAgentCommandSchemas = {
     })
     .strict(),
   capabilities: z.object({}).strict(),
+  /** Owner-only. Default imports the hosted Work check named verify; command defines one. */
+  'configure-check': z
+    .object({
+      name: z.string().min(1).max(200).optional(),
+      checkId: uuid.optional(),
+      command: hostedCheckCommandSchema.optional(),
+      expected: hash.nullable().optional(),
+    })
+    .strict(),
+  /** Owner-only. provider mac fills runtime and environment from this installed package and process;
+   * provider github-actions selects the Convex-dispatched App runner (installation derived via the App). */
+  'configure-runner': z
+    .object({
+      provider: z.enum(['mac', 'github-actions']).optional(),
+      machineId: uuid.optional(),
+      repository: z
+        .string()
+        .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
+        .optional(),
+      configuration: hostedCheckRunnerSchema.optional(),
+      expected: hash.nullable().optional(),
+    })
+    .strict(),
+  'check-settings': z.object({}).strict(),
 };
 export type HostedAgentAction = keyof typeof hostedAgentCommandSchemas;
 export function hostedAgentAction(action: string): HostedAgentAction {

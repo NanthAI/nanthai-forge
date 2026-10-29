@@ -162,7 +162,7 @@ test('mixed-location pull: convex and r2 rows come back verified, r2 bytes strai
   assert.equal((await exchange.download(pins(['legacy-a'])[0])).toString(), 'legacy-a');
   // downloadToFile reads r2 content too.
   const dir = mkdtempSync(join(tmpdir(), 'forge-r2-read-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await client(s).downloadToFile(pins(['modern-c'])[0], join(dir, 'c.txt'));
   assert.equal(readFileSync(join(dir, 'c.txt'), 'utf8'), 'modern-c');
 });
@@ -241,7 +241,7 @@ test('a corrupt object is rejected with BLOB_DIGEST_MISMATCH and never written t
   const reader = client(s);
   await assert.rejects(reader.downloadBatch(pins(['pristine bytes'])), code('BLOB_DIGEST_MISMATCH'));
   const dir = mkdtempSync(join(tmpdir(), 'forge-r2-corrupt-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await assert.rejects(
     reader.downloadToFile(pins(['pristine bytes'])[0], join(dir, 'x')),
     code('BLOB_DIGEST_MISMATCH'),
@@ -322,7 +322,7 @@ test('full round trip on an opted-in project: push, publish, pull back with veri
   const { s, fake } = await setup(t),
     dir = mkdtempSync(join(tmpdir(), 'forge-r2-roundtrip-')),
     root = join(dir, 'owner');
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(root);
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   writeFileSync(join(root, 'b.txt'), 'second file\n');
@@ -360,7 +360,7 @@ test('a large chunked file in an opted-in project round trips through R2 leaves'
     dir = mkdtempSync(join(tmpdir(), 'forge-r2-large-')),
     root = join(dir, 'owner'),
     big = Buffer.alloc(5 * 1024 * 1024 + 123);
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (let i = 0; i < big.length; i++) big[i] = (i * 31 + (i >> 11)) & 255;
   mkdirSync(root);
   writeFileSync(join(root, 'big.bin'), big);

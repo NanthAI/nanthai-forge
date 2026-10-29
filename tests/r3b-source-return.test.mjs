@@ -29,7 +29,7 @@ for (const interrupted of [false, true])
     const { s, fake } = await setup(t),
       dir = mkdtempSync(join(tmpdir(), 'forge-r3b-')),
       root = join(dir, 'owner');
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     mkdirSync(root);
     writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
     initNative(root);

@@ -7,7 +7,7 @@ import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 function setup(t) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-revision-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'source.ts'), 'export const value=1;');

@@ -106,7 +106,7 @@ test('runtime snapshots predating the binary digest retain their available ident
 
 test('CLI identity pins packaged runtime helpers as well as compiled modules', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-helper-identity-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const dist = join(root, 'dist');
   cpSync(fileURLToPath(new URL('../dist', import.meta.url)), dist, { recursive: true });
   copyFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), join(root, 'package.json'));

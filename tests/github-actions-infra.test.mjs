@@ -259,7 +259,7 @@ test('an uncorroborated old rejection marker still goes through bounded discover
 
 test('git classifies original stderr before truncating and retains only redacted diagnostics', async t => {
   const bin = mkdtempSync(join(tmpdir(), 'forge-push-stderr-'));
-  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  t.after(() => rmSync(bin, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const detail =
     'remote: token=synthetic-credential ' +
     'progress '.repeat(100) +
@@ -310,7 +310,7 @@ for (const race of ['same', 'different']) {
   test(`create-only retry lease survives a ${race} commit appearing after the final observation (local bare repo)`, async t => {
     const { workGit } = await import('../dist/work-git.js');
     const root = mkdtempSync(join(tmpdir(), 'forge-push-lease-'));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     workGit(root, ['init', '--bare', '--template=']);
     const tree = workGit(root, ['write-tree']).trim();
     const commit = workGit(root, ['commit-tree', tree, '-m', 'synthetic check']).trim();

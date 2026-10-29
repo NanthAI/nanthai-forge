@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { v } from 'convex/values';
-import { mutation, query } from './cliServer';
+import { mutation, query, type MutationCtx } from './cliServer';
+import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import {
   checkSetting,
@@ -37,66 +38,78 @@ const requestSchema = z
     ]),
   })
   .strict();
+type CheckSettingRequest = { operationId: string; authorityEpoch: number; expected: string | null };
+type CheckSettingChange = { kind: 'runner' | 'definition'; key: string; value: unknown; digest: string };
+/** One owner-only, operation-idempotent, digest-CAS settings write. The change is
+ * resolved only for a new operation, so a replay never rereads its inputs. */
+export async function saveCheckSetting(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  request: CheckSettingRequest,
+  payload: unknown,
+  resolve: (project: Doc<'hostedProjects'>, at: string) => Promise<CheckSettingChange> | CheckSettingChange,
+) {
+  const { actor, project } = await checkCaller(ctx, projectId);
+  // Project execution settings retain the existing owner authority boundary.
+  invariant(project.owner === actor, 'PROJECT_UNAVAILABLE', 'Project check settings belong to its owner.');
+  const prepared = await beginCheckOperation(ctx, {
+    projectId,
+    actor,
+    operationId: request.operationId,
+    expected: { authorityEpoch: request.authorityEpoch },
+    payload,
+  });
+  if (prepared.replayed) {
+    invariant(
+      prepared.operation.terminal?.outcome.status === 'completed',
+      'SOURCE_UNAVAILABLE',
+      'Original check settings receipt is unavailable.',
+    );
+    return canonicalPayload(prepared.operation.terminal.outcome.result);
+  }
+  const { kind, key, value, digest } = await resolve(project, prepared.operation.firstAttempt.at);
+  const old = await checkSetting(ctx, projectId, kind, key);
+  invariant(
+    (old?.digest ?? null) === request.expected,
+    'EVIDENCE_CHANGED',
+    'Select the current check definition or runner configuration.',
+  );
+  const saved = {
+    projectId,
+    kind,
+    key,
+    version: (old?.version ?? -1) + 1,
+    digest,
+    value: canonicalPayload(value),
+  };
+  await ctx.db.insert('projectHostedCheckSettingVersions', saved);
+  if (old) await ctx.db.replace(old._id, saved);
+  else await ctx.db.insert('projectHostedCheckSettings', saved);
+  const result = { kind, key, version: saved.version, digest, value };
+  await completeCheckOperation(ctx, prepared.operation, result);
+  return canonicalPayload(result);
+}
 export const configure = mutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const request = requestSchema.parse(JSON.parse(input.request));
-      const { actor, project } = await checkCaller(ctx, input.projectId);
-      // Project execution settings retain the existing owner authority boundary.
-      invariant(
-        project.owner === actor,
-        'PROJECT_UNAVAILABLE',
-        'Project check settings belong to its owner.',
-      );
-      const prepared = await beginCheckOperation(ctx, {
-        projectId: input.projectId,
-        actor,
-        operationId: request.operationId,
-        expected: { authorityEpoch: request.authorityEpoch },
-        payload: request,
-      });
-      if (prepared.replayed) {
-        invariant(
-          prepared.operation.terminal?.outcome.status === 'completed',
-          'SOURCE_UNAVAILABLE',
-          'Original check settings receipt is unavailable.',
-        );
-        return canonicalPayload(prepared.operation.terminal.outcome.result);
-      }
       const change = request.change;
-      const kind: 'runner' | 'definition' = change.kind === 'runner' ? 'runner' : 'definition';
-      const key =
-        change.kind === 'runner' ? 'runner' : change.kind === 'import' ? change.check.id : change.checkId;
-      const old = await checkSetting(ctx, input.projectId, kind, key);
-      invariant(
-        (old?.digest ?? null) === request.expected,
-        'EVIDENCE_CHANGED',
-        'Select the current check definition or runner configuration.',
-      );
-      const value =
-        change.kind === 'runner'
-          ? change.configuration
-          : change.kind === 'import'
+      return await saveCheckSetting(ctx, input.projectId, request, request, (_project, at) => {
+        if (change.kind === 'runner')
+          return {
+            kind: 'runner',
+            key: 'runner',
+            value: change.configuration,
+            digest: checkPin(change.configuration),
+          };
+        const value =
+          change.kind === 'import'
             ? importedHostedCheck(change.check)
-            : hostedCheckDefinition(change.command, change.checkId, prepared.operation.firstAttempt.at);
-      const digest =
-        change.kind === 'runner' ? checkPin(value) : (value as z.infer<typeof checkSchema>).definition;
-      const saved = {
-        projectId: input.projectId,
-        kind,
-        key,
-        version: (old?.version ?? -1) + 1,
-        digest,
-        value: canonicalPayload(value),
-      };
-      await ctx.db.insert('projectHostedCheckSettingVersions', saved);
-      if (old) await ctx.db.replace(old._id, saved);
-      else await ctx.db.insert('projectHostedCheckSettings', saved);
-      const result = { kind, key, version: saved.version, digest, value };
-      await completeCheckOperation(ctx, prepared.operation, result);
-      return canonicalPayload(result);
+            : hostedCheckDefinition(change.command, change.checkId, at);
+        return { kind: 'definition', key: value.id, value, digest: value.definition };
+      });
     } catch (error) {
       return report(error);
     }

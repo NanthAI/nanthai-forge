@@ -102,7 +102,7 @@ test('conflict markers retain auto-resolved insertion hunks alongside a real mod
 
 function fixture(t, withDocs = false) {
   const root = mkdtempSync(join(tmpdir(), 'forge-insertion-merge-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.mjs'), base);
   if (withDocs) writeFileSync(join(root, 'README.md'), '- base capability\n');
   const origin = initNative(root).head,

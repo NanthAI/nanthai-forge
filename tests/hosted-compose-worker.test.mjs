@@ -37,7 +37,7 @@ function plan(s, left, right) {
 }
 async function parity(t, s, left, right) {
   const root = mkdtempSync(join(tmpdir(), 'forge-hosted-merge-parity-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const native = new NativeSource(root);
   for (const bytes of s.objects.values()) native.put(bytes);
   const original = new Map([...s.objects].map(([id, bytes]) => [id, Buffer.from(bytes)]));

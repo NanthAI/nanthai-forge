@@ -25,7 +25,7 @@ import { readAutoSnapshot, snapshotLane } from '../dist/lane-auto-snapshot.js';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-snapshot-clone-')));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const source = new NativeSource(root);
   source.put(Buffer.from('seed object directory'));
   return { root, source, path: join(root, 'live.bin'), bytes: Buffer.alloc(8 * 1024 * 1024, 37) };

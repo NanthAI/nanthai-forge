@@ -7,6 +7,8 @@ import { finishFixture, landingApi, code } from './hosted-finish-fixture.mjs';
 const { BrowserLanding } = await import(moduleUrl('../web/src/lane/hosted-landing-client.ts'));
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
+  // The revert fixture drives the signed Modal callback path; Convex is the default.
+  FORGE_SOURCE_PROVIDER: 'modal',
   FORGE_SOURCE_WORKER: 'fixed-worker',
   FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
   FORGE_SOURCE_KEY_ID: 'SYNTHETIC',

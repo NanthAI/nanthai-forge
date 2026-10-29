@@ -13,6 +13,7 @@ for (const [scenario, offlineMs] of [
     const started = performance.now();
     const synthetic = {
       FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
+      FORGE_SOURCE_PROVIDER: 'modal',
       FORGE_SOURCE_WORKER: 'fixed-worker',
       FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
       FORGE_SOURCE_KEY_ID: 'SYNTHETIC',

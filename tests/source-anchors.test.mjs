@@ -52,7 +52,7 @@ function prepare(store) {
 }
 test('line comments retain exact source through narrow appends, lifecycle, export/restore and journal replay', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-anchors-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'const value = 1;\n');
   initNative(root);
   const work = new WorkService(root),
@@ -73,7 +73,7 @@ test('line comments retain exact source through narrow appends, lifecycle, expor
   const exported = (await work.dispatch({ action: 'export-work', archive: true }, work.store.revision()))
       .result,
     target = root + '-restored';
-  t.after(() => rmSync(target, { recursive: true, force: true }));
+  t.after(() => rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await restoreNativeWork(exported.archive.path, target);
   assert.deepEqual(new WorkService(target).store.load().intents[0].notes[0].anchor, command.anchor);
   const event = {

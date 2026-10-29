@@ -13,7 +13,7 @@ import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
 const at = '2026-01-01T00:00:00.000Z';
 export function agentFixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-hosted-agent-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'client'),
     address = { url: 'https://fixture.invalid', projectId: 'project' };
   const state = { schema: 1, kind: 'forge-source-state', parents: [], files: [], message: 'Synthetic', at };

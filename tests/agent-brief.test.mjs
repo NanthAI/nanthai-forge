@@ -164,7 +164,7 @@ test('selection rejects cross-linked records and never infers merged state from 
 });
 function local(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-brief-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'AGENTS.md'), 'UNTRUSTED_REPOSITORY_TEXT_DO_NOT_ECHO');
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;');
   initNative(root);

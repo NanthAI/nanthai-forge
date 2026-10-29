@@ -19,7 +19,7 @@ import { githubActionsWorkflow } from '../dist/github-actions-workflow.js';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-actions-ci-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const write = (path, text) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);

@@ -318,6 +318,39 @@ Pending commit identities and an operation UUID are saved before sending. After 
 
 ### Automatic main mirror
 
+For server-authority projects, each hosted main publication queues one mirror
+job in the same transaction. The fixed Convex action uses the installed GitHub
+App and Git Data API. It reads exact hosted/R2 source, creates only changed
+blobs in windows of at most 100 and 8 MiB (or one larger file), then creates a
+tree with `base_tree`, a deterministic commit and a non-forced fast-forward
+update of `main`. The commit keeps the Intent outcome and Forge identity
+trailers and uses the existing noreply sync identity. A source-unchanged landing
+advances its mapping without an empty commit. Native-owner and shadow projects
+keep the local worker described below; server bindings and a pending server
+cutover stop that Mac worker.
+
+Hosted credentials are `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`. The App
+needs Contents read/write on the mirror repository. Set
+`FORGE_GITHUB_SYNC_NAME` and `FORGE_GITHUB_SYNC_EMAIL` to the existing sync
+identity, or retain that identity in the imported `githubSync` mapping. Hosted
+mirrors reuse that mapping's entry format in indexed `projectGithubMirrorJobs`
+rows and retain the latest mapping in `projectGithubMirrors`. Bootstrap uses the
+pushed native mapping, or the remote commit's `Forge-State` trailer (falling
+back to the first landing's previous State), and verifies the complete exported
+Git tree before trusting it. `GITHUB_SYNC_BOOTSTRAP_TREE` reports a mismatch;
+`GITHUB_SYNC_CHANGED` reports unexpected GitHub main movement. Neither forces
+or reconciles external GitHub history automatically.
+
+A failed action retains its cursor and structured error on the job. After
+resolving the cause, the operator can invoke the internal
+`projectGithubMirrorStore:resume` mutation with that job's `jobId`. It checks the
+original scheduled action is no longer running and resumes the same step.
+Deterministic commit bytes and GitHub ref observation reconcile lost replies
+without a second commit for the State. No periodic retries or idle functions
+are scheduled. `autoPush:false` stops future attempts; a request already sent
+to GitHub can still finish. Undo published source through a compensating Lane;
+published history is retained.
+
 Enable on the native owner through CLI or the agent MCP `set-policy` action:
 
 ```sh

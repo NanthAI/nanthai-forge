@@ -23,7 +23,7 @@ test('derived Lane names end at a word boundary with an ellipsis, and full outco
 });
 test('agent start derives a bounded label without truncating the retained Intent outcome', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-lane-name-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'a.ts'), 'export const a=1;\n');
   initNative(root);
   const lane = (await new AgentWorkflow(root).dispatch({ action: 'start', outcome })).result;

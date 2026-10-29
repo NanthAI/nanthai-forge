@@ -216,7 +216,7 @@ test('new work responses advertise actual capabilities', async t => {
     artifactDeduplication: false,
   });
   const nativeRoot = mkdtempSync(join(tmpdir(), 'forge-native-capabilities-'));
-  t.after(() => rmSync(nativeRoot, { recursive: true, force: true }));
+  t.after(() => rmSync(nativeRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(nativeRoot, 'a.ts'), 'export const a=1;');
   initNative(nativeRoot);
   const native = new WorkService(nativeRoot).status({ compact: true });

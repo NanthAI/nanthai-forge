@@ -16,7 +16,7 @@ import { agentPeers } from '../dist/agent-peers.js';
 const compiler = resolve('node_modules/typescript/lib/tsc.js');
 async function fixture(t, { check = true, baselineBad = false, packageScript = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-integration-test-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'types.ts'), 'export function value(): {a: string} { return {a: "ok"}; }\n');
   writeFileSync(
     join(root, 'consumer.ts'),

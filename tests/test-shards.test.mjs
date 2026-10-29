@@ -110,7 +110,7 @@ test('history bounds file count, serialized bytes and run ledger without omittin
 
 test('missing, corrupt, oversized and invalid history reads fall back to round-robin', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-shard-history-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const path = join(root, 'history.json');
   const empty = { version: 1, files: {}, runs: [] };
   assert.deepEqual(readTimingHistory(path), empty);

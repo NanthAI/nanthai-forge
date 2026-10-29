@@ -28,7 +28,7 @@ import { ForgeError } from '../dist/errors.js';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-native-review-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'owner');
   mkdirSync(root);
   writeFileSync(join(root, 'a.ts'), 'export const value = 1;\n');

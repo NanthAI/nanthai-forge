@@ -120,7 +120,7 @@ test('an old publication is rejected before loading large retained Work, within 
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const directory = mkdtempSync(join(tmpdir(), 'forge-return-memory-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const run = mode => {
     const child = spawnSync(
       process.execPath,

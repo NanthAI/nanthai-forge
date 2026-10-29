@@ -28,7 +28,7 @@ const context = (sessionId = 'agent-one', turnId = 'turn-one') => ({
 });
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-first-write-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   mkdirSync(join(root, 'docs'));
   for (const file of ['status.md', 'architecture.md', 'roadmap.md'])
     writeFileSync(join(root, 'docs', file), 'Original synthetic document\n');

@@ -23,7 +23,7 @@ const now = () => new Date().toISOString();
 const actor = { kind: 'agent', id: 'synthetic-b8' };
 function fixture(t, enabled = true) {
   const root = mkdtempSync(join(tmpdir(), 'forge-disjoint-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const file of ['a.txt', 'b.txt', 'delete.txt', 'mode.sh']) writeFileSync(join(root, file), 'base\n');
   const { head: base } = initNative(root),
     store = new WorkStore(root),

@@ -113,7 +113,7 @@ for (const flaky of [true, false])
       : "exists('A.txt') && exists('C.txt')";
     const f = await fixture(t, { failWhen });
     // Keep the one-shot marker until the fixture has drained its detached audit.
-    t.after(() => rmSync(scratch, { recursive: true, force: true }));
+    t.after(() => rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
     const candidates = [];
     for (const name of ['A', 'B', 'C']) candidates.push(await f.candidate(`${name}.txt`));
     await f.checkCandidates();

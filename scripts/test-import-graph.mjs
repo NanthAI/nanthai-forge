@@ -62,9 +62,9 @@ export function testImportGraph(files, scriptsChanged = []) {
     value.startsWith('node:') || [...packages].some(name => value === name || value.startsWith(`${name}/`));
   let uncertain;
   const domains = ['src/', 'web/src/', 'convex/', 'netlify/', 'scripts/', 'tests/'];
-  for (const [path, text] of [...files].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+  for (const path of [...files.keys()].sort()) {
     if (!/\.(?:[cm]?js|[cm]?tsx?)$/.test(path) || path.endsWith('.d.ts')) continue;
-    const ast = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+    const ast = ts.createSourceFile(path, files.get(path), ts.ScriptTarget.Latest, true);
     if (ast.parseDiagnostics.length)
       return { error: `Unparseable ${scriptPath(path) ? 'script' : 'module'}: ${path}` };
     const widen = (prefix, detail = 'Computed module path') => {

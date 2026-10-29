@@ -55,7 +55,7 @@ test('absent paths or uncertain package selection never skip full verification',
 });
 function repository(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'forge-ci-scope-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  t.after(() => rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const git = (...args) =>
     execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd, encoding: 'utf8' }).trim();
   const put = (path, text) => {
@@ -136,7 +136,7 @@ test('malformed committed package metadata fails toward full verification', t =>
 });
 test('CLI writes only a fixed scope value, including missing-input fallback', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'forge-ci-output-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  t.after(() => rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const output = join(cwd, 'output');
   const stdout = execFileSync(
     process.execPath,
@@ -176,7 +176,7 @@ test('CLI uses supplied exact PR pins for documentation scope output', t => {
 
 test('docs checks preserve package inventory and original-notice validation without building', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'forge-documents-'));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  t.after(() => rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   cpSync(new URL('../docs/', import.meta.url), join(cwd, 'docs'), { recursive: true });
   writeFileSync(join(cwd, 'package.json'), readFileSync(new URL('../package.json', import.meta.url)));
   const check = () =>

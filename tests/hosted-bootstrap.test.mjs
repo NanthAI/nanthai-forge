@@ -240,7 +240,7 @@ test('fresh hosted main checks out zero file blobs with a valid receipt and repl
     },
   };
   const directory = mkdtempSync(join(tmpdir(), 'forge-empty-main-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'checkout');
   const request = {
     projectId,
