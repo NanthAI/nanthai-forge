@@ -2,9 +2,9 @@
 import { makeFunctionReference } from 'convex/server';
 import { httpAction } from './_generated/server';
 import { z } from 'zod';
+import { sourcePackCommand } from './projectSourcePacks';
 import { verifyActionsOidc } from '../src/github-actions-oidc';
-import { directCommandSchema } from '../src/hosted-actions-direct';
-import { hostedActionsRecipeSchema } from '../src/hosted-actions';
+import { directRequestSchema } from '../src/hosted-actions-direct';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { verifyOutputObject } from './projectHostedOutputApi';
 import { directOutput } from '../src/hosted-actions-direct';
@@ -14,15 +14,8 @@ import { hostedCheckTerminal } from '../src/hosted-check';
 import type { HostedCheckRun } from '../src/hosted-check';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
-const requestSchema = z
-  .object({
-    projectId: z.string(),
-    runId: z.uuid(),
-    fence: z.number().safe().nonnegative().optional(),
-    command: directCommandSchema,
-  })
-  .strict();
 export const handle = httpAction(async (ctx, request) => {
+  let reason: 'authorization' | 'validation' | 'storage' = 'authorization';
   try {
     const site = process.env.CONVEX_SITE_URL;
     invariant(
@@ -31,6 +24,7 @@ export const handle = httpAction(async (ctx, request) => {
       'GitHub OIDC authorization required.',
     );
     const claims = await verifyActionsOidc(request.headers.get('authorization')!.slice(7), site);
+    reason = 'validation';
     // Byte bound on protocol metadata, not repository size; source bytes use storage.
     const reader = request.body?.getReader();
     invariant(reader, 'BAD_ARGUMENT', 'A JSON body is required.');
@@ -52,13 +46,16 @@ export const handle = httpAction(async (ctx, request) => {
       bytes.set(chunk, offset);
       offset += chunk.length;
     }
-    const parsed = requestSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
+    const parsed = directRequestSchema.parse(
+      JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
+    );
     const { command, ...id } = parsed;
     const input = {
       ...id,
       projectId: id.projectId as Id<'hostedProjects'>,
       claims: canonicalPayload(claims),
     };
+    reason = 'authorization';
     let value: unknown;
     if (command.kind === 'source')
       value = await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSource:resolve'), {
@@ -76,15 +73,16 @@ export const handle = httpAction(async (ctx, request) => {
         makeFunctionReference<'mutation'>('projectHostedActionsSession:session'),
         { ...input, ...(command.timings ? { timings: true } : {}) },
       );
+    else if (command.kind === 'sourcePack')
+      value = await sourcePackCommand(ctx, input, command.phase, command.object);
     else if (command.kind === 'plan') {
       // Recheck before and after storage IO; only immutable small plan metadata crosses this action.
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSession:session'), input);
-      const plan = z
-        .object({ recipe: hostedActionsRecipeSchema, lockfile: z.string().regex(/^[a-f0-9]{64}$/) })
-        .strict()
-        .parse(command.plan);
+      const plan = command.plan;
+      reason = 'storage';
       const selectionStorage = await ctx.storage.store(new Blob([canonicalPayload(plan.recipe.selection)]));
       const recipeStorage = await ctx.storage.store(new Blob([canonicalPayload(plan.recipe)]));
+      reason = 'authorization';
       value = await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsPlan:prepare'), {
         ...input,
         recipe: canonicalPayload(plan.recipe),
@@ -99,12 +97,15 @@ export const handle = httpAction(async (ctx, request) => {
         makeFunctionReference<'mutation'>('projectHostedActionsSession:session'),
         input,
       );
-      if (command.result.log)
+      if (command.result.log) {
+        reason = 'storage';
         await verifyOutputObject(
           input.projectId,
           directOutput(run, command.result.index, command.result.log, outputSigningKey(run.keyId))[0]!
             .message,
         );
+      }
+      reason = 'authorization';
       value = await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsResults:result'), {
         ...input,
         result: canonicalPayload(command.result),
@@ -116,6 +117,7 @@ export const handle = httpAction(async (ctx, request) => {
           input,
         )) as { root: OutputRoot; target: { url: string; headers: Record<string, string> } } | null;
         if (final) {
+          reason = 'storage';
           const stored = await fetch(final.target.url, {
             method: 'PUT',
             headers: final.target.headers,
@@ -128,6 +130,7 @@ export const handle = httpAction(async (ctx, request) => {
             input.projectId,
             outputMessage(settled, { kind: 'final', root: final.root }),
           );
+          reason = 'authorization';
           await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsOutput:apply'), {
             ...input,
             root: canonicalPayload(final.root),
@@ -144,8 +147,10 @@ export const handle = httpAction(async (ctx, request) => {
         ? `validation ${error.issues.map(issue => issue.path.join('.')).join(',')}`
         : ((error as { code?: unknown })?.code ?? (error as Error)?.name ?? 'unknown'),
     );
+    if (error instanceof z.ZodError) reason = 'validation';
+    else if (String((error as { code?: unknown })?.code ?? '').startsWith('R2_')) reason = 'storage';
     return Response.json(
-      { error: 'Actions request failed authorization, validation or storage verification.' },
+      { reason, error: 'Actions request failed authorization, validation or storage verification.' },
       { status: 403, headers: { 'Cache-Control': 'no-store' } },
     );
   }

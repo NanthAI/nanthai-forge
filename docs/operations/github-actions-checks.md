@@ -339,8 +339,28 @@ reads source as data with the installed selector and shared eight-way partitione
 existing default full selection remains full. Docs scope uses only the static job.
 Arbitrary commands run once, including the existing composed Intent contract union.
 
-The planning session includes the project's advisory timing history without a
-separate request. Eight-way LPT partitioning models the two test workers on each
+The runner first sends the oldest session shape. The reply adds `capabilities`
+alongside the existing run fields, so old runners retain their response shape.
+Missing capabilities mean no extensions: results omit `testFiles` and planning
+uses round-robin without requesting timing history. The shared list in
+`src/hosted-actions-capabilities.ts` currently advertises `results.testFiles`,
+`session.timingHistory` and `sourcePack`. A runner requests history only after that advertisement,
+using one additional session request (two Convex function invocations per check).
+Negotiated capabilities travel with the runner's plan artifact for its shards
+and the optional pack refresh job.
+The server still derives retained summaries from `contractReports`; the optional
+`testFiles` field is a compatibility summary, not independent evidence. The runner
+reads the session's `sourcePack` field and sends pack prepare/commit commands only
+when the server advertised `sourcePack`. Without it, planning uses W2 full download
+and skips pack refresh.
+Backend and runner updates can be deployed in any order.
+
+Command and result metadata strip unknown fields. The identity envelope, known
+field types, logs, object pins and recipes remain strict. Refusals include a fixed
+`reason` (`validation`, `authorization` or `storage`); the runner includes only
+these codes in its error, never arbitrary response text.
+
+The negotiated planning session includes the project's advisory timing history. Eight-way LPT partitioning models the two test workers on each
 runner; unknown files use the historical p75, or the existing sorted round-robin
 split when history is missing or invalid. Complete per-file reports already carried
 by shard results train that history once when a check passes or fails. Hosted Mac
@@ -375,21 +395,104 @@ workflow without complete per-job evidence is interrupted, never passed. One
 12-hour watchdog bounds a missing completion event and is cancelled on terminal
 results. There are no project scans, active-run pollers, or idle scheduled functions.
 
-For 3,000 raw source objects, a full nine-job check uses 76 Convex function
+For 3,000 raw source objects, a full nine-job check uses 78 Convex function
 invocations including HTTP actions, nested functions, enqueue, dispatch and webhook;
-a two-job scoped check uses 41, and docs-only uses 36. The formula is
-`15 + 2 * ceil(sourceObjects / 400) + 5 * jobs`, including one Candidate/base
+a two-job scoped check uses 43, and docs-only uses 38. The formula is
+`17 + 2 * ceil(sourceObjects / 400) + 5 * jobs`, including one Candidate/base
 manifest window. Recipe metadata/leaves add their actual bounded descriptor
 windows; issued download grants expire after five minutes. GitHub API and object
 storage requests are separate from Convex function calls. A 6,000-object full
-fixture budgets 90 calls. Page concurrency does not change these call counts:
+fixture budgets 92 calls. Page concurrency does not change these call counts:
 raw content needs one descriptor request per page (two function invocations,
 including its HTTP action). Recipe and leaf windows are unchanged. Timing history
 adds one indexed document read to the existing planning session and one read/write
-to terminal result processing, with no additional function calls or idle activity.
+to terminal result processing, with no per-file function calls or idle activity. The capability bootstrap adds
+two function invocations per check when the server supports timing history.
 Before the first history write, bootstrap adds at most two indexed run reads.
 Plan retries can retain unused small storage objects;
 this path adds no deletion or retention policy.
+
+### Forge source packs
+
+Hosted planning uses Forge source directly, without any GitHub mirror, Git checkout
+of Candidate source, or GitHub source cache. The archive codec and verification
+work with any runner provider; this workflow uses its existing Actions OIDC session
+for authorized metadata and signed URLs. The control-tool checkout and Candidate
+artifact transfer remain workflow bootstrap, independent of Forge source storage.
+
+The existing planning session optionally returns `sourcePack`: the newest project's
+`stateRef`, `objectKey`, `sha256`, `size`, `fileCount`, `createdAt` and a five-minute
+signed GET. It reuses the negotiated timing-history session; no additional
+pack session or polling is needed. Planning resolves the Candidate,
+base and, if different, pack State through the ordinary hash-verified source path.
+One pack GET seeds a job-private blob cache; only changed content uses W2's paged,
+three-worker downloader. A fresh tree applies deletions, mode changes and path-type
+changes, creates symlinks last, and hashes every final file/link against the Candidate
+with Forge's SHA-256 digest. Cache inventory, size, checksum, State, gzip, or final
+tree failures discard all extracted bytes and run the full W2 transfer. Older
+servers without `sourcePack` use that same full path.
+
+The deterministic format is gzip (level 1), containing a four-byte big-endian JSON
+inventory length, the version/State/path/mode/blob/size inventory, then exact file
+bytes in sorted path order. It avoids tar's platform-specific metadata, extensions,
+and link/path extraction rules; only verified hash-named cache files are written.
+It is bounded to 300 MiB compressed, 1 GiB file bytes, 32 MiB per file, 100,000 files
+and a 16 MiB inventory. Larger source remains checkable through W2; only caching
+is skipped. Packing and hashing stream disk files; extraction buffers at most one
+bounded file plus the inventory. There is no persistent runner-local cache.
+
+When there is no usable pack, or the delta exceeds 300 paths or 10% of Candidate
+content bytes, the optional `hosted-pack` job runs alongside the check shards after
+matrix and Candidate artifact publication. It uses that artifact to seed its cache,
+fetches any missing accepted-base blobs, verifies them, and packs the pinned accepted
+base rather than speculative Candidate source. Its failure does not fail the check.
+It uses separate `sourcePack` prepare/commit commands only after advertisement.
+Servers without that capability receive no pack commands, and their checks use
+the existing source/plan/result shapes.
+
+`projectSourcePacks` holds one small indexed document per project, including newest
+metadata and a second slot for a previous pack or reserved upload. Reservations
+precede PUTs; conflicting refreshes skip, including after interrupted uploads.
+A create-only, checksum/length-bound PUT grants one computed project/State/digest
+key. Commit checks R2 HEAD size/checksum and repeats current session authorization.
+The previous or abandoned slot is deleted before its next replacement, after its
+15-minute signed PUT plus two-minute transfer grace has expired. Failed deletion
+retains the slot and skips refresh; later refresh retries it. At most two pack
+objects are tracked, with no idle calls, sweeps, timers or schedulers. Latest pack
+metadata is never removed by that cleanup. Every consumer independently verifies
+its inventory and bytes against immutable Forge State source.
+
+For 6,000 unique raw files with 20 changed blobs and a pack of the base, planning
+uses two source requests (one manifest window and one delta window), versus W2's
+sixteen. Including HTTP actions and nested mutations, session/source/plan totals
+are eleven versus thirty-nine function invocations; source itself is four versus
+thirty-two. R2 reads are 23 GETs (pack, two manifests, twenty blobs), versus 6,002.
+A different pack State adds one manifest request/GET. Recipe-backed content adds
+its actual bounded descriptor and storage windows. The negotiated timing-history session adds one indexed
+pack-document read; unchanged-pack planning writes no pack metadata.
+
+A refresh adds two HTTP requests / five function invocations, one PUT (Class A)
+and one HEAD (Class B), plus missing-base descriptor pages and blob GETs. Replacing
+an old slot adds one nested mutation and one DELETE (free); the DELETE must succeed
+before another object is reserved. Fallback adds the attempted pack/manifest reads
+to ordinary full-download costs; a final verification failure can also repeat the
+already downloaded delta. Check result/log operations remain unchanged.
+
+The 100–300 MB GET + unpack + full verification + twenty-blob delta is expected to
+take roughly 5–25 seconds at 25–100 MB/s with local SSD storage and two vCPUs,
+excluding runner/tool bootstrap and Candidate artifact transfer. This is an
+estimate, not a hosted measurement. Two packs add about 200–600 MB per project,
+with a hard compressed maximum of 600 MiB. At R2 Standard's $0.015/GB-month this is
+about $0.003–$0.0094/month amortized, before free allowance and account-level billing
+rounding; requests also have free allowances. See [R2 pricing](https://developers.cloudflare.com/r2/pricing/).
+There is no new paid provider or mirror dependency.
+
+Deploy additive schema/backend support first, then publish the runner modules,
+script and workflow together. The first successful full check seeds a base pack;
+subsequent checks can use it. An old runner ignores the optional response; a new
+runner on an old backend completes via W2 and skips pack publication. Qualification
+of real R2 throughput, signed checksum headers and Actions job scheduling remains
+an operator task.
 
 Deploy this backend and publish this workflow on GitHub `main` before configuring
 the App runner. Keep the Mac interim selected until one hosted Candidate completes

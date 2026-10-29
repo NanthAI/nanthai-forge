@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { HostedCheckRun } from './hosted-check.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
+import { sourcePackDownloadSchema, type SourcePackDownload } from './source-pack.js';
 import { digest } from './hash.js';
 import { objectRecipeSchema, objectChunkPageSchema } from './object-chunks.js';
 import { invariant } from './errors.js';
+import type { z } from 'zod';
+import type { directCommandSchema } from './hosted-actions-direct.js';
+import { actionsCommandForCapabilities, actionsRefusalReasons } from './hosted-actions-capabilities.js';
 import { parseTimingHistory, timingDurations } from '../scripts/test-shards.mjs';
 export class ActionsJobClient {
   run: HostedCheckRun | null = null;
   timings: Record<string, number> = {};
+  capabilities: string[] = [];
+  sourcePack: SourcePackDownload | null = null;
   private token = '';
   private expires = 0;
   private refreshing: Promise<void> | null = null;
@@ -15,9 +21,9 @@ export class ActionsJobClient {
     readonly site: string,
     readonly projectId: string,
     readonly runId: string,
-    private request = fetch,
+    readonly request = fetch,
   ) {}
-  async call(command: unknown) {
+  async call(command: z.infer<typeof directCommandSchema>) {
     if (this.expires < Date.now() + 30_000) {
       this.refreshing ??= this.refreshToken().finally(() => {
         this.refreshing = null;
@@ -33,10 +39,19 @@ export class ActionsJobClient {
         projectId: this.projectId,
         runId: this.runId,
         ...(this.run ? { fence: this.run.fence } : {}),
-        command,
+        command: actionsCommandForCapabilities(command, this.capabilities),
       }),
     });
-    invariant(response.ok, 'RUNNER_UNAVAILABLE', `Convex Actions request failed (${response.status}).`);
+    if (!response.ok) {
+      // Only a fixed reason vocabulary may reach logs; never echo a response body.
+      const body = (await response.json().catch(() => null)) as { reason?: unknown } | null;
+      const reason = actionsRefusalReasons.find(value => value === body?.reason);
+      invariant(
+        false,
+        'RUNNER_UNAVAILABLE',
+        `Convex Actions request failed (${response.status}${reason ? `; reason: ${reason}` : ''}).`,
+      );
+    }
     return response.json();
   }
   private async refreshToken() {
@@ -54,14 +69,29 @@ export class ActionsJobClient {
       (JSON.parse(Buffer.from(this.token.split('.')[1]!, 'base64url').toString()).exp as number) * 1000;
   }
   async session(timings = false) {
-    if (timings) {
+    // Bootstrap with the oldest request, even when timing history is desired.
+    const { capabilities, ...run } = (await this.call({ kind: 'session' })) as HostedCheckRun & {
+      capabilities?: string[];
+    };
+    this.run = run as HostedCheckRun;
+    this.capabilities = Array.isArray(capabilities)
+      ? capabilities.filter(value => typeof value === 'string')
+      : [];
+    this.timings = {};
+    this.sourcePack = null;
+    if (timings && this.capabilities.includes('session.timingHistory')) {
       const result = (await this.call({ kind: 'session', timings: true })) as {
         run: HostedCheckRun;
         timingHistory: string;
+        sourcePack?: SourcePackDownload;
       };
       this.run = result.run;
+      if (this.capabilities.includes('sourcePack')) {
+        const pack = sourcePackDownloadSchema.safeParse(result.sourcePack);
+        this.sourcePack = pack.success ? pack.data : null;
+      }
       this.timings = timingDurations(parseTimingHistory(result.timingHistory));
-    } else this.run = (await this.call({ kind: 'session' })) as HostedCheckRun;
+    }
     return this.run;
   }
   transport() {

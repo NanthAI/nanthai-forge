@@ -70,6 +70,7 @@ jobs:
       id-token: write
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
+      pack_refresh: ${{ steps.plan.outputs.pack_refresh }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -88,7 +89,7 @@ jobs:
           FORGE_PROJECT_ID: ${{ inputs.projectId }}
           FORGE_RUN_ID: ${{ inputs.runId }}
           FORGE_CANDIDATE: ${{ runner.temp }}/candidate
-      - run: tar -cf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP" candidate forge-actions-plan.json forge-actions-run.json
+      - run: tar -cf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP" candidate forge-actions-plan.json forge-actions-run.json forge-pack-refresh.json
       - uses: actions/upload-artifact@v4
         with:
           name: forge-candidate
@@ -127,3 +128,35 @@ jobs:
           FORGE_RUN_ID: ${{ inputs.runId }}
           FORGE_CANDIDATE: ${{ runner.temp }}/candidate
           FORGE_ACTIONS_SHARD: ${{ matrix.shard }}
+
+  hosted-pack:
+    if: ${{ needs.hosted-plan.outputs.pack_refresh == 'true' }}
+    needs: hosted-plan
+    name: Refresh optional Forge source pack
+    continue-on-error: true
+    runs-on: ${{ fromJSON(inputs.runs_on || '"ubuntu-latest"') }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: control
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts && npm run build:core
+        working-directory: control
+      - uses: actions/download-artifact@v4
+        with:
+          name: forge-candidate
+          path: ${{ runner.temp }}
+      - run: tar -xf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP"
+      - run: node control/scripts/hosted-actions-job.mjs pack
+        env:
+          FORGE_CONVEX_SITE: ${{ inputs.deployment }}
+          FORGE_PROJECT_ID: ${{ inputs.projectId }}
+          FORGE_RUN_ID: ${{ inputs.runId }}
+          FORGE_CANDIDATE: ${{ runner.temp }}/candidate

@@ -296,6 +296,8 @@ import type * as projectSourceJobCallbacks from "../projectSourceJobCallbacks.js
 import type * as projectSourceJobDispatch from "../projectSourceJobDispatch.js";
 import type * as projectSourceJobs from "../projectSourceJobs.js";
 import type * as projectSourceMembership from "../projectSourceMembership.js";
+import type * as projectSourcePackStore from "../projectSourcePackStore.js";
+import type * as projectSourcePacks from "../projectSourcePacks.js";
 import type * as projectSourceProjection from "../projectSourceProjection.js";
 import type * as projectSourceProvider from "../projectSourceProvider.js";
 import type * as projectSourceProviderApi from "../projectSourceProviderApi.js";
@@ -679,6 +681,8 @@ declare const fullApi: ApiFromModules<{
   projectSourceJobDispatch: typeof projectSourceJobDispatch;
   projectSourceJobs: typeof projectSourceJobs;
   projectSourceMembership: typeof projectSourceMembership;
+  projectSourcePackStore: typeof projectSourcePackStore;
+  projectSourcePacks: typeof projectSourcePacks;
   projectSourceProjection: typeof projectSourceProjection;
   projectSourceProvider: typeof projectSourceProvider;
   projectSourceProviderApi: typeof projectSourceProviderApi;

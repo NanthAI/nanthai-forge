@@ -9,6 +9,7 @@ import { semanticCheckCommand } from './semantic-check-command.js';
 import { digest } from './hash.js';
 import { directLogBytes } from './hosted-actions-direct.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
+import { checkFileSummary } from './check-file-summary.js';
 import { invariant } from './errors.js';
 /** Credentials remain in the fixed supervisor; the project receives a clean env.
  * Full stdout stays on Actions. Forge retains at most 64 KiB per job. */
@@ -93,7 +94,13 @@ export async function executeActionsJob(
   }
   await client.call({
     kind: 'result',
-    result: { index, exitCode, ...(log ? { log } : {}), contractReports: reports.reports },
+    result: {
+      index,
+      exitCode,
+      ...(log ? { log } : {}),
+      contractReports: reports.reports,
+      testFiles: checkFileSummary(reports.reports),
+    },
   });
   return exitCode;
 }

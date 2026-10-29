@@ -7,6 +7,8 @@ import { directActions } from './projectHostedActionsDirect';
 import { actionsClaimsSchema, validateActionsClaims } from '../src/github-actions-oidc';
 import { invariant } from '../src/errors';
 import { githubHostedRunsOn } from '../src/github-actions-runner-label';
+import { hostedActionsCapabilities } from '../src/hosted-actions-capabilities';
+import { latestSourcePack } from './projectSourcePackStore';
 import { hostedTimingHistory } from './projectHostedTestTimings';
 export const sessionArgs = {
   projectId: v.id('hostedProjects'),
@@ -54,8 +56,13 @@ export const session = internalMutation({
   returns: v.any(),
   handler: async (ctx, input) => {
     const { run } = await actionsSession(ctx, input);
-    if (!input.timings) return run;
+    if (!input.timings) return { ...run, capabilities: [...hostedActionsCapabilities] };
     const { history } = await hostedTimingHistory(ctx, input.projectId);
-    return { run, timingHistory: JSON.stringify(history) };
+    return {
+      run,
+      capabilities: [...hostedActionsCapabilities],
+      timingHistory: JSON.stringify(history),
+      sourcePack: await latestSourcePack(ctx, input.projectId),
+    };
   },
 });

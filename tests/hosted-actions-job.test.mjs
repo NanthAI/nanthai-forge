@@ -5,16 +5,27 @@ import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync, lstatSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { hostedActionsCapabilities } from '../dist/hosted-actions-capabilities.js';
+import { z } from 'zod';
 import { ActionsJobClient } from '../dist/hosted-actions-job-client.js';
 import { prepareActionsJob } from '../dist/hosted-actions-job-plan.js';
 import { executeActionsJob } from '../dist/hosted-actions-job-run.js';
 import { savePin } from '../dist/hosted-save.js';
 import { digest } from '../dist/hash.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
+import { createSourcePack } from '../dist/source-pack-archive.js';
+import { refreshSourcePack, sourcePackFileBytes } from '../dist/source-pack.js';
+import { gzipSync, gunzipSync } from 'node:zlib';
+import { truncateSync } from 'node:fs';
 import { partitionTests, shardDuration } from '../scripts/test-shards.mjs';
 function fixture(
   t,
-  { sourceDelay = 0, downloadDelay = 0, timingHistory = { version: 1, files: {}, runs: [] } } = {},
+  {
+    sourceDelay = 0,
+    downloadDelay = 0,
+    timingHistory = { version: 1, files: {}, runs: [] },
+    capabilities = hostedActionsCapabilities,
+  } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-direct-job-'));
   t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -58,6 +69,7 @@ function fixture(
     fence: 1,
     executionId: '123',
   };
+  const session = { sourcePack: null, unsupported: false };
   const calls = [],
     traffic = { active: 0, peak: 0, downloads: 0, oidc: 0 };
   const oldUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL,
@@ -79,6 +91,15 @@ function fixture(
         value: `header.${Buffer.from(JSON.stringify({ exp: Date.now() / 1000 + 300 })).toString('base64url')}.signature`,
       });
     }
+    if (String(url).startsWith('https://objects.invalid/') && init?.method === 'PUT') {
+      const parts = [];
+      for await (const chunk of init.body) parts.push(chunk);
+      const bytes = Buffer.concat(parts),
+        hash = String(url).split('/').at(-1);
+      assert.equal(digest(bytes), hash);
+      objects.set(hash, bytes);
+      return new Response(null, { status: 200 });
+    }
     if (String(url).startsWith('https://objects.invalid/')) {
       traffic.active++;
       traffic.peak = Math.max(traffic.peak, traffic.active);
@@ -91,8 +112,39 @@ function fixture(
     const body = JSON.parse(init.body),
       command = body.command;
     calls.push(command);
+    if (capabilities === null) {
+      // A pre-extension server rejects new wire shapes.
+      if (command.kind === 'session')
+        z.object({ kind: z.literal('session') })
+          .strict()
+          .parse(command);
+      if (command.kind === 'result')
+        z.object({
+          index: z.number(),
+          exitCode: z.number(),
+          log: z.unknown().optional(),
+          contractReports: z.unknown().optional(),
+        })
+          .strict()
+          .parse(command.result);
+      assert.notEqual(command.kind, 'sourcePack', 'old servers must never receive pack commands');
+    }
     if (command.kind === 'session')
-      return Response.json(command.timings ? { run, timingHistory: JSON.stringify(timingHistory) } : run);
+      return Response.json(
+        command.timings
+          ? {
+              run,
+              timingHistory: JSON.stringify(timingHistory),
+              ...(session.sourcePack ? { sourcePack: session.sourcePack } : {}),
+              ...(capabilities ? { capabilities } : {}),
+            }
+          : { ...run, ...(capabilities ? { capabilities } : {}) },
+      );
+    if (command.kind === 'output') return Response.json({ url: 'https://output.invalid/log', headers: {} });
+    if (command.kind === 'result') {
+      run.status = command.result.exitCode === 0 ? 'passed' : 'failed';
+      return Response.json(run);
+    }
     if (command.kind === 'source') {
       if (sourceDelay) await new Promise(resolve => setTimeout(resolve, sourceDelay));
       return Response.json(
@@ -105,6 +157,13 @@ function fixture(
         })),
       );
     }
+    if (command.kind === 'sourcePack') {
+      if (session.unsupported) return new Response(null, { status: 403 });
+      if (command.phase === 'prepare')
+        return Response.json({ url: `https://objects.invalid/${command.object.sha256}`, headers: {} });
+      assert.equal(objects.get(command.object.sha256).length, command.object.size);
+      return Response.json(null);
+    }
     if (command.kind === 'plan') {
       run.plan = {
         head: run.request.expectedHead,
@@ -116,7 +175,7 @@ function fixture(
     }
     throw new Error(`Unexpected synthetic command ${command.kind}`);
   });
-  return { directory, objects, recipes, put, entry, state, files, run, calls, client, traffic };
+  return { directory, objects, recipes, put, entry, state, files, run, calls, client, traffic, session };
 }
 
 test('6000-file download measurement keeps source calls within the existing page budget', async t => {
@@ -250,7 +309,7 @@ test('planner consumes session timing history for balanced LPT shards; empty and
       prepared.recipe.groups,
       partitionTests(tests, 8, Object.keys(filesHistory).length ? durations : {}),
     );
-    assert.equal(s.calls.filter(call => call.kind === 'session').length, 1);
+    assert.equal(s.calls.filter(call => call.kind === 'session').length, 2);
     if (Object.keys(filesHistory).length) {
       const estimates = prepared.recipe.groups.map(group => shardDuration(group, durations));
       assert(Math.max(...estimates) <= Math.min(...estimates) * 1.2);
@@ -404,7 +463,7 @@ test('workflow keeps the native plan branch and uses OIDC without GitHub secrets
   assert.match(workflow, /id-token: write/);
   assert.equal(
     (workflow.match(/runs-on: \$\{\{ fromJSON\(inputs\.runs_on \|\| '"ubuntu-latest"'\) \}\}/g) ?? []).length,
-    2,
+    3,
   );
   assert.equal((workflow.match(/runs-on: "ubuntu-latest"/g) ?? []).length, 2);
   assert.match(workflow, /runs_on:\n\s+description: JSON runner label or label array/);
@@ -482,3 +541,285 @@ for (const flaky of [false, true])
       assert.equal(reports['tests/synthetic-0.test.mjs'].attempts.length, 2);
     }
   });
+
+async function cachedPack(s, files = s.files, stateRef = s.run.candidate.base.head) {
+  const cache = join(s.directory, 'pack-input');
+  mkdirSync(cache, { recursive: true });
+  for (const file of files) writeFileSync(join(cache, file.blob), s.objects.get(file.blob));
+  const path = join(s.directory, 'pack.gz');
+  const pin = await createSourcePack(stateRef, JSON.parse(s.objects.get(stateRef)), cache, path);
+  assert(pin);
+  s.objects.set(pin.sha256, readFileSync(path));
+  s.session.sourcePack = {
+    ...pin,
+    objectKey: `synthetic/${pin.sha256}`,
+    createdAt: 0,
+    url: `https://objects.invalid/${pin.sha256}`,
+  };
+  return pin;
+}
+
+test('pack round-trip preserves bytes, modes and links; delta applies added, changed, deleted and mode paths', async t => {
+  const s = fixture(t);
+  await cachedPack(s);
+  const candidateFiles = [
+    ...s.files.filter(file => !['README.md', 'scripts/example.sh'].includes(file.path)),
+    { ...s.files.find(file => file.path === 'scripts/example.sh'), mode: 'file' },
+    s.entry('nested/new.txt', 'new content'),
+    s.entry('test-link', 'nested/new.txt', 'symlink'),
+  ].filter((file, i, files) => files.findLastIndex(other => other.path === file.path) === i);
+  s.run.request.expectedHead = s.state(candidateFiles).sha256;
+  const result = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+  );
+  assert.equal(readFileSync(join(s.directory, 'candidate/test-link'), 'utf8'), 'new content');
+  assert.equal(lstatSync(join(s.directory, 'candidate/scripts/example.sh')).mode & 0o111, 0);
+  assert.equal(existsSync(join(s.directory, 'candidate/README.md')), false);
+  assert.equal(result.packRefresh.deltaFiles, 4);
+  assert.equal(s.calls.filter(call => call.kind === 'source').length, 2);
+  assert.equal(s.traffic.downloads, 5); // two manifests, pack and two changed blobs
+});
+
+test('6000-file pack plus 20 changes uses two source windows instead of W2 sixteen', async t => {
+  const s = fixture(t);
+  const files = Array.from({ length: 6000 }, (_, i) => s.entry(`source/file-${i}.txt`, `before-${i}`));
+  s.run.candidate.base.head = s.state(files).sha256;
+  await cachedPack(s, files);
+  const changed = files.map((file, i) => (i < 20 ? s.entry(file.path, `after-${i}`) : file));
+  s.run.request.expectedHead = s.state(changed).sha256;
+  s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
+  const started = performance.now(),
+    rssBefore = process.memoryUsage().rss;
+  const result = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+  );
+  assert.equal(result.packRefresh.deltaFiles, 20);
+  assert.equal(result.packRefresh.refresh, false);
+  assert.equal(s.calls.filter(call => call.kind === 'source').length, 2);
+  assert.equal(s.traffic.downloads, 23);
+  assert(
+    process.memoryUsage().rss - rssBefore < 256 * 1024 * 1024,
+    'pack planner memory growth stays within 256 MiB',
+  );
+  t.diagnostic(
+    JSON.stringify({
+      files: 6000,
+      changed: 20,
+      sourceCalls: 2,
+      w2SourceCalls: 16,
+      convexFunctionSavings: 28,
+      elapsedMs: performance.now() - started,
+      rssBytes: process.memoryUsage().rss,
+    }),
+  );
+});
+
+test('corrupt, wrong-State, oversized and interior hash-mismatch packs fall back to full W2', async t => {
+  for (const failure of ['corrupt', 'wrong-state', 'oversized', 'interior-hash']) {
+    const s = fixture(t);
+    const pin = await cachedPack(s);
+    if (failure === 'corrupt') s.objects.set(pin.sha256, Buffer.from('bad pack'));
+    if (failure === 'wrong-state') s.session.sourcePack.stateRef = s.run.request.expectedHead;
+    if (failure === 'oversized') s.session.sourcePack.size = 301 * 1024 * 1024;
+    if (failure === 'interior-hash') {
+      const bytes = gzipSync(
+        Buffer.from(
+          gunzipSync(s.objects.get(pin.sha256)).toString().replace('synthetic before', 'synthetic broken'),
+        ),
+      );
+      const hash = digest(bytes);
+      s.objects.set(hash, bytes);
+      Object.assign(s.session.sourcePack, {
+        sha256: hash,
+        size: bytes.length,
+        url: `https://objects.invalid/${hash}`,
+      });
+    }
+    const result = await prepareActionsJob(
+      s.client,
+      join(s.directory, 'candidate'),
+      join(s.directory, 'cache'),
+    );
+    assert.equal(result.packRefresh.packed, null, failure);
+    assert.equal(readFileSync(join(s.directory, 'candidate/README.md'), 'utf8'), 'synthetic after');
+    assert.equal(result.packRefresh.refresh, true);
+  }
+});
+
+test('no pack uses W2 and refreshes the pinned accepted base; advertised refresh failure is advisory', async t => {
+  for (const unsupported of [false, true]) {
+    const s = fixture(t);
+    s.session.unsupported = unsupported;
+    const result = await prepareActionsJob(
+      s.client,
+      join(s.directory, 'candidate'),
+      join(s.directory, 'cache'),
+    );
+    assert.equal(result.packRefresh.refresh, true);
+    assert.equal(await result.refreshSourcePack(), !unsupported);
+    const commands = s.calls.filter(call => call.kind === 'sourcePack');
+    assert.equal(commands.length, unsupported ? 1 : 2);
+    assert(commands.every(command => command.object.stateRef === s.run.candidate.base.head));
+    assert.equal(s.calls.filter(call => call.kind === 'session').length, 2);
+  }
+});
+
+test('refresh threshold and oversized tree skip only the pack cache', async t => {
+  const s = fixture(t),
+    pin = await cachedPack(s);
+  assert.equal(refreshSourcePack(pin, 300, 10, 100), false);
+  assert.equal(refreshSourcePack(pin, 301, 10, 100), true);
+  assert.equal(refreshSourcePack(pin, 20, 11, 100), true);
+  assert.equal(refreshSourcePack(null, 0, 0, 100), true);
+  const cache = join(s.directory, 'oversize');
+  mkdirSync(cache);
+  const file = s.files[0];
+  writeFileSync(join(cache, file.blob), '');
+  truncateSync(join(cache, file.blob), sourcePackFileBytes + 1);
+  assert.equal(
+    await createSourcePack('a'.repeat(64), { files: [file] }, cache, join(s.directory, 'oversize.gz')),
+    null,
+  );
+  assert.equal(existsSync(join(s.directory, 'oversize.gz')), false);
+});
+
+test('final tree hash mismatch discards the entire pack and redownloads W2 source', async t => {
+  const s = fixture(t);
+  await cachedPack(s);
+  const cache = join(s.directory, 'cache');
+  const original = s.client.transport.bind(s.client);
+  let corrupted = false;
+  const unchanged = s.files.find(file => file.path === 'package-lock.json');
+  s.client.transport = () => {
+    const connection = original(),
+      read = connection.transport.read;
+    connection.transport.read = async pin => {
+      const bytes = await read(pin);
+      if (!corrupted && pin.sha256 === digest('synthetic after')) {
+        writeFileSync(join(cache, unchanged.blob), 'corrupt final cache');
+        corrupted = true;
+      }
+      return bytes;
+    };
+    return connection;
+  };
+  const result = await prepareActionsJob(s.client, join(s.directory, 'candidate'), cache);
+  assert(corrupted);
+  assert.equal(result.packRefresh.packed, null);
+  assert.equal(readFileSync(join(s.directory, 'candidate/package-lock.json'), 'utf8'), '{}');
+  assert.equal(s.traffic.downloads, 8); // two manifests, pack, changed blob, then four full blobs
+});
+
+test('pack bytes are deterministic and total oversized trees skip before reading sparse files', async t => {
+  const s = fixture(t);
+  const first = await cachedPack(s);
+  const second = await createSourcePack(
+    first.stateRef,
+    JSON.parse(s.objects.get(first.stateRef)),
+    join(s.directory, 'pack-input'),
+    join(s.directory, 'second.gz'),
+  );
+  assert.deepEqual(second, first);
+  const cache = join(s.directory, 'pack-input');
+  const large = s.files[0];
+  truncateSync(join(cache, large.blob), sourcePackFileBytes);
+  const files = Array.from({ length: 33 }, (_, i) => ({ ...large, path: `file-${i}` }));
+  assert.equal(
+    await createSourcePack(first.stateRef, { files }, cache, join(s.directory, 'oversize-total.gz')),
+    null,
+  );
+});
+
+for (const capabilities of [
+  null,
+  [],
+  ['session.timingHistory'],
+  ['results.testFiles'],
+  hostedActionsCapabilities,
+])
+  test(`runner negotiates ${JSON.stringify(capabilities)} and completes an exact check`, async t => {
+    const s = fixture(t, { capabilities }),
+      candidate = join(s.directory, 'candidate');
+    const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+    const path = join(s.directory, 'plan.json');
+    writeFileSync(path, JSON.stringify(prepared.recipe));
+    t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+    t.mock.method(process.stdout, 'write', () => true);
+    const program =
+      "console.log('__FORGE_TESTS__'+JSON.stringify({file:'tests/synthetic.test.mjs',complete:true,durationMs:5,results:[{name:'synthetic',passed:true}]}))";
+    assert.equal(
+      await executeActionsJob(s.client, candidate, path, 'static', [process.execPath, '--eval', program]),
+      0,
+    );
+    assert.equal(s.run.status, 'passed');
+    const sessions = s.calls.filter(call => call.kind === 'session');
+    assert.deepEqual(sessions[0], { kind: 'session' });
+    assert.equal(sessions.length, capabilities?.includes('session.timingHistory') ? 2 : 1);
+    if (sessions.length === 2) assert.deepEqual(sessions[1], { kind: 'session', timings: true });
+    const result = s.calls.find(call => call.kind === 'result').result;
+    assert.equal('testFiles' in result, !!capabilities?.includes('results.testFiles'));
+    if (result.testFiles) assert.deepEqual(result.testFiles.counts, { total: 1, failed: 0, flaky: 0 });
+    assert.equal(s.calls.filter(call => call.kind === 'result').length, 1);
+  });
+
+test('runner errors print only allowlisted refusal reasons, including old and malformed refusals', async t => {
+  const s = fixture(t);
+  await s.client.session();
+  for (const [body, suffix] of [
+    [JSON.stringify({ reason: 'validation', error: 'secret-response' }), '; reason: validation'],
+    [JSON.stringify({ reason: 'authorization' }), '; reason: authorization'],
+    [JSON.stringify({ reason: 'storage' }), '; reason: storage'],
+    [JSON.stringify({ reason: 'secret-response' }), ''],
+    [JSON.stringify({ error: 'old refusal' }), ''],
+    ['not JSON', ''],
+    ['null', ''],
+  ]) {
+    s.client.request = async () => new Response(body, { status: 403 });
+    await assert.rejects(s.client.call({ kind: 'session' }), error => {
+      assert.equal(error.code, 'RUNNER_UNAVAILABLE');
+      assert.equal(error.message, `Convex Actions request failed (403${suffix}).`);
+      assert.doesNotMatch(error.stack, /secret-response/);
+      return true;
+    });
+  }
+});
+
+for (const capabilities of [null, [], ['session.timingHistory']])
+  test(`runner without sourcePack capability uses full download and never refreshes: ${JSON.stringify(capabilities)}`, async t => {
+    const s = fixture(t, { capabilities });
+    await cachedPack(s); // Even an unsolicited session field must be ignored.
+    const result = await prepareActionsJob(
+      s.client,
+      join(s.directory, 'candidate'),
+      join(s.directory, 'cache'),
+    );
+    assert.equal(s.client.sourcePack, null);
+    assert.equal(result.packRefresh.sourcePack, null);
+    assert.equal(result.packRefresh.packed, null);
+    assert.equal(result.packRefresh.refresh, false);
+    assert.equal(s.traffic.downloads, 6); // Two manifests plus all four Candidate blobs, no archive.
+    assert.equal(readFileSync(join(s.directory, 'candidate/README.md'), 'utf8'), 'synthetic after');
+    assert.equal(await result.refreshSourcePack(), false);
+    assert.equal(s.calls.filter(call => call.kind === 'sourcePack').length, 0);
+  });
+
+test('runner never reads an unadvertised session sourcePack field', async t => {
+  const s = fixture(t, { capabilities: ['session.timingHistory'] });
+  const call = s.client.call.bind(s.client);
+  s.client.call = async command => {
+    const result = await call(command);
+    if (command.kind === 'session' && command.timings)
+      Object.defineProperty(result, 'sourcePack', {
+        get() {
+          throw new Error('unadvertised field read');
+        },
+      });
+    return result;
+  };
+  await s.client.session(true);
+  assert.equal(s.client.sourcePack, null);
+});

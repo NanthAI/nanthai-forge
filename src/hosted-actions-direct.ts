@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { sourcePackUploadSchema } from './source-pack.js';
 import { checkHash, checkNumber, checkObject, checkPin, type HostedCheckRun } from './hosted-check.js';
 import { outputMessage, signOutput, type OutputMessage } from './hosted-check-output.js';
 import { hostedCheckCallbackSchema, type HostedCheckCallback } from './hosted-check-evidence.js';
 import { semanticReportsSchema } from './intent-semantic-conflict.js';
 import { invariant } from './errors.js';
+import { checkFileSummarySchema } from './check-file-summary.js';
+import { hostedActionsRecipeSchema } from './hosted-actions.js';
 export const directSourceWindow = 400;
 export const directLogBytes = 64 * 1024;
 export const directLogSchema = z
@@ -19,17 +22,34 @@ export const directResultSchema = z
     exitCode: z.number().int(),
     log: directLogSchema.optional(),
     contractReports: semanticReportsSchema.optional(),
+    // Compatibility metadata only; retained summaries are derived from contractReports.
+    testFiles: checkFileSummarySchema.optional(),
+  })
+  .strip();
+export const directPlanSchema = z.object({ recipe: hostedActionsRecipeSchema, lockfile: checkHash }).strict();
+// Command/result metadata may grow. Identity, pins, logs and recipes remain strict.
+export const directCommandSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('session'), timings: z.boolean().optional() }).strip(),
+  z.object({ kind: z.literal('source'), digests: z.array(checkHash).min(1).max(directSourceWindow) }).strip(),
+  z
+    .object({
+      kind: z.literal('sourcePack'),
+      phase: z.enum(['prepare', 'commit']),
+      object: sourcePackUploadSchema,
+    })
+    .strip(),
+  z.object({ kind: z.literal('plan'), plan: directPlanSchema }).strip(),
+  z.object({ kind: z.literal('output'), index: checkNumber, log: directLogSchema }).strip(),
+  z.object({ kind: z.literal('result'), result: directResultSchema }).strip(),
+]);
+export const directRequestSchema = z
+  .object({
+    projectId: z.string(),
+    runId: z.uuid(),
+    fence: z.number().safe().nonnegative().optional(),
+    command: directCommandSchema,
   })
   .strict();
-export const directCommandSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('session'), timings: z.boolean().optional() }).strict(),
-  z
-    .object({ kind: z.literal('source'), digests: z.array(checkHash).min(1).max(directSourceWindow) })
-    .strict(),
-  z.object({ kind: z.literal('plan'), plan: z.unknown() }).strict(),
-  z.object({ kind: z.literal('output'), index: checkNumber, log: directLogSchema }).strict(),
-  z.object({ kind: z.literal('result'), result: directResultSchema }).strict(),
-]);
 export function directCallback(run: HostedCheckRun, result: HostedCheckCallback['result']) {
   invariant(
     run.plan && run.planDigest && run.executionId,

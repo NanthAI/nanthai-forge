@@ -6,6 +6,8 @@ import { getFunctionName } from 'convex/server';
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { verifyActionsOidc, validateActionsClaims, actionsIssuer } from '../dist/github-actions-oidc.js';
+import { hostedActionsCapabilities } from '../dist/hosted-actions-capabilities.js';
+import { hostedCheckRunSchema } from '../dist/hosted-check.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
 import { checkPin } from '../dist/hosted-check.js';
 import { savePin } from '../dist/hosted-save.js';
@@ -13,6 +15,7 @@ const { githubAppJwt, mintInstallationToken, actionsPermissions } = await import
   moduleUrl('../convex/githubAppToken.ts')
 );
 const direct = await import(moduleUrl('../convex/projectHostedActionsDirect.ts'));
+const packs = await import(moduleUrl('../convex/projectSourcePacks.ts'));
 const sessions = await import(moduleUrl('../convex/projectHostedActionsSession.ts'));
 const source = await import(moduleUrl('../convex/projectHostedActionsSource.ts'));
 const plans = await import(moduleUrl('../convex/projectHostedActionsPlan.ts'));
@@ -314,6 +317,7 @@ test('duplicate results are immutable and complete shard evidence is needed to p
     index: 0,
     exitCode: 0,
     contractReports: { 'tests/synthetic-0.test.mjs': { durationMs: 5, failed: false } },
+    testFiles: { counts: { total: 0, failed: 0, flaky: 0 }, failed: [], flaky: [] },
   };
   const send = result => s.call(results, 'result', { ...s.input(), result: JSON.stringify(result) });
   await send(first);
@@ -322,6 +326,7 @@ test('duplicate results are immutable and complete shard evidence is needed to p
   const terminal = await send({ index: 1, exitCode: 0 });
   assert.equal(terminal.status, 'passed');
   assert.equal(terminal.contractReports['tests/synthetic-0.test.mjs'].durationMs, 5);
+  assert.deepEqual(terminal.testFiles.counts, { total: 1, failed: 0, flaky: 0 });
   const histories = [...s.tables.projectHostedTestTimings.values()];
   assert.equal(histories.length, 1);
   const history = JSON.parse(histories[0].history);
@@ -460,6 +465,8 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
     s = await fixture(t, 9);
   await s.bind();
   await s.prepare();
+  await s.call(sessions, 'session', s.input());
+  await s.call(sessions, 'session', { ...s.input(), timings: true });
   const pins = Array.from({ length: 6000 }, (_, i) => s.put(`synthetic source ${i}`));
   const baseline = s.counts.length,
     scheduled = s.scheduled.length;
@@ -505,9 +512,9 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
   await s.call(sessions, 'session', s.input());
   assert.equal(s.scheduled.length, terminalSchedules);
   // HTTP+transaction source: 2*ceil(N/400). Each job: output (2) + result (3).
-  const budget = (n, jobs) => 2 * Math.ceil(n / 400) + jobs * 5 + 15;
+  const budget = (n, jobs) => 2 * Math.ceil(n / 400) + jobs * 5 + 17;
   assert(budget(3000, 9) <= 80);
-  assert(budget(6000, 9) <= 90);
+  assert(budget(6000, 9) <= 92);
   t.diagnostic(
     JSON.stringify({
       objects: pins.length,
@@ -542,6 +549,7 @@ test('HTTP rejects forged OIDC before any source or database access', async t =>
     }),
   );
   assert.equal(response.status, 403);
+  assert.equal((await response.json()).reason, 'authorization');
 });
 
 test('OIDC HTTP commits one bounded log with its shard result and reconciles a lost reply', async t => {
@@ -717,4 +725,250 @@ test('workflow_run uses the existing HMAC webhook boundary', async t => {
   assert.equal((await s.status(s.run.id)).status, 'dispatching');
   assert.equal((await send(signature)).status, 204);
   assert.equal((await s.status(s.run.id)).status, 'cancelled');
+});
+
+test('legacy HTTP session shape remains a run with additive capabilities; unknown metadata is stripped', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  await s.prepare();
+  t.mock.method(globalThis, 'fetch', async () => jwks());
+  const modules = { projectHostedActionsSession: sessions, projectHostedActionsResults: results };
+  const received = [];
+  const ctx = {
+    runMutation: (ref, input) => {
+      const [name, method] = getFunctionName(ref).split(':');
+      received.push(input);
+      return s.call(modules[name], method, input);
+    },
+  };
+  const send = (command, identity = {}) =>
+    handle._handler(
+      ctx,
+      new Request(`${audience}/checks/actions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${oidc()}` },
+        body: JSON.stringify({ ...s.id, fence: 1, ...identity, command }),
+      }),
+    );
+  const response = await send({ kind: 'session' });
+  assert.equal(response.status, 200);
+  const { capabilities, ...oldRun } = await response.json();
+  assert.deepEqual(capabilities, hostedActionsCapabilities);
+  assert.equal(hostedCheckRunSchema.parse(oldRun).id, s.run.id);
+  // Old runners submit no extension fields. Keep the second shard pending to avoid storage finalization.
+  const result = { index: 0, exitCode: 0, contractReports: {} };
+  assert.equal((await send({ kind: 'result', result })).status, 200);
+  assert.equal(
+    (await send({ kind: 'result', futureMetadata: true, result: { ...result, futureMetadata: true } }))
+      .status,
+    200,
+  );
+  assert.deepEqual(JSON.parse(received.at(-1).result), result);
+  assert.equal((await send({ kind: 'session', futureMetadata: true })).status, 200);
+  const before = received.length;
+  for (const [command, identity] of [
+    [{ kind: 'session' }, { unexpectedIdentity: 'bad' }],
+    [{ kind: 'session' }, { fence: 'bad' }],
+    [{ kind: 'session', timings: 'bad' }, {}],
+    [{ kind: 'sourcePack' }, {}],
+    [{ kind: 'result', result: { ...result, testFiles: {} } }, {}],
+    [
+      {
+        kind: 'output',
+        index: 0,
+        log: { object: { sha256: 'f'.repeat(64), size: 5, unknownPin: true }, failureSummary: '' },
+      },
+      {},
+    ],
+  ]) {
+    const refused = await send(command, identity);
+    assert.equal(refused.status, 403);
+    assert.equal((await refused.json()).reason, 'validation');
+  }
+  assert.equal(received.length, before);
+  const storageCtx = {
+    runMutation: async () => {
+      throw Object.assign(new Error('private details'), { code: 'R2_VERIFY_FAILED' });
+    },
+  };
+  const refused = await handle._handler(
+    storageCtx,
+    new Request(`${audience}/checks/actions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${oidc()}` },
+      body: JSON.stringify({ ...s.id, command: { kind: 'session' } }),
+    }),
+  );
+  assert.equal(refused.status, 403);
+  assert.equal((await refused.json()).reason, 'storage');
+});
+
+test('source pack reservations bound project storage to two objects and delete older objects before replacement', async t => {
+  variables(t, { FORGE_BLOBS: 'r2' });
+  const s = await fixture(t);
+  await s.bind();
+  const stateRef = s.run.candidate.base.head;
+  // This fixture's base pin is synthetic; register it in this project explicitly.
+  if (![...s.tables.projectObjects.values()].some(row => row.digest === stateRef))
+    s.insert('projectObjects', {
+      projectId: s.projectId,
+      digest: stateRef,
+      size: 1,
+      location: 'r2',
+      r2Key: 'synthetic/state',
+      r2Committed: true,
+      removed: false,
+      nonce: randomUUID(),
+    });
+  const object = hash => ({ stateRef, sha256: hash.repeat(64), size: 10, fileCount: 1 });
+  const input = hash => ({ ...s.input(), object: JSON.stringify(object(hash)) });
+  const call = (name, args) => s.call(packs, name, args);
+  assert((await call('prepare', input('1'))).target.url.includes('X-Amz-Signature='));
+  assert.equal(
+    await call('prepare', input('2')),
+    null,
+    'a concurrent different upload cannot allocate a third key',
+  );
+  await assert.rejects(call('commit', input('2')));
+  await call('commit', input('1'));
+  await call('commit', input('1')); // lost reply is idempotent
+  assert.equal(s.tables.projectSourcePacks.size, 1);
+  assert((await call('prepare', input('2'))).target);
+  await call('commit', input('2'));
+  const row = [...s.tables.projectSourcePacks.values()][0];
+  assert.equal(row.latest.sha256, '2'.repeat(64));
+  assert.equal(row.other.sha256, '1'.repeat(64));
+  assert.equal(row.other.ready, true);
+  assert.equal(await call('prepare', input('3')), null, 'retired signed PUT must expire before deletion');
+  const input3 = input('3');
+  let now = Math.max(row.latest.expiresAt, row.other.expiresAt) + 1;
+  const mutate = args =>
+    s.call(
+      { sourcePackPrepare: { _handler: (ctx, value) => packs.prepareSourcePack(ctx, value, now) } },
+      'sourcePackPrepare',
+      args,
+    );
+  const cleanup = await mutate(input3);
+  assert.equal(cleanup.cleanup, row.other.objectKey);
+  const deletions = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    assert.equal(init.method, 'DELETE');
+    assert(decodeURIComponent(String(url)).includes(row.other.objectKey));
+    deletions.push(url);
+    return new Response(null, { status: 204 });
+  });
+  const actionCtx = {
+    runMutation: async (ref, args) => {
+      assert.equal(getFunctionName(ref), 'projectSourcePacks:prepare');
+      return mutate(args);
+    },
+  };
+  assert((await packs.sourcePackCommand(actionCtx, s.input(), 'prepare', object('3'))).url);
+  assert.equal(deletions.length, 1);
+  await call('commit', input3);
+  assert.equal([...s.tables.projectSourcePacks.values()][0].other.sha256, '2'.repeat(64));
+  const session = await s.call(sessions, 'session', { ...s.input(), timings: true });
+  assert.deepEqual(session.capabilities, hostedActionsCapabilities);
+  assert(session.capabilities.includes('sourcePack'));
+  assert.equal(session.sourcePack.sha256, '3'.repeat(64));
+  assert.equal(session.sourcePack.stateRef, stateRef);
+  assert.equal('expiresAt' in session.sourcePack, false);
+  await assert.rejects(
+    call('prepare', {
+      ...input('4'),
+      projectId: s.insert('hostedProjects', {
+        owner: 'other',
+        visibility: 'private',
+        sourceAuthority: { mode: 'server', epoch: 1 },
+      }),
+    }),
+  );
+  await assert.rejects(call('prepare', { ...input('4'), fence: 99 }));
+  await assert.rejects(
+    call('prepare', {
+      ...input('4'),
+      object: JSON.stringify({ ...object('4'), objectKey: 'v1/p/other/pack' }),
+    }),
+  );
+  await assert.rejects(
+    call('prepare', { ...input('4'), object: JSON.stringify({ ...object('4'), stateRef: 'f'.repeat(64) }) }),
+  );
+  const packCalls = s.counts.filter(c => c.touched.includes('projectSourcePacks'));
+  assert(packCalls.length > 0);
+  assert(packCalls.every(c => c.documents <= 20 && c.writes <= 2));
+  t.diagnostic(
+    JSON.stringify({
+      packMaxDocuments: Math.max(...packCalls.map(c => c.documents)),
+      packMaxWrites: Math.max(...packCalls.map(c => c.writes)),
+      packDocuments: s.tables.projectSourcePacks.size,
+    }),
+  );
+});
+
+test('source pack commit verifies R2 size/checksum and reauthorizes after HEAD', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  const object = { stateRef: s.run.candidate.base.head, sha256: '1'.repeat(64), size: 10, fileCount: 1 };
+  for (const observation of ['size', 'checksum', 'missing', 'valid']) {
+    const commands = [];
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      assert.equal(init.method, 'HEAD');
+      return new Response(null, {
+        status: observation === 'missing' ? 404 : 200,
+        headers: {
+          'content-length': observation === 'size' ? '11' : '10',
+          'x-amz-checksum-sha256':
+            observation === 'checksum' ? 'bad' : Buffer.from(object.sha256, 'hex').toString('base64'),
+        },
+      });
+    });
+    const actionCtx = {
+      runMutation: async (ref, _input) => {
+        commands.push(getFunctionName(ref));
+        return null;
+      },
+    };
+    if (observation === 'valid') await packs.sourcePackCommand(actionCtx, s.input(), 'commit', object);
+    else await assert.rejects(packs.sourcePackCommand(actionCtx, s.input(), 'commit', object));
+    assert.deepEqual(
+      commands,
+      observation === 'valid'
+        ? ['projectHostedActionsSession:session', 'projectSourcePacks:commit']
+        : ['projectHostedActionsSession:session'],
+    );
+  }
+});
+
+test('expired pending uploads are fenced before DELETE so late commit cannot publish a deleted pack', async t => {
+  variables(t, { FORGE_BLOBS: 'r2' });
+  const s = await fixture(t);
+  await s.bind();
+  const stateRef = s.run.candidate.base.head;
+  if (![...s.tables.projectObjects.values()].some(row => row.digest === stateRef))
+    s.insert('projectObjects', {
+      projectId: s.projectId,
+      digest: stateRef,
+      size: 1,
+      location: 'r2',
+      r2Key: 'synthetic/state',
+      r2Committed: true,
+      removed: false,
+      nonce: randomUUID(),
+    });
+  const input = hash => ({
+    ...s.input(),
+    object: JSON.stringify({ stateRef, sha256: hash.repeat(64), size: 10, fileCount: 1 }),
+  });
+  await s.call(packs, 'prepare', input('1'));
+  const reserved = [...s.tables.projectSourcePacks.values()][0].other;
+  const expired = reserved.expiresAt + 1;
+  const cleanup = await s.call(
+    { oldPack: { _handler: (ctx, args) => packs.prepareSourcePack(ctx, args, expired) } },
+    'oldPack',
+    input('2'),
+  );
+  assert.equal(cleanup.cleanup, reserved.objectKey);
+  await assert.rejects(s.call(packs, 'commit', input('1')), code('WORK_STALE'));
+  assert.equal([...s.tables.projectSourcePacks.values()][0].latest, undefined);
+  assert.equal([...s.tables.projectSourcePacks.values()][0].other.deleting, true);
 });
