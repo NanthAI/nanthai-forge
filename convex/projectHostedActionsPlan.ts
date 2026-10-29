@@ -8,6 +8,8 @@ import { hostedCheckPlanSchema, checkPin, hostedCheckTerminal } from '../src/hos
 import { hostedActionsRecipeSchema, hostedActionsRuntime } from '../src/hosted-actions';
 import { savePin } from '../src/hosted-save';
 import { semanticTests } from '../src/intent-semantic-conflict';
+import { checkGateSchema } from '../src/bet2-gate';
+import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 export const prepare = internalMutation({
   args: {
@@ -39,11 +41,62 @@ export const prepare = internalMutation({
       new Set(tests).size === tests.length &&
         (standard
           ? checkPin([...tests].sort()) === checkPin([...new Set(recipe.selection.tests)].sort()) &&
-            semanticTests(run.semanticPlan).every(test => tests.includes(test))
+            (run.gate?.mode === 'probe' ||
+              semanticTests(run.semanticPlan).every(test => tests.includes(test)))
           : recipe.groups.length === 0),
       'EVIDENCE_CHANGED',
       'Actions shard membership differs from the complete selection.',
     );
+    if (run.gate) {
+      const echo = recipe.selection.gate === undefined ? null : checkGateSchema.parse(recipe.selection.gate);
+      if (echo) {
+        const { effective, ...declared } = echo;
+        const original = { ...run.gate };
+        delete original.effective;
+        invariant(
+          canonicalPayload(declared) === canonicalPayload(original) &&
+            effective ===
+              (recipe.selection.scope === 'full'
+                ? 'full'
+                : recipe.selection.scope === 'docs'
+                  ? 'docs'
+                  : 'contract') &&
+            (effective !== 'contract' || !['full', 'audit'].includes(run.gate.mode)) &&
+            (effective !== 'contract' || (run.gate.tests ?? []).every(test => tests.includes(test))),
+          'EVIDENCE_CHANGED',
+          'Actions selection differs from its server gate.',
+        );
+        run.gate = echo;
+      } else {
+        const covered = (run.gate.tests ?? []).every(test => tests.includes(test));
+        const union = semanticTests(run.semanticPlan);
+        // Pre-gate planners can report scoped for a docs-only B3.2 union.
+        // Recognize that exact legacy selection, not an arbitrary scoped pass.
+        const legacyDocs =
+          standard &&
+          recipe.selection.scope === 'scoped' &&
+          covered &&
+          union.length > 0 &&
+          recipe.selection.reason ===
+            'Only Markdown documentation changed (including packaged docs); composed Intent contract union' &&
+          checkPin([...tests].sort()) === checkPin([...union].sort());
+        const effective =
+          recipe.selection.scope === 'full'
+            ? 'full'
+            : recipe.selection.scope === 'docs' || legacyDocs
+              ? 'docs'
+              : recipe.selection.scope === 'scoped' && run.gate.mode === 'contract' && covered
+                ? 'contract'
+                : null;
+        invariant(effective, 'EVIDENCE_CHANGED', 'A legacy plan must cover the server gate.');
+        run.gate = { ...run.gate, effective };
+      }
+    } else
+      invariant(
+        recipe.selection.gate === undefined,
+        'EVIDENCE_CHANGED',
+        'Only a server-stamped run can return gate metadata.',
+      );
     const selection = savePin(recipe.selection),
       manifest = savePin(recipe);
     const plan = hostedCheckPlanSchema.parse({
@@ -76,6 +129,7 @@ export const prepare = internalMutation({
       run.plan = plan;
       run.planDigest = checkPin(plan);
       run.status = 'running';
+      if (run.gate) await ctx.db.patch(row._id, { gate: run.gate });
       await writeHostedCheck(ctx, row._id, run);
     }
     return run;

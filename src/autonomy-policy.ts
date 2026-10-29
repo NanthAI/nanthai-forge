@@ -26,6 +26,8 @@ export const autonomyPolicySchema = z.object({
   preset: z.enum(['supervised', 'trusted', 'autonomous', 'custom']),
   acceptance: z.object({
     mode: z.enum(['review', 'auto-on-pass']),
+    /** Absent preserves the full hosted gate. */
+    gate: z.enum(['full', 'contract']).optional(),
     disjointFastPath: z.boolean().optional(),
     landing: z.enum(['batched', 'optimistic']).optional(),
     /** Remote runners only: wait up to this long after the oldest queued landing before the first check. */
@@ -68,6 +70,7 @@ export function policyPreset(preset: Exclude<AutonomyPolicy['preset'], 'custom'>
     autoExchange: autoExchangeSchema.parse({}),
     acceptance: {
       mode: preset === 'supervised' ? 'review' : 'auto-on-pass',
+      gate: preset === 'supervised' ? 'full' : 'contract',
       disjointFastPath: false,
       autoActors: [],
       protectedPaths: [],
@@ -81,7 +84,9 @@ export function policyPreset(preset: Exclude<AutonomyPolicy['preset'], 'custom'>
 }
 /** Existing owners have no new restrictions or cleanup on upgrade. */
 export function legacyPolicy(): AutonomyPolicy {
-  return { ...policyPreset('trusted'), preset: 'custom' };
+  const policy = policyPreset('trusted');
+  delete policy.acceptance.gate;
+  return { ...policy, preset: 'custom' };
 }
 export function effectivePolicy(data: { autonomyPolicy?: AutonomyPolicy | undefined }): AutonomyPolicy {
   let policy = data.autonomyPolicy ? autonomyPolicySchema.parse(data.autonomyPolicy) : legacyPolicy();

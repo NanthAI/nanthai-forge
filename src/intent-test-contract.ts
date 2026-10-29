@@ -9,6 +9,7 @@ export const contractTestsInput = z.object({
   laneId: z.uuid().optional(),
   candidateId: z.uuid().optional(),
   runId: z.uuid().optional(),
+  timingBasis: z.literal('history').optional(),
   tests: z.array(contractTestPath).optional(),
   expectedHead: z
     .string()
@@ -19,6 +20,7 @@ export const contractTestsInput = z.object({
 });
 export const intentTestContractSchema = z
   .object({
+    timingBasis: z.literal('history').optional(),
     version: z.number().safe().positive(),
     operationId: z.uuid(),
     request: z.string().regex(/^[0-9a-f]{64}$/),
@@ -41,7 +43,7 @@ export type ContractTestsInput = z.infer<typeof contractTestsInput>;
 export const latestTestContract = (intent?: { testContracts?: IntentTestContract[] | undefined } | null) =>
   intent?.testContracts?.at(-1) ?? null;
 
-/** A later Candidate never inherits a prior source's measurement contract. */
+/** Exact measurements stay source-bound; history declarations apply across the Intent. */
 export const candidateTestContract = (
   intent: { testContracts?: IntentTestContract[] | undefined } | null | undefined,
   candidateId: string,
@@ -50,7 +52,11 @@ export const candidateTestContract = (
   intent?.testContracts
     ?.slice()
     .reverse()
-    .find(contract => contract.candidateId === candidateId && contract.measuredOn === head) ?? null;
+    .find(
+      contract =>
+        contract.timingBasis === 'history' ||
+        (contract.candidateId === candidateId && contract.measuredOn === head),
+    ) ?? null;
 
 export function contractProposal(tests: string[], timings: Record<string, number>, required = tests) {
   const entries = [...new Set(tests)].sort().map(path => ({ path, durationMs: timings[path] ?? null }));
@@ -77,10 +83,11 @@ export function confirmTestContract(input: {
   version: number;
   request: string;
   at: string;
+  history?: { runId: string; measuredOn: string };
 }): IntentTestContract {
   const { command } = input;
   invariant(
-    command.operationId && command.runId,
+    command.operationId && (command.runId || input.history),
     'BAD_ARGUMENT',
     'Confirmation needs operationId and an exact-Candidate timing runId.',
   );
@@ -112,8 +119,9 @@ export function confirmTestContract(input: {
     operationId: command.operationId,
     request: input.request,
     candidateId: input.candidateId,
-    measuredOn: input.head,
-    runId: command.runId,
+    ...(input.history ? { timingBasis: 'history' } : {}),
+    measuredOn: input.history?.measuredOn ?? input.head,
+    runId: input.history?.runId ?? command.runId,
     at: input.at,
     proposedTests: input.required,
     tests: proposal.tests,

@@ -133,7 +133,9 @@ for (const provider of ['mac', 'self-hosted'])
   for (const preset of ['trusted', 'autonomous'])
     test(`${preset} owner work lands with a completed ${provider} receipt and no additional idle work`, async () => {
       const f = await fixture(preset, provider),
-        item = await f.makeCandidate();
+        item = await f.makeCandidate([], [], {
+          governance: { version: 1, paths: ['src/leaf.ts'], ownerInputs: false },
+        });
       const run = await f.passMac(item);
       assert.deepEqual(run.macEvidence, {
         provider: 'mac',
@@ -235,7 +237,9 @@ for (const provider of ['mac', 'self-hosted'])
 
 test('only the owner revokes a machine; revocation does not rewrite an accepted receipt', async () => {
   const f = await fixture(),
-    item = await f.makeCandidate();
+    item = await f.makeCandidate([], [], {
+      governance: { version: 1, paths: ['src/leaf.ts'], ownerInputs: false },
+    });
   const state = await f.submit(item, await f.passMac(item));
   const accepted = await f.accept(state);
   f.insert('projectContributors', { projectId: f.projectId, contributor: 'outside' });

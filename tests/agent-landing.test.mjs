@@ -635,7 +635,19 @@ test('fast-path finish automatically checks accepted main and creates one fix-fo
   assert.equal(landed.acceptance.fastPath.runId, checked.run.runId);
   // First observe the automatically started audit, then join its queue rather
   // than competing with its worker until the fix-forward publication finishes.
-  await until(() => snapshot(f.store).runs.some(run => run.mainCheck));
+  await until(() => {
+    // Immutable selected-record reads pin one manifest without joining writer
+    // admission. Repeated synchronous writer locks can starve the detached
+    // audit between selecting its View and registering its run.
+    const tx = f.store.readRecords();
+    try {
+      return Array.from({ length: tx.manifest.collections.runs?.count ?? 0 }, (_, index) =>
+        tx.at('runs', index),
+      ).some(run => run.mainCheck);
+    } finally {
+      tx.dispose();
+    }
+  });
   await f.background();
   const data = snapshot(f.store),
     intent = data.intents.find(intent => intent.mainCheckFailure);

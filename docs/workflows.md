@@ -45,6 +45,71 @@ outcome and links to its reverse submission. Source preparation/composition use
 finite job subscriptions; the landing queue continues independently once submitted.
 The Hand to an agent prompt remains available as a secondary route.
 
+## Hosted acceptance gate
+
+`acceptance.gate` is optional: absent or `full` keeps the full gate. Existing
+policies are unchanged. Explicit trusted/autonomous presets select `contract`;
+editing another setting retains the selected gate when the preset becomes custom.
+The check-settings policy and status run's optional `gate` identify the configured
+and effective gates. This table describes each actor class; the same rules apply
+when reviewing a Candidate in the browser.
+
+| Actor or Candidate | Effective gate |
+| --- | --- |
+| Owner's trusted or autonomous agents, permitted by `autoActors` | Contract when eligible; otherwise full |
+| Supervised (`mode: review` or `gate: full`) | Full plus person review |
+| Outside contributor | Full plus current public-governance rules |
+| Intent without a contract | Full |
+| Protected paths | Full plus owner acceptance under existing governance |
+| Missing trusted changed paths | Full plus owner acceptance when the contract policy is enabled |
+| Owner person | Existing explicit review/acceptance behavior |
+| System revert or fix | Full |
+
+Reduced gate execution currently uses the direct Actions runner. Legacy controller
+routes retain full checks and their old run wire shape. Contract eligibility also
+requires green main with no audit debt. The exact run
+covers the declared contract, changed test files and the composed Intent contract
+union. Lockfile, test infrastructure or other paths that require full selection
+escalate to full. A full or docs pass satisfies either gate. Each acceptance still
+checks the exact Candidate, current policy, main head and receipt; a contract from
+another run is not passing evidence.
+
+For a combined Candidate, every member must be eligible for the contract gate;
+its check covers the union of their declared tests. One full-gated member makes
+the combined check full.
+
+Main may be briefly red after a contract-gated landing. The asynchronous main
+audit detects failures; automatic recovery reverts a single clean culprit or
+opens a fix-forward Intent. It retains the culprit's Lane and records what it did
+and how to undo it. A contract attempt ready during red main waits with `MAIN_RED`
+and releases the queue without polling. Full-gated fixes continue. Green main
+releases held attempts through the audit's event-driven wake.
+
+The gate ships dark for existing projects. Deploy the server, runner, main audit
+and automatic recovery before enabling it. With a drained queue and the current
+main receipt fully checked, the owner enables it with
+`nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"set-policy","operationId":"UUID","acceptance":{"gate":"contract"}}'`.
+Use the same command with a fresh UUID and `gate: full` to revert the policy.
+Policy changes invalidate older pinned attempts through `POLICY_CHANGED`.
+
+An agent can request `tests` with `timingBasis: history`, then `confirm-tests`
+with that basis, the exact Candidate/head and proposed contract version before
+finishing. Hosted history uses the existing per-file timing estimates (EWMA),
+with the most recent green main run as provenance. Missing historical timings or
+a total of 90 seconds or more leave the full gate in effect; the full run can
+supply exact measurements for a later declaration. History is an estimate, not
+passing evidence for this Candidate. Old runners keep their existing full/docs selection, including composed Intent
+unions; new runners send gate metadata only when the server stamped the run.
+
+Current free-runner estimates are about 68 job-minutes for a full landing and
+10–14 for a contract landing including amortized audits. The target is one fifth
+of the same-runner full baseline. The old 10.17-minute baseline's 2.03-minute
+target is unreachable with this workflow on free runners. The plan plus static
+job also keeps the estimated finish-to-main floor near five minutes; this slice
+claims no measured latency improvement. Idle gate work adds zero calls. Audits on
+public repositories use free runner minutes; a private repository can exceed its
+2,000 included minutes.
+
 ## Git-backed flow
 
 For a Git repository with an initial commit, `nforge work /path/to/repo` gives the same Intent, Lane and Candidate model. Each Lane is a Git branch and worktree (`forge/lane/<id>`). Stage the files you want, then checkpoint those exact staged files. A Candidate is a clean merge commit of up to eight Lane heads, kept at `refs/forge/views/<id>`. Your checkout is never rewritten. Hooks are disabled and clean/smudge filters and custom merge drivers are rejected.

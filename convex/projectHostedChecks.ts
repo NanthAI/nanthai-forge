@@ -1,6 +1,7 @@
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { requestDirectCancel } from './projectHostedActionsDirect';
 import { scheduleDirectActions } from './projectHostedActionsDirect';
+import { hostedGateForCandidates } from './projectHostedGate';
 import { semanticPayload } from '../src/semantic-payload';
 import { mergeSemanticMembers, semanticMember } from './projectSemanticContracts';
 // SPDX-License-Identifier: Apache-2.0
@@ -194,7 +195,18 @@ export async function enqueueHostedCheck(
     : undefined;
   if (semantic && candidate.semanticPlan?.afterSequence !== undefined)
     semantic.afterSequence = candidate.semanticPlan.afterSequence;
+  const project = (await ctx.db.get(input.projectId))!;
+  // Older controller/provider clients strictly parse run documents. Only the
+  // direct Actions session has the additive gate handshake; all other routes
+  // retain their existing full-check wire shape.
+  const gate =
+    runner.provider === 'github-actions' && !runner.credential && project.autonomyPolicy?.acceptance.gate
+      ? await hostedGateForCandidates(ctx, project, [
+          { candidate, actor: { kind: 'agent', id: actor }, contract: member ?? null },
+        ])
+      : undefined;
   const run = hostedCheckRunSchema.parse({
+    ...(gate ? { gate } : {}),
     ...(semantic && semantic.members.length > 1 ? { semanticPlan: semantic } : {}),
     schema: 1,
     id,
@@ -204,9 +216,7 @@ export async function enqueueHostedCheck(
     request,
     check: checkSchema.parse(JSON.parse(definition.value)),
     configuration: runner,
-    ...((await ctx.db.get(input.projectId))?.autonomyPolicy?.checkLogs
-      ? { checkLogs: (await ctx.db.get(input.projectId))!.autonomyPolicy!.checkLogs }
-      : {}),
+    ...(project.autonomyPolicy?.checkLogs ? { checkLogs: project.autonomyPolicy.checkLogs } : {}),
     keyId,
     candidate: {
       digest: row.digest,

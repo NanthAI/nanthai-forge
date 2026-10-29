@@ -1,3 +1,5 @@
+import { hostedAcceptGate, holdMainRed } from './projectHostedGate';
+import { protectedGatePaths } from '../src/contract-gate-policy';
 import { noteMainLanding } from './projectHostedMainAuditState';
 import type { HostedCheckRun } from '../src/hosted-check';
 // SPDX-License-Identifier: Apache-2.0
@@ -160,17 +162,50 @@ export async function publishAcceptance(
     };
   }
   invariant(
-    !requiresGovernedCheck(project, actor) || check,
+    !(
+      requiresGovernedCheck(project, actor) ||
+      (policy.acceptance.gate === 'contract' && attempt.actor.id !== project.owner)
+    ) || check,
     'CHECK_NOT_PASSED',
     'Agent acceptance requires an exact passing check.',
   );
-  const reason = governanceReason(
-    project,
-    policy,
-    actor,
-    candidate.governance?.paths ?? null,
-    candidate.governance?.ownerInputs,
-  );
+  const ownerReview =
+    actor.kind === 'person' &&
+    actor.id === project.owner &&
+    attempt.actor.id === project.owner &&
+    policy.acceptance.mode === 'auto-on-pass' &&
+    policy.acceptance.gate === 'contract' &&
+    !protectedGatePaths(policy, candidate.governance?.paths ?? null);
+  const gate =
+    run && !ownerReview ? await hostedAcceptGate(ctx, project, candidate, attempt.actor, run) : 'pass';
+  if (gate === 'main-red') {
+    const reason = 'Main audit is red; contract acceptance resumes when main is green.';
+    const next = {
+      ...state,
+      version: state.version + 1,
+      observation: landingObservation('queued'),
+      error: { code: 'MAIN_RED', message: reason },
+    };
+    await holdMainRed(ctx, row, next);
+    await releaseLandingQueue(ctx, queue, now);
+    return { status: 'pending' as const, reason, request: next };
+  }
+  invariant(gate === 'pass', 'CHECK_NOT_PASSED', 'This Candidate requires an exact full check.');
+  const protectedReason =
+    policy.acceptance.gate === 'contract' &&
+    !(actor.kind === 'person' && actor.id === project.owner) &&
+    protectedGatePaths(policy, candidate.governance?.paths ?? null) &&
+    !(actor.id === project.owner && candidate.governance?.ownerInputs)
+      ? 'needs owner approval: protected or unknown paths'
+      : null;
+  const reason =
+    governanceReason(
+      project,
+      policy,
+      actor,
+      candidate.governance?.paths ?? null,
+      candidate.governance?.ownerInputs,
+    ) ?? protectedReason;
   if (reason) {
     const next = {
       ...state,

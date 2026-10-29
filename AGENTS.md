@@ -29,6 +29,23 @@ Record a handoff before stopping.
 
 `finish` checkpoints, merges the latest `main`, runs the `verify` check and accepts on pass. Details: [agent workflow](docs/agents/workflow.md). Lifecycle receipts include advisory local peers; incomplete coverage never establishes independence. `start.scope.paths` retains planned claims; other lifecycle scopes declare relevance for that call. Use `peers {"laneId":"…","detail":true}` or `forge_peers` for details. Clean checkpoints succeed with an unchanged head. When Forge gets in your way, run `nforge agent OWNER friction '{"laneId":"…","title":"…","detail":"…","area":"…"}'`; `nforge improve OWNER` groups the reports that guide the next slice.
 
+## Hosted landing gate
+
+Existing policies without `acceptance.gate` keep full checks. Explicit trusted and
+autonomous presets select the contract gate; supervised projects, contributors,
+system changes and Intents without contracts keep the full gate. A contract run
+checks the declared tests, changed tests and composed Intent union on the exact
+Candidate. Protected paths require a full check and owner acceptance under the
+existing governance rules. With the contract policy enabled, unknown paths also
+require full evidence and owner acceptance.
+
+With the contract gate enabled, main may be briefly red. The hosted main audit
+runs asynchronously; automatic recovery reverts a single clean culprit or opens a
+fix-forward Intent, retaining the Lane and an undo command. Contract acceptance
+pauses while main is red; full-gated fixes can still land. Enable this policy only
+after the hosted audit and automatic recovery slices are deployed. See
+[the effective gate table](docs/workflows.md#hosted-acceptance-gate).
+
 ## Agent source commands
 
 `nforge agent OWNER diff '{"laneId":"…"}'` summarizes base-to-live Lane changes.

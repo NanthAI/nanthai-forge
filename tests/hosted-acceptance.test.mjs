@@ -18,7 +18,9 @@ test.after(() => {
 });
 async function checked(f, item = null, policy = policyPreset('trusted')) {
   f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
-  item ??= await f.makeCandidate();
+  item ??= await f.makeCandidate([], [], {
+    governance: { version: 1, paths: ['src/leaf.ts'], ownerInputs: false },
+  });
   const run = await f.rawChecks.enqueue(
     f.rawChecks.selection({ candidateId: item.candidate.id, expectedHead: item.candidate.result.head }),
   );
@@ -226,7 +228,9 @@ test('only landed exact saved heads complete; newer saves, lifecycle changes, si
     record: intent,
   });
   const lanes = await Promise.all(Array.from({ length: 5 }, () => f.lane({ intentId })));
-  const item = await f.makeCandidate(lanes.slice(0, 4));
+  const item = await f.makeCandidate(lanes.slice(0, 4), [], {
+    governance: { version: 1, paths: ['src/leaf.ts'], ownerInputs: false },
+  });
   const { state } = await checked(f, item);
   const changedBefore = await f.changeLane(lanes[1].laneId, { sourceVersion: 1 });
   const reopenedBefore = await f.changeLane(lanes[2].laneId, { lifecycleVersion: 1 });

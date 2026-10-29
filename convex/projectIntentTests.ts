@@ -96,20 +96,30 @@ export async function executeIntentTests(
     batch.forEach((file, index) => files.set(file.path, bytes[index]!.toString('utf8')));
   }
   const selection = intentContractSelection(files, paths);
-  const timings = command.runId
-    ? await hostedContractTimings({
-        runId: command.runId,
-        candidateId: candidate.id,
-        head,
-        query,
-        mutation,
-        download: async url => {
-          const response = await fetch(url);
-          invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Timing output download failed.');
-          return new Uint8Array(await response.arrayBuffer());
-        },
-      })
-    : {};
+  const historical =
+    command.timingBasis === 'history'
+      ? z
+          .object({ runId: z.uuid(), measuredOn: z.string(), timings: z.record(z.string(), z.number()) })
+          .nullable()
+          .parse(await query('projectHostedGate:history', { candidateId: candidate.id }))
+      : null;
+  const timings =
+    command.timingBasis === 'history'
+      ? (historical?.timings ?? {})
+      : command.runId
+        ? await hostedContractTimings({
+            runId: command.runId,
+            candidateId: candidate.id,
+            head,
+            query,
+            mutation,
+            download: async url => {
+              const response = await fetch(url);
+              invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Timing output download failed.');
+              return new Uint8Array(await response.arrayBuffer());
+            },
+          })
+        : {};
   if (command.action === 'confirm-tests') {
     const contract = confirmTestContract({
       command,
@@ -121,12 +131,18 @@ export async function executeIntentTests(
       version: latestTestContract(intent)?.version ?? 0,
       request: requestDigest,
       at: new Date().toISOString(),
+      ...(historical ? { history: historical } : {}),
     });
-    return mutation('projectIntentTestStore:confirm', {
-      candidateId: candidate.id,
-      contract: canonicalPayload(contract),
-      authorityEpoch: context.authorityEpoch,
-    });
+    return mutation(
+      command.timingBasis === 'history'
+        ? 'projectHostedGate:confirmHistory'
+        : 'projectIntentTestStore:confirm',
+      {
+        candidateId: candidate.id,
+        contract: canonicalPayload(contract),
+        authorityEpoch: context.authorityEpoch,
+      },
+    );
   }
   // Recheck current access even when every source byte was a cache hit.
   await query('projectIntentTestStore:context', { candidateId: candidate.id });
@@ -140,9 +156,9 @@ export async function executeIntentTests(
     contract: latestTestContract(intent),
     contractProposal: {
       ...contractProposal(command.tests ?? selection.tests, timings, selection.tests),
-      timingBasis: command.runId ? 'exact-candidate-run' : 'unavailable',
-      measuredOn: command.runId ? head : null,
-      runId: command.runId ?? null,
+      timingBasis: historical ? 'history' : command.runId ? 'exact-candidate-run' : 'unavailable',
+      measuredOn: historical?.measuredOn ?? (command.runId ? head : null),
+      runId: historical?.runId ?? command.runId ?? null,
     },
   };
 }

@@ -2,6 +2,8 @@
 import { mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { HostedCheckRun } from './hosted-check.js';
+import { contractTestPath } from './intent-test-contract.js';
 import { checkPin } from './hosted-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { digest } from './hash.js';
@@ -52,10 +54,20 @@ export async function prepareActionsJob(client: ActionsJobClient, directory: str
     /(?:^|\/)node$/.test(run.check.executable) &&
     JSON.stringify(run.check.args) === '["scripts/forge-check.mjs"]';
   const files = new SourceFiles(new Map(state.files.map(file => [file.path, file.blob])), cache);
-  const selected = standard
-    ? standardSelection({ paths, files, semanticTests: semanticTests(run.semanticPlan), env: {} })
-    : { scope: 'full', reason: 'Exact configured command', tests: [] };
-  const selection = { scope: selected.scope, reason: selected.reason, tests: selected.tests };
+  const selected = actionsGateSelection(run, paths, files, standard);
+  const selection = {
+    scope: selected.scope,
+    reason: selected.reason,
+    tests: selected.tests,
+    ...(run.gate
+      ? {
+          gate: {
+            ...run.gate,
+            effective: selected.scope === 'full' ? 'full' : selected.scope === 'docs' ? 'docs' : 'contract',
+          },
+        }
+      : {}),
+  };
   const groups =
     standard && selection.scope !== 'docs' ? partitionTests(selection.tests, 8, client.timings) : [];
   const pins = {
@@ -96,4 +108,49 @@ export async function prepareActionsJob(client: ActionsJobClient, directory: str
     recipe,
     matrix: [...groups.map((_, index) => String(index)), 'static'],
   };
+}
+
+/** Gate metadata is sent only in response to a server-stamped run (skew handshake). */
+export function actionsGateSelection(
+  run: HostedCheckRun,
+  paths: string[],
+  files: Map<string, string>,
+  standard: boolean,
+) {
+  if (!standard) return { scope: 'full', reason: 'Exact configured command', tests: [] as string[] };
+  const gate = run.gate;
+  const union = semanticTests(run.semanticPlan);
+  const forceFull = gate?.mode === 'audit' || (gate?.mode === 'full' && union.length > 0);
+  const env = forceFull
+    ? { FORGE_CHECK_FULL: '1' }
+    : gate?.mode === 'full'
+      ? {}
+      : gate
+        ? { FORGE_CHECK_SCOPED: '1' }
+        : {};
+  if (gate?.mode === 'probe') {
+    const tests = [...new Set(gate.tests ?? [])].sort();
+    invariant(
+      tests.every(test => contractTestPath.safeParse(test).success && files.has(test)),
+      'EVIDENCE_CHANGED',
+      'A probe test is absent from the exact Candidate.',
+    );
+    return { scope: 'scoped', reason: gate.reason ?? 'Failed-file probe', tests };
+  }
+  const selected = standardSelection({ paths, files, semanticTests: union, env });
+  if (!gate || gate.mode !== 'contract' || selected.scope === 'full' || selected.scope === 'docs')
+    return selected;
+  const tests = [
+    ...new Set([
+      ...(gate.tests ?? []),
+      ...union,
+      ...paths.filter(path => contractTestPath.safeParse(path).success && files.has(path)),
+    ]),
+  ].sort();
+  invariant(
+    tests.every(test => contractTestPath.safeParse(test).success && files.has(test)),
+    'EVIDENCE_CHANGED',
+    'A gate test is absent from the exact Candidate.',
+  );
+  return { scope: 'scoped', reason: gate.reason ?? `${gate.mode} gate`, tests };
 }
