@@ -1,3 +1,4 @@
+import { prepareLandingCheck } from './projectHostedLandingBatchCheck';
 import { semanticVerdict, semanticConflictMessage } from '../src/intent-semantic-conflict';
 import { digest } from '../src/portable-hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -150,6 +151,8 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     observation = landingObservation('queued');
   let error: HostedLandingState['error'] = null;
   try {
+    if (await prepareLandingCheck(ctx, claim, { row, state, attempt, queue: held }, now))
+      return (await loadLanding(ctx, claim)).state;
     await hostedWriteProject(ctx, claim.projectId, attempt.actor.id, attempt.authorityEpoch);
     const candidate = await readHostedRecord(ctx, {
       projectId: claim.projectId,
@@ -221,7 +224,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
         observation = landingObservation(run.status);
         error = {
           code: run.status === 'failed' ? 'CHECK_FAILED' : 'CHECK_NOT_PASSED',
-          message: `The original exact check settled as ${run.status}.`,
+          message: `The original exact check settled as ${run.status}.${run.testFiles?.failed.length ? ' Failing tests: ' + run.testFiles.failed.map(f => f.file).join(', ') : ''}`,
         };
       } else {
         await requireHostedCheckEvidence(ctx, {

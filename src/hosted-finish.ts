@@ -32,4 +32,4 @@ export type FinishCommand =
       pin: { sha256: string; size: number };
       selection: { attemptId: string; kind: 'inputs' | 'dependencies'; index: number };
     }
-  | { kind: 'plan'; value: string; pin: { sha256: string; size: number } };
+  | { kind: 'plan'; value: string; pin: { sha256: string; size: number }; batchId?: string };

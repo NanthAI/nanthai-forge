@@ -1,3 +1,4 @@
+import type { BatchDropped } from './hosted-landing-batch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { NativeSource, overlappingPaths } from './native-source.js';
 import type { NativeFile } from './native-state-format.js';
@@ -49,6 +50,7 @@ export async function buildHostedComposeState(
   let head = plan.base.head,
     pageCount = 0,
     selected = 0;
+  const dropped: BatchDropped = [];
   let result: ReturnType<typeof composeResultSchema.parse>['result'] | undefined;
   const publishGenerated = async () => {
     await reader.publishGenerated(source, source.generated);
@@ -140,7 +142,9 @@ export async function buildHostedComposeState(
               ),
             );
           invariant(conflicts, 'SOURCE_JOB_INVALID', 'A conflict needs exact source pins.');
-          result = { status: 'conflict', conflicts };
+          if (plan.batch && 'candidateId' in entry && plan.batch.members.includes(entry.candidateId))
+            dropped.push({ candidateId: entry.candidateId, conflicts });
+          else result = { status: 'conflict', conflicts };
         }
         await progress();
       }
@@ -169,6 +173,7 @@ export async function buildHostedComposeState(
         composeResultSchema.parse({
           schema: 1,
           kind: 'forge-hosted-compose-result',
+          ...(plan.batch ? { dropped } : {}),
           input,
           algorithm: plan.algorithm,
           result,

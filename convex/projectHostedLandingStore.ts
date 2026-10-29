@@ -196,6 +196,16 @@ export async function writeLanding(
   await ctx.db.patch(row._id, {
     attemptId: state.attemptId,
     runId: attempt.check?.runId ?? null,
+    batchSelection:
+      !state.batchSolo && (attempt.deferredCheck || row.batchSelection)
+        ? canonicalPayload(attempt)
+        : undefined,
+    batchable: Boolean(
+      !state.batchId &&
+      !state.batchSolo &&
+      (attempt.deferredCheck || row.batchSelection) &&
+      (state.phase === 'queued' || state.phase === 'checking'),
+    ),
     phase: state.phase as LandingRow['phase'],
     runnable,
     value: semanticPayload(state),

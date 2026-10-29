@@ -146,7 +146,9 @@ export const resultDownload = internalMutation({
       return null;
     }
     invariant(
-      job.status === 'completed' && job.output && job.output.size <= 4096,
+      // Batched changed-path coverage can exceed a tiny manifest. Keep the
+      // signed metadata download bounded without rejecting ordinary stacks.
+      job.status === 'completed' && job.output && job.output.size <= 512 * 1024,
       'SOURCE_JOB_INVALID',
       'A completed source result manifest is required.',
     );

@@ -21,6 +21,8 @@ export const hostedAcceptanceSchema = z
     authorityEpoch: count,
     previous: hostedLandingAttemptSchema.shape.main,
     candidate: hostedLandingAttemptSchema.shape.candidate.extend({ head: hash }),
+    memberCandidate: hostedLandingAttemptSchema.shape.candidate.optional(),
+    batchId: z.uuid().optional(),
     actor: hostedLandingAttemptSchema.shape.actor,
     policyDigest: hash,
     check: z

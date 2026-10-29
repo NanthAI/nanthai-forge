@@ -52,6 +52,18 @@ export const hostedLandingCancelSchema = z
 export const hostedLandingAttemptSchema = z
   .object({
     semanticPlan: semanticPlanSchema.optional(),
+    deferredCheck: z.literal(true).optional(),
+    memberCandidate: z
+      .object({
+        id: z.uuid(),
+        digest: hash,
+        head: hash.nullable(),
+        inputs: object,
+        dependencies: object,
+        algorithm: z.string().min(1),
+      })
+      .strict()
+      .optional(),
     schema: z.literal(1),
     projectId: z.string().min(1),
     submissionId: z.uuid(),
@@ -113,6 +125,8 @@ export const hostedLandingStateSchema = z
     attemptId: z.uuid(),
     phase: z.enum(['composing', 'queued', 'checking', 'ready', 'terminal-failed', 'landed']),
     preparing: z.literal(true).optional(),
+    batchId: z.uuid().optional(),
+    batchSolo: z.literal(true).optional(),
     semanticConflicts: semanticConflictsSchema.optional(),
     checkProgress: hash.optional(),
     testFiles: checkFileSummarySchema.optional(),

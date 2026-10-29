@@ -1,3 +1,4 @@
+import { batchComposeSchema, batchDroppedSchema } from './hosted-landing-batch.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import {
@@ -44,6 +45,7 @@ export const composeInputSchema = z
   .object({
     schema: z.literal(1),
     kind: z.literal('forge-hosted-compose-input'),
+    batch: batchComposeSchema.optional(),
     base: main,
     main: saveWorkerObjectSchema,
     inputs: composeManifestSchema,
@@ -57,6 +59,7 @@ export const composeResultSchema = z
   .object({
     schema: z.literal(1),
     kind: z.literal('forge-hosted-compose-result'),
+    dropped: batchDroppedSchema.optional(),
     input: object,
     algorithm: z.literal(COMPOSE_ALGORITHM),
     result: z.discriminatedUnion('status', [

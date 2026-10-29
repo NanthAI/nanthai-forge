@@ -40,6 +40,16 @@ export async function scheduleFinish(
 }
 export async function notifyFinish(ctx: MutationCtx, state: HostedLandingState) {
   const projectId = state.projectId as Id<'hostedProjects'>;
+  if (state.batchId && (state.phase === 'landed' || state.phase === 'terminal-failed')) {
+    const batch = await ctx.db
+      .query('projectHostedLandingBatches')
+      .withIndex('by_project_and_batch', q => q.eq('projectId', projectId).eq('batchId', state.batchId!))
+      .unique();
+    if (batch && JSON.parse(batch.value).phase === 'fallback') {
+      const leader = await finishRow(ctx, { projectId, submissionId: state.batchId });
+      if (leader) await scheduleFinish(ctx, leader);
+    }
+  }
   const row = await finishRow(ctx, { projectId, submissionId: state.id });
   if (
     row &&
@@ -75,4 +85,14 @@ export async function notifyFinishCompose(
     )
     .unique();
   if (row) await scheduleFinish(ctx, row);
+  const batch = await ctx.db
+    .query('projectHostedLandingBatches')
+    .withIndex('by_project_and_compose', q =>
+      q.eq('projectId', projectId).eq('composeOperationId', operationId),
+    )
+    .unique();
+  if (batch) {
+    const leader = await finishRow(ctx, { projectId, submissionId: batch.batchId });
+    if (leader) await scheduleFinish(ctx, leader);
+  }
 }

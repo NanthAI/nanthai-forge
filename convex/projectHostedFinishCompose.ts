@@ -161,6 +161,7 @@ export async function installFinishCompose(
   const attempt = await pinLandingAttempt(ctx, {
     ...input,
     actor: original.actor,
+    deferCheck: !state.batchSolo,
     request: {
       ...state.request,
       expectedMain: pending.main,

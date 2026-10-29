@@ -19,6 +19,14 @@ const lease = v.object({
   attemptId: v.string(),
 });
 export const hostedLandingTables = {
+  projectHostedLandingBatches: defineTable({
+    projectId: v.id('hostedProjects'),
+    batchId: v.string(),
+    composeOperationId: v.string(),
+    value: v.string(),
+  })
+    .index('by_project_and_batch', ['projectId', 'batchId'])
+    .index('by_project_and_compose', ['projectId', 'composeOperationId']),
   projectHostedLandingDesired: defineTable({
     alarm,
     projectId: v.id('hostedProjects'),
@@ -71,6 +79,8 @@ export const hostedLandingTables = {
     submissionId: v.string(),
     operationId: v.string(),
     candidateId: v.optional(v.string()),
+    batchSelection: v.optional(v.string()),
+    batchable: v.optional(v.boolean()),
     revertOf: v.optional(v.string()),
     actor: v.string(),
     sequence: v.number(),
@@ -94,6 +104,13 @@ export const hostedLandingTables = {
       'projectId',
       'channel',
       'runnable',
+      'sequence',
+    ])
+    .index('by_project_and_channel_and_batchable_and_phase_and_sequence', [
+      'projectId',
+      'channel',
+      'batchable',
+      'phase',
       'sequence',
     ])
     .index('by_project_and_channel_and_phase_and_sequence', ['projectId', 'channel', 'phase', 'sequence'])

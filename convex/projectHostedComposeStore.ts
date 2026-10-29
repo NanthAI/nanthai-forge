@@ -1,3 +1,4 @@
+import { batchComposeSchema, batchDroppedSchema } from '../src/hosted-landing-batch';
 import { semanticPayload } from '../src/semantic-payload';
 import { semanticPlanSchema } from '../src/intent-semantic-conflict';
 import { notifyDesiredCompose } from './projectHostedLandingDesiredWake';
@@ -21,6 +22,8 @@ export const composeStateSchema = z
   .object({
     semanticPlan: semanticPlanSchema.optional(),
     ownerInputs: z.boolean().optional(),
+    batch: batchComposeSchema.optional(),
+    dropped: batchDroppedSchema.optional(),
     request: composeRequestSchema,
     main: saveWorkerObjectSchema,
     inputs: progress,
@@ -68,6 +71,7 @@ export async function writeComposeState(
 export function hostedComposeInput(state: ComposeState, at: string) {
   return composeInputSchema.parse({
     schema: 1,
+    ...(state.batch ? { batch: state.batch } : {}),
     kind: 'forge-hosted-compose-input',
     base: state.request.expectedMain,
     main: state.main,

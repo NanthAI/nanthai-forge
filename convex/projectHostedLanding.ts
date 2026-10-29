@@ -278,6 +278,7 @@ export async function enqueueHostedLanding(
     submissionId,
     operationId: request.operationId,
     candidateId: request.candidateId,
+    ...(attempt.deferredCheck ? { batchSelection: canonicalPayload(attempt), batchable: true } : {}),
     ...(request.revertOf ? { revertOf: request.revertOf } : {}),
     actor: actor.id,
     sequence,

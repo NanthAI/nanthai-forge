@@ -62,6 +62,7 @@ export type SourceStepCursor = {
   calculations?: Record<string, import('./hosted-source-merge-journal.js').SourceCalculationResult>;
   /** Compose base entries of changed paths. Absent on cursors from older code:
    * their changed paths are unknown and the Candidate waits for the owner. */
+  batchDropped?: import('./hosted-landing-batch.js').BatchDropped;
   composeBases?: [string, Pick<NativeFile, 'blob' | 'mode'> | null][];
 };
 export function initialSourceStep(input: WorkerPin): SourceStepCursor {
@@ -361,7 +362,11 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
             ...(c.head ? [c.inventory[c.head]] : []),
             ...c.selections.slice(c.index, c.index + 99).map(v => c.inventory[(v as { head: string }).head]),
           ].filter((r): r is WorkerObject => !!r);
-          await io.prepareRead?.(refs.map(ref => ref.object));
+          // Generated intermediate States are resident until this quantum commits;
+          // they have no published descriptor to resolve yet.
+          await io.prepareRead?.(
+            refs.filter(ref => !mergeSource.objects.has(ref.object.sha256)).map(ref => ref.object),
+          );
         }
         const pending = journalSourceCalculations(c, mergeSource);
         const guarded = {

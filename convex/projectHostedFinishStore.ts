@@ -120,15 +120,17 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
   }
   const after = state.request.finish.after;
   if (after) await loadLanding(ctx, { projectId: input.projectId, submissionId: after });
-  const check = attempt.check
-    ? {
-        kind: 'request' as const,
-        checkId: attempt.check.checkId,
-        expectedDefinition: attempt.check.definition,
-        expectedConfiguration: attempt.check.configuration,
-        expectedEnvironment: attempt.check.environment,
-      }
-    : null;
+  const check = attempt.deferredCheck
+    ? state.request.check
+    : attempt.check
+      ? {
+          kind: 'request' as const,
+          checkId: attempt.check.checkId,
+          expectedDefinition: attempt.check.definition,
+          expectedConfiguration: attempt.check.configuration,
+          expectedEnvironment: attempt.check.environment,
+        }
+      : null;
   const id = await ctx.db.insert('projectHostedFinishes', {
     ...input,
     composeOperationId: null,

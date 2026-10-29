@@ -226,6 +226,7 @@ export async function computeMergeStep(
           composeResultSchema.parse({
             schema: 1,
             kind: 'forge-hosted-compose-result',
+            ...(plan.batch ? { dropped: c.batchDropped ?? [] } : {}),
             input: c.input,
             algorithm: plan.algorithm,
             // A fast-forward records exactly the tip difference.
@@ -268,6 +269,7 @@ export async function computeMergeStep(
     c.input,
     {
       ...plan,
+      batch: undefined, // This quantum retains its own member-conflict result.
       base: { ...plan.base, head: c.head },
       main,
       inputs: inputs.manifest,
@@ -278,21 +280,35 @@ export async function computeMergeStep(
     async () => {},
     bases,
   );
-  if (bases) c.composeBases = [...bases];
+  if (bases && !(plan.batch && manifestConflict(result, source))) c.composeBases = [...bases];
   const manifest = composeResultSchema.parse(
     JSON.parse(source.object(result.output.sha256).toString('utf8')),
   );
   c.index++;
-  if (manifest.result.status === 'conflict') {
+  if (
+    manifest.result.status === 'conflict' &&
+    plan.batch &&
+    'candidateId' in value &&
+    plan.batch.members.includes(value.candidateId)
+  ) {
+    (c.batchDropped ??= []).push({ candidateId: value.candidateId, conflicts: manifest.result.conflicts });
+  } else if (manifest.result.status === 'conflict') {
     c.output = result.output;
     c.head = null;
     c.phase = 'done';
   } else {
     c.head = manifest.result.state.sha256;
     c.inventory[c.head] = { object: manifest.result.state, recipe: null };
-    if (c.index === c.selections.length) {
+    if (c.index === c.selections.length && !plan.batch) {
       c.output = result.output;
       c.phase = 'done';
     }
   }
+}
+
+function manifestConflict(result: { output: { sha256: string } }, source: MemoryMergeSource) {
+  return (
+    composeResultSchema.parse(JSON.parse(source.object(result.output.sha256).toString('utf8'))).result
+      .status === 'conflict'
+  );
 }

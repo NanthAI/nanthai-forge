@@ -1,3 +1,6 @@
+import { loadBatch, writeBatch, wakeBatch } from './projectHostedLandingBatchStore';
+import { batchFinishStep, resumeBatchIO } from './projectHostedLandingBatchFinish';
+import { publishLandingBatch } from './projectHostedLandingBatchPublish';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import { loadFinish, failFinish } from './projectHostedFinishStore';
@@ -27,8 +30,10 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
   // A completed/lost reply never permits an older IO callback to advance later work.
   await ctx.db.patch(row._id, { wake: null });
   const { row: landing, state } = await loadLanding(ctx, input);
-  if (state.phase === 'landed' || state.phase === 'terminal-failed') return null;
   try {
+    const batchStep = await batchFinishStep(ctx, input, row);
+    if (batchStep.handled) return batchStep.command;
+    if (state.phase === 'landed' || state.phase === 'terminal-failed') return null;
     await hostedWriteProject(ctx, input.projectId, state.actor, state.request.authorityEpoch);
     if (row.parentSubmissionId) {
       const parent = (
@@ -145,7 +150,8 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       return null;
     }
     try {
-      await publishAcceptance(ctx, claim);
+      if (state.batchId && !state.batchSolo) await publishLandingBatch(ctx, claim);
+      else await publishAcceptance(ctx, claim);
     } catch (error) {
       if (error instanceof ForgeError && error.code === 'CHANNEL_CHANGED') {
         // Yield the Channel so later independent runnable requests can advance.
@@ -157,6 +163,17 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
     return null;
   } catch (error) {
     if (!(error instanceof ForgeError)) throw error;
+    if (state.batchId && !state.batchSolo) {
+      const key = { projectId: input.projectId, batchId: state.batchId };
+      const { batch } = await loadBatch(ctx, key);
+      if (batch.phase === 'composing' || batch.phase === 'checking') {
+        await writeBatch(ctx, key, { ...batch, phase: 'fallback' });
+        await wakeBatch(ctx, key);
+        const held = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
+        if (held?.lease?.submissionId === input.submissionId) await releaseLandingQueue(ctx, held);
+        return null;
+      }
+    }
     await failFinish(ctx, input, error.code, error.message);
     const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
     if (queue?.lease?.submissionId === input.submissionId) await releaseLandingQueue(ctx, queue);
@@ -171,6 +188,10 @@ async function resumeFinishIOOnce(
   const { row, value } = await loadFinish(ctx, input);
   if (row.wake?.id !== input.wakeId) return;
   const { state } = await loadLanding(ctx, input);
+  if (input.command.kind === 'plan' && input.command.batchId) {
+    await resumeBatchIO(ctx, { ...input, command: input.command });
+    return;
+  }
   if (state.phase === 'landed' || state.phase === 'terminal-failed') return;
   await hostedWriteProject(ctx, input.projectId, state.actor, state.request.authorityEpoch);
   if (input.command.kind === 'page') {

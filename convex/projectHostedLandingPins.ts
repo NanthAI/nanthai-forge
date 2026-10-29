@@ -1,3 +1,4 @@
+import { batchEligible } from '../src/hosted-landing-batch';
 import { semanticMember, mergeSemanticMembers } from './projectSemanticContracts';
 import type { SemanticPlan } from '../src/intent-semantic-conflict';
 // SPDX-License-Identifier: Apache-2.0
@@ -34,6 +35,7 @@ export async function pinLandingAttempt(
     at: string;
     operations: { check: string; accept: string };
     allowStaleMain?: boolean;
+    deferCheck?: boolean;
     retainedSelection?: HostedLandingAttempt['candidate'];
   },
 ) {
@@ -87,6 +89,13 @@ export async function pinLandingAttempt(
       'A finish retry must retain the original ordered selection.',
     );
   }
+  const deferredCheck =
+    input.deferCheck !== false &&
+    r.finish &&
+    !r.finish.after &&
+    !r.revertOf &&
+    r.check?.kind === 'request' &&
+    batchEligible(project, effectivePolicy(project), input.actor, candidate);
   let check = null;
   let semanticPlan: SemanticPlan | undefined;
   if (candidate.result.status === 'clean') {
@@ -102,7 +111,7 @@ export async function pinLandingAttempt(
       'SOURCE_HASH_MISMATCH',
       'Registered source size differs.',
     );
-    if (r.check) {
+    if (r.check && !deferredCheck) {
       const run =
         r.check.kind === 'run'
           ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: r.check.runId })).run
@@ -156,6 +165,7 @@ export async function pinLandingAttempt(
   const policy = effectivePolicy(project);
   return hostedLandingAttemptSchema.parse({
     ...(semanticPlan ? { semanticPlan } : {}),
+    ...(deferredCheck ? { deferredCheck: true } : {}),
     schema: 1,
     projectId: input.projectId,
     submissionId: input.submissionId,
