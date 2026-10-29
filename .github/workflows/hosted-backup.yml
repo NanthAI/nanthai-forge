@@ -22,7 +22,6 @@ jobs:
       # Keep file-inclusive backups unless the deployment-wide migration is complete.
       HOSTED_DURABILITY_DATABASE_ONLY: '0'
       HOSTED_DURABILITY_R2_PREFIX: ${{ vars.HOSTED_DURABILITY_R2_PREFIX }}
-      HOSTED_DURABILITY_STATE_DIR: ${{ runner.temp }}/hosted-backup-state
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -49,6 +48,8 @@ jobs:
           node scripts/hosted-backup-mask.mjs
           node scripts/hosted-durability.mjs backup --deployment benevolent-wildebeest-974
         env:
+          # The runner context exists only inside steps, not in job-level env.
+          HOSTED_DURABILITY_STATE_DIR: ${{ runner.temp }}/hosted-backup-state
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
