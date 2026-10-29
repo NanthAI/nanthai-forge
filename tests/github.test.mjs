@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { captureGithub, githubInput, githubRepository, githubJson } from '../dist/github.js';
 import { ForgeError } from '../dist/errors.js';
 import { moduleUrl } from './convex-module.mjs';
+import { setup as r2Setup } from './r2-harness.mjs';
 import { GraphQuery } from '../dist/graph-query.js';
 import { hostedQuery } from '../dist/hosted-query.js';
 import { validateArtifact } from '../dist/artifact-validation.js';
@@ -282,7 +283,7 @@ test('hosted linked documents retain exact revision bytes, nested ignores and ol
   assert.match(hostedQuery(old, 'readme', sha).text, /Guide/);
 });
 
-test('Hosted reads retain imported attribution while checking current provider metadata and access', async () => {
+test('Hosted reads retain imported attribution while checking current provider metadata and access', async t => {
   const f = fixture({ 'main.ts': 'export const value = 1;', LICENSE: 'Original MIT license' });
   const artifact = await captureGithub(f.repository, undefined, undefined, async () => {}, f.request);
   const original = structuredClone(artifact);
@@ -306,10 +307,11 @@ test('Hosted reads retain imported attribution while checking current provider m
   assert.throws(() => hostedQuery(artifact, 'readme', 'c'.repeat(40), current), { code: 'SOURCE_STALE' });
   assert.match(hostedQuery(artifact, 'readme', sha, current).text, /Original MIT license/);
 
-  const { state, job, providers } = await import('./hosted-fixture.mjs');
+  const { job, providers } = await import('./hosted-fixture.mjs');
   const { encodeHostedArtifact } = await import('../dist/hosted-artifact.js');
   const { readSource } = await import(moduleUrl('../convex/hosted.ts'));
-  const s = state([{ ...job(), scope: 'public', visibility: 'public' }]);
+  const { s } = await r2Setup(t);
+  s.tables.imports.set('own', { ...job(), scope: 'public', visibility: 'public' });
   s.caller(null);
   const blob = await encodeHostedArtifact(artifact);
   s.file('saved', blob);

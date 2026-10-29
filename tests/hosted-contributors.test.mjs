@@ -3,6 +3,7 @@ import { historicalArchiveActions } from './historical-archive-fixture.mjs';
 import test from 'node:test';
 import { setup as r2Setup } from './r2-harness.mjs';
 import assert from 'node:assert/strict';
+import { putR2 } from '../dist/exchange-blobs.js';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,7 +39,8 @@ const returns = await import(moduleUrl('../convex/projectSourceReturn.ts'));
 const backups = historicalArchiveActions(await import(moduleUrl('../convex/projectBackupActions.ts')));
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
 const unavailable = e => e.data?.code === 'PROJECT_UNAVAILABLE';
-async function setup(t, { retained = false } = {}) {
+async function setup(t, { retained = false, r2Ready = false } = {}) {
+  if (!r2Ready) await r2Setup(t);
   const dir = mkdtempSync(join(tmpdir(), 'forge-contributors-'));
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'owner');
@@ -407,7 +409,17 @@ test('immutable contributor proposal completion, exact upload retry and owner do
     .map(row => row.storageId)
     .filter(Boolean);
   await modules.projectProposals.remove._handler(s.ctx, { id: stored._id });
-  assert.deepEqual(s.deleted, [storageId, ...derivativeIds]);
+  assert.deepEqual(s.deleted, [storageId, ...derivativeIds.filter(id => !id.startsWith('r2blob:'))]);
+  const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
+  const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
+  for (const ref of derivativeIds.filter(id => id.startsWith('r2blob:'))) {
+    assert.equal(
+      await blobStore(s.ctx).getMetadata(ref),
+      null,
+      'R2 derivative is tombstoned before byte cleanup',
+    );
+    await artifactStorage.deleteBytes._handler(s.ctx, { ref });
+  }
   assert.ok(s.files.has('base'));
   assert.deepEqual(s.tables.hostedProjects.get('project'), before);
 });
@@ -582,7 +594,17 @@ test('owner proposal cleanup preserves recorded shared files and foreign members
     .map(row => row.storageId)
     .filter(Boolean);
   await modules.projectProposals.remove._handler(s.ctx, { id: 'second-reference' });
-  assert.deepEqual(s.deleted, [storageId, ...derivativeIds]);
+  assert.deepEqual(s.deleted, [storageId, ...derivativeIds.filter(id => !id.startsWith('r2blob:'))]);
+  const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
+  const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
+  for (const ref of derivativeIds.filter(id => id.startsWith('r2blob:'))) {
+    assert.equal(
+      await blobStore(s.ctx).getMetadata(ref),
+      null,
+      'R2 derivative is tombstoned before byte cleanup',
+    );
+    await artifactStorage.deleteBytes._handler(s.ctx, { ref });
+  }
   assert.ok(s.files.has('base'));
 });
 
@@ -1012,7 +1034,7 @@ test('new contributor proposals transfer objects, preserve old archives, pull di
 
 test('contributor proposals publish and read committed R2 roots while retaining old archive rows', async t => {
   const { fake } = await r2Setup(t);
-  const s = await setup(t),
+  const s = await setup(t, { r2Ready: true }),
     c = await candidate(t, s);
   s.tables.hostedProjects.get('project').r2Writes = true;
   const { workArchiveMetadata } = await import('../dist/work-archive-metadata.js');
@@ -1045,7 +1067,7 @@ test('contributor proposals publish and read committed R2 roots while retaining 
 
 test('opted-in legacy archive metadata sidecars use R2 and preserve exact Work bytes', async t => {
   const { fake } = await r2Setup(t);
-  const s = await setup(t);
+  const s = await setup(t, { r2Ready: true });
   s.tables.hostedProjects.get('project').r2Writes = true;
   s.files.set('old-sidecar-original', {
     blob: new Blob([s.bytes], { type: 'application/gzip' }),
@@ -1073,5 +1095,45 @@ test('opted-in legacy archive metadata sidecars use R2 and preserve exact Work b
     [...s.tables.derivedArtifacts.values()].some(
       row => row.original === 'old-sidecar-original' && row.storageId?.startsWith('r2blob:'),
     ),
+  );
+});
+
+test('resumed archive proposals upload directly to R2 and retain exact View and grant validation', async t => {
+  const s = await setup(t),
+    c = await candidate(t, s),
+    prepared = await proposals.prepare._handler(s.ctx, c.input);
+  const id = prepared.proposal._id,
+    target = await modules.projectProposals.uploadUrl._handler(s.ctx, { id, actor: 'contributor' });
+  s.ctx.storage.store = () => assert.fail('R2 archive proposals must not write Convex bytes');
+  await putR2(target, c.bytes);
+  const stored = await proposals.complete._handler(s.ctx, { id });
+  assert.equal(stored.status, 'stored');
+  assert.equal(stored.r2Committed, true);
+  assert.equal(stored.storageId, undefined);
+  assert.equal(stored.head, c.view.head);
+  const part = await proposals.downloadPart._handler(s.ctx, { id, offset: 0, digest: stored.digest });
+  assert.equal(part.direct, true);
+  assert.deepEqual(Buffer.from(await (await fetch(part.url)).arrayBuffer()), c.bytes);
+  assert.equal(s.tables.hostedProjects.get('project').currentBackup, 'backup');
+});
+
+test('an R2-only resumed backup restores source and Work metadata without a legacy storage ID', async t => {
+  const s = await setup(t),
+    row = s.tables.projectBackups.get('backup');
+  s.caller('owner');
+  row.status = 'uploading';
+  delete row.storageId;
+  const target = await modules.projectBackups.uploadUrl._handler(s.ctx, { id: 'backup', owner: 'owner' });
+  await putR2(target, s.bytes);
+  await backups.complete._handler(s.ctx, { id: 'backup' });
+  const { source } = await import(moduleUrl('../convex/projectWorkLoad.ts'));
+  const restored = await source(s.ctx, 'backup', 'owner');
+  assert.equal(restored.backup.storageId, undefined);
+  assert.equal(restored.backup.r2Committed, true);
+  assert.equal(restored.manifest.head, s.preview.head);
+  assert.equal(restored.data.nativeHead, s.preview.head);
+  assert.equal(
+    restored.originalWorkDigest,
+    restored.manifest.files.find(file => file.path === 'work.json').sha256,
   );
 });

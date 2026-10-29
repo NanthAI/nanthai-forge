@@ -193,6 +193,16 @@ export async function retainUploadCleanup(
     .withIndex('by_upload', q => q.eq('uploadId', row._id))
     .unique();
   if (old) return old;
+  const r2Only = row.location === 'r2' && !row.storageId;
+  if (r2Only) {
+    const artifact = await ctx.db
+      .query('artifactBlobs')
+      .withIndex('by_namespace_and_digest', q =>
+        q.eq('namespace', `v1/p/${project._id}/archives/${row._id}`).eq('digest', row.digest),
+      )
+      .unique();
+    if (artifact) await blobStore(ctx).delete(`r2blob:${artifact._id}`);
+  }
   const id = await ctx.db.insert('projectUploadCleanup', {
     projectId: project._id,
     owner: project.owner,
@@ -203,12 +213,14 @@ export async function retainUploadCleanup(
     nonce: row.nonce,
     digest: row.digest,
     size: row.size,
-    pending: true,
+    pending: !r2Only,
+    ...(r2Only ? { r2Key: row.r2Key } : {}),
   });
   return (await ctx.db.get(id))!;
 }
 // One metadata page per transaction. Keep original upload bindings for known late outcomes.
 async function sweep(ctx: MutationCtx, binding: Doc<'projectUploadCleanup'>) {
+  if (binding.r2Key) return true;
   const page = await ctx.db.system
     .query('_storage')
     .order('desc')
@@ -224,6 +236,7 @@ async function sweep(ctx: MutationCtx, binding: Doc<'projectUploadCleanup'>) {
   return done;
 }
 export async function scheduleUploadSweep(ctx: MutationCtx, binding: Doc<'projectUploadCleanup'>) {
+  if (binding.r2Key) return;
   if (binding.task) {
     const task = await ctx.db.system.get(binding.task);
     if (task && ['pending', 'inProgress'].includes(task.state.kind)) return;

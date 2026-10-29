@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  mkdtempSync,
-  rmSync,
-  openSync,
-  writeSync,
-  closeSync,
-} from 'node:fs';
+import { downloadArchiveFile, type ArchivePart } from './archive-download-file.js';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
@@ -177,30 +169,22 @@ export async function checkLogsCli(args: string[]) {
 
       const directory = mkdtempSync(join(tmpdir(), 'forge-check-log-migration-'));
       try {
-        const path = join(directory, 'original.tar.gz'),
-          fd = openSync(path, 'wx', 0o600);
-        try {
-          let offset = 0;
-          while (offset < archive.size) {
-            const part = (await client.action(
-              makeFunctionReference<'action'>('projectBackupActions:downloadPart'),
-              { id: archive.backupId, digest: archive.digest, offset },
-            )) as { data: ArrayBuffer; size: number; digest: string };
-            const bytes = Buffer.from(part.data);
-            invariant(
-              part.digest === archive.digest &&
-                part.size === archive.size &&
-                bytes.length > 0 &&
-                offset + bytes.length <= archive.size,
-              'INVALID_WORK_BACKUP',
-              'Archive cleanup received a different snapshot.',
-            );
-            writeSync(fd, bytes);
-            offset += bytes.length;
-          }
-        } finally {
-          closeSync(fd);
-        }
+        const path = join(directory, 'original.tar.gz');
+        const signed = await client.mutation(makeFunctionReference<'mutation'>('backupTransfer:sign'), {
+          id: archive.backupId,
+          digest: archive.digest,
+        });
+        await downloadArchiveFile(
+          { sha256: archive.digest, size: archive.size },
+          path,
+          async offset =>
+            signed ??
+            ((await client.action(makeFunctionReference<'action'>('projectBackupActions:downloadPart'), {
+              id: archive.backupId,
+              digest: archive.digest,
+              offset,
+            })) as Promise<ArchivePart>),
+        );
         const operation = createHash('sha256').update(`${plan.operationId}:${archive.backupId}`).digest();
         operation[6] = (operation[6]! & 15) | 80;
         operation[8] = (operation[8]! & 63) | 128;

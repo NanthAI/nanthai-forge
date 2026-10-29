@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { internalAction, type ActionCtx } from './_generated/server';
-import { archiveSource } from './r2ArchiveSource';
+import { archiveSource, archiveRef } from './r2ArchiveSource';
 import { v } from 'convex/values';
 import { reviewPaths } from '../src/native-source-review';
 import type { Doc } from './_generated/dataModel';
@@ -224,7 +224,7 @@ async function readParents(
       }
     }
   } else {
-    const url = await (await archiveSource(ctx, backup.storageId!)).getUrl();
+    const url = await (await archiveSource(ctx, archiveRef(backup))).getUrl();
     invariant(url, 'SOURCE_UNAVAILABLE', 'Ancestry source archive is unavailable.');
     await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: actor });
     // The optional ancestry read must also yield on a silent archive response.

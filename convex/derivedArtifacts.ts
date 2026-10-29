@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { blobStore } from './blobStore';
+import { artifactBlobId } from './artifactBlobFields';
 import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { artifactMetadata } from './artifactStorage';
@@ -143,11 +144,15 @@ export async function removeDerived(ctx: MutationCtx, original: string): Promise
     if (row.storageId) await blobStore(ctx).delete(row.storageId);
     if (row.uploadType) {
       await ctx.db.patch(row._id, { removed: true, storageId: undefined, inline: undefined });
-      await ctx.scheduler.runAfter(0, internal.derivedArtifacts.sweep, {
-        id: row._id,
-        cursor: null,
-        followup: false,
-      });
+      if (
+        !row.uploadType.startsWith('application/x-forge-derived-r2-') &&
+        !artifactBlobId(row.storageId ?? '')
+      )
+        await ctx.scheduler.runAfter(0, internal.derivedArtifacts.sweep, {
+          id: row._id,
+          cursor: null,
+          followup: false,
+        });
     } else await ctx.db.delete(row._id);
   }
   if (rows.length === 50) await ctx.scheduler.runAfter(0, internal.derivedArtifacts.purge, { original });
@@ -162,10 +167,11 @@ export const purge = internalMutation({
 });
 export const sweep = internalMutation({
   args: { id: v.id('derivedArtifacts'), cursor: v.union(v.string(), v.null()), followup: v.boolean() },
-  returns: v.null(),
+  returns: v.union(v.null(), v.object({ isDone: v.boolean(), cursor: v.string() })),
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id);
     if (!row?.removed || !row.uploadType) return null;
+    if (row.uploadType.startsWith('application/x-forge-derived-r2-')) return { isDone: true, cursor: '' };
     const page = await ctx.db.system
       .query('_storage')
       .order('desc')
@@ -177,19 +183,9 @@ export const sweep = internalMutation({
         storageDigest(file.sha256) === row.digest
       )
         await blobStore(ctx).delete(file._id);
-    if (!scanComplete(page, row._creationTime))
-      await ctx.scheduler.runAfter(0, internal.derivedArtifacts.sweep, {
-        ...args,
-        cursor: page.continueCursor,
-      });
-    else if (!args.followup)
-      await ctx.scheduler.runAfter(10 * 60 * 1000, internal.derivedArtifacts.sweep, {
-        ...args,
-        cursor: null,
-        followup: true,
-      });
+    // Manual legacy purge only: the caller advances the returned cursor.
     // Retain the source-free binding for later late-outcome reconciliation. A timed
     // pass isn't proof that an unknown storage operation can never commit afterwards.
-    return null;
+    return { isDone: scanComplete(page, row._creationTime), cursor: page.continueCursor };
   },
 });

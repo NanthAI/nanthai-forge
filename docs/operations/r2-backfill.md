@@ -115,3 +115,101 @@ deleting its Convex copy; current row pins and other references are rechecked.
 Rows created or migrated after `verifiedAt` are excluded. Early purge removes
 the Convex fallback copy; recovery then uses the verified R2 copy or the hosted
 backup. Without early approval, existing 14-day commands and checks are unchanged.
+
+## Lead runbook: R6, R7 and database-only backup
+
+These are manual lead operations, not an installed job. This runbook does not
+record an executed migration. Use the accepted source containing the R2 byte-path
+cutover and current Convex source worker together. Keep private progress files,
+verification receipts and backup state outside the source tree. Commands below
+use nonsecret selectors/placeholders; load credentials through the existing
+private operator environment without printing them.
+
+1. **Local preflight, no provider calls.** Build the accepted CLI with Node
+   24.22.1+ (24.x) and the pinned lockfile. Confirm the deployed readers support
+   both legacy storage IDs and R2-only archive references, and the writers use
+   R2 for imports, derivatives, archives and finish plans. Identify every project
+   in the deployment: a project-level R6 receipt does not cover other projects,
+   legacy imports or derived artifacts. Preserve matching code/configuration and
+   the Secret Object keyring separately from the database backup.
+2. **LIVE: file-inclusive fallback backup.** Preflight: confirm the explicit
+   deployment, existing private credential selection, bucket/prefix and private
+   state directory. Run the existing file-inclusive weekly backup command in
+   [hosted durability](hosted-durability.md#weekly-r2-backup), retaining its
+   operation ID on an unknown outcome. Confirm the completed remote ZIP's full
+   size/SHA-256 check and published manifest, and run the offline `backup-status`
+   check. Keep this copy for R7 recovery; a database-only backup cannot substitute
+   for the early-purge file-inclusive backup evidence.
+3. **LIVE: R6 configuration and inventory.** Preflight: compatible readers and
+   writers are deployed, the existing backend R2 configuration is available, and
+   the selected owner/project/deployment match. Enable the existing `FORGE_BLOBS`
+   R2 path and project `projectObjectCommit:setR2Writes` opt-in as described above.
+   Run `nforge maintenance r2-backfill ROOT --dry-run` for each project. This
+   contacts Convex metadata but does not transfer bytes or mutate rows. Review
+   row/byte totals and the estimate; the historical 22,800-row estimate above is
+   not a fresh deployment inventory.
+4. **LIVE: R6 copy and verify.** Preflight: reviewed inventory, available private
+   spool space and fallback backup. Run the ordinary backfill with a new private
+   state file, then use `--resume` with that same file after interruption. It
+   copies bytes to R2 and CAS-flips rows, retaining Convex copies. Resolve reported
+   failures; if `BACKFILL_REMAINS` reports concurrent rows behind the cursor, use
+   a fresh pass. Run `--verify --full-digest` with a separate new state file and
+   retain its complete receipt: all four row kinds, no failures, current backfill
+   revision, `digestChecks == count`, `verifiedAt` and `safeToPurgeAfter`. These
+   commands perform live Convex metadata reads and R2 HEAD/GET operations.
+5. **LIVE, OWNER APPROVAL REQUIRED: R7 purge.** Preflight: present the owner with
+   the exact deployment/projects, full verification receipts and eligible counts,
+   the loss of the Convex fallback copies, and recovery through verified R2 plus
+   the preserved file-inclusive backup. Obtain approval for that scope before
+   `--apply`, including normal 14-day purge. Run the command below without
+   `--apply` first; it reads metadata and re-HEADs eligible R2 objects but deletes
+   nothing. Check the printed eligibility/skips. For the approved apply, the
+   backend's existing `FORGE_R2_MAINTENANCE=1` switch must be enabled; set it through
+   the established private operator process, then apply the approved command.
+   The normal path requires `safeToPurgeAfter` to have elapsed. If the owner
+   explicitly approves early purge, use the existing early-purge commands above:
+   full-digest evidence must be current within 24 hours at every page/deletion,
+   match the revision, and include the current seven-day file-inclusive backup
+   evidence. Do not put an approval note on a command before approval exists.
+
+   ```sh
+   node scripts/r2-maintenance.mjs purge --deployment NAME --project PROJECT_ID --verification /private/path/full-verification.json
+   # LIVE DELETION: only after the owner approves the reviewed scope.
+   node scripts/r2-maintenance.mjs purge --deployment NAME --project PROJECT_ID --verification /private/path/full-verification.json --apply
+   ```
+
+   Retain receipts and any early-purge journal. An unknown reply is reconciled by
+   rerunning the same evidence/selection; row markers and current pins prevent
+   repeating deletion. R7 removes legacy Convex copies only; R2-only archives
+   have no copy to purge. This command does not authorize project-prefix deletion
+   or orphan sweeps. Deleted fallback bytes have no automatic undo.
+6. **LIVE: database-only backup qualification.** Preflight: R6/R7 evidence for
+   the selected projects and a deployment-wide inventory covering all durable
+   source/archive/import/Zone/derived references. R6's four project row kinds do
+   not migrate arbitrary legacy import/derived files. The current Convex source
+   worker also still stores outputs and progress in Convex file storage: this
+   byte-path patch moves its finish-plan input, not those worker writes. If durable
+   legacy references remain or active writers recreate them, keep file-inclusive
+   backups and complete that writer/migration work separately. Run the
+   `--database-only` export/backup commands in
+   [hosted durability](hosted-durability.md#database-only-backup-and-restore) with
+   a new operation ID, retaining the existing weekly prefix/keep-four policy.
+   The ZIP validator must accept all references; do not bypass a legacy or
+   unresolved-reference failure. Confirm the uploaded ZIP/manifest's size,
+   SHA-256, storage mode and completed receipt. On an interrupted run preserve
+   its operation ID and mode. Only then set `HOSTED_DURABILITY_DATABASE_ONLY=1`
+   in the existing approved job environment; this adds no new schedule.
+7. **LIVE: fresh-target restore drill.** Preflight: an approved fresh scratch
+   deployment, its own credentials, the exact database ZIP/manifest and retained
+   R2 bucket keys. Follow the existing fresh-target import and matching-code/
+   private-configuration procedure, then compare database snapshots with
+   `--database-only`. Separately verify R2 object integrity and authenticate a
+   source/archive download from the restored project. Retain only observed
+   results and timing. Database equality alone does not qualify bucket durability
+   or off-machine owner recovery. Do not delete R2 project prefixes on the basis
+   of a retained database ZIP: the ZIP needs those bytes to recover.
+
+All calls are finite, operator-triggered pages/transfers. This sequence adds no
+idle calls, poller, timer or scheduled maintenance. Production call totals, wall
+time, memory and costs must be recorded from the actual run; this runbook makes
+no measured live-performance claim.

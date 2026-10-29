@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalQuery, internalMutation, internalAction, type QueryCtx } from './_generated/server';
+import {
+  internalQuery,
+  internalMutation,
+  internalAction,
+  type QueryCtx,
+  type MutationCtx,
+} from './_generated/server';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { artifactBlobId } from './artifactBlobFields';
@@ -34,37 +40,40 @@ export const get = internalQuery({
     return row && !row.removed ? row : null;
   },
 });
+/** Shared reservation for atomic owning transactions; metadata only. */
+export async function reserveArtifact(
+  ctx: MutationCtx,
+  input: { namespace: string; digest: string; size: number; contentType: string },
+) {
+  invariant(
+    /^[a-f0-9]{64}$/.test(input.digest) && Number.isSafeInteger(input.size) && input.size >= 0,
+    'INVALID_ARTIFACT',
+    'Use exact artifact content pins.',
+  );
+  const existing = await ctx.db
+    .query('artifactBlobs')
+    .withIndex('by_namespace_and_digest', q => q.eq('namespace', input.namespace).eq('digest', input.digest))
+    .unique();
+  if (existing) {
+    invariant(
+      !existing.removed && existing.size === input.size && existing.contentType === input.contentType,
+      'INVALID_ARTIFACT',
+      'Artifact differs from its original binding.',
+    );
+    return existing;
+  }
+  const id = await ctx.db.insert('artifactBlobs', {
+    ...input,
+    r2Key: `${input.namespace}/a/${input.digest}`,
+    committed: false,
+    removed: false,
+  });
+  return (await ctx.db.get(id))!;
+}
 export const reserve = internalMutation({
   args: { namespace: v.string(), digest: v.string(), size: v.number(), contentType: v.string() },
   returns: v.any(),
-  handler: async (ctx, input) => {
-    invariant(
-      /^[a-f0-9]{64}$/.test(input.digest) && Number.isSafeInteger(input.size) && input.size >= 0,
-      'INVALID_ARTIFACT',
-      'Use exact artifact content pins.',
-    );
-    const existing = await ctx.db
-      .query('artifactBlobs')
-      .withIndex('by_namespace_and_digest', q =>
-        q.eq('namespace', input.namespace).eq('digest', input.digest),
-      )
-      .unique();
-    if (existing) {
-      invariant(
-        !existing.removed && existing.size === input.size && existing.contentType === input.contentType,
-        'INVALID_ARTIFACT',
-        'Artifact differs from its original binding.',
-      );
-      return existing;
-    }
-    const id = await ctx.db.insert('artifactBlobs', {
-      ...input,
-      r2Key: `${input.namespace}/a/${input.digest}`,
-      committed: false,
-      removed: false,
-    });
-    return (await ctx.db.get(id))!;
-  },
+  handler: (ctx, input) => reserveArtifact(ctx, input),
 });
 export const commit = internalAction({
   args: { ref: v.string() },

@@ -8,7 +8,7 @@ import { capture } from '../dist/snapshot.js';
 import { analyze } from '../dist/analyze.js';
 import { encodeHostedArtifact, decodeHostedArtifact } from '../dist/hosted-artifact.js';
 import { validateArtifact } from '../dist/artifact-validation.js';
-import { job, state, providers } from './hosted-fixture.mjs';
+import { job, providers } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -52,7 +52,8 @@ async function setup(t) {
         license: null,
       },
     };
-  const s = state([{ ...job(), head: artifact.pack.source.gitHead }]);
+  const { s, fake } = await r2Setup(t);
+  s.tables.imports.set('own', { ...job(), head: artifact.pack.source.gitHead });
   s.file('saved', await encodeHostedArtifact(artifact));
   const revoked = new Set(),
     cleanup = providers(actor => revoked.has(actor), true, artifact.pack.source.gitHead);
@@ -71,7 +72,7 @@ async function setup(t) {
     operationId = randomUUID(),
   ) => actions.change._handler(s.ctx, { id, update, expectedRevision, operationId });
   const read = async (id, endpoint) => JSON.parse(await actions.read._handler(s.ctx, { id, endpoint }));
-  return { s, artifact, request, change, read, revoked };
+  return { s, fake, artifact, request, change, read, revoked };
 }
 
 test('human source Zones expose only selected bytes and valid graph identities, exclude documents and global counts, and never imply whole-import access', async t => {
@@ -131,8 +132,10 @@ test('human source Zones expose only selected bytes and valid graph identities, 
     code('GITHUB_UNAVAILABLE'),
   );
   const part = await actions.downloadPart._handler(s.ctx, { id, offset: 0 });
-  assert.equal(part.digest, createHash('sha256').update(Buffer.from(part.data)).digest('hex'));
-  const exported = await decodeHostedArtifact(new Blob([part.data], { type: part.contentType }));
+  assert.equal(part.direct, true);
+  const bytes = await (await fetch(part.url)).arrayBuffer();
+  assert.equal(part.digest, createHash('sha256').update(Buffer.from(bytes)).digest('hex'));
+  const exported = await decodeHostedArtifact(new Blob([bytes], { type: part.contentType }));
   assert.equal(validateArtifact(exported.pack), exported.pack);
   assert.deepEqual(Object.keys(exported.content).sort(), request.files.slice().sort());
   assert.deepEqual(exported.documents, {});
@@ -368,8 +371,7 @@ test('source Zone navigation and copied links retain the scope while ordinary ro
 });
 
 test('opted-in Zones export to R2 from old or R2 indexed originals without Convex writes', async t => {
-  const { fake } = await r2Setup(t);
-  const { s, artifact, request } = await setup(t);
+  const { s, fake, artifact, request } = await setup(t);
   const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
   const job = s.tables.imports.get('own');
   job.r2Writes = true;
@@ -387,7 +389,10 @@ test('opted-in Zones export to R2 from old or R2 indexed originals without Conve
   s.ctx.storage.generateUploadUrl = () => assert.fail('Zone exports must not create Convex upload URLs');
   for (const id of [first, second]) {
     const part = await actions.downloadPart._handler(s.ctx, { id, offset: 0 });
-    const scoped = await decodeHostedArtifact(new Blob([part.data], { type: part.contentType }));
+    assert.equal(part.direct, true);
+    const scoped = await decodeHostedArtifact(
+      new Blob([await (await fetch(part.url)).arrayBuffer()], { type: part.contentType }),
+    );
     assert.deepEqual(Object.keys(scoped.content).sort(), [...request.files].sort());
     const before = fake.objects.size;
     await actions.downloadPart._handler(s.ctx, { id, offset: 0, digest: part.digest });

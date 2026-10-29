@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { accountFor } from './urlIdentity';
-import { blobStore } from './blobStore';
+import { archivePut, reserveArchive, commitArchive, archiveTarget } from './archiveUpload';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, internalMutation, internalQuery } from './cliServer';
@@ -17,7 +17,7 @@ import { report } from './errors';
 import { accessibleProject, activeOwnedProject } from './projectAuthority';
 export { ownedProject } from './projectAuthority';
 
-const item = (backup: Doc<'projectBackups'>, project: Doc<'hostedProjects'>) => ({
+export const item = (backup: Doc<'projectBackups'>, project: Doc<'hostedProjects'>) => ({
   id: backup._id,
   operationId: backup.operationId,
   projectId: project._id,
@@ -128,6 +128,53 @@ export const get = internalQuery({
   },
 });
 
+export async function registerBackup(
+  ctx: import('./_generated/server').MutationCtx,
+  input: {
+    owner: string;
+    key: string;
+    name: string;
+    operationId: string;
+    request: string;
+    nonce: string;
+    previous: import('./_generated/dataModel').Id<'projectBackups'> | null;
+    digest: string;
+    size: number;
+    preview: Doc<'projectBackups'>['preview'];
+  },
+) {
+  try {
+    const project = await ctx.db
+      .query('hostedProjects')
+      .withIndex('by_owner_and_key', q => q.eq('owner', input.owner).eq('key', input.key))
+      .unique();
+    invariant(
+      project,
+      'ARCHIVE_TRANSPORT_RETIRED',
+      'New backups use object exchange. Existing archive uploads remain resumable.',
+    );
+    await activeOwnedProject(ctx, project._id, input.owner);
+    const original = await ctx.db
+      .query('projectBackups')
+      .withIndex('by_project_and_operation', q =>
+        q.eq('projectId', project._id).eq('operationId', input.operationId),
+      )
+      .unique();
+    invariant(
+      original,
+      'ARCHIVE_TRANSPORT_RETIRED',
+      'New backups use object exchange. Existing archive uploads remain resumable.',
+    );
+    invariant(
+      original.request === input.request,
+      'WORK_OPERATION_CHANGED',
+      'Reconcile the original backup pins.',
+    );
+    return original._id;
+  } catch (error) {
+    return report(error);
+  }
+}
 export const register = internalMutation({
   args: {
     owner: v.string(),
@@ -142,50 +189,21 @@ export const register = internalMutation({
     preview: projectBackupPreview,
   },
   returns: v.id('projectBackups'),
-  handler: async (ctx, input) => {
-    try {
-      const project = await ctx.db
-        .query('hostedProjects')
-        .withIndex('by_owner_and_key', q => q.eq('owner', input.owner).eq('key', input.key))
-        .unique();
-      invariant(
-        project,
-        'ARCHIVE_TRANSPORT_RETIRED',
-        'New backups use object exchange. Existing archive uploads remain resumable.',
-      );
-      await activeOwnedProject(ctx, project._id, input.owner);
-      const original = await ctx.db
-        .query('projectBackups')
-        .withIndex('by_project_and_operation', q =>
-          q.eq('projectId', project._id).eq('operationId', input.operationId),
-        )
-        .unique();
-      invariant(
-        original,
-        'ARCHIVE_TRANSPORT_RETIRED',
-        'New backups use object exchange. Existing archive uploads remain resumable.',
-      );
-      invariant(
-        original.request === input.request,
-        'WORK_OPERATION_CHANGED',
-        'Reconcile the original backup pins.',
-      );
-      return original._id;
-    } catch (error) {
-      return report(error);
-    }
-  },
+  handler: (ctx, input) => registerBackup(ctx, input),
 });
 export const uploadUrl = internalMutation({
   args: { id: v.id('projectBackups'), owner: v.string() },
-  returns: v.string(),
+  returns: v.union(v.string(), archivePut),
   handler: async (ctx, { id, owner }) => {
     try {
       const backup = await ctx.db.get(id);
       invariant(backup, 'PROJECT_UNAVAILABLE', 'This Forge backup is unavailable.');
       await activeOwnedProject(ctx, backup.projectId, owner);
       invariant(backup.status === 'uploading', 'PROJECT_CHANGED', 'This original backup is already stored.');
-      return blobStore(ctx).generateUploadUrl();
+      const { r2Key } = await reserveArchive(ctx, backup);
+      const target = await archiveTarget({ ...backup, r2Key });
+      await ctx.db.patch(id, { location: 'r2', r2Key });
+      return target;
     } catch (error) {
       return report(error);
     }
@@ -199,6 +217,7 @@ export const findUpload = internalQuery({
       const backup = await ctx.db.get(id);
       invariant(backup, 'PROJECT_UNAVAILABLE', 'This Forge backup is unavailable.');
       await activeOwnedProject(ctx, backup.projectId, owner);
+      if (backup.location === 'r2') return { id: null, isDone: true, cursor: '' };
       // ponytail: scan native file metadata on unknown uploads; use a bound streaming upload endpoint if measured storage volume warrants it.
       const page = await ctx.db.system.query('_storage').order('desc').paginate({ numItems: 100, cursor });
       const file = page.page.find(
@@ -258,7 +277,44 @@ export const reconcileDuplicates = internalMutation({
       invariant(row && row.status === 'stored', 'PROJECT_UNAVAILABLE', 'Select this original stored upload.');
 
       await activeOwnedProject(ctx, row.projectId, owner);
+      if (row.location === 'r2') return { cursor: '', isDone: true };
       return await duplicatePage(ctx, row, 'backup', cursor);
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** Only the owning action calls this after HEAD verification of this exact key. */
+export const completeR2 = internalMutation({
+  args: {
+    id: v.id('projectBackups'),
+    owner: v.string(),
+    key: v.string(),
+    expected: v.optional(v.object({ digest: v.string(), size: v.number() })),
+  },
+  returns: backupItem,
+  handler: async (ctx, { id, owner, key, expected }) => {
+    try {
+      const backup = await ctx.db.get(id);
+      invariant(
+        backup && backup.location === 'r2' && backup.r2Key === key,
+        'INVALID_WORK_BACKUP',
+        'Original archive reservation changed.',
+      );
+      invariant(
+        !expected || (backup.digest === expected.digest && backup.size === expected.size),
+        'INVALID_WORK_BACKUP',
+        'Original archive content pins changed.',
+      );
+      const project = await activeOwnedProject(ctx, backup.projectId, owner);
+      await commitArchive(ctx, backup);
+      if (backup.status !== 'stored') {
+        await ctx.db.patch(id, { status: 'stored', r2Committed: true });
+        if (project.currentBackup === backup.previous)
+          await ctx.db.patch(project._id, { currentBackup: id, revision: project.revision + 1 });
+      }
+      return item((await ctx.db.get(id))!, (await ctx.db.get(project._id))!);
     } catch (error) {
       return report(error);
     }

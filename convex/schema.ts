@@ -349,7 +349,7 @@ const projectBackupFields = {
     v.object({
       digest: v.string(),
       size: v.number(),
-      storageId: v.id('_storage'),
+      storageId: v.optional(v.id('_storage')),
       ...backfillFields,
       operationId: v.string(),
       at: v.number(),
@@ -520,6 +520,7 @@ export default defineSchema({
     size: v.number(),
     cursor: v.optional(v.string()),
     pending: v.boolean(),
+    r2Key: v.optional(v.string()),
     task: v.optional(v.id('_scheduled_functions')),
   })
     .index('by_upload', ['uploadId'])

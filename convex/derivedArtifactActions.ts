@@ -2,7 +2,6 @@
 'use node';
 import { randomUUID } from 'node:crypto';
 import { blobStore } from './blobStore';
-import { r2Enabled } from './r2';
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -33,7 +32,7 @@ export async function derivedArtifact(
   pin: string,
   build: () => Promise<Blob | string>,
   checkAccess: () => Promise<unknown>,
-  r2 = false,
+  _r2 = false,
 ): Promise<Derived | null> {
   const file = await blobStore(ctx).getMetadata(original);
   invariant(file, 'INVALID_ARTIFACT', 'Stored source is unavailable.');
@@ -49,7 +48,11 @@ export async function derivedArtifact(
       (valid && valid.size === found.size && hexDigest(valid.sha256) === found.digest)
     )
       return found;
-    if (!found.storageId && found.uploadType) {
+    if (
+      !found.storageId &&
+      found.uploadType &&
+      !found.uploadType.startsWith('application/x-forge-derived-r2-')
+    ) {
       const stored = await reconciled(ctx, found);
       if (stored) return stored;
     }
@@ -68,7 +71,7 @@ export async function derivedArtifact(
     contentType: typeof value === 'string' ? 'application/json' : value.type,
     ...(typeof value === 'string'
       ? { inline: value }
-      : { uploadType: `application/x-forge-derived-${randomUUID()}` }),
+      : { uploadType: `application/x-forge-derived-r2-${randomUUID()}` }),
   };
   // Reconcile a lost reservation reply before beginning any storage side effect.
   let row: Derived | null;
@@ -84,13 +87,11 @@ export async function derivedArtifact(
   if (!row || row.inline !== undefined || row.storageId) return row;
   let storageId: string;
   try {
-    storageId = await blobStore(ctx).store(
-      new Blob([bytes], { type: row.uploadType! }),
-      r2Enabled() && r2 ? { r2Namespace: `v1/d/${row._id}` } : undefined,
-    );
+    storageId = await blobStore(ctx).store(new Blob([bytes], { type: row.uploadType! }), {
+      r2Namespace: `v1/d/${row._id}`,
+    });
   } catch (error) {
-    const stored = await reconciled(ctx, row);
-    if (stored) return stored;
+    // A deterministic reservation reconciles by the same R2 key on retry.
     throw error;
   }
   try {

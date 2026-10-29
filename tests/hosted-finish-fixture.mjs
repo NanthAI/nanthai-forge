@@ -37,7 +37,10 @@ export async function compose(c, selection) {
   await c.submit(selection);
   return (await c.publish(await c.work(selection))).outcome.result;
 }
-export async function finishFixture(t, { overlap = false, inputCount = 1, selectedFileCount = 0 } = {}) {
+export async function finishFixture(
+  t,
+  { overlap = false, inputCount = 1, selectedFileCount = 0, fileCount = 3 } = {},
+) {
   let now = Date.now();
   t.mock.method(Date, 'now', () => now);
   const c = await composeFixture();
@@ -53,6 +56,9 @@ export async function finishFixture(t, { overlap = false, inputCount = 1, select
       c.hidden,
       c.file('selected.txt', 'selected\n'),
       ...largeFiles,
+      ...Array.from({ length: Math.max(0, fileCount - 3) }, (_, i) =>
+        c.file(`extra-${i}.txt`, `selected ${i}\n`),
+      ),
     ],
     [c.baseline.sha256],
   );
@@ -70,6 +76,8 @@ export async function finishFixture(t, { overlap = false, inputCount = 1, select
   f.patch('hostedProjects', f.projectId, { autonomyPolicy: policyPreset('trusted') });
   const blobs = new Map(),
     metrics = {
+      planUploads: [],
+      legacyPlanWrites: [],
       transfers: 0,
       downloadBytes: 0,
       uploadBytes: 0,
@@ -211,6 +219,7 @@ export async function finishFixture(t, { overlap = false, inputCount = 1, select
                 blobs.set(id, { metadata: { sha256, size: bytes.length } });
                 c.objects.set(sha256, bytes);
                 metrics.uploadBytes += bytes.length;
+                metrics.legacyPlanWrites.push({ digest: sha256, size: bytes.length });
                 return id;
               },
             },
@@ -326,7 +335,34 @@ export async function finishFixture(t, { overlap = false, inputCount = 1, select
     return f.currentMain();
   };
   const originalFetch = globalThis.fetch;
-  t.mock.method(globalThis, 'fetch', async url => {
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (init?.method === 'PUT') {
+      assert.equal(init.headers['if-none-match'], '*');
+      const bytes = Buffer.from(init.body),
+        hash = digest(bytes);
+      assert.equal(init.headers['content-length'], String(bytes.length));
+      assert.equal(init.headers['x-amz-checksum-sha256'], Buffer.from(hash, 'hex').toString('base64'));
+      const key = new URL(url).pathname.split('/').at(-1);
+      assert.equal(key, hash);
+      if (c.objects.has(hash)) return new Response(null, { status: 412 });
+      c.objects.set(hash, bytes);
+      metrics.planUploads.push({ digest: hash, size: bytes.length });
+      metrics.uploadBytes += bytes.length;
+      return new Response(null, { status: 200 });
+    }
+    if (init?.method === 'HEAD') {
+      const hash = new URL(url).pathname.split('/').at(-1),
+        bytes = c.objects.get(hash);
+      return new Response(null, {
+        status: bytes ? 200 : 404,
+        headers: bytes
+          ? {
+              'content-length': String(bytes.length),
+              'x-amz-checksum-sha256': Buffer.from(hash, 'hex').toString('base64'),
+            }
+          : {},
+      });
+    }
     const hash = new URL(url).pathname.split('/').at(-1),
       bytes = c.objects.get(hash);
     assert(bytes, 'metadata request only targets a synthetic committed object');

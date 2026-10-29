@@ -8,6 +8,9 @@ import { scheduleFinish } from './projectHostedFinishWake';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
 import type { FinishCommand } from '../src/hosted-finish';
+import { r2Config, r2Key, presignPut } from './r2';
+import { verifyArchiveUpload } from './archiveUpload';
+import { exchangeFetch } from '../src/exchange-request';
 import { invariant } from '../src/errors';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
 const stepIdentity = { ...identity, wakeId: v.string() };
@@ -25,6 +28,7 @@ export const resume = internalMutation({
     command: v.string(),
     page: v.optional(v.string()),
     storageId: v.optional(v.id('_storage')),
+    key: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
@@ -76,11 +80,33 @@ export const drive = internalAction({
     if (!raw) return null;
     const command = JSON.parse(raw) as FinishCommand;
     if (command.kind === 'plan') {
-      const storageId = await ctx.storage.store(new Blob([command.value], { type: 'application/json' }));
+      const bytes = new TextEncoder().encode(command.value),
+        key = r2Key(input.projectId, command.pin.sha256);
+      invariant(
+        bytes.length === command.pin.size && digest(bytes) === command.pin.sha256,
+        'SOURCE_HASH_MISMATCH',
+        'Source plan differs from its exact bytes.',
+      );
+      const target = await presignPut(r2Config(), key, { digest: command.pin.sha256, size: bytes.length });
+      const response = await exchangeFetch('R2 finish plan upload', target.url, {
+        method: 'PUT',
+        headers: target.headers,
+        body: bytes,
+      });
+      invariant(
+        response.ok || response.status === 412,
+        'R2_UPLOAD_FAILED',
+        'Object storage could not upload the source plan.',
+      );
+      invariant(
+        await verifyArchiveUpload({ r2Key: key, size: bytes.length, digest: command.pin.sha256 }),
+        'R2_OBJECT_MISSING',
+        'Uploaded source plan is missing.',
+      );
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedFinishDriver:resume'), {
         ...input,
         command: raw,
-        storageId,
+        key,
       });
       return null;
     }

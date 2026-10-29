@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { archiveRef } from './r2ArchiveSource';
 import { projectArchiveMetadata } from './projectArchiveMetadata';
 import { internal } from './_generated/api';
 import type { ActionCtx } from './_generated/server';
@@ -37,7 +38,7 @@ export async function migratedWork(
       : (
           await projectArchiveMetadata(
             _ctx,
-            backup.storageId!,
+            archiveRef(backup),
             backup.size,
             backup.digest,
             () => _ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner }),

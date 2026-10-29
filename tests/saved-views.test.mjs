@@ -2,7 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
-import { job, state, providers } from './hosted-fixture.mjs';
+import { setup as r2Setup } from './r2-harness.mjs';
+import { job, providers } from './hosted-fixture.mjs';
 import { fixture, git } from './helpers.mjs';
 import { capture } from '../dist/snapshot.js';
 import { writeFileSync } from 'node:fs';
@@ -19,11 +20,13 @@ async function setup(t) {
   git(root, ['add', '.']);
   git(root, ['commit', '-qm', 'Saved source candidate']);
   const captured = capture(root),
-    pack = analyze(captured),
-    s = state([
-      { ...job(), head: captured.source.gitHead },
-      { ...job('public'), visibility: 'public', owner: '', head: captured.source.gitHead },
-    ]);
+    pack = analyze(captured);
+  const { s } = await r2Setup(t);
+  for (const row of [
+    { ...job(), head: captured.source.gitHead },
+    { ...job('public'), visibility: 'public', owner: '', head: captured.source.gitHead },
+  ])
+    s.tables.imports.set(row._id, row);
   s.file(
     'saved',
     await encodeHostedArtifact({

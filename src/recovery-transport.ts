@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { ConvexExchange } from './exchange-client.js';
-import { downloadExchangeFile } from './exchange-download-file.js';
+import { downloadArchiveFile } from './archive-download-file.js';
 import { hostedRecoveryPageSchema, type RecoveryTable } from './recovery-hosted-protocol.js';
 import { invariant } from './errors.js';
 import type { RecoveryRequest, RecoverySelection } from './recovery-protocol.js';
@@ -42,24 +42,30 @@ export function recoveryTransport(request: RecoveryRequest): RecoveryTransport {
         }),
       ),
     archive: async (selection: RecoverySelection, path: string) => {
-      await downloadExchangeFile(
+      const signed = await exchange.client.mutation(
+        makeFunctionReference<'mutation'>('backupTransfer:sign'),
+        { id: selection.backupId, digest: selection.checkpointSha256 },
+      );
+      await downloadArchiveFile(
         { sha256: selection.checkpointSha256, size: selection.checkpointSize },
         path,
         async offset => {
-          const part = await exchange.client.action(
-            makeFunctionReference<'action'>('projectBackupActions:downloadPart'),
-            {
-              id: selection.backupId,
-              offset,
-              digest: selection.checkpointSha256,
-            },
-          );
+          const part =
+            signed ??
+            (await exchange.client.action(
+              makeFunctionReference<'action'>('projectBackupActions:downloadPart'),
+              {
+                id: selection.backupId,
+                offset,
+                digest: selection.checkpointSha256,
+              },
+            ));
           invariant(
             part.digest === selection.checkpointSha256 && part.size === selection.checkpointSize,
             'INVALID_WORK_BACKUP',
             'Downloaded archive differs from the selected checkpoint.',
           );
-          return Buffer.from(part.data);
+          return part;
         },
       );
     },

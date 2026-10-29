@@ -396,6 +396,8 @@ test('explicit project deletion removes shared object bytes once, including unre
   );
 });
 test('explicit native archive migration keeps backup IDs and old journals, verifies complete restore, and retires containers only after reference-safe switch', async t => {
+  const { setup } = await import('./r2-harness.mjs');
+  await setup(t);
   const s = fixture(),
     migration = await import(moduleUrl('../convex/projectExchangeMigration.ts'));
   const { exportNativeWork } = await import('../dist/native-backup.js'),

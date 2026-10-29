@@ -3,7 +3,7 @@
 import { v } from 'convex/values';
 import { blobStore } from './blobStore';
 import { artifactBlobId } from './artifactBlobFields';
-import { r2Enabled, r2Config, presignPut } from './r2';
+import { r2Config, presignPut } from './r2';
 import { internalAction, type ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { currentAccess } from './access';
@@ -43,9 +43,7 @@ export const prepare = internalAction({
     return {
       repository: job.repository,
       ref: job.ref,
-      ...(r2Enabled() && job.r2Writes
-        ? { r2: true }
-        : { uploadUrl: await blobStore(ctx).generateUploadUrl() }),
+      r2: true,
     };
   },
 });
@@ -144,9 +142,7 @@ export const uploadTarget = internalAction({
         job.visibility === 'public' &&
         job.remote &&
         job.workerClaimed &&
-        job.generation === generation &&
-        r2Enabled() &&
-        job.r2Writes,
+        job.generation === generation,
       'INVALID_ARTIFACT',
       'Original worker import is unavailable.',
     );

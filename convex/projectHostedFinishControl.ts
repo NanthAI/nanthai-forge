@@ -13,7 +13,7 @@ import { claimReadyLanding } from './projectHostedLandingControl';
 import { publishAcceptance } from './projectHostedAcceptancePublish';
 import { hostedWriteProject } from './projectHostedRecords';
 import { blobStore } from './blobStore';
-import { presignGet, r2Config } from './r2';
+import { presignGet, r2Config, r2Key } from './r2';
 import { isStored } from './projectObjectFields';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { savePin } from '../src/hosted-save';
@@ -82,6 +82,26 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
         });
         return null;
       }
+      r2Config();
+      const key = r2Key(input.projectId, pin.sha256);
+      if (!object)
+        await ctx.db.insert('projectObjects', {
+          projectId: input.projectId,
+          digest: pin.sha256,
+          size: pin.size,
+          nonce: crypto.randomUUID(),
+          removed: false,
+          location: 'r2',
+          r2Key: key,
+        });
+      else {
+        invariant(
+          !object.removed && object.size === pin.size,
+          'SOURCE_HASH_MISMATCH',
+          'Source plan binding differs.',
+        );
+        await ctx.db.patch(object._id, { location: 'r2', r2Key: key });
+      }
       await scheduleFinish(ctx, row, 30_000, true);
       return { kind: 'plan', value: plan, pin };
     }
@@ -146,7 +166,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
 /** One exact IO completion; duplicate or delayed generations do nothing. */
 async function resumeFinishIOOnce(
   ctx: MutationCtx,
-  input: FinishIdentity & { command: FinishCommand; page?: unknown; storageId?: string },
+  input: FinishIdentity & { command: FinishCommand; page?: unknown; storageId?: string; key?: string },
 ) {
   const { row, value } = await loadFinish(ctx, input);
   if (row.wake?.id !== input.wakeId) return;
@@ -161,7 +181,11 @@ async function resumeFinishIOOnce(
     );
     await stageAcceptance(ctx, { ...input, ...input.command.selection, page: input.page });
   } else {
-    invariant(value.pending && input.storageId, 'WORK_STALE', 'Resume only the pending composition.');
+    invariant(
+      value.pending && (input.storageId || input.key),
+      'WORK_STALE',
+      'Resume only the pending composition.',
+    );
     const source = await prepareFinishCompose(ctx, input, value);
     const plan = hostedComposeInput(source.state, source.operation.firstAttempt.at),
       pin = savePin(plan);
@@ -170,12 +194,6 @@ async function resumeFinishIOOnce(
         canonicalPayload(plan) === input.command.value,
       'WORK_OPERATION_CHANGED',
       'Upload only the original pending source plan.',
-    );
-    const metadata = await blobStore(ctx).getMetadata(input.storageId);
-    invariant(
-      metadata?.sha256 === pin.sha256 && metadata.size === pin.size,
-      'SOURCE_HASH_MISMATCH',
-      'Uploaded source plan differs from its exact bytes.',
     );
     const old = await ctx.db
       .query('projectObjects')
@@ -186,19 +204,36 @@ async function resumeFinishIOOnce(
       'SOURCE_HASH_MISMATCH',
       'Source plan binding differs.',
     );
-    if (!old)
-      await ctx.db.insert('projectObjects', {
-        projectId: input.projectId,
-        digest: pin.sha256,
-        size: pin.size,
-        storageId: input.storageId as import('./_generated/dataModel').Id<'_storage'>,
-        nonce: crypto.randomUUID(),
-        removed: false,
-      });
-    if (old && !isStored(old))
-      await ctx.db.patch(old._id, {
-        storageId: input.storageId as import('./_generated/dataModel').Id<'_storage'>,
-      });
+    if (input.key) {
+      invariant(
+        old &&
+          old.location === 'r2' &&
+          old.r2Key === input.key &&
+          input.key === r2Key(input.projectId, pin.sha256),
+        'SOURCE_HASH_MISMATCH',
+        'Resume the exact reserved R2 source plan.',
+      );
+      await ctx.db.patch(old._id, { r2Committed: true });
+    } else {
+      // Read-only compatibility for an already-issued legacy IO callback.
+      const metadata = await blobStore(ctx).getMetadata(input.storageId!);
+      invariant(
+        metadata?.sha256 === pin.sha256 && metadata.size === pin.size,
+        'SOURCE_HASH_MISMATCH',
+        'Uploaded source plan differs from its exact bytes.',
+      );
+      const storageId = input.storageId as import('./_generated/dataModel').Id<'_storage'>;
+      if (!old)
+        await ctx.db.insert('projectObjects', {
+          projectId: input.projectId,
+          digest: pin.sha256,
+          size: pin.size,
+          storageId,
+          nonce: crypto.randomUUID(),
+          removed: false,
+        });
+      else if (!isStored(old)) await ctx.db.patch(old._id, { storageId });
+    }
     await submitHostedCompose(ctx, {
       projectId: input.projectId,
       actor: state.actor,

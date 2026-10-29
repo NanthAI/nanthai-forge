@@ -638,13 +638,8 @@ test('a prepared but uncommitted metadata binding reconciles to the verified pla
   const raw = await f.tx('finishStep', driver.step, task.args[0]),
     command = JSON.parse(raw);
   assert.equal(command.kind, 'plan');
-  f.insert('projectObjects', {
-    projectId: f.projectId,
-    digest: command.pin.sha256,
-    size: command.pin.size,
-    nonce: randomUUID(),
-    removed: false,
-  });
+  const reserved = [...f.tables.projectObjects.values()].find(row => row.digest === command.pin.sha256);
+  assert(reserved && reserved.location === 'r2' && !reserved.r2Committed);
   // Recover this same IO generation. The real action uploads its exact plan and
   // the completion transaction makes the prepared object readable atomically.
   await f.drain();
@@ -750,8 +745,39 @@ test('a main-race recompose retains newly accepted peer contracts in its named c
   assert.equal((await f.current(state.id)).submission.observation.pendingReason, 'checking');
 });
 
+test('a ten-file finish publishes a small R2 plan with no Convex file write and no idle wake', async t => {
+  const f = await finishFixture(t, { fileCount: 10 }),
+    { state } = await begin(f);
+  f.moveMain();
+  await complete(f);
+  await complete(f);
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  const plans = [...f.tables.projectObjects.values()].filter(
+    row =>
+      row.location === 'r2' &&
+      row.r2Committed &&
+      f.metrics.planUploads.some(plan => plan.digest === row.digest),
+  );
+  assert(plans.length >= 1);
+  assert(plans.every(row => row.size < 128 * 1024 && !row.storageId));
+  assert.equal(f.metrics.legacyPlanWrites.length, 0);
+  assert.equal(f.pending().length, 0);
+  assert(f.metrics.stepCalls.every(calls => calls.length <= 2));
+  assert(f.metrics.stepCalls.reduce((sum, calls) => sum + calls.length, 0) <= 15);
+  t.diagnostic(
+    JSON.stringify({
+      files: 10,
+      planBytes: plans.reduce((sum, row) => sum + row.size, 0),
+      uploadBytes: f.metrics.uploadBytes,
+      downloadBytes: f.metrics.downloadBytes,
+      driverCalls: f.metrics.stepCalls.reduce((sum, calls) => sum + calls.length, 0),
+      peakRssBytes: process.resourceUsage().maxRSS * 1024,
+    }),
+  );
+});
+
 test('Convex source recompose reaches the ordinary checked finish receipt without Modal configuration or idle source wakes', async t => {
-  const f = await finishFixture(t);
+  const f = await finishFixture(t, { fileCount: 10 });
   const keys = [
       'FORGE_SOURCE_PROVIDER',
       'FORGE_SOURCE_WORKER',
@@ -771,11 +797,18 @@ test('Convex source recompose reaches the ordinary checked finish receipt withou
     assert.equal(landed.submission.phase, 'landed');
     assert.equal(f.tables.projectSourceSteps.size, 1);
     assert(f.metrics.convexSourceCalls.includes('projectConvexSource:step'));
+    assert(f.metrics.convexSourceCalls.length <= 10);
+    assert(f.metrics.convexStorageCalls <= 2);
+    assert.equal(f.metrics.legacyPlanWrites.length, 0);
     assert.equal(f.pending().length, 0);
     t.diagnostic(
       JSON.stringify({
         convexSourceCalls: f.metrics.convexSourceCalls,
         convexStorageCalls: f.metrics.convexStorageCalls,
+        driverControlCalls: f.metrics.stepCalls.reduce((sum, calls) => sum + calls.length, 0),
+        legacyPlanBytes: f.metrics.legacyPlanWrites.reduce((sum, row) => sum + row.size, 0),
+        r2PlanBytes: f.metrics.planUploads.reduce((sum, row) => sum + row.size, 0),
+        pendingWakes: f.pending().length,
         sourceExecutions: f.tables.projectSourceSteps.size,
       }),
     );

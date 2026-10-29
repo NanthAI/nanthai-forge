@@ -12,6 +12,7 @@ import type { FunctionArgs, FunctionReturnType } from 'convex/server';
 import type { Id } from '../../convex/_generated/dataModel';
 import { api } from '../../convex/_generated/api';
 import type { WorkArchivePreview } from './work-archive';
+import { backupTransfer } from './backup-transfer-api';
 import { hostedError, snapshotDownload } from './snapshot';
 import { ActionPanel } from './WorkspaceUI';
 import HostedWork from './HostedWork';
@@ -223,23 +224,24 @@ export default function ProjectBackups({ explore }: { explore?: () => void }) {
         setAttempt(null);
         return;
       }
-      const prepared = await client.action(api.projectBackupActions.prepare, original.input);
+      const prepared = await client.mutation(backupTransfer.prepare, original.input);
       original.id = prepared.backup.id;
       chooseProject(prepared.backup.projectId);
       let backup = prepared.backup;
       if (backup.status !== 'stored') {
-        if (!prepared.uploadUrl || !prepared.contentType)
-          throw new Error('The original upload destination is unavailable. Reconcile this operation.');
-        const response = await fetch(prepared.uploadUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': prepared.contentType },
+        if (!prepared.target) throw new Error('The original upload destination is unavailable.');
+        const response = await fetch(prepared.target.url, {
+          method: 'PUT',
+          headers: prepared.target.headers,
           body: original.file,
         });
-        if (!response.ok) throw new Error(`Archive upload returned HTTP ${response.status}.`);
-        const result = (await response.json()) as { storageId: Id<'_storage'> };
-        backup = await client.action(api.projectBackupActions.complete, {
+        if (!response.ok && response.status !== 412)
+          throw new Error(`Archive upload returned HTTP ${response.status}.`);
+        backup = await client.action(backupTransfer.complete, {
           id: original.id,
-          storageId: result.storageId,
+          projectId: backup.projectId,
+          digest: original.input.digest,
+          size: original.input.size,
         });
       }
       setMessage(
@@ -320,15 +322,20 @@ export default function ProjectBackups({ explore }: { explore?: () => void }) {
         );
         return;
       }
+      const signed =
+        backup.transport === 'objects'
+          ? null
+          : await client.mutation(backupTransfer.sign, { id: backup.id, digest: backup.digest });
       const { blob, filename } =
         backup.transport === 'objects'
           ? await downloadObjectArchive(client, backup.projectId, backup.id)
           : await snapshotDownload(async offset => ({
-              ...(await client.action(api.projectBackupActions.downloadPart, {
-                id: backup.id,
-                offset,
-                digest: backup.digest,
-              })),
+              ...(signed ??
+                (await client.action(api.projectBackupActions.downloadPart, {
+                  id: backup.id,
+                  offset,
+                  digest: backup.digest,
+                }))),
               contentType: 'application/gzip',
               repository: backup.name,
               head: backup.preview.head,

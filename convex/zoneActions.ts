@@ -14,6 +14,7 @@ import { githubJson } from '../src/github';
 import { decodeHostedArtifact, encodeHostedArtifact } from '../src/hosted-artifact';
 import { agentProjection } from '../src/agent-query';
 import { derivedArtifact, derivedBytes } from './derivedArtifactActions';
+import { archiveDownload, directDownloadFields } from './archiveDownload';
 import { projectArchivePart } from './projectArchivePart';
 import { hostedStatus, type HostedStatus } from '../src/hosted-status';
 import { hostedQuery } from '../src/hosted-query';
@@ -315,6 +316,7 @@ export const read = action({
 export const downloadPart = action({
   args: { id: v.id('sourceZones'), offset: v.number(), digest: v.optional(v.string()) },
   returns: v.object({
+    ...directDownloadFields,
     data: v.bytes(),
     size: v.number(),
     digest: v.string(),
@@ -326,6 +328,8 @@ export const downloadPart = action({
     ctx,
     { id, offset, digest: expected },
   ): Promise<{
+    direct?: boolean;
+    url?: string;
     data: ArrayBuffer;
     size: number;
     digest: string;
@@ -343,17 +347,25 @@ export const downloadPart = action({
         'The source Zone export changed. Download again for one complete snapshot.',
       );
       invariant(offset < record.size, 'BAD_ARGUMENT', 'Download offset exceeds the snapshot.');
-      const data = await projectArchivePart(
-        ctx,
-        record.storageId!,
-        record.size,
-        record.digest,
-        offset,
-        () => access(ctx, id, reader),
-        'INVALID_ARTIFACT',
-      );
+      const direct = await archiveDownload(ctx, {
+        storageId: record.storageId!,
+        size: record.size,
+        digest: record.digest,
+      });
+      const data = direct
+        ? direct.data
+        : await projectArchivePart(
+            ctx,
+            record.storageId!,
+            record.size,
+            record.digest,
+            offset,
+            () => access(ctx, id, reader),
+            'INVALID_ARTIFACT',
+          );
       await access(ctx, id, reader);
       return {
+        ...direct,
         data,
         size: record.size,
         digest: record.digest,

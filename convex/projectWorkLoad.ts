@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { archiveRef } from './r2ArchiveSource';
 import { migratedWork } from './projectWorkDetailLoad';
 import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
@@ -39,7 +40,7 @@ export async function source(
   );
   invariant(
     original.backup.status === 'stored' &&
-      (original.backup.transport === 'objects' || original.backup.storageId),
+      (original.backup.transport === 'objects' || original.backup.storageId || original.backup.r2Committed),
     'PROJECT_UNAVAILABLE',
     'Select a stored source and Work backup.',
   );
@@ -73,7 +74,7 @@ export async function source(
           ? await exchangeMetadata(ctx, original.backup, owner, objectReader)
           : await projectArchiveMetadata(
               ctx,
-              original.backup.storageId!,
+              archiveRef(original.backup),
               original.backup.size,
               original.backup.digest,
               () => ctx.runQuery(internal.projectBackups.get, { id: backupId, owner }),

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { blobStore } from './blobStore';
+import { archivePut, reserveArchive, commitArchive, archiveTarget } from './archiveUpload';
 import { isStored } from './projectObjectFields';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, mutation, internalMutation, internalQuery } from './cliServer';
@@ -115,14 +115,17 @@ export const register = internalMutation({
 });
 export const uploadUrl = internalMutation({
   args: { id: v.id('projectProposals'), actor: v.string() },
-  returns: v.string(),
+  returns: v.union(v.string(), archivePut),
   handler: async (ctx, { id, actor }) => {
     try {
       const proposal = await ctx.db.get(id);
       invariant(proposal?.actor === actor, 'PROJECT_UNAVAILABLE', 'This upload belongs to another actor.');
       await activeProject(ctx, proposal.projectId, actor);
       invariant(proposal.status === 'uploading', 'PROJECT_CHANGED', 'This proposal is already stored.');
-      return await blobStore(ctx).generateUploadUrl();
+      const { r2Key } = await reserveArchive(ctx, proposal);
+      const target = await archiveTarget({ ...proposal, r2Key });
+      await ctx.db.patch(id, { location: 'r2', r2Key });
+      return target;
     } catch (error) {
       return report(error);
     }
@@ -136,6 +139,7 @@ export const findUpload = internalQuery({
       const proposal = await ctx.db.get(id);
       invariant(proposal?.actor === actor, 'PROJECT_UNAVAILABLE', 'This upload belongs to another actor.');
       await activeProject(ctx, proposal.projectId, actor);
+      if (proposal.location === 'r2') return { id: null, isDone: true, cursor: '' };
       const page = await ctx.db.system.query('_storage').order('desc').paginate({ cursor, numItems: 100 });
       const file = page.page.find(
         file =>
@@ -240,6 +244,7 @@ export const reconcileDuplicates = internalMutation({
       invariant(row && row.status === 'stored', 'PROJECT_UNAVAILABLE', 'Select this original stored upload.');
       invariant(row.actor === actor, 'PROJECT_UNAVAILABLE', 'This upload belongs to another actor.');
       await activeProject(ctx, row.projectId, actor);
+      if (row.location === 'r2') return { cursor: '', isDone: true };
       return await duplicatePage(ctx, row, 'proposal', cursor);
     } catch (error) {
       return report(error);
@@ -271,6 +276,30 @@ export const completeObjects = internalMutation({
         'Proposal root is unavailable.',
       );
       await ctx.db.patch(id, { status: 'stored' });
+      return (await ctx.db.get(id))!;
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** Only the owning action calls this after HEAD verification of this exact key. */
+export const completeR2 = internalMutation({
+  args: { id: v.id('projectProposals'), actor: v.string(), key: v.string() },
+  returns: projectProposalDocument,
+  handler: async (ctx, { id, actor, key }) => {
+    try {
+      const proposal = await ctx.db.get(id);
+      invariant(
+        proposal && proposal.location === 'r2' && proposal.r2Key === key,
+        'INVALID_WORK_BACKUP',
+        'Original archive reservation changed.',
+      );
+      invariant(proposal.actor === actor, 'PROJECT_UNAVAILABLE', 'This upload belongs to another actor.');
+      await activeProject(ctx, proposal.projectId, actor);
+      await intentAuthority(ctx, proposal.projectId, actor, proposal.intentId);
+      await commitArchive(ctx, proposal);
+      if (proposal.status !== 'stored') await ctx.db.patch(id, { status: 'stored', r2Committed: true });
       return (await ctx.db.get(id))!;
     } catch (error) {
       return report(error);

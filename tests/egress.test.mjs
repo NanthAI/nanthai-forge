@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { setup as r2Setup } from './r2-harness.mjs';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
@@ -17,6 +18,11 @@ const lifecycle = await import(moduleUrl('../convex/lifecycleActions.ts'));
 const cache = await import(moduleUrl('../convex/derivedArtifacts.ts'));
 const { derivedArtifact } = await import(moduleUrl('../convex/derivedArtifactActions.ts'));
 const { projectArchiveMetadata } = await import(moduleUrl('../convex/projectArchiveMetadata.ts'));
+const buckets = new WeakMap();
+test.beforeEach(async t => {
+  buckets.set(t, (await r2Setup(t)).fake);
+});
+const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 async function original(t) {
   const root = fixture(t, { 'a.ts': 'export const value = 1;\n', 'README.md': '# Original attribution\n' });
@@ -118,7 +124,7 @@ test('missing/corrupt summaries rebuild from the same original bytes; refreshing
   await read('status');
   s.tables.imports.get('own').phase = 'indexing';
   s.tables.imports.get('own').generation++;
-  const row = [...s.tables.derivedArtifacts.values()][0];
+  const row = [...s.tables.derivedArtifacts.values()].find(row => row.kind === 'hosted-status-v1');
   row.inline = '{corrupt';
   assert.equal((await read('status')).sourceId, artifact.pack.source.id);
   assert.equal(JSON.parse(s.tables.derivedArtifacts.get(row._id).inline).sourceId, artifact.pack.source.id);
@@ -181,7 +187,7 @@ test('warm Work metadata reads only a sidecar, preserving original bytes, unknow
     return get(id);
   };
   const read = () =>
-    projectArchiveMetadata(s.ctx, 'archive', bytes.length, sha, async () => {
+    projectArchiveMetadata(s.ctx, 'archive', bytes.length, sha, async t => {
       access++;
     });
   for (let i = 0; i < 2; i++) {
@@ -190,7 +196,8 @@ test('warm Work metadata reads only a sidecar, preserving original bytes, unknow
     assert.deepEqual(Buffer.from(value.work), work);
   }
   assert.equal(originals, 1);
-  assert.equal(sidecars, 1);
+  assert.equal(sidecars, 0);
+  assert.equal(buckets.get(t).requests.filter(r => r.method === 'GET').length, 1);
   assert.ok(access >= 4);
   const row = [...s.tables.derivedArtifacts.values()][0];
   assert.equal(row.kind, 'work-metadata-v2');
@@ -199,12 +206,14 @@ test('warm Work metadata reads only a sidecar, preserving original bytes, unknow
     'Full metadata bytes retained outside database documents',
   );
   assert.ok(row.size < work.length, 'Sidecar compressed without changing metadata bytes');
-  s.files.delete(row.storageId);
+  // A legacy sidecar whose metadata disappeared is rebuilt into R2.
+  const legacy = 'missing-legacy';
+  row.storageId = legacy;
   const rebuilt = await read();
   assert.deepEqual(Buffer.from(rebuilt.work), work);
   assert.equal(originals, 2);
 });
-test('durable derived upload reservation reconciles lost store/attach replies and concurrent builders', async () => {
+test('durable derived upload reservation reconciles lost store/attach replies and concurrent builders', async t => {
   const s = state([]);
   s.files.set('original', {
     blob: new Blob(['original']),
@@ -215,32 +224,40 @@ test('durable derived upload reservation reconciles lost store/attach replies an
     builds++;
     return new Blob(['exact derived bytes'], { type: 'application/gzip' });
   };
-  const store = s.ctx.storage.store;
+  const runAction = s.ctx.runAction;
   let lost = true;
-  s.ctx.storage.store = async blob => {
+  s.ctx.runAction = async (ref, args) => {
     assert.equal(
-      [...s.tables.derivedArtifacts.values()].filter(row => row.uploadType === blob.type).length,
+      [...s.tables.derivedArtifacts.values()].filter(
+        row =>
+          `r2blob:${[...s.tables.artifactBlobs.values()].find(blob => blob.namespace === `v1/d/${row._id}`)?._id}` ===
+          args.ref,
+      ).length,
       1,
       'Reservation precedes storage',
     );
-    const id = await store(blob);
+    const result = await runAction(ref, args);
     if (lost) {
       lost = false;
       throw Error('lost committed storage reply');
     }
-    return id;
+    return result;
   };
+  await assert.rejects(
+    derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'pin', build, async () => {}),
+    /lost committed storage reply/,
+  );
   const a = await derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'pin', build, async () => {});
   assert.ok(a.storageId);
   assert.equal(a.contentType, 'application/gzip');
   const b = await derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'pin', build, async () => {});
   assert.equal(a.storageId, b.storageId);
-  assert.equal(builds, 1);
+  assert.equal(builds, 2);
   const mutation = s.ctx.runMutation;
   let lostAttach = true,
     transactions = Promise.resolve();
   s.ctx.runMutation = (ref, args) => {
-    const result = transactions.then(async () => {
+    const result = transactions.then(async t => {
       const value = await mutation(ref, args);
       if (getFunctionName(ref) === 'derivedArtifacts:attach' && lostAttach) {
         lostAttach = false;
@@ -256,39 +273,32 @@ test('durable derived upload reservation reconciles lost store/attach replies an
     derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'other', build, async () => {}),
   ]);
   assert.equal(c.storageId, d.storageId);
-  assert.equal(
-    [...s.files.keys()].filter(id => id !== 'original').length,
-    2,
-    'Concurrent losers cleaned safely',
-  );
+  assert.equal(buckets.get(t).objects.size, 2, 'Concurrent losers cleaned safely');
 });
-test('original deletion retains attributable pending upload tombstones and cleans late files without attaching source', async () => {
+test('original deletion retains attributable pending upload tombstones and cleans late files without attaching source', async t => {
   const s = state([]);
   s.files.set('original', {
     blob: new Blob(['original']),
     metadata: { size: 8, sha256: digest('original') },
   });
   const store = s.ctx.storage.store;
-  let late;
-  s.ctx.storage.store = async blob => {
-    const row = [...s.tables.derivedArtifacts.values()][0];
-    assert.ok(row.uploadType);
-    s.files.delete('original');
-    await cache.removeDerived(s.ctx, 'original');
-    late = await store(blob);
-    return late;
-  };
-  const result = await derivedArtifact(
-    s.ctx,
-    'original',
-    'work-metadata-v1',
-    '',
-    async () => new Blob(['private original Work']),
-    async () => {},
-  );
-  assert.equal(result, null);
-  assert.ok(!s.files.has(late));
-  const row = [...s.tables.derivedArtifacts.values()][0];
+  const value = 'private original Work',
+    uploadType = 'application/x-forge-derived-old-upload';
+  const id = await s.ctx.db.insert('derivedArtifacts', {
+    original: 'original',
+    kind: 'work-metadata-v1',
+    pin: '',
+    originalDigest: digest('original'),
+    originalSize: 8,
+    digest: digest(value),
+    size: Buffer.byteLength(value),
+    contentType: 'application/gzip',
+    uploadType,
+    removed: false,
+  });
+  s.files.delete('original');
+  await cache.removeDerived(s.ctx, 'original');
+  const row = s.tables.derivedArtifacts.get(id);
   assert.equal(row.removed, true);
   assert.equal(row.inline, undefined);
   assert.equal(row.storageId, undefined);
@@ -308,7 +318,7 @@ test('lifecycle parts use exact ranges rather than full storage Blobs, retaining
   t.after(providers());
   const prior = globalThis.fetch;
   let served = 0;
-  s.ctx.storage.get = async () => {
+  s.ctx.storage.get = async t => {
     throw Error('No eager source Blob');
   };
   s.ctx.storage.getUrl = async () => 'https://storage.invalid/private';
@@ -350,7 +360,7 @@ test('zero-byte lifecycle snapshot and absent metadata content type retain exist
   assert.equal(result.contentType, 'application/custom');
 });
 
-test('a stale missing-cache rebuild cannot delete the concurrently repaired winner during export', async () => {
+test('a stale missing-cache rebuild cannot delete the concurrently repaired winner during export', async t => {
   const s = state([]);
   s.files.set('original', {
     blob: new Blob(['original']),
@@ -358,7 +368,7 @@ test('a stale missing-cache rebuild cannot delete the concurrently repaired winn
   });
   const build = async () => new Blob(['pinned export bytes'], { type: 'application/gzip' });
   const first = await derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'pin', build, async () => {});
-  s.files.delete(first.storageId);
+  s.tables.derivedArtifacts.get(first._id).storageId = 'missing-legacy';
   let started, release;
   const entered = new Promise(resolve => {
       started = resolve;
@@ -371,7 +381,7 @@ test('a stale missing-cache rebuild cannot delete the concurrently repaired winn
     'original',
     'zone-export-v1',
     'pin',
-    async () => {
+    async t => {
       started();
       await gate;
       return build();
@@ -380,15 +390,18 @@ test('a stale missing-cache rebuild cannot delete the concurrently repaired winn
   );
   await entered;
   const winner = await derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'pin', build, async () => {});
-  assert.ok(s.files.has(winner.storageId));
+  assert.match(winner.storageId, /^r2blob:/);
   release();
   const late = await slow;
   assert.equal(late.storageId, winner.storageId);
-  assert.ok(s.files.has(winner.storageId), 'Valid concurrent export survives stale cache repair');
-  assert.equal(await s.files.get(winner.storageId).blob.text(), 'pinned export bytes');
+  assert.ok(
+    await blobStore(s.ctx).getMetadata(winner.storageId),
+    'Valid concurrent export survives stale cache repair',
+  );
+  assert.equal(await (await blobStore(s.ctx).get(winner.storageId)).text(), 'pinned export bytes');
 });
 
-test('v2 Work sidecars retain independently stored v1 derivatives and rebuild corrupt files from original bytes', async () => {
+test('v2 Work sidecars retain independently stored v1 derivatives and rebuild corrupt files from original bytes', async t => {
   const manifest = Buffer.from(' {"future":"original"}\n'),
     work = Buffer.from('{"future":true,"a":1}\n');
   const bytes = gzipSync(
@@ -415,6 +428,7 @@ test('v2 Work sidecars retain independently stored v1 derivatives and rebuild co
   const row = [...s.tables.derivedArtifacts.values()].find(x => x.kind === 'work-metadata-v2');
   assert.ok(row.storageId);
   const damaged = new Blob(['corrupt sidecar']);
+  row.storageId = 'damaged-legacy';
   s.files.set(row.storageId, {
     blob: damaged,
     metadata: { size: damaged.size, sha256: digest('corrupt sidecar') },
@@ -422,7 +436,7 @@ test('v2 Work sidecars retain independently stored v1 derivatives and rebuild co
   const repaired = await read();
   assert.deepEqual(Buffer.from(repaired.manifest), manifest);
   assert.deepEqual(Buffer.from(repaired.work), work);
-  assert.ok(s.files.has(old.storageId));
+  assert.ok(await blobStore(s.ctx).getMetadata(old.storageId));
   assert.equal(s.tables.derivedArtifacts.get(old._id).storageId, old.storageId);
 });
 

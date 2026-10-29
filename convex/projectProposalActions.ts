@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { archivePut, verifyArchiveUpload } from './archiveUpload';
+import type { R2PutTarget } from './r2';
 import { randomUUID } from 'node:crypto';
 import { v } from 'convex/values';
 import { action, type ActionCtx } from './cliServer';
@@ -13,7 +15,11 @@ import { parseWorkBytes } from '../src/work-metadata';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { archiveDownload, directDownloadFields, type DirectDownload } from './archiveDownload';
 import { projectArchivePart } from './projectArchivePart';
+import { presignGet, r2Config } from './r2';
+import { workArchiveMetadata } from '../src/work-archive-metadata';
+import { exchangeRequest } from '../src/exchange-request';
 import { projectArchiveMetadata } from './projectArchiveMetadata';
 async function checkedComplete(
   ctx: ActionCtx,
@@ -31,15 +37,23 @@ async function checkedComplete(
     actor,
   });
   const bytes = await projectArchiveMetadata(
-      ctx,
-      storageId,
-      proposal.size,
-      proposal.digest,
-      () => ctx.runQuery(internal.projectProposals.get, { id, actor }),
-      true,
-      r2,
-    ),
-    manifest = sourceManifestSchema.parse(JSON.parse(Buffer.from(bytes.manifest).toString('utf8'))),
+    ctx,
+    storageId,
+    proposal.size,
+    proposal.digest,
+    () => ctx.runQuery(internal.projectProposals.get, { id, actor }),
+    true,
+    r2,
+  );
+  validateProposalMetadata(proposal, bytes);
+  // The atomic final mutation rechecks current grant and server-created Intent after these asynchronous reads.
+  return await ctx.runMutation(internal.projectProposals.complete, { id, actor, storageId });
+}
+function validateProposalMetadata(
+  proposal: Doc<'projectProposals'>,
+  bytes: { manifest: Uint8Array; work: Uint8Array },
+) {
+  const manifest = sourceManifestSchema.parse(JSON.parse(Buffer.from(bytes.manifest).toString('utf8'))),
     data = parseWorkBytes(bytes.work);
   const work = manifest.files.find(file => file.path === 'work.json'),
     view = data.views.find(item => item.id === proposal.viewId);
@@ -62,8 +76,23 @@ async function checkedComplete(
     'INVALID_WORK_BACKUP',
     'Proposal metadata does not contain the selected clean native View, head and original Intent base.',
   );
-  // The atomic final mutation rechecks current grant and server-created Intent after these asynchronous reads.
-  return await ctx.runMutation(internal.projectProposals.complete, { id, actor, storageId });
+}
+async function validateR2Proposal(ctx: ActionCtx, proposal: Doc<'projectProposals'>, actor: string) {
+  const bytes = await exchangeRequest(
+    'R2 proposal metadata',
+    await presignGet(r2Config(), proposal.r2Key!),
+    { headers: { 'accept-encoding': 'identity' } },
+    async (response, progressed) => {
+      invariant(response.ok && response.body, 'INVALID_WORK_BACKUP', 'Stored proposal is unavailable.');
+      try {
+        return await workArchiveMetadata(response.body, undefined, progressed);
+      } finally {
+        if (response.body && !response.body.locked) await response.body.cancel();
+      }
+    },
+  );
+  validateProposalMetadata(proposal, bytes);
+  await ctx.runQuery(internal.projectProposals.get, { id: proposal._id, actor });
 }
 async function reconcile(
   ctx: ActionCtx,
@@ -73,6 +102,15 @@ async function reconcile(
 ): Promise<Doc<'projectProposals'>> {
   const proposal: Doc<'projectProposals'> = await ctx.runQuery(internal.projectProposals.get, { id, actor });
   invariant(proposal.actor === actor, 'PROJECT_UNAVAILABLE', 'This upload belongs to another actor.');
+  if (proposal.transport === 'objects') return proposal;
+  if (proposal.location === 'r2') {
+    if (proposal.status === 'stored') return proposal;
+    if (await verifyArchiveUpload(proposal)) {
+      await validateR2Proposal(ctx, proposal, actor);
+      return ctx.runMutation(internal.projectProposals.completeR2, { id, actor, key: proposal.r2Key! });
+    }
+    return proposal;
+  }
   if (proposal.status === 'stored') {
     if (!cleanupStored) return proposal;
     let cleanupCursor: string | null = null;
@@ -102,12 +140,18 @@ export const prepare = action({
   returns: v.object({
     proposal: projectProposalDocument,
     uploadUrl: v.optional(v.string()),
+    target: v.optional(archivePut),
     contentType: v.optional(v.string()),
   }),
   handler: async (
     ctx,
     input,
-  ): Promise<{ proposal: Doc<'projectProposals'>; uploadUrl?: string; contentType?: string }> => {
+  ): Promise<{
+    proposal: Doc<'projectProposals'>;
+    uploadUrl?: string;
+    target?: R2PutTarget;
+    contentType?: string;
+  }> => {
     try {
       const actor = await caller(ctx),
         uuid = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i,
@@ -168,11 +212,16 @@ export const prepare = action({
         request,
         nonce: randomUUID(),
       });
-      const proposal = await reconcile(ctx, id, actor);
+      const proposal: Doc<'projectProposals'> = await ctx.runQuery(internal.projectProposals.get, {
+        id,
+        actor,
+      });
+      invariant(proposal.actor === actor, 'PROJECT_UNAVAILABLE', 'This upload belongs to another actor.');
       if (proposal.status === 'stored') return { proposal };
+      const target = await ctx.runMutation(internal.projectProposals.uploadUrl, { id, actor });
       return {
         proposal,
-        uploadUrl: await ctx.runMutation(internal.projectProposals.uploadUrl, { id, actor }),
+        ...(typeof target === 'string' ? { uploadUrl: target } : { target }),
         contentType: `application/x-forge-proposal-${proposal.nonce}`,
       };
     } catch (error) {
@@ -181,18 +230,31 @@ export const prepare = action({
   },
 });
 export const complete = action({
-  args: { id: v.id('projectProposals'), storageId: v.id('_storage') },
+  args: { id: v.id('projectProposals'), storageId: v.optional(v.id('_storage')) },
   returns: projectProposalDocument,
   handler: async (ctx, { id, storageId }): Promise<Doc<'projectProposals'>> => {
     try {
+      const actor = await caller(ctx),
+        proposal: Doc<'projectProposals'> = await ctx.runQuery(internal.projectProposals.get, { id, actor });
+      if (proposal.location === 'r2') {
+        invariant(await verifyArchiveUpload(proposal), 'R2_OBJECT_MISSING', 'Uploaded archive is missing.');
+        await validateR2Proposal(ctx, proposal, actor);
+        return await ctx.runMutation(internal.projectProposals.completeR2, {
+          id,
+          actor,
+          key: proposal.r2Key!,
+        });
+      }
+      invariant(storageId, 'INVALID_WORK_BACKUP', 'Select the original legacy upload.');
       return await checkedComplete(ctx, id, await caller(ctx), storageId);
     } catch (error) {
       try {
-        await ctx.runMutation(internal.projectLifecycle.cleanupUpload, {
-          uploadId: id,
-          actor: await caller(ctx),
-          storageId,
-        });
+        if (storageId)
+          await ctx.runMutation(internal.projectLifecycle.cleanupUpload, {
+            uploadId: id,
+            actor: await caller(ctx),
+            storageId,
+          });
       } catch {
         /* Foreign/unattributable files remain untouched. */
       }
@@ -213,16 +275,24 @@ export const reconcileUpload = action({
 });
 export const downloadPart = action({
   args: { id: v.id('projectProposals'), offset: v.number(), digest: v.string() },
-  returns: v.object({ data: v.bytes(), size: v.number(), digest: v.string(), filename: v.string() }),
+  returns: v.object({
+    ...directDownloadFields,
+    data: v.bytes(),
+    size: v.number(),
+    digest: v.string(),
+    filename: v.string(),
+  }),
   handler: async (
     ctx,
     { id, offset, digest: expected },
-  ): Promise<{ data: ArrayBuffer; size: number; digest: string; filename: string }> => {
+  ): Promise<DirectDownload & { size: number; digest: string; filename: string }> => {
     try {
       const actor = await caller(ctx),
         proposal: Doc<'projectProposals'> = await ctx.runQuery(internal.projectProposals.get, { id, actor });
       invariant(
-        proposal.status === 'stored' && proposal.storageId && expected === proposal.digest,
+        proposal.status === 'stored' &&
+          (proposal.storageId || (proposal.location === 'r2' && proposal.r2Committed)) &&
+          expected === proposal.digest,
         'PROJECT_CHANGED',
         'Select the original stored proposal and digest.',
       );
@@ -231,16 +301,15 @@ export const downloadPart = action({
         'BAD_ARGUMENT',
         'Invalid proposal archive offset.',
       );
-      const data = await projectArchivePart(
-        ctx,
-        proposal.storageId,
-        proposal.size,
-        proposal.digest,
-        offset,
-        () => ctx.runQuery(internal.projectProposals.get, { id, actor }),
-      );
+      const direct = await archiveDownload(ctx, proposal);
+      const data = direct
+        ? direct.data
+        : await projectArchivePart(ctx, proposal.storageId!, proposal.size, proposal.digest, offset, () =>
+            ctx.runQuery(internal.projectProposals.get, { id, actor }),
+          );
       await ctx.runQuery(internal.projectProposals.get, { id, actor });
       return {
+        ...direct,
         data,
         size: proposal.size,
         digest: proposal.digest,

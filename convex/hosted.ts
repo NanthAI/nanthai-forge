@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { paginationOptsValidator } from 'convex/server';
-import { blobStore } from './blobStore';
 import { ForgeError } from '../src/errors';
 import { v } from 'convex/values';
 import { action, type ActionCtx } from './cliServer';
@@ -10,10 +9,9 @@ import type { Id } from './_generated/dataModel';
 import { currentAccess, githubConfig } from './access';
 import { authorizeGithub } from '../src/github-access';
 import { githubInput, githubJson } from '../src/github';
-import { decodeHostedArtifact } from '../src/hosted-artifact';
 import { derivedArtifact, derivedBytes } from './derivedArtifactActions';
 import { hostedStatus, type HostedStatus } from '../src/hosted-status';
-import { hostedQuery } from '../src/hosted-query';
+import { indexedHostedQuery } from './hostedQueryIndex';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
@@ -90,12 +88,7 @@ export async function readSource(
     invariant(job.artifactKey, 'INDEX_MISSING', 'This repository is still being indexed.');
     const isStatus = endpoint.split('?')[0] === 'status';
     const revision: number | null = isStatus ? await ctx.runMutation(internal.sync.begin, { id }) : null;
-    const key = job.artifactKey as Id<'_storage'>;
-    const readArtifact = async () => {
-      const blob = await blobStore(ctx).get(key);
-      invariant(blob, 'INVALID_ARTIFACT', 'Stored source is unavailable.');
-      return decodeHostedArtifact(blob);
-    };
+    const key = job.artifactKey;
     const latest = await githubJson<{ sha: string }>(
       `/repos/${repository.full_name}/commits/${encodeURIComponent(job.ref)}`,
       token,
@@ -111,13 +104,14 @@ export async function readSource(
       isStatus ? 'hosted-status-v1' : 'hosted-query-v1',
       isStatus ? '' : JSON.stringify([id, job.head, endpoint, latest.sha]),
       async () => {
-        const artifact = await readArtifact();
         const value = JSON.stringify(
-          hostedQuery(
-            artifact,
+          await indexedHostedQuery(
+            ctx,
+            key,
             isStatus ? 'status' : endpoint,
-            isStatus ? artifact.pack.source.gitHead! : latest.sha,
-            artifact.repository,
+            isStatus ? job.head! : latest.sha,
+            repository,
+            () => currentAccess(ctx, id, user?.subject),
           ),
         );
         return Buffer.byteLength(value) <= 64_000 ? value : new Blob([value], { type: 'application/json' });

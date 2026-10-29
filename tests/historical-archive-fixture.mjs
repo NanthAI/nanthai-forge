@@ -104,6 +104,10 @@ export function historicalArchiveActions(actions) {
         const run = ctx.runMutation;
         ctx.runMutation = (ref, args) => {
           const name = getFunctionName(ref);
+          // Model a legacy upload URL already issued before the R2 cutover.
+          // New-write tests call the production target mutation directly.
+          if (['projectBackups:uploadUrl', 'projectProposals:uploadUrl'].includes(name))
+            return ctx.storage.generateUploadUrl();
           return name === 'projectBackups:register'
             ? registerBackup(ctx, args)
             : name === 'projectProposals:register' && !args.transport

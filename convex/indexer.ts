@@ -3,7 +3,6 @@
 import { v } from 'convex/values';
 import { blobStore } from './blobStore';
 import { artifactBlobId } from './artifactBlobFields';
-import { r2Enabled } from './r2';
 import { internalAction } from './_generated/server';
 import { internal } from './_generated/api';
 import { currentAccess } from './access';
@@ -69,10 +68,9 @@ export const run = internalAction({
           });
         },
       );
-      stored = await blobStore(ctx).store(
-        await encodeHostedArtifact(artifact),
-        r2Enabled() && job.r2Writes ? { r2Namespace: `v1/i/${id}/g/${generation}` } : undefined,
-      );
+      stored = await blobStore(ctx).store(await encodeHostedArtifact(artifact), {
+        r2Namespace: `v1/i/${id}/g/${generation}`,
+      });
       await currentAccess(ctx, id, job.owner || undefined);
       const published = await ctx.runMutation(internal.imports.update, {
         id,

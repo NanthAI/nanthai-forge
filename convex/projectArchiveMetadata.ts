@@ -70,7 +70,8 @@ export async function projectArchiveMetadata(
   cache = true,
   r2 = false,
 ) {
-  if (!cache) return readOriginalMetadata(ctx, storageId, size, digest, checkAccess);
+  if (!cache || storageId.startsWith('r2archive:'))
+    return readOriginalMetadata(ctx, storageId, size, digest, checkAccess);
   const source = await archiveSource(ctx, storageId);
   if (source.purged) return readOriginalMetadata(ctx, storageId, size, digest, checkAccess);
   const file = source.metadata;

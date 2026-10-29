@@ -18,6 +18,36 @@ redeployed; off-machine owner recovery remains unqualified. Convex scheduled
 backups require Pro; the weekly R2 job below runs independently on the operator's
 Mac. No deployment or schedule is configured by these scripts.
 
+## Object-storage references
+
+New backup/proposal archive transfers, imported artifacts, Zone exports, binary
+derivatives and finish-plan JSON use the existing presigned R2 protocol. Exported
+rows retain exact keys, sizes and SHA-256 pins: archives use their owning
+backup/proposal plus `artifactBlobs`; imports and derivatives use `r2blob:`
+references to `artifactBlobs`; finish plans use `projectObjects`. No second R2
+component or private in-process object registry is required.
+
+A Convex export preserves these rows, including reservations and tombstones. R2
+bytes remain in the configured bucket; including Convex file storage in the ZIP
+does not copy R2 objects into it. Retain the corresponding bucket objects when
+restoring the table snapshot. The database-only verifier recognizes committed,
+nonremoved artifact references regardless of table order, and still refuses
+unresolved references or remaining legacy source/derived files. The maintenance
+script retains its paged project-prefix inventory and legacy-copy purge; new
+R2-only archives have no Convex copy eligible for that purge.
+
+Legacy `_storage` IDs remain readable, including migrated IDs retained as lookup
+aliases. New R2-only archive receipts may omit `storageId`; the retained key and
+pins identify the original container. The browser and native archive readers use
+`backupTransfer:sign`; existing range-action clients remain compatible. The optional receipt storage ID and optional `projectUploadCleanup.r2Key`
+need no row migration. Deploy the compatible readers before resuming R2 archive uploads.
+R6 backfills the remaining legacy bytes; R7 verifies and purges them afterwards.
+The [lead runbook](r2-backfill.md#lead-runbook-r6-r7-and-database-only-backup) lists each live step, its preflight and the owner approval required for R7 deletion.
+Neither backfill nor purge is run automatically by this change. The manual
+`derivedArtifacts:sweep` handles one bounded legacy orphan page and returns its
+cursor; it schedules no recurring or delayed sweep. New R2 derivatives and
+archives do not start `_storage` scans.
+
 ## Snapshot and backup
 
 Use the accepted Forge source and lockfile, Node 24.22.1+ (24.x), installed dependencies

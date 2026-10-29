@@ -6,6 +6,7 @@ import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { currentAccess } from './access';
 import { invariant } from '../src/errors';
+import { archiveDownload, directDownloadFields } from './archiveDownload';
 import { projectArchivePart } from './projectArchivePart';
 import { report } from './errors';
 
@@ -84,6 +85,7 @@ export const snapshotInfo = action({
 export const downloadPart = action({
   args: { id: v.id('imports'), offset: v.number(), digest: v.optional(v.string()) },
   returns: v.object({
+    ...directDownloadFields,
     data: v.bytes(),
     size: v.number(),
     digest: v.string(),
@@ -95,6 +97,8 @@ export const downloadPart = action({
     ctx,
     { id, offset, digest },
   ): Promise<{
+    direct?: boolean;
+    url?: string;
     data: ArrayBuffer;
     size: number;
     digest: string;
@@ -127,20 +131,24 @@ export const downloadPart = action({
         ? file.sha256
         : Buffer.from(file.sha256, 'base64').toString('hex');
       let contentType = file.contentType ?? '';
-      const data = await projectArchivePart(
-        ctx,
-        key,
-        file.size,
-        normalized,
-        offset,
-        () => currentAccess(ctx, id, user?.subject),
-        'INVALID_ARTIFACT',
-        value => {
-          contentType = file.contentType ?? value;
-        },
-      );
+      const direct = await archiveDownload(ctx, { storageId: key, size: file.size, digest: normalized });
+      const data = direct
+        ? direct.data
+        : await projectArchivePart(
+            ctx,
+            key,
+            file.size,
+            normalized,
+            offset,
+            () => currentAccess(ctx, id, user?.subject),
+            'INVALID_ARTIFACT',
+            value => {
+              contentType = file.contentType ?? value;
+            },
+          );
       await currentAccess(ctx, id, user?.subject);
       return {
+        ...direct,
         data,
         size: file.size,
         digest: file.sha256,

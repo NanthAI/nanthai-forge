@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { archiveRef } from './r2ArchiveSource';
 import { deleteR2Object } from './r2Operations';
 import { r2Config } from './r2';
 import { portableCheckPath } from '../src/check-log-policy';
@@ -49,7 +50,7 @@ export const migrate = action({
           backup.digest === input.originalDigest &&
           backup.status === 'stored' &&
           backup.preview.format === 'native' &&
-          (backup.transport === 'objects' || backup.storageId),
+          (backup.transport === 'objects' || backup.storageId || backup.r2Committed),
         'INVALID_WORK_BACKUP',
         'Select your exact stored native archive.',
       );
@@ -94,7 +95,7 @@ export const migrate = action({
       });
       const original = await projectArchiveMetadata(
         ctx,
-        backup.storageId!,
+        archiveRef(backup),
         backup.size,
         backup.digest,
         () => ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: user.subject }),
@@ -135,7 +136,8 @@ export const migrate = action({
       await ctx.runMutation(internal.projectExchange.migrateArchive, {
         ...input,
         owner: user.subject,
-        originalStorageId: backup.storageId!,
+        ...(backup.storageId ? { originalStorageId: backup.storageId } : {}),
+        ...(backup.r2Key ? { originalR2Key: backup.r2Key } : {}),
       });
       return retire();
     } catch (error) {

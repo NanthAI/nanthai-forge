@@ -183,18 +183,29 @@ export default function ProjectProposals({
         // Reconcile stored bytes before posting again; the original operation retains exact pins.
         let observed = await client.action(proposals.reconcile, { id: original.id });
         if (observed.status !== 'stored') {
-          if (!prepared.uploadUrl || !prepared.contentType)
-            throw new Error('Original upload destination unavailable. Reconcile this proposal.');
-          const response = await fetch(prepared.uploadUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': prepared.contentType },
-            body: original.file,
-          });
-          if (!response.ok) throw new Error(`Proposal upload returned HTTP ${response.status}.`);
-          const result = (await response.json()) as { storageId: Id<'_storage'> };
+          let storageId: Id<'_storage'> | undefined;
+          if (prepared.target) {
+            const response = await fetch(prepared.target.url, {
+              method: 'PUT',
+              headers: prepared.target.headers,
+              body: original.file,
+            });
+            if (!response.ok && response.status !== 412)
+              throw new Error(`Proposal upload returned HTTP ${response.status}.`);
+          } else {
+            if (!prepared.uploadUrl || !prepared.contentType)
+              throw new Error('Original upload destination unavailable.');
+            const response = await fetch(prepared.uploadUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': prepared.contentType },
+              body: original.file,
+            });
+            if (!response.ok) throw new Error(`Proposal upload returned HTTP ${response.status}.`);
+            storageId = ((await response.json()) as { storageId: Id<'_storage'> }).storageId;
+          }
           observed = await client.action(proposals.complete, {
             id: original.id,
-            storageId: result.storageId,
+            ...(storageId ? { storageId } : {}),
           });
         }
         if (observed.status !== 'stored')

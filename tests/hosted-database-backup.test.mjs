@@ -83,3 +83,26 @@ test('database export passes exclusion to the exporter and dry-run reports it wi
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('database-only validation resolves R2 artifact references in either table order and refuses missing/uncommitted bindings', () => {
+  for (const committed of [true, false])
+    for (const bindingsFirst of [true, false]) {
+      const run = () =>
+        summary(tables => {
+          delete tables.imports;
+          delete tables.derivedArtifacts;
+          delete tables.artifactBlobs;
+          const bindings = () => {
+            tables.artifactBlobs = [
+              { _id: 'artifact', committed, removed: false, r2Key: 'v1/i/import/a/hash' },
+            ];
+          };
+          if (bindingsFirst) bindings();
+          tables.imports = [{ _id: 'import', artifactKey: 'r2blob:artifact' }];
+          tables.derivedArtifacts = [{ _id: 'derived', storageId: 'r2blob:artifact', removed: false }];
+          if (!bindingsFirst) bindings();
+        });
+      if (committed) assert.doesNotThrow(run);
+      else assert.throws(run, { code: 'DATABASE_ONLY_STORAGE_REMAINS' });
+    }
+});

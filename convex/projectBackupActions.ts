@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { archivePut, verifyArchiveUpload } from './archiveUpload';
+import type { R2PutTarget } from './r2';
 import { randomUUID } from 'node:crypto';
 import { v } from 'convex/values';
 import { action, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
-import { projectBackupPreview } from './schema';
-import { digest } from '../src/hash';
+import { backupTransferArgs, backupTransferRequest } from './backupTransferRequest';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { backupItem } from './projectBackups';
+import { archiveDownload, directDownloadFields, type DirectDownload } from './archiveDownload';
 import { projectArchivePart } from './projectArchivePart';
 
 async function caller(ctx: ActionCtx) {
@@ -41,6 +43,13 @@ async function reconcile(
   cleanupStored = false,
 ): Promise<Owned['item']> {
   const original: Owned = await ctx.runQuery(internal.projectBackups.get, { id, owner });
+  if (original.backup.transport === 'objects') return original.item;
+  if (original.backup.location === 'r2') {
+    if (original.backup.status === 'stored') return original.item;
+    if (await verifyArchiveUpload(original.backup))
+      return ctx.runMutation(internal.projectBackups.completeR2, { id, owner, key: original.backup.r2Key! });
+    return original.item;
+  }
   if (original.backup.status === 'stored') {
     if (!cleanupStored) return original.item;
     let cleanupCursor: string | null = null;
@@ -66,91 +75,33 @@ async function reconcile(
   }
 }
 export const prepare = action({
-  args: {
-    key: v.string(),
-    name: v.string(),
-    operationId: v.string(),
-    previous: v.union(v.id('projectBackups'), v.null()),
-    digest: v.string(),
-    size: v.number(),
-    preview: projectBackupPreview,
-  },
+  args: backupTransferArgs,
   returns: v.object({
     backup: backupItem,
     uploadUrl: v.optional(v.string()),
+    target: v.optional(archivePut),
     contentType: v.optional(v.string()),
   }),
   handler: async (
     ctx,
     input,
-  ): Promise<{ backup: Owned['item']; uploadUrl?: string; contentType?: string }> => {
+  ): Promise<{ backup: Owned['item']; uploadUrl?: string; target?: R2PutTarget; contentType?: string }> => {
     try {
       const owner = await caller(ctx),
-        uuid = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
-      invariant(
-        uuid.test(input.key) &&
-          uuid.test(input.operationId) &&
-          input.name.trim() &&
-          /^[0-9a-f]{64}$/.test(input.digest) &&
-          Number.isSafeInteger(input.size) &&
-          input.size > 0,
-        'BAD_ARGUMENT',
-        'Select a named project and exact Forge archive size/digest.',
-      );
-      invariant(
-        /^[0-9a-f]{64}$/.test(input.preview.manifestDigest) &&
-          input.preview.head.length === (input.preview.format === 'sha1' ? 40 : 64) &&
-          /^[0-9a-f]+$/.test(input.preview.head) &&
-          [
-            input.preview.revision,
-            input.preview.intents,
-            input.preview.lanes,
-            input.preview.views,
-            input.preview.runs,
-            input.preview.files,
-            input.preview.unavailable,
-          ].every(value => Number.isSafeInteger(value) && value >= 0) &&
-          input.preview.channels.every(
-            pin => pin.name && pin.head.length === input.preview.head.length && /^[0-9a-f]+$/.test(pin.head),
-          ),
-        'BAD_ARGUMENT',
-        'Archive source and Work preview fields are invalid.',
-      );
-      const args = { ...input, name: input.name.trim() },
-        p = input.preview;
-      const request = digest(
-        JSON.stringify([
-          args.key,
-          args.name,
-          args.operationId,
-          args.previous,
-          args.digest,
-          args.size,
-          p.manifestDigest,
-          p.head,
-          p.format,
-          p.revision,
-          p.intents,
-          p.lanes,
-          p.views,
-          p.runs,
-          p.files,
-          p.unavailable,
-          p.channels.map(pin => [pin.name, pin.head]),
-        ]),
-      );
+        { args, request } = backupTransferRequest(input);
       const id: Id<'projectBackups'> = await ctx.runMutation(internal.projectBackups.register, {
         ...args,
         owner,
         request,
         nonce: randomUUID(),
       });
-      const backup: Owned['item'] = await reconcile(ctx, id, owner);
+      const original: Owned = await ctx.runQuery(internal.projectBackups.get, { id, owner }),
+        backup = original.item;
       if (backup.status === 'stored') return { backup };
-      const original: Owned = await ctx.runQuery(internal.projectBackups.get, { id, owner });
+      const target = await ctx.runMutation(internal.projectBackups.uploadUrl, { id, owner });
       return {
         backup,
-        uploadUrl: await ctx.runMutation(internal.projectBackups.uploadUrl, { id, owner }),
+        ...(typeof target === 'string' ? { uploadUrl: target } : { target }),
         contentType: `application/x-forge-backup-${original.backup.nonce}`,
       };
     } catch (error) {
@@ -159,10 +110,25 @@ export const prepare = action({
   },
 });
 export const complete = action({
-  args: { id: v.id('projectBackups'), storageId: v.id('_storage') },
+  args: { id: v.id('projectBackups'), storageId: v.optional(v.id('_storage')) },
   returns: backupItem,
   handler: async (ctx, { id, storageId }): Promise<Owned['item']> => {
     try {
+      const owner = await caller(ctx),
+        original: Owned = await ctx.runQuery(internal.projectBackups.get, { id, owner });
+      if (original.backup.location === 'r2') {
+        invariant(
+          await verifyArchiveUpload(original.backup),
+          'R2_OBJECT_MISSING',
+          'Uploaded archive is missing.',
+        );
+        return await ctx.runMutation(internal.projectBackups.completeR2, {
+          id,
+          owner,
+          key: original.backup.r2Key!,
+        });
+      }
+      invariant(storageId, 'INVALID_WORK_BACKUP', 'Select the original legacy upload.');
       return await ctx.runMutation(internal.projectBackups.complete, {
         id,
         owner: await caller(ctx),
@@ -170,11 +136,12 @@ export const complete = action({
       });
     } catch (error) {
       try {
-        await ctx.runMutation(internal.projectLifecycle.cleanupUpload, {
-          uploadId: id,
-          actor: await caller(ctx),
-          storageId,
-        });
+        if (storageId)
+          await ctx.runMutation(internal.projectLifecycle.cleanupUpload, {
+            uploadId: id,
+            actor: await caller(ctx),
+            storageId,
+          });
       } catch {
         /* Foreign/unattributable files remain untouched. */
       }
@@ -195,11 +162,17 @@ export const reconcileUpload = action({
 });
 export const downloadPart = action({
   args: { id: v.id('projectBackups'), offset: v.number(), digest: v.string() },
-  returns: v.object({ data: v.bytes(), size: v.number(), digest: v.string(), filename: v.string() }),
+  returns: v.object({
+    ...directDownloadFields,
+    data: v.bytes(),
+    size: v.number(),
+    digest: v.string(),
+    filename: v.string(),
+  }),
   handler: async (
     ctx,
     { id, offset, digest },
-  ): Promise<{ data: ArrayBuffer; size: number; digest: string; filename: string }> => {
+  ): Promise<DirectDownload & { size: number; digest: string; filename: string }> => {
     try {
       const owner = await caller(ctx),
         original: Owned = await ctx.runQuery(internal.projectBackups.get, { id, owner }),
@@ -210,7 +183,9 @@ export const downloadPart = action({
         'Use incremental exchange pull for this checkpoint; a full recovery archive can be exported locally.',
       );
       invariant(
-        backup.status === 'stored' && backup.storageId && digest === backup.digest,
+        backup.status === 'stored' &&
+          (backup.storageId || (backup.location === 'r2' && backup.r2Committed)) &&
+          digest === backup.digest,
         'PROJECT_CHANGED',
         'Select the original stored archive and digest.',
       );
@@ -219,11 +194,15 @@ export const downloadPart = action({
         'BAD_ARGUMENT',
         'Invalid archive offset.',
       );
-      const data = await projectArchivePart(ctx, backup.storageId, backup.size, backup.digest, offset, () =>
-        ctx.runQuery(internal.projectBackups.get, { id, owner }),
-      );
+      const direct = await archiveDownload(ctx, backup);
+      const data = direct
+        ? direct.data
+        : await projectArchivePart(ctx, backup.storageId!, backup.size, backup.digest, offset, () =>
+            ctx.runQuery(internal.projectBackups.get, { id, owner }),
+          );
       await ctx.runQuery(internal.projectBackups.get, { id, owner });
       return {
+        ...direct,
         data,
         size: backup.size,
         digest: backup.digest,

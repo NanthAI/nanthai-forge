@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
+import { setup as r2Setup } from './r2-harness.mjs';
 import { job, state, providers } from './hosted-fixture.mjs';
 import { fixture, git } from './helpers.mjs';
 import { analyze } from '../dist/analyze.js';
@@ -63,8 +64,9 @@ test('a reader gets exact source/graph/README/metadata/export only while grant a
   git(root, ['add', '.']);
   git(root, ['commit', '-qm', 'Synthetic sharing candidate']);
   const captured = capture(root),
-    pack = analyze(captured),
-    s = state([{ ...job(), head: captured.source.gitHead }]);
+    pack = analyze(captured);
+  const { s } = await r2Setup(t);
+  s.tables.imports.set('own', { ...job(), head: captured.source.gitHead });
   const artifact = {
     pack,
     content: Object.fromEntries(captured.content),

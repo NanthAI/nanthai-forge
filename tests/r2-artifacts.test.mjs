@@ -139,7 +139,7 @@ test('indexed imports store R2 gzip, reconcile a lost publication reply, and rea
   );
 });
 
-test('indexed import and binary derivatives keep Convex placement without the flag or opt-in', async t => {
+test('indexed imports and binary derivatives use R2 without the old flag or per-import opt-in', async t => {
   for (const options of [{ flag: '' }, { optIn: false }])
     await t.test(JSON.stringify(options), async t => {
       const { s, fake } = await setup(t, options);
@@ -147,7 +147,7 @@ test('indexed import and binary derivatives keep Convex placement without the fl
       github(t);
       await indexer.run._handler(s.ctx, { id: 'indexed', generation: 1 });
       const original = s.tables.imports.get('indexed').artifactKey;
-      assert.ok(original && !original.startsWith('r2blob:'));
+      assert.match(original, /^r2blob:/);
       const record = await derivedArtifact(
         s.ctx,
         original,
@@ -158,8 +158,8 @@ test('indexed import and binary derivatives keep Convex placement without the fl
         options.optIn !== false,
       );
       assert.equal(Buffer.from(await derivedBytes(s.ctx, record)).toString(), 'derived');
-      assert.equal(fake.objects.size, 0);
-      assert.equal(s.files.size, 2);
+      assert.equal(fake.objects.size, 2);
+      assert.equal(s.files.size, 0);
     });
 });
 

@@ -171,7 +171,8 @@ export const migrateArchive = internalMutation({
     owner: v.string(),
     operationId: v.string(),
     originalDigest: v.string(),
-    originalStorageId: v.id('_storage'),
+    originalStorageId: v.optional(v.id('_storage')),
+    originalR2Key: v.optional(v.string()),
     manifestDigest: v.string(),
     manifestSize: v.number(),
   },
@@ -192,6 +193,8 @@ export const migrateArchive = internalMutation({
       }
       invariant(
         backup.storageId === input.originalStorageId &&
+          (!input.originalR2Key || (backup.r2Key === input.originalR2Key && backup.r2Committed)) &&
+          (input.originalStorageId || input.originalR2Key) &&
           backup.digest === input.originalDigest &&
           backup.preview.format === 'native' &&
           backup.status === 'stored',
@@ -220,7 +223,7 @@ export const migrateArchive = internalMutation({
         archiveReceipt: {
           digest: backup.digest,
           size: backup.size,
-          storageId: input.originalStorageId,
+          ...(input.originalStorageId ? { storageId: input.originalStorageId } : {}),
           ...(backup.location ? { location: backup.location } : {}),
           ...(backup.r2Key ? { r2Key: backup.r2Key, r2Committed: backup.r2Committed } : {}),
           operationId: input.operationId,
@@ -254,7 +257,9 @@ export const retireArchive = internalMutation({
         'WORK_OPERATION_CHANGED',
         'Reconcile this original migration.',
       );
-      const retired = await removeExclusive(ctx, backup.archiveReceipt.storageId);
+      const retired = backup.archiveReceipt.storageId
+        ? await removeExclusive(ctx, backup.archiveReceipt.storageId)
+        : true;
       return {
         backupId: backup._id,
         manifestDigest: backup.objectManifest.digest,
@@ -295,6 +300,15 @@ export const retireArchiveR2 = internalMutation({
       'WORK_OPERATION_CHANGED',
       'Retire only the original archive representation.',
     );
+    const artifact = await ctx.db
+      .query('artifactBlobs')
+      .withIndex('by_namespace_and_digest', q =>
+        q
+          .eq('namespace', `v1/p/${backup.projectId}/archives/${backup._id}`)
+          .eq('digest', backup.archiveReceipt!.digest),
+      )
+      .unique();
+    if (artifact?.r2Key === input.key) await ctx.db.patch(artifact._id, { removed: true });
     await ctx.db.patch(backup._id, { archiveReceipt: { ...backup.archiveReceipt, r2Committed: false } });
     return null;
   },

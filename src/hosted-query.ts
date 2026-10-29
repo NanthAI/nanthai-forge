@@ -23,6 +23,35 @@ export function hostedQuery(
     'ARTIFACT_INTEGRITY',
     'Stored source differs from the graph manifest.',
   );
+  return queryArtifact(artifact, endpoint, currentHead, currentRepository, pack, content);
+}
+
+/** The index builder verified the complete original content. Each selected file
+ * is independently verified against the immutable graph manifest on range read. */
+export function hostedIndexQuery(
+  artifact: HostedArtifact,
+  endpoint: string,
+  currentHead: string,
+  currentRepository: GithubRepository,
+) {
+  const pack = validateArtifact(artifact.pack),
+    content = new Map(Object.entries(artifact.content));
+  for (const [path, text] of content)
+    invariant(
+      pack.source.files.some(file => file.path === path && digest(text) === file.digest),
+      'ARTIFACT_INTEGRITY',
+      'Stored source differs from the graph manifest.',
+    );
+  return queryArtifact(artifact, endpoint, currentHead, currentRepository, pack, content);
+}
+function queryArtifact(
+  artifact: HostedArtifact,
+  endpoint: string,
+  currentHead: string,
+  currentRepository: GithubRepository,
+  pack: HostedArtifact['pack'],
+  content: Map<string, string>,
+): unknown {
   const query = new GraphQuery(pack, { root: '', source: pack.source, content });
   query.freshness = currentHead === pack.source.gitHead ? 'current' : 'stale';
   const [name, search] = endpoint.split('?');

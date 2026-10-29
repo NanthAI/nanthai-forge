@@ -25,7 +25,9 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
     projects = [],
     generations = new Map(),
     partitions = new Map(),
-    storageIds = new Set();
+    storageIds = new Set(),
+    artifactRefs = new Set(),
+    committedArtifacts = new Set();
   let convexSourceRemains = false;
   function add(event) {
     if (event.kind === 'file') {
@@ -41,6 +43,8 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
     )
       throw failure('SNAPSHOT_INVALID');
     tables.get(event.table).push(hash(row));
+    if (event.table === 'artifactBlobs' && row.committed && !row.removed)
+      committedArtifacts.add(`r2blob:${row._id}`);
     if (databaseOnly) {
       const r2 = source => source?.location === 'r2' && source.r2Committed && source.r2Key;
       if (['projectObjects', 'projectBackups', 'projectProposals'].includes(event.table)) {
@@ -51,8 +55,14 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
         ['imports', 'importArtifacts', 'sourceZones', 'agentGrants'].includes(event.table) &&
         row.artifactKey &&
         !r2(row)
-      )
-        convexSourceRemains = true;
+      ) {
+        if (row.artifactKey.startsWith('r2blob:')) artifactRefs.add(row.artifactKey);
+        else convexSourceRemains = true;
+      }
+      if (event.table === 'derivedArtifacts' && row.storageId && !row.removed) {
+        if (row.storageId.startsWith('r2blob:')) artifactRefs.add(row.storageId);
+        else convexSourceRemains = true;
+      }
     }
     if (event.table === '_storage') storageIds.add(row._id);
     if (event.table === 'hostedProjects') projects.push(row);
@@ -76,7 +86,8 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
     const fileIds = new Set(
       files.filter(file => file.path.startsWith('_storage/')).map(file => file.path.slice(9).split('.')[0]),
     );
-    if (databaseOnly && convexSourceRemains) throw failure('DATABASE_ONLY_STORAGE_REMAINS');
+    if (databaseOnly && (convexSourceRemains || [...artifactRefs].some(ref => !committedArtifacts.has(ref))))
+      throw failure('DATABASE_ONLY_STORAGE_REMAINS');
     if (!databaseOnly && (!tables.has('_storage') || [...storageIds].some(id => !fileIds.has(id))))
       throw failure('STORAGE_INCOMPLETE');
     const work = projects

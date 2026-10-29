@@ -136,7 +136,14 @@ export const handle = httpAction(async (ctx, request) => {
       }
     }
     return Response.json(value, { headers: { 'Cache-Control': 'no-store' } });
-  } catch {
+  } catch (error) {
+    // Codes and schema paths only: request bodies and messages may carry runner data.
+    console.error(
+      'Actions request refused',
+      error instanceof z.ZodError
+        ? `validation ${error.issues.map(issue => issue.path.join('.')).join(',')}`
+        : ((error as { code?: unknown })?.code ?? (error as Error)?.name ?? 'unknown'),
+    );
     return Response.json(
       { error: 'Actions request failed authorization, validation or storage verification.' },
       { status: 403, headers: { 'Cache-Control': 'no-store' } },

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { setup as r2Setup } from './r2-harness.mjs';
 import { workerAuthorized } from '../dist/worker-auth.js';
 import { decodeHostedArtifact } from '../dist/hosted-artifact.js';
 import { validateArtifact } from '../dist/artifact-validation.js';
@@ -110,7 +111,9 @@ test('Convex owns one remote claim, stale publication, private denial, timeout a
       false,
       'The pending watchdog coalesces active remote imports.',
     );
-    assert.ok((await remote.prepare._handler(ctx, { id: job._id, generation: 2 })).uploadUrl);
+    const prepared = await remote.prepare._handler(ctx, { id: job._id, generation: 2 });
+    assert.equal(prepared.r2, true);
+    assert.equal(prepared.uploadUrl, undefined);
     assert.equal(
       await remote.prepare._handler(ctx, { id: job._id, generation: 2 }),
       null,
@@ -630,32 +633,32 @@ test('a delayed observation cannot overwrite a later completed current-access ch
   assert.equal(rows.get('import').artifactKey, 'old-object');
 });
 
-test('explicit refresh reacquires old acquisition artifacts at the same Git head, then reuses current document captures', async () => {
+test('explicit refresh reacquires old acquisition artifacts at the same Git head, then reuses current document captures', async t => {
   const head = 'a'.repeat(40),
     text = '# Guide retained by the new acquisition version';
   const bytes = Buffer.from(text),
     blobSha = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
   const old = { ...original(), phase: 'ready', head, analysisVersion: '5.9.3:1:github-2' };
-  const local = context(old),
-    previousFetch = globalThis.fetch;
+  const { s, fake } = await r2Setup(t);
+  s.tables.imports.set('import', structuredClone(old));
+  const local = { ...s, job: s.tables.imports.get('import') },
+    previousFetch = globalThis.fetch,
+    stores = () => fake.requests.filter(request => request.method === 'PUT').length;
+  const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
   const variables = ['NETLIFY_WORKER_URL', 'FORGE_WORKER_KEY'],
     before = variables.map(name => process.env[name]);
   let uploaded,
-    stores = 0,
     trees = 0,
     handoffs = 0;
-  local.ctx.storage.store = async blob => {
-    stores++;
-    uploaded = await decodeHostedArtifact(blob);
-    return 'new-document-object';
-  };
+  local.ctx.storage.store = () => assert.fail('Refreshed imports must store bytes in R2.');
   delete process.env.NETLIFY_WORKER_URL;
-  globalThis.fetch = async input => {
+  globalThis.fetch = async (input, init) => {
     const url = new URL(input);
     if (url.hostname === 'worker.example') {
       handoffs++;
       return new Response(null, { status: 202 });
     }
+    if (url.hostname !== 'api.github.com') return previousFetch(input, init);
     if (url.pathname.endsWith('/project')) return Response.json(repository);
     if (url.pathname.includes('/commits/'))
       return Response.json({ sha: head, commit: { tree: { sha: 'b'.repeat(40) } } });
@@ -670,15 +673,16 @@ test('explicit refresh reacquires old acquisition artifacts at the same Git head
   };
   try {
     assert.equal(local.job.artifactKey, 'old-object');
-    assert.equal(stores, 0);
+    assert.equal(stores(), 0);
     const refresh = await imports.begin._handler(local.ctx, local.job);
     assert.equal(refresh.run, true);
     await indexer.run._handler(local.ctx, { id: 'import', generation: refresh.generation });
     assert.equal(local.job.phase, 'ready');
     assert.equal(local.job.head, head);
-    assert.equal(local.job.artifactKey, 'new-document-object');
+    assert.match(local.job.artifactKey, /^r2blob:/);
+    uploaded = await decodeHostedArtifact(await blobStore(local.ctx).get(local.job.artifactKey));
     assert.equal(uploaded.documents['docs/guide.md'], text);
-    assert.equal(stores, 1);
+    assert.equal(stores(), 1);
     assert.equal(trees, 1);
     assert.equal(
       local.job.analysisVersion,
@@ -688,7 +692,7 @@ test('explicit refresh reacquires old acquisition artifacts at the same Git head
     const repeat = await imports.begin._handler(local.ctx, local.job);
     await indexer.run._handler(local.ctx, { id: 'import', generation: repeat.generation });
     assert.equal(local.job.phase, 'ready');
-    assert.equal(stores, 1);
+    assert.equal(stores(), 1);
     assert.equal(trees, 1, 'The current-version exact-head artifact remains reusable.');
     process.env.NETLIFY_WORKER_URL = 'https://worker.example';
     process.env.FORGE_WORKER_KEY = 'fixture-key';

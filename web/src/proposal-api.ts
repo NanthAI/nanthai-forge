@@ -34,9 +34,14 @@ export const proposals = {
   prepare: makeFunctionReference<
     'action',
     ProposalInput,
-    { proposal: Proposal; uploadUrl?: string; contentType?: string }
+    {
+      proposal: Proposal;
+      uploadUrl?: string;
+      target?: { kind: 'r2'; url: string; headers: Record<string, string> };
+      contentType?: string;
+    }
   >('projectProposalActions:prepare'),
-  complete: makeFunctionReference<'action', { id: string; storageId: Id<'_storage'> }, Proposal>(
+  complete: makeFunctionReference<'action', { id: string; storageId?: Id<'_storage'> }, Proposal>(
     'projectProposalActions:complete',
   ),
   reconcile: makeFunctionReference<'action', { id: string }, Proposal>(
@@ -45,7 +50,7 @@ export const proposals = {
   download: makeFunctionReference<
     'action',
     { id: string; offset: number; digest: string },
-    { data: ArrayBuffer; size: number; digest: string; filename: string }
+    { direct?: boolean; url?: string; data: ArrayBuffer; size: number; digest: string; filename: string }
   >('projectProposalActions:downloadPart'),
 };
 /** Display selection only. Server and native import validate the actual archive and source closure. */

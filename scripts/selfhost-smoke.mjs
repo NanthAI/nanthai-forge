@@ -147,7 +147,7 @@ async function snapshot(client, id) {
     });
     sha ??= part.digest;
     assert.equal(part.digest, sha);
-    parts.push(Buffer.from(part.data));
+    parts.push(Buffer.from(part.direct ? await (await fetch(part.url)).arrayBuffer() : part.data));
     offset += parts.at(-1).length;
     assert(offset <= part.size);
     if (offset === part.size) break;
@@ -157,7 +157,7 @@ async function snapshot(client, id) {
     artifact = await decodeHostedArtifact(new Blob([bytes], { type: 'application/gzip' }));
   const path = join(root, randomUUID() + '.gz');
   await writeFile(path, bytes, { mode: 0o600 });
-  const hex = Buffer.from(sha, 'base64').toString('hex');
+  const hex = /^[a-f0-9]{64}$/.test(sha) ? sha : Buffer.from(sha, 'base64').toString('hex');
   assert.equal(await digest(path), hex);
   return {
     sha: hex,
