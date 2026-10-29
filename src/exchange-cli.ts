@@ -10,7 +10,6 @@ import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { nativeOwner } from './native-source.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { retryExchange } from './exchange-retry.js';
-import { formatSourceReturnProgress } from './source-return-progress.js';
 import { receiveProposal } from './exchange-proposal.js';
 import { boundExchange } from './bound-exchange.js';
 import { readFileSync } from 'node:fs';
@@ -21,6 +20,7 @@ import { ConvexExchange } from './exchange-client.js';
 import { pushNativeExchange, pullNativeExchange } from './native-exchange.js';
 import { WorkStore } from './work-store.js';
 import { invariant } from './errors.js';
+import { CUTOVER_UPGRADE } from './cutover-version.js';
 export const mainPullSchema = z
   .object({
     url: z.url(),
@@ -36,13 +36,6 @@ export const exchangePushSchema = z
     operationId: z.uuid(),
     previous: z.string().nullable(),
     revision: z.number().safe().nonnegative(),
-    returnSource: z
-      .object({
-        expectedBackupId: z.string(),
-        revision: z.number().safe().nonnegative(),
-        operationId: z.uuid(),
-      })
-      .optional(),
   })
   .strict();
 export const exchangeMigrateSchema = z
@@ -85,7 +78,7 @@ nforge exchange NEW_DIRECTORY pull-proposal --command-file REQUEST.json
 nforge exchange ROOT reconcile --command-file REQUEST.json
 nforge exchange ROOT migrate-archive --command-file REQUEST.json
 Run nforge login or set FORGE_AUTH_TOKEN to your current Forge sign-in JWT. Never put it in the request file.
-Push: {url,projectId,operationId,previous,revision,returnSource?:{expectedBackupId,revision,operationId}}
+Push: {url,projectId,operationId,previous,revision}
 Open/pull main: {url,projectId,operationId,expected?:{head,receiptId}}
 Open-lane: {url,projectId,laneId,operationId,expected?:{head,sourceVersion,version},paths?:["path/or/directory"]}
 Lane checkout is full by default; paths expands a sparse editing directory. Its marker retains the complete baseline. Dirty files are preserved.
@@ -98,8 +91,6 @@ Migration preserves exact logical source/Work/artifact bytes and historical arch
 Push reuses verified project content and large-file chunks by digest, preserving original request IDs for retries.
 First seeds send complete new bytes; changed regions reuse prior chunks without changing logical source hashes.
 Upload counts and bytes describe physical POST bodies; logical reused objects remain separate.
-Bound push --supersede-retained explicitly retires an uncommitted retained return with hosted backup/revision CAS, then starts a fresh push.
-The optional returnSource uses the existing hosted source-return reconciliation and authority.
 Restore creates an independent owner; cacheRoot reuses verified local source and journalPath overlays its journal.
 History/source are preserved. No automatic deletion, archive generation, execution or Channel acceptance occurs.
 `;
@@ -109,12 +100,7 @@ export async function exchangeCli(args: string[]) {
     return;
   }
   const [root, action, option, file] = args;
-  if (
-    root &&
-    action === 'push' &&
-    (args.length === 2 || (args.length === 3 && option === '--supersede-retained'))
-  )
-    return boundExchange(root, 'push', undefined, option === '--supersede-retained');
+  if (root && action === 'push' && args.length === 2) return boundExchange(root, 'push');
   if (
     root &&
     action === 'pull' &&
@@ -228,6 +214,11 @@ async function executeExchangeCommand(root: string, action: string, input: unkno
     return reconcileExchange(root, exchangeReconcileSchema.parse(input));
   }
   if (action === 'push') {
+    invariant(
+      !(input && typeof input === 'object' && 'returnSource' in input),
+      'CLI_UPGRADE_REQUIRED',
+      CUTOVER_UPGRADE,
+    );
     const request = exchangePushSchema.parse(input),
       transport = new ConvexExchange(
         request.url,
@@ -236,41 +227,14 @@ async function executeExchangeCommand(root: string, action: string, input: unkno
         request.operationId,
         request.previous,
       );
-    transport.onReturnProgress = event => process.stderr.write(formatSourceReturnProgress(event));
     const result = await retryExchange(
       'local checkpoint push',
       request.operationId,
-      () =>
-        pushNativeExchange(
-          new WorkStore(root),
-          request.revision,
-          request.operationId,
-          transport,
-          request.returnSource
-            ? {
-                deferPendingAcknowledgement: true,
-                workBaselineKey: transport.checkpointKey(request.returnSource.expectedBackupId)!,
-                ownerDerivedBaselineKey: transport.checkpointKey(request.returnSource.expectedBackupId)!,
-                journalRevision: request.returnSource.revision,
-              }
-            : {},
-        ),
+      () => pushNativeExchange(new WorkStore(root), request.revision, request.operationId, transport, {}),
       { localSnapshot: true },
     );
-    const completed = request.returnSource
-      ? {
-          ...result,
-          sourceReturn: await transport.returnSource(
-            result.backupId,
-            request.returnSource.expectedBackupId,
-            request.returnSource.revision,
-            request.returnSource.operationId,
-            result.ownerDerived,
-          ),
-        }
-      : result;
-    if (completed.pendingCoverage) acknowledgePendingExchange(new WorkStore(root), completed.pendingCoverage);
-    return completed;
+    if (result.pendingCoverage) acknowledgePendingExchange(new WorkStore(root), result.pendingCoverage);
+    return result;
   }
   const request = exchangePullSchema.parse(input),
     transport = new ConvexExchange(request.url, process.env.FORGE_AUTH_TOKEN, request.projectId, '', null);

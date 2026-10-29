@@ -142,7 +142,7 @@ test('receipt-reconciled Convex actions retry identical operation IDs; unknown a
     fetch: exchangeConvexFetch(deadlines),
   });
   assert.equal(
-    await client.action(makeFunctionReference('projectSourceReturn:returnSource'), {
+    await client.action(makeFunctionReference('projectExchangeMigration:migrate'), {
       projectId: 'synthetic',
       operationId: 'same-original-id',
     }),
@@ -177,7 +177,7 @@ test('Convex typed action errors preserve authorization/CAS codes rather than tr
     fetch: exchangeConvexFetch(deadlines),
   });
   await assert.rejects(
-    client.action(makeFunctionReference('projectSourceReturn:returnSource'), { operationId: 'original' }),
+    client.action(makeFunctionReference('projectExchangeMigration:migrate'), { operationId: 'original' }),
     error => error.data?.code === 'WORK_STALE',
   );
   assert.equal(f.requests.length, 1);
@@ -381,7 +381,6 @@ test('long actions keep the seven-minute header and total deadline; quick calls 
   const fetch = exchangeConvexFetch();
   for (const path of [
     'projectExchangeActions:publish',
-    'projectSourceReturn:returnSource',
     'projectWorkActions:exportJournal',
     'projectWorkIndexActions:ensure',
     'projectExchangeActions:manifest',

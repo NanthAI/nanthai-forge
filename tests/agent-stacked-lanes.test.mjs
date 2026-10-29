@@ -356,10 +356,6 @@ test('stack metadata survives unified records and portable reads without changin
   const { batchEdit } = await import('../dist/landing-batch-store.js');
   await batchEdit(f.agent.work, randomUUID(), () => {});
   assert.equal(f.store.load().schema, 22);
-  const { validateSourceReturn } = await import('../dist/work-source-return.js');
-  assert.throws(() => validateSourceReturn(data, { ...data, schema: 20 }, {}), {
-    code: 'WORK_UPGRADE_REQUIRED',
-  });
 });
 
 test('same-Intent stack waits for its exact parent, not unrelated siblings, and pending shows the chain', async t => {

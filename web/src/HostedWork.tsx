@@ -35,7 +35,6 @@ import { type WorkflowPage } from './ProjectOverview';
 import { localAgentPrompt } from './local-agent-prompt';
 import ExchangeHandoff from './ExchangeHandoff';
 import ProjectProposals from './ProjectProposals';
-import HostedSourceReturn from './HostedSourceReturn';
 import { IndexedEvent } from './HostedIndexedHistory';
 import { lazy, Suspense } from 'react';
 import { loadCode } from './route-preload';
@@ -64,7 +63,6 @@ type Snapshot = {
   capabilities?: {
     owner: boolean;
     editableIntentIds: string[];
-    sourceReturn: boolean;
     hostedChannels: boolean;
     planning?: boolean;
   };
@@ -598,11 +596,7 @@ export default function HostedWork({
     <>
       {localHandoff}
       {owner && (
-        <HostedSourceReturn
-          projectId={projectId}
-          backupId={snapshot.backupId}
-          revision={snapshot.data.revision}
-        >
+        <>
           <details
             className="fx-transfer-verification"
             onToggle={event => setSourceDetailsOpen(event.currentTarget.open)}
@@ -622,7 +616,7 @@ export default function HostedWork({
               />
             ))}
           </details>
-        </HostedSourceReturn>
+        </>
       )}
     </>
   ) : null;

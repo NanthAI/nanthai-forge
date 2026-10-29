@@ -38,8 +38,6 @@ const names = [
   'projectWork',
   'projectWorkActions',
   'projectWorkJournal',
-  'projectSourceReturn',
-  'projectReturnSupersede',
   'projectDiffstats',
 ];
 export const modules = Object.fromEntries(

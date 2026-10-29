@@ -203,40 +203,6 @@ test('hosted conversion treats journal-proven planning writes on an Intent UUID 
   assert.deepEqual(result.hostedEvents, data.hostedEvents);
 });
 
-test('source-return validation refuses a schema downgrade after unified migration', async () => {
-  const { validateSourceReturn } = await import('../dist/work-source-return.js');
-  const legacy = workSchema.parse({ schema: 15, revision: 0, intents: [], lanes: [], views: [] });
-  const unified = migrateHostedIntents(legacy, { operationId: randomUUID(), revision: 0 });
-  assert.throws(
-    () => validateSourceReturn(unified, legacy, {}),
-    e => e.code === 'WORK_UPGRADE_REQUIRED',
-  );
-});
-
-test('a schema-15 source return staged before cutover cannot publish after the migration CAS', async () => {
-  const s = setup(),
-    staged = await s.begin();
-  await s.publish(staged._id);
-  const work = await import(moduleUrl('../convex/projectWork.ts'));
-  await assert.rejects(
-    work.returnSource._handler(s.ctx, {
-      projectId: 'project',
-      owner: 'owner',
-      operationId: randomUUID(),
-      request: 'a'.repeat(64),
-      command: '{}',
-      backupId: 'candidate',
-      expectedBackupId: 'backup',
-      expectedRevision: 5,
-      localRevision: 5,
-      projection: { generationId: 'old', metadata: '{"schema":15}', entries: [], removed: [] },
-    }),
-    e => e.data?.code === 'WORK_UPGRADE_REQUIRED',
-  );
-  assert.equal(s.tables.hostedProjects.get('project').work.generationId, staged._id);
-  assert.equal(s.tables.projectWorkEvents.size, 0);
-});
-
 test('retaining the previous generation also protects its physical record partition from cleanup', async () => {
   const s = setup();
   s.tables.projectWorkGenerations.get('old').recordsGenerationId = 'partition';
@@ -264,8 +230,6 @@ test('retaining the previous generation also protects its physical record partit
   });
   const staged = await s.begin();
   await s.publish(staged._id);
-  const partitions = await import(moduleUrl('../convex/projectReturnIndexStage.ts'));
-  await partitions.retirePartition._handler(s.ctx, { projectId: 'project', partitionId: 'partition' });
   await index.retire._handler(s.ctx, { generationId: 'partition' });
   assert.ok(s.tables.projectWorkRecords.has('legacy-row'));
   assert.ok(s.tables.projectWorkGenerations.has('partition'));

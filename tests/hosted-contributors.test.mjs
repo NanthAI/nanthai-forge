@@ -35,7 +35,6 @@ for (const name of [
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const grants = await import(moduleUrl('../convex/projectContributorActions.ts'));
 const proposals = historicalArchiveActions(await import(moduleUrl('../convex/projectProposalActions.ts')));
-const returns = await import(moduleUrl('../convex/projectSourceReturn.ts'));
 const backups = historicalArchiveActions(await import(moduleUrl('../convex/projectBackupActions.ts')));
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
 const unavailable = e => e.data?.code === 'PROJECT_UNAVAILABLE';
@@ -272,16 +271,7 @@ test('native contributor grant discovers full project and source without GitHub 
     }),
     unavailable,
   );
-  await assert.rejects(
-    returns.returnSource._handler(s.ctx, {
-      projectId: 'project',
-      backupId: 'backup',
-      expectedBackupId: 'backup',
-      revision: 0,
-      operationId: randomUUID(),
-    }),
-    unavailable,
-  );
+
   assert.equal(s.tables.hostedProjects.get('project').currentBackup, before.currentBackup);
   s.caller('owner');
   await s.command({

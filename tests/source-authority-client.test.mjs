@@ -221,7 +221,7 @@ test('normal offline accepts work at epoch zero; owner writer stale feedback blo
 test('bound push persists normalized stale-writer feedback before surfacing the error', async t => {
   const f = setup(t);
   await assert.rejects(
-    boundExchange(f.root, 'push', undefined, false, {
+    boundExchange(f.root, 'push', undefined, {
       beforePush: async () => {
         throw hostedActionError(stale(server), 'publication');
       },

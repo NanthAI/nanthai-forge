@@ -68,7 +68,6 @@ export const workspace = query({
           intent: contributor,
           note: contributor,
           intentStatus: contributor,
-          sourceReturn: owner,
           hostedChannels: owner,
           planning: owner,
           execution: 'local',

@@ -32,6 +32,12 @@ const deferred = () => {
   });
   return { promise, resolve };
 };
+async function waitForEntry(entered, operation) {
+  await Promise.race([
+    entered.promise,
+    operation.then(() => assert.fail('Push settled before reaching the blocked transport.')),
+  ]);
+}
 function fixture(t, policy = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-auto-exchange-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -114,7 +120,7 @@ function fixture(t, policy = {}) {
     },
   });
   f.exchange = exchange;
-  f.manual = () => boundExchange(root, 'push', undefined, false, { exchange });
+  f.manual = () => boundExchange(root, 'push', undefined, { exchange });
   f.run = (options = {}) =>
     drainAutoExchange(new WorkStore(root), {
       now: f.now,
@@ -124,7 +130,7 @@ function fixture(t, policy = {}) {
       },
       usage: f.usage,
       push: admission =>
-        boundExchange(root, 'push', undefined, false, {
+        boundExchange(root, 'push', undefined, {
           beforePush: admission,
           exchange: f.exchange,
         }),
@@ -225,7 +231,7 @@ test('two drivers never publish concurrently or duplicate the saved snapshot', a
     await release.promise;
   };
   const first = f.run();
-  await entered.promise;
+  await waitForEntry(entered, first);
   const second = await f.run();
   assert.ok('waiting' in second);
   assert.equal(f.attempts.length, 1);
@@ -244,7 +250,7 @@ test('manual push and auto driver share the bound queue and clear covered work o
     await release.promise;
   };
   const manual = f.manual();
-  await entered.promise;
+  await waitForEntry(entered, manual);
   const automatic = f.run();
   release.resolve();
   await Promise.all([manual, automatic]);
@@ -374,6 +380,46 @@ test('terminal authority, journal and publication errors retain pending saves wi
     assert.equal(f.state().autoExchange.status, 'failed');
     assert.equal(f.state().autoExchange.code, code);
     assert.ok(f.queue().pending.length);
+  }
+});
+
+test('retained return phases fail fast without uploads, acknowledgements or replacement operations', async t => {
+  for (const slot of ['push', 'pendingPushes']) {
+    const f = fixture(t, { debounceMs: 0 });
+    const binding = f.state().binding;
+    const retained = {
+      projectId: binding.projectId,
+      deployment: binding.deployment,
+      operationId: randomUUID(),
+      previous: binding.backupId,
+      revision: f.store.revision(),
+      captureId: randomUUID(),
+      returnSource: {
+        expectedBackupId: binding.backupId,
+        revision: f.store.revision(),
+        operationId: randomUUID(),
+      },
+    };
+    updateHostState(f.store, host => {
+      host[slot] = slot === 'push' ? retained : [retained];
+    });
+    const queue = f.queue();
+    // Construction of the bound client precedes retained-operation selection;
+    // none of its read/upload/publication methods may run.
+    f.exchange = () => ({
+      client: { query: async () => assert.fail('Retired return queried hosted Work.') },
+    });
+    await f.run({ sleep: async () => assert.fail('A retired return must not retry or debounce.') });
+    assert.equal(f.state().autoExchange.status, 'failed');
+    assert.equal(f.state().autoExchange.code, 'CLI_UPGRADE_REQUIRED');
+    assert.equal(f.state().autoExchange.operationId, retained.operationId);
+    assert.deepEqual(f.state()[slot], slot === 'push' ? retained : [retained]);
+    assert.deepEqual(f.queue(), queue);
+    assert.deepEqual(f.sleeps, []);
+    assert.deepEqual(f.attempts, []);
+    assert.equal(f.objects.size, 0);
+    await assert.rejects(f.manual(), { code: 'CLI_UPGRADE_REQUIRED' });
+    assert.deepEqual(f.state()[slot], slot === 'push' ? retained : [retained]);
   }
 });
 
@@ -690,7 +736,7 @@ test('stalled wake cooperatively yields both queue slots; successor resumes the 
     return transport;
   };
   const first = f.run();
-  await entered.promise;
+  await waitForEntry(entered, first);
   // Move only the test clock. Console heartbeats do not change last progress.
   const progress = f.state().pushProgress;
   f.advance(progress.lastProgressAt + PUSH_STALL_MS - f.now());
@@ -726,7 +772,7 @@ test('manual push phase and stale progress are visible even when automatic pushi
     await release.promise;
   };
   const pending = f.manual();
-  await entered.promise;
+  await waitForEntry(entered, pending);
   const progress = f.state().pushProgress;
   const fresh = readAutoExchangeStatus(f.store, progress.lastProgressAt);
   assert.equal(fresh.status, 'pushing');

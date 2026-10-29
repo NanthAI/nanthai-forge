@@ -64,7 +64,7 @@ export default function ExchangeHandoff({
                 Download Work reconciliation request
               </button>
               <p>
-                Before returning edits from your existing owner, set its current local revision and run{' '}
+                To reconcile hosted metadata with your existing owner, set its current local revision and run{' '}
                 <code>nforge exchange ROOT reconcile --command-file forge-reconcile.json</code>. The original
                 source and local Lane files remain in place.
               </p>
@@ -79,7 +79,6 @@ export default function ExchangeHandoff({
                   operationId: crypto.randomUUID(),
                   previous: previous ?? backupId,
                   revision,
-                  returnSource: { expectedBackupId: backupId, revision, operationId: crypto.randomUUID() },
                 },
                 'forge-push.json',
               )
@@ -90,7 +89,7 @@ export default function ExchangeHandoff({
           <p>
             Set the top-level <code>revision</code> to the current local Work revision, then run{' '}
             <code>nforge exchange ROOT push --command-file forge-push.json</code>. Keep the original request
-            for retries. The nested source-return pins preserve the observed hosted revision.
+            for retries.
           </p>
         </>
       )}

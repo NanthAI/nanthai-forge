@@ -7,7 +7,6 @@ import { moduleUrl, moduleSource } from './convex-module.mjs';
 import { workSchema } from '../dist/work-types.js';
 import { metadataRequest } from '../dist/work-metadata.js';
 import { LONG_ACTION_BUDGET_MS, LONG_ACTION_DEADLINE_MS, longActionExpired } from '../dist/long-action.js';
-const { replayReturnJournal } = await import(moduleUrl('../convex/projectSourceReturnJournal.ts'));
 const { runPublication } = await import(moduleUrl('../convex/projectPublicationRun.ts'));
 
 test('server scheduling window leaves three minutes below the client deadline', t => {
@@ -19,65 +18,6 @@ test('server scheduling window leaves three minutes below the client deadline', 
   assert.equal(longActionExpired(100), false);
   now++;
   assert.equal(longActionExpired(100), true);
-});
-
-test('journal replay yields after a whole event and resumes by saved revision without duplicates', async t => {
-  let now = 1000;
-  t.mock.method(Date, 'now', () => now);
-  const data = workSchema.parse({
-    schema: 15,
-    revision: 0,
-    nativeHead: 'a'.repeat(64),
-    intents: [],
-    lanes: [],
-    views: [],
-  });
-  const intentId = randomUUID();
-  data.intents.push({
-    id: intentId,
-    base: data.nativeHead,
-    outcome: 'Synthetic',
-    constraints: '',
-    status: 'active',
-    createdAt: 'now',
-    notes: [],
-  });
-  const events = Array.from({ length: 8 }, (_, i) => {
-    const command = { action: 'note', intentId, kind: 'comment', text: `event ${i}` };
-    return {
-      operationId: randomUUID(),
-      request: metadataRequest(command),
-      previousRevision: i,
-      revision: i + 1,
-      actor: 'owner',
-      at: 'now',
-      command: JSON.stringify(command),
-    };
-  });
-  let snapshot = {
-    data,
-    backup: { digest: 'b'.repeat(64) },
-    project: { _id: 'project', key: randomUUID(), work: { initialRevision: 0, revision: 8 } },
-    events: [],
-  };
-  const starts = [];
-  const ctx = {
-    runQuery: async (_ref, args) => {
-      starts.push(args.initialRevision);
-      now += LONG_ACTION_BUDGET_MS + 1;
-      return { page: events.filter(e => e.revision > args.initialRevision), isDone: true };
-    },
-  };
-  for (let i = 0; i < 8; i++) {
-    const done = await replayReturnJournal(ctx, snapshot, 'owner', now);
-    assert.equal(done, i === 7);
-    // Model the caller's durable cursor save/reload after every action.
-    snapshot = structuredClone(snapshot);
-    assert.equal(snapshot.data.revision, i + 1);
-    assert.equal(snapshot.data.intents[0].notes.length, i + 1);
-  }
-  assert.deepEqual(starts, [0, 1, 2, 3, 4, 5, 6, 7]);
-  assert.equal(new Set(snapshot.data.hostedEvents.map(e => e.id)).size, 8);
 });
 
 test('publication wait yields pending at its budget and never releases another worker claim', async t => {

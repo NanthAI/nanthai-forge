@@ -52,16 +52,10 @@ const longActions = new Set([
   'projectObjectRecipes:complete',
   'projectWorkActions:initialize',
   'projectExchangeMigration:migrate',
-  'projectSourceReturn:returnSource',
   'projectWorkActions:exportJournal',
   'projectWorkIndexActions:ensure',
 ]);
-const receiptCalls = new Set([
-  'projectExchangeActions:publish',
-  'projectExchangeMigration:migrate',
-  'projectSourceReturn:returnSource',
-  'projectReturnSupersede:supersede',
-]);
+const receiptCalls = new Set(['projectExchangeActions:publish', 'projectExchangeMigration:migrate']);
 
 /** The HTTP client uses this for every exchange query, mutation and action,
  * including direct calls from bound exchange and the upload/transport helpers. */

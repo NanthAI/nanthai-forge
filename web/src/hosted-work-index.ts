@@ -64,7 +64,6 @@ export type WorkIndexWorkspace = {
     recentSummaryPages?: boolean;
     owner: boolean;
     editableIntentIds: string[];
-    sourceReturn: boolean;
     hostedChannels: boolean;
     planning?: boolean;
   };

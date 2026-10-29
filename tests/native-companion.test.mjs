@@ -36,7 +36,6 @@ import { readHosted } from './hosted-read.mjs';
 
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const work = await import(moduleUrl('../convex/projectWork.ts'));
-const returns = await import(moduleUrl('../convex/projectSourceReturn.ts'));
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 
 async function setup(t) {
@@ -164,16 +163,6 @@ async function setup(t) {
       journalSha256: digest(bytes),
     };
   }
-  async function returnSource(archive, previous) {
-    const input = {
-      projectId,
-      backupId: archive.id,
-      expectedBackupId: previous.id,
-      revision: (await remote()).revision,
-      operationId: randomUUID(),
-    };
-    return returns.returnSource._handler(s.ctx, input);
-  }
   const bin = join(dir, 'bin'),
     marker = join(dir, 'git-used');
   mkdirSync(bin);
@@ -200,180 +189,8 @@ async function setup(t) {
     hosted,
     remote,
     command,
-    returnSource,
   };
 }
-
-test('real hosted second-round reconciliation preserves dirty source, running output, exact server receipts and fresh Git-free recovery', async t => {
-  const f = await setup(t);
-  await f.hosted({
-    action: 'note',
-    intentId: f.intent.id,
-    text: 'Repeated intentional note',
-    kind: 'comment',
-  });
-  await f.hosted({ action: 'intent-status', intentId: f.intent.id, status: 'ready' });
-  await f.hosted({ action: 'intent', outcome: 'Hosted-only Intent', constraints: '', base: f.intent.base });
-  await actions.acceptChannel._handler(f.s.ctx, {
-    projectId: f.projectId,
-    operationId: randomUUID(),
-    revision: (await f.remote()).revision,
-    command: JSON.stringify({
-      action: 'accept-hosted-channel',
-      channel: 'main',
-      acceptanceId: f.acceptance.id,
-      viewId: f.view.id,
-      head: f.view.head,
-      previousId: null,
-      archiveSha256: digest(f.base.bytes),
-    }),
-  });
-  f.act({ action: 'note', intentId: f.intent.id, text: 'Repeated intentional note', kind: 'comment' });
-  writeFileSync(join(f.w.store.path(f.lane.id), 'a.ts'), 'local dirty source stays exact\n');
-  const check = f.act({
-    action: 'define-check',
-    name: 'Active original output',
-    executable: process.execPath,
-    args: ['-e', 'console.log("active output");setInterval(()=>{},1000)'],
-  });
-  const run = (
-    await f.call({
-      action: 'run-check',
-      operationId: randomUUID(),
-      viewId: f.view.id,
-      expectedHead: f.view.head,
-      checkId: check.id,
-      expectedDefinition: check.definition,
-      expectedEnvironment: f.w.status().environment.fingerprint,
-    })
-  ).result;
-
-  for (
-    let n = 0;
-    n < 100 &&
-    !readFileSync(join(f.w.store.directory, 'check-' + run.id, 'stdout.log'), 'utf8').includes(
-      'active output',
-    );
-    n++
-  )
-    await new Promise(r => setTimeout(r, 20));
-  const raw = f.data();
-  raw.futureField = { preserved: ['unknown'] };
-  raw.intents[0].futureIntent = 'exact';
-  raw.runs[0].futureRun = { original: true };
-  f.w.store.save(raw);
-  const ongoing = structuredClone(raw),
-    objects = readdirSync(new NativeSource(f.root).directory);
-  const originalRemote = await f.remote(),
-    first = await f.command();
-  const result = await f.call(first);
-  assert.equal(result.result.status, 'reconciled');
-  const merged = JSON.parse(readWorkBytes(join(f.w.store.directory, 'work.json')));
-  assert.equal(merged.schema, 3);
-  assert.deepEqual(merged.futureField, raw.futureField);
-  assert.equal(merged.intents[0].futureIntent, 'exact');
-  assert.deepEqual(merged.runs, ongoing.runs);
-  assert.deepEqual(merged.lanes, ongoing.lanes);
-  assert.deepEqual(merged.views, ongoing.views);
-  assert.deepEqual(merged.checks, ongoing.checks);
-  assert.deepEqual(merged.channelMoves, ongoing.channelMoves);
-  assert.deepEqual(merged.hostedEvents, originalRemote.hostedEvents);
-  assert.deepEqual(merged.hostedChannelMoves, originalRemote.hostedChannelMoves);
-  assert.equal(merged.intents[0].status, 'ready');
-  assert.equal(merged.intents[0].notes.length, 2);
-  assert.equal(
-    merged.intents[0].notes[0].text,
-    merged.intents[0].notes[1].text,
-    'intentional duplicate notes retained',
-  );
-  assert.equal(merged.intents.length, 2);
-  assert.deepEqual(readdirSync(new NativeSource(f.root).directory), objects);
-  assert.equal(
-    readFileSync(join(f.w.store.path(f.lane.id), 'a.ts'), 'utf8'),
-    'local dirty source stays exact\n',
-  );
-  assert.match(
-    readFileSync(join(f.w.store.directory, 'check-' + run.id, 'stdout.log'), 'utf8'),
-    /active output/,
-  );
-  const secondBase = await f.upload();
-  await f.returnSource(secondBase, f.base);
-  f.act({ action: 'note', intentId: f.intent.id, text: 'Later local work', kind: 'decision' });
-  const source = new NativeSource(f.root);
-  const checkpoint = f.act({
-    action: 'checkpoint',
-    laneId: f.lane.id,
-    expectedHead: f.data().lanes[0].head,
-    expectedTree: source.tree(source.capture(f.w.store.path(f.lane.id), false, f.data().lanes[0].head)),
-    message: 'Keep continued source',
-  });
-  const continued = f.data();
-  await f.hosted({ action: 'note', intentId: f.intent.id, text: 'Later hosted work', kind: 'decision' });
-  const secondRemote = await f.remote(),
-    second = await f.command(secondBase);
-  const combined = await f.call(second);
-  assert.equal(combined.result.status, 'reconciled', JSON.stringify(combined.result.conflicts));
-  assert.deepEqual(f.data().lanes, continued.lanes);
-  assert.equal(f.data().lanes[0].head, checkpoint.head);
-  assert.deepEqual(f.data().runs, continued.runs);
-  assert.deepEqual(f.data().hostedEvents, secondRemote.hostedEvents);
-  assert.deepEqual(
-    f.data().intents[0].notes.map(n => n.text),
-    ['Repeated intentional note', 'Repeated intentional note', 'Later hosted work', 'Later local work'],
-  );
-  // A new original operation over an already received prefix adds no notes.
-  await f.call({ ...second, operationId: randomUUID() });
-  assert.equal(f.data().intents[0].notes.length, 4);
-  const thirdBase = await f.upload();
-  await f.returnSource(thirdBase, secondBase);
-  const final = await f.command(thirdBase),
-    target = join(f.dir, 'fresh');
-  await restoreNativeWork(thirdBase.exported.archive.path, target, final.journalPath);
-  const restored = new WorkService(target);
-  assert.deepEqual(restored.store.load().nativeCompanionReceipts, f.data().nativeCompanionReceipts);
-  assert.deepEqual(restored.store.load().hostedEvents, (await f.remote()).hostedEvents);
-  assert.equal(restored.store.load().runs[0].status, 'interrupted');
-  assert.equal(f.data().runs[0].status, 'running', 'scratch recovery never interrupts the live local run');
-  assert.equal(
-    new NativeSource(target).state(checkpoint.head).files[0].blob,
-    new NativeSource(f.root).state(checkpoint.head).files[0].blob,
-  );
-  assert.equal(
-    z.object({ schema: z.union([z.literal(1), z.literal(2)]) }).safeParse(f.data()).success,
-    false,
-    'released old format reader rejects format3',
-  );
-});
-
-test('status/note conflicts report exact fields without changing Work and leave unrelated local commands usable', async t => {
-  const f = await setup(t);
-  await f.hosted({ action: 'intent-status', intentId: f.intent.id, status: 'ready' });
-  f.act({ action: 'intent-status', intentId: f.intent.id, status: 'abandoned' });
-  const command = await f.command(),
-    path = join(f.w.store.directory, 'work.json'),
-    before = readFileSync(path);
-  const conflict = await f.call(command);
-  assert.equal(conflict.result.status, 'conflict');
-  assert.equal(conflict.result.conflicts[0].field, 'status');
-  assert.equal(conflict.result.conflicts[0].id, f.intent.id);
-  assert.deepEqual(readFileSync(path), before);
-  f.act({ action: 'intent', outcome: 'Unrelated local work still works' });
-  f.act({ action: 'intent-status', intentId: f.intent.id, status: 'ready' });
-  assert.equal((await f.call(command)).result.status, 'reconciled');
-  await f.hosted({ action: 'note', intentId: f.intent.id, kind: 'comment', text: 'Original hosted note' });
-  await f.call(await f.command());
-  const noteBase = await f.upload();
-  await f.returnSource(noteBase, f.base);
-  const changed = f.data();
-  changed.intents[0].notes[0].text = 'Changed original note';
-  f.w.store.save(changed);
-  const bytes = readFileSync(path),
-    notes = await f.call(await f.command(noteBase));
-  assert.equal(notes.result.status, 'conflict');
-  assert.equal(notes.result.conflicts[0].field, 'notes');
-  assert.deepEqual(readFileSync(path), bytes);
-  f.act({ action: 'intent', outcome: 'Unrelated work also survives note conflict' });
-});
 
 test('lost replies retry before stale revision or missing paths; changed pins reject; concurrent digest changes are not overwritten', async t => {
   const f = await setup(t);

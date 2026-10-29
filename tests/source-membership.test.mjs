@@ -6,7 +6,7 @@ import { fixture } from './project-exchange-fixture.mjs';
 import { materializeWork } from '../dist/work-hosted-index.js';
 import { workSchema } from '../dist/work-types.js';
 import { ancestryEntries } from './ancestry-fixture.mjs';
-const { stateParentEntries, deltaFits } = await import(moduleUrl('../convex/projectSourceReturnDelta.ts'));
+import { stateParentEntries } from '../dist/source-state-parent-index.js';
 const { sourceMembership } = await import(moduleUrl('../convex/projectSourceMembership.ts'));
 function insert(s, entries) {
   for (const entry of entries)
@@ -149,20 +149,4 @@ test('summary-only refresh preserves provenance in chunked View detail payloads'
   );
   assert.equal(payload.fileCount, 7);
   assert.equal(payload.provenanceAvailable, true);
-});
-
-test('publication budget accounts for old rows and protocol bytes even when the new delta is small', () => {
-  const delta = {
-    entries: ancestryEntries('head', new Map([['head', []]])),
-    removed: [],
-    views: [],
-    summaries: [],
-    positions: {},
-    stopParents: [],
-    readBytes: 0,
-    payloadReplacements: 0,
-  };
-  assert.equal(deltaFits(delta, 1024), true);
-  assert.equal(deltaFits({ ...delta, readBytes: 16 * 1024 * 1024 }, 1024), false);
-  assert.equal(deltaFits(delta, 16 * 1024 * 1024), false);
 });

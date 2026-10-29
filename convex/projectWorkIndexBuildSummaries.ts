@@ -25,7 +25,6 @@ import { summaryStates } from './projectWorkIndexBuildStates';
 import { viewStates } from './projectSourceProjection';
 import type { ChangedStates } from './projectDiffstatProjection';
 import { ownerDerivedRows } from './projectOwnerDerived';
-import type { Cursor as ReturnCursor } from './projectSourceReturnStep';
 import type { WorkView } from '../src/work-types';
 /** A bounded summary page shares source resolution and diffstat work. */
 export async function projectSummaries(
@@ -146,7 +145,7 @@ export async function projectSummaries(
           parents: [],
           heads: [],
           delta: { stopParents: [], views: [0], trees: [] },
-        } as unknown as ReturnCursor,
+        },
         {
           schema: 3,
           work: e.records.work.sha256,

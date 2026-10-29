@@ -2,7 +2,7 @@
 'use node';
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
-import type { Cursor } from './projectSourceReturnStep';
+import type { OwnerProjectionContext } from './projectOwnerDerived';
 import type { WorkData } from '../src/work-types';
 import type { sourceManifestSchema } from '../src/work-archive-metadata';
 import type { z } from 'zod';
@@ -43,13 +43,8 @@ export async function ownerProjection(
   const summaries = projection.entries.filter(
     row => row.collection === 'lanes' || row.collection === 'views',
   );
-  const c = {
+  const c: OwnerProjectionContext = {
     snapshot,
-    final: {
-      command: JSON.stringify({
-        workSha256: snapshot.manifest.files.find(p => p.path === 'work.json')?.sha256,
-      }),
-    },
     pending: workSourcePins(snapshot.data),
     parents: [],
     heads: workSourcePins(snapshot.data),
@@ -59,7 +54,7 @@ export async function ownerProjection(
       views: snapshot.data.views.map((_, i) => i),
       trees: selectedTreeHeads(snapshot.data),
     },
-  } as unknown as Cursor;
+  };
   const supplied = ownerDerivedRows(c, value);
   if ('reason' in supplied) return; // Existing hosted reads preserve their compatibility path.
   const entries = [

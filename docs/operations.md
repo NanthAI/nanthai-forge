@@ -1294,32 +1294,35 @@ scope, not a promise to delete useful review components.
 - **A12:** `convex/projectExchangeActions.ts`.
 - **A13:** `web/src/HostedWork.tsx`, `web/src/ProjectBackups.tsx`.
 
-#### B1.6b — source return
+#### B1.6b — source return (deleted)
+
+Live source-return computation, callers, progress probes and return-only tests are deleted. Counts below are full-file LOC immediately before this deletion on supplied main `cfc1c04`; caller keys record the pre-deletion inventory. Two public RPC addresses (`projectSourceReturn:returnSource` and `projectReturnSupersede:supersede`) remain only as no-IO `CLI_UPGRADE_REQUIRED` tombstones for installed clients. Shared owner-display row validation stays with its surviving readers; they no longer import return modules. Historic journal chunking, table definitions and stored-document validators remain. Rollback uses B1.5a recovery followed by reverse CAS, never source return.
+
 
 | Module                                  |       LOC | Last surviving callers |
 | --------------------------------------- | --------: | ---------------------- |
-| `convex/projectSourceReturn.ts`         |       453 | B1                     |
-| `convex/projectSourceReturnProgress.ts` |       457 | B1                     |
-| `convex/projectSourceReturnPrepare.ts`  |       317 | B1                     |
-| `convex/projectSourceReturnRecords.ts`  |       211 | B1                     |
-| `convex/projectSourceReturnDelta.ts`    |       144 | B2                     |
-| `convex/projectSourceReturnStep.ts`     |       120 | B2                     |
-| `convex/projectSourceReturnCursor.ts`   |        94 | B1                     |
-| `convex/projectSourceReturnMetadata.ts` |        93 | B2                     |
-| `convex/projectSourceReturnRows.ts`     |        82 | B1                     |
-| `convex/projectSourceReturnJournal.ts`  |        49 | B1                     |
-| `convex/projectSourceReturnBudget.ts`   |        17 | B1                     |
-| `convex/projectWorkRecordReturn.ts`     |       323 | B1                     |
-| `convex/projectReturnIndexStage.ts`     |       245 | B3                     |
-| `convex/projectReturnMetadataStore.ts`  |       157 | B4                     |
-| `convex/projectReturnCommit.ts`         |       122 | B1                     |
-| `convex/projectReturnSupersede.ts`      |        88 | B5                     |
-| `convex/projectGitReturnIndex.ts`       |       112 | B1                     |
-| `convex/coordinationReturnChanges.ts`   |        50 | B1                     |
-| `src/work-source-return.ts`             |       136 | B6                     |
-| `src/source-return-progress.ts`         |        30 | B7                     |
-| `web/src/HostedSourceReturn.tsx`        |       107 | B8                     |
-| **Whole-file scope**                    | **3,407** |                        |
+| `convex/projectSourceReturn.ts` (Compatibility tombstone) | 455 | B1                     |
+| `convex/projectSourceReturnProgress.ts` (Deleted) | 551 | B1                     |
+| `convex/projectSourceReturnPrepare.ts` (Deleted) | 317 | B1                     |
+| `convex/projectSourceReturnRecords.ts` (Deleted) | 211 | B1                     |
+| `convex/projectSourceReturnDelta.ts` (Deleted) | 212 | B2                     |
+| `convex/projectSourceReturnStep.ts` (Deleted) | 112 | B2                     |
+| `convex/projectSourceReturnCursor.ts` (Deleted) | 94 | B1                     |
+| `convex/projectSourceReturnMetadata.ts` (Deleted) | 114 | B2                     |
+| `convex/projectSourceReturnRows.ts` (Deleted) | 83 | B1                     |
+| `convex/projectSourceReturnJournal.ts` (Deleted) | 49 | B1                     |
+| `convex/projectSourceReturnBudget.ts` (Deleted) | 17 | B1                     |
+| `convex/projectWorkRecordReturn.ts` (Deleted) | 244 | B1                     |
+| `convex/projectReturnIndexStage.ts` (Deleted) | 311 | B3                     |
+| `convex/projectReturnMetadataStore.ts` (Deleted) | 200 | B4                     |
+| `convex/projectReturnCommit.ts` (Deleted) | 179 | B1                     |
+| `convex/projectReturnSupersede.ts` (Compatibility tombstone) | 88 | B5                     |
+| `convex/projectGitReturnIndex.ts` (Deleted) | 112 | B1                     |
+| `convex/coordinationReturnChanges.ts` (Deleted) | 50 | B1                     |
+| `src/work-source-return.ts` (Deleted) | 141 | B6                     |
+| `src/source-return-progress.ts` (Deleted) | 31 | B7                     |
+| `web/src/HostedSourceReturn.tsx` (Deleted) | 107 | B8                     |
+| **Whole-file scope**                    | **3,678** |                        |
 
 - **B1:** `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.
 - **B2:** `convex/projectExchangeActions.ts`, `convex/projectSourceProjection.ts`, `convex/projectWorkLoad.ts`, `src/exchange-client.ts`, `src/exchange-convex-fetch.ts`, `web/src/HostedWork.tsx`.

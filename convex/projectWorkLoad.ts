@@ -15,21 +15,18 @@ import { sourceManifestSchema } from '../src/work-archive-metadata';
 import { exchangeObjectReader, type ExchangeObjectReader } from './projectExchangeReader';
 import { exchangeMetadata } from './projectExchangeActions';
 import { projectArchiveMetadata } from './projectArchiveMetadata';
-import { publicationSnapshot } from './projectSourceReturnMetadata';
 type SourceSnapshot = {
   backup: Doc<'projectBackups'>;
   project: Doc<'hostedProjects'>;
   manifest: ReturnType<typeof sourceManifestSchema.parse>;
   data: WorkData;
   originalWorkDigest: string;
-  publication: Awaited<ReturnType<typeof publicationSnapshot>>;
 };
 export async function source(
   ctx: ActionCtx,
   backupId: Id<'projectBackups'>,
   owner: string,
   reader?: ExchangeObjectReader,
-  metadata = false,
   cacheMetadata = true,
   currentDetails = false,
 ): Promise<SourceSnapshot> {
@@ -44,14 +41,11 @@ export async function source(
     'PROJECT_UNAVAILABLE',
     'Select a stored source and Work backup.',
   );
-  // Only source return opts into owner publication metadata. Existing source
-  // reads retain their current byte reader and access behavior.
-  const publication = metadata ? await publicationSnapshot(ctx, original.backup, owner) : undefined;
   const migrated = currentDetails
     ? await migratedWork(ctx, original.backup, original.project, owner, objectReader)
     : undefined;
   const streamed =
-    !migrated && original.backup.transport === 'objects' && !publication
+    !migrated && original.backup.transport === 'objects'
       ? await resolveExchangeWork(
           (
             await objectReader.read(original.backup.projectId, owner, [
@@ -68,19 +62,17 @@ export async function source(
     ? { manifest: migrated.manifest, work: Buffer.alloc(0) }
     : streamed
       ? undefined
-      : publication?.work !== undefined
-        ? { manifest: Buffer.from(JSON.stringify(publication.manifest)), work: Buffer.from(publication.work) }
-        : original.backup.transport === 'objects'
-          ? await exchangeMetadata(ctx, original.backup, owner, objectReader)
-          : await projectArchiveMetadata(
-              ctx,
-              archiveRef(original.backup),
-              original.backup.size,
-              original.backup.digest,
-              () => ctx.runQuery(internal.projectBackups.get, { id: backupId, owner }),
-              cacheMetadata,
-              original.project.r2Writes ?? false,
-            );
+      : original.backup.transport === 'objects'
+        ? await exchangeMetadata(ctx, original.backup, owner, objectReader)
+        : await projectArchiveMetadata(
+            ctx,
+            archiveRef(original.backup),
+            original.backup.size,
+            original.backup.digest,
+            () => ctx.runQuery(internal.projectBackups.get, { id: backupId, owner }),
+            cacheMetadata,
+            original.project.r2Writes ?? false,
+          );
   const manifestBytes = streamed?.manifest ?? bytes!.manifest,
     manifest = sourceManifestSchema.parse(JSON.parse(Buffer.from(manifestBytes).toString('utf8'))),
     file = manifest.files.find(item => item.path === 'work.json');
@@ -121,7 +113,7 @@ export async function source(
         ],
       }
     : manifest;
-  return { ...original, manifest: effectiveManifest, data, originalWorkDigest: file.sha256, publication };
+  return { ...original, manifest: effectiveManifest, data, originalWorkDigest: file.sha256 };
 }
 export const journalEvent = (
   projectKey: string,
@@ -143,7 +135,7 @@ export async function load(
   projectId: Id<'hostedProjects'>,
   owner: string,
   reader?: ExchangeObjectReader,
-  options: { requireCurrent?: boolean; metadata?: boolean; cacheMetadata?: boolean } = {},
+  options: { requireCurrent?: boolean; cacheMetadata?: boolean } = {},
 ): Promise<SourceSnapshot & { events: HostedEvent[] }> {
   const project: Doc<'hostedProjects'> = await ctx.runQuery(internal.projectWork.get, { projectId, owner });
   invariant(project.work, 'PROJECT_WORK_MISSING', 'Start hosted Work from a stored source backup.');
@@ -160,15 +152,7 @@ export async function load(
     );
   };
   try {
-    const snapshot = await source(
-        ctx,
-        project.work.backupId,
-        owner,
-        reader,
-        options.metadata,
-        options.cacheMetadata,
-        true,
-      ),
+    const snapshot = await source(ctx, project.work.backupId, owner, reader, options.cacheMetadata, true),
       events: HostedEvent[] = [];
     const migratedRevision =
       project.work.recordDetails?.backupId === project.work.backupId

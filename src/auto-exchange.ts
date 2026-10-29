@@ -249,7 +249,7 @@ export async function drainAutoExchange(store: WorkStore, options: AutoExchangeO
             const pushed = (await withExchangeProgress({ signal: controller.signal }, async () =>
               options.push
                 ? await options.push(admission)
-                : await boundExchange(store.root, 'push', undefined, false, {
+                : await boundExchange(store.root, 'push', undefined, {
                     beforePush: admission,
                     expectedBinding: binding,
                   }),

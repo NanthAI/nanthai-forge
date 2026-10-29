@@ -138,20 +138,7 @@ test('optional project Trash stops contributor access and all source/Work change
     }),
     unavailable,
   );
-  await assert.rejects(
-    modules.projectWork.returnSource._handler(s.ctx, {
-      projectId: 'project',
-      owner: 'owner',
-      operationId: randomUUID(),
-      request: 'r',
-      command: '{}',
-      backupId: 'backup',
-      expectedBackupId: 'backup',
-      expectedRevision: 0,
-      localRevision: 0,
-    }),
-    unavailable,
-  );
+
   await assert.rejects(
     modules.projectBackups.uploadUrl._handler(s.ctx, { id: 'backup', owner: 'owner' }),
     unavailable,

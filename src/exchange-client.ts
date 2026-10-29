@@ -1,4 +1,3 @@
-import { pendingProgressGuard } from './long-action.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 // SPDX-License-Identifier: Apache-2.0
 import {
@@ -14,7 +13,6 @@ import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { hostedMainSchema, type MainExpectation } from './hosted-main.js';
 import { exchangeConvexFetch } from './exchange-convex-fetch.js';
 import { retryExchange } from './exchange-retry.js';
-import type { SourceReturnProgress } from './source-return-progress.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { resolveAuthToken } from './auth-store.js';
 import { ConvexHttpClient } from 'convex/browser';
@@ -52,7 +50,6 @@ export class ConvexExchange implements ExchangeTransport {
   onCall?: (name: string, pending: boolean) => void;
   onWorkProgress?: (done: number, total: number) => void;
   onDownloadProgress?: (pin: ContentPin, done: number) => void;
-  onReturnProgress?: (progress: SourceReturnProgress) => void;
   uploadBatchSize?: number;
   readonly client: ConvexHttpClient;
   /** Byte transport; built on the current client so a replaced client is honored. */
@@ -663,92 +660,5 @@ export class ConvexExchange implements ExchangeTransport {
     return retryExchange('Work journal read', this.operationId, () =>
       this.client.action(action('projectWorkActions:exportJournal'), { projectId: this.projectId }),
     );
-  }
-  async returnSource(
-    backupId: string,
-    expectedBackupId: string,
-    revision: number,
-    operationId: string,
-    ownerDerived?: ContentPin,
-  ) {
-    let active = true,
-      probing = false;
-    const started = Date.now();
-    const probe = this.onReturnProgress
-      ? setInterval(() => {
-          if (probing) return;
-          probing = true;
-          void this.client
-            .action(action('projectSourceReturn:returnSource'), {
-              projectId: this.projectId,
-              backupId,
-              expectedBackupId,
-              revision,
-              operationId,
-              continuation: true,
-              statusOnly: true,
-              ...(ownerDerived ? { ownerDerived } : {}),
-            })
-            .then(result => {
-              if (active && result?.pending && result.progress)
-                this.onReturnProgress?.({
-                  ...JSON.parse(result.progress),
-                  elapsedMs: Date.now() - started,
-                  resumed: false,
-                });
-            })
-            .catch(() => {
-              // A progress probe is advisory; the original action reports its result/error.
-            })
-            .finally(() => {
-              probing = false;
-            });
-        }, 30000)
-      : undefined;
-    try {
-      let first = true;
-      const guard = pendingProgressGuard('source return', operationId);
-      while (true) {
-        const result = await retryExchange('source return', operationId, () =>
-          this.client.action(action('projectSourceReturn:returnSource'), {
-            projectId: this.projectId,
-            backupId,
-            expectedBackupId,
-            revision,
-            operationId,
-            continuation: true,
-            ...(ownerDerived ? { ownerDerived } : {}),
-          }),
-        );
-        if (!(result && typeof result === 'object' && 'pending' in result && result.pending === true)) {
-          const accounting =
-            result && typeof result === 'object' && 'accounting' in result ? result.accounting : undefined;
-          this.onReturnProgress?.({
-            phase: 'complete',
-            step: 0,
-            done: 1,
-            total: 1,
-            elapsedMs: Date.now() - started,
-            etaSeconds: 0,
-            resumed: false,
-            ...(accounting && typeof accounting === 'object' ? accounting : {}),
-          });
-          return result;
-        }
-        guard(result.progress);
-        if (result.progress)
-          this.onReturnProgress?.({
-            ...JSON.parse(result.progress),
-            resumed: first && result.resumed === true,
-          });
-        first = false;
-        await new Promise<void>(resolve => setImmediate(resolve));
-      }
-    } catch (error) {
-      throw hostedActionError(error, 'source return');
-    } finally {
-      active = false;
-      clearInterval(probe);
-    }
   }
 }

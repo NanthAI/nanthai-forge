@@ -7,13 +7,25 @@ import { sourceTreeEntries } from '../src/source-tree-index';
 import { invariant, ForgeError } from '../src/errors';
 import { resolveOwnerDerived } from '../src/owner-derived-pages';
 import { safeRelative } from '../src/files';
-import type { ActionCtx } from './_generated/server';
-import { internal } from './_generated/api';
-import type { Cursor } from './projectSourceReturnStep';
+import type { WorkData } from '../src/work-types';
+import type { sourceManifestSchema } from '../src/work-archive-metadata';
+import type { z } from 'zod';
+
+export type OwnerProjectionContext = {
+  snapshot: { data: WorkData; manifest: z.infer<typeof sourceManifestSchema> };
+  pending: string[];
+  parents: [string, string[]][];
+  heads: string[];
+  diffstats?: { records: IndexEntry[] };
+  delta?: { stopParents: string[]; views: number[]; trees?: string[] };
+};
 import type { IndexEntry } from '../src/work-hosted-index';
 
 /** Validate owner display facts without reading source or recomputing provenance. */
-export function ownerDerivedRows(c: Cursor, value: unknown): { rows: IndexEntry[] } | { reason: string } {
+export function ownerDerivedRows(
+  c: OwnerProjectionContext,
+  value: unknown,
+): { rows: IndexEntry[] } | { reason: string } {
   try {
     if (!c.delta) return { reason: 'delta-missing' };
     const parsed = ownerDerivedSchema.safeParse(value);
@@ -246,94 +258,6 @@ function unpack(row: IndexEntry, rows: IndexEntry[]) {
   return JSON.parse(payload);
 }
 
-/** Keep validated rows private until the original return cursor publishes them. */
-export async function installOwnerDerived(ctx: ActionCtx, c: Cursor, value: unknown) {
-  requireOwnerDerived(value);
-  // A partial context can change queue-derived Lane summary fields without
-  // changing its source comparison. Reuse that exact pair's retained stats.
-  const derived = value as import('../src/owner-derived').OwnerDerived;
-  invariant(Array.isArray(derived.stats), 'INVALID_OWNER_DATA', 'Owner display statistics are invalid.');
-  const known = new Set(derived.stats.map(([key]) => key));
-  const missing = [
-    ...new Set(
-      (c.diffstats?.records ?? []).flatMap(row => {
-        const summary = JSON.parse(row.value);
-        const key = `${summary.base}:${summary.head}`;
-        return summary.head && summary.status !== 'conflict' && !known.has(key) ? [key] : [];
-      }),
-    ),
-  ];
-  for (let offset = 0; offset < missing.length; offset += 100) {
-    const keys = missing.slice(offset, offset + 100);
-    const rows: (IndexEntry | null)[] = await ctx.runQuery(internal.projectWorkIndexStore.lookups, {
-      projectId: c.final.projectId,
-      owner: c.final.owner,
-      generationId: c.generationId,
-      keys: keys.map(key => ({ collection: 'diffstats', key })),
-    });
-    for (const [index, row] of rows.entries()) {
-      if (!row) continue;
-      const stats = JSON.parse(row.value);
-      derived.stats.push([
-        keys[index]!,
-        {
-          files: stats.files,
-          ...(stats.add === undefined ? {} : { add: stats.add }),
-          ...(stats.del === undefined ? {} : { del: stats.del }),
-        },
-      ]);
-    }
-  }
-  const result = ownerDerivedRows(c, derived);
-  if ('reason' in result) console.log('source-return owner-derived invalid', { reason: result.reason });
-  invariant(
-    'rows' in result,
-    'INVALID_OWNER_DATA',
-    `Owner display data is incomplete or invalid (${'reason' in result ? result.reason : ''}). Prepare it locally with the current nforge CLI.`,
-  );
-  const supplied = result.rows;
-  {
-    const newViews = new Set(c.delta!.newViews);
-    const unchangedFiles = new Set(c.delta!.unchangedViewFiles);
-    const viewIds = c
-      .delta!.views.map(index => c.snapshot.data.views[index]!.id)
-      .filter(id => !c.full && !newViews.has(id) && !unchangedFiles.has(id));
-    const keys = new Set(supplied.filter(r => r.collection === 'viewFiles').map(r => r.key));
-    for (let offset = 0; offset < viewIds.length; offset += 100) {
-      const selected = viewIds.slice(offset, offset + 100);
-      let view = 0,
-        after = -1;
-      do {
-        const page: { keys: string[]; view: number; after: number; bytes: number } = await ctx.runQuery(
-          internal.projectWorkIndexStore.returnViewFiles,
-          {
-            projectId: c.final.projectId,
-            owner: c.final.owner,
-            generationId: c.generationId!,
-            viewIds: selected,
-            view,
-            after,
-          },
-        );
-        for (const key of page.keys)
-          if (!keys.has(key)) {
-            c.delta!.removed.push({ collection: 'viewFiles', key });
-            c.metadata!.counts.viewFiles!--;
-          }
-        c.delta!.readBytes += page.bytes;
-        view = page.view;
-        after = page.after;
-      } while (view < selected.length);
-    }
-    c.rows.push(...supplied);
-    c.phase = 'done';
-    c.pending = [];
-    c.parents = [];
-    c.heads = [];
-    delete c.diffstats;
-  }
-}
-
 export const CLI_UPGRADE_MESSAGE =
   'This push requires owner display protocol 3. Upgrade nforge with `npm install -g /path/to/current/nanthai-forge.tgz`, then prepare a new push. Existing hosted reads remain available.';
 export function requireOwnerDerived(value: unknown) {
@@ -374,7 +298,7 @@ export async function readOwnerDerived(
   } catch (error) {
     if (error instanceof ForgeError) throw error;
     const reason = error instanceof Error ? error.message : String(error);
-    console.log('source-return owner-derived read invalid', { reason });
+    console.log('owner-derived read invalid', { reason });
     throw new ForgeError('INVALID_OWNER_DATA', `Invalid owner display document or page (${reason}).`);
   }
 }

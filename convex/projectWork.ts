@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { requireSourceAuthority } from '../src/hosted-source-authority';
-import { detachReturnMetadata } from './projectReturnMetadataStore';
-import { requireActiveReturn } from './projectReturnSupersede';
 import { indexActivity } from '../src/work-hosted-index';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -22,12 +20,11 @@ import { ownedProject, accessibleProject, activeOwnedProject, activeProject } fr
 import { intentAuthority } from './projectContributors';
 import { metadataCommandSchema } from '../src/work-intent-types';
 import { invariant } from '../src/errors';
-import { indexEntry, returnProjection } from './projectWorkIndexFields';
+import { indexEntry } from './projectWorkIndexFields';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { internal } from './_generated/api';
 import { report } from './errors';
 import { emitChange, workChange } from './coordinationWrite';
-import { returnChange } from './coordinationFields';
 
 export const state = query({
   args: { projectId: v.id('hostedProjects') },
@@ -204,204 +201,6 @@ export const append = internalMutation({
   },
   returns: hostedWorkEventDocument,
   handler: appendWork,
-});
-
-export const returnSourceInput = v.object({
-  projectId: v.id('hostedProjects'),
-  owner: v.string(),
-  operationId: v.string(),
-  request: v.string(),
-  command: v.string(),
-  backupId: v.id('projectBackups'),
-  expectedBackupId: v.id('projectBackups'),
-  expectedRevision: v.number(),
-  localRevision: v.number(),
-  at: v.optional(v.string()),
-  projection: v.optional(returnProjection),
-  changes: v.optional(v.array(returnChange)),
-});
-export const returnSource = internalMutation({
-  args: returnSourceInput.fields,
-  returns: hostedWorkEventDocument,
-  handler: async (ctx, input) => {
-    try {
-      const project = await workProject(ctx, await activeOwnedProject(ctx, input.projectId, input.owner));
-      const original = await ctx.db
-        .query('projectWorkEvents')
-        .withIndex('by_project_and_operation', q =>
-          q.eq('projectId', input.projectId).eq('operationId', input.operationId),
-        )
-        .unique();
-      if (original) {
-        invariant(
-          original.request === input.request && original.command === input.command,
-          'WORK_OPERATION_CHANGED',
-          'Reconcile this return’s original source, Work and hosted base.',
-        );
-        return original;
-      }
-      await requireActiveReturn(ctx, input.projectId, input.operationId);
-      invariant(
-        project.work?.backupId === input.expectedBackupId && project.work.revision === input.expectedRevision,
-        'WORK_STALE',
-        'Hosted source or Work changed. The uploaded candidate and current work are retained; download current Work before returning another checkpoint.',
-      );
-      invariant(
-        !project.work?.intentMigration ||
-          (input.projection && [16, 18, 20, 22, 24].includes(JSON.parse(input.projection.metadata).schema)),
-        'WORK_UPGRADE_REQUIRED',
-        'Hosted Intents migrated while this checkpoint was preparing; return a unified format-16, format-18 or format-20 checkpoint. Existing Work is preserved.',
-      );
-      const backup = await ctx.db.get(input.backupId);
-      invariant(
-        backup?.projectId === input.projectId &&
-          backup.status === 'stored' &&
-          backup.preview.revision === input.localRevision &&
-          input.localRevision >= input.expectedRevision,
-        'INVALID_WORK_JOURNAL',
-        'Select this project’s stored local checkpoint with the current hosted history.',
-      );
-      invariant(
-        !input.projection || input.projection.entries.length + input.projection.removed.length <= 1000,
-        'BAD_ARGUMENT',
-        'Stage large return projections before the final flip.',
-      );
-      let generationId;
-      if (input.projection) {
-        let generation = await selectedGeneration(ctx, project);
-        const detached = !generation && !input.projection.generationId && input.projection.partitionId;
-        if (detached) {
-          generation = await ctx.db.get(detached);
-          invariant(
-            generation?.projectId === project._id &&
-              generation.status === 'ready' &&
-              generation.backupId === input.backupId &&
-              generation.revision === input.localRevision + 1 &&
-              generation.returnOperationId === input.operationId,
-            'WORK_STALE',
-            'Owner display staging changed before the source return.',
-          );
-        }
-        if (generation && (generation._id === input.projection.generationId || detached === generation._id)) {
-          if (input.projection.deltaPartitionId) {
-            const stage = await ctx.db.get(input.projection.deltaPartitionId);
-            invariant(
-              stage?.projectId === project._id &&
-                stage.status === 'ready' &&
-                stage.backupId === input.backupId &&
-                stage.revision === input.localRevision + 1,
-              'WORK_STALE',
-              'Return delta staging changed.',
-            );
-            await detachReturnMetadata(ctx, stage);
-          }
-          const oldPartition = recordPartition(generation);
-          const partition = input.projection.partitionId ?? oldPartition;
-          if (input.projection.partitionId) {
-            const staged = await ctx.db.get(partition);
-            invariant(
-              staged?.projectId === project._id &&
-                staged.status === 'ready' &&
-                staged.backupId === input.backupId &&
-                staged.revision === input.localRevision + 1,
-              'WORK_STALE',
-              'Return index staging changed.',
-            );
-            invariant(
-              !staged.returnCommitPlan || staged.returnCommitDone,
-              'WORK_STALE',
-              'Complete the private return commit before publication.',
-            );
-            await detachReturnMetadata(ctx, staged);
-          }
-          for (const pin of input.projection.removed) {
-            const old = await record(ctx, partition, pin.collection, pin.key);
-            if (old) await ctx.db.delete(old._id);
-          }
-          for (const entry of input.projection.entries) {
-            const old = await record(ctx, partition, entry.collection, entry.key);
-            if (old) {
-              if (!entry.collection.endsWith(':payload')) {
-                const payloadKey = JSON.parse(old.value).payloadKey;
-                if (payloadKey && JSON.parse(entry.value).payloadKey !== payloadKey)
-                  await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retirePayload, {
-                    generationId: partition,
-                    collection: entry.collection,
-                    key: entry.key,
-                    payloadKey,
-                  });
-              }
-              await ctx.db.patch(old._id, { ...entry, ...indexActivity(entry), status: entry.status });
-            } else
-              await ctx.db.insert('projectWorkRecords', {
-                ...entry,
-                ...indexActivity(entry),
-                projectId: project._id,
-                generationId: partition,
-              });
-          }
-          generationId = generation._id;
-          await ctx.db.patch(generationId, {
-            ...(partition !== generationId ? { recordsGenerationId: partition } : {}),
-            backupId: input.backupId,
-            revision: input.localRevision + 1,
-            initialRevision: input.localRevision,
-            metadata: input.projection.metadata,
-            workSchema: JSON.parse(input.projection.metadata).schema,
-          });
-          if (partition !== oldPartition)
-            await ctx.scheduler.runAfter(0, internal.projectReturnIndexStage.retirePartition, {
-              projectId: project._id,
-              partitionId: oldPartition,
-            });
-        }
-      }
-      const id = await ctx.db.insert('projectWorkEvents', {
-        projectId: input.projectId,
-        operationId: input.operationId,
-        request: input.request,
-        previousRevision: input.localRevision,
-        revision: input.localRevision + 1,
-        command: input.command,
-        actor: input.owner,
-        at: input.at ?? new Date().toISOString(),
-      });
-      const changes = input.changes?.length ? input.changes : [{}];
-      for (const [index, change] of changes.entries())
-        await emitChange(ctx, {
-          projectId: input.projectId,
-          actor: input.owner,
-          operationId: `return:${input.operationId}:${index}`,
-          source: 'return',
-          ...change,
-        });
-      await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.sweep, {
-        projectId: project._id,
-        cursor: null,
-      });
-      await setWorkHead(
-        ctx,
-        project._id,
-        input.backupId,
-        input.localRevision + 1,
-        input.projection?.metadata,
-      );
-      await ctx.db.patch(input.projectId, {
-        work: {
-          ...project.work,
-          originBackupId: project.work.originBackupId ?? project.work.backupId,
-          generationId,
-          backupId: input.backupId,
-          initialRevision: input.localRevision,
-          revision: input.localRevision + 1,
-        },
-        revision: project.revision + 1,
-      });
-      return (await ctx.db.get(id))!;
-    } catch (error) {
-      return report(error);
-    }
-  },
 });
 
 export async function appendWork(

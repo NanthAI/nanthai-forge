@@ -96,8 +96,9 @@ test('owner grants retry-safe reader access; reader sees real Work with no write
   const workspace = JSON.parse(
     await modules.projectWorkIndex.workspace._handler(s.ctx, { projectId: 'project' }),
   );
-  for (const key of ['owner', 'intent', 'note', 'intentStatus', 'sourceReturn', 'hostedChannels', 'planning'])
+  for (const key of ['owner', 'intent', 'note', 'intentStatus', 'hostedChannels', 'planning'])
     assert.equal(workspace.capabilities[key], false, key);
+  assert.equal(Object.hasOwn(workspace.capabilities, 'sourceReturn'), false);
   const detail = await modules.projectWorkIndex.detail._handler(s.ctx, {
     projectId: 'project',
     collection: 'intents',

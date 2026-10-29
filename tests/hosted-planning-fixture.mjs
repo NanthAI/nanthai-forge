@@ -12,7 +12,6 @@ import { state } from './hosted-fixture.mjs';
 import { readHosted } from './hosted-read.mjs';
 export const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 export const work = await import(moduleUrl('../convex/projectWork.ts'));
-export const returns = await import(moduleUrl('../convex/projectSourceReturn.ts'));
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
 export async function setup(t, native = true, prepare) {

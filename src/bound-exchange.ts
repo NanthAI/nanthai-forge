@@ -1,18 +1,15 @@
-import { ensureWorkIndex } from './work-index-client.js';
 import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { withBoundPushProgress } from './bound-push-progress.js';
 import { currentExchangeProgress } from './exchange-progress-hooks.js';
 import { acknowledgePendingExchange } from './pending-exchange.js';
 import { currentExchangeObservation, withExchangeObservation } from './exchange-observation.js';
-import { supersedeRetainedPush } from './bound-exchange-supersede.js';
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 // SPDX-License-Identifier: Apache-2.0
 import { withQueueSlot } from './landing-queue.js';
 import { withWorkLockOptions } from './work-lock.js';
 import { withWorkProgress, workProgress } from './work-progress.js';
 import { retryExchange } from './exchange-retry.js';
-import { formatSourceReturnProgress } from './source-return-progress.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -25,8 +22,8 @@ import { digest } from './hash.js';
 import { ConvexExchange } from './exchange-client.js';
 import { prepareNativeExchange, pushNativeExchange } from './native-exchange.js';
 import { parseWorkBytes } from './work-metadata.js';
-import { reconcileExchange } from './exchange-reconcile.js';
 import { ForgeError, invariant } from './errors.js';
+import { CUTOVER_UPGRADE } from './cutover-version.js';
 type PendingPush = NonNullable<HostState['push']>;
 const REBASE_ATTEMPTS = 3;
 export type BoundExchangeOptions = {
@@ -58,14 +55,13 @@ export async function boundExchange(
   root: string,
   action: 'push' | 'pull',
   target?: string,
-  supersedeRetained = false,
   options: BoundExchangeOptions = {},
 ) {
   const store = new WorkStore(root),
     binding = readHostState(store).binding;
   try {
     const { value, observation } = await withExchangeObservation(() =>
-      runBoundExchange(root, action, target, supersedeRetained, options),
+      runBoundExchange(root, action, target, options),
     );
     return { ...value, observation };
   } catch (error) {
@@ -77,7 +73,6 @@ async function runBoundExchange(
   root: string,
   action: 'push' | 'pull',
   target: string | undefined,
-  supersedeRetained: boolean,
   options: BoundExchangeOptions,
 ) {
   return withWorkLockOptions({ operation: `exchange ${action}` }, () =>
@@ -108,7 +103,6 @@ async function runBoundExchange(
           () =>
             withBoundPushProgress(store, async () => {
               await options.beforePush?.();
-              await supersedeRetainedPush(store, supersedeRetained, report);
               return boundExchangeAction(root, action, target, report, options);
             }),
           { anchor: store.directory, phase: 'exchange push' },
@@ -183,13 +177,14 @@ async function boundExchangeAction(
     state.push = pending;
     return pending;
   });
+  invariant(!request.returnSource, 'CLI_UPGRADE_REQUIRED', CUTOVER_UPGRADE);
   for (;;) {
     let result;
     try {
       result = await pushAttempt(root, store, request, report, options);
     } catch (error) {
-      // Known stale/conflicting phases can use fresh pins next time. A checkpoint
-      // may already be published if source return was stale; it remains retained.
+      // Known stale/conflicting phases can use fresh pins next time.
+      // Already published checkpoints remain retained.
       // Unknown network outcomes keep the exact original request for reconciliation.
       const code =
         error instanceof ForgeError
@@ -204,9 +199,8 @@ async function boundExchangeAction(
         const fresh = await hostedState(client, binding.projectId),
           parentId = request.parentId ?? request.operationId,
           attempt = (request.attempt ?? 0) + 1;
-        // The original capture may predate hosted events already merged into
-        // this attempt. Its retained candidate is the next common source; using
-        // the older capture again would manufacture an original-prefix conflict.
+        // Reuse the prepared candidate as the next capture so retries retain
+        // the original source and Work bytes.
         const prepared =
           request.captureId &&
           existsSync(join(store.directory, `exchange-${request.operationId}`, 'manifest.json'));
@@ -223,16 +217,6 @@ async function boundExchangeAction(
             ? {
                 captureId: prepared ? request.operationId : request.captureId,
                 captureRevision: prepared ? request.revision : request.captureRevision,
-              }
-            : {}),
-          ...(store.native && fresh.work
-            ? {
-                reconcileId: pushAttemptId(parentId, attempt, 'reconcile'),
-                returnSource: {
-                  expectedBackupId: fresh.work.backupId,
-                  revision: fresh.work.revision,
-                  operationId: pushAttemptId(parentId, attempt, 'return'),
-                },
               }
             : {}),
         };
@@ -318,10 +302,8 @@ async function pushAttempt(
     request.previous,
   );
   transport.authorityEpoch = request.authorityEpoch;
-  transport.onReturnProgress = event => process.stderr.write(formatSourceReturnProgress(event));
-  // Capture all mutable local inputs before the first hosted read. The separate
-  // capture ID stays unchanged across rebases; each attempt overlays only hosted
-  // metadata onto these original local bytes.
+  // Capture mutable local inputs before the first hosted read. Rebases retain
+  // these original source and Work bytes.
   report('capturing local source and Work');
   const captured = request.captureId
     ? await prepareNativeExchange(
@@ -344,15 +326,6 @@ async function pushAttempt(
     report('reading hosted Work state');
     const remote = await hostedState(transport, request.projectId);
     request.previous = remote.currentBackup;
-    if (remote.work) {
-      const parent = request.parentId ?? request.operationId;
-      request.reconcileId = pushAttemptId(parent, request.attempt ?? 0, 'reconcile');
-      request.returnSource = {
-        expectedBackupId: remote.work.backupId,
-        revision: remote.work.revision,
-        operationId: pushAttemptId(parent, request.attempt ?? 0, 'return'),
-      };
-    }
     delete request.needsBaseline;
     persist(pending => {
       Object.assign(pending, request);
@@ -370,76 +343,7 @@ async function pushAttempt(
       'The original captured Work differs from its retained digest.',
     );
   }
-  let candidate = captureBytes ? parseWorkBytes(captureBytes) : undefined;
-  if (request.reconcileId && request.returnSource) {
-    report('receiving and reconciling hosted Work journal');
-    const reconcileId = request.reconcileId,
-      returnSource = request.returnSource;
-    // Hosted WORK_STALE here is a hosted CAS mismatch (rebased by the caller); local
-    // Work written meanwhile is merged under the short owner lock, never a failure.
-    const reconciled = await retryExchange('local Work reconciliation', request.reconcileId, () =>
-      reconcileExchange(
-        root,
-        {
-          url: request.deployment,
-          projectId: request.projectId,
-          backupId: returnSource.expectedBackupId,
-          operationId: reconcileId,
-          revision: request.revision,
-          preserveLocalSource: true,
-        },
-        {
-          followLocal: true,
-          onProgress: detail => report(detail, false),
-          ...(candidate
-            ? {
-                candidate,
-                onCandidate: data => {
-                  candidate = data;
-                },
-              }
-            : {}),
-        },
-      ),
-    );
-    if (reconciled.result.status !== 'reconciled') {
-      // Values may contain complete Work collections. Identify a bounded set of
-      // items without serializing source, notes, or whole histories into errors.
-      const conflicts = reconciled.result.conflicts;
-      const items = conflicts
-        .slice(0, 20)
-        .map(({ collection, id, field }) => JSON.stringify({ collection, ...(id ? { id } : {}), field }));
-      throw new ForgeError(
-        'WORK_CONFLICT',
-        `Hosted and local metadata conflict (${conflicts.length} items). Reconcile the retained Work before pushing again. Conflicts: ${items.join(', ')}${conflicts.length > items.length ? `; ${conflicts.length - items.length} more` : ''}. Reconcile operation: ${reconcileId}.`,
-      );
-    }
-    request.revision = Math.max(request.revision, reconciled.result.receipt.revision);
-    // Retain the derived attempt before recording reconciliation as complete.
-    // A crash can repeat the original reconciliation and receive its same receipt.
-    if (captured && candidate) {
-      report('preparing reconciled checkpoint');
-      await prepareNativeExchange(
-        store,
-        request.revision,
-        request.operationId,
-        transport.metadataTrees,
-        transport.checkpointKey(request.returnSource?.expectedBackupId),
-        request.returnSource ? transport.checkpointKey(request.returnSource.expectedBackupId) : undefined,
-        {
-          pinCurrent: true,
-          captured: { directory: captured.directory, data: candidate },
-          ...(transport.workRecords ? { recordMetadata: true } : {}),
-          ...(request.returnSource ? { journalRevision: request.returnSource.revision } : {}),
-        },
-      );
-    }
-    delete request.reconcileId;
-    persist(pending => {
-      Object.assign(pending, request);
-      delete pending.reconcileId;
-    });
-  }
+  const candidate = captureBytes ? parseWorkBytes(captureBytes) : undefined;
   report('preparing and uploading checkpoint');
   const result = await retryExchange(
     'local checkpoint push',
@@ -448,13 +352,6 @@ async function pushAttempt(
       pushNativeExchange(store, request.revision, request.operationId, transport, {
         deferPendingAcknowledgement: true,
         ...(captured && candidate ? { captured: { directory: captured.directory, data: candidate } } : {}),
-        ...(request.returnSource
-          ? {
-              workBaselineKey: transport.checkpointKey(request.returnSource.expectedBackupId)!,
-              ownerDerivedBaselineKey: transport.checkpointKey(request.returnSource.expectedBackupId)!,
-              journalRevision: request.returnSource.revision,
-            }
-          : {}),
         ...(store.native
           ? {
               pinCurrent: true,
@@ -471,18 +368,5 @@ async function pushAttempt(
       }),
     { localSnapshot: true },
   );
-  if (!request.returnSource) return result;
-  report('returning hosted source');
-  const sourceReturn = await transport.returnSource(
-    result.backupId,
-    request.returnSource.expectedBackupId,
-    request.returnSource.revision,
-    request.returnSource.operationId,
-    result.ownerDerived,
-  );
-  report('refreshing hosted Work index');
-  await retryExchange('hosted index refresh', request.operationId, () =>
-    ensureWorkIndex(transport.client, request.projectId),
-  );
-  return { ...result, sourceReturn };
+  return result;
 }

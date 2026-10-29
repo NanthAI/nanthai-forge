@@ -12,7 +12,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { fixture, checkpoint, modules } from './project-exchange-fixture.mjs';
 const { report } = await import(moduleUrl('../convex/errors.ts'));
 
-for (const method of ['publish', 'published', 'returnSource', 'journal'])
+for (const method of ['publish', 'published', 'journal'])
   test(`${method} retries an unknown hosted reply with identical operation and payload`, async t => {
     const exchange = new ConvexExchange(
         'https://fixture.invalid',
@@ -30,33 +30,17 @@ for (const method of ['publish', 'published', 'returnSource', 'journal'])
         throw Error('[Request ID: abc123] INTERNAL_ERROR synthetic-private-payload');
       }
       assert.equal(committed, 1);
-      return method === 'journal' ? 'journal' : method === 'returnSource' ? { id: 'receipt' } : 'backup';
+      return method === 'journal' ? 'journal' : 'backup';
     });
     const result =
-      method === 'returnSource'
-        ? await exchange.returnSource('candidate', 'base', 12, randomUUID())
-        : method === 'journal'
-          ? await exchange.journal()
-          : await exchange[method]({ sha256: 'a'.repeat(64), size: 4 });
+      method === 'journal'
+        ? await exchange.journal()
+        : await exchange[method]({ sha256: 'a'.repeat(64), size: 4 });
     assert.ok(result);
     assert.equal(calls.length, 2);
     assert.deepEqual(calls[1], calls[0]);
     assert.equal(committed, 1);
   });
-
-test('source return resumes committed continuations without inventing operation IDs', async t => {
-  const exchange = new ConvexExchange('https://fixture.invalid', 'synthetic', 'project', randomUUID(), null),
-    inputs = [];
-  t.mock.method(exchange.client, 'action', async (_ref, input) => {
-    inputs.push(input);
-    if (inputs.length === 2)
-      throw new ConvexError({ code: 'HOSTED_CONFLICT', message: 'Concurrent hosted transaction.' });
-    return inputs.length < 4 ? { pending: true } : { id: 'once' };
-  });
-  assert.deepEqual(await exchange.returnSource('candidate', 'base', 1, randomUUID()), { id: 'once' });
-  assert.equal(inputs.length, 4);
-  for (const input of inputs) assert.deepEqual(input, inputs[0]);
-});
 
 test('push retries local Work races with the same operation then fails typed after its bounded budget', async () => {
   const operationId = randomUUID(),
@@ -207,31 +191,4 @@ test('hosted journal reads detect a moving head and retry to a consistent snapsh
   assert.equal(moved, true);
   assert.equal(JSON.parse(json).source.backupId, backupId);
   assert.ok(reads >= 4);
-});
-
-test('source-return continuation retries retain their exact payloads', async t => {
-  const exchange = new ConvexExchange('https://fixture.invalid', 'synthetic', 'project', randomUUID(), null),
-    calls = [],
-    events = [],
-    operationId = randomUUID(),
-    progress = { phase: 'views', step: 3, done: 1, total: 2, elapsedMs: 100, etaSeconds: 1 },
-    receipt = { id: 'receipt' };
-  exchange.onReturnProgress = event => events.push(event);
-  t.mock.method(exchange.client, 'action', async (_ref, input) => {
-    calls.push(structuredClone(input));
-    if (calls.length === 1) throw Error('INTERNAL_ERROR after return attempt');
-    if (calls.length === 2) return { pending: true, resumed: true, progress: JSON.stringify(progress) };
-    if (calls.length === 3)
-      throw new ConvexError({ code: 'HOSTED_CONFLICT', message: 'Concurrent transaction.' });
-    return receipt;
-  });
-  assert.equal(await exchange.returnSource('candidate', 'base', 12, operationId), receipt);
-  assert.equal(calls.length, 4);
-  assert.deepEqual(calls[1], calls[0]);
-  assert.deepEqual(calls[3], calls[2]);
-  assert.equal(calls[0].statusOnly, undefined);
-  assert.equal(calls[2].statusOnly, undefined);
-  assert(calls.every(input => input.operationId === operationId && input.revision === 12));
-  assert.deepEqual(events[0], { ...progress, resumed: true });
-  assert.equal(events.at(-1).phase, 'complete');
 });
