@@ -224,3 +224,4 @@ Native bound pushes retain a consistent local snapshot before the first hosted
 read and allow later Work writes to travel on the next push. Known hosted CAS
 mismatches rebase with deterministic attempt IDs up to three times after the
 initial attempt; unknown replies retain their original pins.
+<!-- off-Mac cancel qualification probe 1793273175 -->
