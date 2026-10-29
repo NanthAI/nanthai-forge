@@ -45,15 +45,15 @@ export function landingState(read?: LandingRead | null, superseded = false): Lan
           ? 'Check waiting for a runner'
           : reason === 'checking'
             ? 'Checking'
-            : read.request.phase === 'ready'
-              ? 'Landing'
-              : reason === 'waiting-for-review'
-                ? 'Waiting for review'
+            : reason === 'waiting-for-review'
+              ? 'Waiting for review'
+              : read.request.phase === 'ready'
+                ? 'Landing'
                 : 'Queued',
       tone:
         reason === 'pending-infra'
           ? 'stale'
-          : reason === 'checking' || read.request.phase === 'ready'
+          : reason !== 'waiting-for-review' && (reason === 'checking' || read.request.phase === 'ready')
             ? 'running'
             : 'waiting',
       pending: true,

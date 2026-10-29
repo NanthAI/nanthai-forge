@@ -11,9 +11,9 @@ import {
 import { syncInputSchema } from './hosted-sync.js';
 import { saveBytes, savePin } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState, type NativeFile } from './native-state-format.js';
 import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js';
-import { buildHostedComposeState } from './hosted-compose-worker.js';
+import { buildHostedComposeState, changedPaths, type ComposeBases } from './hosted-compose-worker.js';
 import { buildHostedSyncState } from './hosted-sync-worker.js';
 import { readJson, sourceStepBytes, full, type StepMeter } from './hosted-source-step-verify.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
@@ -118,20 +118,30 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
       right = (c.selections[0] as { head: string }).head,
       left = plan.base.head;
     const tips = [...new Set([left, right])].filter(id => !c.parents[id]);
+    // Both tips are read in one action so their manifests also sign changed paths.
+    const size = tips.reduce((sum, id) => sum + c.inventory[id]!.object.size, 0);
+    if (tips.length && (full(m) || (m.objects && m.bytes + size > sourceStepBytes))) {
+      m.yielded = true;
+      return;
+    }
     await io.prepareRead?.(tips.map(id => c.inventory[id]!.object));
+    const files = new Map<string, NativeFile[]>();
     for (const id of tips) {
-      const ref = c.inventory[id]!;
-      if (full(m) || (m.objects && m.bytes + ref.object.size > sourceStepBytes)) {
-        m.yielded = true;
-        return;
-      }
       const reader = new MemorySourceReader(new MemoryMergeSource({}), io),
-        state = parseNativeState(await reader.bytes(ref));
+        state = parseNativeState(await reader.bytes(c.inventory[id]!));
       c.parents[id] = state.parents;
       c.states.push(...state.parents);
+      files.set(id, state.files);
     }
     if (left === right || c.parents[left]!.includes(right) || c.parents[right]!.includes(left)) {
       c.head = left === right || c.parents[left]!.includes(right) ? left : right;
+      if (c.head !== left && c.composeBases) {
+        if (files.has(left) && files.has(right)) {
+          const bases: ComposeBases = new Map();
+          changedPaths(bases, files.get(left)!, files.get(right)!);
+          c.composeBases = [...bases];
+        } else delete c.composeBases;
+      }
       c.index = 1;
       c.phase = 'compute';
       return;
@@ -218,7 +228,12 @@ export async function computeMergeStep(
             kind: 'forge-hosted-compose-result',
             input: c.input,
             algorithm: plan.algorithm,
-            result: { status: 'clean', state },
+            // A fast-forward records exactly the tip difference.
+            result: {
+              status: 'clean',
+              state,
+              ...(c.composeBases ? { paths: c.composeBases.map(([path]) => path).sort() } : {}),
+            },
           }),
         ),
       ),
@@ -248,6 +263,7 @@ export async function computeMergeStep(
     invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve intermediate State.');
     main = (await io.describeBatch([c.head]))[0]!;
   }
+  const bases: ComposeBases | null = c.composeBases ? new Map(c.composeBases) : null;
   const result = await buildHostedComposeState(
     c.input,
     {
@@ -260,7 +276,9 @@ export async function computeMergeStep(
     reader,
     source,
     async () => {},
+    bases,
   );
+  if (bases) c.composeBases = [...bases];
   const manifest = composeResultSchema.parse(
     JSON.parse(source.object(result.output.sha256).toString('utf8')),
   );

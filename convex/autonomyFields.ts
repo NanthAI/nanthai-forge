@@ -24,6 +24,7 @@ export const autonomyPolicy = v.object({
     batchWindowMs: v.optional(v.number()),
     autoActors: v.optional(v.array(v.string())),
     protectedPaths: v.array(v.string()),
+    ownerApprovalPaths: v.optional(v.array(v.string())),
   }),
   checks: v.optional(
     v.object({

@@ -3,7 +3,16 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import type { SourceStepCursor } from './hosted-source-step.js';
-const fields = ['files', 'inventory', 'queue', 'seen', 'parents', 'selections', 'calculations'] as const;
+const fields = [
+  'files',
+  'inventory',
+  'queue',
+  'seen',
+  'parents',
+  'selections',
+  'calculations',
+  'composeBases',
+] as const;
 type Section = { sha256: string; id: string };
 export type SourceProgress = {
   kind: 'forge-source-progress-v1';

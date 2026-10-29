@@ -1458,12 +1458,14 @@ and completion evidence while Lane status materialization is pending. Failed
 materialization can resume from the retained receipt; completed work schedules
 nothing. Recovery/export folding of these snapshot deltas remains H21 work.
 
-People can accept clean unchecked Candidates. Agents still need an exact passing
-run and current autonomy permission. Existing supervised/actor/protected-path rules
-return waiting-for-review. H08 currently supplies no trusted changed-path coverage;
-protected-path policy therefore uses its existing unavailable-coverage review rule,
-never caller-supplied path claims. No new policy, UI step, provider call or cutover
-is introduced. The API is exercised with local metadata/provider/source-worker fakes.
+Owners can explicitly accept clean unchecked Candidates. Agents and public-project
+contributors need an exact passing run and current autonomy permission. Trusted
+compose results retain exact changed paths and server-derived owner-only input
+provenance. Public contributor changes to protected paths wait for explicit owner
+approval at final publication; missing legacy coverage cannot bypass that gate.
+Review waits schedule no idle work. See [public governance](operations/governance.md)
+for defaults, policy edits, version skew and the owner acceptance API. The API is
+exercised with local metadata/provider/source-worker fakes.
 
 ### Composed Intent contracts
 

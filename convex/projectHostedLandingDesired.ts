@@ -137,6 +137,7 @@ export const submit = mutation({
         error: null,
         timing: { submittedAt: at, composeStartedAt: source.operation.firstAttempt.at },
         request: {
+          ...(command.governanceVersion ? { governanceVersion: command.governanceVersion } : {}),
           operationId: command.operationId,
           authorityEpoch: command.authorityEpoch,
           channel: 'main',

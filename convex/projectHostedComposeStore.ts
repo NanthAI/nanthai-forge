@@ -20,6 +20,7 @@ const progress = z
 export const composeStateSchema = z
   .object({
     semanticPlan: semanticPlanSchema.optional(),
+    ownerInputs: z.boolean().optional(),
     request: composeRequestSchema,
     main: saveWorkerObjectSchema,
     inputs: progress,
@@ -43,14 +44,14 @@ export const composeForJob = (ctx: QueryCtx | MutationCtx, projectId: Id<'hosted
     .withIndex('by_project_and_job', q => q.eq('projectId', projectId).eq('jobId', jobId))
     .unique();
 export async function loadCompose(ctx: QueryCtx | MutationCtx, input: SaveIdentity, writing = true) {
-  await activeProject(ctx, input.projectId, input.actor);
+  const project = await activeProject(ctx, input.projectId, input.actor);
   const row = await composeRow(ctx, input);
   invariant(row, 'NOT_FOUND', 'Prepare this original hosted composition first.');
   const state = composeStateSchema.parse(JSON.parse(row.value));
   if (writing) await hostedWriteProject(ctx, input.projectId, input.actor, state.request.authorityEpoch);
   const operation = await hostedOperationRow(ctx, input.projectId, input.actor, input.operationId);
   invariant(operation, 'SOURCE_UNAVAILABLE', 'The original compose operation is unavailable.');
-  return { row, state, operation: hostedOperationSchema.parse(JSON.parse(operation.value)) };
+  return { row, state, project, operation: hostedOperationSchema.parse(JSON.parse(operation.value)) };
 }
 export async function writeComposeState(
   ctx: MutationCtx,

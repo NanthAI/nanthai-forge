@@ -109,6 +109,7 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
       (own ? await semanticBaseSequence(ctx, input.projectId, own.base.receiptId) : 0);
   }
   const stateValue: ComposeState = {
+    ownerInputs: originalCandidate?.governance?.ownerInputs === true,
     ...(semanticPlan.members.length ? { semanticPlan } : {}),
     request,
     main: await saveObject(ctx, input.projectId, { sha256: pending.main.head }),

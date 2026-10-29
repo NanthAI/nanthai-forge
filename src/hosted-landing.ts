@@ -21,6 +21,7 @@ export const landingCheckSelectionSchema = z.union([
 export const hostedLandingRequestSchema = z
   .object({
     operationId: z.uuid(),
+    governanceVersion: z.literal(1).optional(),
     authorityEpoch: checkNumber,
     channel: z.literal('main'),
     expectedMain: mainExpectationSchema,

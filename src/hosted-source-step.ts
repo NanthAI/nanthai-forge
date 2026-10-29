@@ -60,6 +60,9 @@ export type SourceStepCursor = {
   output: WorkerPin | null;
   changed: boolean;
   calculations?: Record<string, import('./hosted-source-merge-journal.js').SourceCalculationResult>;
+  /** Compose base entries of changed paths. Absent on cursors from older code:
+   * their changed paths are unknown and the Candidate waits for the owner. */
+  composeBases?: [string, Pick<NativeFile, 'blob' | 'mode'> | null][];
 };
 export function initialSourceStep(input: WorkerPin): SourceStepCursor {
   return {
@@ -85,6 +88,7 @@ export function initialSourceStep(input: WorkerPin): SourceStepCursor {
     output: null,
     changed: false,
     calculations: {},
+    composeBases: [],
   };
 }
 async function verifyQueue(c: SourceStepCursor, io: StepTransport, m: StepMeter) {

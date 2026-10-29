@@ -41,13 +41,16 @@ export async function loadSave(ctx: QueryCtx | MutationCtx, input: SaveIdentity,
   invariant(opRow, 'SOURCE_UNAVAILABLE', 'The original save operation is unavailable.');
   return { row, state, operation: hostedOperationSchema.parse(JSON.parse(opRow.value)) };
 }
-export async function saveLane(
+export async function saveLaneRecord(
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; actor: string; laneId: string },
 ) {
   const row = await readHostedRecord(ctx, { ...input, kind: 'lane', key: input.laneId });
   invariant(row, 'NOT_FOUND', 'Hosted Lane not found on this project.');
-  return hostedLaneSchema.parse(JSON.parse(row.value));
+  return { lane: hostedLaneSchema.parse(JSON.parse(row.value)), ownerOnly: row.ownerOnly === true };
+}
+export async function saveLane(...args: Parameters<typeof saveLaneRecord>) {
+  return (await saveLaneRecord(...args)).lane;
 }
 export const sameSaveLane = (
   lane: z.infer<typeof hostedLaneSchema>,

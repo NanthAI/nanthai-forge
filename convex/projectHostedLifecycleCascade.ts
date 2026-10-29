@@ -73,6 +73,7 @@ export async function advanceLifecycle(ctx: MutationCtx, plan: LifecyclePlan) {
       ...hostedRecordIndex(record),
       version: record.version,
       bodyId,
+      ...(row.ownerOnly !== undefined ? { ownerOnly: row.ownerOnly } : {}),
       digest: ref.digest,
       bytes: ref.bytes,
       lifecyclePlanId: plan._id,

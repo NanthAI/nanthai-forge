@@ -11,6 +11,7 @@ import { saveBytes, buildSavePages } from '../dist/hosted-save.js';
 import { buildComposePages } from '../dist/hosted-compose.js';
 import { digest } from '../dist/hash.js';
 import { buildHostedSourceState } from '../dist/hosted-source-worker.js';
+import { changedPaths } from '../dist/hosted-compose-worker.js';
 const at = '2026-01-01T00:00:00.000Z';
 function fixture() {
   const objects = new Map(),
@@ -324,8 +325,12 @@ test('one direct saved child composes in one action without retained-history rea
     message: 'merge',
     at,
   });
+  const expected = await buildHostedSourceState(input, x.io);
+  x.reads.length = 0;
   const result = await drain(x, input, true);
   assert.equal(result.cursor.head, right.sha256);
+  assert.deepEqual(result.cursor.output, expected.output, 'fast-forward signs the fixed-worker paths');
+  assert.deepEqual(JSON.parse(x.objects.get(result.cursor.output.sha256)).result.paths, ['new']);
   assert.equal(result.metrics.length, 1);
   assert(!x.reads.some(pin => retained.includes(pin.sha256)));
 });
@@ -446,6 +451,93 @@ test('20 selected Lanes share a bounded action and metadata windows', async () =
     actual = await drain(x, input, true);
   assert.deepEqual(actual.cursor.output, expected.output);
   assert.equal(actual.metrics.length, 1, 'small merge inputs batch within the object/byte budget');
+});
+test('changed paths span every composition step and action; old cursors sign no paths', async () => {
+  const x = fixture(),
+    file = (path, text) => ({ path, mode: 'file', blob: x.put(text).sha256 }),
+    shared = file('shared', 'shared'),
+    workflow = file('.github/workflows/deploy.yml', 'deploy'),
+    base = x.state([shared]);
+  // The protected change arrives only through a dependency; a descendant Lane
+  // removes a temporary file, and the last selected Lane changes an ordinary path.
+  const dep = x.state([shared, workflow, file('tmp', 'temporary')], [base.sha256]),
+    cleanup = x.state([shared, workflow], [dep.sha256]);
+  const lanes = [
+    cleanup,
+    ...Array.from({ length: 60 }, (_, i) => x.state([shared, file(`lane-${i}`, `lane ${i}`)], [base.sha256])),
+  ].map(head => ({
+    laneId: randomUUID(),
+    head: head.sha256,
+    version: 0,
+    sourceVersion: 0,
+    lifecycleVersion: 0,
+    state: { object: head, recipe: null },
+  }));
+  const inputs = buildComposePages(lanes),
+    dependencies = buildComposePages([
+      { candidateId: randomUUID(), head: dep.sha256, state: { object: dep, recipe: null } },
+    ]);
+  for (const page of [...inputs.pages, ...dependencies.pages]) x.json(page.value);
+  const plan = {
+    schema: 1,
+    kind: 'forge-hosted-compose-input',
+    base: { head: base.sha256, receiptId: 'main' },
+    main: { object: base, recipe: null },
+    inputs: inputs.manifest,
+    dependencies: dependencies.manifest,
+    algorithm: 'forge-native-compose-v1',
+    message: 'merge',
+    at,
+  };
+  const input = x.json(plan),
+    expected = await buildHostedSourceState(input, x.io),
+    actual = await drain(x, input, true);
+  assert(actual.metrics.length > 1, 'base entries survive durable cursors between actions');
+  assert.deepEqual(actual.cursor.output, expected.output);
+  const paths = JSON.parse(x.objects.get(actual.cursor.output.sha256)).result.paths;
+  assert.equal(paths[0], '.github/workflows/deploy.yml');
+  assert(!paths.includes('tmp') && !paths.includes('shared'));
+  assert.equal(paths.length, 61);
+  const single = buildComposePages([lanes[1]]),
+    fastForward = x.json({ ...plan, inputs: single.manifest, dependencies: buildComposePages([]).manifest });
+  for (const page of [...single.pages, ...buildComposePages([]).pages]) x.json(page.value);
+  for (const old of [input, fastForward]) {
+    let c = initialSourceStep(old);
+    delete c.composeBases;
+    while (c.phase !== 'done') c = JSON.parse(JSON.stringify((await runSourceStep(c, x.io)).cursor));
+    const result = JSON.parse(x.objects.get(c.output.sha256)).result;
+    assert.equal(result.status, 'clean');
+    assert(!('paths' in result), 'unknown coverage is never signed as complete');
+  }
+});
+test('dogfood-size changed-path bases stay compact in durable progress', async t => {
+  const blob = i => digest(`blob-${i}`),
+    before = Array.from({ length: 26000 }, (_, i) => ({
+      path: `src/f-${i}.ts`,
+      blob: blob(i),
+      mode: 'file',
+    })),
+    after = before.map((file, i) => (i % 13 === 0 ? { ...file, blob: blob(-i - 1) } : file));
+  const started = performance.now(),
+    bases = new Map(),
+    paths = changedPaths(bases, before, after),
+    elapsedMs = performance.now() - started;
+  assert.equal(paths.length, 2000);
+  const c = { ...initialSourceStep({ sha256: 'a'.repeat(64), size: 1 }), composeBases: [...bases] },
+    writes = [];
+  const saved = await saveSourceProgress(c, null, async bytes => {
+    writes.push(bytes.length);
+    return String(writes.length);
+  });
+  const rawBytes = Buffer.byteLength(JSON.stringify(c.composeBases)),
+    sectionBytes = writes[0];
+  assert(saved.value.sections.composeBases, 'large base sets leave the small cursor');
+  assert(
+    rawBytes < 120 * paths.length && sectionBytes < 100 * 1024,
+    JSON.stringify({ rawBytes, sectionBytes }),
+  );
+  assert(elapsedMs < 2000);
+  t.diagnostic(JSON.stringify({ files: 26000, changed: paths.length, rawBytes, sectionBytes, elapsedMs }));
 });
 test('journaled virtual-base merges retain native recursive results and file/directory alternatives', async () => {
   for (const pathClash of [false, true]) {

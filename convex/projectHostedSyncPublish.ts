@@ -184,6 +184,7 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
         ...input,
         authorityEpoch,
         expectedVersion: lane.version - 1,
+        ownerOnly: state.ownerInputs === true,
         record: lane,
       });
     }

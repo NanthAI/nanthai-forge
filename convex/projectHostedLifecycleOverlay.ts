@@ -73,6 +73,7 @@ export async function materializeLifecycleLane(
     parent: row.parent,
     status: row.status,
     version: row.version,
+    ...(row.ownerOnly !== undefined ? { ownerOnly: row.ownerOnly } : {}),
     recordId: row._id,
   });
 }

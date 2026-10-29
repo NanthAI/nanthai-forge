@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { mutation, query, internalMutation, type MutationCtx } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, activeOwnedProject } from './projectAuthority';
 import { claimReadyLanding } from './projectHostedLandingControl';
 import {
   acceptanceSelection,
@@ -81,6 +81,45 @@ export const accept = mutation({
       });
       return canonicalPayload(
         claim ? await publishAcceptance(ctx, claim) : { status: 'pending', reason: 'queued' },
+      );
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+/** Explicit acceptance of an exact prepared contributor Candidate by the owner.
+ * Device identities remain agents and cannot approve their own automation. */
+export const approve = mutation({
+  args: selection,
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    try {
+      const actor = await acceptanceActor(ctx);
+      await activeOwnedProject(ctx, input.projectId, actor.id);
+      invariant(
+        actor.kind === 'person',
+        'PROJECT_UNAVAILABLE',
+        'Owner approval requires explicit person acceptance.',
+      );
+      const { attempt } = await acceptanceSelection(ctx, input);
+      if (await acceptanceRow(ctx, { projectId: input.projectId, receiptId: attempt.operations.accept }))
+        return canonicalPayload(
+          await publishAcceptance(
+            ctx,
+            { ...input, channel: 'main', owner: attempt.operations.accept, token: 0 },
+            Date.now(),
+            actor,
+          ),
+        );
+      const claim = await claimReadyLanding(ctx, {
+        ...input,
+        channel: 'main',
+        owner: attempt.operations.accept,
+      });
+      return canonicalPayload(
+        claim
+          ? await publishAcceptance(ctx, claim, Date.now(), actor)
+          : { status: 'pending', reason: 'queued' },
       );
     } catch (error) {
       return report(error);

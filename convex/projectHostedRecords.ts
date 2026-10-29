@@ -88,9 +88,11 @@ export async function writeHostedRecord(
     authorityEpoch: number;
     record: unknown;
     expectedVersion: number | null;
+    /** Trusted source reducers may clear provenance when importing unaccepted peer source. */
+    ownerOnly?: boolean;
   },
 ) {
-  await activeProject(ctx, input.projectId, input.actor);
+  const project = await activeProject(ctx, input.projectId, input.actor);
   const { record, ref, value } = hostedRecordValue(input.record);
   if (record.kind === 'lane') await materializeLifecycleLane(ctx, input.projectId, record.id);
   const old = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
@@ -116,7 +118,18 @@ export async function writeHostedRecord(
     'WORK_OPERATION_CHANGED',
     'Saves and Candidates retain their original identity.',
   );
-  const indexed = { ...hostedRecordIndex(record), version: record.version },
+  // Provenance is server metadata, independent of immutable source/record bytes.
+  const ownerOnly =
+    record.kind === 'lane'
+      ? {
+          ownerOnly:
+            input.actor === project.owner &&
+            record.actor === project.owner &&
+            input.ownerOnly !== false &&
+            (head ? head.ownerOnly === true : input.ownerOnly === true || record.head === record.base.head),
+        }
+      : {};
+  const indexed = { ...hostedRecordIndex(record), version: record.version, ...ownerOnly },
     identity = { projectId: input.projectId, kind: record.kind, key: record.id };
   const bodyId = await ctx.db.insert('projectHostedRecordBodies', { projectId: input.projectId, value });
   const id = await ctx.db.insert('projectHostedRecords', {

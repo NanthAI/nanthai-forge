@@ -13,6 +13,7 @@ import type { SaveIdentity } from './projectHostedSaveStore';
 export const syncStateSchema = z
   .object({
     request: syncRequestSchema,
+    ownerInputs: z.boolean().optional(),
     work: syncWorkSchema,
     intentId: z.uuid(),
     base: hostedLaneSchema.shape.base,

@@ -274,7 +274,7 @@ An owner that kept working after a return can receive hosted changes without a f
 
 The project owner adds a contributor by account ID or email. The contributor opens the project from "Shared with you", creates an Intent, downloads the matching journal and source archive as a pair, and restores them locally. They edit, compose a clean Candidate, export the archive and upload it as a proposal from the Proposals tab.
 
-A proposal is visible, including its contents, to everyone who can read the project, like a pull request. It moves nothing. The owner downloads it and runs `import-native-contribution` with the archive path, hash and candidate State. This creates a separate Lane. The owner composes, checks and accepts it normally. The contributor's checks and reviews stay as provenance. Contributors cannot write source or Channels directly.
+A proposal is visible, including its contents, to everyone who can read the project, like a pull request. It moves nothing. The owner downloads it and runs `import-native-contribution` with the archive path, hash and candidate State. This creates a separate Lane. The owner composes, checks and accepts it normally. The contributor's checks and reviews stay as provenance. Under native-owner authority, contributors cannot write accepted source or Channels directly. Under server authority they can work in hosted Lanes and submit landings; public projects enforce [owner approval for protected paths](operations/governance.md), including when a contributor selects person authority.
 
 ## GitHub
 

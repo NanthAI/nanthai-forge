@@ -114,7 +114,9 @@ export function LandingProgress({
                 <a href={hostedHref({ projectTab: 'checks' })}>Checks settings</a>
               </>
             )}
-            {request.observation.pendingReason === 'waiting-for-review' && <p>Waiting for review</p>}
+            {request.observation.pendingReason === 'waiting-for-review' && (
+              <p>{request.error?.message ?? 'Waiting for review'}</p>
+            )}
             {request.observation.pendingReason === 'waiting-for-dependency' && (
               <p>Waiting for the selected dependency to land</p>
             )}

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { NativeSource, overlappingPaths } from './native-source.js';
+import type { NativeFile } from './native-state-format.js';
 import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { savePin, saveBytes } from './hosted-save.js';
@@ -15,12 +16,30 @@ import type { SourceWorkerReader } from './hosted-source-worker-reader.js';
 import { LazyMergeSource, lazyMerge } from './hosted-merge-reader.js';
 import type { WorkerPin } from './hosted-source-worker-format.js';
 
+export type ComposeBases = Map<string, Pick<NativeFile, 'blob' | 'mode'> | null>;
+const sameFile = (a: Pick<NativeFile, 'blob' | 'mode'> | null | undefined, b: typeof a) =>
+  a?.blob === b?.blob && a?.mode === b?.mode;
+/** Net changed paths against the composition base. A stepped composition over
+ * intermediate heads keeps each path's base entry, recorded when first changed,
+ * so it signs the same paths as one whole composition. */
+export function changedPaths(bases: ComposeBases, before: NativeFile[], after: NativeFile[]) {
+  const left = new Map(before.map(file => [file.path, file])),
+    right = new Map(after.map(file => [file.path, file]));
+  for (const path of new Set([...left.keys(), ...right.keys()])) {
+    const file = left.get(path);
+    if (!bases.has(path) && !sameFile(file, right.get(path)))
+      bases.set(path, file ? { blob: file.blob, mode: file.mode } : null);
+  }
+  return [...bases.keys()].filter(path => !sameFile(bases.get(path), right.get(path))).sort();
+}
 export async function buildHostedComposeState(
   input: WorkerPin,
   value: unknown,
   reader: SourceWorkerReader,
   original: NativeSource,
   progress: () => Promise<void>,
+  /** Base entries of every path changed so far; null when that coverage is unknown. */
+  bases: ComposeBases | null = new Map(),
 ) {
   const plan = composeInputSchema.parse(value),
     source = original instanceof LazyMergeSource ? original : new LazyMergeSource(original.owner);
@@ -134,7 +153,16 @@ export async function buildHostedComposeState(
     );
   }
   await publishGenerated();
-  if (!result) result = { status: 'clean', state: { sha256: head, size: source.object(head).length } };
+  if (!result) {
+    // These exact State manifests are already resident for composition. No blob reads,
+    // source scans, graph queries or provider calls are needed for changed paths.
+    const paths = bases && changedPaths(bases, source.state(plan.base.head).files, source.state(head).files);
+    result = {
+      status: 'clean',
+      state: { sha256: head, size: source.object(head).length },
+      ...(paths ? { paths } : {}),
+    };
+  }
   const output = await reader.publish(
     Buffer.from(
       saveBytes(

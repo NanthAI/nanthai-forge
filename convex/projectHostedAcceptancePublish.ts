@@ -15,14 +15,20 @@ import { hostedMainV2Schema } from '../src/hosted-main';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { effectivePolicy, reviewReason } from '../src/autonomy-policy';
+import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { landingObservation } from '../src/hosted-landing';
 import { digest } from '../src/portable-hash';
+import { governanceReason, requiresGovernedCheck } from '../src/public-governance';
 import { invariant } from '../src/errors';
 /** One constant-size publication transaction. A completed replay authorizes the
  * reader first, then returns the original receipt without rechecking old policy,
  * acquiring another lease or rewinding any later main/saved Lane. */
-export async function publishAcceptance(ctx: MutationCtx, claim: LandingClaim, now = Date.now()) {
+export async function publishAcceptance(
+  ctx: MutationCtx,
+  claim: LandingClaim,
+  now = Date.now(),
+  ownerApproval?: AcceptanceActor,
+) {
   const selected = await acceptanceSelection(ctx, claim);
   await activeProject(ctx, claim.projectId, selected.attempt.actor.id);
   const identity = { projectId: claim.projectId, receiptId: selected.attempt.operations.accept };
@@ -70,6 +76,12 @@ export async function publishAcceptance(ctx: MutationCtx, claim: LandingClaim, n
     'CHANNEL_CHANGED',
     'Main head or receipt changed; retain this attempt and prepare a named retry.',
   );
+  invariant(
+    !ownerApproval || (ownerApproval.id === project.owner && ownerApproval.kind === 'person'),
+    'PROJECT_UNAVAILABLE',
+    'Only explicit owner acceptance can approve protected paths.',
+  );
+  const actor = ownerApproval ?? attempt.actor;
   const policy = effectivePolicy(project);
   invariant(
     digest(canonicalPayload(policy)) === attempt.policyDigest,
@@ -145,20 +157,23 @@ export async function publishAcceptance(ctx: MutationCtx, claim: LandingClaim, n
     };
   }
   invariant(
-    attempt.actor.kind === 'person' || check,
+    !requiresGovernedCheck(project, actor) || check,
     'CHECK_NOT_PASSED',
     'Agent acceptance requires an exact passing check.',
   );
-  // H08 does not yet publish trusted changed-path coverage. Existing policy
-  // explicitly requires review when that coverage is unavailable; never trust
-  // caller-supplied paths or treat missing graph edges as independence.
-  const reason = reviewReason(policy, attempt.actor, null);
+  const reason = governanceReason(
+    project,
+    policy,
+    actor,
+    candidate.governance?.paths ?? null,
+    candidate.governance?.ownerInputs,
+  );
   if (reason) {
     const next = {
       ...state,
       version: state.version + 1,
       observation: landingObservation('waiting-for-review'),
-      error: null,
+      error: { code: 'REVIEW_REQUIRED', message: reason },
     };
     await writeLanding(ctx, row, next, false);
     await releaseLandingQueue(ctx, queue, now);
@@ -176,7 +191,7 @@ export async function publishAcceptance(ctx: MutationCtx, claim: LandingClaim, n
     authorityEpoch: attempt.authorityEpoch,
     previous: attempt.main,
     candidate: attempt.candidate,
-    actor: attempt.actor,
+    actor,
     policyDigest: attempt.policyDigest,
     check,
     snapshot: { id: identity.receiptId, previousId: main.snapshotId, revision: main.sourceRevision + 1 },
@@ -186,7 +201,7 @@ export async function publishAcceptance(ctx: MutationCtx, claim: LandingClaim, n
       lanes: plan.lanes,
       enabled: policy.lifecycle.completeOnAccept && !state.request.keepOpen,
     },
-    automatic: attempt.actor.kind === 'agent',
+    automatic: requiresGovernedCheck(project, actor),
     undo: { kind: 'revert', receiptId: identity.receiptId },
   });
   const value = canonicalPayload(receipt);

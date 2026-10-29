@@ -32,6 +32,8 @@ export const autonomyPolicySchema = z.object({
     batchWindowMs: z.number().int().min(0).max(60_000).optional(),
     autoActors: z.array(z.string().min(1)).optional(),
     protectedPaths: z.array(z.string().min(1)),
+    /** Public-project owner approval; absent selects the built-in governance paths. */
+    ownerApprovalPaths: z.array(z.string().min(1)).optional(),
   }),
   checks: z
     .object({
@@ -95,6 +97,7 @@ export function effectivePolicy(data: { autonomyPolicy?: AutonomyPolicy | undefi
 export const policyWriteSchema = z
   .object({
     action: z.literal('set-policy'),
+    governanceVersion: z.literal(1).optional(),
     operationId: z.string().uuid(),
     /** Compare-and-swap prevents a concurrent settings edit from being overwritten. */
     expectedPolicy: autonomyPolicySchema.optional(),
@@ -118,7 +121,11 @@ export const policyWriteSchema = z
       })
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    value => value.acceptance?.ownerApprovalPaths === undefined || value.governanceVersion === 1,
+    'Editing owner approval paths requires governanceVersion:1.',
+  );
 export type PolicyWrite = z.infer<typeof policyWriteSchema>;
 export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): AutonomyPolicy {
   const base =
@@ -167,7 +174,8 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     'BAD_ARGUMENT',
     'Regenerable-copy cleanup requires auto-on-pass acceptance.',
   );
-  for (const glob of policy.acceptance.protectedPaths) globPattern(glob);
+  for (const glob of [...policy.acceptance.protectedPaths, ...(policy.acceptance.ownerApprovalPaths ?? [])])
+    globPattern(glob);
   return policy;
 }
 /** Repository-relative globs: *, **, ?, character classes and brace alternatives.

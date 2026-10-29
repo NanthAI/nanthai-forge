@@ -517,7 +517,7 @@ export async function executeHostedAgent(
       phase: 'finish',
       composeOperationId,
       submission: await session.mutation('projectHostedLandingDesired:submit', {
-        request: canonicalPayload(desired),
+        request: canonicalPayload({ ...desired, governanceVersion: 1 }),
       }),
     };
   let candidateId = command.candidateId;
@@ -538,6 +538,7 @@ export async function executeHostedAgent(
       if (command.accept === false) return { phase: 'compose', composeOperationId, progress };
       const desired = await session.journal.retain('desired-landing', async () =>
         hostedLandingDesiredSchema.parse({
+          governanceVersion: 1,
           operationId,
           authorityEpoch: epoch,
           composeOperationId,
@@ -550,7 +551,7 @@ export async function executeHostedAgent(
         phase: 'finish',
         composeOperationId,
         submission: await session.mutation('projectHostedLandingDesired:submit', {
-          request: canonicalPayload(desired),
+          request: canonicalPayload({ ...desired, governanceVersion: 1 }),
         }),
       };
     }
@@ -579,6 +580,7 @@ export async function executeHostedAgent(
       });
     }
     return hostedLandingRequestSchema.parse({
+      governanceVersion: 1,
       operationId,
       authorityEpoch: epoch,
       channel: 'main',
@@ -599,7 +601,7 @@ export async function executeHostedAgent(
     };
   // Account JWTs still make agent requests. Person authority is never selected by CLI input.
   const result = await session.mutation('projectHostedLanding:enqueue', {
-    request: canonicalPayload(request),
+    request: canonicalPayload({ ...request, governanceVersion: 1 }),
   });
   let queueAheadSelection: unknown;
   try {

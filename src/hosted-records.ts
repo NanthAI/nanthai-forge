@@ -81,6 +81,10 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
     .object({
       ...common,
       kind: z.literal('candidate'),
+      governance: z
+        .object({ version: z.literal(1), paths: z.array(z.string()), ownerInputs: z.boolean() })
+        .strict()
+        .optional(),
       semanticPlan: semanticPlanSchema.optional(),
       intentId: z.uuid(),
       base: main,

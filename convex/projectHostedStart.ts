@@ -137,6 +137,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     );
   }
   let initialHead = payload.initialHead ?? main.head;
+  let ownerOnly = initialHead === main.head;
   let stack: import('../src/hosted-lane').HostedLaneSelection['stack'];
   if (payload.stackOn) {
     const row = await readHostedRecord(ctx, { projectId, actor, kind: 'lane', key: payload.stackOn });
@@ -148,6 +149,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       'The saved stack parent changed.',
     );
     initialHead = parent.head;
+    ownerOnly = row.ownerOnly === true;
     stack = {
       laneId: parent.id,
       head: parent.head,
@@ -200,6 +202,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       actor,
       authorityEpoch: expected.authorityEpoch,
       expectedVersion: null,
+      ownerOnly,
       record: {
         kind: 'lane',
         id: laneId,

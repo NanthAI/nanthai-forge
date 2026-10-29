@@ -72,6 +72,7 @@ export const prepare = mutation({
         invariant(old, 'SOURCE_UNAVAILABLE', 'The original sync is unavailable.');
         return canonicalPayload({ state: JSON.parse(old.value), terminal: prepared.operation.terminal });
       }
+      let ownerInputs = false;
       let work: SyncState['work'],
         lane: SyncState['lane'] = null,
         intentId: string,
@@ -114,6 +115,7 @@ export const prepare = mutation({
         } else {
           const target = request.target;
           if (target.kind === 'main') {
+            ownerInputs = true;
             const main = await hostedStartMain(ctx, auth.projectId);
             invariant(
               main.head === target.head &&
@@ -124,6 +126,7 @@ export const prepare = mutation({
             );
           } else {
             const selected = await candidate(target.candidateId);
+            ownerInputs = selected.governance?.ownerInputs === true;
             invariant(
               selected.result.status === 'clean' && selected.result.head === target.head,
               'WORK_STALE',
@@ -146,6 +149,7 @@ export const prepare = mutation({
               entry?.phase === 'landed' ||
               entry?.phase === 'terminal-failed';
             right = detached ? target.head : parent.head;
+            ownerInputs = detached || parentRow.ownerOnly === true;
             stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.stack.head });
             stackAfter = { ...lane.stack, head: right, ...(detached ? { detached: true } : {}) };
           }
@@ -158,6 +162,7 @@ export const prepare = mutation({
         }
       }
       const state: SyncState = {
+        ownerInputs,
         request,
         work,
         lane,

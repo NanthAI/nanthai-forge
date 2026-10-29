@@ -73,6 +73,9 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
   } else await saveObject(ctx, input.projectId, result.conflicts);
   const candidate = {
     kind: 'candidate' as const,
+    ...(result.status === 'clean' && result.paths
+      ? { governance: { version: 1 as const, paths: result.paths, ownerInputs: state.ownerInputs === true } }
+      : {}),
     ...(state.semanticPlan ? { semanticPlan: state.semanticPlan } : {}),
     id: state.candidateId,
     version: 0,

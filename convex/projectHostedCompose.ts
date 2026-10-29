@@ -13,7 +13,7 @@ import { activeProject } from './projectAuthority';
 import { readHostedRecord } from './projectHostedRecords';
 import { beginHostedOperation } from './projectHostedOperations';
 import { hostedStartMain } from './projectHostedChannels';
-import { saveLane, sameSaveLane, saveObject } from './projectHostedSaveStore';
+import { saveLaneRecord, sameSaveLane, saveObject } from './projectHostedSaveStore';
 import {
   composeRow,
   loadCompose,
@@ -101,6 +101,7 @@ export const prepare = mutation({
           ? { semanticPlan: { primaryIntentId: request.intentId, afterSequence, members: peers } }
           : {}),
         request,
+        ownerInputs: true,
         main: await saveObject(ctx, input.projectId, { sha256: main.head }),
         inputs: { next: request.inputs.root, pages: 0, count: 0 },
         dependencies: { next: request.dependencies.root, pages: 0, count: 0 },
@@ -130,7 +131,7 @@ export const stage = mutation({
   handler: async (ctx, input) => {
     try {
       const auth = await caller(ctx, input),
-        { row, state, operation } = await loadCompose(ctx, auth);
+        { row, state, operation, project } = await loadCompose(ctx, auth);
       const page = validateComposePage(JSON.parse(input.page)),
         pin = savePin(page),
         progress = state[input.kind],
@@ -176,7 +177,8 @@ export const stage = mutation({
           .unique();
         invariant(!duplicate || input.kind === 'dependencies', 'BAD_ARGUMENT', 'Select each Lane once.');
         if ('laneId' in entry) {
-          const lane = await saveLane(ctx, { ...auth, laneId: entry.laneId });
+          const { lane, ownerOnly } = await saveLaneRecord(ctx, { ...auth, laneId: entry.laneId });
+          state.ownerInputs = state.ownerInputs === true && lane.actor === project.owner && ownerOnly;
           invariant(
             lane.intentId === state.request.intentId && sameSaveLane(lane, entry),
             'WORK_STALE',
@@ -198,6 +200,7 @@ export const stage = mutation({
             'WORK_STALE',
             'Select the exact clean dependency Candidate.',
           );
+          state.ownerInputs = state.ownerInputs === true && candidate.governance?.ownerInputs === true;
           if (!contractMembers.has(candidate.intentId))
             contractMembers.set(candidate.intentId, await semanticMember(ctx, auth, candidate.intentId));
           const member = contractMembers.get(candidate.intentId);

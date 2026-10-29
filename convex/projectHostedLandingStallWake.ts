@@ -24,7 +24,10 @@ export async function scheduleLandingAlarm(ctx: MutationCtx, state: HostedLandin
   const row = canonical ?? desired;
   if (!row) return;
   const at = hostedLandingProgressAt(state);
-  const pending = state.observation.state === 'pending' && state.observation.stall?.lastProgressAt !== at;
+  const pending =
+    state.observation.state === 'pending' &&
+    state.observation.pendingReason !== 'waiting-for-review' &&
+    state.observation.stall?.lastProgressAt !== at;
   if (pending && row.alarm?.lastProgressAt === at) return;
   if (row.alarm) await ctx.scheduler.cancel(row.alarm.taskId);
   if (!pending) {

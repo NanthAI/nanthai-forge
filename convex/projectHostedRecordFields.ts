@@ -16,7 +16,12 @@ export const hostedRef = v.object({
   bytes: v.number(),
 });
 const identity = { projectId: v.id('hostedProjects'), kind: hostedKind, key: v.string() };
-const indexed = { parent: v.string(), status: v.string(), version: v.number() };
+const indexed = {
+  parent: v.string(),
+  status: v.string(),
+  version: v.number(),
+  ownerOnly: v.optional(v.boolean()),
+};
 export const hostedRecordFields = {
   ...identity,
   ...indexed,
