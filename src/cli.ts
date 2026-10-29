@@ -37,6 +37,7 @@ import { landCli } from './land-cli.js';
 import { agentCli } from './agent-cli.js';
 import { readFileSync } from 'node:fs';
 import { nativeOwner } from './native-source.js';
+import { hostedFixStatus } from './hosted-agent-cache.js';
 import { hostedStatusMetrics } from './self-metrics-source.js';
 import { readPendingStatus } from './pending-status-read.js';
 import { formatPendingStatus } from './pending-status-format.js';
@@ -320,7 +321,12 @@ async function main(args: string[]): Promise<unknown> {
           'Use status ROOT [--pending] [--detail] [--ignored] [--offset N] [--limit N] [--json].',
         );
     }
-    const status = readPendingStatus(new WorkStore(args[1]), undefined, undefined, options);
+    const store = new WorkStore(args[1]);
+    const pendingFixes = await hostedFixStatus(store);
+    const status = {
+      ...readPendingStatus(store, undefined, undefined, options),
+      ...(pendingFixes ?? {}),
+    };
     const metrics = await hostedStatusMetrics(args[1]);
     if (metrics) status.metrics = metrics;
     if (args.includes('--json')) return status;

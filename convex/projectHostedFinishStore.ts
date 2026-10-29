@@ -46,6 +46,8 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
     attemptId: state.firstAttemptId,
   });
   let source = state.request.finish.reviewedSource;
+  let restoreBases: HostedFinish['restoreBases'];
+  let recoveryRunId: string | undefined;
   if (source) {
     // Browser approval selects the canonical Candidate, irrespective of who
     // composed it. Supplied manifests cannot substitute different source roots.
@@ -58,6 +60,8 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
     });
     invariant(row, 'NOT_FOUND', 'Select a canonical reviewed Candidate.');
     const candidate = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
+    if (row.restoreBases)
+      restoreBases = hostedFinishSchema.shape.restoreBases.parse(JSON.parse(row.restoreBases));
     invariant(
       source.intentId === candidate.intentId &&
         source.authorityEpoch === state.request.authorityEpoch &&
@@ -80,6 +84,8 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
       'Finish selects the original completed composition.',
     );
     source = original.state.request;
+    restoreBases = original.state.restoreBases;
+    recoveryRunId = original.row.culpritRunId;
   }
   invariant(
     canonicalPayload(source.inputs.root) === canonicalPayload(attempt.candidate.inputs) &&
@@ -137,7 +143,15 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
     parentSubmissionId: after,
     waiting: after !== null,
     wake: null,
-    value: canonicalPayload(hostedFinishSchema.parse({ source, check, pending: null })),
+    value: canonicalPayload(
+      hostedFinishSchema.parse({
+        source,
+        check,
+        pending: null,
+        ...(restoreBases ? { restoreBases } : {}),
+        ...(recoveryRunId ? { recoveryRunId } : {}),
+      }),
+    ),
   });
   await scheduleFinish(ctx, (await ctx.db.get(id))!);
 }

@@ -28,6 +28,7 @@ export const hostedRecordFields = {
   bodyId: v.id('projectHostedRecordBodies'),
   /** Server-written Candidate creator, independent of its check requester. */
   creatorAccountId: v.optional(v.string()),
+  restoreBases: v.optional(v.string()),
   digest: v.string(),
   bytes: v.number(),
   lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
@@ -60,6 +61,7 @@ export const hostedRecordTables = {
     .index('by_project_and_kind_and_status', ['projectId', 'kind', 'status'])
     .index('by_project', ['projectId']),
   projectHostedOperations: defineTable({
+    recovery: v.optional(v.string()),
     projectId: v.id('hostedProjects'),
     actor: v.string(),
     operationId: v.string(),

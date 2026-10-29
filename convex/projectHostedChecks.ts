@@ -1,3 +1,4 @@
+import { fixGate } from '../src/culprit-bisect';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { requestDirectCancel } from './projectHostedActionsDirect';
 import { scheduleDirectActions } from './projectHostedActionsDirect';
@@ -199,11 +200,13 @@ export async function enqueueHostedCheck(
   // Older controller/provider clients strictly parse run documents. Only the
   // direct Actions session has the additive gate handshake; all other routes
   // retain their existing full-check wire shape.
+  const recoveryGate = fixGate({ needsFix: row.restoreBases ?? project.needsFix?.[candidate.intentId] });
   const gate =
     runner.provider === 'github-actions' && !runner.credential && project.autonomyPolicy?.acceptance.gate
-      ? await hostedGateForCandidates(ctx, project, [
+      ? (recoveryGate ??
+        (await hostedGateForCandidates(ctx, project, [
           { candidate, actor: { kind: 'agent', id: actor }, contract: member ?? null },
-        ])
+        ])))
       : undefined;
   const run = hostedCheckRunSchema.parse({
     ...(gate ? { gate } : {}),

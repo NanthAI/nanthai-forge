@@ -91,6 +91,7 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
     ...input,
     authorityEpoch: state.request.authorityEpoch,
     expectedVersion: null,
+    ...(state.restoreBases ? { restoreBases: canonicalPayload(state.restoreBases) } : {}),
     record: candidate,
   });
   const terminal = {

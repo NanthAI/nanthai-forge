@@ -17,6 +17,7 @@ export const hostedIntentInputSchema = z.discriminatedUnion('kind', [
 ]);
 export const hostedStartSchema = z
   .object({
+    noticeVersion: z.literal(1).optional(),
     operationId: z.uuid(),
     authorityEpoch: sourceAuthoritySchema.shape.epoch,
     expectedMain: mainExpectationSchema,
@@ -50,6 +51,8 @@ export type HostedLaneSelection = z.infer<typeof hostedLaneSelectionSchema>;
 
 export const hostedStartResultSchema = z
   .object({
+    fixBrief: z.string().optional(),
+    needsFix: z.array(z.record(z.string(), z.json())).optional(),
     schema: z.literal(1),
     operationId: z.uuid(),
     intentId: z.uuid(),

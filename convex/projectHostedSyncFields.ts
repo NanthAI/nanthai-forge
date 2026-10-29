@@ -3,6 +3,7 @@ import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 export const hostedSyncTables = {
   projectHostedSyncs: defineTable({
+    culpritRunId: v.optional(v.string()),
     projectId: v.id('hostedProjects'),
     actor: v.string(),
     operationId: v.string(),

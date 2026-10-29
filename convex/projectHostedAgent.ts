@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { needsFix } from '../src/culprit-bisect';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
@@ -11,9 +12,13 @@ import { report } from './errors';
 import { requireCutoverVersion } from '../src/cutover-version';
 /** Discovery is a current-authority read, never a worker wake or an availability promise. */
 export const capabilities = query({
-  args: { projectId: v.id('hostedProjects'), clientVersion: v.optional(v.string()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    clientVersion: v.optional(v.string()),
+    noticeVersion: v.optional(v.literal(1)),
+  },
   returns: v.string(),
-  handler: async (ctx, { projectId, clientVersion }) => {
+  handler: async (ctx, { projectId, clientVersion, noticeVersion }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to discover hosted agent capabilities.');
@@ -22,6 +27,7 @@ export const capabilities = query({
       if (project.sourceCutover && authority.mode === 'server') requireCutoverVersion(clientVersion);
       return canonicalPayload(
         hostedAgentCapabilitiesSchema.parse({
+          ...(noticeVersion === 1 ? { needsFix: needsFix(project) } : {}),
           schema: 1,
           projectId,
           actor: user.subject,

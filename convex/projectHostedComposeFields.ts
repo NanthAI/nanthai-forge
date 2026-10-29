@@ -3,7 +3,12 @@ import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 const identity = { projectId: v.id('hostedProjects'), actor: v.string(), operationId: v.string() };
 export const hostedComposeTables = {
-  projectHostedComposes: defineTable({ ...identity, jobId: v.string(), value: v.string() })
+  projectHostedComposes: defineTable({
+    culpritRunId: v.optional(v.string()),
+    ...identity,
+    jobId: v.string(),
+    value: v.string(),
+  })
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
     .index('by_project_and_job', ['projectId', 'jobId']),
   projectHostedComposePages: defineTable({

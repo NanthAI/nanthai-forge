@@ -1,3 +1,4 @@
+import { fixGate } from '../src/culprit-bisect';
 import { batchEligible } from '../src/hosted-landing-batch';
 import { semanticMember, mergeSemanticMembers } from './projectSemanticContracts';
 import type { SemanticPlan } from '../src/intent-semantic-conflict';
@@ -89,7 +90,9 @@ export async function pinLandingAttempt(
       'A finish retry must retain the original ordered selection.',
     );
   }
+  const recoveryGate = fixGate({ needsFix: row.restoreBases ?? project.needsFix?.[candidate.intentId] });
   const deferredCheck =
+    !recoveryGate &&
     input.deferCheck !== false &&
     r.finish &&
     !r.finish.after &&
@@ -119,6 +122,7 @@ export async function pinLandingAttempt(
               projectId: input.projectId,
               actor: input.actor.id,
               request: {
+                ...(recoveryGate ? { gate: recoveryGate } : r.check.gate ? { gate: r.check.gate } : {}),
                 operationId: input.operations.check,
                 authorityEpoch: r.authorityEpoch,
                 candidateId: r.candidateId,

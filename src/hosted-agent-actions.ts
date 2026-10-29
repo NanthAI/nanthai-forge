@@ -352,6 +352,7 @@ export async function executeHostedAgent(
       const parent = command.stackOn ? await selectAgentLane(session, command.stackOn) : null;
       return hostedStartSchema.parse({
         operationId,
+        ...(session.capabilities.needsFix !== undefined ? { noticeVersion: 1 } : {}),
         authorityEpoch: epoch,
         expectedMain: { head: main.head, receiptId: main.receipt.id },
         ...((parent?.head ?? command.initialHead)

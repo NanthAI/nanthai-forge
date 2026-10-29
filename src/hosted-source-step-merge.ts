@@ -113,7 +113,13 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
   // The first finish commonly composes one saved direct child of current
   // main. Its two verified tip manifests prove the native fast-forward without
   // fetching unrelated retained ancestry.
-  if (kind === 'forge-hosted-compose-input' && c.selections.length === 1) {
+  // Restore plans reapply an original delta even when its saved head is already
+  // an ancestor of reverted main; tip ancestry cannot prove a no-op for them.
+  if (
+    kind === 'forge-hosted-compose-input' &&
+    c.selections.length === 1 &&
+    !composeInputSchema.parse(c.plan).restoreBases
+  ) {
     const plan = composeInputSchema.parse(c.plan),
       right = (c.selections[0] as { head: string }).head,
       left = plan.base.head;

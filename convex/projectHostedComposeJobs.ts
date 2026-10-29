@@ -103,6 +103,11 @@ export const publish = internalMutation({
   handler: async (ctx, input) => {
     const row = await composeForJob(ctx, input.projectId, input.jobId);
     if (!row) return null;
+    if (row.culpritRunId)
+      await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:advance'), {
+        projectId: row.projectId,
+        runId: row.culpritRunId,
+      });
     return canonicalPayload(
       await publishHostedCompose(ctx, {
         projectId: input.projectId,
@@ -125,6 +130,11 @@ export const resultDownload = internalMutation({
     await loadCompose(ctx, row);
     const job = await loadSourceJob(ctx, input.projectId, input.jobId);
     if (job.status === 'failed' || job.status === 'cancelled') {
+      if (row.culpritRunId)
+        await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:advance'), {
+          projectId: row.projectId,
+          runId: row.culpritRunId,
+        });
       await finishHostedOperation(ctx, {
         projectId: row.projectId,
         actor: row.actor,

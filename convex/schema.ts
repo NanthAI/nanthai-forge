@@ -290,6 +290,7 @@ export const projectPurgeBlocked = v.union(
   v.literal('R2_PURGE_RETRY_EXHAUSTED'),
 );
 const projectFields = {
+  needsFix: v.optional(v.record(v.string(), v.string())),
   checkLogSweep: v.optional(
     v.object({
       operationId: v.string(),

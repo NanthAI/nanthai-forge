@@ -110,9 +110,17 @@ export class HostedAgentTransport {
         invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'operationId must be a UUID.');
       let discovery: unknown;
       try {
-        discovery = await this.query('projectHostedAgent:capabilities', {
-          clientVersion: CUTOVER_CLI_VERSION,
-        });
+        try {
+          discovery = await this.query('projectHostedAgent:capabilities', {
+            clientVersion: CUTOVER_CLI_VERSION,
+            noticeVersion: 1,
+          });
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes('ArgumentValidationError')) throw error;
+          discovery = await this.query('projectHostedAgent:capabilities', {
+            clientVersion: CUTOVER_CLI_VERSION,
+          });
+        }
       } catch (error) {
         const safe = hostedActionError(error, 'agent capability discovery');
         if (safe.code !== 'HOSTED_ACTION_FAILED') throw safe;
@@ -147,12 +155,15 @@ export class HostedAgentTransport {
       if (action === 'capabilities') return this.response(action, null, capabilities);
       if (action === 'check-settings')
         return this.response(action, null, await hostedCheckSettings(this.query.bind(this), capabilities));
+      if (observation && action === 'status' && Object.keys(command.data).length === 0)
+        return this.response(action, null, { needsFix: capabilities.needsFix ?? [] });
       if (observation)
-        return this.response(
-          action,
-          null,
-          await this.observe(command.data as z.infer<typeof hostedAgentCommandSchemas.status>),
-        );
+        return this.response(action, null, {
+          ...((await this.observe(
+            command.data as z.infer<typeof hostedAgentCommandSchemas.status>,
+          )) as Record<string, unknown>),
+          ...(capabilities.needsFix ? { needsFix: capabilities.needsFix } : {}),
+        });
       const root = hostedAgentRoot(this.root);
       if (action === 'start' || action === 'open') hostedRootLanePath(root, this.address);
       const journal = new HostedAgentJournal(

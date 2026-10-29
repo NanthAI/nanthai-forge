@@ -1,3 +1,4 @@
+import { fixGate } from '../src/culprit-bisect';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { internalMutation } from './_generated/server';
@@ -41,7 +42,7 @@ export async function hostedGateInput(
     policy,
     actor,
     paths: candidate.governance?.paths ?? null,
-    contract: enabled ? member : null,
+    contract: enabled && !fixGate({ needsFix: project.needsFix?.[candidate.intentId] }) ? member : null,
     main: enabled
       ? await mainGate(ctx, project._id)
       : {
@@ -69,7 +70,11 @@ export async function hostedGateForCandidates(
       ...shared,
       actor,
       paths: candidate.governance?.paths ?? null,
-      contract: shared.policy.acceptance.gate === 'contract' ? contract : null,
+      contract:
+        shared.policy.acceptance.gate === 'contract' &&
+        !fixGate({ needsFix: project.needsFix?.[candidate.intentId] })
+          ? contract
+          : null,
     })),
   );
 }

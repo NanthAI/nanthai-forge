@@ -1,3 +1,4 @@
+import { needsFix } from '../src/culprit-bisect';
 import { hostedPaths } from '../src/hosted-paths';
 // SPDX-License-Identifier: Apache-2.0
 import { effectivePolicy } from '../src/autonomy-policy';
@@ -73,6 +74,16 @@ export const brief = query({
         },
       );
       context.autonomyPolicy = effectivePolicy(project);
+      const pendingFixes = needsFix(project);
+      if (pendingFixes.length)
+        context.guidance.project +=
+          '\nWork needing a fix:\n' +
+          pendingFixes
+            .map(
+              n =>
+                `${n.state}: Intent ${n.intentId}. ${n.summary} Undo: ${n.undo}. Start a fix: nforge agent ROOT start '${JSON.stringify({ intentId: n.intentId })}'`,
+            )
+            .join('\n');
       context.coverage.push(...coverage);
       return hostedPaths(
         renderBriefing(

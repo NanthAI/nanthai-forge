@@ -221,16 +221,27 @@ test('mainGate performs one indexed read and reports absent, green and red rows'
   }
 });
 
-test('internal placeholders validate real arguments and never access context', async () => {
-  for (const [fn, args] of [
-    [gate.noop, { projectId: 'project' }],
-    [culprit.startRedClassification, { projectId: 'project', runId: randomUUID() }],
-  ]) {
+test('remaining internal placeholder validates real arguments and never accesses context', async () => {
+  for (const [fn, args] of [[gate.noop, { projectId: 'project' }]]) {
     checkArgs(fn, args, 'stub');
     assert.equal(await fn._handler(forbiddenContext, args), null);
     assert.throws(() => checkArgs(fn, {}, 'stub'), /ArgumentValidationError/);
     assert.equal(fn.isInternal, true);
   }
+});
+
+test('culprit classification validates arguments and no-ops for an absent project', async () => {
+  const f = lanesFixture();
+  const args = { projectId: 'missing-project', runId: randomUUID() };
+  checkArgs(culprit.startRedClassification, args, 'classification');
+  assert.throws(
+    () => checkArgs(culprit.startRedClassification, {}, 'classification'),
+    /ArgumentValidationError/,
+  );
+  assert.equal(culprit.startRedClassification.isInternal, true);
+  assert.equal(await f.call('classification', culprit.startRedClassification, args), null);
+  assert.equal(f.counts.at(-1).documents, 1);
+  assert.equal(f.counts.at(-1).writes, 0);
 });
 
 test('600 Intents, 575 receipts and a 3k-file tree add zero IO at either no-op seam', async t => {

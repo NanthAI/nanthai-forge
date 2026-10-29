@@ -4,10 +4,20 @@ import { ForgeError } from './errors.js';
 
 /** Describe invalid fields without echoing supplied values or unknown keys. */
 export function parseAgentAction(input: unknown) {
-  const normalized =
+  let normalized =
     input && typeof input === 'object' && 'action' in input && input.action === 'save'
       ? { ...input, action: 'checkpoint' }
       : input;
+  if (
+    normalized &&
+    typeof normalized === 'object' &&
+    'action' in normalized &&
+    normalized.action === 'start' &&
+    'intentId' in normalized &&
+    typeof normalized.intentId === 'string' &&
+    !('outcome' in normalized)
+  )
+    normalized = { ...normalized, outcome: `Continue Intent ${normalized.intentId}` };
   const parsed = agentActionSchema.safeParse(normalized);
   if (parsed.success) return parsed.data;
   const issues = parsed.error.issues.map(issue => {

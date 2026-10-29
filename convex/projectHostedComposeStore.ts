@@ -22,6 +22,7 @@ export const composeStateSchema = z
   .object({
     semanticPlan: semanticPlanSchema.optional(),
     ownerInputs: z.boolean().optional(),
+    restoreBases: z.record(z.uuid(), saveWorkerObjectSchema).optional(),
     batch: batchComposeSchema.optional(),
     dropped: batchDroppedSchema.optional(),
     request: composeRequestSchema,
@@ -73,6 +74,7 @@ export function hostedComposeInput(state: ComposeState, at: string) {
     schema: 1,
     ...(state.batch ? { batch: state.batch } : {}),
     kind: 'forge-hosted-compose-input',
+    ...(state.restoreBases ? { restoreBases: state.restoreBases } : {}),
     base: state.request.expectedMain,
     main: state.main,
     inputs: state.request.inputs,

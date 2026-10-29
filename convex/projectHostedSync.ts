@@ -135,6 +135,8 @@ export const prepare = mutation({
           }
           let right = target.head;
           let stackBase, stackAfter;
+          if (lane.restoreBase)
+            stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.restoreBase });
           if (target.kind === 'main' && lane.stack && !lane.stack.detached) {
             const parentRow = await readHostedRecord(ctx, { ...auth, kind: 'lane', key: lane.stack.laneId });
             invariant(parentRow, 'NOT_FOUND', 'Stack parent Lane not found.');

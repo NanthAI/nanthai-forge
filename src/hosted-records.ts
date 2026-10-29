@@ -1,3 +1,4 @@
+import { needsFixSchema } from './culprit-bisect.js';
 import { semanticPayload } from './semantic-payload.js';
 import { semanticPlanSchema } from './intent-semantic-conflict.js';
 import { intentTestContractSchema } from './intent-test-contract.js';
@@ -18,6 +19,8 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
     .object({
       ...common,
       kind: z.literal('intent'),
+      needsFix: needsFixSchema.optional(),
+      recoveryRunId: z.uuid().optional(),
       testContracts: z.array(intentTestContractSchema).optional(),
       outcome: z.string().trim().min(1).max(500),
       constraints: z.string().max(4000),
@@ -31,6 +34,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
     .object({
       ...common,
       kind: z.literal('lane'),
+      restoreBase: hash.optional(),
       stack: z
         .object({
           laneId: z.uuid(),

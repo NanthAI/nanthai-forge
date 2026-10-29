@@ -2,6 +2,7 @@ import { loadBatch, writeBatch, wakeBatch } from './projectHostedLandingBatchSto
 import { batchFinishStep, resumeBatchIO } from './projectHostedLandingBatchFinish';
 import { publishLandingBatch } from './projectHostedLandingBatchPublish';
 // SPDX-License-Identifier: Apache-2.0
+import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import { loadFinish, failFinish } from './projectHostedFinishStore';
 import { loadLanding, writeLanding, type LandingIdentity } from './projectHostedLandingStore';
@@ -35,6 +36,25 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
     if (batchStep.handled) return batchStep.command;
     if (state.phase === 'landed' || state.phase === 'terminal-failed') return null;
     await hostedWriteProject(ctx, input.projectId, state.actor, state.request.authorityEpoch);
+    if (value.recoveryRunId) {
+      const audit = await ctx.db
+        .query('projectHostedMainAudits')
+        .withIndex('by_project', q => q.eq('projectId', input.projectId))
+        .unique();
+      if (audit?.red?.runId !== value.recoveryRunId) {
+        await failFinish(
+          ctx,
+          input,
+          'RECOVERY_SUPERSEDED',
+          'The red audit was superseded; no automatic reverse was landed. The saved reverse Lane remains available.',
+        );
+        await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:advance'), {
+          projectId: input.projectId,
+          runId: value.recoveryRunId,
+        });
+        return null;
+      }
+    }
     if (row.parentSubmissionId) {
       const parent = (
         await loadLanding(ctx, { projectId: input.projectId, submissionId: row.parentSubmissionId })

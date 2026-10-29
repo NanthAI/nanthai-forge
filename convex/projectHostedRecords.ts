@@ -88,12 +88,19 @@ export async function writeHostedRecord(
     authorityEpoch: number;
     record: unknown;
     expectedVersion: number | null;
+    /** Trusted compose metadata, outside the client-visible immutable record body. */
+    restoreBases?: string;
     /** Trusted source reducers may clear provenance when importing unaccepted peer source. */
     ownerOnly?: boolean;
   },
 ) {
   const project = await activeProject(ctx, input.projectId, input.actor);
-  const { record, ref, value } = hostedRecordValue(input.record);
+  let { record, ref, value } = hostedRecordValue(input.record);
+  if (record.kind === 'intent' && ['completed', 'abandoned'].includes(record.status) && record.needsFix) {
+    const { needsFix: handledNotice, ...closed } = record;
+    void handledNotice;
+    ({ record, ref, value } = hostedRecordValue(closed));
+  }
   if (record.kind === 'lane') await materializeLifecycleLane(ctx, input.projectId, record.id);
   const old = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
   if (old) {
@@ -118,6 +125,15 @@ export async function writeHostedRecord(
     'WORK_OPERATION_CHANGED',
     'Saves and Candidates retain their original identity.',
   );
+  if (
+    record.kind === 'intent' &&
+    ['completed', 'abandoned'].includes(record.status) &&
+    project.needsFix?.[record.id]
+  ) {
+    const remaining = { ...project.needsFix };
+    delete remaining[record.id];
+    await ctx.db.patch(input.projectId, { needsFix: Object.keys(remaining).length ? remaining : undefined });
+  }
   // Provenance is server metadata, independent of immutable source/record bytes.
   const ownerOnly =
     record.kind === 'lane'
@@ -137,6 +153,7 @@ export async function writeHostedRecord(
     ...indexed,
     bodyId,
     ...(record.kind === 'candidate' ? { creatorAccountId: input.actor } : {}),
+    ...(record.kind === 'candidate' && input.restoreBases ? { restoreBases: input.restoreBases } : {}),
     digest: ref.digest,
     bytes: ref.bytes,
   });

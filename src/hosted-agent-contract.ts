@@ -47,6 +47,7 @@ export const hostedAgentAddressSchema = z.object({ url: z.url(), projectId: z.st
 export type HostedAgentAddress = z.infer<typeof hostedAgentAddressSchema>;
 export const hostedAgentCapabilitiesSchema = z
   .object({
+    needsFix: z.array(z.record(z.string(), z.json())).optional(),
     schema: z.literal(1),
     projectId: z.string(),
     actor: z.string(),

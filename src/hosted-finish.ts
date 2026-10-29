@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { composeInputSchema } from './hosted-compose.js';
 import { composeRequestSchema } from './hosted-compose.js';
 import { hostedLandingAttemptSchema, landingCheckSelectionSchema } from './hosted-landing.js';
 /** Finish owns orchestration only. Source/check/publication authority remains in
@@ -7,6 +8,8 @@ import { hostedLandingAttemptSchema, landingCheckSelectionSchema } from './hoste
 export const hostedFinishSchema = z
   .object({
     source: composeRequestSchema,
+    recoveryRunId: z.uuid().optional(),
+    restoreBases: composeInputSchema.shape.restoreBases,
     check: landingCheckSelectionSchema.nullable(),
     pending: z
       .object({

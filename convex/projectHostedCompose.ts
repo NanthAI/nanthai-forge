@@ -184,6 +184,11 @@ export const stage = mutation({
             'WORK_STALE',
             'Selected Lane changed or belongs to another Intent.',
           );
+          if (lane.restoreBase)
+            state.restoreBases = {
+              ...state.restoreBases,
+              [lane.id]: await saveObject(ctx, input.projectId, { sha256: lane.restoreBase }),
+            };
           invariant(
             lane.resolution?.status !== 'pending',
             'CONFLICT_MARKERS',

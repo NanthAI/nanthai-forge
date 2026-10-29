@@ -1,3 +1,4 @@
+import { needsFix } from '../src/culprit-bisect';
 import { hostedRecordValue } from './hostedRecordValue';
 import { hostedPaths } from '../src/hosted-paths';
 // SPDX-License-Identifier: Apache-2.0
@@ -48,6 +49,7 @@ export const workspace = query({
         ...hostedPaths(JSON.parse(generation.metadata)),
         freshness: await projectFreshness(ctx, project, generation, backup),
         autonomyPolicy: effectivePolicy(project),
+        ...(project.needsFix ? { needsFix: needsFix(project) } : {}),
         generationId: generation._id,
         backupId: generation.backupId,
         backupDigest: backup.digest,

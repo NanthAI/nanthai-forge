@@ -131,6 +131,10 @@ export class AgentWorkflow {
     if (input && typeof input === 'object' && (input as { action?: unknown }).action === 'save')
       input = { ...input, action: 'checkpoint' };
     const action = input && typeof input === 'object' ? (input as { action?: unknown }).action : undefined;
+    if (action === 'status') {
+      parseAgentAction(input);
+      return boundAgentCache(this.work.store, input, selected => this.dispatchRequest(selected));
+    }
     if (action === 'start' || action === 'checkpoint') {
       // Validate before constructing/reading Work. A UUID replay may omit fields
       // already pinned in its cache journal; supplied values still validate.

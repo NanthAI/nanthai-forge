@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { needsFix, fixBrief } from '../src/culprit-bisect';
 import { v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -21,6 +22,7 @@ import { isStored } from './projectObjectFields';
 const args = {
   projectId: v.id('hostedProjects'),
   operationId: v.string(),
+  noticeVersion: v.optional(v.literal(1)),
   authorityEpoch: v.number(),
   expectedMain: v.object({ head: v.string(), receiptId: v.string() }),
   initialHead: v.optional(v.string()),
@@ -34,6 +36,7 @@ const args = {
 type Input = {
   projectId: Id<'hostedProjects'>;
   operationId: string;
+  noticeVersion?: 1;
   authorityEpoch: number;
   expectedMain: { head: string; receiptId: string };
   initialHead?: string;
@@ -41,6 +44,15 @@ type Input = {
   stackEntry?: string;
   intent: { kind: 'new'; outcome: string; constraints?: string } | { kind: 'existing'; intentId: string };
 };
+
+function startReply(value: unknown, noticeVersion?: 1) {
+  const result = hostedStartResultSchema.parse(value);
+  if (noticeVersion === 1) return result;
+  const { fixBrief: brief, needsFix: notices, ...legacy } = result;
+  void brief;
+  void notices;
+  return legacy;
+}
 
 /** One mutation commits the Intent, Lane and original result, with no global revision write. */
 async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent') {
@@ -56,8 +68,10 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     'BAD_ARGUMENT',
     'Send a hosted start with an operation UUID and exact main pins.',
   );
-  const payload = { action, ...validated.data };
+  const { noticeVersion, ...semanticRequest } = validated.data;
+  const payload = { action, ...semanticRequest };
   invariant(action === 'start' || payload.intent.kind === 'new', 'BAD_ARGUMENT', 'Create a new Intent.');
+  let recovery: import('../src/culprit-bisect').NeedsFix | undefined;
   if (payload.intent.kind === 'existing') {
     const row = await readHostedRecord(ctx, {
       projectId,
@@ -67,6 +81,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     });
     invariant(row, 'NOT_FOUND', 'Hosted Intent not found on this project.');
     const intent = hostedIntentSchema.parse(JSON.parse(row.value));
+    if (!['abandoned', 'completed'].includes(intent.status)) recovery = intent.needsFix;
     invariant(
       project.owner === actor ||
         intent.creatorAccountId === actor ||
@@ -110,7 +125,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       'WORK_OPERATION_CHANGED',
       'The original operation did not complete.',
     );
-    return canonicalPayload(terminal.result);
+    return canonicalPayload(startReply(terminal.result, noticeVersion));
   }
   const main = await hostedStartMain(ctx, projectId);
   invariant(
@@ -136,7 +151,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       'Commit the selected initial State before starting its hosted Lane.',
     );
   }
-  let initialHead = payload.initialHead ?? main.head;
+  let initialHead = payload.initialHead ?? recovery?.head ?? main.head;
   let ownerOnly = initialHead === main.head;
   let stack: import('../src/hosted-lane').HostedLaneSelection['stack'];
   if (payload.stackOn) {
@@ -156,6 +171,8 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       ...(payload.stackEntry ? { entryId: payload.stackEntry } : {}),
     };
   }
+  const restoreBase =
+    recovery && initialHead === recovery.head && !payload.stackOn ? recovery.previousHead : undefined;
   const first = prepared.operation.firstAttempt,
     intentId = first.ids.intent!,
     laneId = first.ids.lane!;
@@ -206,6 +223,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       record: {
         kind: 'lane',
         id: laneId,
+        ...(restoreBase ? { restoreBase } : {}),
         intentId,
         actor,
         version: 0,
@@ -219,14 +237,23 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
         authorityEpoch: expected.authorityEpoch,
       },
     });
-  const result = hostedStartResultSchema.parse({ schema: 1, operationId, intentId, lane, at: first.at });
+  const pendingFixes = needsFix(project);
+  const result = hostedStartResultSchema.parse({
+    schema: 1,
+    operationId,
+    intentId,
+    lane,
+    at: first.at,
+    ...(recovery ? { fixBrief: fixBrief(recovery) } : {}),
+    ...(pendingFixes.length ? { needsFix: pendingFixes } : {}),
+  });
   await finishHostedOperation(ctx, {
     projectId,
     actor,
     operationId,
     receipt: { attemptId: first.id, at: first.at, outcome: { status: 'completed', result } },
   });
-  return canonicalPayload(result);
+  return canonicalPayload(startReply(result, noticeVersion));
 }
 
 export const start = mutation({

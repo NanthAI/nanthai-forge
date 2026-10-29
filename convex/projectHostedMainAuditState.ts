@@ -195,15 +195,12 @@ export async function noteMainLanding(
 }
 export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): Promise<void> {
   if (!run.gate || !hostedCheckTerminal(run)) return;
-  if (run.gate.mode === 'probe') {
-    const row = await auditRow(ctx, run.projectId as Id<'hostedProjects'>);
-    if (row?.red)
-      await ctx.scheduler.runAfter(
-        0,
-        makeFunctionReference<'mutation'>('projectHostedCulprit:startRedClassification'),
-        { projectId: row.projectId, runId: row.red.runId },
-      );
-    return;
+  if (run.gate.mode === 'probe' || run.gate.reason?.startsWith('culprit-revert:')) {
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:terminal'), {
+      projectId: run.projectId as Id<'hostedProjects'>,
+      runId: run.id,
+    });
+    if (run.gate.mode === 'probe') return;
   }
   if (run.gate?.mode !== 'audit' && !(run.status === 'failed' && fullGate(run))) return;
   const projectId = run.projectId as Id<'hostedProjects'>;

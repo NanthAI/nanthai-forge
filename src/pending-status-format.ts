@@ -11,6 +11,8 @@ export function formatPendingStatus(
     sections?: { skipped: string[]; request: string };
     countsScope?: string;
     ignored?: IgnoredStatus;
+    needsFixError?: { code: string };
+    needsFix?: Record<string, import('zod').z.infer<ReturnType<typeof import('zod').z.json>>>[];
     queue?: { total: number; items: unknown[] };
   },
 ) {
@@ -34,6 +36,11 @@ export function formatPendingStatus(
         `${lane.laneId.slice(0, 8)} ${lane.submission ? submissionLine(lane.submission) : lane.status} ${oneLine(lane.name).slice(0, 70)}`,
     );
   const lines = [
+    ...(value.needsFixError ? [`Hosted fix notices unavailable: ${oneLine(value.needsFixError.code)}`] : []),
+    ...(value.needsFix ?? []).map(
+      n =>
+        `${oneLine(String(n.state))}: Intent ${oneLine(String(n.intentId))} · ${oneLine(String(n.summary))} · Start a fix: nforge agent ROOT start '${JSON.stringify({ intentId: n.intentId })}' · Undo: ${oneLine(String(n.undo))}`,
+    ),
     `Pending work${value.countsScope === 'loaded-pages' ? ' (loaded pages)' : ''} · revision ${value.snapshot.workRevision} · ${value.snapshot.observedAt}`,
     `Main: ${pin(value.main.head)}${value.integrationPreview ? ` · Integration preview: ${oneLine(value.integrationPreview)}` : ''}`,
     `Lanes: ${value.counts.ready} ready · ${value.counts.waiting} waiting · ${value.counts.checking} checking (${value.countsScope === 'loaded-pages' ? 'loaded pages; --offset/--limit for more' : 'recorded states'})`,

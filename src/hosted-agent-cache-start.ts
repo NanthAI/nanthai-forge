@@ -180,6 +180,8 @@ export async function startCache(
       store.commitRecords(tx, undefined, { advisory: false });
       retained.result = {
         operationId,
+        ...(started.fixBrief ? { fixBrief: started.fixBrief } : {}),
+        ...(started.needsFix ? { needsFix: started.needsFix } : {}),
         outcome: command.outcome,
         laneId: lane.laneId,
         intentId: started.intentId,

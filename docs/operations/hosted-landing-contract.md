@@ -498,3 +498,53 @@ period. The event source must be authenticated and its coverage stated by the
 caller; missing history never establishes zero historical red time. Free
 GitHub-hosted runners on a public repository incur no runner charge; private
 repository minutes and other configured providers follow their own billing.
+
+## Hosted culprit recovery and fix notices
+
+A failed hosted audit schedules classification after its red state commits. The
+recovery journal reads the accepted range in one indexed page, probes the failed
+tests on the audited head to distinguish a flake, then bisects comparable
+passing/failing evidence. A range of k landings uses at most
+`1 + ceil(log2(k + 1))` probes. Missing, mixed or incomparable evidence opens
+fix-forward work. A passing flake probe records a flake and clears that episode.
+Newer counted landings remain pending: recovery uses the audit's pinned coverage
+count, rather than counting docs receipts, and schedules remaining audit debt
+through the existing cadence.
+Probe and automatic-revert completion continue through scheduled internal
+callbacks; status reads never advance recovery.
+
+One proven receipt produces a compensating reverse Lane using the existing
+revert source worker, followed by ordinary composition, a full check and final
+acceptance on current main. Conflicts or source/check failures produce
+fix-forward work. Accepted work and the original Lane remain retained. A later
+green main supersedes a pending automatic reverse. The recovery receipt records
+the failing tests, adjacent source/run proof, actual reverse receipt and undo
+command. Main is never rewound.
+
+The original Intent stays active with optional `needsFix.state` of `reverted`
+or `needs-fix`, its saved accepted head, capped failure excerpts and undo command.
+Compact project summaries ride existing hosted status, workspace and briefing
+reads; CLI/MCP status and the next start briefing expose them. Bound native
+status makes one on-demand capability read and no follow-up notice query.
+Notice-aware clients opt into the additive fields; legacy clients and documents
+keep their existing shapes. Web rendering and the Start a fix button remain
+follow-up work.
+
+`start {intentId}` opens a sibling from the saved head with the failure and fix
+brief. Server-pinned restore bases reapply the original change plus the fix,
+preserving later accepted work. Private Candidate and finish metadata retain
+those bases across reviewed finishes and retries, even after a notice is closed.
+Authoritative selection forces a full check; fix Lanes reserve their solo check
+instead of entering deferred batches. Current hosted batches also use a full
+union check and fall back to exact solo checks on failure. A notice clears only
+when the Intent re-lands after the reverse or its owner closes it; replay of an
+older acceptance or close cannot clear a newer notice.
+
+Deploy the fixed source worker with optional `restoreBases` compose-plan support
+before deploying server recovery hooks: those hooks can immediately schedule
+recovery for red audits. Older source workers strictly reject the extended
+plan. Keep the contract gate dark until the server schema/recovery, source
+worker and GitHub Actions gate runner are all deployed and the combined
+recovery/gate budget checks pass. Then use the drained-queue preflight and
+owner-approved policy flip described in the hosted gate workflow. No backfill
+is required for absent optional fields.

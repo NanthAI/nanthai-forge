@@ -1,3 +1,4 @@
+import { makeFunctionReference } from 'convex/server';
 import { semanticPayload } from '../src/semantic-payload';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
@@ -210,6 +211,14 @@ export async function writeLanding(
     runnable,
     value: semanticPayload(state),
   });
+  if (state.phase === 'landed' && previous.phase !== 'landed' && state.acceptance) {
+    const project = await ctx.db.get(row.projectId);
+    if (project?.needsFix)
+      await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:accepted'), {
+        projectId: row.projectId,
+        receiptId: state.acceptance.receiptId,
+      });
+  }
   await notifyFinish(ctx, state);
   return state;
 }

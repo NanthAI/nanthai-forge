@@ -45,6 +45,7 @@ export const composeInputSchema = z
   .object({
     schema: z.literal(1),
     kind: z.literal('forge-hosted-compose-input'),
+    restoreBases: z.record(z.uuid(), saveWorkerObjectSchema).optional(),
     batch: batchComposeSchema.optional(),
     base: main,
     main: saveWorkerObjectSchema,

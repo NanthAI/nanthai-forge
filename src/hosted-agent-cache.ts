@@ -37,6 +37,11 @@ export async function boundAgentCache(
   const raw = input as Record<string, unknown>;
   const binding = readHostState(store).binding;
   if (!store.native || !binding || sourceAuthority(binding).mode !== 'server') return native(input);
+  if (raw?.action === 'status') {
+    const local = await native(input);
+    const status = await hostedFixStatus(store, supplied);
+    return status ? { ...local, result: { ...(local.result as object), ...status } } : local;
+  }
   if (!['start', 'checkpoint'].includes(String(raw?.action))) return native(input);
   const directory = join(store.directory, 'hosted-cache-operations');
   const operationId = z.uuid().parse(raw.operationId ?? randomUUID());
@@ -186,4 +191,30 @@ export async function boundAgentCache(
         revision: store.revision(),
         result: { operationId, transport: 'hosted', status: 'pending', complete: false },
       };
+}
+
+/** Explicit hosted status read; no scheduler, polling, or notice-only follow-up request. */
+export async function hostedFixStatus(store: WorkStore, supplied?: HostedAgentTransport) {
+  const binding = readHostState(store).binding;
+  if (!binding || sourceAuthority(binding).mode !== 'server') return null;
+  const transport =
+    supplied ??
+    new HostedAgentTransport(store.root, { url: binding.deployment, projectId: binding.projectId });
+  try {
+    const response = await transport.dispatch('status', {});
+    return {
+      needsFix: (
+        response.result as {
+          needsFix: Record<string, import('zod').z.infer<ReturnType<typeof import('zod').z.json>>>[];
+        }
+      ).needsFix,
+    };
+  } catch (error) {
+    // Keep local status available while explicitly recording unavailable hosted evidence.
+    return {
+      needsFixError: {
+        code: error instanceof Error && 'code' in error ? String(error.code) : 'HOSTED_STATUS_UNAVAILABLE',
+      },
+    };
+  }
 }

@@ -1,5 +1,6 @@
 import type { BatchDropped } from './hosted-landing-batch.js';
 // SPDX-License-Identifier: Apache-2.0
+import { composeStack } from './native-stack-compose.js';
 import { NativeSource, overlappingPaths } from './native-source.js';
 import type { NativeFile } from './native-state-format.js';
 import { invariant } from './errors.js';
@@ -88,6 +89,8 @@ export async function buildHostedComposeState(
           'Compose input State differs.',
         );
         await reader.file(entry.state);
+        const restoreBase = 'laneId' in entry ? plan.restoreBases?.[entry.laneId] : undefined;
+        if (restoreBase) await reader.file(restoreBase);
         selected++;
         // Retain every input even after the first conflict; do not reinterpret a suffix.
         if (result) continue;
@@ -96,11 +99,22 @@ export async function buildHostedComposeState(
         const merged = await calculate(() => {
           source.state(left);
           source.state(right);
-          return source.compose(left, right, plan.message, plan.at);
+          return restoreBase
+            ? composeStack(source, right, left, restoreBase.object.sha256, plan.message, plan.at)
+            : source.compose(left, right, plan.message, plan.at);
         });
         if (merged.head) head = merged.head;
         else {
-          const details = await calculate(() => source.mergeFiles(left, right));
+          const details = await calculate(() =>
+            restoreBase
+              ? source.mergeFiles(
+                  left,
+                  right,
+                  new Set([restoreBase.object.sha256]),
+                  new Set([restoreBase.object.sha256]),
+                )
+              : source.mergeFiles(left, right),
+          );
           const leftFiles = new Map(source.state(left).files.map(file => [file.path, file])),
             rightFiles = new Map(source.state(right).files.map(file => [file.path, file]));
           const byPath = new Map(details.conflicts.map(item => [item.path, item]));
