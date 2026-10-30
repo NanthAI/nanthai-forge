@@ -45,6 +45,7 @@ export const hostedRecordTables = {
   ),
   // Canonical immutable versions; the head is only a per-resource CAS pointer.
   projectHostedRecords: defineTable(hostedRecordFields)
+    .index('by_project_and_kind', ['projectId', 'kind'])
     .index('by_project_and_kind_and_key_and_version', ['projectId', 'kind', 'key', 'version'])
     .index('by_project_and_kind_and_key_and_version_and_plan', [
       'projectId',

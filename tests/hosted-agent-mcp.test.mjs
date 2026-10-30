@@ -266,17 +266,42 @@ test('the existing stdio CLI accepts explicit hosted addressing and discovers to
   assert(!existsSync(`${s.root}.forge-client`));
 });
 
-test('MCP hosted metrics accepts the shared schema and performs only finite paged queries', async t => {
+test('MCP hosted metrics uses seven finite metadata streams and its authenticated input transport', async t => {
   const s = agentFixture(t);
   const api = await import(moduleUrl('../convex/projectSelfMetrics.ts'));
   const original = s.exchange.client.query.bind(s.exchange.client);
   let pages = 0;
+  const streams = [];
+  const { buildComposePages } = await import('../dist/hosted-compose.js');
+  const { saveBytes } = await import('../dist/hosted-save.js');
+  const input = buildComposePages([]);
+  let objectCalls = 0;
+  t.mock.method(s.exchange, 'downloadBatch', async pins => {
+    objectCalls++;
+    assert.deepEqual(pins, [input.manifest.root]);
+    return [saveBytes(input.pages[0].value)];
+  });
   t.mock.method(s.exchange.client, 'query', async (ref, args) => {
     if (getFunctionName(ref) !== 'projectSelfMetrics:page') return original(ref, args);
     checkArgs(api.page, args, 'metrics');
     pages++;
+    streams.push(args.stream);
     return JSON.stringify({
-      page: [],
+      page:
+        args.stream === 'acceptances'
+          ? [
+              {
+                id: 'synthetic-move',
+                at: '2026-10-29T00:00:00.000Z',
+                head: 'synthetic-head',
+                submissionId: 'synthetic-request',
+                submittedAt: null,
+                trusted: false,
+                kind: 'landing',
+                inputPin: input.manifest.root,
+              },
+            ]
+          : [],
       isDone: true,
       continueCursor: '',
       cutover: '2026-10-28T00:00:00.000Z',
@@ -292,7 +317,9 @@ test('MCP hosted metrics accepts the shared schema and performs only finite page
   assert.equal(result.action, 'metrics');
   assert.equal(result.operationId, null);
   assert.equal(result.result.source.kind, 'hosted');
-  assert.equal(pages, 4);
+  assert.equal(pages, 7);
+  assert.deepEqual(streams, ['acceptances', 'requests', 'runs', 'operations', 'attempts', 'lanes', 'saves']);
+  assert.equal(objectCalls, 1);
   assert(s.calls.every(call => call.name === 'projectHostedAgent:capabilities'));
   assert(!existsSync(`${s.root}.forge-metrics.jsonl`));
 });

@@ -5,6 +5,7 @@ import { accessibleProject } from './projectAuthority';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
+import type { HostedRecord } from '../src/hosted-records';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -14,9 +15,9 @@ const tables = {
   requests: 'projectHostedLandingRequests',
   runs: 'projectHostedCheckRuns',
   operations: 'projectHostedOperations',
+  attempts: 'projectHostedLandingAttempts',
 } as const;
-/** Creation-time indexes include a one-day context window. Old pending requests,
- * pre-window results and unavailable immutable input objects remain named gaps.
+/** Compact, demand-driven pages. A finite context horizon is explicit in coverage.
  * Nothing in this query wakes execution or materializes metric records. */
 export const page = query({
   args: {
@@ -26,10 +27,14 @@ export const page = query({
       v.literal('requests'),
       v.literal('runs'),
       v.literal('operations'),
+      v.literal('attempts'),
+      v.literal('lanes'),
+      v.literal('saves'),
     ),
     from: v.string(),
     to: v.string(),
     cursor: v.union(v.string(), v.null()),
+    contextDays: v.optional(v.number()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -57,21 +62,31 @@ export const page = query({
         'BAD_ARGUMENT',
         'Use a finite metrics window [from,to).',
       );
+      const context = from - (input.contextDays === 1 ? 1 : 30) * 86400000;
       const selected =
         input.stream === 'operations'
-          ? ctx.db.query('projectHostedOperations').withIndex('by_project_and_metric_action', q =>
-              q
-                .eq('projectId', input.projectId)
-                .eq('metricMutation.action', 'cancel')
-                .gte('_creationTime', from - 86400000)
-                .lt('_creationTime', to),
-            )
-          : ctx.db.query(tables[input.stream]).withIndex('by_project', q =>
-              q
-                .eq('projectId', input.projectId)
-                .gte('_creationTime', from - 86400000)
-                .lt('_creationTime', to),
-            );
+          ? ctx.db
+              .query('projectHostedOperations')
+              .withIndex('by_project_and_metric_action', q =>
+                q
+                  .eq('projectId', input.projectId)
+                  .eq('metricMutation.action', 'cancel')
+                  .gte('_creationTime', context)
+                  .lt('_creationTime', to),
+              )
+          : input.stream === 'lanes' || input.stream === 'saves'
+            ? ctx.db.query('projectHostedRecords').withIndex('by_project_and_kind', q =>
+                q
+                  .eq('projectId', input.projectId)
+                  .eq('kind', input.stream === 'lanes' ? 'lane' : 'save')
+                  .gte('_creationTime', context)
+                  .lt('_creationTime', to),
+              )
+            : ctx.db
+                .query(tables[input.stream])
+                .withIndex('by_project', q =>
+                  q.eq('projectId', input.projectId).gte('_creationTime', context).lt('_creationTime', to),
+                );
       const rows = await selected.order('desc').paginate({
         cursor: input.cursor,
         numItems: 100,
@@ -80,6 +95,26 @@ export const page = query({
       });
       const values = await Promise.all(
         rows.page.map(async row => {
+          if (input.stream === 'lanes' || input.stream === 'saves') {
+            invariant('bodyId' in row, 'EVIDENCE_CHANGED', 'Metric record body is missing.');
+            const body = await ctx.db.get(row.bodyId);
+            invariant(
+              body && body.projectId === input.projectId,
+              'EVIDENCE_CHANGED',
+              'Metric record body is missing.',
+            );
+            const record = JSON.parse(body.value) as HostedRecord;
+            if (record.kind === 'lane')
+              return {
+                id: record.id,
+                version: record.version,
+                intentId: record.intentId,
+                revert: !!record.revert,
+              };
+            invariant(record.kind === 'save', 'EVIDENCE_CHANGED', 'Metric record kind changed.');
+            return { id: record.id, laneId: record.laneId, head: record.head, at: record.at };
+          }
+          invariant('value' in row, 'EVIDENCE_CHANGED', 'Metric record value is missing.');
           if (input.stream === 'acceptances') {
             const move = JSON.parse(row.value) as HostedAcceptance;
             const request = await ctx.db
@@ -104,7 +139,8 @@ export const page = query({
               submittedAt: submitted?.timing?.submittedAt ?? submitted?.at ?? null,
               trusted: selected?.actor.kind === 'agent' && selected.policy.acceptance.mode === 'auto-on-pass',
               kind: request?.revertOf ? 'compensating' : 'landing',
-              ...(submitted?.supersedes ? { path: 'after-retry' } : {}),
+              attemptId: move.attemptId,
+              inputPin: move.candidate.inputs ?? null,
             };
           }
           if (input.stream === 'runs') {
@@ -119,8 +155,13 @@ export const page = query({
               // Cost.seconds is observed execution time, never the billed dollar amount.
               runnerMinutes:
                 run.cost.status === 'observed' && run.cost.seconds !== null ? run.cost.seconds / 60 : null,
-              // A check name alone does not establish full-suite coverage.
-              fullSuite: null,
+              inputPin: run.candidate?.inputs ?? null,
+              // Explicit selection is evidence; a check name alone is not.
+              fullSuite:
+                (run.gate ?? run.request.gate)
+                  ? ['full', 'audit'].includes((run.gate ?? run.request.gate)!.mode) ||
+                    (run.gate ?? run.request.gate)!.effective === 'full'
+                  : null,
             };
           }
           if (input.stream === 'requests') {
@@ -129,9 +170,20 @@ export const page = query({
               id: request.id,
               at: request.at,
               status: request.phase,
+              actor: request.actor ?? ('actor' in row ? row.actor : 'unknown'),
+              operationId: request.operationId ?? ('operationId' in row ? row.operationId : request.id),
+              attemptId: request.attemptId ?? ('attemptId' in row ? row.attemptId : request.id),
+              endedAt: request.timing?.settledAt ?? request.timing?.committedAt ?? null,
               runIds: 'runId' in row && row.runId ? [row.runId] : [],
               progressAt: Object.values(request.timing ?? {}),
               errorCode: request.error?.code ?? null,
+              retryCause: request.observation?.stall
+                ? 'stall'
+                : request.observation?.cause === 'conflict'
+                  ? 'conflict'
+                  : request.observation?.cause === 'check-failed'
+                    ? 'check-failure-or-flake'
+                    : 'other',
               ...(request.supersedes
                 ? {
                     retry: {
@@ -144,11 +196,24 @@ export const page = query({
                 : {}),
             };
           }
+          if (input.stream === 'attempts') {
+            const attempt = JSON.parse(row.value) as HostedLandingAttempt;
+            return {
+              id: 'attemptId' in row ? row.attemptId : attempt.id,
+              submissionId: 'submissionId' in row ? row.submissionId : attempt.submissionId,
+              at: attempt.at ?? new Date(row._creationTime).toISOString(),
+              parentAttemptId: attempt.parentAttemptId ?? null,
+              mainHead: attempt.main?.head ?? null,
+              inputPin: attempt.candidate?.inputs ?? null,
+              runId: attempt.check?.runId ?? null,
+            };
+          }
           return { id: row._id, ...('metricMutation' in row ? { mutation: row.metricMutation } : {}) };
         }),
       );
       return canonicalPayload({
         page: values,
+        contextFrom: new Date(context).toISOString(),
         isDone: rows.isDone,
         continueCursor: rows.continueCursor,
         cutover: project.sourceCutover?.at ?? null,

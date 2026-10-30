@@ -30,8 +30,13 @@ export function metricAddress(root: string): { owner: string; address: HostedAge
 }
 export function metricQuery(address: HostedAgentAddress): MetricQuery {
   const exchange = new ConvexExchange(address.url, process.env.FORGE_AUTH_TOKEN, address.projectId, '', null);
-  return (name, args) =>
-    exchange.client.query(makeFunctionReference<'query'>(name), { ...args, projectId: address.projectId });
+  return Object.assign(
+    (name: string, args: Record<string, unknown>) =>
+      exchange.client.query(makeFunctionReference<'query'>(name), { ...args, projectId: address.projectId }),
+    {
+      objects: (pins: import('./self-metrics-hosted-inputs.js').MetricPin[]) => exchange.downloadBatch(pins),
+    },
+  );
 }
 /** Join by authority time, retaining context on each side but never counting a
  * stale post-cutover native move. The seam itself is always visible in coverage. */
@@ -78,8 +83,11 @@ export async function readMetricRecords(
       selected.owner,
       options.pointer ? { pointer: options.pointer } : {},
     ).read();
+  const query = options.query ?? metricQuery(selected.address);
   const { records, cutover } = await readHostedMetricPages(
-    options.query ?? metricQuery(selected.address),
+    Object.assign((name: string, args: Record<string, unknown>) => query(name, args), {
+      objects: query.objects ?? (pins => metricQuery(selected.address!).objects!(pins)),
+    }),
     period,
     options.summary,
   );

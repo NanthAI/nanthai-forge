@@ -17,13 +17,14 @@ export type MetricMove = {
   kind: 'landing' | 'revert' | 'compensating';
   ancestorHeads?: string[];
   path?: 'after-retry' | undefined;
+  attemptId?: string | undefined;
 };
 export type MetricSubmission = {
   id: string;
   entryId: string;
   entryAt?: string | undefined;
   entryStatus?: string | undefined;
-  retryCause?: import('./first-attempt-land-rate.js').LandRateEntry['cause'];
+  retryCause?: import('./first-attempt-land-rate.js').LandRateEntry['cause'] | undefined;
   at: string;
   inputs: MetricInput[];
   status: string;
@@ -33,6 +34,16 @@ export type MetricSubmission = {
   delivered?: 'landed' | 'terminal-failed';
   noOwner?: boolean | undefined;
   landedAt?: string | undefined;
+  errorCode?: string | null;
+  supersedes?: string;
+  retryReason?: string;
+  attemptId?: string | undefined;
+  parentAttemptId?: string | null;
+  submissionId?: string;
+  actor?: string | undefined;
+  operationId?: string | undefined;
+  mainRace?: boolean;
+  recheck?: boolean;
 };
 export type MetricRun = {
   head?: string;
@@ -80,6 +91,7 @@ export type MetricRecords = {
   landingKindsComplete?: boolean;
   lifecycleCoverageGaps?: string[];
   mutationCoverageGaps?: string[];
+  landingCoverageGaps?: string[];
   source?: {
     kind: 'native' | 'hosted' | 'joined';
     revision?: number | string | undefined;

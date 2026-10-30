@@ -32,7 +32,7 @@ test('hosted queries authorize owner/maintainer, reject stranger and plain reade
     seam,
   );
   f.put('projectReaders', { projectId: 'project', reader: 'reader' }, seam);
-  f.landing('before-context', at(-1441), at(-1441));
+  f.landing('before-context', at(-43201), at(-43201));
   f.landing('context', at(-1440), at(-1440));
   f.landing('included', at(0), at(0));
   f.landing('excluded-to', period.to, period.to);
@@ -216,7 +216,7 @@ test('source-authority gate preserves native/native-shadow readers; hosted handl
       const previous = f.meter.calls;
       const result = await readMetricRecords(root, period, { query: f.query });
       assert.equal(result.source.kind, mode === 'server' ? 'hosted' : 'native');
-      assert.equal(f.meter.calls - previous, mode === 'server' ? 4 : 0);
+      assert.equal(f.meter.calls - previous, mode === 'server' ? 7 : 0);
     }
     const previous = f.meter.calls;
     const summary = await hostedStatusMetrics(root, period.to, f.query);

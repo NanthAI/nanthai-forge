@@ -42,6 +42,14 @@ export function formatMetricReport(current: MetricsSurface, before?: MetricsSurf
     columns,
     previous ? '| --- | --- | --- | --- | --- |' : '| --- | --- | --- | --- |',
     ...rows,
+    '',
+    '| Waste cause | Attempts | Lost elapsed minutes | Runner minutes | Discarded passed runner minutes | Unknown elapsed / runner |',
+    '| --- | --- | --- | --- | --- | --- |',
+    ...current.totals.waste.byCause.map(
+      row =>
+        `| ${row.cause} | ${row.attempts} | ${number(row.elapsedMinutes)} | ${number(row.runnerMinutes)} | ${number(row.discardedPassedRunnerMinutes)} | ${row.unknownElapsedAttempts} / ${row.unknownRunnerRuns} |`,
+    ),
+    `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner minutes. ${cell(current.totals.waste.gaps.join(' '))}`,
     `Finish-to-main p50 (trusted actors): ${number(current.totals.finishToMain.p50Minutes)} minutes. ${cell(current.totals.finishToMain.gaps.join(' '))}`,
     '',
   ].join('\n');
@@ -56,6 +64,13 @@ export function formatMetrics(current: MetricsSurface) {
     `Metrics UTC [${current.period.from}, ${current.period.to})`,
     ...rows,
     `Finish-to-main p50 (trusted actors): ${number(current.totals.finishToMain.p50Minutes)} min · partial`,
+    ...current.totals.waste.byCause
+      .filter(row => row.attempts)
+      .map(
+        row =>
+          `Waste ${row.cause}: ${number(row.elapsedMinutes)} elapsed / ${number(row.runnerMinutes)} runner min; discarded passed ${number(row.discardedPassedRunnerMinutes)} runner min`,
+      ),
+    `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner min`,
     'Daily values and named gaps: --json; report: --report FILE.md',
   ].join('\n');
 }

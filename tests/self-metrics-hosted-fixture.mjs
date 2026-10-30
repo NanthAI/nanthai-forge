@@ -27,12 +27,14 @@ export function fixture() {
     sourceCutover: { at: seam, minimumCliVersion: '0.3.1' },
   };
   tables.hostedProjects.push(project);
+  const documentsById = new Map([[project._id, project]]);
   let actor = 'owner';
   const field = (row, path) => path.split('.').reduce((value, key) => value?.[key], row);
   const put = (table, row, time) => {
     const doc = { ...row, _id: `${table}-${tables[table].length}`, _creationTime: Date.parse(time) };
     checkDocument(schema, table, doc);
     tables[table].push(doc);
+    documentsById.set(doc._id, doc);
     return doc;
   };
   const read = rows => {
@@ -42,7 +44,14 @@ export function fixture() {
   const ctx = {
     auth: { getUserIdentity: async () => (actor ? { subject: actor } : null) },
     db: {
-      get: async id => read(tables.hostedProjects.filter(row => row._id === id))[0] ?? null,
+      get: async id => {
+        const row =
+          documentsById.get(id) ??
+          Object.values(tables)
+            .flat()
+            .find(row => row._id === id);
+        return read(row ? [row] : [])[0] ?? null;
+      },
       query: table => {
         let selected,
           descending = false;

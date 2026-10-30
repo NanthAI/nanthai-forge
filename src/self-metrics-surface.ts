@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { calculateSelfMetrics } from './self-metrics.js';
+import { calculateWaste } from './self-metrics-waste.js';
 import { observations, during, percentile } from './self-metrics-joins.js';
 import { z } from 'zod';
 import { invariant } from './errors.js';
@@ -53,6 +54,7 @@ export function metricTotals(
     gaps: [...value.gaps, ...globalGaps],
   });
   return {
+    waste: wrap(calculateWaste(records, period), count(records.submissions)),
     finishToMain: (() => {
       const rows = (records.finishTimings ?? []).filter(row => row.trusted && during(row.at, period));
       return {

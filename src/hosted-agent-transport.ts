@@ -188,7 +188,13 @@ export class HostedAgentTransport {
           action,
           null,
           await executeHostedMetrics(
-            { root: this.root, address: this.address, query: this.query.bind(this) },
+            {
+              root: this.root,
+              address: this.address,
+              query: Object.assign(this.query.bind(this), {
+                objects: this.exchange.downloadBatch.bind(this.exchange),
+              }),
+            },
             command.data,
           ),
         );

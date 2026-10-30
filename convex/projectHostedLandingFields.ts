@@ -164,6 +164,7 @@ export const hostedLandingTables = {
     progress: v.optional(v.string()),
     value: v.string(),
   })
+    .index('by_project', ['projectId'])
     .index('by_project_and_attempt', ['projectId', 'attemptId'])
     .index('by_project_and_submission_and_number', ['projectId', 'submissionId', 'number']),
 };

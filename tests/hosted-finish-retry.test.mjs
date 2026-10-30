@@ -324,12 +324,15 @@ test('server new-op retry links a failed submission, preserves original replay a
     'projectHostedLandingAttempts',
     'projectHostedCheckRuns',
     'projectHostedOperations',
+    'projectHostedRecords',
+    'projectHostedRecordBodies',
   ])
     projected.tables[table] = [...f.tables[table].values()].map(row => ({
       ...row,
       projectId: 'project',
       _creationTime: Date.parse('2026-10-29T00:00:00.000Z'),
     }));
+  projected.query.objects = async pins => pins.map(pin => f.c.objects.get(pin.sha256));
   const { records } = await readHostedMetricPages(projected.query, {
     from: '2025-01-01T00:00:00.000Z',
     to: '2028-01-01T00:00:00.000Z',

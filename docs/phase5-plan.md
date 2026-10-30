@@ -93,6 +93,25 @@ now. Each metric includes its source-record count, `partial` flag and named
 coverage gaps; an unknown value is `null`. Context records before the window
 remain available for classification and red-main intervals. Dollar figures
 retain the recorded monthly billing allocation; daily rows are not new invoices.
+
+Hosted metrics page compact acceptance, submission, attempt, run and immutable
+Lane/save metadata. Compose-input pages are deduplicated and digest-verified in
+batches of at most eight objects (1 MiB); source trees are never downloaded.
+Classification uses the exact Lane head and Intent, including resubmissions and
+saved heads after a failed submission. Thirty days of pre-window context are
+retained; older history and live pagination remain one explicit classification
+gap. Ordinary hosted landings and compensating reverts are counted separately.
+Status keeps its four-page read ceiling and omits this input hydration.
+
+JSON totals and daily rows include `waste`: lost attempt elapsed time and runner
+minutes by main race, explicit flake retry, conflict, cancellation, supersession,
+stall and check failure. Passed checks discarded by a main race and the ensuing
+re-checks have separate runner-minute fields. `CHECK_FAILED` alone never implies
+a flake. All recorded runs remain in 5.6, including cancelled and discarded runs;
+observed execution seconds are retained, while missing shard/reuse receipts stay
+partial. Hosted resubmissions join the existing requester-attributed cancel and
+linked-retry intervention receipts; other owner interventions remain a named gap.
+
 JSON is the default for agents and redirected output; a terminal gets a short
 text table (`--text` also selects it explicitly).
 
@@ -104,9 +123,9 @@ at most 100 rows. Status reads at most four hosted pages and labels omitted
 records. Native-owner and server-shadow bindings keep native metric reads.
 Spanning windows join native evidence before the recorded cutover timestamp and
 hosted evidence at/after it, naming that authority seam. Hosted context is bounded
-to one day before the window; pages are live observations, not a cross-page
-snapshot. Missing inputs, caller delivery, full-suite selection, reuse keys,
-requester history and billing evidence stay named gaps. Trusted finish-to-main
+to thirty days before the window (one day for status); pages are live observations,
+not a cross-page snapshot. Missing historical inputs, caller delivery, legacy
+full-suite selection, reuse keys, requester history and billing evidence stay named gaps. Trusted finish-to-main
 p50 uses submission/acceptance timestamps under the recorded attempt policy,
 never free text. An older deployment without `projectSelfMetrics` returns
 `METRICS_UNAVAILABLE` with coverage gaps. Deploy Convex before the client.

@@ -39,6 +39,17 @@ function pathFor(
       return 'after-fixer';
     if (
       history.some(
+        s =>
+          same(s) &&
+          s.supersedes &&
+          history.some(
+            previous =>
+              previous.entryId === s.supersedes &&
+              same(previous) &&
+              ['failed', 'interrupted', 'superseded'].includes(previous.status),
+          ),
+      ) ||
+      history.some(
         (s, index) =>
           same(s) &&
           ['failed', 'interrupted', 'superseded'].includes(s.status) &&
@@ -144,25 +155,24 @@ export function calculateSelfMetrics(
   const delivered = new Map<string, string>();
   for (const receipt of records.receipts.filter(r => instant(r.at) <= instant(asOf)))
     for (const item of receipt.deliveries ?? []) delivered.set(item.entryId, item.state);
+  const acceptedInputs = new Set(
+    records.moves
+      .filter(move => instant(move.at) <= instant(asOf))
+      .flatMap(move => move.inputs.map(input => `${input.laneId}:${input.head}`)),
+  );
+  const runsById = new Map(records.runs.map(run => [run.id, run]));
   const dropped = (options.headline ? [] : records.submissions)
     .filter(s => inPeriod(s.at, period) && instant(s.at) <= instant(asOf))
     .filter(s => {
       if (s.delivered || delivered.has(s.entryId) || (s.landedAt && instant(s.landedAt) <= instant(asOf)))
         return false;
-      if (
-        records.moves.some(
-          m =>
-            instant(m.at) <= instant(asOf) &&
-            m.inputs.some(i => s.inputs.some(j => j.laneId === i.laneId && j.head === i.head)),
-        )
-      )
-        return false;
+      if (s.inputs.some(input => acceptedInputs.has(`${input.laneId}:${input.head}`))) return false;
       const progress = [
         s.at,
         ...(s.endedAt ? [s.endedAt] : []),
         ...s.progressAt,
-        ...records.runs
-          .filter(r => s.runIds.includes(r.id))
+        ...s.runIds
+          .flatMap(id => (runsById.has(id) ? [runsById.get(id)!] : []))
           .flatMap(r => [r.at, ...(r.endedAt ? [r.endedAt] : [])]),
       ]
         .filter(at => instant(at) <= instant(asOf))
@@ -289,8 +299,12 @@ export function calculateSelfMetrics(
       period.to,
     ),
     metric1: {
-      partial: rows.some(r => r.path === 'unknown') || records.landingKindsComplete === false,
+      partial:
+        rows.some(r => r.path === 'unknown') ||
+        records.landingKindsComplete === false ||
+        !!records.landingCoverageGaps?.length,
       gaps: [
+        ...(records.landingCoverageGaps ?? []),
         ...(rows.some(r => r.path === 'unknown')
           ? ['Submission history or saved-head/failure ordering is unavailable for unclassified landings.']
           : []),
