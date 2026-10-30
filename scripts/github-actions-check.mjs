@@ -53,6 +53,10 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
     if (build) {
       npm('run', 'build:core');
       npm('run', 'build:web');
+    } else {
+      // Shared build artifacts omit ignored declarations; restore the API types
+      // before tests invoke the deployment compiler directly.
+      run('node', ['scripts/prepare-convex-api.mjs']);
     }
     // Partial runs never claim coverage, even when the job inherits a coverage head.
     if (plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;

@@ -41,7 +41,7 @@ function fixture(t) {
   return join(root, 'public-verify-plan.json');
 }
 
-test('public shards use the Forge executor and consume builds without rerunning static steps', t => {
+test('public shards prepare ignored Convex types before consuming shared builds', t => {
   const path = fixture(t);
   const expected = benchmarkPlan(24, {});
   for (const shard of ['0', '23', 'static']) {
@@ -50,13 +50,16 @@ test('public shards use the Forge executor and consume builds without rerunning 
       calls.push({ command, args, env: { ...options.env } }),
     );
     assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), expected);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].command, 'node');
+    assert.ok(calls.every(call => call.command === 'node'));
     if (shard === 'static') {
+      assert.equal(calls.length, 1);
       assert.deepEqual(calls[0].args, ['scripts/verify.mjs']);
       assert.deepEqual(JSON.parse(calls[0].env.FORGE_SELECTED_TESTS).tests, []);
     } else {
-      assert.deepEqual(calls[0].args, ['scripts/test-files.mjs', ...expected.groups[Number(shard)]]);
+      assert.deepEqual(
+        calls.map(call => call.args),
+        [['scripts/prepare-convex-api.mjs'], ['scripts/test-files.mjs', ...expected.groups[Number(shard)]]],
+      );
     }
     assert.equal(calls[0].env.FORGE_TEST_WORKERS, '2');
     assert.equal(calls[0].env.FORGE_TEST_EVENTS, '1');
@@ -105,7 +108,9 @@ test('public verification uses timing history while retaining every file, includ
   assert.deepEqual(expected.groups.flat().sort(), baseline.selection.tests);
   const calls = [];
   for (const shard of ['0', '1', '2', '3'])
-    publicVerify(shard, '4', (command, args) => calls.push(args.slice(1)));
+    publicVerify(shard, '4', (command, args) => {
+      if (args[0] === 'scripts/test-files.mjs') calls.push(args.slice(1));
+    });
   assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), expected);
   assert.deepEqual(calls.flat().sort(), baseline.selection.tests);
 });
