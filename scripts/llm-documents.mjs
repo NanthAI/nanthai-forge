@@ -19,6 +19,7 @@ export const llmsFullPaths = [
   'docs/agents.md',
   'docs/agents/briefings.md',
   'docs/agents/workflow.md',
+  'docs/parallel-work-defaults.md',
   'docs/security.md',
   'docs/workflows.md',
   'docs/gh-cli.md',
@@ -57,6 +58,7 @@ const agentDocs = new Set([
   'docs/agents.md',
   'docs/agents/briefings.md',
   'docs/agents/improvement-loop.md',
+  'docs/parallel-work-defaults.md',
 ]);
 
 const referenceDocs = new Set([

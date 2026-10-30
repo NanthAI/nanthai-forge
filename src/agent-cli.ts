@@ -11,6 +11,9 @@ import { AgentWorkflow } from './agent-workflow.js';
 import { overlapLines, type PredictiveOverlap } from './agent-predictive-overlap.js';
 import { retainedFinishCommand } from './agent-finish-journal.js';
 import { invariant } from './errors.js';
+import { hostedLandCli, LAND_CHILD_ENV } from './hosted-land-cli.js';
+import { HostedAgentTransport } from './hosted-agent-transport.js';
+import { housekeepingLines, type IdleLane } from './lane-prune.js';
 
 export const AGENT_HELP = `Forge agent workflow
   nforge agent ROOT start|save|land [--MODE] [JSON | --command-file FILE]
@@ -39,6 +42,11 @@ Three verbs:
     --save            save, sync if main moved, compose, check and land (accept:true)
     --save --check-only   the same without landing
     --resume-ready    resume landings waiting on dependencies
+
+land --save waits for the outcome (--no-wait returns after submission; a killed client never stops it).
+--message-file FILE|- reads message text; --command-file - reads the JSON from stdin.
+Hosted start prints {"started":{laneId,path}} on stderr first; path:DIR opens there, open:false skips the checkout.
+Heavy local commands: nforge heavy CMD. Settings: nforge settings; docs: nforge docs parallel-work-defaults.
 
 land --save checkpoints, syncs the Lane with main if main moved, composes, runs the
 "verify" check (or the only check) and requests acceptance under project policy.
@@ -330,7 +338,36 @@ function laneFromCwd(directory: string): string | undefined {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) ? id : undefined;
 }
 
-type AgentCliOptions = { operator?: boolean; notices?: boolean };
+/** process: invoked as the nforge process (land detaches its submission and waits by default). */
+type AgentCliOptions = { operator?: boolean; notices?: boolean; process?: boolean };
+
+/** Client-side flags, accepted anywhere after the action: --wait/--no-wait and --message-file FILE|-. */
+function clientOptions(tail: string[]) {
+  const rest: string[] = [];
+  let wait: boolean | undefined, messageFile: string | undefined;
+  for (let index = 0; index < tail.length; index++) {
+    const arg = tail[index]!;
+    if (arg === '--wait' || arg === '--no-wait') {
+      invariant(wait === undefined, 'BAD_ARGUMENT', 'Choose --wait or --no-wait once.');
+      wait = arg === '--wait';
+    } else if (arg === '--message-file') {
+      invariant(
+        messageFile === undefined && tail[index + 1] !== undefined,
+        'BAD_ARGUMENT',
+        'Use --message-file FILE once (- reads stdin).',
+      );
+      messageFile = tail[++index];
+    } else rest.push(arg);
+  }
+  return { rest, wait, messageFile };
+}
+function readInput(path: string, name: string): string {
+  try {
+    return readFileSync(path === '-' ? 0 : path, 'utf8');
+  } catch {
+    invariant(false, 'BAD_ARGUMENT', `${name} could not be read.`);
+  }
+}
 
 /** Alias notices print only after the command succeeds, so error stderr stays one JSON object. */
 export async function agentCli(args: string[], options: AgentCliOptions = {}): Promise<unknown> {
@@ -353,7 +390,9 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     invariant(laneId, 'BAD_ARGUMENT', 'Run peers --path inside a Lane or set FORGE_LANE_ID.');
     return workflow.dispatch({ action: 'peers', laneId, path: args[3] });
   }
-  const [root, requestedAction, ...tail] = args;
+  const [root, requestedAction, ...rawTail] = args;
+  const client = clientOptions(rawTail),
+    tail = client.rest;
   if (requestedAction === 'help' || requestedAction === '--help') {
     process.stdout.write(AGENT_HELP);
     return undefined;
@@ -378,12 +417,8 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   }
   let text = option ?? '{}';
   if (option === '--command-file') {
-    invariant(path, 'BAD_ARGUMENT', 'Choose a command JSON file.');
-    try {
-      text = readFileSync(path, 'utf8');
-    } catch {
-      invariant(false, 'BAD_ARGUMENT', 'Command file could not be read.');
-    }
+    invariant(path, 'BAD_ARGUMENT', 'Choose a command JSON file, or - for stdin.');
+    text = readInput(path, 'Command file');
   }
   let parameters: unknown;
   try {
@@ -397,6 +432,9 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     'Command parameters must be a JSON object.',
   );
   let selected = parameters as Record<string, unknown>;
+  // Any message text (apostrophes, newlines) arrives verbatim from a file or stdin, never through shell quoting.
+  if (client.messageFile !== undefined)
+    selected = { ...selected, message: readInput(client.messageFile, 'Message file').replace(/\r?\n$/, '') };
   if (typeof selected.action === 'string') noticeViewAlias(selected.action);
   const hosted = hostedAgentAddress(root, selected);
   action = canonical(lowerVerb(form!, Boolean(hosted)));
@@ -408,14 +446,44 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   );
   // Old spellings print their start/save/land or x form once; new forms and internal facades stay quiet.
   const notice = (command: Record<string, unknown>) => {
-    if (options.notices === false || form!.operator || form!.flags.length) return;
+    if (
+      options.notices === false ||
+      form!.operator ||
+      form!.flags.length ||
+      process.env[LAND_CHILD_ENV] === '1'
+    )
+      return;
     const current = newForm(requestedAction!, command, Boolean(hosted));
     if (current) notices.push(aliasNotice(root, requestedAction!, current));
   };
   if (hosted) {
     notice(selected);
-    return hostedAgentCli(root, action, landSaveCommand(form!, true, selected), hosted);
+    const command = landSaveCommand(form!, true, selected);
+    // The installed CLI detaches the submission and waits by default; in-process callers opt in.
+    if (action === 'finish' && (options.process || client.wait !== undefined))
+      return hostedLandCli(root, command, hosted, {
+        wait: client.wait ?? (options.process ? undefined : false),
+        detach: Boolean(options.process),
+      });
+    if (action !== 'start' || !options.process) return hostedAgentCli(root, action, command, hosted);
+    const transport = new HostedAgentTransport(root, hosted);
+    // The Lane id and path print before the checkout downloads, so a slow open never hides them.
+    transport.onStarted = lane => process.stderr.write(`${JSON.stringify({ started: lane })}\n`);
+    const response = (await hostedAgentCli(root, action, command, hosted, transport)) as {
+      localLanes?: { idle: IdleLane[]; pruned: { count: number; bytes: number } };
+    };
+    if (response.localLanes)
+      for (const line of housekeepingLines(root, response.localLanes.idle, response.localLanes.pruned))
+        process.stderr.write(`${line}\n`);
+    return response;
   }
+  invariant(
+    client.wait === undefined || action === 'finish',
+    'BAD_ARGUMENT',
+    '--wait and --no-wait apply to land --save.',
+  );
+  // Native finish already waits by default; --no-wait returns after durable submission.
+  if (action === 'finish' && client.wait === false) selected = { ...selected, wait: false };
   if (action === 'wait') {
     await agentWaitCli(root, selected, textMode);
     return undefined;

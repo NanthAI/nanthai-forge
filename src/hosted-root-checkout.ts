@@ -48,8 +48,9 @@ export async function openHostedRootLane(
   address: HostedAgentAddress,
   exchange: HostedAgentExchange,
   command: z.infer<typeof hostedAgentCommandSchemas.open> & { operationId: string },
+  /** Open here instead of the default placement; objects still come from ROOT's cache. */
+  path = hostedRootLanePath(root, address, command.laneId),
 ) {
-  const path = hostedRootLanePath(root, address, command.laneId);
   const downloads = new HostedCheckoutDownloads(exchange);
   return checkoutHostedLane(
     path,

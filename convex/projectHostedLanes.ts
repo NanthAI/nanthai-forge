@@ -3,7 +3,8 @@ import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
-import { hostedRecordPage, readHostedRecord } from './projectHostedRecords';
+import { hostedRecordPage, readHostedRecord, recordHead } from './projectHostedRecords';
+import { effectiveLifecycleRecord } from './projectHostedLifecycleOverlay';
 import { hostedLaneSchema, hostedLaneSelectionSchema, hostedIntentSchema } from '../src/hosted-lane';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { invariant } from '../src/errors';
@@ -47,6 +48,32 @@ export const head = query({
         sourceVersion: lane.sourceVersion,
         lifecycleVersion: lane.lifecycleVersion,
       };
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+/** Lifecycle state of up to 100 Lanes in one call (client idle listing and prune).
+ * Reads heads and lifecycle overlays only, never record bodies. Unknown ids are "missing". */
+export const states = query({
+  args: { projectId: v.id('hostedProjects'), laneIds: v.array(v.string()) },
+  returns: v.array(v.object({ laneId: v.string(), state: v.string(), version: v.number() })),
+  handler: async (ctx, input) => {
+    try {
+      invariant(input.laneIds.length <= 100, 'BAD_ARGUMENT', 'Read at most 100 Lanes per call.');
+      await caller(ctx, input.projectId);
+      const result = [];
+      for (const laneId of new Set(input.laneIds)) {
+        const head = await recordHead(ctx, input.projectId, 'lane', laneId);
+        const row = head ? await ctx.db.get(head.recordId) : null;
+        const effective = row ? await effectiveLifecycleRecord(ctx, row) : null;
+        result.push(
+          effective
+            ? { laneId, state: String(effective.status), version: effective.version }
+            : { laneId, state: 'missing', version: 0 },
+        );
+      }
+      return result;
     } catch (error) {
       return report(error);
     }

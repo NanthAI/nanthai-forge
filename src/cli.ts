@@ -74,7 +74,10 @@ Usage:
   nforge mcp-coordination <deployment-url> <project-id>
   nforge exchange ROOT pull [--target NEW_DIRECTORY]
   nforge exchange <root> pull|open|restore|receive-proposal|pull-proposal|migrate-archive --command-file FILE
-  nforge agent <root> start|save|land [--mode] [json | --command-file FILE]   # nforge agent --help
+  nforge agent <root> start|save|land [--mode] [json | --command-file FILE|-] [--message-file FILE|-] [--no-wait]   # nforge agent --help
+  nforge heavy CMD [ARGS...]   # run a heavy local command under the machine-wide slot limit
+  nforge prune [--apply] [--scan DIRECTORY]   # remove local roots of landed/abandoned Lanes
+  nforge settings [KEY [VALUE | --reset]]   # client parallel-work defaults (docs/parallel-work-defaults.md)
   nforge agent <root> <read> [json | --command-file FILE]
   nforge x <root> <operator-action> [json | --command-file FILE]
   nforge owner refresh <root>
@@ -181,8 +184,28 @@ async function main(args: string[]): Promise<unknown> {
   if (args[0] === 'land') return landCli(args.slice(1));
   if (args[0] === 'release')
     return (await import('./maintainer-release-cli.js')).maintainerReleaseCli(args.slice(1));
-  if (args[0] === 'agent') return agentCli(args.slice(1));
-  if (args[0] === 'x') return agentCli(args.slice(1), { operator: true });
+  if (args[0] === 'agent') return agentCli(args.slice(1), { process: true });
+  if (args[0] === 'x') return agentCli(args.slice(1), { operator: true, process: true });
+  if (args[0] === 'heavy') {
+    process.exitCode = await (await import('./heavy-slots.js')).heavyCli(args.slice(1));
+    return undefined;
+  }
+  if (args[0] === 'settings') return (await import('./client-settings.js')).clientSettingsCli(args.slice(1));
+  if (args[0] === 'prune') {
+    const { pruneCli, convexLaneStates } = await import('./lane-prune.js');
+    const { ConvexExchange } = await import('./exchange-client.js');
+    const clients = new Map<string, InstanceType<typeof ConvexExchange>['client']>();
+    return pruneCli(
+      args.slice(1),
+      convexLaneStates(({ url, projectId }) => {
+        const key = `${url}\0${projectId}`;
+        if (!clients.has(key))
+          clients.set(key, new ConvexExchange(url, process.env.FORGE_AUTH_TOKEN, projectId, '', null).client);
+        const client = clients.get(key)!;
+        return { query: (name, input) => client.query(name as never, input as never) };
+      }),
+    );
+  }
   if (args[0] === 'local-checks') return localChecksCli(args.slice(1));
   if (args[0] === 'plugin-config') {
     invariant(
@@ -432,6 +455,11 @@ async function main(args: string[]): Promise<unknown> {
 function shellQuote(value: string) {
   return "'" + value.replaceAll("'", "'\\''") + "'";
 }
+// A closed reader (`| head`) must not crash the process with EPIPE mid-action; output is dropped.
+for (const stream of [process.stdout, process.stderr])
+  stream.on('error', error => {
+    if ((error as NodeJS.ErrnoException).code !== 'EPIPE') throw error;
+  });
 // Fail closed if a sync invocation loses its asynchronous completion. In
 // particular an unfinished request must never leave an empty stdout and exit 0.
 let syncPending = process.argv[2] === 'github-sync';

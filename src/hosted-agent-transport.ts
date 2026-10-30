@@ -7,6 +7,16 @@ import type { HostedRunSubscription } from './hosted-agent-observe.js';
 import { executeHostedRecords } from './hosted-agent-records.js';
 import { hostedAgentRecordActions } from './hosted-agent-contract.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
+import { recordLane } from './lane-registry.js';
+import { convexLaneStates, laneHousekeeping, markerIdentity } from './lane-prune.js';
+import { shareDependencies } from './shared-dependencies.js';
+import { readClientSettings } from './client-settings.js';
+import {
+  knownCapabilities,
+  protocolMismatchError,
+  unadvertisedActionError,
+  unknownActionError,
+} from './hosted-agent-version.js';
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 import { dirname, basename, resolve } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
@@ -82,6 +92,8 @@ export type HostedAgentResponse = {
   behindMain?: unknown;
   /** Present only while an overlap is unanswered: who, which files and the acknowledge or route-around command. */
   overlapNotice?: HostedOverlapNotice;
+  /** start only: your idle open Lanes and finished Lane roots pruned on this machine. */
+  localLanes?: { idle: unknown[]; pruned: { count: number; bytes: number } };
 };
 /** The shared CLI/MCP transport. Source bytes use the existing verified exchange;
  * every dispatch is finite and every mutation is pinned before network IO. */
@@ -91,6 +103,8 @@ export class HostedAgentTransport {
   private receiptActor: string | undefined;
   private callerActor: string | null = null;
   private callerOperationId: string | null = null;
+  /** CLI only: start reports the new Lane before its checkout downloads. */
+  onStarted?: (lane: { laneId: string; path: string | null }) => void;
   constructor(
     readonly root: string,
     readonly address: HostedAgentAddress,
@@ -112,11 +126,32 @@ export class HostedAgentTransport {
     try {
       const response = await this.dispatchCaller(requestedAction, input, signal);
       this.retainCaller(requestedAction, { result: response.result }, response.operationId);
+      this.touchLane(requestedAction, input, response);
       return response;
     } catch (error) {
       this.retainCaller(requestedAction, { error }, this.callerOperationId);
       throw error;
     }
+  }
+  /** Local Lane activity for idle listing and prune: one small file write, no network. */
+  private touchLane(action: string, input: Record<string, unknown>, response: HostedAgentResponse) {
+    if (
+      ['capabilities', 'metrics', 'check-settings', 'status', 'observe', 'landing', 'start', 'open'].includes(
+        action,
+      )
+    )
+      return;
+    const laneId =
+      typeof input.laneId === 'string' ? input.laneId : (markerIdentity(this.root)?.laneId ?? undefined);
+    if (!laneId) return;
+    const text = JSON.stringify(response.result ?? null);
+    const state =
+      action === 'abandon'
+        ? ('abandoned' as const)
+        : action === 'finish' && /"phase":"landed"/.test(text)
+          ? ('completed' as const)
+          : undefined;
+    recordLane({ laneId, ...(state ? { state } : {}) });
   }
   /** Record what the caller receives, locally; a later CLI mutation carries it. */
   private retainCaller(
@@ -158,7 +193,14 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
-    const action = hostedAgentAction(requestedAction);
+    let action: HostedAgentAction;
+    try {
+      action = hostedAgentAction(requestedAction);
+    } catch (error) {
+      if (error instanceof ForgeError && error.code === 'HOSTED_ACTION_UNSUPPORTED')
+        throw unknownActionError(hostedAgentRoot(this.root), requestedAction);
+      throw error;
+    }
     invariant(
       hostedAgentAddressSchema.safeParse(this.address).success &&
         this.exchange.projectId === this.address.projectId,
@@ -170,6 +212,18 @@ export class HostedAgentTransport {
         return await executeHostedRecords(this, action as (typeof hostedAgentRecordActions)[number], input);
       const observation = action === 'status' || action === 'observe';
       const { operationId, ...parameters } = input;
+      // Client-only start placement: where to open the Lane, or open:false for pins only.
+      const placement = action === 'start' ? { path: parameters.path, open: parameters.open } : {};
+      if (action === 'start') {
+        delete parameters.path;
+        delete parameters.open;
+        invariant(
+          (placement.path === undefined || (typeof placement.path === 'string' && placement.path !== '')) &&
+            (placement.open === undefined || typeof placement.open === 'boolean'),
+          'BAD_ARGUMENT',
+          'start path is a directory and open is true or false.',
+        );
+      }
       const command = hostedAgentCommandSchemas[action].safeParse(observation ? input : parameters);
       invariant(
         command.success,
@@ -224,7 +278,9 @@ export class HostedAgentTransport {
           'Hosted agent capability discovery is unavailable at this deployment. A compatible hosted agent API is required; no native owner or local listener fallback was attempted.',
         );
       }
-      const capabilities = hostedAgentCapabilitiesSchema.parse(discovery);
+      const capabilities = hostedAgentCapabilitiesSchema.parse(
+        knownCapabilities(hostedAgentRoot(this.root), discovery),
+      );
       this.callerActor = capabilities.actor;
       this.receiptActor = capabilities.metricReceiptVersion === 1 ? capabilities.actor : undefined;
       metricRequesterActor({ kind: 'agent', name: capabilities.actor });
@@ -233,13 +289,14 @@ export class HostedAgentTransport {
         'PROJECT_UNAVAILABLE',
         'Capabilities belong to a different project.',
       );
-      invariant(
-        capabilities.actions.includes(action as (typeof capabilities.actions)[number]) ||
-          (capabilities.authority.mode !== 'native-owner' &&
-            (hostedAgentOwnerActions as readonly string[]).includes(action)),
-        'HOSTED_ACTION_UNSUPPORTED',
-        'The project does not support this hosted action under its current source authority.',
-      );
+      if (
+        !capabilities.actions.includes(action as (typeof capabilities.actions)[number]) &&
+        !(
+          capabilities.authority.mode !== 'native-owner' &&
+          (hostedAgentOwnerActions as readonly string[]).includes(action)
+        )
+      )
+        throw unadvertisedActionError(action);
       if (action === 'metrics')
         return this.response(
           action,
@@ -356,15 +413,59 @@ export class HostedAgentTransport {
       } else {
         result = await executeHostedAgent(session, action, command.data);
         if (action === 'finish') result = await recoverHostedFinish(session, result);
-        if (action === 'start' && hostedRootLanePath(root, this.address)) {
+        if (action === 'start') {
           const started = hostedStartResultSchema.parse(result);
-          invariant(started.lane, 'SOURCE_UNAVAILABLE', 'Hosted start has no Lane source.');
-          const opened = await openHostedRootLane(root, this.address, this.exchange, {
-            laneId: started.lane.laneId,
-            operationId: await journal.id('checkout'),
-          });
-          result = { ...started, path: opened.root, checkout: opened };
+          const into =
+            placement.open === false || !started.lane
+              ? null
+              : typeof placement.path === 'string'
+                ? resolve(placement.path)
+                : hostedRootLanePath(root, this.address)
+                  ? hostedRootLanePath(root, this.address, started.lane.laneId)
+                  : null;
+          if (started.lane) {
+            // Report the Lane before its checkout downloads, so a slow or interrupted open never hides it.
+            recordLane({
+              laneId: started.lane.laneId,
+              root: into ?? root,
+              url: this.address.url,
+              projectId: this.address.projectId,
+              ...(command.data && typeof (command.data as { outcome?: unknown }).outcome === 'string'
+                ? { outcome: (command.data as { outcome: string }).outcome }
+                : {}),
+            });
+            this.onStarted?.({ laneId: started.lane.laneId, path: into });
+          }
+          if (into) {
+            invariant(started.lane, 'SOURCE_UNAVAILABLE', 'Hosted start has no Lane source.');
+            // A checkout ROOT keeps its warm object cache for the new Lane, wherever it opens.
+            const opened = await openHostedRootLane(
+              hostedRootLanePath(root, this.address) ? root : into,
+              this.address,
+              this.exchange,
+              { laneId: started.lane.laneId, operationId: await journal.id('checkout') },
+              into,
+            );
+            recordLane({ laneId: started.lane.laneId, root: opened.root });
+            result = {
+              ...started,
+              path: opened.root,
+              checkout: opened,
+              dependencies: await this.shareDependencies(opened.root),
+            };
+          }
         }
+      }
+      if (action === 'open') {
+        const opened = result as { root?: unknown; laneId?: unknown };
+        const path = typeof opened.root === 'string' ? opened.root : resolve(root);
+        recordLane({
+          laneId: (command.data as { laneId: string }).laneId,
+          root: path,
+          url: this.address.url,
+          projectId: this.address.projectId,
+        });
+        result = { ...(result as object), dependencies: await this.shareDependencies(path) };
       }
       // A replayed finish poll adds no read; the first call and the terminal answer carry the notice.
       const finishDone =
@@ -377,26 +478,66 @@ export class HostedAgentTransport {
             (command.data as { laneId?: string }).laneId ??
             readHostedLaneCheckout(root)?.selection.laneId)
           : undefined;
-      return this.response(
+      const response = await this.response(
         action,
         journal.operationId,
         await withSourceRecovery(session, action, command.data, result),
         overlapLane,
       );
+      if (action === 'start') {
+        const started = result as { lane?: { laneId?: string } | null; path?: string };
+        const localLanes = await this.housekeeping(
+          [root, ...(started.path ? [started.path] : [])],
+          [...(started.lane?.laneId ? [started.lane.laneId] : [])],
+        );
+        if (localLanes) response.localLanes = localLanes;
+      }
+      return response;
     } catch (error) {
       const owner = nativeOwner(existsSync(this.root) ? realpathSync(this.root) : this.root);
       if (owner) rememberSourceAuthorityError(new WorkStore(owner), error, this.address.projectId);
-      if (error instanceof z.ZodError)
-        throw new ForgeError(
-          'HOSTED_PROTOCOL_INVALID',
-          'Hosted agent response does not match the supported contract.',
-        );
+      if (error instanceof z.ZodError) throw protocolMismatchError();
       const safe = hostedActionError(error, `agent ${action}`);
       if (safe instanceof SourceAuthorityStaleError) throw safe;
+      // Version skew needs an upgrade, not a replay.
+      if (safe.code === 'HOSTED_ACTION_UNSUPPORTED' || safe.code === 'CLI_UPGRADE_REQUIRED') throw safe;
       throw new ForgeError(
         safe.code,
         `${safe.code === 'HOSTED_ACTION_FAILED' ? `Hosted agent ${action} failed.` : safe.message} Retry the original hosted agent action and parameters to reconcile its retained operation.`,
       );
+    }
+  }
+  /** Never fails the action: dependencies are a convenience the agent can still install itself. */
+  private async shareDependencies(path: string) {
+    try {
+      return await shareDependencies(path);
+    } catch (error) {
+      return { status: 'failed', message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  /** start lists the caller's idle open Lanes and prunes finished Lane roots: registry plus one batched read. */
+  private async housekeeping(roots: string[], laneIds: string[]) {
+    try {
+      const settings = readClientSettings();
+      const value = await laneHousekeeping({
+        readStates: convexLaneStates(() => ({
+          query: (name, args) => this.exchange.client.query(name as never, args as never),
+        })),
+        address: this.address,
+        apply: settings.autoPruneHours > 0,
+        settings,
+        exclude: { roots, laneIds },
+      });
+      if (!value.idle.length && !value.pruned.length) return undefined;
+      return {
+        idle: value.idle,
+        pruned: {
+          count: value.pruned.length,
+          bytes: value.pruned.reduce((sum, lane) => sum + lane.bytes, 0),
+        },
+      };
+    } catch {
+      return undefined;
     }
   }
   private async response(

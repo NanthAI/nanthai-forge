@@ -25,7 +25,7 @@ nforge agent OWNER start '{"outcome":"What you are changing"}'   # returns a Lan
 nforge agent OWNER land --save '{"laneId":"…","message":"…"}'
 ```
 
-Record a handoff before stopping.
+Record a handoff before stopping. Run heavy local commands through `nforge heavy CMD`; `land --save` waits for the outcome. Defaults and settings: [parallel-work defaults](docs/parallel-work-defaults.md).
 
 Three verbs: `start`, `save` and `land`. `land --save` saves, merges the latest `main`, runs the `verify` check and accepts on pass; `save --sync` brings `main` in on demand. Operator actions (`abandon`, `accept`, `cancel`, `revert`, …) run as `nforge x OWNER ACTION`. Old names such as `finish` and `checkpoint` still work and print their new form. Details: [agent workflow](docs/agents/workflow.md). Lifecycle receipts include advisory local peers; incomplete coverage never establishes independence. `start.scope.paths` retains planned claims; other lifecycle scopes declare relevance for that call. Use `peers {"laneId":"…","detail":true}` or `forge_peers` for details. Clean saves succeed with an unchanged head. When Forge gets in your way, run `nforge agent OWNER save --friction '{"laneId":"…","title":"…","detail":"…","area":"…"}'`; `nforge improve OWNER` groups the reports that guide the next slice.
 
