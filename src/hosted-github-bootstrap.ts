@@ -54,19 +54,7 @@ export function githubHostedProject(
     at,
   });
   const head = digest(state);
-  const data = createWork(head);
-  data.channelMoves = [
-    {
-      id: operationId,
-      channel: 'main',
-      viewId: operationId,
-      head,
-      previous: null,
-      at,
-      status: 'accepted',
-      provenance: 'user-declared-local',
-    },
-  ];
+  const data = githubImportedWork(operationId, at, head);
   const work = JSON.stringify(data, null, 2);
   const pin = (text: string) => ({ sha256: digest(text), size: new TextEncoder().encode(text).length });
   const source = new Map(files.map(file => [file.blob, file.size]));
@@ -105,4 +93,21 @@ export function githubHostedProject(
       channels: [{ name: 'main', head }],
     },
   };
+}
+
+export function githubImportedWork(operationId: string, at: string, head: string) {
+  const data = createWork(head);
+  data.channelMoves = [
+    {
+      id: operationId,
+      channel: 'main',
+      viewId: operationId,
+      head,
+      previous: null,
+      at,
+      status: 'accepted',
+      provenance: 'user-declared-local',
+    },
+  ];
+  return data;
 }

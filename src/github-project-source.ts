@@ -121,12 +121,13 @@ export async function discoverGithubSource(
 
 /** Raw media avoids base64/JSON expansion at the provider's largest file size.
  * Every response is bound to the chosen Git object, including symlink targets. */
-export async function readGithubSourceBlob(
+export async function streamGithubSourceBlob(
   repository: string,
   entry: GithubSourceEntry,
+  consume: (bytes: Buffer) => Promise<void>,
   token?: string,
   request: GithubFetch = fetch,
-): Promise<Buffer> {
+): Promise<{ blob: string; size: number }> {
   const response = await request(`https://api.github.com/repos/${repository}/git/blobs/${entry.sha}`, {
     redirect: 'error',
     signal: AbortSignal.timeout(120_000),
@@ -142,8 +143,9 @@ export async function readGithubSourceBlob(
     'GITHUB_UNAVAILABLE',
     'GitHub could not provide this source blob with current access.',
   );
-  const reader = response.body.getReader(),
-    parts: Uint8Array[] = [];
+  const reader = response.body.getReader();
+  const git = createHash(entry.sha.length === 40 ? 'sha1' : 'sha256').update(`blob ${entry.size}\0`);
+  const logical = createHash('sha256');
   let size = 0;
   try {
     while (true) {
@@ -151,23 +153,40 @@ export async function readGithubSourceBlob(
       if (part.done) break;
       size += part.value.byteLength;
       invariant(size <= entry.size, 'ARTIFACT_INTEGRITY', 'GitHub blob exceeds its pinned size.');
-      parts.push(part.value);
+      git.update(part.value);
+      logical.update(part.value);
+      await consume(Buffer.from(part.value.buffer, part.value.byteOffset, part.value.byteLength));
     }
   } finally {
     await reader.cancel();
     reader.releaseLock();
   }
-  const bytes = Buffer.concat(parts);
   invariant(
-    size === entry.size &&
-      createHash(entry.sha.length === 40 ? 'sha1' : 'sha256')
-        .update(`blob ${size}\0`)
-        .update(bytes)
-        .digest('hex') === entry.sha,
+    size === entry.size && git.digest('hex') === entry.sha,
     'ARTIFACT_INTEGRITY',
     'GitHub blob differs from the selected commit.',
   );
-  return bytes;
+  return { blob: logical.digest('hex'), size };
+}
+
+/** Compatibility reader; the hosted page worker consumes the stream directly. */
+export async function readGithubSourceBlob(
+  repository: string,
+  entry: GithubSourceEntry,
+  token?: string,
+  request: GithubFetch = fetch,
+): Promise<Buffer> {
+  const parts: Buffer[] = [];
+  await streamGithubSourceBlob(
+    repository,
+    entry,
+    async bytes => {
+      parts.push(bytes);
+    },
+    token,
+    request,
+  );
+  return Buffer.concat(parts);
 }
 
 export type ImportedSourceFile = {

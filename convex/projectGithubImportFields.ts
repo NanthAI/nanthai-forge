@@ -2,6 +2,15 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 export const githubImportFields = {
+  protocol: v.optional(v.literal(2)),
+  publication: v.optional(
+    v.object({
+      backupId: v.id('projectBackups'),
+      generationId: v.id('projectWorkGenerations'),
+      head: v.string(),
+      root: v.string(),
+    }),
+  ),
   visibility: v.union(v.literal('public'), v.literal('private')),
   owner: v.string(),
   operationId: v.string(),
@@ -27,6 +36,17 @@ export const githubImportDocument = v.object({
   ...githubImportFields,
 });
 export const githubImportTables = {
+  projectGithubImportInventory: defineTable({
+    projectId: v.id('hostedProjects'),
+    jobId: v.id('projectGithubImports'),
+    part: v.string(),
+    key: v.string(),
+    position: v.number(),
+    value: v.string(),
+  })
+    .index('by_job_and_part_and_key', ['jobId', 'part', 'key'])
+    .index('by_job_and_part_and_position', ['jobId', 'part', 'position'])
+    .index('by_project', ['projectId']),
   projectGithubImports: defineTable(githubImportFields)
     .index('by_owner_and_operation', ['owner', 'operationId'])
     .index('by_project', ['projectId']),

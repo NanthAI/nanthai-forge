@@ -266,7 +266,7 @@ export const purge = internalMutation({
         const task = await ctx.db.system.get(job.task);
         if (task && task.state.kind === 'pending') await ctx.scheduler.cancel(job.task);
       }
-      await blobStore(ctx).delete(job.cursor);
+      if (job.protocol !== 2) await blobStore(ctx).delete(job.cursor);
       await ctx.db.delete(job._id);
     }
     if (imports.length === 50) {
@@ -276,6 +276,7 @@ export const purge = internalMutation({
     }
 
     for (const table of [
+      'projectGithubImportInventory',
       'projectPublicationPages',
       'projectPublicationAttempts',
       'projectReturnPages',
@@ -286,12 +287,13 @@ export const purge = internalMutation({
       'projectWorkGenerations',
       'projectWorkDetailMigrations',
     ] as const) {
+      const pageSize = table === 'projectGithubImportInventory' ? 1000 : 50;
       const rows = await ctx.db
         .query(table)
         .withIndex('by_project', q => q.eq('projectId', projectId))
-        .take(50);
+        .take(pageSize);
       for (const row of rows) await ctx.db.delete(row._id);
-      if (rows.length === 50) {
+      if (rows.length === pageSize) {
         await ctx.db.patch(projectId, { task: undefined });
         await schedule(ctx, (await ctx.db.get(projectId))!);
         return null;

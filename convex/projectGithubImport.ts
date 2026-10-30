@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { v } from 'convex/values';
-import { blobStore } from './blobStore';
 import { action } from './cliServer';
 import { internal } from './_generated/api';
 import type { Id, Doc } from './_generated/dataModel';
@@ -55,16 +54,14 @@ export const start = action({
         ref ?? access.repository.default_branch,
         access.token,
       );
-      const cursor = await blobStore(ctx).store(
-        new Blob([JSON.stringify({ source, files: [] })], { type: 'application/json' }),
-      );
       return await ctx.runMutation(internal.projectGithubImportStore.begin, {
         ...key,
         name: input.name?.trim() || access.repository.full_name.split('/').at(-1)!,
         repository: source.repository,
         commit: source.commit,
         at: new Date().toISOString(),
-        cursor,
+        cursor: '',
+        rootTree: source.pending[0]!.sha,
         visibility: access.repository.private ? 'private' : 'public',
       });
     } catch (error) {

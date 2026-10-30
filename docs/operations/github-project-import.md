@@ -12,18 +12,38 @@ import, with its own language and text-selection rules.
 The worker resolves the ref once, walks non-recursive Git trees and retains every
 committed regular file, executable and symlink target, including binaries, empty
 files and paths matched by committed ignore rules. It verifies raw bytes against
-Git's object hash before retaining them. Each directory or file is a durable step;
-retries use the saved cursor. The worker obtains fresh access through the existing
+Git's object hash before committing a logical file binding. Durable steps process
+pages of up to 1,000 files or 128 directories, also bounded by physical bytes,
+metadata bytes and elapsed action time. Large files stream through 1 MiB chunks;
+8 MiB upload windows bound retained source buffers. These are scheduling
+boundaries, not repository or file exclusions. The worker obtains fresh access through the existing
 GitHub App credential path for each action. No credentials are saved in the job
 or cursor, and no additional GitHub scopes are requested.
 
-Physical source objects use the existing Convex file storage and chunk recipes.
-Identical physical bytes share a storage ID across projects; bindings remain
+New source-import projects select R2 when deployment R2 storage is enabled. This
+placement is retained on the project; missing R2 configuration fails explicitly.
+Other deployments use Convex file storage. Object reuse/preparation and verified
+completion are batched, with existing chunk recipes for large logical objects.
+Convex physical bytes can share a storage ID across projects; R2 keys and bindings remain
 project-scoped and all source reads retain current project authorization. Digest
 reuse is internal and does not expose another project's source or existence.
 Explicit project deletion retains other projects' shared objects through the
-existing storage-reference checks. Replaced computational cursors are disposable;
-retained source objects and accepted history are not expired by the importer.
+existing storage-reference checks and project-prefix R2 cleanup.
+
+The inventory is immutable and read through ordered indexed pages. Import results,
+unique logical-blob pins and per-page progress receipts are retained separately;
+the compact cursor contains only directory positions and the last file key. No
+worker reserializes the repository inventory, and there are no cursor blobs to
+rewrite in R2. Project deletion removes these inventory rows in bounded pages.
+State/manifest bytes stream from inventory pages into content-addressed recipes.
+The derived source index is staged in retry-safe pages; selecting the final backup
+and ready generation is atomic. Interrupted publication reuses the same immutable
+pins and projection receipts. No idle worker is scheduled after completion.
+
+Legacy source-import cursors report `IMPORT_RESTART_REQUIRED`, including a command
+to start a new operation at the original pinned commit. They do not silently switch
+revisions or publish partial main. The separate Work index cursors described below
+remain resumable.
 
 A project has no selected backup/main until the complete source and initialized
 Work publish atomically. A failed or interrupted import therefore never exposes
@@ -70,7 +90,6 @@ project-scoped bindings over globally deduplicated physical chunks, authenticate
 bounded-range reads, existing shared-reference deletion semantics, and atomic
 publication through the same hosted-main receipt. It must preserve operation IDs,
 source modes, private-repository authorization and lost-reply reconciliation.
-No R2 integration is included here.
 
 Hosted Work index reads retry transient transport/storage faults up to three total
 attempts, with short backoff inside the same action; application, validation and

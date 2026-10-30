@@ -9,6 +9,9 @@ import { setup as r2Setup } from './r2-harness.mjs';
 import { digest } from '../dist/hash.js';
 const modules = {};
 for (const name of [
+  'projectGithubImportInventory',
+  'projectGithubImportBatch',
+  'projectGithubImportPublication',
   'projectGithubImportStore',
   'projectGithubImportObjects',
   'projectGithubImportWorker',
@@ -279,30 +282,33 @@ test('existing explicit project deletion removes import progress and preserves a
     await lifecycle.purge._handler(s.ctx, { projectId: a.projectId });
   assert.equal(s.tables.hostedProjects.get(a.projectId).removal, 'deleted');
   assert.equal(s.tables.projectGithubImports.has(first), false);
+  assert.equal(
+    [...s.tables.projectGithubImportInventory.values()].some(row => row.projectId === a.projectId),
+    false,
+  );
   assert.equal(s.files.has(a.cursor), false);
   assert.equal(s.files.has(shared), true);
   assert.equal(s.tables.hostedProjects.get(b.projectId).currentBackup !== null, true);
 });
 
-test('opted-in hosted import writes source, metadata and cursor to R2 and retries a lost object commit', async t => {
+test('supported new import writes source and metadata to R2 and retries an interrupted page', async t => {
   const { fake } = await r2Setup(t);
   const s = fixture(t),
     id = await s.start();
   const job = s.tables.projectGithubImports.get(id);
-  s.tables.hostedProjects.get(job.projectId).r2Writes = true;
+  assert.equal(s.tables.hostedProjects.get(job.projectId).r2Writes, true);
   s.ctx.storage.store = () => assert.fail('opted-in import must not store Convex bytes');
   s.ctx.storage.generateUploadUrl = () => assert.fail('opted-in import must not generate Convex upload URLs');
   await s.advance(id);
-  assert.match(s.tables.projectGithubImports.get(id).cursor, /^r2blob:/);
+  assert.equal(JSON.parse(s.tables.projectGithubImports.get(id).cursor).schema, 2);
   const run = s.ctx.runMutation;
   let lost = false;
   s.ctx.runMutation = async (ref, args) => {
-    const value = await run(ref, args);
-    if (!lost && getFunctionName(ref) === 'projectExchangeCache:completeR2') {
+    if (!lost && getFunctionName(ref) === 'projectGithubImportStore:advance' && args.completed === 1) {
       lost = true;
-      throw Error('lost committed R2 object reply');
+      throw Error('interrupted R2 page before progress');
     }
-    return value;
+    return run(ref, args);
   };
   await s.advance(id);
   assert.equal(s.tables.projectGithubImports.get(id).phase, 'error');
@@ -314,9 +320,70 @@ test('opted-in hosted import writes source, metadata and cursor to R2 and retrie
   assert.ok(fake.objects.size >= objects);
   const bindings = [...s.tables.projectObjects.values()];
   assert.ok(
-    bindings.length > 0 && bindings.every(row => row.location === 'r2' && row.r2Committed && !row.storageId),
+    bindings.length > 0 &&
+      bindings.every(row => (row.recipe || (row.location === 'r2' && row.r2Committed)) && !row.storageId),
   );
   const source = bindings.find(row => row.digest === digest(s.bytes));
   assert.deepEqual(fake.objects.get(fake.key(source.r2Key)), s.bytes);
   assert.equal(bindings.filter(row => row.digest === digest(s.bytes)).length, 1);
+  t.diagnostic(
+    JSON.stringify({
+      r2RetainedBytes: [...fake.objects.values()].reduce((sum, bytes) => sum + bytes.length, 0),
+      r2Objects: fake.objects.size,
+      putRequests: fake.requests.filter(row => row.method === 'PUT').length,
+      headRequests: fake.requests.filter(row => row.method === 'HEAD').length,
+      cursorTransferBytes: 0,
+    }),
+  );
+});
+
+test('legacy in-flight cursor stops clearly with a pinned-commit restart request', async t => {
+  const s = fixture(t),
+    id = await s.start();
+  await s.ctx.db.patch(id, { protocol: undefined });
+  await s.advance(id);
+  const job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'error');
+  assert.equal(job.error.code, 'IMPORT_RESTART_REQUIRED');
+  assert.match(job.error.message, /projectGithubImport.start/);
+  assert.ok(job.error.message.includes(job.commit));
+  assert.equal(s.tables.hostedProjects.get(job.projectId).currentBackup, null);
+});
+
+test('lost staged-publication reply replays the exact projection page without duplicates', async t => {
+  const s = fixture(t),
+    id = await s.start();
+  await s.advance(id);
+  await s.advance(id);
+  const mutation = s.ctx.runMutation;
+  let lost = false;
+  s.ctx.runMutation = async (ref, input) => {
+    const result = await mutation(ref, input);
+    if (!lost && getFunctionName(ref) === 'projectGithubImportPublication:stage') {
+      lost = true;
+      throw Error('unknown stage outcome');
+    }
+    return result;
+  };
+  await s.advance(id);
+  const job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'error');
+  assert.equal(s.tables.hostedProjects.get(job.projectId).currentBackup, null);
+  await s.start(job.operationId);
+  await s.advance(id);
+  assert.equal(s.tables.projectGithubImports.get(id).phase, 'ready');
+  const records = [...s.tables.projectWorkRecords.values()];
+  assert.equal(new Set(records.map(row => `${row.collection}:${row.key}`)).size, records.length);
+});
+
+test('new import selected for R2 fails explicitly on missing configuration without Convex fallback', async t => {
+  await r2Setup(t, { credentials: false });
+  const s = fixture(t),
+    id = await s.start();
+  s.ctx.storage.store = () => assert.fail('selected R2 placement cannot fall back to Convex bytes');
+  await s.advance(id);
+  await s.advance(id);
+  const job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.error.code, 'R2_NOT_CONFIGURED');
+  assert.equal(s.tables.hostedProjects.get(job.projectId).currentBackup, null);
 });

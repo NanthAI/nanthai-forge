@@ -5,11 +5,16 @@ import { internalMutation, internalQuery, type QueryCtx } from './_generated/ser
 import { internal } from './_generated/api';
 import { githubImportDocument } from './projectGithubImportFields';
 import { activeOwnedProject } from './projectAuthority';
+import { readJob } from './projectGithubImportRead';
 import { createProject } from './projectCreation';
 import { githubHostedProject } from '../src/hosted-github-bootstrap';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
+import { r2Enabled } from './r2';
+import { initialImportProgress } from '../src/github-import-pages';
+import { completion, recipePin, completeObjects } from './projectGithubImportBatch';
+import { retain, inventoryEntry } from './projectGithubImportInventory';
 
 const key = { actor: v.string(), operationId: v.string(), request: v.string() };
 async function find(ctx: QueryCtx, input: { actor: string; operationId: string; request: string }) {
@@ -32,19 +37,6 @@ export const lookup = internalQuery({
   returns: v.union(githubImportDocument, v.null()),
   handler: find,
 });
-async function readJob(
-  ctx: QueryCtx,
-  { id, actor }: { id: import('./_generated/dataModel').Id<'projectGithubImports'>; actor: string },
-) {
-  const row = await ctx.db.get(id);
-  invariant(
-    row && row.owner === actor,
-    'PROJECT_UNAVAILABLE',
-    'This import is unavailable with current access.',
-  );
-  await activeOwnedProject(ctx, row.projectId, actor);
-  return row;
-}
 export const get = internalQuery({
   args: { id: v.id('projectGithubImports'), actor: v.string() },
   returns: githubImportDocument,
@@ -73,6 +65,7 @@ export const begin = internalMutation({
     commit: v.string(),
     at: v.string(),
     cursor: v.string(),
+    rootTree: v.optional(v.string()),
     visibility: v.union(v.literal('public'), v.literal('private')),
   },
   returns: v.id('projectGithubImports'),
@@ -90,7 +83,10 @@ export const begin = internalMutation({
       'WORK_OPERATION_CHANGED',
       'This operation already identifies another project.',
     );
-    await ctx.db.patch(project._id, { hostingRequest: input.request });
+    await ctx.db.patch(project._id, {
+      hostingRequest: input.request,
+      ...(input.rootTree ? { r2Writes: r2Enabled() } : {}),
+    });
     const id = await ctx.db.insert('projectGithubImports', {
       visibility: input.visibility,
       owner: input.actor,
@@ -100,7 +96,8 @@ export const begin = internalMutation({
       repository: input.repository,
       commit: input.commit,
       at: input.at,
-      cursor: input.cursor,
+      cursor: input.rootTree ? JSON.stringify(initialImportProgress()) : input.cursor,
+      ...(input.rootTree ? { protocol: 2 as const } : {}),
       step: 0,
       phase: 'discovering',
       totalKnown: false,
@@ -109,6 +106,15 @@ export const begin = internalMutation({
       bytes: 0,
       totalBytes: 0,
     });
+    if (input.rootTree)
+      await ctx.db.insert('projectGithubImportInventory', {
+        projectId: project._id,
+        jobId: id,
+        part: 'directories',
+        key: '',
+        position: 0,
+        value: JSON.stringify({ path: '', sha: input.rootTree }),
+      });
     const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
       id,
       actor: input.actor,
@@ -127,13 +133,46 @@ export const advance = internalMutation({
     bytes: v.number(),
     totalBytes: v.number(),
     discovering: v.boolean(),
+    objects: v.optional(v.array(completion)),
+    recipes: v.optional(v.array(recipePin)),
+    entries: v.optional(v.array(inventoryEntry)),
   },
   returns: v.boolean(),
   handler: async (ctx, input) => {
     const row = await readJob(ctx, input);
     if (row.step !== input.step || row.phase === 'ready') {
-      if (row.cursor !== input.cursor) await blobStore(ctx).delete(input.cursor);
+      if (row.protocol !== 2 && row.cursor !== input.cursor) await blobStore(ctx).delete(input.cursor);
       return false;
+    }
+    if (row.protocol === 2) {
+      await completeObjects(ctx, row.projectId, input.objects ?? [], input.recipes ?? []);
+      await retain(ctx, row, input.entries ?? []);
+      for (const entry of input.entries ?? [])
+        if (entry.part === 'imported') {
+          const file = JSON.parse(entry.value);
+          await retain(ctx, row, [
+            {
+              part: 'blobs',
+              key: file.blob,
+              position: 0,
+              value: JSON.stringify({ sha256: file.blob, size: file.size }),
+            },
+          ]);
+        }
+      await retain(ctx, row, [
+        {
+          part: 'receipts',
+          key: String(input.step),
+          position: input.step,
+          value: JSON.stringify({
+            cursor: input.cursor,
+            completed: input.completed,
+            total: input.total,
+            bytes: input.bytes,
+            totalBytes: input.totalBytes,
+          }),
+        },
+      ]);
     }
     await ctx.db.patch(row._id, {
       cursor: input.cursor,
@@ -146,7 +185,7 @@ export const advance = internalMutation({
       totalKnown: !input.discovering,
       error: undefined,
     });
-    await blobStore(ctx).delete(row.cursor);
+    if (row.protocol !== 2) await blobStore(ctx).delete(row.cursor);
     const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
       id: row._id,
       actor: row.owner,
