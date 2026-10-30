@@ -20,6 +20,7 @@ const replaySafe = new Set([
   'projectHostedChannels:current',
   'projectHostedAgent:capabilities',
   'projectHostedLanes:select',
+  'projectHostedOverlaps:read',
   'projectMain:objects',
   'projectObjects:missing',
   'projectObjects:available',

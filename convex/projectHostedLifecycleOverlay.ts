@@ -1,3 +1,4 @@
+import { materializeHostedOverlapLifecycle } from './projectHostedOverlapStore';
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -76,4 +77,5 @@ export async function materializeLifecycleLane(
     ...(row.ownerOnly !== undefined ? { ownerOnly: row.ownerOnly } : {}),
     recordId: row._id,
   });
+  await materializeHostedOverlapLifecycle(ctx, projectId, laneId, row.version);
 }

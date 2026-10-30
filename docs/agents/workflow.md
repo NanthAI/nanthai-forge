@@ -209,7 +209,7 @@ Start, checkpoint, sync, finish and Lane-specific status include an advisory loc
 
 `peers.predictive` compares this Lane's live changed regions against peer checkpoints. Explicit `peers` reads compare every open peer's latest saved checkpoint. Each entry names the peer Lane, checkpoint head, Intent outcome, file, base ranges and suggested first Lane (`first`, with `orderReason`: ready, smaller change, then earlier start). Ranges are one-based `{start,lines}`; zero lines denotes an insertion before `start`. Overlapping ranges, ranges within three lines, shared changed exported contracts and structural path changes are high risk. Exact renames appear as deletion at the old path and addition at the destination. Same-file disjoint changes are low risk and appear only with `detail:true`. Changed base blobs are aligned before comparison; `alignedPeer` gives peer ranges in this Lane's base coordinates. Unsupported text or expensive alignment is explicitly unknown and makes coverage incomplete. Contract scanning retains its syntactic limitations described above; implementation-only shared exports may be missed.
 
-Checkpoint refresh workers and sync prime disposable summaries keyed by exact base/head; reads reuse them and rebuild missing entries once. Lifecycle receipts rank all open Lanes by shared saved/claimed paths, then latest save time and Lane ID. The path index reuses changed-path summaries or saved manifests without extra live-tree hashing. Every path candidate receives saved-region analysis and bilateral journal alerts; unrelated Lanes cannot displace overlapping Lanes. Full live contract-dependent analysis remains bounded to three peer Lanes; deferred advice uses `coverage:"local-incomplete"`, `more` and a pointer to `peers {laneId,detail:true}`. Each receipt advice pass reads at most sixteen additional source States for ancestry; deeper history is reported as incomplete and stays available through explicit `peers` reads. Live path claims still cover all open peers, and up to three overlapping peers still receive conflict previews with ordering advice. Detailed `peers` reads compare every peer's saved regions. Peer predictions use saved bytes even if that peer has newer unsaved edits; existing path/conflict observations still include live files. CLI prints at most three compact high-overlap lines on stderr and keeps stdout JSON; when bases differ it shows the aligned peer ranges. Omitted entries are counted by the existing compact digest's `more`, with full observations available through `detail:true`. The suggested order is advice: land the suggested Lane first, then sync the other after it lands. Predictions never block or change landing, and no polling or hosted surface is added.
+Checkpoint refresh workers and sync prime disposable summaries keyed by exact base/head; reads reuse them and rebuild missing entries once. Lifecycle receipts rank all open Lanes by shared saved/claimed paths, then latest save time and Lane ID. The path index reuses changed-path summaries or saved manifests without extra live-tree hashing. Every path candidate receives saved-region analysis and bilateral journal alerts; unrelated Lanes cannot displace overlapping Lanes. Full live contract-dependent analysis remains bounded to three peer Lanes; deferred advice uses `coverage:"local-incomplete"`, `more` and a pointer to `peers {laneId,detail:true}`. Each receipt advice pass reads at most sixteen additional source States for ancestry; deeper history is reported as incomplete and stays available through explicit `peers` reads. Live path claims still cover all open peers, and up to three overlapping peers still receive conflict previews with ordering advice. Detailed `peers` reads compare every peer's saved regions. Peer predictions use saved bytes even if that peer has newer unsaved edits; existing path/conflict observations still include live files. CLI prints at most three compact high-overlap lines on stderr and keeps stdout JSON; when bases differ it shows the aligned peer ranges. Omitted entries are counted by the existing compact digest's `more`, with full observations available through `detail:true`. The suggested order is advice: land the suggested Lane first, then sync the other after it lands. Predictions never block or change landing and add no polling; hosted Lanes receive server-computed overlaps and behind-main paths at save, start and status.
 
 Lifecycle observations pre-compose main and up to three overlapping open Lanes. Notices include a proposed order and `granularity` (`file` today). Detailed reads return exact hunks/object pins, Intent, checkpoint message, actor/workspace and known owner sessions. Empty sessions mean unknown. Compact receipts list up to ten overlapping Lanes with paths, actors and Intent outcomes, within a 12,000-byte JSON budget, and point to detailed reads for additional context. Compact inbox and prediction examples cover distinct Lane pairs; additional regions for the same pair stay in detailed reads rather than inflating the omitted-Lane count. Existing journal alerts remain available to both participants through peers and Lane status, even if fresh source analysis is unavailable. A detached refresh does not mark an alert as delivered; only notices returned in a mutating receipt count as delivered. Known landed conflicts name the accepted Lane and Intent; unrelated later acceptances do not change that attribution. Explicit `peers` observations finish their selected reads regardless of elapsed time, rebuilding missing or corrupt disposable indexes in the same call. Lifecycle receipts bound expensive peer analysis before computing it; deferred work is not evidence of independence. Unavailable source, unsupported analysis and skipped composition or dependency work still report incomplete coverage; missing overlaps never establish independence.
 
@@ -1421,6 +1421,29 @@ reports retried Lanes and preceding retry causes: conflict, check failure/flake,
 stall, cancelled and other. It does not infer that a failed check was a flake.
 Internal hosted child attempts remain part of their original land entry. All
 calculation is read-time work over landing records, with no new background job.
+
+### Hosted overlap advice
+
+Hosted agent start, save and Lane status responses include
+`unacknowledgedOverlaps:{count,items,coverage}` and
+`behindMain:{commits,conflictingPaths,more,coverage}` when the server advertises
+`overlapVersion:1`. Notices use the first-write notice identity and name the peer
+Lane, actor, Intent and shared saved path. `peer-ack` and `overlap-acks` suppress
+that notice for the answering Lane across machines. Advice never blocks saving,
+checking or landing. MCP emits `forge-overlap` notices from these same responses;
+no polling, subscriptions or idle work are added.
+
+Save staging retains a bounded path projection and publishes it with the Lane
+head. Reverting a file to its saved base clears its projected change. Main
+acceptance updates the latest accepted sequence touching each retained path, so
+status compares against the Lane base without walking acceptance history.
+`conflictingPaths` predicts shared files, not a proven text merge conflict.
+Five overlap notices and ten main paths are shown per response. Metadata windows,
+older source without a projection, syncs without path evidence and unknown base
+sequences report incomplete coverage; a missing notice never proves independence.
+Unavailable advice retains the source receipt with explicit unknown coverage.
+Older clients and servers keep their existing protocol through capability
+negotiation. Needs you continues using its existing work projection.
 
 ### Hosted friction, decisions and overlap answers
 

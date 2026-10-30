@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { trackHostedOverlapLane } from './projectHostedOverlapStore';
+import type { OverlapChange } from '../src/hosted-overlap';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeProject, accessibleProject } from './projectAuthority';
@@ -92,6 +94,7 @@ export async function writeHostedRecord(
     restoreBases?: string;
     /** Trusted source reducers may clear provenance when importing unaccepted peer source. */
     ownerOnly?: boolean;
+    overlap?: { changes?: OverlapChange[]; complete?: boolean; baseSequence?: number; intent?: string };
   },
 ) {
   const project = await activeProject(ctx, input.projectId, input.actor);
@@ -160,7 +163,10 @@ export async function writeHostedRecord(
   const pointer = { ...identity, ...indexed, recordId: id };
   if (head) await ctx.db.replace(head._id, pointer);
   else await ctx.db.insert('projectHostedRecordHeads', pointer);
-  if (record.kind === 'lane') await touchLifecycleIntent(ctx, input.projectId, record.intentId);
+  if (record.kind === 'lane') {
+    await touchLifecycleIntent(ctx, input.projectId, record.intentId);
+    await trackHostedOverlapLane(ctx, input.projectId, record, input.overlap);
+  }
   return { ...(await ctx.db.get(id))!, value };
 }
 

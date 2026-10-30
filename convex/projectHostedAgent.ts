@@ -17,9 +17,10 @@ export const capabilities = query({
     clientVersion: v.optional(v.string()),
     noticeVersion: v.optional(v.literal(1)),
     resolveVersion: v.optional(v.literal(1)),
+    overlapVersion: v.optional(v.literal(1)),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, clientVersion, noticeVersion, resolveVersion }) => {
+  handler: async (ctx, { projectId, clientVersion, noticeVersion, resolveVersion, overlapVersion }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to discover hosted agent capabilities.');
@@ -28,6 +29,7 @@ export const capabilities = query({
       if (project.sourceCutover && authority.mode === 'server') requireCutoverVersion(clientVersion);
       return canonicalPayload(
         hostedAgentCapabilitiesSchema.parse({
+          ...(overlapVersion === 1 ? { overlapVersion: 1 } : {}),
           ...(noticeVersion === 1 ? { needsFix: needsFix(project) } : {}),
           schema: 1,
           projectId,

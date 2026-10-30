@@ -1,3 +1,4 @@
+import { readHostedOverlapAdvice } from './hosted-overlap-client.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
 import type { HostedRunSubscription } from './hosted-agent-observe.js';
@@ -59,6 +60,8 @@ export type HostedAgentResponse = {
   operationId: string | null;
   resolved: { operationId: string } | null;
   result: unknown;
+  unacknowledgedOverlaps?: unknown;
+  behindMain?: unknown;
 };
 /** The shared CLI/MCP transport. Source bytes use the existing verified exchange;
  * every dispatch is finite and every mutation is pinned before network IO. */
@@ -119,33 +122,31 @@ export class HostedAgentTransport {
         invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'operationId must be a UUID.');
       let discovery: unknown;
       try {
-        try {
-          discovery = await this.query('projectHostedAgent:capabilities', {
-            clientVersion: CUTOVER_CLI_VERSION,
-            noticeVersion: 1,
-            resolveVersion: 1,
-          });
-        } catch (error) {
-          if (!(error instanceof Error) || !error.message.includes('ArgumentValidationError')) throw error;
-          // A named noticeVersion refusal already establishes the oldest
-          // shape; do not repeat that known-unsupported field on the next probe.
-          if (/extra field\s+[`'"]?noticeVersion\b/i.test(error.message)) {
+        let options: Record<string, 1> = { noticeVersion: 1, resolveVersion: 1, overlapVersion: 1 };
+        for (;;) {
+          try {
             discovery = await this.query('projectHostedAgent:capabilities', {
               clientVersion: CUTOVER_CLI_VERSION,
+              ...options,
             });
-          } else {
-            try {
-              discovery = await this.query('projectHostedAgent:capabilities', {
-                clientVersion: CUTOVER_CLI_VERSION,
-                noticeVersion: 1,
-              });
-            } catch (legacy) {
-              if (!(legacy instanceof Error) || !legacy.message.includes('ArgumentValidationError'))
-                throw legacy;
-              discovery = await this.query('projectHostedAgent:capabilities', {
-                clientVersion: CUTOVER_CLI_VERSION,
-              });
-            }
+            break;
+          } catch (error) {
+            if (
+              !(error instanceof Error) ||
+              !error.message.includes('ArgumentValidationError') ||
+              !Object.keys(options).length
+            )
+              throw error;
+            const field = /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion)\b/i.exec(
+              error.message,
+            )?.[1];
+            // Preserve independently supported features, and never repeat a
+            // named refusal. Pre-notice servers use the oldest argument shape.
+            if (field === 'noticeVersion') options = {};
+            else if (field && field in options) delete options[field];
+            else
+              options =
+                'resolveVersion' in options || 'overlapVersion' in options ? { noticeVersion: 1 } : {};
           }
         }
       } catch (error) {
@@ -183,14 +184,24 @@ export class HostedAgentTransport {
       if (action === 'check-settings')
         return this.response(action, null, await hostedCheckSettings(this.query.bind(this), capabilities));
       if (observation && action === 'status' && Object.keys(command.data).length === 0)
-        return this.response(action, null, { needsFix: capabilities.needsFix ?? [] });
+        return this.response(
+          action,
+          null,
+          { needsFix: capabilities.needsFix ?? [] },
+          capabilities.overlapVersion === 1 ? readHostedLaneCheckout(this.root)?.selection.laneId : undefined,
+        );
       if (observation)
-        return this.response(action, null, {
-          ...((await this.observe(
-            command.data as z.infer<typeof hostedAgentCommandSchemas.status>,
-          )) as Record<string, unknown>),
-          ...(capabilities.needsFix ? { needsFix: capabilities.needsFix } : {}),
-        });
+        return this.response(
+          action,
+          null,
+          {
+            ...((await this.observe(
+              command.data as z.infer<typeof hostedAgentCommandSchemas.status>,
+            )) as Record<string, unknown>),
+            ...(capabilities.needsFix ? { needsFix: capabilities.needsFix } : {}),
+          },
+          capabilities.overlapVersion === 1 ? (command.data as { laneId?: string }).laneId : undefined,
+        );
       const root = hostedAgentRoot(this.root);
       if (action === 'start' || action === 'open') hostedRootLanePath(root, this.address);
       const journal = new HostedAgentJournal(
@@ -255,7 +266,13 @@ export class HostedAgentTransport {
           result = { ...started, path: opened.root, checkout: opened };
         }
       }
-      return this.response(action, journal.operationId, result);
+      const overlapLane =
+        capabilities.overlapVersion === 1 && ['start', 'save'].includes(action)
+          ? ((result as { lane?: { laneId?: string } }).lane?.laneId ??
+            (command.data as { laneId?: string }).laneId ??
+            readHostedLaneCheckout(root)?.selection.laneId)
+          : undefined;
+      return this.response(action, journal.operationId, result, overlapLane);
     } catch (error) {
       const owner = nativeOwner(existsSync(this.root) ? realpathSync(this.root) : this.root);
       if (owner) rememberSourceAuthorityError(new WorkStore(owner), error, this.address.projectId);
@@ -276,6 +293,7 @@ export class HostedAgentTransport {
     action: HostedAgentAction,
     operationId: string | null,
     result: unknown,
+    overlapLaneId?: string,
   ): Promise<HostedAgentResponse> {
     return {
       schema: 1,
@@ -284,6 +302,7 @@ export class HostedAgentTransport {
       operationId,
       resolved: operationId ? { operationId } : null,
       result: await hostedConflictAdvice(this, await enrichHostedQueueAhead(this, result)),
+      ...(overlapLaneId ? await readHostedOverlapAdvice(this, overlapLaneId) : {}),
     };
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {

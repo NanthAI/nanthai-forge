@@ -131,6 +131,40 @@ test('Convex journal action uses the same deadline and names its endpoint', asyn
   assert.equal(f.requests[0].body, f.requests[1].body);
 });
 
+test('hosted overlap reads retry a lost connection but current authority errors remain final', async t => {
+  for (const denied of [false, true]) {
+    const f = await fixture(t, (_req, res, n) => {
+      if (n === 1 && !denied) return res.destroy();
+      res.writeHead(denied ? 560 : 200);
+      res.end(
+        JSON.stringify(
+          denied
+            ? {
+                status: 'error',
+                errorData: { code: 'PROJECT_UNAVAILABLE', message: 'Current access revoked' },
+                errorMessage: 'Current access revoked',
+              }
+            : { status: 'success', value: 'overlap advice' },
+        ),
+      );
+    });
+    const client = new ConvexHttpClient(f.url, {
+      skipConvexDeploymentUrlCheck: true,
+      logger: false,
+      fetch: exchangeConvexFetch(deadlines),
+    });
+    const read = () =>
+      client.query(makeFunctionReference('projectHostedOverlaps:read'), {
+        projectId: 'synthetic',
+        laneId: 'same-lane',
+      });
+    if (denied) await assert.rejects(read, error => error.data?.code === 'PROJECT_UNAVAILABLE');
+    else assert.equal(await read(), 'overlap advice');
+    assert.equal(f.requests.length, denied ? 1 : 2);
+    if (!denied) assert.equal(f.requests[0].body, f.requests[1].body);
+  }
+});
+
 test('receipt-reconciled Convex actions retry identical operation IDs; unknown actions do not replay', async t => {
   const f = await fixture(t, (_req, res, n) => {
     if (n === 1) return res.destroy();

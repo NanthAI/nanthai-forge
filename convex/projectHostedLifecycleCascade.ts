@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { markHostedOverlapLifecycle } from './projectHostedOverlapStore';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -88,6 +89,7 @@ export async function advanceLifecycle(ctx: MutationCtx, plan: LifecyclePlan) {
     };
     if (pointer) await ctx.db.replace(pointer._id, next);
     else await ctx.db.insert('projectHostedLifecyclePointers', next);
+    await markHostedOverlapLifecycle(ctx, plan.projectId, lane.id, plan._id);
     await writeLifecycleEvent(ctx, plan, lane, staged++);
   }
   await ctx.db.patch(plan._id, { staged, cursor: page.continueCursor, ready: page.isDone });

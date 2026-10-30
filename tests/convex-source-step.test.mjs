@@ -562,6 +562,48 @@ test('journaled virtual-base merges retain native recursive results and file/dir
     assert.deepEqual(actual.cursor.output, expected.output);
   }
 });
+test('hosted resolve completes a saved deletion through fresh resumable source steps', async () => {
+  const x = fixture(),
+    file = text => ({ path: 'generated.d.ts', mode: 'file', blob: x.put(text).sha256 }),
+    base = x.state([file('original\n')]),
+    left = x.state([], [base.sha256]),
+    right = x.state([file('changed\n')], [base.sha256]);
+  const plan = work => ({
+    schema: 1,
+    kind: 'forge-hosted-sync-input',
+    algorithm: 'forge-native-sync-v1',
+    work,
+    message: 'Resolve generated declaration deletion',
+    at,
+  });
+  const sync = x.json(
+      plan({ mode: 'sync', left: { object: left, recipe: null }, right: { object: right, recipe: null } }),
+    ),
+    draftOutput = await buildHostedSourceState(sync, x.io),
+    draft = JSON.parse(x.objects.get(draftOutput.output.sha256)).result,
+    saved = x.state([], [draft.state.sha256]);
+  const input = x.json(
+    plan({
+      mode: 'resolve',
+      left: { object: saved, recipe: null },
+      resolution: {
+        candidateId: null,
+        conflicts: draft.conflicts,
+        left: left.sha256,
+        right: right.sha256,
+        draftHead: draft.state.sha256,
+        status: 'pending',
+      },
+    }),
+  );
+  const actual = await drain(x, input, true),
+    result = JSON.parse(x.objects.get(actual.cursor.output.sha256)).result,
+    state = JSON.parse(x.objects.get(result.state.sha256));
+  assert.equal(result.status, 'resolved');
+  assert.deepEqual(state.files, []);
+  assert.deepEqual(state.parents, [saved.sha256, right.sha256]);
+});
+
 test('streamed resolution-marker scans match native regex across chunks and recipe continuations', async () => {
   const { runSourceTask } = await import('../dist/hosted-source-fanout.js');
   for (const text of [

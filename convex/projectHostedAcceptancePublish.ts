@@ -1,3 +1,4 @@
+import { trackHostedOverlapMain } from './projectHostedOverlapStore';
 import { hostedAcceptGate, holdMainRed } from './projectHostedGate';
 import { protectedGatePaths } from '../src/contract-gate-policy';
 import { noteMainLanding } from './projectHostedMainAuditState';
@@ -280,6 +281,12 @@ export async function publishAcceptance(
       }),
     ),
   });
+  await trackHostedOverlapMain(
+    ctx,
+    claim.projectId,
+    receipt.snapshot.revision,
+    candidate.governance?.paths ?? null,
+  );
   const next = {
     ...state,
     version: state.version + 1,

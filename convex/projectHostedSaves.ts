@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { boundOverlapChanges, type OverlapChange } from '../src/hosted-overlap';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { activeProject } from './projectAuthority';
@@ -153,8 +154,14 @@ export const stage = mutation({
         'WORK_OPERATION_CHANGED',
         'Delta page counts or continuation differ from preparation.',
       );
+      const overlap = boundOverlapChanges(
+        [...(JSON.parse(state.overlapChanges ?? '[]') as OverlapChange[]), ...page.changes],
+        state.overlapComplete !== false,
+      );
       const next = {
         ...state,
+        overlapChanges: overlap.changes,
+        overlapComplete: overlap.complete,
         stagedPages,
         stagedChanges,
         lastPath,

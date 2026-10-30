@@ -71,6 +71,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
   const { noticeVersion, ...semanticRequest } = validated.data;
   const payload = { action, ...semanticRequest };
   invariant(action === 'start' || payload.intent.kind === 'new', 'BAD_ARGUMENT', 'Create a new Intent.');
+  let overlapIntent = payload.intent.kind === 'new' ? payload.intent.outcome : payload.intent.intentId;
   let recovery: import('../src/culprit-bisect').NeedsFix | undefined;
   if (payload.intent.kind === 'existing') {
     const row = await readHostedRecord(ctx, {
@@ -81,6 +82,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     });
     invariant(row, 'NOT_FOUND', 'Hosted Intent not found on this project.');
     const intent = hostedIntentSchema.parse(JSON.parse(row.value));
+    overlapIntent = intent.outcome;
     if (!['abandoned', 'completed'].includes(intent.status)) recovery = intent.needsFix;
     invariant(
       project.owner === actor ||
@@ -220,6 +222,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       authorityEpoch: expected.authorityEpoch,
       expectedVersion: null,
       ownerOnly,
+      overlap: { baseSequence: main.sourceRevision, intent: overlapIntent },
       record: {
         kind: 'lane',
         id: laneId,

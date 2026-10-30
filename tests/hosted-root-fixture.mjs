@@ -18,6 +18,7 @@ const controls = Object.fromEntries(
       'projectHostedChannels',
       'projectHostedStart',
       'projectHostedLanes',
+      'projectHostedOverlaps',
     ].map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))]),
   ),
 );

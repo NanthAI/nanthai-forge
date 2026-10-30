@@ -110,6 +110,10 @@ export async function publishHostedSave(ctx: MutationCtx, input: SaveIdentity & 
       ...input,
       authorityEpoch,
       expectedVersion: lane.version,
+      overlap: {
+        ...(state.overlapChanges ? { changes: JSON.parse(state.overlapChanges) } : {}),
+        complete: state.overlapComplete !== false,
+      },
       record: { ...lane, head, sourceVersion, version, at: first.at },
     });
   }

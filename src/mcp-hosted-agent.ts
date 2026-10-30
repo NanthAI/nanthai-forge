@@ -1,3 +1,4 @@
+import { hostedOverlapNotifications } from './mcp-hosted-overlaps.js';
 // SPDX-License-Identifier: Apache-2.0
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -46,6 +47,7 @@ export function registerHostedAgentWorkflow(
   subscribe?: () => HostedRunSubscription,
 ) {
   const active = new Set<AbortController>();
+  const notifyOverlaps = hostedOverlapNotifications(server);
   const groups = [
     {
       name: 'forge_task',
@@ -99,7 +101,14 @@ export function registerHostedAgentWorkflow(
       async ({ command }, extra) =>
         result(() => {
           const { action, ...body } = command;
-          return hostedAgentCli(transport.root, action, body, transport.address, transport, extra?.signal);
+          return hostedAgentCli(
+            transport.root,
+            action,
+            body,
+            transport.address,
+            transport,
+            extra?.signal,
+          ).then(notifyOverlaps);
         }),
     );
   }

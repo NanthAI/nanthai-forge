@@ -13,6 +13,8 @@ import { invariant } from '../src/errors';
 
 export const saveStateSchema = z
   .object({
+    overlapChanges: z.string().optional(),
+    overlapComplete: z.boolean().optional(),
     request: saveRequestSchema,
     baseline: saveWorkerObjectSchema,
     next: saveObjectSchema.nullable(),

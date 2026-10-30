@@ -12,7 +12,9 @@ export const hostedFrictionTables = {
     actor: v.string(),
     laneId: v.string(),
     noticeId: v.string(),
-  }).index('by_project_and_id', ['projectId', 'id']),
+  })
+    .index('by_project_and_id', ['projectId', 'id'])
+    .index('by_project_and_lane_and_notice', ['projectId', 'laneId', 'noticeId']),
   projectHostedAckBatches: defineTable({ ...record, actor: v.string() }).index('by_project_and_id', [
     'projectId',
     'id',

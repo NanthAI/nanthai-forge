@@ -125,6 +125,11 @@ async function changedSave(t, legacy, scale = false, provider = 'modal') {
   exchange.client = c.client;
   const command = { operationId: randomUUID(), message: 'ten-file save' };
   s.counts.length = 0;
+  const overlapWrites = () =>
+    s.counts.reduce(
+      (total, row) => total + row.written.filter(table => table === 'projectHostedOverlapLanes').length,
+      0,
+    );
   const started = performance.now();
   const transport = legacy
     ? {
@@ -144,7 +149,12 @@ async function changedSave(t, legacy, scale = false, provider = 'modal') {
     const terminal = await saveHostedLane(root, command, exchange);
     const output = terminal.outcome.result;
     assert.equal(JSON.parse(s.objects.get(output.head)).files.length, 3000);
-    const stats = { ...c.stats(), storageCalls: c.storageCalls(), wallMs: performance.now() - started };
+    const stats = {
+      ...c.stats(),
+      overlapWrites: overlapWrites(),
+      storageCalls: c.storageCalls(),
+      wallMs: performance.now() - started,
+    };
     stats.totalCalls = stats.calls + stats.storageCalls;
     return { stats, calls: c.calls, s, c, root, command, transport };
   }
@@ -180,6 +190,7 @@ async function changedSave(t, legacy, scale = false, provider = 'modal') {
   await c.call('projectHostedSaveJobs:complete', args);
   const stats = {
     ...c.stats(),
+    overlapWrites: overlapWrites(),
     wallMs: performance.now() - started,
     rssBytes: process.memoryUsage().rss,
     maxRssBytes: process.resourceUsage().maxRSS * 1024,
@@ -219,7 +230,8 @@ test('ten changed files in a 3,000-file tree fit the complete save budget at dog
       }),
     );
     assert(run.stats.calls <= 30, JSON.stringify(run.calls));
-    assert(run.stats.writes <= 98, JSON.stringify(run.stats));
+    assert.equal(run.stats.overlapWrites, 1, 'one atomic path projection update per changed save');
+    assert(run.stats.writes - run.stats.overlapWrites <= 98, JSON.stringify(run.stats));
     const prior = run.c.calls.length;
     await saveHostedLane(run.root, run.command, run.transport);
     assert.equal(run.c.calls.length - prior, 1, 'same-op terminal retry only prepares/returns the receipt');
@@ -347,7 +359,8 @@ test('sync batches missing merge objects at 3,000-file scale and leaves unchange
 test('Convex source provider: complete 10-file save including new object uploads stays below 30 calls at dogfood scale', async t => {
   const run = await changedSave(t, false, true, 'convex');
   assert(run.stats.totalCalls <= 30, JSON.stringify({ stats: run.stats, functions: run.calls }));
-  assert(run.stats.writes <= 97, JSON.stringify(run.stats));
+  assert.equal(run.stats.overlapWrites, 1, 'one atomic path projection update per changed save');
+  assert(run.stats.writes - run.stats.overlapWrites <= 97, JSON.stringify(run.stats));
   t.diagnostic(
     JSON.stringify({
       convex: run.stats,

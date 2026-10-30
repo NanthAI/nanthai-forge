@@ -48,8 +48,9 @@ export async function buildHostedSyncState(
       'Resolution source no longer descends from its exact draft.',
     );
     const state = source.state(work.left.object.sha256);
-    const draft = await resolveCalculate(() => source.state(resolution.draftHead));
-    const draftFiles = new Map(draft.files.map(file => [file.path, file]));
+    const draftFiles = new Map(
+      (await resolveCalculate(() => source.state(resolution.draftHead).files)).map(file => [file.path, file]),
+    );
     const currentFiles = new Map(state.files.map(file => [file.path, file]));
     let pin: WorkerPin | null = resolution.conflicts;
     const seen = new Set<string>();
