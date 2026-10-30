@@ -84,7 +84,11 @@ export async function transitionHostedLane(
   if (original.request && parsed.action === 'abandon' && parsed.saveFirst)
     childProgress = await saveHostedLane(
       root,
-      { operationId: original.saveOperationId, message: `Before abandon: ${parsed.reason}` },
+      {
+        operationId: original.saveOperationId,
+        message: `Before abandon: ${parsed.reason}`,
+        supersedeFinish: true,
+      },
       exchange,
     );
   if (!original.request) {
@@ -117,7 +121,11 @@ export async function transitionHostedLane(
       if (parsed.saveFirst) {
         childProgress = await saveHostedLane(
           root,
-          { operationId: original.saveOperationId, message: `Before abandon: ${parsed.reason}` },
+          {
+            operationId: original.saveOperationId,
+            message: `Before abandon: ${parsed.reason}`,
+            supersedeFinish: true,
+          },
           exchange,
         );
         if ('outcome' in childProgress && childProgress.outcome.status === 'failed')

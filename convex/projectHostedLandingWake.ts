@@ -14,7 +14,7 @@ import {
 export { scheduleLandingWake, wakeLandingQueue } from './projectHostedLandingEvents';
 import { landingRow } from './projectHostedLandingStore';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
-import { nextLandingRow, orderHostedLandingRows } from './projectHostedLandingOrder';
+import { nextLandingRow, nextReadyLandingRow, orderHostedLandingRows } from './projectHostedLandingOrder';
 import { canonicalPayload } from '../src/hosted-source-operation';
 
 /** The active eligible cohort retains its place while source/check IO runs.
@@ -22,6 +22,9 @@ import { canonicalPayload } from '../src/hosted-source-operation';
  * most, plus bounded priority-class heads for non-batchable work.
  * No history scan, parked-request writes, or polling wake. */
 export async function nextTrainLandingRow(ctx: MutationCtx, queue: Doc<'projectHostedLandingQueues'>) {
+  // A passed proof accepts before any new check or cohort starts, urgent included.
+  const ready = await nextReadyLandingRow(ctx, queue);
+  if (ready) return ready;
   if (queue.train?.length) {
     const rows = await Promise.all(
       queue.train.map(submissionId => landingRow(ctx, { projectId: queue.projectId, submissionId })),

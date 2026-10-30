@@ -17,6 +17,7 @@ import {
   writeSaveState,
   type SaveIdentity,
 } from './projectHostedSaveStore';
+import { refuseLiveLaneFinish } from './projectHostedLaneFinish';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -46,6 +47,17 @@ export const prepare = mutation({
           resourceVersion: request.expected.version,
           sourceRevision: request.expected.sourceVersion,
         };
+      // Refuse before any operation exists so a later explicit save starts clean.
+      // An empty delta never moves the head, so it keeps the live finish's proof.
+      if (request.pages && !request.supersedeFinish) {
+        const current = await saveLane(ctx, { ...auth, laneId: request.laneId });
+        if (current.state === 'active' && sameSaveLane(current, request.expected))
+          await refuseLiveLaneFinish(ctx, {
+            projectId: input.projectId,
+            laneId: request.laneId,
+            headWrittenAt: current.at,
+          });
+      }
       const prepared = await beginHostedOperation(ctx, {
         ...auth,
         payload: request,

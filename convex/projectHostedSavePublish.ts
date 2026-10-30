@@ -18,6 +18,7 @@ import { saveResultSchema, savePin } from '../src/hosted-save';
 import { workerResultSchema } from '../src/hosted-source-worker-format';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
+import { liveLaneFinish, laneFinishActiveMessage } from './projectHostedLaneFinish';
 import { invariant } from '../src/errors';
 
 /** One small transaction: exact signed worker evidence, committed immutable State,
@@ -86,8 +87,26 @@ export async function publishHostedSave(ctx: MutationCtx, input: SaveIdentity & 
     await wakeLifecycleSave(ctx, input);
     return terminal;
   }
-  const unchanged = head === lane.head,
-    sourceVersion = lane.sourceVersion + (unchanged ? 0 : 1),
+  const unchanged = head === lane.head;
+  // A moved head silently ends a live finish; the delta is retained for an explicit save.
+  const live = unchanged
+    ? null
+    : await liveLaneFinish(ctx, { projectId: input.projectId, laneId: lane.id, headWrittenAt: lane.at });
+  if (live && !state.request.supersedeFinish) {
+    const terminal = {
+      attemptId: operation.firstAttempt.id,
+      at: operation.firstAttempt.at,
+      outcome: {
+        status: 'failed' as const,
+        error: { code: 'LANE_FINISH_ACTIVE', message: laneFinishActiveMessage(lane.id, live) },
+      },
+    };
+    await finishHostedOperation(ctx, { ...input, receipt: terminal });
+    await writeSaveState(ctx, row._id, { ...state, status: 'stale' });
+    await wakeLifecycleSave(ctx, input);
+    return terminal;
+  }
+  const sourceVersion = lane.sourceVersion + (unchanged ? 0 : 1),
     version = lane.version + (unchanged ? 0 : 1),
     first = operation.firstAttempt;
   const authorityEpoch = state.request.authorityEpoch;
@@ -126,6 +145,7 @@ export async function publishHostedSave(ctx: MutationCtx, input: SaveIdentity & 
     version,
     sourceVersion,
     unchanged,
+    ...(live ? { supersededFinish: live.submissionId } : {}),
     at: first.at,
   });
   await writeHostedRecord(ctx, {

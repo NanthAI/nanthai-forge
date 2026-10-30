@@ -3,6 +3,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { LandingChannel, LandingRow } from './projectHostedLandingStore';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { orderLandingEntries } from '../src/landing-batch-order';
+import { hostedLandingStateSchema } from '../src/hosted-landing';
 
 export function landingPriority(owner: string, actor: string, requested?: 'urgent' | 'normal') {
   const allowed = owner === actor;
@@ -36,9 +37,30 @@ export function orderHostedLandingRows<T extends Pick<LandingRow, 'sequence' | '
     })),
   );
 }
+/** A passed proof ages with every main move, so a READY entry accepts before any
+ * new check starts, urgent ones included: urgent leads the train, it never moves
+ * main under a passed proof. One indexed window; acceptance is a single slot, so
+ * READY entries are few. Entries that wait for review or a dependency are skipped. */
+export async function nextReadyLandingRow(ctx: QueryCtx | MutationCtx, input: LandingChannel) {
+  const rows = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_channel_and_phase_and_sequence', q =>
+      q.eq('projectId', input.projectId).eq('channel', input.channel).eq('phase', 'ready'),
+    )
+    .order('asc')
+    .take(8);
+  const ready = rows.filter(row => {
+    if (!row.runnable || row.hold) return false;
+    const { pendingReason } = hostedLandingStateSchema.parse(JSON.parse(row.value)).observation;
+    return pendingReason !== 'waiting-for-review' && pendingReason !== 'waiting-for-dependency';
+  });
+  return orderHostedLandingRows(ready)[0] ?? null;
+}
 /** Selection of the first entry needs only the head of each indexed class. Old
  * rows without priority belong to normal; no backfill or history scan is needed. */
 export async function nextLandingRow(ctx: QueryCtx | MutationCtx, input: LandingChannel) {
+  const ready = await nextReadyLandingRow(ctx, input);
+  if (ready) return ready;
   const heads = [];
   for (const priority of ['urgent', 'normal', undefined] as const) {
     const [row] = await ctx.db

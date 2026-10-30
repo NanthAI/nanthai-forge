@@ -392,7 +392,15 @@ export async function executeHostedAgent(
   if (action === 'save') {
     const command = hostedAgentCommandSchemas.save.parse(input);
     checkLocalLane(session, command.laneId);
-    return saveHostedLane(session.root, { operationId, message: command.message }, session.exchange);
+    return saveHostedLane(
+      session.root,
+      {
+        operationId,
+        message: command.message,
+        ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
+      },
+      session.exchange,
+    );
   }
   if (action === 'compose')
     return composeAgentSource(session, hostedAgentCommandSchemas.compose.parse(input), operationId);

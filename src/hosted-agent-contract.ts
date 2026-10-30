@@ -112,7 +112,7 @@ export const hostedAgentCommandSchemas = {
       paths: z.array(z.string().refine(safeRelative)).optional(),
     })
     .strict(),
-  save: z.object({ ...lane, ...message }).strict(),
+  save: z.object({ ...lane, ...message, supersedeFinish: z.boolean().optional() }).strict(),
   compose: z.object(selection).strict(),
   sync: z
     .object({

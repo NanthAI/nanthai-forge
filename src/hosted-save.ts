@@ -63,6 +63,8 @@ export const saveRequestSchema = z
     authorityEpoch: number,
     expected: saveExpectedSchema,
     message: z.string(),
+    /** Explicitly replace a live finish of this Lane instead of being refused. */
+    supersedeFinish: z.boolean().optional(),
     pages: saveObjectSchema.nullable(),
     pageCount: number,
     changeCount: number,
@@ -100,6 +102,8 @@ export const saveResultSchema = z
     version: number,
     sourceVersion: number,
     unchanged: z.boolean(),
+    /** Set when this save replaced a live finish on purpose. */
+    supersededFinish: z.uuid().optional(),
     at: z.iso.datetime(),
   })
   .strict();

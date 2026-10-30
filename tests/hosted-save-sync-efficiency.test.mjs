@@ -8,6 +8,9 @@ import { join } from 'node:path';
 import { composeFixture } from './hosted-compose-fixture.mjs';
 import { controls, environment } from './hosted-source-efficiency-fixture.mjs';
 import { ConvexExchange } from '../dist/exchange-client.js';
+import { ConvexError } from 'convex/values';
+import { getFunctionName } from 'convex/server';
+import { existsSync } from 'node:fs';
 import { saveHostedLane } from '../dist/hosted-save-client.js';
 import { buildHostedSourceState } from '../dist/hosted-source-worker.js';
 import { sourceDispatch } from '../dist/hosted-source-job-controller.js';
@@ -262,6 +265,37 @@ test('unchanged save has no object or worker calls', async t => {
   assert.equal(terminal.outcome.result.unchanged, true);
   assert.equal(c.calls.length, 2);
   t.diagnostic(JSON.stringify({ unchanged: c.stats() }));
+});
+
+test('a save refused for a live finish drops its retained capture and forwards the explicit override', async t => {
+  environment(t);
+  const s = await composeFixture(),
+    entry = await s.lane(s.baseline);
+  const root = checkout(t, s, entry, JSON.parse(s.objects.get(s.baseline.sha256)));
+  const c = controls(t, s),
+    exchange = new ConvexExchange('https://fixture.invalid', 'synthetic', s.projectId, randomUUID(), null);
+  const prepared = [];
+  exchange.client = {
+    ...c.client,
+    mutation: async (ref, args) => {
+      if (getFunctionName(ref) === 'projectHostedSaves:prepare') {
+        prepared.push(JSON.parse(args.request));
+        throw new ConvexError({ code: 'LANE_FINISH_ACTIVE', message: 'Lane has an active finish.' });
+      }
+      return c.client.mutation(ref, args);
+    },
+  };
+  const command = { operationId: randomUUID(), message: 'while finishing' };
+  await assert.rejects(saveHostedLane(root, command, exchange), error => error.code === 'LANE_FINISH_ACTIVE');
+  assert.equal(prepared[0].supersedeFinish, undefined);
+  // The refusal began no server operation, so stale bytes must not be resumed later.
+  assert.equal(existsSync(`${root}.forge-client/saves/${command.operationId}`), false);
+  const explicit = { operationId: randomUUID(), message: 'on purpose', supersedeFinish: true };
+  await assert.rejects(
+    saveHostedLane(root, explicit, exchange),
+    error => error.code === 'LANE_FINISH_ACTIVE',
+  );
+  assert.equal(prepared[1].supersedeFinish, true);
 });
 
 test('20-input compose setup selects and describes in page calls while retaining order', async t => {

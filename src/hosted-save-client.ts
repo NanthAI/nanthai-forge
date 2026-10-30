@@ -24,11 +24,13 @@ import type { ContentPin } from './native-exchange.js';
  * progress later without keeping a tab, coding host or owner process alive. */
 export async function saveHostedLane(
   root: string,
-  command: { operationId: string; message: string },
+  command: { operationId: string; message: string; supersedeFinish?: boolean },
   exchange: Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'> &
     Partial<Pick<ConvexExchange, 'uploadLazyBatch'>>,
 ) {
-  z.object({ operationId: z.uuid(), message: z.string() }).strict().parse(command);
+  z.object({ operationId: z.uuid(), message: z.string(), supersedeFinish: z.boolean().optional() })
+    .strict()
+    .parse(command);
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
   root = realpathSync(root);
   const directory = `${root}.forge-client/saves/${command.operationId}`;
@@ -130,6 +132,7 @@ export async function saveHostedLane(
         lifecycleVersion: selection.lifecycleVersion,
       },
       message: command.message,
+      ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
       pages: built.root,
       pageCount: built.pages.length,
       changeCount: changes.length,
@@ -151,12 +154,31 @@ export async function saveHostedLane(
   });
   const objects = hostedObjectWriter(exchange);
   const args = { projectId: exchange.projectId, operationId: command.operationId };
-  const prepared = JSON.parse(
-    await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaves:prepare'), {
-      projectId: exchange.projectId,
-      request: canonicalPayload(request),
-    }),
-  );
+  let prepared;
+  try {
+    prepared = JSON.parse(
+      await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaves:prepare'), {
+        projectId: exchange.projectId,
+        request: canonicalPayload(request),
+      }),
+    );
+  } catch (error) {
+    const refused = hostedActionError(error, 'save');
+    // A refusal began no server operation. Drop the retained capture so a later
+    // save reads the working files again instead of resuming these stale bytes.
+    if (refused.code === 'LANE_FINISH_ACTIVE') {
+      workLocked(join(`${root}.forge-client`, 'lock'), () => {
+        if (
+          checkoutPathExists(pending) &&
+          JSON.parse(readFileSync(pending, 'utf8')).operationId === command.operationId
+        )
+          rmSync(pending);
+        rmSync(directory, { recursive: true, force: true });
+      });
+      throw refused;
+    }
+    throw error;
+  }
   if (prepared.terminal) {
     applyHostedSaveReceipt(root, capture, request, prepared.terminal);
     return prepared.terminal;
@@ -281,7 +303,7 @@ export async function reconcileHostedSave(root: string, exchange: Parameters<typ
   const pending = join(`${root}.forge-client`, `save-baseline-${digest(canonicalPayload(marker))}.json`);
   if (!checkoutPathExists(pending)) return null;
   const command = z
-    .object({ operationId: z.uuid(), message: z.string() })
+    .object({ operationId: z.uuid(), message: z.string(), supersedeFinish: z.boolean().optional() })
     .parse(JSON.parse(readFileSync(pending, 'utf8')));
   const directory = `${root}.forge-client/saves/${command.operationId}`;
   const capture = JSON.parse(readFileSync(join(directory, 'capture.json'), 'utf8'));
@@ -304,7 +326,15 @@ export async function reconcileHostedSave(root: string, exchange: Parameters<typ
   }
   // The checkpoint may have stopped before preparation or job submission.
   // Resume its retained bytes and operation rather than waiting for an unscheduled job.
-  const resumed = await saveHostedLane(root, command, exchange);
+  const resumed = await saveHostedLane(
+    root,
+    {
+      operationId: command.operationId,
+      message: command.message,
+      ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
+    },
+    exchange,
+  );
   if (resumed.outcome) return null;
   return { phase: 'save', saveOperationId: command.operationId, progress: resumed };
 }
