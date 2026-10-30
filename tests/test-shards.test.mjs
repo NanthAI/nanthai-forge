@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   partitionTests,
+  scopedAsFullShare,
   timedShards,
   shardDuration,
   testDuration,
@@ -138,7 +139,7 @@ test('timing targets choose scoped and full shard counts within the total job bu
   const files = Array.from({ length: 80 }, (_, i) => `tests/timed-${i}.test.mjs`);
   const timings = Object.fromEntries(files.map(file => [file, 45000]));
   const full = timedShards(files, timings, { full: true });
-  const scoped = timedShards(files, timings);
+  const scoped = timedShards(files, timings, { suite: 400 });
   assert.equal(full.length, 4);
   assert.equal(scoped.length, 8); // Need ten to hit 180s, so report the capped plan honestly.
   assert.equal(timedShards(files.slice(0, 8), timings).length, 1);
@@ -152,6 +153,28 @@ test('timing targets choose scoped and full shard counts within the total job bu
   assert.deepEqual(timedShards([]), []);
   for (const budget of [0, 1, -1, 2.5, Infinity])
     assert.throws(() => timedShards(files, timings, { concurrencyBudget: budget }));
+});
+
+test('a scoped selection above 70 percent of the suite plans with the full wall target', () => {
+  const suite = Array.from({ length: 100 }, (_, i) => `tests/wide-${i}.test.mjs`);
+  const timings = Object.fromEntries(suite.map(file => [file, 45000]));
+  const cost = groups =>
+    groups.reduce((sum, group) => sum + shardDuration(group, timings) + shardJobOverheadMs, 0);
+  const full = timedShards(suite, timings, { full: true });
+  const wide = timedShards(suite.slice(0, 71), timings);
+  const narrow = timedShards(suite.slice(0, 70), timings);
+  assert.equal(scopedAsFullShare, 0.7);
+  // The suite size comes from the timing history, or from an explicit option.
+  const files71 = suite.slice(0, 71);
+  assert.deepEqual(wide, timedShards(files71, timings, { full: true }));
+  assert.deepEqual(wide, timedShards(files71, timings, { suite: 90 }));
+  const scoped = timedShards(files71, timings, { suite: 1000 });
+  assert(wide.length <= full.length && wide.length < scoped.length);
+  assert(cost(wide) < cost(scoped));
+  assert.deepEqual(narrow, timedShards(suite.slice(0, 70), timings, { suite: 1000 }));
+  // Unmeasured selections and small scoped ones keep the scoped target.
+  assert.equal(timedShards(suite.slice(0, 71)).length, 8);
+  assert.equal(timedShards(suite.slice(0, 8), timings).length, 1);
 });
 
 test('dogfood size timing selection stays local, bounded and covers unknown files once', t => {

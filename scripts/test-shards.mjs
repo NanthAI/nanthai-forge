@@ -133,6 +133,8 @@ export function partitionTests(files, count, durations = {}, workers = 2) {
 // Rounded above the observed 23s p75 control preparation, allowing Candidate build
 // and result upload too. This is a planning estimate, never measured test evidence.
 export const shardJobOverheadMs = 60_000;
+/** Scoped selections above this share of the suite use the full-run wall target. */
+export const scopedAsFullShare = 0.7;
 
 /** Prefer the wall target when capacity is idle. Under pressure maximize estimated
  * checks per occupied runner-second, accounting for unused slots and job startup.
@@ -140,7 +142,7 @@ export const shardJobOverheadMs = 60_000;
 export function timedShards(
   files,
   durations = {},
-  { full = false, concurrencyBudget = 9, activeChecks = 1, jobCap } = {},
+  { full = false, concurrencyBudget = 9, activeChecks = 1, jobCap, suite } = {},
 ) {
   if (!Number.isSafeInteger(concurrencyBudget) || concurrencyBudget < 2)
     throw new Error('Expected a concurrency budget of at least two jobs.');
@@ -158,9 +160,14 @@ export function timedShards(
     new Set(files).size,
   );
   if (!maximum) return [];
-  // Reserve two minutes for planning, job startup and artifact/dependency restore.
-  const target = (full ? 480 : 180) * 1000;
   const measured = Object.values(durations).some(positive);
+  // A scoped selection that is most of the suite costs more runner minutes on the short
+  // scoped target than a full run does, so it plans like one. The timing history is
+  // pruned to the checked inventory, so its size stands in for the suite unless given.
+  const known = suite ?? Object.values(durations).filter(positive).length;
+  const wide = measured && known > 0 && new Set(files).size > known * scopedAsFullShare;
+  // Reserve two minutes for planning, job startup and artifact/dependency restore.
+  const target = (full || wide ? 480 : 180) * 1000;
   const limit = measured ? maximum : Math.min(8, maximum);
   let groups,
     best,

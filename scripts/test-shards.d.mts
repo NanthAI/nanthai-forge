@@ -26,8 +26,15 @@ export function partitionTests(
   workers?: number,
 ): string[][];
 export const shardJobOverheadMs: number;
+export const scopedAsFullShare: number;
 export function timedShards(
   files: string[],
   durations?: Record<string, number>,
-  options?: { full?: boolean; concurrencyBudget?: number; activeChecks?: number; jobCap?: number },
+  options?: {
+    full?: boolean;
+    concurrencyBudget?: number;
+    activeChecks?: number;
+    jobCap?: number;
+    suite?: number;
+  },
 ): string[][];
