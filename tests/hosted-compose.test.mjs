@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { composeFixture, api, jobApi, code, maxima } from './hosted-compose-fixture.mjs';
 import { saveBytes } from '../dist/hosted-save.js';
+import { convexSourceRuntime } from '../dist/convex-source-provider.js';
 const selected = async s =>
   s.selection([await s.lane(s.state([s.file('a.txt', 'A\nb\nc\n'), s.hidden], [s.baseline.sha256]))]);
 test('ordered multi-Lane compose publishes one clean immutable Candidate and leaves Lane/main untouched', async () => {
@@ -24,7 +25,7 @@ test('ordered multi-Lane compose publishes one clean immutable Candidate and lea
     candidate = terminal.outcome.result;
   assert.equal(candidate.result.status, 'clean');
   assert.deepEqual(candidate.base, x.request.expectedMain);
-  assert.equal(candidate.algorithm, `forge-native-compose-v1@${'a'.repeat(64)}`);
+  assert.equal(candidate.algorithm, `forge-native-compose-v1@${convexSourceRuntime}`);
   const state = JSON.parse(s.objects.get(candidate.result.head));
   assert.equal(s.objects.get(state.files.find(f => f.path === 'a.txt').blob).toString(), 'A\nb\nC\n');
   assert.equal(

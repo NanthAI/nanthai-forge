@@ -6,7 +6,7 @@ import { composeForJob } from './projectHostedComposeStore';
 import { saveForJob } from './projectHostedSavePublish';
 import { internalMutation, internalQuery } from './_generated/server';
 import { enqueueSourceJob, claimSourceJob, advanceSourceJob, cancelSourceJob } from './projectSourceJobs';
-import { receiveSourceJobCallback } from './projectSourceJobCallbacks';
+import { receiveConvexSourceJobCallback } from './projectSourceJobCallbacks';
 import { hostedRecordPage } from './projectHostedRecords';
 
 // Trusted caller only; actor/worker/runtime/input pins are resolved by the parent
@@ -45,14 +45,10 @@ export const advance = internalMutation({
   },
 });
 export const callback = internalMutation({
-  args: { projectId: v.id('hostedProjects'), callback: v.string(), signature: v.string() },
+  args: { projectId: v.id('hostedProjects'), callback: v.string() },
   returns: v.string(),
   handler: async (ctx, input) => {
-    const job = await receiveSourceJobCallback(
-      ctx,
-      { ...input, callback: JSON.parse(input.callback) },
-      keyId => process.env[`FORGE_SOURCE_JOB_KEY_${keyId}`] ?? '',
-    );
+    const job = await receiveConvexSourceJobCallback(ctx, input.projectId, JSON.parse(input.callback));
     if (
       job.jobKind === 'save' &&
       (job.status === 'completed' || job.status === 'failed') &&

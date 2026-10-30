@@ -53,7 +53,7 @@ export function recordCheckTimings(store: WorkStore, run: CheckRun, directory: s
         /* Truncated report. */
       }
     }
-    // Modal's collector retains machine reports in execution results instead of stdout.
+    // Retained shard indexes store machine reports in execution results instead of stdout.
     const executionsPath = join(directory, 'modal-shard-logs.json');
     if (existsSync(executionsPath)) {
       const executions = JSON.parse(readFileSync(executionsPath, 'utf8'));

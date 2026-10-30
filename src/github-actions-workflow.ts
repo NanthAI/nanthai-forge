@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModalPlan } from './modal-plan.js';
+import type { RemoteCheckPlan } from './remote-check-plan.js';
 
 /** Only generated in the run export; never changes the accepted candidate. */
 export function githubActionsWorkflow(runsOn: string | string[] = 'ubuntu-latest') {
@@ -52,7 +52,7 @@ jobs:
           FORGE_ACTIONS_SHARD: static
 `;
 }
-export function githubActionsRecipe(plan: ModalPlan) {
+export function githubActionsRecipe(plan: RemoteCheckPlan) {
   const { retryFiles, pin, head, definition, selection, groups, standard, interaction, command } = plan;
   return { retryFiles, pin, head, definition, selection, groups, standard, interaction, command };
 }

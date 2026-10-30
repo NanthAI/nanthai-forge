@@ -137,7 +137,7 @@ for (const remote of [true, false])
         waited.logPath,
         remote ? null : join(f.store.directory, `check-${f.original.id}`, 'stdout.log'),
       );
-      if (remote) assert.equal(waited.providerUrl, 'https://modal.com/apps');
+      if (remote) assert.equal(waited.providerUrl, 'https://github.com/actions');
       validatePassingPrefix(f.work, f.batch, f.prefix);
       const observation = queueObservation(f.store.select('landingEntries', f.entryId), reused);
       assert.equal(observation.checkReuse.runId, f.original.id);
@@ -495,7 +495,7 @@ test('advisory timing history retains the passed shard placement', async t => {
   await f.agent.dispatch({
     action: 'set-policy',
     operationId: randomUUID(),
-    checks: { runner: 'modal', shards: 3 },
+    checks: { runner: 'github-actions', repo: 'synthetic/checks', shards: 3 },
   });
   const reused = await reuseLandingCheck(f.work, f.batch, f.prefix, driver);
   assert.equal(reused.reusedFrom.runId, f.original.id);
@@ -553,10 +553,21 @@ test('billing-only plan pins do not invalidate successful command evidence', asy
   const f = await prepared(t);
   const path = join(f.store.directory, `check-${f.original.id}`);
   const plan = JSON.parse(readFileSync(join(path, 'modal-plan.json'), 'utf8'));
-  plan.costSafetyMargin += 1;
+  plan.costSafetyMargin = (plan.costSafetyMargin ?? 1.15) + 1;
   plan.pin = digest(
     JSON.stringify(
-      Object.fromEntries(Object.entries(plan).filter(([key]) => !['pin', 'source', 'output'].includes(key))),
+      Object.fromEntries(
+        Object.entries(plan)
+          .filter(([key]) => !['pin', 'source', 'output', 'costSafetyMargin'].includes(key))
+          .flatMap(([key, value]) =>
+            key === 'runtime'
+              ? [
+                  [key, value],
+                  ['costSafetyMargin', plan.costSafetyMargin],
+                ]
+              : [[key, value]],
+          ),
+      ),
     ),
   );
   writeFileSync(join(path, 'modal-plan.json'), JSON.stringify(plan));
@@ -956,7 +967,11 @@ for (const partial of [false, true, 'scope'])
 
 test('content-equivalent passed evidence can cross runner routes while retaining original execution provenance', async t => {
   const f = await prepared(t, { remote: false });
-  await f.agent.dispatch({ action: 'set-policy', operationId: randomUUID(), checks: { runner: 'modal' } });
+  await f.agent.dispatch({
+    action: 'set-policy',
+    operationId: randomUUID(),
+    checks: { runner: 'github-actions', repo: 'synthetic/checks' },
+  });
   await batchEdit(f.work, 'different-requesting-owner-node', data => {
     const environment = data.landingBatches.find(batch => batch.id === f.batch.id).environment;
     environment.node = 'v24.23.0';

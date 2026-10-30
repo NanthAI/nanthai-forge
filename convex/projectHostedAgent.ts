@@ -46,14 +46,7 @@ export const capabilities = query({
               ? ['capabilities']
               : hostedAgentActions.filter(action => action !== 'resolve' || resolveVersion === 1),
           mainReady: (await channelRow(ctx, projectId)) !== null,
-          sourceWorkerConfigured:
-            (process.env.FORGE_SOURCE_PROVIDER ?? 'convex') === 'convex' ||
-            (process.env.FORGE_SOURCE_PROVIDER === 'modal' &&
-              Boolean(
-                process.env.FORGE_SOURCE_WORKER &&
-                process.env.FORGE_SOURCE_RUNTIME &&
-                process.env.FORGE_SOURCE_KEY_ID,
-              )),
+          sourceWorkerConfigured: (process.env.FORGE_SOURCE_PROVIDER ?? 'convex') === 'convex',
           checkCallbackConfigured: Boolean(process.env.FORGE_HOSTED_CHECK_KEY_ID),
           nativeOwnerRequired: false,
           observation: 'finite',

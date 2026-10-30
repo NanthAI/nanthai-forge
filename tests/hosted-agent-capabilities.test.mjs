@@ -74,7 +74,7 @@ test('discovery applies current project access, removal and device credential re
   await assert.rejects(s.read('owner'), code('PROJECT_UNAVAILABLE'));
 });
 
-test('default Convex discovery needs no worker configuration and explicit Modal still reports missing pins', async () => {
+test('default Convex discovery needs no worker configuration and retired Modal remains unavailable even with old pins', async () => {
   const keys = [
       'FORGE_SOURCE_PROVIDER',
       'FORGE_SOURCE_WORKER',
@@ -93,7 +93,7 @@ test('default Convex discovery needs no worker configuration and explicit Modal 
       FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
       FORGE_SOURCE_KEY_ID: 'SYNTHETIC',
     });
-    assert.equal((await s.read('owner')).sourceWorkerConfigured, true);
+    assert.equal((await s.read('owner')).sourceWorkerConfigured, false);
     process.env.FORGE_SOURCE_PROVIDER = 'unknown';
     assert.equal((await s.read('owner')).sourceWorkerConfigured, false);
   } finally {

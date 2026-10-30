@@ -17,7 +17,7 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
-import type { ModalEvent } from './modal-client.js';
+import type { CheckExecutionEvent } from './check-execution-event.js';
 import { testFlakeEvidence, type TestVerdict, type TestObservation } from './check-flake-evidence.js';
 
 type Verdict = TestVerdict;
@@ -219,7 +219,7 @@ type Assessment = {
 export function checkQuarantineResult(
   store: WorkStore,
   run: CheckRun,
-  result: Extract<ModalEvent, { kind: 'result' }>,
+  result: Extract<CheckExecutionEvent, { kind: 'result' }>,
   groups: string[][],
   at: string,
 ) {
@@ -249,8 +249,4 @@ export function checkQuarantineResult(
   return assessTestQuarantine(store, run, observed, at);
 }
 
-export {
-  testExecutionVerdicts,
-  testExecutionVerdicts as modalTestVerdicts,
-  checkQuarantineResult as modalQuarantine,
-};
+export { testExecutionVerdicts };

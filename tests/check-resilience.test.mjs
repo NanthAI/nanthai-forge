@@ -14,7 +14,6 @@ import { claimLandingDriver } from '../dist/landing-driver.js';
 import { advanceLandingBatch } from '../dist/landing-batch-step.js';
 import { drainLandingBatches } from '../dist/landing-batch.js';
 import { launchGithubActionsRun } from '../dist/work-github-actions-run.js';
-import { launchModalRun } from '../dist/work-modal-run.js';
 import { checkEnvironment, recoverRuns } from '../dist/work-run.js';
 import { actionsApi } from '../dist/github-actions-api.js';
 import { sweepActionsRefs } from '../dist/github-actions-cleanup.js';
@@ -172,9 +171,13 @@ test('the driver parks a lost Actions rerun reply, then lands the same attempt w
   t.after(() => {
     process.env.PATH = previous;
   });
-  // Post-accept audits keep using the fixture's fake Modal client. The retained
+  // Post-accept audits use the local runner. The retained
   // Actions attempt continues on its original route through this settings change.
-  await f.agent.dispatch({ action: 'set-policy', operationId: randomUUID(), checks: { runner: 'modal' } });
+  await f.agent.dispatch({
+    action: 'set-policy',
+    operationId: randomUUID(),
+    checks: { runner: 'local' },
+  });
   await drainLandingBatches(f.work, 'main');
   assert.equal(reruns, 1);
   assert.equal(dispatches, 1);
@@ -186,7 +189,7 @@ test('the driver parks a lost Actions rerun reply, then lands the same attempt w
   assert.ok(readdirSync(f.path).some(name => name.startsWith('result.json.interrupted-')));
 });
 
-for (const backend of ['github-actions', 'modal'])
+for (const backend of ['github-actions'])
   test(`${backend} recovery completion explicitly wakes the driver after its receipt is durable`, async t => {
     const f = await reserve(t, backend);
     const sent = [];
@@ -217,34 +220,7 @@ for (const backend of ['github-actions', 'modal'])
       sent.length = 0;
       ready = true;
     };
-    if (backend === 'modal') {
-      let attempts = 0,
-        retained;
-      await launchModalRun(
-        f.store,
-        f.run,
-        async (file, emit) => {
-          const plan = read(file);
-          if (++attempts === 1) {
-            retained = plan;
-            emit({ kind: 'error', category: 'network', safeFallback: true });
-          } else {
-            assert.deepEqual(plan, retained);
-            await beforeResult();
-            emit({
-              kind: 'result',
-              pin: plan.pin,
-              head: plan.head,
-              definition: plan.definition,
-              exitCode: 0,
-              estimatedCostUsd: 0,
-            });
-          }
-        },
-        1,
-      );
-      assert.equal(attempts, 2);
-    } else {
+    {
       let rerun = false;
       await launchGithubActionsRun(
         f.store,

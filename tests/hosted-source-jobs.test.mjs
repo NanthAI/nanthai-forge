@@ -6,8 +6,7 @@ import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 import { hostedPayloadHash } from '../dist/hosted-source-operation.js';
-import { signSourceJobCallback, sourceJobCallbackSchema } from '../dist/hosted-source-job.js';
-import { ModalSourceProvider } from '../dist/modal-source-provider.js';
+import { sourceJobCallbackSchema } from '../dist/hosted-source-job.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { driveSourceJob } from '../dist/hosted-source-job-controller.js';
 
@@ -17,7 +16,6 @@ const api = await import(moduleUrl('../convex/projectSourceJobApi.ts'));
 const bridge = await import(moduleUrl('../convex/projectSourceJobDispatch.ts'));
 const hash = 'a'.repeat(64),
   output = { sha256: 'b'.repeat(64), size: 123 };
-const secret = 'synthetic-source-worker-key-not-a-real-account';
 const at = '2026-01-01T00:00:00.000Z';
 const empty = { status: 'empty', authoritative: true };
 const errorCode = code => error => error.code === code;
@@ -40,7 +38,7 @@ after(() => {
   console.log(JSON.stringify({ sourceJobFunctionMaxima: maxima }));
 });
 
-async function fixture(actor = 'owner', providerId = 'fake') {
+async function fixture(actor = 'owner', providerId = 'convex') {
   const f = recordsFixture(),
     identity = await f.setup();
   invocationCounts.push(f.counts);
@@ -139,14 +137,9 @@ async function fixture(actor = 'owner', providerId = 'fake') {
       result,
     };
   };
-  const receive = (callback, signature = signSourceJobCallback(callback, secret)) =>
+  const receive = callback =>
     f.run('callback', () =>
-      callbacks.receiveSourceJobCallback(
-        f.ctx,
-        { projectId: identity.projectId, callback, signature },
-        () => secret,
-        now,
-      ),
+      callbacks.receiveConvexSourceJobCallback(f.ctx, identity.projectId, callback, now),
     );
   const drive = () => driveSourceJob(identity.projectId, store, adapter, randomUUID);
   const expire = () => {
@@ -456,11 +449,10 @@ test('verified callback can precede the dispatch reply; duplicate terminal resul
   x.check(t);
 });
 
-test('forged callback signatures and every mismatched execution pin are rejected', async t => {
+test('internal callbacks reject every mismatched execution pin', async t => {
   const x = await fixture();
   await x.drive();
   const callback = await x.body();
-  await assert.rejects(x.receive(callback, '0'.repeat(64)), errorCode('SOURCE_CALLBACK_INVALID'));
   for (const patch of [
     { operationId: randomUUID() },
     { attempt: 2 },
@@ -475,11 +467,6 @@ test('forged callback signatures and every mismatched execution pin are rejected
   ]) {
     await assert.rejects(x.receive({ ...callback, ...patch }), errorCode('SOURCE_CALLBACK_INVALID'));
   }
-  const changedOutput = { ...callback, result: { status: 'completed', output: { sha256: hash, size: 1 } } };
-  await assert.rejects(
-    x.receive(changedOutput, signSourceJobCallback(callback, secret)),
-    errorCode('SOURCE_CALLBACK_INVALID'),
-  );
   assert.equal(sourceJobCallbackSchema.safeParse({ ...callback, source: 'raw source bytes' }).success, false);
   assert.equal((await x.load()).status, 'running');
   x.check(t);
@@ -666,93 +653,22 @@ test('registered enqueue, callback and cancel preserve the same internal contrac
     { projectId: x.identity.projectId, jobId: x.jobId, owner: randomUUID(), leaseMs: 1000 },
     x.adapter,
   );
-  const callback = await x.body(),
-    name = 'FORGE_SOURCE_JOB_KEY_H05_SYNTHETIC_TEST',
-    previous = process.env[name];
-  try {
-    delete process.env[name];
-    await assert.rejects(
-      x.f.call('api:callback-missing-key', api.callback, {
-        projectId: x.identity.projectId,
-        callback: JSON.stringify(callback),
-        signature: signSourceJobCallback(callback, secret),
-      }),
-      errorCode('SOURCE_WORKER_UNAVAILABLE'),
-    );
-    process.env[name] = secret;
-    const completed = JSON.parse(
-      await x.f.call('api:callback', api.callback, {
-        projectId: x.identity.projectId,
-        callback: JSON.stringify(callback),
-        signature: signSourceJobCallback(callback, secret),
-      }),
-    );
-    assert.equal(completed.status, 'completed');
-    const cancelled = JSON.parse(
-      await x.f.call('api:cancel-terminal', api.cancel, {
-        projectId: x.identity.projectId,
-        actor: 'owner',
-        jobId: x.jobId,
-      }),
-    );
-    assert.equal(cancelled.status, 'completed');
-    assert.equal(cancelled.version, completed.version);
-  } finally {
-    if (previous === undefined) delete process.env[name];
-    else process.env[name] = previous;
-  }
-  x.check(t);
-});
-
-test('Modal adapter uses short Convex action transitions, recovers lost dispatch and completes without owner source reads', async t => {
-  const x = await fixture('owner', 'modal');
-  let requests = 0;
-  const paid = new Map();
-  const provider = new ModalSourceProvider({
-    endpoint: 'https://synthetic-source.modal.run/',
-    token: 'synthetic-only',
-    worker: 'forge-source-v1',
-    runtime: hash,
-    timeoutMs: 1000,
-    async fetch(_url, init) {
-      requests++;
-      const { action, input } = JSON.parse(init.body);
-      if (action === 'dispatch') {
-        if (!paid.has(input.dispatchKey)) paid.set(input.dispatchKey, 'execution-1');
-        throw new Error('lost dispatch response after paid create');
-      }
-      return new Response(
-        JSON.stringify({
-          dispatchKey: input.dispatchKey,
-          input: canonicalPayload(input),
-          result: { status: 'found', executionId: paid.get(input.dispatchKey) },
-        }),
-      );
-    },
-  });
-  const ctx = {
-    runMutation: async (ref, input) => {
-      const name = getFunctionName(ref).split(':')[1];
-      const job = await x.invoke(
-        `modal:${name}`,
-        name === 'claim' ? jobs.claimSourceJob : jobs.advanceSourceJob,
-        name === 'advance' ? { ...input, command: JSON.parse(input.command) } : input,
-      );
-      return job === null ? null : JSON.stringify(job);
-    },
-  };
-  const tick = () =>
-    bridge.dispatchSourceJob(
-      ctx,
-      { projectId: x.identity.projectId, jobId: x.jobId, owner: randomUUID(), leaseMs: 1000 },
-      provider,
-    );
-  assert.equal(await tick(), 'unknown');
-  x.expire();
-  assert.equal(await tick(), 'observed');
-  assert.equal(paid.size, 1);
-  assert.equal(requests, 2);
-  await x.receive(await x.body());
-  assert.equal((await x.load()).status, 'completed');
+  const callback = await x.body();
+  const completed = JSON.parse(
+    await x.f.call('api:callback', api.callback, {
+      projectId: x.identity.projectId,
+      callback: JSON.stringify(callback),
+    }),
+  );
+  assert.equal(completed.status, 'completed');
+  const cancelled = JSON.parse(
+    await x.f.call('api:cancel-terminal', api.cancel, {
+      projectId: x.identity.projectId,
+      actor: 'owner',
+      jobId: x.jobId,
+    }),
+  );
+  assert.equal(cancelled.status, 'completed');
+  assert.equal(cancelled.version, completed.version);
   x.check(t);
 });

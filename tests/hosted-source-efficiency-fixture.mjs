@@ -6,7 +6,6 @@ import { validateContext } from './convex-context.mjs';
 import { checkArgs } from './convex-args.mjs';
 import { digest } from '../dist/hash.js';
 import { convexStoreBlob } from './convex-storage-fake.mjs';
-import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { sourceWorkerHttp } from '../dist/hosted-source-worker-http.js';
 
 const names = [
@@ -19,7 +18,6 @@ const names = [
   'projectHostedSaveJobs',
   'projectSourceJobApi',
   'projectSourceProviderApi',
-  'projectModalSource',
   'projectHostedSaveTransfers',
   'projectHostedSourceTransferBatch',
   'projectHostedComposeSelection',
@@ -37,13 +35,7 @@ export function environment(t) {
     R2_BUCKET: 'synthetic',
     R2_ACCESS_KEY_ID: 'synthetic',
     R2_SECRET_ACCESS_KEY: 'synthetic',
-    FORGE_SOURCE_PROVIDER: 'modal',
-    FORGE_SOURCE_WORKER: 'fixed-worker',
-    FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
-    FORGE_SOURCE_KEY_ID: 'SYNTHETIC',
-    FORGE_SOURCE_JOB_KEY_SYNTHETIC: 'synthetic-key',
-    FORGE_SOURCE_MODAL_URL: 'https://bridge.invalid/',
-    FORGE_SOURCE_MODAL_TOKEN: 'synthetic',
+    FORGE_SOURCE_PROVIDER: 'convex',
   };
   const before = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
   Object.assign(process.env, env);
@@ -57,8 +49,7 @@ export function environment(t) {
 /** Real function handlers/nested calls and storage checks, with local R2 bytes. */
 export function controls(t, s) {
   const calls = [];
-  let dispatch,
-    storageCalls = 0;
+  let storageCalls = 0;
   const blobs = new Map();
   const storage = {
     async get(id) {
@@ -86,7 +77,7 @@ export function controls(t, s) {
     const [file, method] = name.split(':');
     const fn = modules[file][method];
     checkArgs(fn, args, name);
-    if (file === 'projectModalSource' || file === 'projectConvexSource') return fn._handler(context, args);
+    if (file === 'projectConvexSource') return fn._handler(context, args);
     if (
       ['commit', 'commitBatch', 'complete'].includes(method) &&
       [
@@ -121,23 +112,6 @@ export function controls(t, s) {
     if (parsed.hostname === 'convex.invalid') {
       storageCalls++;
       return new Response(blobs.get(parsed.pathname.slice(1)) ?? null);
-    }
-    if (parsed.hostname === 'bridge.invalid') {
-      dispatch = JSON.parse(init.body).input;
-      const args = {
-        projectId: s.projectId,
-        jobId: dispatch.jobId,
-        input: JSON.stringify(dispatch),
-        token: crypto.randomUUID(),
-      };
-      const reservation = JSON.parse(await invoke('projectSourceProviderApi:reserve', args));
-      assert(reservation.create);
-      await invoke('projectSourceProviderApi:created', { ...args, executionId: 'synthetic-execution' });
-      return Response.json({
-        dispatchKey: dispatch.dispatchKey,
-        input: canonicalPayload(dispatch),
-        result: { status: 'accepted', executionId: 'synthetic-execution' },
-      });
     }
     if (parsed.hostname === 'control.invalid') {
       const input = JSON.parse(init.body);
@@ -197,7 +171,6 @@ export function controls(t, s) {
     calls,
     stats,
     context,
-    dispatch: () => dispatch,
     storageCalls: () => storageCalls,
   };
 }

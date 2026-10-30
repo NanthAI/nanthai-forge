@@ -3,7 +3,6 @@ import { childEnv } from '../scripts/child-env.mjs';
 import { checkEnvironment, checkPassthrough } from './check-environment.js';
 import type { AutonomyPolicy } from './autonomy-policy.js';
 import type { Check } from './work-types.js';
-import type { ModalCredentialsRef } from './check-runner-settings.js';
 
 export const ownerEnvNames = [
   'XDG_CONFIG_HOME',
@@ -50,11 +49,10 @@ export const syncEnvNames = [
   'FORGE_GIT_TIMEOUT_MS',
 ];
 
-/** Controllers need only explicitly declared check inputs and the selected
- * backend credentials. Project commands still use checkProcessEnvironment. */
+/** Controllers need only explicitly declared check inputs and selected
+ * GitHub authentication. Project commands still use checkProcessEnvironment. */
 export function checkWorkerEnv(
   checks: Pick<Check, 'env' | 'credentials'>[],
-  credentials?: ModalCredentialsRef | null,
   allow: string[] = [],
   extra: NodeJS.ProcessEnv = {},
 ) {
@@ -63,11 +61,8 @@ export function checkWorkerEnv(
       ...ownerEnvNames,
       ...Object.keys(checkEnvironment().env),
       ...allow,
-      'FORGE_MODAL_PYTHON',
       // These names were explicitly selected by the check owner for execution.
       ...checks.flatMap(checkPassthrough),
-      // The Modal controller resolves this selected project credential pair.
-      ...(credentials?.kind === 'env' ? [credentials.tokenId, credentials.tokenSecret] : []),
     ],
     extra,
   });
@@ -83,7 +78,6 @@ export function checkServiceEnv(
 ) {
   return checkWorkerEnv(
     checks,
-    policy.checks?.runner === 'modal' ? policy.checks.credentialsRef : undefined,
     [
       ...allow,
       ...(policy.githubMirror?.autoPush

@@ -218,11 +218,9 @@ nforge agent ROOT define-check '{"name":"integration","executable":"node","args"
 
 Choose the native project's runner once through the existing owner-only
 `set-policy` command: `checks.runner` is `local` (default), `github-actions`
-(`repo`, `runsOn`, optional `shards`), or `modal` (`credentialsRef` naming the
-project's token variables or an external local JSON secret file). Use `policy` to
-show it; `status` also includes it. Modal never discovers the owner's default
-account; missing project credentials are a typed infrastructure error. Token values
-stay outside Work, source and hosting. Each terminal receipt records `backend.cost`
+(`repo`, `runsOn`, optional `shards`). Use `policy` or `status` to show the
+configured runner. Modal is retired: existing policies remain readable, but a
+new runner selection must use `local` or `github-actions`. Each terminal receipt records `backend.cost`
 with billed quantities, estimated USD and its basis; `status.checkCosts.months`
 summarizes available estimates per month and runner, marking unknown and legacy
 inputs. See [runner selection and cost basis](operations.md#native-runner-selection)
@@ -230,7 +228,10 @@ for commands, configurable label rates and allowance exclusions.
 
 Configured native runners batch queued code candidates as checked prefixes. `land-ready` resumes retained batches; cancellation preserves earlier passing prefixes. Batches retain the selecting driver's clean environment for resumed runs and identify incompatible entries by changed environment field. See [landing batches](operations/landing-batches.md) and [agent workflow](agents/workflow.md#landing-queue).
 
-Modal interruptions preserve completed exact-plan shards; failed test shards retry once. Two named flake verdicts within seven days quarantine the exact test, which continues running without blocking on fully attributed failures. Twenty consecutive clean passes or an explicit fix release quarantine. See [Modal checks](operations/modal-checks.md#flakes-and-quarantine) for attribution, infrastructure recovery and retained attempts.
+Shared check evidence retains named test verdicts and quarantines. Two supported
+flake verdicts within seven days quarantine the exact test; it continues running.
+Twenty consecutive clean passes or an explicit fix release quarantine. Actions
+retains each attempt and retries unfinished infrastructure jobs, not test failures.
 
 ## Channels and releases
 

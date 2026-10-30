@@ -9,7 +9,7 @@ function provider({ lostReply = false, unknownLookup = false, rejected = false }
   const executions = new Map(),
     observed = { dispatches: 0, lookups: 0, paidExecutions: 0, pins: [] };
   return {
-    id: 'modal',
+    id: 'github-actions',
     observed,
     async dispatch(input) {
       observed.dispatches++;
@@ -86,7 +86,7 @@ test('two controllers reserve one dispatch under OCC and never substitute a prov
   ]);
   assert.equal(fake.observed.dispatches, 1);
   assert.equal(fake.observed.paidExecutions, 1);
-  assert.equal((await s.status(r.id)).configuration.provider, 'modal');
+  assert.equal((await s.status(r.id)).configuration.provider, 'github-actions');
 });
 test('expired controller response cannot overwrite takeover; lookup adopts the existing execution', async () => {
   const s = await checksFixture(),

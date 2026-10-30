@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { modalPlan } from '../dist/modal-plan.js';
+import { remoteCheckPlan } from '../dist/remote-check-plan.js';
 import { NativeSource } from '../dist/native-source.js';
 import { initNative } from '../dist/native-work.js';
 import { benchmarkPlan } from '../scripts/bench-landing-shard.mjs';
@@ -97,7 +97,7 @@ function fixture(t, extra = []) {
       check: { executable: process.execPath, args: ['scripts/forge-check.mjs'], definition: 'a'.repeat(64) },
       environment: { env: { FORGE_CHECK_SCOPED: '1' } },
     };
-    const forge = await modalPlan(store, run, directory, 4);
+    const forge = await remoteCheckPlan(store, run, directory, 4);
     const comparison = JSON.parse(readFileSync(join(directory, 'changes.json'), 'utf8'));
     const inventory = new Map([...combined].filter(([path]) => selectionSourcePath(path)));
     const github = benchmarkPlan(4, comparison, inventory, {});

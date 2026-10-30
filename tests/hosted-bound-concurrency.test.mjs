@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
-  FORGE_SOURCE_PROVIDER: 'modal',
+  FORGE_SOURCE_PROVIDER: 'convex',
   FORGE_SOURCE_WORKER: 'synthetic-worker',
   FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
   FORGE_SOURCE_KEY_ID: 'SYNTHETIC',

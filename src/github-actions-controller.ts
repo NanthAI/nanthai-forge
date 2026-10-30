@@ -6,8 +6,8 @@ import { compactCheckText } from './check-compact-output.js';
 import { mutate, observe, type ActionsApi, type ActionsJob, type ActionsRun } from './github-actions-api.js';
 import { ensureActionsDispatch } from './github-actions-dispatch.js';
 import type { ActionsJournal } from './github-actions-export.js';
-import type { ModalPlan } from './modal-plan.js';
-import { ModalShardLogs, shardLogName } from './modal-shard-logs.js';
+import type { RemoteCheckPlan } from './remote-check-plan.js';
+import { CheckShardLogs, shardLogName } from './check-shard-logs.js';
 import { actionsJobLogEvidence } from './github-actions-job-evidence.js';
 import { actionsCost, actionsRate } from './check-cost.js';
 import { invariant } from './errors.js';
@@ -21,7 +21,7 @@ type Cost = {
   billable?: Record<string, { jobs?: number; job_runs?: { job_id: number; duration_ms: number }[] }>;
 };
 export async function controlActions(
-  plan: ModalPlan,
+  plan: RemoteCheckPlan,
   journal: ActionsJournal,
   save: () => void,
   api: ActionsApi,
@@ -43,7 +43,7 @@ export async function controlActions(
   await ensureActionsDispatch(plan, journal, save, api, cancelled, progress, executionAllowed);
   if (!journal.runId)
     return { status: 'cancelled' as const, exitCode: null, billableMinutes: [], cost: cost() };
-  const logs = new ModalShardLogs(plan.output, plan.groups.length);
+  const logs = new CheckShardLogs(plan.output, plan.groups.length);
   let cancelSent = false,
     retryPolls = 0,
     settlePolls = 0;

@@ -19,13 +19,13 @@ See [GitHub's dispatch API](https://docs.github.com/en/rest/actions/workflows#cr
 No deployment, repository creation or default-branch update happens automatically.
 
 `runsOn` defaults to `ubuntu-latest`. Omitted `shards` uses the same duration-balanced
-plan as Modal; a positive shard count explicitly partitions all selected test files.
+provider-neutral check plan; a positive shard count explicitly partitions all selected test files.
 Every standard check runs one independent static job. Docs-only candidates run
 only documentation checks in that job, with no test shards. Code candidates use
-the same scoped selection as local and Modal checks; explicit full scope and
+the same scoped selection as local checks; explicit full scope and
 post-accept main audits retain full verification. Test matrices use fail-fast
 disabled. Both call `node scripts/forge-check.mjs`; the Actions plan
-selects static verification or `scripts/test-files.mjs` with Modal's selection and
+selects static verification or `scripts/test-files.mjs` with the pinned selection and
 worker environment. Node is 24.22.1. Each job installs with `npm ci --ignore-scripts`.
 Retained pre-upgrade Node 24.19.0 executions remain observable and cancellable,
 with their original runtime identity. They cannot dispatch new work or retry shards;
@@ -69,13 +69,13 @@ No timing data is written to Convex or fetched over the network.
 The shared partitioner assigns longest files first, modelling the runner's two
 concurrent whole-file workers. Unknown files use historical p75; missing or corrupt
 history preserves sorted round-robin. Ties use portable path order and shard index.
-Membership remains in the digest-bound `modal-plan.json` and generated Actions
+For receipt compatibility, membership remains in the digest-bound `modal-plan.json` and generated Actions
 recipe; an existing run always reuses that plan after timing history changes.
 `scripts/public-verify.mjs` and the landing benchmark use the same partitioner.
 They read the local history path above, or an explicitly supplied
 `FORGE_TEST_TIMINGS_HISTORY` file, and cover every selected test with either strategy.
 
-The owner exports the same immutable State used by Modal and adds a generated
+The owner exports the immutable State and adds a generated
 workflow and recipe to that export only. The exported commit is pushed only to
 `refs/heads/forge-check/<runId>`, using a compare-and-swap creation. A changed or
 colliding ref is never overwritten. Before pushing, Forge saves an ambiguous intent;
@@ -110,7 +110,7 @@ The source State, Candidate, definition, runtime,
 selection and shard membership stay digest-bound. The journal also retains the
 target repository and runner label so policy changes cannot redirect adoption.
 Git-backed checks and declared environment/credential inputs keep existing local
-routing. The shared Modal export rules for local credential configuration apply.
+routing. The source export rules for local credential configuration apply.
 No owner token is sent in the plan or check environment; checkout does not retain
 its credential, and raw gh/git error output is never logged. Failed Actions API calls retain only
 the HTTP status and GitHub’s structured `message` and `documentation_url` fields

@@ -406,15 +406,15 @@ Imported Code subscribes to source-free import/status-derivative invalidations. 
 
 ## Checks and evidence
 
-Native checks select local, Modal or GitHub Actions execution through `checks.runner` in project
-autonomy policy. The Modal owner-side adapter pins source, definition, selection
-and runtime, verifies snapshot hashes remotely, uses independent remote capacity,
-and binds the terminal receipt to those pins. Owner credentials stay on the
-controller; declared secret inputs stay local. Infrastructure fallback is explicit;
-unknown executions retain IDs for adoption rather than repeating commands.
-See [Modal checks](operations/modal-checks.md) and [GitHub Actions and Blacksmith checks](operations/github-actions-checks.md) for execution and cost details. `checks.fallback` is `manual` by default for existing and new policies; automatic local fallback requires explicit opt-in and owner-originated candidates. Confirmed runner outages and budget exhaustion produce retryable infrastructure outcomes, not failed-test evidence; see [runner fallback](operations/runner-fallback.md).
-
-Modal interruptions preserve completed exact-plan shards. Failed test shards retry once; two named flake verdicts within seven days quarantine that exact test identity. Quarantined tests continue running without blocking on fully attributed failures; twenty consecutive clean passes or an explicit fix release quarantine. Infrastructure recovery keeps its attempts without contributing flake verdicts. See [flakes and quarantine](operations/modal-checks.md#flakes-and-quarantine).
+Native checks select local or GitHub Actions execution through `checks.runner` in
+project autonomy policy. The Actions controller pins source, definition, selection
+and runtime, and binds the terminal receipt to those pins. Declared secret inputs
+stay local. Unknown remote outcomes retain execution IDs for reconciliation.
+See [GitHub Actions and Blacksmith checks](operations/github-actions-checks.md).
+Modal execution has been removed. Historical policy, runner, cost and evidence
+literals remain accepted by readers; new Modal runner configurations are refused.
+Shared named-test verdicts, quarantine evidence and retained attempt logs remain
+available to local and Actions runners.
 
 A check is an executable, its arguments, an optional environment label and explicit environment/credential passthrough names. A run records the pinned Candidate, the check definition, an environment fingerprint and the process owner. It runs in a fresh workspace under your OS account with private HOME/XDG/temp directories and a clean runtime allowlist plus declared passthrough. Passthrough values are transient; receipts retain names only. It is not sandboxed. The runner keeps outcomes, bounded failure summaries, compact test evidence, provider log links and chosen build outputs. Local logs stay local for seven days; upload requires explicit project opt-in with finite retention. Cancelled, interrupted and failed are different results. After a lost reply, a retry observes the existing run and does not start another.
 
@@ -855,17 +855,11 @@ lookup immediately before reservation. It reuses the same execution key and
 worker pins. Accepted executions are only reconciled. A rejected recovery request
 cannot prove that the original ambiguous request created no execution.
 
-Modal callbacks use HMAC-SHA-256 with a backend-resolved key identified by the pinned
-worker configuration (`FORGE_SOURCE_JOB_KEY_<keyId>`). The signature binds project,
-job, operation, attempt, fence, authority epoch, input digest, provider, worker,
-runtime, execution identity and the completed output manifest digest/size or
-failure code. Current project/contributor authority and epoch are rechecked on
-every callback, including duplicates. A verified callback may reconcile before
-the dispatch response. Terminal receipts cannot be rewritten. Signed sequential
-heartbeats renew a worker lease across action lifetimes; replayed heartbeats do
-not extend it, and expired workers cannot commit. Cancellation advances the
-worker fence without implying that remote compute was stopped. Controller lease
-takeover preserves a running worker's execution fence.
+Internal Convex source results bind project, job, operation, attempt, fence,
+authority epoch, input digest, worker, runtime and execution identity. Current
+project/contributor authority and epoch are rechecked, including duplicates.
+Terminal receipts cannot be rewritten. External source callbacks and worker
+credential resolution have been removed. Cancellation advances the worker fence.
 
 Recovery reads only a selected project's pending/dispatching/running status
 index in bounded pages; it does not scan terminal history or every project.
@@ -1031,9 +1025,7 @@ when the native merge needs them. Derived ancestry rows are prefetch hints, neve
 closure evidence. No temporary disk, repository execution, worker credential,
 HTTP control ingress, idle poller or Workflow component is required.
 
-The optional Modal adapter retains its reservation, signed callbacks and direct
-transfer grants. Source-operation reducers still own publication for both
-providers. See [trusted hosted source worker](operations/hosted-source-worker.md).
+Source-operation reducers own publication for the internal Convex provider. See [trusted hosted source worker](operations/hosted-source-worker.md).
 
 ### Hosted Lane and Intent lifecycle APIs
 
@@ -1187,7 +1179,7 @@ remote runner configuration with original-operation reconciliation and expected
 definition/configuration pins. Definitions use the local command normalization
 and definition digest; import preserves the original check UUID, timestamp and
 command. Project check settings use owner authority; contributors can request
-checks under current project access. Configuration contains a Modal route or a
+checks under current project access. Configuration contains a Mac machine identity or a
 GitHub Actions repository, App installation and selected `runsOn` label, exact
 runtime/environment fingerprints and a credential-use reference, never account
 credential values or a local credential file. These APIs do not configure a live
@@ -1235,7 +1227,7 @@ Candidate runs and shard metadata through indexes. The shared
 `requireHostedCheckEvidence` helper rechecks current definitions/configuration and
 exact passing provider evidence inside the caller's transaction. It does not move
 main, implement landing policy or require checks for person-selected acceptance.
-Live provider dispatch (including Modal), credential use, callback ingress and
+Live provider dispatch, credential use, callback ingress and
 check-output transfer remain adapter work; the contracts are exercised with local
 fake providers. See the
 [check API](operations/source-exchange.md#hosted-check-api).
@@ -1253,7 +1245,7 @@ Candidate creator and accepting account must match the project owner. Candidate
 creator provenance is written by the canonical record writer, independent of the
 account requesting its check. Missing creator provenance, supervised projects and
 outside contributors require hosted-runner evidence (`HOSTED_RUNNER_REQUIRED`).
-Modal and GitHub Actions retain their existing sufficiency rules, and unchecked
+GitHub Actions retains its existing sufficiency rules, and unchecked
 person review remains available.
 
 `projectHostedCheckMachines:revoke` is an idempotent project-owner mutation with
@@ -1611,7 +1603,7 @@ Forge background workers and native helpers construct child environments with
 `childEnv` from ordinary OS settings and explicit per-operation names. Unknown
 variables, including unrelated credentials and ambient `NODE_OPTIONS`, are not
 inherited. Git helpers retain their explicit Git identity/configuration and CGI
-settings. GitHub, hosted synchronization and Modal controllers receive only their
+settings. GitHub and hosted synchronization controllers receive only their
 selected provider credential names; check controllers preserve the check's declared
 environment and credential inputs. Project commands continue to use their private
 check runtime directories and declared passthrough. The self-host backend receives

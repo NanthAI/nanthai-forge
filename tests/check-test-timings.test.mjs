@@ -90,7 +90,7 @@ test('Actions timestamped shard logs use latest complete attempt and survive rec
   assert.equal(readFileSync(f.historyPath, 'utf8'), bytes);
 });
 
-test('Modal execution reports preserve durations, prefer retries, and include completed failures', t => {
+test('Retained execution reports preserve durations, prefer retries, and include completed failures', t => {
   const f = fixture(t);
   f.run.status = 'failed';
   writeFileSync(

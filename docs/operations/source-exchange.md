@@ -361,8 +361,7 @@ baseline, counts and exact linked page root. Preparation also returns the origin
 server-timestamped worker input, allowing its upload to share the delta-page
 window before staging. The worker batches changed-blob read grants and State/result
 output commits. `projectHostedSaveJobs:submit` creates
-one child source job pinned to Modal, `FORGE_SOURCE_WORKER`,
-`FORGE_SOURCE_RUNTIME` and `FORGE_SOURCE_KEY_ID`. The trusted worker verifies the
+one child source job pinned to the internal Convex source worker and its fixed runtime. The trusted worker verifies the
 baseline State and each prior delta entry, downloads changed blobs with bounded
 buffers/private disk, preserves other paths and constructs the native State with
 server-selected parent/time. It never materializes or executes repository code.
@@ -475,12 +474,10 @@ start live compute. Existing native check requests are unchanged.
   fields: name, executable, args, environmentLabel and optional environment-name,
   credential-name, artifact-path, static/resource and declared-input settings.
   For `kind:"import"`, provide the existing `check` with its UUID, definition and
-  timestamp. For `kind:"runner"`, provide `configuration` with `provider:"modal"`,
-  `app`, `function`, `runtime`, `environmentFingerprint` and credential-use
-  reference `{secretId,version,operation}`. Alternatively, use
+  timestamp. For `kind:"runner"`, provide `configuration` with
   `provider:"github-actions"`, `repository:"owner/repo"`, `installationId`,
-  `runsOn`, `runtime`, `environmentFingerprint` and the same credential-use
-  reference for an existing GitHub App installation token. `runsOn` is the exact
+  `runsOn`, `runtime`, `environmentFingerprint` and a credential-use
+  reference `{secretId,version,operation}` for an existing GitHub App installation token. `runsOn` is the exact
   GitHub-hosted or Blacksmith runner label. `hostedActionsRuntime` exports the
   fixed Actions harness runtime fingerprint. No credential values are accepted.
   Settings use existing project-owner authority. Each mutation retains its exact

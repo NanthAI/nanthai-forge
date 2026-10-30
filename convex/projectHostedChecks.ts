@@ -179,6 +179,11 @@ export async function enqueueHostedCheck(
   );
   const runner = hostedCheckRunnerSchema.parse(JSON.parse(configuration.value));
   invariant(
+    runner.provider !== 'modal',
+    'RUNNER_UNAVAILABLE',
+    'The Modal runner has been retired. Select mac, self-hosted or github-actions.',
+  );
+  invariant(
     runner.environmentFingerprint === request.expectedEnvironment,
     'EVIDENCE_CHANGED',
     'Select the configured runtime environment.',

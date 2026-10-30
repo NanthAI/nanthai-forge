@@ -78,7 +78,6 @@ Open work and friction, one line per problem. S is a small focused change, M spa
 - M: External runner/API fakes can miss real behavior; qualify on throwaway live fixtures and retain exact runner/runtime evidence.
 - M / owner decision required: Check/exchange outputs accumulate; decide any result/log/tree retention and deletion behavior explicitly before implementing an automatic age rule.
 - M: Identify and explicitly disable the unexpected managed/cloud MCP client in benchmark cells; failed auth does not establish a tool-isolation guarantee.
-- M: Qualify Modal owner-replacement identity behavior, including reused inode/birthtime and stale directory views; a provider skip is not correctness evidence.
 - S / owner decision required: Clean old installed runtimes and leftover scratch Lanes/folders only within the agreed cleanup scope.
 - M: Installed runner/batch fixes still require a CLI reinstall; shorten the deployment/install path without claiming an unmeasured speedup.
 - M: Complete the approved throwaway backup/restore drill and the planned weekly export/four-copy/off-site and monthly restore workflow.
@@ -88,7 +87,7 @@ Open work and friction, one line per problem. S is a small focused change, M spa
 ## Later (see the roadmap)
 
 - L: Hosted Lanes, hosted accept, server-side landing queue, hosted two-way GitHub sync and offline qualification.
-- L: Self-hosted worker (`nforge worker`), runner picker, Modal with the project's own key and contributor first-click rule.
+- L: Self-hosted worker (`nforge worker`), runner picker and contributor first-click rule.
 - M: Git serving and Lane refs; Lane-scoped undo.
 - M: Optional remote pre-check an agent can request before finishing: its affected tests run on the project runner, nothing heavy on the agent's machine.
 - L: Making-of browser timeline/flows, Intent discussions with per-item visibility, Markdown/images on Intents and a real dependency graph in Code.

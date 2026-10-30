@@ -29,6 +29,7 @@ export const autonomyPolicy = v.object({
   }),
   checks: v.optional(
     v.object({
+      // Persisted Modal policies remain readable; editedPolicy rejects new selection.
       runner: v.union(v.literal('local'), v.literal('modal'), v.literal('github-actions')),
       repo: v.optional(v.string()),
       runsOn: v.optional(v.string()),

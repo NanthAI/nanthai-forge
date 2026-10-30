@@ -582,19 +582,7 @@ test('release restart retains a checking remote landing and its replacement owne
   const release = fixture(t);
   const f = await landingFixture(t);
   const gate = join(f.store.directory, 'release-provider-ready');
-  writeFileSync(
-    join(f.store.directory, 'mock-modal.mjs'),
-    `#!${process.execPath}
-import fs from 'node:fs';
-const plan = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
-console.log(JSON.stringify({kind:'execution', executionId:'synthetic-in-flight', image:'fixture'}));
-const waiting = setInterval(() => {
-  if (!fs.existsSync(${JSON.stringify(gate)})) return;
-  clearInterval(waiting);
-  console.log(JSON.stringify({kind:'result', pin:plan.pin, head:plan.head, definition:plan.definition, exitCode:0, estimatedCostUsd:0}));
-}, 5);
-`,
-  );
+  f.provider.configure({ gateFile: gate });
   const input = await f.candidate('release-in-flight.txt');
   const batch = await batchEdit(f.work, 'release-select', data => selectBatch(f.work, data, 'main'));
   await composeBatch(f.work, batch);
@@ -608,11 +596,7 @@ const waiting = setInterval(() => {
   let run;
   try {
     for (const deadline = performance.now() + 5000; performance.now() < deadline;) {
-      run = f.store
-        .load()
-        .runs.find(
-          item => item.status === 'running' && item.backend?.executionIds?.includes('synthetic-in-flight'),
-        );
+      run = f.store.load().runs.find(item => item.status === 'running' && item.backend?.executionIds?.length);
       if (run) break;
       await new Promise(resolve => setTimeout(resolve, 5));
     }

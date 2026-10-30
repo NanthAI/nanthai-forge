@@ -10,7 +10,7 @@ import { mkdirBelow } from './mkdir-below.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readPolicy } from './work-autonomy.js';
-import { modalPlan, validateModalPlan, type ModalPlan } from './modal-plan.js';
+import { remoteCheckPlan, validateRemoteCheckPlan, type RemoteCheckPlan } from './remote-check-plan.js';
 import { actionsApi, ActionsApiError, recordActionsFailures, type ActionsApi } from './github-actions-api.js';
 import { cleanupActionsResult, sweepActionsRefs } from './github-actions-cleanup.js';
 import { actionsJournal, deleteActionsRef, exportActionsSnapshot } from './github-actions-export.js';
@@ -18,7 +18,7 @@ import { ActionsDispatchRejected, ActionsDispatchExhausted } from './github-acti
 import { controlActions } from './github-actions-controller.js';
 import { durableReplace } from './native-durability.js';
 import { remoteCancellation, cancellationDetails } from './work-run-cancellation.js';
-import { updateModalRun } from './work-modal-run.js';
+import { updateRemoteRun } from './work-remote-run.js';
 import { CheckQueue } from './check-queue.js';
 import { workProgress } from './work-progress.js';
 import { createRunReceipt } from './work-run-receipt.js';
@@ -66,11 +66,11 @@ export async function launchGithubActionsRun(
       runsOn = retained?.runsOn ?? policy?.runsOn ?? 'ubuntu-latest';
     invariant(repo, 'BAD_ARGUMENT', 'GitHub Actions runner requires checks.repo (owner/name).');
     const runtime = actionsCheckRuntime(repo, runsOn);
-    let plan: ModalPlan;
+    let plan: RemoteCheckPlan;
     let executionAllowed = true;
     if (existsSync(join(path, 'modal-plan.json'))) {
       plan = JSON.parse(readFileSync(join(path, 'modal-plan.json'), 'utf8'));
-      validateModalPlan(plan, run);
+      validateRemoteCheckPlan(plan, run);
       executionAllowed = plan.runtime === runtime;
       invariant(
         executionAllowed || (retained && plan.runtime === runtime.replace('node:24.22.1;', 'node:24.19.0;')),
@@ -78,7 +78,7 @@ export async function launchGithubActionsRun(
         'Retained Actions route changed.',
       );
     } else {
-      const created = await modalPlan(store, run, path, policy?.shards, runtime);
+      const created = await remoteCheckPlan(store, run, path, policy?.shards, runtime);
       if (!created) {
         durableReplace(
           join(path, 'result.json'),
@@ -104,14 +104,14 @@ export async function launchGithubActionsRun(
     run.backend = { ...run.backend!, pin: plan.pin, lockfile: plan.lockfile, runtime: plan.runtime };
     run.status = 'running';
     if (run.error?.code === PENDING_ACTIONS_INFRA) delete run.error;
-    updateModalRun(store, run);
+    updateRemoteRun(store, run);
     const { journal, save: saveJournal } = actionsJournal(path, plan, repo, runsOn);
     const save = () => {
       saveJournal();
       if (journal.runId && run.backend?.executionIds?.[0] !== String(journal.runId)) {
         run.backend!.executionIds = [String(journal.runId)];
         run.backend!.providerUrl = `https://github.com/${journal.repo}/actions/runs/${journal.runId}`;
-        updateModalRun(store, run);
+        updateRemoteRun(store, run);
       }
     };
     api = recordActionsFailures(api, error => {

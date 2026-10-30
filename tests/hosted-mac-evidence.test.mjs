@@ -248,7 +248,7 @@ test('only the owner revokes a machine; revocation does not rewrite an accepted 
   assert.deepEqual(await f.accept(state), accepted);
 });
 
-for (const provider of ['modal', 'github-actions'])
+for (const provider of ['github-actions'])
   test(`${provider} evidence still permits person-reviewed supervised and outside work`, async () => {
     const f = await acceptanceFixture();
     f.patch('hostedProjects', f.projectId, { autonomyPolicy: policyPreset('supervised') });
@@ -257,7 +257,7 @@ for (const provider of ['modal', 'github-actions'])
       item = await f.makeCandidate();
     let configuration = c.configuration.digest;
     if (provider === 'github-actions') {
-      const { app, function: ignored, ...common } = c.runner;
+      const common = c.runner;
       configuration = (
         await c.configure(
           {

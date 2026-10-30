@@ -3,41 +3,21 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { loadSourceJob, saveSourceJob, sourceJobTerminal } from './projectSourceJobs';
 import { hostedWriteProject } from './projectHostedRecords';
-import { sourceJobCallbackSchema, verifySourceJobCallback } from '../src/hosted-source-job';
+import { sourceJobCallbackSchema } from '../src/hosted-source-job';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
 
-/** The key resolver belongs to the trusted backend, never to callback arguments.
- * Only the output manifest reference becomes job evidence. H06/H07 separately
+/** Only the output manifest reference becomes job evidence. H06/H07 separately
  * verify object membership/closure before publishing source or moving a Lane. */
-export async function receiveSourceJobCallback(
-  ctx: MutationCtx,
-  input: {
-    projectId: Id<'hostedProjects'>;
-    callback: unknown;
-    signature: string;
-  },
-  key: (keyId: string) => string,
-  now = Date.now(),
-) {
-  return applySourceJobCallback(ctx, input, key, now);
-}
 /** Internal Convex execution has no credential or network callback boundary. */
 export async function receiveConvexSourceJobCallback(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
-  callback: unknown,
+  value: unknown,
   now = Date.now(),
 ) {
-  return applySourceJobCallback(ctx, { projectId, callback, signature: '' }, null, now);
-}
-async function applySourceJobCallback(
-  ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; callback: unknown; signature: string },
-  key: ((keyId: string) => string) | null,
-  now: number,
-) {
+  const input = { projectId, callback: value };
   const callback = sourceJobCallbackSchema.parse(input.callback);
   invariant(
     callback.projectId === input.projectId,
@@ -47,13 +27,11 @@ async function applySourceJobCallback(
   const job = await loadSourceJob(ctx, input.projectId, callback.jobId),
     control = job.control;
   await hostedWriteProject(ctx, input.projectId, control.actor, job.authorityEpoch);
-  if (key) verifySourceJobCallback(callback, input.signature, key(control.keyId));
-  else
-    invariant(
-      control.provider === 'convex',
-      'SOURCE_PROVIDER_CHANGED',
-      'Select the internal Convex source provider.',
-    );
+  invariant(
+    control.provider === 'convex',
+    'SOURCE_PROVIDER_CHANGED',
+    'Select the internal Convex source provider.',
+  );
   invariant(
     callback.operationId === job.operationId &&
       callback.attempt === job.attempt &&
@@ -82,7 +60,7 @@ async function applySourceJobCallback(
     'The source-worker lease is absent or expired.',
   );
   if (callback.result.status === 'heartbeat') {
-    // Signed duplicate/old heartbeats never extend the lease a second time.
+    // Duplicate/old internal heartbeats never extend the lease a second time.
     if (callback.result.sequence <= control.heartbeat) return job;
     return saveSourceJob(
       ctx,

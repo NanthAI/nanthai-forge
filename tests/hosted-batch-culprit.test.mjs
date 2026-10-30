@@ -104,7 +104,7 @@ test('incident replay: B and C pass alone but fail together; both statuses name 
   // modules above. Cold TypeScript compilation is test setup, not runtime work.
   if (process.env.FORGE_BATCH_CULPRIT_CHILD !== '1') {
     // The validating scheduler resolves this provider target lazily.
-    moduleUrl('../convex/projectModalSource.ts');
+    moduleUrl('../convex/projectConvexSource.ts');
     const child = spawn(
       process.execPath,
       [

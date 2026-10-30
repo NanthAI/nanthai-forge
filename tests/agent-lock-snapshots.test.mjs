@@ -13,7 +13,6 @@ import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { WorkRecordTransaction } from '../dist/work-record-transaction.js';
 import { agentCostSummary } from '../dist/agent-cost-summary.js';
-import { modalMonthCost } from '../dist/check-backend.js';
 import { runnerMonthCosts, localCost } from '../dist/check-cost.js';
 import { checkEnvironment } from '../dist/work-run.js';
 import { trustAgents } from './autonomy-fixture.mjs';
@@ -253,7 +252,7 @@ test('exact cost summaries reuse unchanged immutable run pages across Work revis
   });
   const { submissions, ...train } = trainAccounting(runs);
   void submissions;
-  const expected = { modalCost: modalMonthCost(runs, now), checkCosts: { ...runnerMonthCosts(runs), train } };
+  const expected = { checkCosts: { ...runnerMonthCosts(runs), train } };
   assert.deepEqual(agentCostSummary(root, store.readRecords(), now), expected);
   assert.equal(reads, 257);
   reads = 0;

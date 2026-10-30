@@ -8,7 +8,7 @@ import { durableReplace } from './native-durability.js';
 import { invariant } from './errors.js';
 import { githubActionsRecipe, githubActionsWorkflow } from './github-actions-workflow.js';
 import type { JobUsage } from './check-cost.js';
-import type { ModalPlan } from './modal-plan.js';
+import type { RemoteCheckPlan } from './remote-check-plan.js';
 import type { ActionsFailure } from './github-actions-api.js';
 import { ensureActionsPush } from './github-actions-push.js';
 import type { ActionsAttempt, ActionsBranchEvidence, ActionsDiscovery } from './github-actions-infra.js';
@@ -49,7 +49,7 @@ export type ActionsJournal = {
   deleted?: boolean;
   terminal?: boolean;
 };
-export function actionsJournal(path: string, plan: ModalPlan, repo: string, runsOn: string) {
+export function actionsJournal(path: string, plan: RemoteCheckPlan, repo: string, runsOn: string) {
   const filename = join(path, 'github-actions.json');
   const journal: ActionsJournal = existsSync(filename)
     ? JSON.parse(readFileSync(filename, 'utf8'))
@@ -58,7 +58,7 @@ export function actionsJournal(path: string, plan: ModalPlan, repo: string, runs
   return { journal, save: () => durableReplace(filename, JSON.stringify(journal)) };
 }
 export async function exportActionsSnapshot(
-  plan: ModalPlan,
+  plan: RemoteCheckPlan,
   journal: ActionsJournal,
   save: () => void,
   git = syncGit,
@@ -97,7 +97,7 @@ export async function exportActionsSnapshot(
   await ensureActionsPush(plan, journal, save, git, sleep, progress);
 }
 export async function deleteActionsRef(
-  plan: ModalPlan,
+  plan: RemoteCheckPlan,
   journal: ActionsJournal,
   save: () => void,
   git = syncGit,

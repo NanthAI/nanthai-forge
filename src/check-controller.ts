@@ -72,15 +72,18 @@ export async function launchDetachedCheck(store: WorkStore, run: CheckRun): Prom
     {
       detached: true,
       stdio: 'ignore',
-      env: checkWorkerEnv([run.check], run.backend?.credentialsRef, [
-        // Completed checks may wake the configured mirror and hosted metadata sync.
-        'FORGE_AUTH_TOKEN',
-        ...(policy.githubMirror?.autoPush
-          ? syncEnvNames
-          : run.backend?.actual === 'github-actions'
-            ? githubEnvNames
-            : []),
-      ]),
+      env: checkWorkerEnv(
+        [run.check],
+        [
+          // Completed checks may wake the configured mirror and hosted metadata sync.
+          'FORGE_AUTH_TOKEN',
+          ...(policy.githubMirror?.autoPush
+            ? syncEnvNames
+            : run.backend?.actual === 'github-actions'
+              ? githubEnvNames
+              : []),
+        ],
+      ),
     },
   );
   child.once('exit', code => {

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { modalUsageCost } from './modal-cost.js';
 import type { CheckRun } from './work-types.js';
 
 const quantity = z.number().nonnegative().finite().nullable();
@@ -25,8 +24,6 @@ export const checkCostSchema = z.object({
 });
 export type CheckCost = z.infer<typeof checkCostSchema>;
 type Item = z.infer<typeof costItemSchema>;
-const modalCostBasis =
-  'Modal Sandbox estimate (conservative): CPU $0.00003942/core-second + memory $0.00000667/GiB-second at max(request, usage); worker-runtime when recorded, legacy controller-time otherwise. Excludes startup/teardown, builds, egress, credits and billing adjustments. Includes each retained safety margin; legacy estimates are uncalibrated. Modal billing is authoritative.';
 
 export function unknownCost(runner: CheckCost['runner']): CheckCost {
   return {
@@ -59,31 +56,18 @@ export function localCost(runId: string): CheckCost {
     'Own machine: no provider-billed seconds/minutes or Forge runner charge ($0). Hardware, electricity and operator costs are not estimated.',
   );
 }
-export function modalRunCost(backend: NonNullable<CheckRun['backend']>): CheckCost {
-  if (backend.costUsage) {
-    const usage = [...new Map(backend.costUsage.map(item => [item.executionId, item])).values()];
-    return {
-      ...itemsCost(
-        'modal',
-        usage.map(item => ({
-          id: item.executionId,
-          seconds: item.seconds,
-          executingSeconds: item.basis === 'worker-runtime' ? item.seconds : null,
-          ...(item.attempt !== undefined ? { retry: item.attempt > 0 } : {}),
-          billedMinutes: item.seconds / 60,
-          estimatedCostUsd: modalUsageCost(item),
-        })),
-        `${modalCostBasis} Measurement bases: ${[...new Set(usage.map(item => item.basis))].join(', ') || 'no executions'}.`,
-      ),
-      legacy: usage.some(item => item.basis === 'controller-time'),
-    };
-  }
-  return {
-    ...unknownCost('modal'),
-    legacy: true,
-    estimatedCostUsd: backend.estimatedCostUsd ?? null,
-    basis: `${modalCostBasis} Legacy aggregate estimate; execution quantities unavailable and may overstate spend.`,
-  };
+/** Preserve saved legacy totals without applying a retired provider's price model. */
+export function retainedRunCost(backend: CheckRun['backend']): CheckCost {
+  if (backend?.cost) return backend.cost;
+  const cost = unknownCost(backend?.actual ?? 'local');
+  return backend?.estimatedCostUsd === undefined
+    ? cost
+    : {
+        ...cost,
+        legacy: true,
+        estimatedCostUsd: backend.estimatedCostUsd,
+        basis: 'Retained legacy aggregate estimate; execution quantities and billed spend are unknown.',
+      };
 }
 
 /** Defaults are estimates, never a provider invoice. Unknown labels need an explicit rate. */
@@ -159,11 +143,7 @@ export function runnerMonthCosts(runs: Iterable<Pick<CheckRun, 'id' | 'startedAt
   const records = [...runs];
   const observed = new Map<string, Item>();
   for (const run of records) {
-    const cost =
-      run.backend?.cost ??
-      (run.backend?.actual === 'modal'
-        ? modalRunCost(run.backend)
-        : unknownCost(run.backend?.actual ?? 'local'));
+    const cost = retainedRunCost(run.backend);
     for (const item of cost.items) {
       const key = `${cost.runner}:${item.id}`,
         previous = observed.get(key);
@@ -175,11 +155,7 @@ export function runnerMonthCosts(runs: Iterable<Pick<CheckRun, 'id' | 'startedAt
   }
   for (const run of records) {
     const backend = run.backend;
-    const cost =
-      backend?.cost ??
-      (backend?.costUsage || (backend?.actual === 'modal' && backend.estimatedCostUsd !== undefined)
-        ? modalRunCost(backend)
-        : unknownCost(backend?.actual ?? 'local'));
+    const cost = retainedRunCost(backend);
     const month = run.startedAt.slice(0, 7),
       key = `${month}:${cost.runner}:${cost.label ?? ''}`;
     let group = groups.get(key);

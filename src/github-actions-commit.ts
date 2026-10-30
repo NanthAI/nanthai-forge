@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { workGit } from './work-git.js';
-import type { ModalPlan } from './modal-plan.js';
+import type { RemoteCheckPlan } from './remote-check-plan.js';
 
 /** Hash exact bytes directly: Git attributes, autocrlf, clean filters and hooks cannot rewrite source. */
-export function commitActionsSnapshot(plan: ModalPlan, generated: Map<string, string>, git = workGit) {
+export function commitActionsSnapshot(plan: RemoteCheckPlan, generated: Map<string, string>, git = workGit) {
   const stateBytes = readFileSync(join(plan.output, 'modal-state.json'));
   invariant(digest(stateBytes) === plan.head, 'EVIDENCE_CHANGED', 'Actions source State digest changed.');
   const state = JSON.parse(stateBytes.toString()) as {

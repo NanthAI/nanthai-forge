@@ -34,9 +34,9 @@ const parse = (value: string | null) => {
   invariant(job.kind === 'job', 'SOURCE_JOB_INVALID', 'Expected a trusted source job.');
   return job;
 };
-/** H06's provider action calls this once per pending-job trigger. The provider
- * waits outside Convex; callbacks/heartbeats arrive in independent transactions.
- * This module intentionally registers no fake adapter or production provider. */
+/** One bounded provider control tick per pending-job trigger. It carries source
+ * references and execution pins only; source computation belongs to the worker.
+ * It registers no idle scheduler or alternate provider. */
 export async function dispatchSourceJob(
   ctx: ActionCtx,
   input: {

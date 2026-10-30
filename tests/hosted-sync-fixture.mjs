@@ -34,7 +34,7 @@ export async function syncFixture() {
       .then(JSON.parse);
   const withWorker = async fn => {
     const env = {
-        FORGE_SOURCE_PROVIDER: 'modal',
+        FORGE_SOURCE_PROVIDER: 'convex',
         FORGE_SOURCE_WORKER: 'fixed-worker',
         FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
         FORGE_SOURCE_KEY_ID: 'SYNTHETIC',

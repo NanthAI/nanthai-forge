@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { readSource } from './files.js';
 import { processAlive } from './local-process.js';
 import { receiptSchema } from './work-run-receipt.js';
-import { shardLogName } from './modal-shard-logs.js';
+import { shardLogName } from './check-shard-logs.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 

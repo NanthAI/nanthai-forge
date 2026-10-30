@@ -472,7 +472,7 @@ test('owner refresh, runner and GitHub policy edits each mark custom and preserv
   };
   for (const fields of [
     { ownerRootUpdates: false },
-    { checks: { runner: 'modal' } },
+    { checks: { runner: 'github-actions', repo: 'synthetic/checks' } },
     { githubMirror: { ...githubMirror, autoPush: false } },
   ]) {
     const edited = editedPolicy(previous, {

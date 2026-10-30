@@ -90,9 +90,7 @@ export async function submitHostedCompose(
     makeFunctionReference<'action'>(
       job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
         ? 'projectHostedComposeJobs:complete'
-        : job.control.provider === 'convex'
-          ? 'projectConvexSource:dispatch'
-          : 'projectModalSource:dispatch',
+        : 'projectConvexSource:dispatch',
     ),
     { projectId: input.projectId, jobId: row.jobId },
   );

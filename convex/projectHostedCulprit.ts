@@ -1066,13 +1066,10 @@ export const transfer = internalMutation({
         },
       });
       await writeSyncState(ctx, sync.row._id, { ...sync.state, status: 'submitted' });
-      await ctx.scheduler.runAfter(
-        0,
-        makeFunctionReference<'action'>(
-          payload.provider === 'convex' ? 'projectConvexSource:dispatch' : 'projectModalSource:dispatch',
-        ),
-        { projectId: input.projectId, jobId: sync.row.jobId },
-      );
+      await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectConvexSource:dispatch'), {
+        projectId: input.projectId,
+        jobId: sync.row.jobId,
+      });
     } else if (state.stage === 'compose')
       await submitHostedCompose(ctx, {
         projectId: input.projectId,

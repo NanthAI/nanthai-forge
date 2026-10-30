@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { saveFixture, maxima } from './hosted-saves-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { signSourceJobCallback } from '../dist/hosted-source-job.js';
 import { digest } from '../dist/hash.js';
 const transfer = await import(moduleUrl('../convex/projectHostedSaveTransfers.ts'));
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
@@ -51,7 +50,6 @@ async function fixture(t) {
     result: { status: 'heartbeat', sequence: 1 },
   };
   const env = {
-      FORGE_SOURCE_JOB_KEY_SYNTHETIC: 'synthetic-key',
       FORGE_BLOBS: 'r2',
       R2_ACCOUNT_ID: 'h07-fixture',
       R2_BUCKET: 'synthetic',
@@ -70,7 +68,6 @@ async function fixture(t) {
   await s.call('heartbeat', callbacks.callback, {
     projectId: s.projectId,
     callback: JSON.stringify(callback),
-    signature: signSourceJobCallback(callback, env.FORGE_SOURCE_JOB_KEY_SYNTHETIC),
   });
   job = await s.run('loadJob', (ctx, input) => jobs.loadSourceJob(ctx, input.projectId, input.jobId), {
     projectId: s.projectId,

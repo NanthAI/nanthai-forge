@@ -9,7 +9,6 @@ import { durableReplace } from './native-durability.js';
 import { digest } from './hash.js';
 import { checkEnvironment } from './check-environment.js';
 import { checkRoute, actionsCheckRuntime } from './check-backend.js';
-import { modalRuntime } from './modal-plan.js';
 import { readPolicy } from './work-autonomy.js';
 import { observeCheckInputs } from './work-inputs.js';
 import { writeCheckScope } from './work-check-scope.js';
@@ -94,11 +93,7 @@ export async function admitLandingCheck(
     settings = readPolicy(store).checks,
     route = checkRoute(settings?.runner ?? 'local', check, store.native),
     runtime =
-      route.actual === 'github-actions'
-        ? actionsCheckRuntime(settings?.repo, settings?.runsOn)
-        : route.actual === 'modal'
-          ? modalRuntime
-          : undefined;
+      route.actual === 'github-actions' ? actionsCheckRuntime(settings?.repo, settings?.runsOn) : undefined;
   const draft = {
     head: prefix.head,
     base: view.base,

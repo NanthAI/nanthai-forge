@@ -140,16 +140,12 @@ test('child env drops unknown credentials and Node loaders; exact allow-list and
   );
   assert.equal(source.HOME, '/fake/home');
 });
-test('check controller keeps declared inputs and selected Modal names without unrelated credentials', t => {
+test('check controller keeps declared inputs without resolving retired Modal credentials', t => {
   plant(t, [...secretNames, 'DECLARED_INPUT', 'PROJECT_MODAL_ID', 'PROJECT_MODAL_SECRET']);
-  const env = checkWorkerEnv([{ env: ['DECLARED_INPUT'], credentials: ['UNRELATED_TOKEN'] }], {
-    kind: 'env',
-    tokenId: 'PROJECT_MODAL_ID',
-    tokenSecret: 'PROJECT_MODAL_SECRET',
-  });
+  const env = checkWorkerEnv([{ env: ['DECLARED_INPUT'], credentials: ['UNRELATED_TOKEN'] }]);
   assert.equal(env.DECLARED_INPUT, 'fake-test-secret');
   assert.equal(env.UNRELATED_TOKEN, 'fake-test-secret');
-  assert.equal(env.PROJECT_MODAL_SECRET, 'fake-test-secret');
+  assert.equal(env.PROJECT_MODAL_SECRET, undefined);
   assert.equal(env.OPENAI_API_KEY, undefined);
   assert.equal(env.CONVEX_DEPLOY_KEY, undefined);
 });
@@ -340,34 +336,6 @@ test('Actions check launcher drops unrelated credentials from its runner environ
   );
   assert.equal(launches, 1);
 });
-test('fixed Modal supervisor drops planted secrets before starting a project command', t => {
-  const directory = mkdtempSync(join(tmpdir(), 'forge-modal-env-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  mkdirSync(join(directory, 'modal-check'));
-  copyFileSync(
-    new URL('../scripts/modal-check/worker.mjs', import.meta.url),
-    join(directory, 'modal-check', 'worker.mjs'),
-  );
-  copyFileSync(new URL('../scripts/child-env.mjs', import.meta.url), join(directory, 'child-env.mjs'));
-  const env = {
-    ...process.env,
-    FORGE_MODAL_COMMAND: JSON.stringify({
-      command: [
-        process.execPath,
-        '-e',
-        `if(${JSON.stringify(secretNames)}.some(name => process.env[name] !== undefined)) process.exit(19);`,
-      ],
-      artifacts: [],
-    }),
-  };
-  for (const name of secretNames) env[name] = 'fake-test-secret';
-  const result = childProcess.spawnSync(process.execPath, [join(directory, 'modal-check', 'worker.mjs')], {
-    env,
-    encoding: 'utf8',
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /__FORGE_USAGE__/);
-});
 
 test('detached native Git export and batch subprocesses exclude planted credentials', async t => {
   const calls = capture(t);
@@ -402,7 +370,7 @@ test('owner drivers give GitHub credentials only to a selected Actions backend o
     },
   });
   assert.equal(modal.GH_TOKEN, undefined);
-  assert.equal(modal.PROJECT_MODAL_SECRET, 'fake-test-secret');
+  assert.equal(modal.PROJECT_MODAL_SECRET, undefined);
 });
 
 test('Windows lookup keeps Path and ComSpec, filters credentials case-insensitively and avoids duplicate overrides', () => {

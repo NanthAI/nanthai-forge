@@ -2,7 +2,7 @@
 
 ## Backup and recovery
 
-An export holds the full retained source States, Work, check results, failure summaries, compact test evidence and links to the CI provider’s logs. Full GitHub Actions and Modal logs stay with the provider. Local logs are included only when explicitly enabled for the project and within finite retention.
+An export holds the full retained source States, Work, check results, failure summaries, compact test evidence and links to the CI provider’s logs. Full GitHub Actions logs stay with the provider. Local logs are included only when explicitly enabled for the project and within finite retention.
 
 ```sh
 nforge work ROOT                                                    # bounded revision, head and collection counts
@@ -143,7 +143,7 @@ Status makes no hosted calls.
 
 ### Flake evidence and quarantine
 
-Native checks, GitHub Actions/BYOCI shards and Modal use the same test verdict
+Native checks and GitHub Actions/BYOCI shards use the same test verdict
 assessment. The file supervisor waits for the initial files to settle, then
 retries each failed file once, sequentially in the same workspace and environment.
 The default budget is three files (`FORGE_TEST_MAX_RETRIES` overrides it). If more
@@ -197,7 +197,7 @@ idle work; the only extra execution is the eligible failing-file retry.
 Forge uses your CI provider’s log storage and retention. Status, exit code, timing,
 provider run/execution IDs, bounded failure summaries (4096 characters), failing
 names, compact per-file test counts/timings and evidence hashes, and reuse evidence remain in Forge. Full per-run CI test reports (`test-reports.json`) are discarded after extraction and never exported, seeded, exchanged or uploaded. The compact `test-evidence.json` retains completion, counts, failing names, file durations, bounded diagnostics and a hash of each original report; passing test inventories and coverage traces are omitted. Full
-GitHub Actions and Modal output does not enter Work exports, hosting seeds or
+GitHub Actions output does not enter Work exports, hosting seeds or
 exchange. The Run view and agent log command return the provider link instead.
 Older archives with full logs still restore; deliberately omitted provider logs
 are provider-held, not missing check evidence. Results and source validation stay
@@ -602,7 +602,11 @@ and Code-tree pages. Removing it requires parity evidence for all of those pages
 
 ## Native runner selection
 
-Native checks support local, [Modal](operations/modal-checks.md), and [GitHub Actions or Blacksmith](operations/github-actions-checks.md) runners. `checks.fallback` accepts `manual` or `local` and defaults to `manual`, including existing policies. Automatic local fallback requires explicit opt-in and owner-originated work. Confirmed runner outages and budget exhaustion return retryable infrastructure outcomes rather than failed-test evidence. See [runner fallback](operations/runner-fallback.md) for policy commands and recovery.
+Native checks support local and [GitHub Actions or Blacksmith](operations/github-actions-checks.md)
+runners. Existing Modal policies and receipts remain readable; new Modal runner
+selections are refused with instructions to select a supported runner. The
+`checks.fallback` field remains readable for policy compatibility; Actions does
+not automatically repeat unknown remote work locally.
 
 The existing owner-only project policy is the single runner setting. CLI-created
 owners default to the own machine. Show it with `nforge policy OWNER` or
@@ -612,21 +616,7 @@ and payload after an unknown reply):
 ```sh
 nforge set-policy OWNER '{"operationId":"UUID","checks":{"runner":"local"}}'
 nforge set-policy OWNER '{"operationId":"UUID","checks":{"runner":"github-actions","repo":"OWNER/REPO","runsOn":"blacksmith-4vcpu-ubuntu-2404","shards":4}}'
-nforge set-policy OWNER '{"operationId":"UUID","checks":{"runner":"modal","credentialsRef":{"kind":"env","tokenId":"PROJECT_MODAL_ID","tokenSecret":"PROJECT_MODAL_SECRET"}}}'
 ```
-
-For Modal, set the two named variables in the owner process environment using the
-project's own account/key. Alternatively use
-`"credentialsRef":{"kind":"file","path":"/absolute/external/project-modal.json"}`.
-That local JSON file contains `tokenId` and `tokenSecret` values and must resolve
-outside the owner, including its Lanes; symlinks into source are rejected. Only the
-reference enters policy/Work. Values are read immediately before SDK invocation,
-kept in process memory and passed only to the owner-side SDK process; they never
-enter source, plans, Work, logs or hosted storage. The SDK gets an empty config and
-no ambient Modal account/environment selectors. Missing, unreadable or invalid
-credentials return `MODAL_CREDENTIALS_REQUIRED` naming `checks.credentialsRef`,
-without using the owner's account or falling back locally. Existing Modal owners
-must explicitly configure their reference. No hosted runner account funds checks.
 
 Every new terminal check receipt has `backend.cost`: the runner/label, estimated
 billed seconds/minutes, estimated USD, per-execution quantities and the basis.
@@ -644,16 +634,13 @@ any label's estimate with `checks.ratesUsdPerMinute`, for example
 `{"blacksmith-4vcpu-ubuntu-2404":0.008}`. Unknown labels retain usage with unknown USD
 until configured. The journal pins the selected rate for adoption.
 
-Modal uses recorded Sandbox core-seconds × $0.00003942 plus GiB-seconds ×
-$0.00000667, measured at worker runtime when available
-([Modal pricing](https://modal.com/pricing), [resource basis](https://modal.com/docs/guide/sandbox-resources)).
 `status.checkCosts.months` groups all retained months (UTC run start) by runner
 and label, deduplicates remote execution identities and reports unknown/legacy
 run counts. Totals sum available estimates before allowances, credits and billing
-adjustments; provider invoices remain authoritative. Legacy Modal controller-time
-and aggregate estimates remain explicitly labelled, may overstate spend and are
-not reconciled against invoices. `modalCost` remains the current-month compatibility
-summary with its historical basis; it excludes Actions. No backfill is performed.
+adjustments; provider invoices remain authoritative. Saved legacy costs and
+aggregate estimates remain readable; missing usage stays unknown. The retired
+Modal price model and `modalCost` status summary have been removed. No backfill
+or document migration is performed.
 
 ## Local check reliability
 

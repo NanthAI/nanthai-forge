@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { type ActionsApi, type ActionsRun, observe } from './github-actions-api.js';
 import { actionsJournal, deleteActionsRef, type ActionsJournal } from './github-actions-export.js';
 import { durableReplace } from './native-durability.js';
-import { validateModalPlan, type ModalPlan } from './modal-plan.js';
+import { validateRemoteCheckPlan, type RemoteCheckPlan } from './remote-check-plan.js';
 import { receiptSchema } from './work-run-receipt.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
@@ -45,8 +45,8 @@ export async function sweepActionsRefs(
           pendingActionsInfra(receipt)
         )
           continue;
-        const plan = JSON.parse(readFileSync(join(path, 'modal-plan.json'), 'utf8')) as ModalPlan;
-        validateModalPlan(plan, run);
+        const plan = JSON.parse(readFileSync(join(path, 'modal-plan.json'), 'utf8')) as RemoteCheckPlan;
+        validateRemoteCheckPlan(plan, run);
         const { journal, save } = actionsJournal(path, plan, repo, 'ubuntu-latest');
         if (journal.repo !== repo || journal.deleted || !journal.pushed || !journal.commit) continue;
         if (journal.runId) {
@@ -90,7 +90,7 @@ export async function sweepActionsRefs(
 
 /** Results/logs are durable before this is called; an unresolved remote run keeps its branch. */
 export async function cleanupActionsResult(
-  plan: ModalPlan,
+  plan: RemoteCheckPlan,
   journal: ActionsJournal,
   save: () => void,
   api: ActionsApi,

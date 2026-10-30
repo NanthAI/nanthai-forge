@@ -7,7 +7,7 @@ import {
   type ActionsAttempt,
 } from './github-actions-infra.js';
 import type { ActionsJournal } from './github-actions-export.js';
-import type { ModalPlan } from './modal-plan.js';
+import type { RemoteCheckPlan } from './remote-check-plan.js';
 
 const PUSH_ATTEMPTS = 5;
 const DISCOVERY_MS = 60_000;
@@ -33,7 +33,7 @@ async function gated<T>(repo: string, use: () => Promise<T>) {
   }
 }
 export async function ensureActionsPush(
-  plan: ModalPlan,
+  plan: RemoteCheckPlan,
   journal: ActionsJournal,
   save: () => void,
   git = syncGit,

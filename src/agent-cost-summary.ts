@@ -2,14 +2,12 @@ import { previewMeasurements } from './preview-accounting.js';
 // SPDX-License-Identifier: Apache-2.0
 import { PeersCache } from './agent-peers-cache.js';
 import { digest } from './hash.js';
-import { modalMonthCost } from './check-backend.js';
 import { runnerMonthCosts } from './check-cost.js';
 import { accountingContext, accountingRecords } from './accounting-records.js';
 import { trainAccounting, type CostRun } from './train-accounting.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 
 type Summary = {
-  modalCost: ReturnType<typeof modalMonthCost>;
   checkCosts: ReturnType<typeof runnerMonthCosts> & {
     train: Omit<ReturnType<typeof trainAccounting>, 'submissions'>;
   };
@@ -21,7 +19,7 @@ type Summary = {
 export function agentCostSummary(root: string, tx: WorkRecordTransaction, now = new Date()): Summary {
   const collection = tx.manifest.collections.runs;
   const cache = new PeersCache(root);
-  const key = `agent-cost-v4:${now.toISOString().slice(0, 7)}:${digest(JSON.stringify([previewMeasurements(tx.directory).version, collection, ...['landingBatches', 'landingEntries', 'channelMoves'].map(key => tx.manifest.collections[key])]))}`;
+  const key = `agent-cost-v5:${now.toISOString().slice(0, 7)}:${digest(JSON.stringify([previewMeasurements(tx.directory).version, collection, ...['landingBatches', 'landingEntries', 'channelMoves'].map(key => tx.manifest.collections[key])]))}`;
   const cached = cache.read<Summary>(key);
   if (cached) return cached;
   const runs = accountingRecords(
@@ -42,7 +40,7 @@ export function agentCostSummary(root: string, tx: WorkRecordTransaction, now = 
   // Project status returns fixed-size totals. Per-submission rows belong to selected making-of records.
   const { submissions, ...train } = trainAccounting(runs, accountingContext(root, tx), now);
   void submissions;
-  const result = { modalCost: modalMonthCost(runs, now), checkCosts: { ...runnerMonthCosts(runs), train } };
+  const result = { checkCosts: { ...runnerMonthCosts(runs), train } };
   cache.write(key, result);
   return result;
 }

@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 import { z } from 'zod';
 import { readSourceControlReply } from './hosted-source-control-reply.js';
 import { invariant } from './errors.js';
-import type { SourceDispatch, SourceJobCallback } from './hosted-source-job.js';
+import type { SourceDispatch } from './hosted-source-job.js';
 import type { HostedActionsTransfer } from './hosted-actions.js';
 import { workerObjectSchema, type WorkerPin } from './hosted-source-worker-format.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
@@ -15,7 +15,7 @@ const grant = z.union([
 ]);
 /** Fixed trusted ingress authorizes each pin using current job authority, then
  * returns exact R2 transfer URLs. It never proxies source bytes through Convex.
- * The grant/callback ingress is provisioned with the source-operation reducers. */
+ * The grant ingress is provisioned with the source-operation reducers. */
 export function sourceWorkerHttp(config: {
   endpoint: string;
   token: string;
@@ -264,8 +264,5 @@ export function sourceWorkerHttp(config: {
   };
   return {
     transport,
-    callback: async (body: SourceJobCallback, signature: string) => {
-      await control('callback', { callback: body, signature });
-    },
   };
 }

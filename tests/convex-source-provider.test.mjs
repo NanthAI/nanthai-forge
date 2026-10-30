@@ -173,12 +173,12 @@ async function fixture() {
     countsIO: () => ({ stores, gets }),
   };
 }
-test('Convex is the fixed default with no Modal configuration; explicit Modal retains validation', () => {
+test('Convex is the fixed default; retired Modal selection is refused without network calls', () => {
   assert.equal(sourceWorkerPlan({}).provider, 'convex');
   assert.equal(sourceWorkerPlan({}).keyId, 'CONVEX');
   assert.throws(
     () => sourceWorkerPlan({ FORGE_SOURCE_PROVIDER: 'modal' }),
-    e => e.code === 'SOURCE_WORKER_UNAVAILABLE',
+    e => e.code === 'SOURCE_PROVIDER_CHANGED',
   );
 });
 test('ten-file save has one execution, atomic progress, lost-reply recovery and zero idle schedules', async t => {

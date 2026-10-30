@@ -6,12 +6,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildHostedSourceState } from '../dist/hosted-source-worker.js';
-import { runHostedSourceWorker } from '../dist/hosted-source-worker-run.js';
 import { SourceWorkerReader } from '../dist/hosted-source-worker-reader.js';
 import { NativeSource } from '../dist/native-source.js';
 import { digest } from '../dist/hash.js';
 import { buildObjectRecipe } from '../dist/object-chunks.js';
-import { verifySourceJobCallback } from '../dist/hosted-source-job.js';
 
 const at = '2026-01-01T00:00:00.000Z';
 const pin = bytes => ({ sha256: digest(bytes), size: bytes.length });
@@ -254,60 +252,6 @@ test('128 MiB recipe streams via bounded verified leaves and reconstructs its co
   assert.equal(x.reads.filter(ref => ref.sha256 === leaf.sha256).length, 1);
   assert.equal(result.metrics.maxChunkBytes, chunk.length);
   t.diagnostic(JSON.stringify(result.metrics));
-});
-
-test('fixed worker emits signed sequential heartbeats beyond ten minutes and binds the exact output', async t => {
-  const x = fixture();
-  const objects = [],
-    files = [];
-  for (let i = 0; i < 14; i++) {
-    const object = x.put(Buffer.from(`file ${i}`));
-    objects.push({ object, recipe: null });
-    files.push({ ...x.file, path: `file-${i}`, blob: object.sha256 });
-  }
-  const input = x.plan({ files, objects }),
-    callbacks = [],
-    secret = 'synthetic-key';
-  const dispatch = {
-    schema: 1,
-    provider: 'modal',
-    worker: 'forge-source-state-v1',
-    runtime: 'a'.repeat(64),
-    input,
-    inputDigest: input.sha256,
-    projectId: 'synthetic-project',
-    jobId: randomUUID(),
-    operationId: randomUUID(),
-    attempt: 1,
-    fence: 1,
-    authorityEpoch: 2,
-    jobKind: 'save',
-    dispatchKey: 'b'.repeat(64),
-  };
-  const result = await runHostedSourceWorker(dispatch, {
-    worker: dispatch.worker,
-    runtime: dispatch.runtime,
-    executionId: 'fc-synthetic',
-    secret,
-    now: x.now,
-    heartbeatMs: 30000,
-    transport: x.transport,
-    async callback(body, signature) {
-      verifySourceJobCallback(body, signature, secret);
-      callbacks.push(body);
-    },
-  });
-  assert(x.now() > 600000);
-  const heartbeats = callbacks.filter(body => body.result.status === 'heartbeat');
-  assert.deepEqual(
-    heartbeats.map(body => body.result.sequence),
-    heartbeats.map((_, i) => i + 1),
-  );
-  assert.deepEqual(callbacks.at(-1).result, { status: 'completed', output: result.output });
-  assert(callbacks.every(body => body.executionId === 'fc-synthetic' && body.inputDigest === input.sha256));
-  t.diagnostic(
-    JSON.stringify({ elapsedSyntheticMs: x.now(), heartbeats: heartbeats.length, ...result.metrics }),
-  );
 });
 
 test('transport failures and lost output acknowledgements never send completed callbacks', async () => {

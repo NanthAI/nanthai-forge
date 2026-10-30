@@ -15,7 +15,7 @@ import { effectivePolicy } from './autonomy-policy.js';
 import { readPolicy } from './work-autonomy.js';
 import { checkReuseKey, reusableCheckInputs } from './check-reuse-key.js';
 import { observeCheckInputs } from './work-inputs.js';
-import { modalPlan, modalRuntime, type ModalPlan } from './modal-plan.js';
+import { remoteCheckPlan, type RemoteCheckPlan } from './remote-check-plan.js';
 import { checkEnvironment } from './check-environment.js';
 import { type Check, type CheckRun, type WorkView } from './work-types.js';
 import { batchEdit } from './landing-batch-store.js';
@@ -38,7 +38,7 @@ const same = isDeepStrictEqual;
  * Adopt the original validated shard placement: timing history is scheduling advice.
  * Selection reasons and shadow coverage describe the check; they do not execute it.
  * Scoped/custom commands also retain exact base and ordered Lane/dependency pins. */
-function recipe(plan: ModalPlan) {
+function recipe(plan: RemoteCheckPlan) {
   const inputs = Object.fromEntries(
     Object.entries(plan).filter(
       ([name]) =>
@@ -114,8 +114,7 @@ async function reuseCheck(
     return;
   const policy = readPolicy(store).checks,
     route = checkRoute(policy?.runner ?? 'local', check, true),
-    runtime =
-      route.actual === 'github-actions' ? actionsCheckRuntime(policy?.repo, policy?.runsOn) : modalRuntime;
+    runtime = actionsCheckRuntime(policy?.repo, policy?.runsOn);
   const draft: CheckRun = {
     id: replaced ? finishChild(prefix.runId, 'passed-twin') : prefix.runId,
     viewId: view.id,
@@ -151,10 +150,10 @@ async function reuseCheck(
   try {
     // Reuse the execution planner; do not invent a second test-selection algorithm.
     // This prepares local files only, with no provider IO, registration or dispatch.
-    let plan: ModalPlan | null;
+    let plan: RemoteCheckPlan | null;
     let files: ReturnType<typeof tree>;
     try {
-      plan = await modalPlan(store, draft, directory, policy?.shards, runtime);
+      plan = await remoteCheckPlan(store, draft, directory, policy?.shards, runtime);
       if (!plan || (audit && !(view.mainCheck && plan.standard && plan.selection.scope === 'full'))) return;
       files = tree(store, draft.head);
     } catch {
@@ -194,7 +193,9 @@ async function reuseCheck(
             !same(executionSelection(original.checkSelection), executionSelection(plan.selection))
           )
             continue;
-        } else if (!same(recipe(readJson(store, original.id, 'modal-plan.json') as ModalPlan), recipe(plan)))
+        } else if (
+          !same(recipe(readJson(store, original.id, 'modal-plan.json') as RemoteCheckPlan), recipe(plan))
+        )
           continue;
         // Verify every referenced source blob, including lockfiles and symlink bytes.
         const source = new NativeSource(store.root);

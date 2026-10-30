@@ -59,7 +59,7 @@ Goal: the Forge team uses Forge end to end on its own project and is happy with 
 Started on 2026-10-21. Work in order:
 
 1. **R3 metadata-only publication and return — done**, except the big-backlog measurement. Routine push fell from 95 minutes to about 3 minutes; push #21 took 186 seconds. See the [R2 storage plan](r2-storage-plan.md#r3-owner-derived-publication-and-source-return-done).
-2. **Carried-over fixes — done**: P03, P04, P12, P15 and P27; hosted-unsynced state; incremental deploy export; the Modal estimate.
+2. **Carried-over fixes — done**: P03, P04, P12, P15 and P27; hosted-unsynced state; incremental deploy export; retained runner cost estimates.
 3. **Hosted Lanes — built** (H01–H18b, H22a and H22b): start, save, compose, land, revert and abandon from the site with all Macs offline, through a server-side landing queue with compare-and-swap main. Checks run on the project's own GitHub Actions or Blacksmith runners. The H22b live smoke with a registered GitHub App moves into Phase 5 Bet 1, where the hosted path becomes the only accept path.
 4. **The lead's routine in the product — done**: `nforge land` batch landing with `--wait` progress, the landing train (S01–S17), automatic exchange, the release command and GitHub sync.
 5. **Off-machine recovery — done**: inventory, restore and reconnect, and weekly backups. The recovery drill passed on 2026-10-24 (recover in 9 seconds; see the [recovery drill](operations/recovery-drill.md)).
@@ -153,7 +153,6 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 
 - Browser byte work touching one Convex endpoint selects the whole backend namespace and shared native parser consumers (311 test files). This scoped selection is nearly a full suite for a finite implementation Lane. Expose narrower endpoint dependencies while retaining broad combined landing validation.
 
-- Modal cost-model edits to `scripts/modal-check/cost.py` and analysis-worker edits to `netlify/functions/analyze-background.mts` select the full test suite as unclassified paths. Finite agents forbidden from running full verification cannot run the returned selection; the selector needs explicit mappings to the Modal bridge, cost-model and analysis-worker artifact tests.
 
 - `agent tests` compares a saved Lane against the latest main. Concurrent accepted additions can appear as deletions in an unsynced Lane and force a full-suite fallback for unrelated work. Expose a pinned comparison for task-scoped validation without requiring a sync; the existing comparison remains useful for landing validation.
 
@@ -163,4 +162,4 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 - [R2 storage plan](r2-storage-plan.md): why and how bulk bytes leave the database.
 - [Status](status.md): what works today.
 - [Design constraints](decisions.md), [architecture](architecture.md), [operations](operations.md).
-- [Landing batches](operations/landing-batches.md), [Modal checks](operations/modal-checks.md), [GitHub Actions checks](operations/github-actions-checks.md), [runner fallback](operations/runner-fallback.md), [hosted durability](operations/hosted-durability.md).
+- [Landing batches](operations/landing-batches.md), [GitHub Actions checks](operations/github-actions-checks.md), [runner fallback](operations/runner-fallback.md), [hosted durability](operations/hosted-durability.md).

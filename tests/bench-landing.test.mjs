@@ -181,7 +181,7 @@ test('pair presets, runner policy and validated burst sizes', async () => {
   for (const pair of Object.keys(PAIRS)) {
     const o = parseArgs(['--source', '/does-not-exist', '--pair', pair, '--dry-run', '--burst', '4,8']);
     assert.deepEqual(o.burst, [4, 8]);
-    assert.equal(o.ghShards, pair === 'P3' ? 16 : 1);
+    assert.equal(o.ghShards, 1);
     if (pair === 'P4') assert.deepEqual(o.sides, ['github']);
     const steps = plan(o, { github: { repo: `me/test-${pair}`, clone: '/tmp/clone' } });
     assert.ok(steps.some(s => s.startsWith('BURST 4:')));
@@ -266,7 +266,7 @@ test('burst timing and cost fixtures retain unknown observations', async () => {
 
 test('dry-run cannot invoke gh or nforge, even without a source on disk', async () => {
   const { execFileSync } = await import('node:child_process');
-  for (const pair of ['P1', 'P2', 'P3', 'P4']) {
+  for (const pair of ['P1', 'P2', 'P4']) {
     const out = execFileSync(
       process.execPath,
       [

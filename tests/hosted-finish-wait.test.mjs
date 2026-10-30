@@ -8,7 +8,7 @@ import { observeHostedSubmissions } from '../dist/hosted-agent-submission-wait.j
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
-  FORGE_SOURCE_PROVIDER: 'modal',
+  FORGE_SOURCE_PROVIDER: 'convex',
   FORGE_SOURCE_WORKER: 'fixed-worker',
   FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
   FORGE_SOURCE_KEY_ID: 'SYNTHETIC',

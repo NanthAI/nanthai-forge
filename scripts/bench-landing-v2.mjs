@@ -8,7 +8,6 @@ export const PAIRS = {
     ghRunsOn: 'blacksmith-2vcpu-ubuntu-2404',
     ghShards: 1,
   },
-  P3: { forgeRunner: 'modal', ghRunsOn: 'blacksmith-2vcpu-ubuntu-2404', ghShards: 16 },
   P4: { sides: ['github'], ghRunsOn: 'ubuntu-latest', ghShards: 1 },
 };
 export function runnerPolicy(options, repo) {

@@ -5,7 +5,6 @@ import { hostname } from 'node:os';
 import { processIdentity } from './local-process.js';
 import { diskGuard } from './disk-guard.js';
 import { checkRoute, actionsCheckRuntime } from './check-backend.js';
-import { modalRuntime } from './modal-plan.js';
 import { checkReuseKey } from './check-reuse-key.js';
 import { checkEnvironment, checkEnvironmentDescription } from './check-environment.js';
 import { observeCheckInputs } from './work-inputs.js';
@@ -53,7 +52,6 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
       const run: CheckRun = {
         backend: {
           ...route,
-          ...(route.actual === 'modal' ? { credentialsRef: policy?.credentialsRef ?? null } : {}),
         },
         id: command.operationId,
         viewId: view.id,
@@ -97,10 +95,7 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
           ...(route.actual === 'local'
             ? {}
             : {
-                runtime:
-                  route.actual === 'github-actions'
-                    ? actionsCheckRuntime(policy?.repo, policy?.runsOn)
-                    : modalRuntime,
+                runtime: actionsCheckRuntime(policy?.repo, policy?.runsOn),
               }),
         },
       });

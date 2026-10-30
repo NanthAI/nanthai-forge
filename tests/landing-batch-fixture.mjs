@@ -1,6 +1,7 @@
+import { actionsRunnerFixture } from './actions-runner-fixture.mjs';
 import { cleanupOwner } from './owner-cleanup.mjs';
 // SPDX-License-Identifier: Apache-2.0
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -8,6 +9,7 @@ import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { NativeSource } from '../dist/native-source.js';
 import { initNative } from '../dist/native-work.js';
 import { checkEnvironment } from '../dist/work-run.js';
+import { withDetachedChecks } from '../dist/check-execution-context.js';
 import { enqueueLanding } from '../dist/landing-batch-store.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { trustAgents } from './autonomy-fixture.mjs';
@@ -23,37 +25,26 @@ export async function fixture(
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'forge-batch-'));
-  const credentialRoot = mkdtempSync(join(tmpdir(), 'forge-batch-credentials-'));
-  const credentialsRef = { kind: 'file', path: join(credentialRoot, 'modal.json') };
-  writeFileSync(
-    credentialsRef.path,
-    JSON.stringify({ tokenId: 'synthetic-project-id', tokenSecret: 'synthetic-project-secret' }),
-    { mode: 0o600 },
-  );
   for (const [path, text] of Object.entries(files)) writeFileSync(join(root, path), text);
   initNative(root);
   trustAgents(root);
   const agent = new AgentWorkflow(root),
     work = agent.work,
     store = work.store;
+  // Match CLI execution ownership: a passed receipt can precede provider cleanup.
+  // Detached controllers remain joinable by cleanupOwner until that cleanup ends.
+  const dispatch = agent.dispatch.bind(agent);
+  agent.dispatch = (...args) => withDetachedChecks(() => dispatch(...args));
   const saved = {
-    FORGE_MODAL_PYTHON: process.env.FORGE_MODAL_PYTHON,
+    PATH: process.env.PATH,
     FORGE_WORK_LOCK_WAIT_MS: process.env.FORGE_WORK_LOCK_WAIT_MS,
     FORGE_CHECK_QUEUE_DIR: process.env.FORGE_CHECK_QUEUE_DIR,
   };
   // Detached audits and parallel controllers legitimately write the same synthetic owner.
   process.env.FORGE_WORK_LOCK_WAIT_MS = '10000';
   process.env.FORGE_CHECK_QUEUE_DIR = join(store.directory, 'fixture-queue');
-  const mock = join(store.directory, 'mock-modal.mjs');
-  writeFileSync(
-    mock,
-    `#!${process.execPath}\nimport fs from 'node:fs';import path from 'node:path';
-const plan=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
-const exists=name=>fs.existsSync(path.join(plan.source,name));
-setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.head,definition:plan.definition,exitCode:(${failWhen})?1:0,estimatedCostUsd:0})),${delay});\n`,
-  );
-  chmodSync(mock, 0o700);
-  process.env.FORGE_MODAL_PYTHON = mock;
+  const provider = actionsRunnerFixture(store.directory, { delay, failWhen });
+  process.env.PATH = `${provider.bin}:${saved.PATH}`;
   const check = (
     await agent.dispatch({
       action: 'define-check',
@@ -68,20 +59,38 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
   await agent.dispatch({
     action: 'set-policy',
     operationId: randomUUID(),
-    checks: { runner: remote ? 'modal' : 'local', credentialsRef },
+    checks: { runner: remote ? 'github-actions' : 'local', repo: 'synthetic/checks' },
   });
   t.after(async () => {
     // All remote calls, including detached audits, use the synthetic client above.
     process.env.FORGE_WORK_LOCK_WAIT_MS = '10000';
-    process.env.FORGE_MODAL_PYTHON = mock;
+    process.env.PATH = `${provider.bin}:${saved.PATH}`;
     process.env.FORGE_CHECK_QUEUE_DIR = join(store.directory, 'fixture-queue');
+    // Diagnostics inspect bounded headers through the status index, never Work histories.
+    const records = store.readRecords();
+    const interrupted = records
+      ? records
+          .positions('runs', 'interrupted', 'status')
+          .slice(-8)
+          .map(position => records.fieldsAt('runs', position).record)
+      : [];
+    for (const run of interrupted) {
+      const summary = join(store.directory, `check-${run.id}`, 'controller-summary.txt');
+      t.diagnostic(
+        JSON.stringify({
+          runId: run.id,
+          error: run.error,
+          details: run.details,
+          controller: existsSync(summary) ? readFileSync(summary, 'utf8') : undefined,
+        }),
+      );
+    }
     await drainPostAccept(store);
     await cleanupOwner(root, undefined, { stopChecks });
     for (const [name, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
-    rmSync(credentialRoot, { recursive: true, force: true });
   });
   const pending = [];
   const soloRuns = new Set();
@@ -92,7 +101,10 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
       store.load().landingEntries.map(entry => store.select('views', entry.viewId));
     for (const view of views) {
       const run = (await agent.dispatch({ action: 'run', viewId: view.id })).result;
-      if (run.status !== 'passed') throw new Error(`Fixture solo check failed: ${run.status}`);
+      if (run.status !== 'passed')
+        throw new Error(
+          `Fixture solo check failed: ${run.status}; ${store.select('runs', run.runId)?.details}`,
+        );
       soloRuns.add(run.runId);
     }
   }
@@ -147,5 +159,18 @@ setTimeout(()=>console.log(JSON.stringify({kind:'result',pin:plan.pin,head:plan.
       file = source.state(main().head).files.find(file => file.path === path);
     return file && source.object(file.blob).toString();
   };
-  return { root, agent, work, store, check, candidate, main, content, pending, checkCandidates, soloRuns };
+  return {
+    root,
+    agent,
+    work,
+    store,
+    check,
+    provider,
+    candidate,
+    main,
+    content,
+    pending,
+    checkCandidates,
+    soloRuns,
+  };
 }

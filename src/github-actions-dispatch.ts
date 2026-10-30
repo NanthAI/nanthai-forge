@@ -9,7 +9,7 @@ import {
   type ActionsFailure,
 } from './github-actions-api.js';
 import type { ActionsJournal } from './github-actions-export.js';
-import type { ModalPlan } from './modal-plan.js';
+import type { RemoteCheckPlan } from './remote-check-plan.js';
 import type { ActionsAttempt } from './github-actions-infra.js';
 import { ForgeError, invariant } from './errors.js';
 
@@ -36,7 +36,7 @@ export class ActionsDispatchExhausted extends ForgeError {
 
 // The branch REST index can lag behind a successful Git push. At most 60 s of backoff.
 async function visibleBranch(
-  plan: ModalPlan,
+  plan: RemoteCheckPlan,
   journal: ActionsJournal,
   api: ActionsApi,
   progress: (message: string) => void,
@@ -80,7 +80,7 @@ async function visibleBranch(
 }
 
 export async function ensureActionsDispatch(
-  plan: ModalPlan,
+  plan: RemoteCheckPlan,
   journal: ActionsJournal,
   save: () => void,
   api: ActionsApi,

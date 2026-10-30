@@ -23,9 +23,8 @@ import {
 import { launchGithubActionsRun } from './work-github-actions-run.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { pollCancellation } from './work-cancel-poll.js';
-import { shardLogName } from './modal-shard-logs.js';
-import { localCost, modalRunCost } from './check-cost.js';
-import { launchModalRun } from './work-modal-run.js';
+import { shardLogName } from './check-shard-logs.js';
+import { localCost, retainedRunCost } from './check-cost.js';
 import { withWorkLockOptions } from './work-lock.js';
 import { wakeGithubPush } from './github-auto-push.js';
 import { lightweightDocsRun } from './work-docs-admission.js';
@@ -91,7 +90,7 @@ export function runOutputDirectory(store: WorkStore, id: string) {
   invariant(safeDirectory(path), 'NOT_FOUND', 'Run output directory is unavailable.');
   return path;
 }
-const adoptingModalRuns = new Set<string>();
+const adoptingRemoteRuns = new Set<string>();
 export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>, adopt = true): boolean {
   let changed = false;
   for (const run of data.runs.filter(active)) {
@@ -134,13 +133,13 @@ export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>, adop
       void executeOwnedRun(store, run, launchDetachedCheck);
       continue;
     }
-    if (['modal', 'github-actions'].includes(run.backend?.actual ?? '') && !processAlive(run.runner)) {
+    if (run.backend?.actual === 'github-actions' && !processAlive(run.runner)) {
       if (!adopt) continue;
       const key = `${store.root}:${run.id}`;
-      if (!adoptingModalRuns.has(key)) {
-        adoptingModalRuns.add(key);
+      if (!adoptingRemoteRuns.has(key)) {
+        adoptingRemoteRuns.add(key);
         queueMicrotask(() => {
-          void adoptModalRun(store, run.id).finally(() => adoptingModalRuns.delete(key));
+          void adoptRemoteRun(store, run.id).finally(() => adoptingRemoteRuns.delete(key));
         });
       }
       continue;
@@ -161,7 +160,7 @@ export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>, adop
 }
 /** Claim the current stored runner under the owner lock before starting an adopter.
  * Observation copies never acquire execution ownership or overwrite a live runner. */
-export async function adoptModalRun(
+export async function adoptRemoteRun(
   store: WorkStore,
   id: string,
   start: (store: WorkStore, run: CheckRun) => Promise<unknown> = async (store, run) =>
@@ -177,7 +176,7 @@ export async function adoptModalRun(
         !run ||
         !active(run) ||
         run.cancelRequested ||
-        !['modal', 'github-actions'].includes(run.backend?.actual ?? '') ||
+        run.backend?.actual !== 'github-actions' ||
         run.runner.host !== hostname() ||
         processAlive(run.runner)
       )
@@ -190,7 +189,7 @@ export async function adoptModalRun(
   } catch (error) {
     if (error instanceof ForgeError && error.code === 'WORK_BUSY') {
       await new Promise(resolve => setTimeout(resolve, 250));
-      return adoptModalRun(store, id, start);
+      return adoptRemoteRun(store, id, start);
     }
     throw error;
   }
@@ -288,10 +287,24 @@ async function launch(store: WorkStore, run: CheckRun, complete?: (error?: unkno
     return;
   }
   if (run.backend?.actual === 'modal') {
-    if (await launchModalRun(store, run, undefined, 1)) {
-      saveCompletion(store, run.id, complete);
-      return;
-    }
+    const path = directory(store, run.id);
+    mkdirBelow(store.directory, path);
+    durableReplace(
+      join(path, 'result.json'),
+      JSON.stringify(
+        createRunReceipt({
+          status: 'runner-unavailable',
+          backend: run.backend,
+          endedAt: new Date().toISOString(),
+          exitCode: null,
+          signal: null,
+          details:
+            'The Modal runner has been retired. Retained execution evidence is unchanged; select local or github-actions for a new check.',
+        }),
+      ),
+    );
+    saveCompletion(store, run.id, complete);
+    return;
   }
   return launchLocal(store, run, complete);
 }
@@ -458,13 +471,8 @@ async function launchLocal(
           : {}),
         ...(run.backend ?? { requested: 'local', actual: 'local' }),
         cost:
-          run.backend?.costUsage ||
-          (run.backend?.requested === 'modal' && run.backend.estimatedCostUsd !== undefined)
-            ? {
-                ...modalRunCost(run.backend),
-                basis: modalRunCost(run.backend).basis + ' Local fallback adds no provider runner charge.',
-              }
-            : localCost(run.id),
+          run.backend?.cost ??
+          (run.backend?.estimatedCostUsd !== undefined ? retainedRunCost(run.backend) : localCost(run.id)),
       },
       cancellation:
         store.select('runs', run.id)?.cancellation ??

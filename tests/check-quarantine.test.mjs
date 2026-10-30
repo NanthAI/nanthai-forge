@@ -11,8 +11,8 @@ import { testFlakeEvidence } from '../dist/check-flake-evidence.js';
 import { WorkStore } from '../dist/work-store.js';
 import {
   quarantineLedger,
-  modalTestVerdicts,
-  modalQuarantine,
+  testExecutionVerdicts,
+  checkQuarantineResult,
   checkQuarantine,
   fixQuarantinedTest,
 } from '../dist/check-quarantine.js';
@@ -82,7 +82,7 @@ const result = (passed = true) => ({
 const groups = [['tests/synthetic.test.mjs']];
 
 test('pass-after-fail names the recovered test without claiming a flake; missing, partial and foreign reports cannot exonerate failure', () => {
-  assert.deepEqual(modalTestVerdicts(result(), groups).verdicts, [{ test: name, verdict: 'recovered' }]);
+  assert.deepEqual(testExecutionVerdicts(result(), groups).verdicts, [{ test: name, verdict: 'recovered' }]);
   for (const change of [
     event => {
       delete event.executions[2].tests;
@@ -96,8 +96,8 @@ test('pass-after-fail names the recovered test without claiming a flake; missing
   ]) {
     const event = result();
     change(event);
-    assert.equal(modalTestVerdicts(event, groups).unknownFailure, true);
-    assert.equal(modalTestVerdicts(event, groups).recoveredFailure, true);
+    assert.equal(testExecutionVerdicts(event, groups).unknownFailure, true);
+    assert.equal(testExecutionVerdicts(event, groups).recoveredFailure, true);
   }
 });
 
@@ -109,8 +109,8 @@ test('only named quarantined failures become nonblocking, static and unrelated f
   const store = new WorkStore(root);
   const at = new Date().toISOString();
   // No prior evidence: a recovery is not an established flake or a clean check.
-  const first = modalQuarantine(store, { id: randomUUID() }, result(), groups, at);
-  const failure = modalQuarantine(store, { id: randomUUID() }, result(false), groups, at);
+  const first = checkQuarantineResult(store, { id: randomUUID() }, result(), groups, at);
+  const failure = checkQuarantineResult(store, { id: randomUUID() }, result(false), groups, at);
   assert.equal(failure.verdict, 'failed');
   assert.equal(failure.blocked, true);
   assert.deepEqual(failure.quarantine, []);
@@ -304,7 +304,7 @@ test('a partial or foreign failed report cannot establish a named flake', () => 
   ]) {
     const event = result();
     change(event.executions[0].tests['tests/synthetic.test.mjs']);
-    const observed = modalTestVerdicts(event, groups);
+    const observed = testExecutionVerdicts(event, groups);
     assert.deepEqual(observed.verdicts, [{ test: name, verdict: 'passed' }]);
     assert.equal(observed.unknownFailure, true);
   }
@@ -335,7 +335,7 @@ test('clean check receipts do not read source impact evidence', t => {
   });
   const event = result();
   event.executions = [event.executions[1], { ...event.executions[2], attempt: 0 }];
-  const assessment = modalQuarantine(store, run, event, groups, new Date().toISOString());
+  const assessment = checkQuarantineResult(store, run, event, groups, new Date().toISOString());
   assert.equal(assessment.blocked, false);
   assert.equal(assessment.verdict, 'clean');
   assert.equal(reads, 0);

@@ -14,7 +14,7 @@ import { checkEnvironment } from '../dist/check-environment.js';
 import { checkQuarantineResult, checkQuarantine, fixQuarantinedTest } from '../dist/check-quarantine.js';
 import { quarantineHistory, quarantineList } from '../dist/check-quarantine-history.js';
 import { nativeQuarantine } from '../dist/check-native-quarantine.js';
-import { modalPlan, validateModalPlan } from '../dist/modal-plan.js';
+import { remoteCheckPlan, validateRemoteCheckPlan } from '../dist/remote-check-plan.js';
 import { githubActionsRecipe } from '../dist/github-actions-workflow.js';
 import { compactCheckText, CompactCheckWriter } from '../dist/check-compact-output.js';
 import { testReports } from '../dist/check-test-report.js';
@@ -254,7 +254,7 @@ test('native checks require independent passing static evidence and preserve ret
   }
 });
 
-test('pinned Actions and Modal recipes reuse exact impact selection and deny retries on affected files', async t => {
+test('pinned Actions recipes reuse exact impact selection and deny retries on affected files', async t => {
   const { root, store, source, run, next } = fixture(t);
   writeFileSync(join(root, 'src/other.ts'), 'export const value = 2;');
   run.head = source.writeState(
@@ -266,13 +266,13 @@ test('pinned Actions and Modal recipes reuse exact impact selection and deny ret
   run.mainCheck = { channel: 'main' };
   const current = next(),
     path = join(store.directory, `check-${current.id}`);
-  const plan = await modalPlan(store, current, path);
+  const plan = await remoteCheckPlan(store, current, path);
   assert.ok(plan.retryFiles.includes(file));
   assert.ok(!plan.retryFiles.includes('tests/other.test.mjs'));
   assert.deepEqual(githubActionsRecipe(plan).retryFiles, plan.retryFiles);
   current.backend.pin = plan.pin;
-  validateModalPlan(plan, current);
-  assert.throws(() => validateModalPlan({ ...plan, retryFiles: [] }, current), /digest changed/);
+  validateRemoteCheckPlan(plan, current);
+  assert.throws(() => validateRemoteCheckPlan({ ...plan, retryFiles: [] }, current), /digest changed/);
 });
 
 test('dogfood ledger: 1500 runs × 500 files stream details, use zero Convex calls, and resume without rereading history', t => {

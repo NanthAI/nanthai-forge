@@ -96,7 +96,7 @@ test('compose conflict ejects only its entry and retains the conflict View', asy
 });
 
 for (const remote of [true, false])
-  test(`${remote ? 'Modal parallel' : 'local halving'} failure lands checked prefix, records failing combination, preserves later age`, async t => {
+  test(`${remote ? 'Actions parallel' : 'local halving'} failure lands checked prefix, records failing combination, preserves later age`, async t => {
     const f = await fixture(t, { remote, failWhen: "exists('good.txt') && exists('bad.txt')" });
     const entries = [];
     for (const path of ['good.txt', 'bad.txt', 'third.txt', 'fourth.txt'])
@@ -382,7 +382,7 @@ test('synthetic four-entry wall time uses the same runner and harness for serial
   assert.equal(before.runs, 4);
   assert.equal(after.runs, 5, 'four singleton admission checks plus the combined gate');
   t.diagnostic(
-    `SYNTHETIC serial=${before.ms}ms (${before.runs} runs), batch=${after.ms}ms (${after.runs} runs including admission); mock Modal 80ms/check; no real Modal`,
+    `SYNTHETIC serial=${before.ms}ms (${before.runs} runs), batch=${after.ms}ms (${after.runs} runs including admission); fake Actions 80ms/check; no provider IO`,
   );
 });
 

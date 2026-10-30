@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { checkLogsSchema } from './check-log-policy.js';
 import { invariant } from './errors.js';
-import { modalCredentialsRefSchema } from './check-runner-settings.js';
+import { legacyCheckCredentialsRefSchema } from './legacy-check-credentials.js';
 export const autoExchangeSchema = z.object({
   enabled: z.boolean().default(false),
   debounceMs: z.number().safe().nonnegative().default(30_000),
@@ -39,6 +39,7 @@ export const autonomyPolicySchema = z.object({
   }),
   checks: z
     .object({
+      // Persisted Modal policies remain readable; editedPolicy rejects new selection.
       runner: z.enum(['modal', 'local', 'github-actions']),
       fallback: z.enum(['manual', 'local']).optional(),
       repo: z
@@ -48,7 +49,7 @@ export const autonomyPolicySchema = z.object({
         .optional(),
       runsOn: z.string().min(1).optional(),
       shards: z.number().int().positive().optional(),
-      credentialsRef: modalCredentialsRefSchema.optional(),
+      credentialsRef: legacyCheckCredentialsRefSchema.optional(),
       ratesUsdPerMinute: z.record(z.string().min(1), z.number().nonnegative().finite()).optional(),
       /** Remote runners only: landing batches checked at once (stacked on one another). */
       concurrency: z.number().int().min(1).max(16).optional(),
@@ -133,6 +134,11 @@ export const policyWriteSchema = z
   );
 export type PolicyWrite = z.infer<typeof policyWriteSchema>;
 export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): AutonomyPolicy {
+  invariant(
+    command.checks?.runner !== 'modal',
+    'BAD_ARGUMENT',
+    'The Modal runner has been retired. Select checks.runner local or github-actions.',
+  );
   const base =
     command.preset === 'custom'
       ? { ...previous, preset: 'custom' as const }

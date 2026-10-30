@@ -13,7 +13,7 @@ import { readPendingStatus } from '../dist/pending-status-read.js';
 import { batchEdit, selectBatch, composeBatch } from '../dist/landing-batch-store.js';
 import { queuedOutcome, submissionOutcome } from '../dist/landing-submission.js';
 import { prepareRunRegistration } from '../dist/work-run-preparation.js';
-import { checkEnvironment, adoptModalRun } from '../dist/work-run.js';
+import { checkEnvironment, adoptRemoteRun } from '../dist/work-run.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
@@ -255,12 +255,12 @@ for (const { remote, passedTwin } of [
     });
   });
 
-for (const backend of ['modal', 'github-actions'])
+for (const backend of ['github-actions'])
   test(`failed ${backend} adoption ends the original run instead of retaining a live orphan owner`, async t => {
     const f = await fixture(t, { remote: true });
     const run = await orphanRun(f, backend);
     let starts = 0;
-    await adoptModalRun(f.store, run.id, async () => {
+    await adoptRemoteRun(f.store, run.id, async () => {
       starts++;
       throw new Error('synthetic private transport details');
     });
@@ -272,14 +272,14 @@ for (const backend of ['modal', 'github-actions'])
     const receipt = read(join(f.store.directory, `check-${run.id}`, 'result.json'));
     assert.equal(receipt.status, 'interrupted');
     assert.doesNotMatch(JSON.stringify(receipt), /synthetic private transport/);
-    await adoptModalRun(f.store, run.id, async () => assert.fail('terminal run must not restart'));
+    await adoptRemoteRun(f.store, run.id, async () => assert.fail('terminal run must not restart'));
     assert.equal(f.store.load().runs.length, 1);
   });
 
 for (const failure of ['spawn', 'bootstrap'])
   test(`a detached ${failure} failure ends its claimed run with a durable receipt`, async t => {
     const f = await fixture(t, { remote: true });
-    const run = await orphanRun(f, 'modal');
+    const run = await orphanRun(f, 'github-actions');
     const spawn = childProcess.spawn;
     const mocked = t.mock.method(childProcess, 'spawn', function (executable, args, options) {
       if (!args[0]?.endsWith('/check-controller-worker.js')) return spawn(executable, args, options);
@@ -295,7 +295,7 @@ for (const failure of ['spawn', 'bootstrap'])
     });
     syncBuiltinESMExports();
     try {
-      await adoptModalRun(f.store, run.id);
+      await adoptRemoteRun(f.store, run.id);
       await until(
         f,
         () => f.store.select('runs', run.id)?.status === 'interrupted',
@@ -428,7 +428,7 @@ test('incident replay: settlement WORK_STALE retries itself and a later land rea
 
 test('failed-replay teardown ends a wedged synthetic controller without recovery respawning it', async t => {
   const f = await fixture(t, { remote: true });
-  const run = await orphanRun(f, 'modal');
+  const run = await orphanRun(f, 'github-actions');
   const script = join(f.store.directory, 'wedged-controller.mjs');
   writeFileSync(
     script,
@@ -447,7 +447,7 @@ await runCheckController(new WorkStore(process.argv[2]),process.argv[3],()=>new 
   );
   syncBuiltinESMExports();
   try {
-    await adoptModalRun(f.store, run.id);
+    await adoptRemoteRun(f.store, run.id);
     await until(
       f,
       () => {

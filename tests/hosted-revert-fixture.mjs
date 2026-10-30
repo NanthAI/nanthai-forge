@@ -9,7 +9,7 @@ export const syncJobs = await import(moduleUrl('../convex/projectHostedSyncJobs.
 export { code } from './hosted-finish-fixture.mjs';
 export const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
-  FORGE_SOURCE_PROVIDER: 'modal',
+  FORGE_SOURCE_PROVIDER: 'convex',
   FORGE_SOURCE_WORKER: 'fixed-worker',
   FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
   FORGE_SOURCE_KEY_ID: 'SYNTHETIC',
@@ -59,7 +59,7 @@ export async function revertFixture(t, options) {
     // Execute the synthetic source dispatch directly; never a real provider.
     for (const task of f
       .pending()
-      .filter(x => x.name === 'projectModalSource:dispatch' && x.args[0].jobId === job.id))
+      .filter(x => x.name === 'projectConvexSource:dispatch' && x.args[0].jobId === job.id))
       f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
     return { ...output, jobId: job.id };
   };

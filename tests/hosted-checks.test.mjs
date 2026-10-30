@@ -13,7 +13,6 @@ import {
 } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { hostedCheckCallbackSchema } from '../dist/hosted-check-evidence.js';
-import { signSourceJobCallback } from '../dist/hosted-source-job.js';
 
 test('configuration retries retain original versions without rewinding later settings', async () => {
   const s = await checksFixture(),
@@ -96,12 +95,13 @@ test('definition changes after enqueue preserve execution pins but invalidate cu
 test('runner configuration changes do not reroute an enqueued run or make old environment current', async () => {
   const s = await checksFixture(),
     original = await s.enqueue(s.selection());
+  await s.bindRepository(s.projectId, { repository: 'synthetic/new-checks', repoId: 124, installationId: 9 });
   await s.configure(
-    { kind: 'runner', configuration: { ...s.runner, app: 'new-app' } },
+    { kind: 'runner', configuration: { ...s.runner, repository: 'synthetic/new-checks' } },
     s.configuration.digest,
   );
   const passed = await s.pass(await s.activate(original.id));
-  assert.equal(passed.configuration.app, 'synthetic-app');
+  assert.equal(passed.configuration.repository, 'synthetic/checks');
   await assert.rejects(s.evidence(passed), code('EVIDENCE_CHANGED'));
   await assert.rejects(
     s.enqueue(s.selection({ expectedEnvironment: 'f'.repeat(64) })),
@@ -170,10 +170,7 @@ test('untrusted stdout/source verdict claims cannot pass through a provider even
     await assert.rejects(s.callback(body));
   }
   const sourceClaim = s.complete(r);
-  await assert.rejects(
-    s.callback(sourceClaim, signSourceJobCallback(sourceClaim, 'synthetic-source-worker-key')),
-    code('EVIDENCE_CHANGED'),
-  );
+  await assert.rejects(s.callback(sourceClaim, 'synthetic-foreign-signature'), code('EVIDENCE_CHANGED'));
   s.insert('projectHostedDisplayRecords', {
     projectId: s.projectId,
     snapshotId: 'synthetic-snapshot',

@@ -5,13 +5,16 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, rmSyn
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { actionsCost, actionsRate, localCost, modalRunCost, runnerMonthCosts } from '../dist/check-cost.js';
-import { modalCredentials } from '../dist/modal-credentials.js';
-import { modalClient } from '../dist/modal-client.js';
+import {
+  actionsCost,
+  actionsRate,
+  localCost,
+  retainedRunCost,
+  runnerMonthCosts,
+} from '../dist/check-cost.js';
 import { editedPolicy, policyPreset } from '../dist/autonomy-policy.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { receiptSchema, createRunReceipt } from '../dist/work-run-receipt.js';
-import { modalMonthCost } from '../dist/check-backend.js';
 import { initNative } from '../dist/native-work.js';
 
 function directory(t) {
@@ -67,28 +70,6 @@ test('Actions rates can be overridden by label and missing timing/rates remain u
   assert.equal(actionsCost('ubuntu-latest', 0.006, []).estimatedCostUsd, null);
 });
 
-test('Modal per-second quantities are deduplicated and legacy estimates retain their basis', () => {
-  const usage = {
-    executionId: 'synthetic-sandbox',
-    seconds: 10,
-    cpuCoreSeconds: 20,
-    memoryGiBSeconds: 40,
-    basis: 'worker-runtime',
-  };
-  const cost = modalRunCost({
-    actual: 'modal',
-    requested: 'modal',
-    costUsage: [usage, usage],
-    estimatedCostUsd: 99,
-  });
-  assert.equal(cost.billedSeconds, 10);
-  assert.equal(cost.estimatedCostUsd, 20 * 0.00003942 + 40 * 0.00000667);
-  assert.match(cost.basis, /worker-runtime/);
-  const legacy = modalRunCost({ estimatedCostUsd: 2 });
-  assert.equal(legacy.billedSeconds, null);
-  assert.match(legacy.basis, /Legacy aggregate.*overstate/);
-});
-
 test('monthly status separates months/runners, deduplicates executions and counts unknown/legacy inputs', () => {
   const cost = actionsCost('blacksmith-2vcpu-ubuntu-2404', 0.004, [job(1, 61)]);
   const run = (id, month, backend) => ({ id, startedAt: `${month}-01T00:00:00Z`, backend });
@@ -108,87 +89,6 @@ test('monthly status separates months/runners, deduplicates executions and count
   assert.equal(summary.months.find(row => row.runner === 'local').estimatedCostUsd, 0);
   assert.equal(summary.months.find(row => row.runner === 'github-actions' && !row.label).unknownRuns, 1);
   assert.match(summary.basis, /not billed spend/);
-});
-
-test('project references resolve only explicit env/file credentials, reject source paths and redact failures', t => {
-  const root = directory(t),
-    project = join(root, 'project');
-  mkdirSync(project);
-  const env = {
-    PROJECT_ID: 'synthetic-project-id',
-    PROJECT_SECRET: 'synthetic-project-secret',
-    MODAL_TOKEN_ID: 'synthetic-owner-id',
-    MODAL_TOKEN_SECRET: 'synthetic-owner-secret',
-  };
-  const reference = { kind: 'env', tokenId: 'PROJECT_ID', tokenSecret: 'PROJECT_SECRET' };
-  assert.deepEqual(modalCredentials(project, reference, env), {
-    MODAL_TOKEN_ID: env.PROJECT_ID,
-    MODAL_TOKEN_SECRET: env.PROJECT_SECRET,
-  });
-  const secret = join(root, 'secret.json');
-  writeFileSync(
-    secret,
-    JSON.stringify({ tokenId: 'synthetic-file-id', tokenSecret: 'synthetic-file-secret' }),
-  );
-  assert.equal(modalCredentials(project, { kind: 'file', path: secret }).MODAL_TOKEN_ID, 'synthetic-file-id');
-  const internal = join(project, 'source.json');
-  writeFileSync(internal, readFileSync(secret));
-  const link = join(root, 'symlink.json');
-  symlinkSync(internal, link);
-  for (const ref of [
-    undefined,
-    { kind: 'env', tokenId: 'MISSING', tokenSecret: 'MISSING' },
-    { kind: 'file', path: internal },
-    { kind: 'file', path: link },
-    { kind: 'file', path: 'relative.json' },
-    { kind: 'file', path: join(root, 'absent.json') },
-  ]) {
-    assert.throws(
-      () => modalCredentials(project, ref, env),
-      error => {
-        assert.equal(error.code, 'MODAL_CREDENTIALS_REQUIRED');
-        assert.match(error.message, /checks.credentialsRef/);
-        assert.doesNotMatch(error.message, /synthetic-project-secret|synthetic-owner|secret.json/);
-        return true;
-      },
-    );
-  }
-  writeFileSync(secret, 'synthetic-private-invalid-json');
-  assert.throws(
-    () => modalCredentials(project, { kind: 'file', path: secret }),
-    error => !error.message.includes('synthetic-private'),
-  );
-});
-
-test('Modal SDK child receives project tokens, an empty config and no ambient account selectors', async t => {
-  const root = directory(t),
-    executable = join(root, 'fake-python');
-  const previous = { ...process.env };
-  t.after(() => {
-    process.env = previous;
-  });
-  process.env.FORGE_MODAL_PYTHON = executable;
-  process.env.MODAL_TOKEN_ID = 'synthetic-owner';
-  process.env.MODAL_TOKEN_SECRET = 'synthetic-owner-secret';
-  process.env.MODAL_CONFIG_PATH = join(root, 'owner-config');
-  process.env.MODAL_ENVIRONMENT = 'owner-env';
-  writeFileSync(
-    executable,
-    `#!${process.execPath}\nconst fs = require('node:fs');
-const ok = process.env.MODAL_TOKEN_ID === 'synthetic-project' && process.env.MODAL_TOKEN_SECRET === 'synthetic-project-secret' && !process.env.MODAL_ENVIRONMENT && fs.readFileSync(process.env.MODAL_CONFIG_PATH, 'utf8') === '';
-process.stdout.write(JSON.stringify({kind:'progress',message:ok?'isolated':'incorrect'})+'\\n');`,
-    { mode: 0o755 },
-  );
-  const events = [];
-  await modalClient(join(root, 'plan.json'), event => events.push(event), undefined, {
-    MODAL_TOKEN_ID: 'synthetic-project',
-    MODAL_TOKEN_SECRET: 'synthetic-project-secret',
-  });
-  assert.deepEqual(events, [{ kind: 'progress', message: 'isolated' }]);
-  await assert.rejects(
-    modalClient(join(root, 'plan.json'), () => {}),
-    { code: 'MODAL_CREDENTIALS_REQUIRED' },
-  );
 });
 
 test('default local check records cost in durable receipt and status; runner policy edits retry safely', async t => {
@@ -244,7 +144,7 @@ test('default local check records cost in durable receipt and status; runner pol
   assert.equal(status.checkCosts.months[0].recordedRuns, 1);
 });
 
-test('legacy receipt reads remain unchanged and Modal compatibility summaries exclude Actions estimates', () => {
+test('legacy Modal receipts remain readable and retain saved totals without re-estimation', () => {
   const original = {
     status: 'passed',
     backend: { requested: 'modal', actual: 'modal', estimatedCostUsd: 1 },
@@ -253,15 +153,8 @@ test('legacy receipt reads remain unchanged and Modal compatibility summaries ex
   };
   assert.deepEqual(receiptSchema.parse(original), original);
   assert.equal(createRunReceipt(original).backend.cost.estimatedCostUsd, null);
-  const summary = modalMonthCost(
-    [
-      { startedAt: '2026-10-01', backend: { actual: 'github-actions', estimatedCostUsd: 999 } },
-      { startedAt: '2026-10-01', backend: { actual: 'modal', estimatedCostUsd: 1 } },
-    ],
-    new Date('2026-10-20T00:00:00Z'),
-  );
-  assert.equal(summary.estimatedCostUsd, 1);
-  assert.equal(summary.recordedRuns, 1);
+  assert.equal(retainedRunCost(original.backend).estimatedCostUsd, 1);
+  assert.equal(retainedRunCost(original.backend).billedSeconds, null);
 });
 
 test('monthly history completes an adopted job observation without double counting it or deducting allowance', () => {

@@ -7,7 +7,6 @@ import { supportedNode } from '../scripts/node-runtime.mjs';
 import { githubActionsWorkflow } from '../dist/github-actions-workflow.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
 import { checkPin } from '../dist/hosted-check.js';
-import { modalRuntime } from '../dist/modal-plan.js';
 import { githubWorkflow } from '../scripts/bench-landing-workflow.mjs';
 
 test('Node release floors reject vulnerable and unsupported lines and accept patched stable releases', () => {
@@ -82,7 +81,4 @@ test('package and active remote check recipes agree on the fixed Node release', 
     hostedActionsRuntime,
     checkPin('github-actions;node:24.22.1;checkout:v4;setup-node:v4;forge-check:v1'),
   );
-  assert.match(modalRuntime, /node:24\.22\.1-trixie-slim;/);
-  for (const path of ['scripts/modal-check/runner.py', 'scripts/modal-spike/runner.py'])
-    assert.match(readFileSync(path, 'utf8'), /node:24\.22\.1-trixie-slim/);
 });

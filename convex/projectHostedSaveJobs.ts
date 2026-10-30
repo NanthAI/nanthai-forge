@@ -77,9 +77,7 @@ export const submit = mutation({
         makeFunctionReference<'action'>(
           job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
             ? 'projectHostedSaveJobs:complete'
-            : job.control.provider === 'convex'
-              ? 'projectConvexSource:dispatch'
-              : 'projectModalSource:dispatch',
+            : 'projectConvexSource:dispatch',
         ),
         { projectId: input.projectId, jobId: row.jobId },
       );

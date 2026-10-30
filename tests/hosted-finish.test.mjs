@@ -15,7 +15,7 @@ import {
 import { hostedFinishBackoff } from '../dist/hosted-finish.js';
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
-  FORGE_SOURCE_PROVIDER: 'modal',
+  FORGE_SOURCE_PROVIDER: 'convex',
   FORGE_SOURCE_WORKER: 'fixed-worker',
   FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
   FORGE_SOURCE_KEY_ID: 'SYNTHETIC',
@@ -463,7 +463,7 @@ test('a source completion after landing cancellation cannot install a child atte
     { state } = await begin(f);
   f.moveMain();
   await f.passChecks();
-  while (f.pending()[0]?.name !== 'projectModalSource:dispatch') await f.execute();
+  while (f.pending()[0]?.name !== 'projectConvexSource:dispatch') await f.execute();
   await f.tx('finishLandingCancel', landingApi.cancel, {
     projectId: f.projectId,
     request: JSON.stringify({ operationId: randomUUID(), submissionId: state.id, authorityEpoch: 1 }),
@@ -525,9 +525,12 @@ for (const crash of ['before-source', 'after-source-callback', 'after-source-pub
       { state } = await begin(f);
     f.moveMain();
     await f.passChecks();
-    while (f.pending()[0]?.name !== 'projectModalSource:dispatch') await f.execute();
+    while (f.pending()[0]?.name !== 'projectConvexSource:dispatch') await f.execute();
     const pending = (await f.current(state.id)).pendingAttempt;
     const sourceCount = f.tables.projectHostedComposes.size;
+    if (crash === 'after-source-publish') {
+      while (f.pending()[0]?.name !== 'projectHostedComposeJobs:complete') await f.execute();
+    }
     await assert.rejects(f.execute(f.pending()[0], crash), /synthetic crash/);
     await f.tx('finishRepair', api.resume, { projectId: f.projectId, submissionId: state.id });
     await f.drain();

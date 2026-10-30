@@ -7,11 +7,9 @@ import { moduleUrl } from './convex-module.mjs';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 import { hostedPayloadHash, canonicalPayload } from '../dist/hosted-source-operation.js';
 import { sourceDispatch } from '../dist/hosted-source-job-controller.js';
-import { signSourceJobCallback } from '../dist/hosted-source-job.js';
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
 const provider = await import(moduleUrl('../convex/projectSourceProvider.ts'));
 const api = await import(moduleUrl('../convex/projectSourceProviderApi.ts'));
-const modalAction = await import(moduleUrl('../convex/projectModalSource.ts'));
 const jobApi = await import(moduleUrl('../convex/projectSourceJobApi.ts'));
 const callbacks = await import(moduleUrl('../convex/projectSourceJobCallbacks.ts'));
 const all = [];
@@ -44,7 +42,7 @@ async function fixture(initialNow = Date.now()) {
     jobKind: 'save',
     input: { sha256: 'a'.repeat(64), size: 123 },
     inputDigest: 'a'.repeat(64),
-    provider: 'modal',
+    provider: 'convex',
     worker: 'forge-source-state-v1',
     runtime: 'b'.repeat(64),
     keyId: 'SYNTHETIC',
@@ -176,16 +174,7 @@ test('signed worker callback recovers SDK identity before create reply and match
     result: { status: 'completed', output: { sha256: 'c'.repeat(64), size: 123 } },
   };
   await x.f.run('callback', () =>
-    callbacks.receiveSourceJobCallback(
-      x.f.ctx,
-      {
-        projectId: x.request.projectId,
-        callback: body,
-        signature: signSourceJobCallback(body, secret),
-      },
-      () => secret,
-      x.now(),
-    ),
+    callbacks.receiveConvexSourceJobCallback(x.f.ctx, x.request.projectId, body, x.now()),
   );
   const writes = x.f.tables.projectHostedRecords.size;
   assert.equal(await x.call('recordSourceProvider', { ...x.request, executionId: 'fc-worker' }), 'fc-worker');
@@ -235,56 +224,4 @@ test('registered internal provider endpoints use constant-size exact job transac
     { status: 'found', executionId: 'fc-api' },
   );
   x.check();
-});
-
-test('configured Modal action performs a short exact lookup; missing configuration has no provider fallback', async () => {
-  const x = await fixture(Date.now() - 10000);
-  const names = [
-    'FORGE_SOURCE_MODAL_URL',
-    'FORGE_SOURCE_MODAL_TOKEN',
-    'FORGE_SOURCE_WORKER',
-    'FORGE_SOURCE_RUNTIME',
-  ];
-  const saved = names.map(name => process.env[name]),
-    previousFetch = globalThis.fetch;
-  let requests = 0;
-  const ctx = {
-    runMutation: (ref, input) =>
-      x.f.call(`dispatch:${getFunctionName(ref)}`, jobApi[getFunctionName(ref).split(':')[1]], input),
-  };
-  try {
-    for (const name of names) delete process.env[name];
-    await assert.rejects(
-      modalAction.dispatch._handler(ctx, { projectId: x.request.projectId, jobId: x.request.jobId }),
-      e => e.code === 'SOURCE_WORKER_UNAVAILABLE',
-    );
-    process.env.FORGE_SOURCE_MODAL_URL = 'https://synthetic.modal.run/';
-    process.env.FORGE_SOURCE_MODAL_TOKEN = 'synthetic';
-    process.env.FORGE_SOURCE_WORKER = x.request.input.worker;
-    process.env.FORGE_SOURCE_RUNTIME = x.request.input.runtime;
-    globalThis.fetch = async (_url, init) => {
-      requests++;
-      const value = JSON.parse(init.body);
-      assert.equal(value.action, 'lookup');
-      return new Response(
-        JSON.stringify({
-          dispatchKey: value.input.dispatchKey,
-          input: canonicalPayload(value.input),
-          result: { status: 'found', executionId: 'fc-action' },
-        }),
-      );
-    };
-    assert.equal(
-      await modalAction.dispatch._handler(ctx, { projectId: x.request.projectId, jobId: x.request.jobId }),
-      'observed',
-    );
-    assert.equal(requests, 1);
-    x.check();
-  } finally {
-    globalThis.fetch = previousFetch;
-    names.forEach((name, i) => {
-      if (saved[i] === undefined) delete process.env[name];
-      else process.env[name] = saved[i];
-    });
-  }
 });

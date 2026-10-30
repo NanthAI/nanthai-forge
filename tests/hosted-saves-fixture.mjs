@@ -7,7 +7,6 @@ import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
 import { saveBytes, savePin, buildSavePages } from '../dist/hosted-save.js';
 import { buildHostedSourceState } from '../dist/hosted-source-worker.js';
-import { signSourceJobCallback } from '../dist/hosted-source-job.js';
 export const api = await import(moduleUrl('../convex/projectHostedSaves.ts'));
 export const jobApi = await import(moduleUrl('../convex/projectHostedSaveJobs.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
@@ -165,7 +164,7 @@ export async function saveFixture() {
       ),
     );
     Object.assign(process.env, {
-      FORGE_SOURCE_PROVIDER: 'modal',
+      FORGE_SOURCE_PROVIDER: 'convex',
       FORGE_SOURCE_WORKER: 'fixed-worker',
       FORGE_SOURCE_RUNTIME: 'a'.repeat(64),
       FORGE_SOURCE_KEY_ID: 'SYNTHETIC',
@@ -237,19 +236,7 @@ export async function saveFixture() {
       executionId: 'fake-execution',
       result: { status: 'completed', output: result.output },
     };
-    const secret = 'local-synthetic-signing-key',
-      prior = process.env.FORGE_SOURCE_JOB_KEY_SYNTHETIC;
-    process.env.FORGE_SOURCE_JOB_KEY_SYNTHETIC = secret;
-    try {
-      await call('callback', callbacks.callback, {
-        projectId,
-        callback: JSON.stringify(callback),
-        signature: signSourceJobCallback(callback, secret),
-      });
-    } finally {
-      if (prior === undefined) delete process.env.FORGE_SOURCE_JOB_KEY_SYNTHETIC;
-      else process.env.FORGE_SOURCE_JOB_KEY_SYNTHETIC = prior;
-    }
+    await call('callback', callbacks.callback, { projectId, callback: JSON.stringify(callback) });
     return { ...result, jobId, manifest: objects.get(result.output.sha256).toString(), reads };
   };
   const publish = output =>

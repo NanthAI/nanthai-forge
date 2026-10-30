@@ -622,7 +622,7 @@ change check inputs. Owner restart, sleep, install-path changes and Node patch
 upgrades preserve reuse; Node minor, lockfile or declared-input changes require
 a new run. Explicit partial test lists can never satisfy a gate. The `run` action
 accepts an explicit `tests` list for a failed-file-only retry and records partial
-evidence; Modal also retries failed shards while retaining completed shards.
+evidence. Actions does not retry failed test shards.
 Check-only commands and `assess-check-inputs` retain their existing behavior.
 
 The acceptance receipt's structured `fastPath` records the policy, checked
@@ -892,7 +892,7 @@ parallel/halving diagnosis. Each settled batch updates its requesting land
 journal before the channel sweep continues with unrelated submissions.
 
 The native landing worker reconciles active check runs before replaying retained
-landing journals. A dead local runner ends as interrupted; a dead Modal or Actions
+landing journals. A dead local runner ends as interrupted; a dead Actions
 controller is adopted with the original run and provider pins. Release keeps
 in-flight check controllers alive on their pinned runtime. SIGTERM and SIGHUP
 mean service shutdown rather than remote check cancellation; explicit check or

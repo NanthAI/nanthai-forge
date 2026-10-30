@@ -3,27 +3,23 @@ import { semanticCheckCommand } from './semantic-check-command.js';
 import { runDetails } from './work-detail-store.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { latestCheckCoverage } from './check-coverage.js';
 import { digest } from './hash.js';
-import { MODAL_COST_SAFETY_MARGIN } from './modal-cost.js';
 import { NativeSource } from './native-source.js';
 import { writeCheckScope } from './work-check-scope.js';
-import { balanceShards } from './check-backend.js';
+import { actionsCheckRuntime, balanceShards } from './check-backend.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 import { partitionTests, timingDurations } from '../scripts/test-shards.mjs';
 import { readTimingHistory } from '../scripts/test-timings-file.mjs';
 
-export const modalRuntime =
-  'node:24.22.1-trixie-slim;git;time;python3;modal-sdk:1.6.2;cpu:2;memory:4096;static-memory:8192;static-oom-retry:16384;static-workers:2;static-heap:3072;file-flake-retry:1;resume:1;cost:worker-runtime-margin-1;timeout:900';
-export const modalBridge = fileURLToPath(new URL('../scripts/modal-check/runner.py', import.meta.url));
-export async function modalPlan(
+// Historical modal-* filenames are shared Actions receipt formats; retain them for replay.
+export async function remoteCheckPlan(
   store: WorkStore,
   run: CheckRun,
   path: string,
   shards?: number,
-  runtime = modalRuntime,
+  runtime = actionsCheckRuntime(undefined),
 ) {
   const source = new NativeSource(store.root),
     state = source.state(run.head);
@@ -88,7 +84,6 @@ export async function modalPlan(
     selection,
     lockfile,
     runtime,
-    costSafetyMargin: MODAL_COST_SAFETY_MARGIN,
     groups: standard
       ? shards
         ? partitionTests(selection.tests, shards, durations)
@@ -119,10 +114,13 @@ export async function modalPlan(
   writeFileSync(join(path, 'selection.json'), JSON.stringify(selection), { mode: 0o600 });
   return plan;
 }
-export type ModalPlan = NonNullable<Awaited<ReturnType<typeof modalPlan>>>;
+export type RemoteCheckPlan = NonNullable<Awaited<ReturnType<typeof remoteCheckPlan>>> & {
+  /** Retained pre-retirement Actions plans included this pin. */
+  costSafetyMargin?: number;
+};
 
 /** Recompute the retained recipe, including exact View and shard membership. */
-export function validateModalPlan(plan: ModalPlan, run: CheckRun) {
+export function validateRemoteCheckPlan(plan: RemoteCheckPlan, run: CheckRun) {
   const {
     retryFiles,
     runId,
@@ -132,7 +130,7 @@ export function validateModalPlan(plan: ModalPlan, run: CheckRun) {
     selection,
     lockfile,
     runtime,
-    costSafetyMargin: MODAL_COST_SAFETY_MARGIN,
+    costSafetyMargin,
     groups,
     standard,
     artifacts,
@@ -155,7 +153,7 @@ export function validateModalPlan(plan: ModalPlan, run: CheckRun) {
         selection,
         lockfile,
         runtime,
-        costSafetyMargin: MODAL_COST_SAFETY_MARGIN,
+        ...(costSafetyMargin !== undefined ? { costSafetyMargin } : {}),
         groups,
         standard,
         artifacts,
@@ -164,5 +162,5 @@ export function validateModalPlan(plan: ModalPlan, run: CheckRun) {
       }),
     ) !== plan.pin
   )
-    throw new Error('Retained Modal source, Candidate or plan digest changed.');
+    throw new Error('Retained remote source, Candidate or plan digest changed.');
 }

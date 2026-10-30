@@ -5,7 +5,7 @@ import { digest } from './hash.js';
 import { readSource } from './files.js';
 import { checkReuseKey, gateCheck, reusableCheckInputs } from './check-reuse-key.js';
 import { invariant } from './errors.js';
-import { validateModalPlan, type ModalPlan } from './modal-plan.js';
+import { validateRemoteCheckPlan, type RemoteCheckPlan } from './remote-check-plan.js';
 import { receiptSchema } from './work-run-receipt.js';
 import { checkRunSchema, type CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
@@ -52,8 +52,8 @@ export function retainedPassedCheck(store: WorkStore, value: unknown): CheckRun 
     )
       return;
     if (run.backend?.actual !== 'local') {
-      const plan = readCheckJson(store, run.id, 'modal-plan.json') as ModalPlan;
-      validateModalPlan(plan, run);
+      const plan = readCheckJson(store, run.id, 'modal-plan.json') as RemoteCheckPlan;
+      validateRemoteCheckPlan(plan, run);
       if (
         plan.runtime !== run.backend?.runtime ||
         plan.lockfile !== run.backend?.lockfile ||

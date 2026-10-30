@@ -4,16 +4,16 @@ import { mkdirBelow } from './mkdir-below.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { durableReplace } from './native-durability.js';
-import type { ModalEvent } from './modal-client.js';
+import type { CheckExecutionEvent } from './check-execution-event.js';
 import { failedTestFiles } from './check-failure-files.js';
 
-type Execution = NonNullable<Extract<ModalEvent, { kind: 'result' }>['executions']>[number];
+type Execution = NonNullable<Extract<CheckExecutionEvent, { kind: 'result' }>['executions']>[number];
 export function shardLogName(shard: number | 'static', attempt = 1) {
   return `${shard}${attempt > 1 ? `.attempt-${attempt}` : ''}.log`;
 }
 
 /** Execution identity survives controller adoption; retries never overwrite earlier output. */
-export class ModalShardLogs {
+export class CheckShardLogs {
   private executions: Execution[] = [];
   private writers = new Map<string, CompactCheckWriter>();
   private readonly indexPath: string;
@@ -37,9 +37,9 @@ export class ModalShardLogs {
       ).replace(/\.log$/, '.evidence'),
     );
   }
-  register(event: Extract<ModalEvent, { kind: 'execution' }>) {
+  register(event: Extract<CheckExecutionEvent, { kind: 'execution' }>) {
     if (event.index === undefined) return;
-    if (event.index > this.staticIndex) throw new Error('Modal execution names an unselected shard.');
+    if (event.index > this.staticIndex) throw new Error('Remote execution names an unselected shard.');
     const execution = { executionId: event.executionId, index: event.index, attempt: event.attempt ?? 0 };
     const previous = this.executions.find(item => item.executionId === event.executionId);
     if (previous) {
@@ -67,11 +67,11 @@ export class ModalShardLogs {
   complete(executionId: string, failed: boolean) {
     this.writers.get(executionId)?.finish(failed);
   }
-  failureSummary(result: Extract<ModalEvent, { kind: 'result' }>) {
+  failureSummary(result: Extract<CheckExecutionEvent, { kind: 'result' }>) {
     for (const outcome of result.executions ?? []) {
       const execution = this.executions.find(item => item.executionId === outcome.executionId);
       if (!execution || execution.index !== outcome.index || execution.attempt !== outcome.attempt)
-        throw new Error('Modal result shard identity changed.');
+        throw new Error('Remote result shard identity changed.');
       if (outcome.exitCode !== undefined) execution.exitCode = outcome.exitCode;
       if (outcome.exitCode !== undefined) {
         let writer = this.writers.get(outcome.executionId);

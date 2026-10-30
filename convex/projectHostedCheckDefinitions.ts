@@ -100,6 +100,11 @@ export const configure = mutation({
       const change = request.change;
       return await saveCheckSetting(ctx, input.projectId, request, request, async (_project, at) => {
         if (change.kind === 'runner') {
+          invariant(
+            change.configuration.provider !== 'modal',
+            'BAD_ARGUMENT',
+            'The Modal runner has been retired. Select mac, self-hosted or github-actions.',
+          );
           if (change.configuration.provider === 'github-actions')
             await requireStoredRepositoryBinding(ctx, input.projectId, change.configuration.repository);
           return {

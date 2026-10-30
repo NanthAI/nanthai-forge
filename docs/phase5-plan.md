@@ -79,7 +79,7 @@ Every slice reports against these metrics at landing: the values before and afte
 | 5.5 | Operator interventions per landing | Owner-mutating commands that are not `start`, `checkpoint`, `finish` or `land` (for example `cancel`, `accept`, `revert`, `abandon`, `take`, `set-policy`, a retry, a manual owner-service restart, a manual queue nudge), by actor, ÷ landings. Requires a requester on every mutation, including cancellations. **Target: near zero** (Q track). |
 | 5.6 | Check minutes per landing; reuse rate | Runner minutes (sum of shard durations, the billing basis) and wall minutes for all runs in the period, whatever their outcome, ÷ landings. Continuous-audit minutes count. Reuse rate: check requests satisfied by an existing passed run with the same reuse key ÷ (those requests + full checks started). The **reuse key** is tree + check definition + lockfile + Node major.minor + declared inputs. Install paths and runtime fingerprints that change on restart are not part of it. |
 | 5.7 | Authority lag | **Before cutover:** for each owner revision, owner revision − hosted revision and seconds until hosted reaches it, p50 and p95 per day, plus contradiction minutes (time any hosted page showed a Lane, Intent or Candidate state that owner records contradict). **After cutover:** Mac cache lag behind hosted (p50, p95) and contradiction minutes on any surface, CLI, MCP or web. |
-| 5.8 | Dollars per landing | Runner (Modal, Blacksmith, Actions) + hosted (Convex, Netlify) + storage (R2) ÷ landings, per month, at billed price and at list price. Bills are entered as records. Estimator error: (estimate − bill) ÷ bill. |
+| 5.8 | Dollars per landing | Runner (Blacksmith, Actions; saved legacy costs) + hosted (Convex, Netlify) + storage (R2) ÷ landings, per month, at billed price and at list price. Bills are entered as records. Estimator error: (estimate − bill) ÷ bill. |
 | R | Red-main minutes per day | Minutes per day during which the current main head has a failed full-suite result on its exact State, or is a descendant of a landed Intent later named as a culprit, until a main head passes the full suite. Before B2.3 the source is full runs on main heads plus public GitHub Verify on the mirror; report both. |
 
 Bet metrics also need one tag: **no-owner incidents**, errors in metrics 2 and 3 whose cause is a run, worker or batch with no live owner of record.
@@ -293,7 +293,7 @@ Without the conditional G and replace-first I: about 13,100 non-test. To add: ab
 ### B1.3b. Mac evidence and its trust rule
 
 - **Size:** S–M. **Depends on:** B1.3a.
-- **Changes:** evidence provider `mac` alongside `modal` and `github-actions`. Proposed rule (owner approves): Mac evidence counts for trusted and autonomous actors on projects the Mac's owner controls; supervised projects and outside contributors need hosted-runner evidence. The receipt names the machine and the reuse key.
+- **Changes:** evidence provider `mac` alongside `github-actions` (legacy `modal` evidence remains readable). Proposed rule (owner approves): Mac evidence counts for trusted and autonomous actors on projects the Mac's owner controls; supervised projects and outside contributors need hosted-runner evidence. The receipt names the machine and the reuse key.
 - **Acceptance:** a supervised Candidate with only Mac evidence is not accepted; a trusted one is; evidence from a revoked machine is refused. **Metrics:** moves 6 and 8. Must not regress 3.
 
 ### B1.4a. Lanes as APFS reflink clones with snapshots

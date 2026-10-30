@@ -137,12 +137,12 @@ export async function checksFixture(source = null) {
     });
   const checkId = randomUUID();
   const runner = {
-    provider: 'modal',
-    app: 'synthetic-app',
-    function: 'check',
+    provider: 'github-actions',
+    repository: 'synthetic/checks',
+    runsOn: 'ubuntu-latest',
     runtime: 'c'.repeat(64),
     environmentFingerprint: 'd'.repeat(64),
-    credential: { secretId: 'synthetic-use-reference', version: 1, operation: 'modal-check' },
+    credential: { secretId: 'synthetic-use-reference', version: 1, operation: 'actions-check' },
   };
   const configure = (change, expected = null, operationId = randomUUID(), actor = 'owner') =>
     call(
@@ -152,6 +152,7 @@ export async function checksFixture(source = null) {
       actor,
     ).then(JSON.parse);
   let definition = await configure({ kind: 'definition', checkId, command });
+  await s.bindRepository(projectId, { repository: runner.repository, repoId: 123, installationId: 9 });
   let configuration = await configure({ kind: 'runner', configuration: runner });
   const selection = overrides => ({
     operationId: randomUUID(),
@@ -221,7 +222,7 @@ export async function checksFixture(source = null) {
     operationId: r.request.operationId,
     authorityEpoch: 1,
     fence: r.fence,
-    provider: 'modal',
+    provider: 'github-actions',
     executionId: r.executionId ?? 'synthetic-provider-execution',
     head: r.request.expectedHead,
     definition: r.check.definition,

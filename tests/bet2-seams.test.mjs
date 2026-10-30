@@ -138,7 +138,14 @@ test('insertHostedCheckRun preserves the exact old inserted document and dispatc
   for (const provider of ['modal', 'mac', 'self-hosted', 'github-actions']) {
     const configuration =
       provider === 'modal'
-        ? original.configuration
+        ? {
+            provider,
+            app: 'synthetic',
+            function: 'check',
+            runtime: hash,
+            environmentFingerprint: hash,
+            credential: { secretId: 'synthetic', version: 1, operation: 'check' },
+          }
         : provider === 'github-actions'
           ? {
               provider,

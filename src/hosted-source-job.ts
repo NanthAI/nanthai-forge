@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { hmac } from '@noble/hashes/hmac.js';
-import { sha256 } from '@noble/hashes/sha2.js';
-import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';
-import { invariant } from './errors.js';
 
 export const jobHash = z.string().regex(/^[0-9a-f]{64}$/);
 export const jobNumber = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -33,7 +29,7 @@ export const sourceJobControlSchema = z
   .strict();
 export type SourceJobControl = z.infer<typeof sourceJobControlSchema>;
 
-/** Signed by the trusted source process, never project code. No source bytes,
+/** Produced by the internal Convex source worker, never project code. No source bytes,
  * source URLs, account credentials or arbitrary output claims cross this seam. */
 export const sourceJobCallbackSchema = z
   .object({
@@ -57,17 +53,6 @@ export const sourceJobCallbackSchema = z
   })
   .strict();
 export type SourceJobCallback = z.infer<typeof sourceJobCallbackSchema>;
-export function signSourceJobCallback(callback: SourceJobCallback, secret: string) {
-  invariant(secret.length > 0, 'SOURCE_WORKER_UNAVAILABLE', 'Trusted source callback key is unavailable.');
-  return bytesToHex(hmac(sha256, utf8ToBytes(secret), utf8ToBytes(canonicalPayload(callback))));
-}
-export function verifySourceJobCallback(callback: SourceJobCallback, signature: string, secret: string) {
-  const expected = signSourceJobCallback(callback, secret);
-  let difference = expected.length ^ signature.length;
-  for (let i = 0; i < expected.length; i++)
-    difference |= expected.charCodeAt(i) ^ (signature.charCodeAt(i) || 0);
-  invariant(difference === 0, 'SOURCE_CALLBACK_INVALID', 'Trusted source callback signature is invalid.');
-}
 export const sourceDispatchKey = (projectId: string, jobId: string, operationId: string) =>
   digest(canonicalPayload({ projectId, jobId, operationId }));
 

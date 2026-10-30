@@ -4,13 +4,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ModalShardLogs } from '../dist/modal-shard-logs.js';
+import { CheckShardLogs } from '../dist/check-shard-logs.js';
 
 for (const exitCode of [1, 137])
-  test(`Modal exit ${exitCode} summary retains the failing file and diagnoses only an observed kill`, t => {
+  test(`Shard exit ${exitCode} summary retains the failing file and diagnoses only an observed kill`, t => {
     const path = mkdtempSync(join(tmpdir(), 'forge-shard-summary-'));
     t.after(() => rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-    const logs = new ModalShardLogs(path, 1);
+    const logs = new CheckShardLogs(path, 1);
     logs.register({ kind: 'execution', executionId: 'synthetic', index: 0, attempt: 0 });
     logs.append('synthetic', '# Failed test file: tests/broken.test.mjs\nnot ok 1 - broken\n');
     const summary = logs.failureSummary({

@@ -1,7 +1,5 @@
 import { readLandCheckController } from './land-check-progress.js';
 import { landingWaitMs, assertLandingWorkerActive } from './landing-worker-context.js';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 // SPDX-License-Identifier: Apache-2.0
 import { CheckQueue, queueHolder } from './check-queue.js';
 import { workProgress, workProgressIdentity, observeWorkProgress } from './work-progress.js';
@@ -39,16 +37,7 @@ export async function waitForAgentRun(
     observeWorkProgress();
     if (!active(run)) return;
     if (progress) {
-      const queue =
-        run.backend?.actual === 'modal'
-          ? CheckQueue.observe(
-              run.id,
-              join(
-                process.env.FORGE_CHECK_QUEUE_DIR ?? join(homedir(), '.forge'),
-                run.mainCheck ? 'modal-audit-queue' : 'modal-check-queue',
-              ),
-            )
-          : CheckQueue.observe(run.id);
+      const queue = CheckQueue.observe(run.id);
       const control = readLandCheckController(store, run);
       const holder = control?.holder
         ? {

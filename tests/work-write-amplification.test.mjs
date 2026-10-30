@@ -10,7 +10,7 @@ import { initNative, nativeStatus } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { selectMainAudit } from '../dist/post-accept-selection.js';
 import { postAcceptMoves } from '../dist/post-accept-coverage.js';
-import { updateModalRun } from '../dist/work-modal-run.js';
+import { updateRemoteRun } from '../dist/work-remote-run.js';
 import { checkEnvironment } from '../dist/work-run.js';
 import { agentClean } from '../dist/agent-clean.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
@@ -189,7 +189,7 @@ test('unchanged backend observation and replacement write no record or revision;
     ...run,
     backend: { executionIds: [...run.backend.executionIds], actual: 'modal', requested: 'modal' },
   };
-  updateModalRun(store, reordered);
+  updateRemoteRun(store, reordered);
   store.locked(() => {
     const tx = store.records();
     tx.patchFields('runs', run.id, { backend: reordered.backend });
@@ -199,7 +199,7 @@ test('unchanged backend observation and replacement write no record or revision;
   assert.deepEqual(readdirSync(join(store.directory, 'records')), files);
   const stale = store.records();
   run.backend.executionIds.push('synthetic-2');
-  updateModalRun(store, run);
+  updateRemoteRun(store, run);
   assert.equal(store.revision(), data.revision + 1);
   assert.throws(() => stale.commit(), { code: 'WORK_STALE' }, 'no-op guards retain concurrency checks');
   assert.deepEqual(store.select('runs', run.id).backend.executionIds, ['synthetic-1', 'synthetic-2']);

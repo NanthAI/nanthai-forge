@@ -587,7 +587,7 @@ test('remote scheduler waits for high-overlap parent but speculates disjoint wor
   await f.agent.dispatch({
     action: 'set-policy',
     operationId: randomUUID(),
-    checks: { runner: 'modal' },
+    checks: { runner: 'github-actions', repo: 'synthetic/checks' },
   });
   const enqueue = async lane => {
     const saved = f.store.select('lanes', lane.laneId),

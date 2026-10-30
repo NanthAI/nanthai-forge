@@ -174,7 +174,7 @@ parent source. Resolution uses the existing sync/checkpoint flow. See
 
 ## Remote bursts
 
-Modal and GitHub Actions checks do not share the owner's CPU, so a burst need not queue
+GitHub Actions checks do not share the owner's CPU, so a burst need not queue
 behind one check. Before the first check of an idle channel, the drain waits until
 `acceptance.batchWindowMs` (default 2000) after the oldest queued entry, or until a
 batch is full. Entries arriving while a check runs form a speculative batch stacked on
@@ -188,7 +188,7 @@ on real main. A restarted driver adopts every recorded batch in order. Local run
 never stack or wait.
 
 A passing batch moves main once, with every included Lane head recorded in its
-Candidate. A remote failure (Modal or GitHub Actions) checks all proper prefixes in one parallel round, lands
+Candidate. A remote failure (GitHub Actions) checks all proper prefixes in one parallel round, lands
 the longest observed passing prefix, and records the next entry's failed prefix
 run. The remaining entries requeue. Local runners halve the prefix interval
 instead, only accepting a prefix that passed its own exact-Candidate check. A
@@ -256,9 +256,8 @@ a lost acceptance reply never causes another Channel move.
 Every batch acceptance requests the existing coalesced full-main audit, including
 when the landing check was full. Audit failure creates the existing fix-forward
 Intent without rolling back main by default. Opt-in [optimistic landing](optimistic-landing.md)
-can compensate attributed failures under trusted policy. Modal audits use a separate capacity queue so
-audit execution cannot occupy a landing-check slot. Audits do not block the
-acceptance response. Modal budget enforcement is separate from batching.
+can compensate attributed failures under trusted policy. Audits do not block the
+acceptance response.
 
 Format 17 adds `landingEntries` and `landingBatches`; it does not activate the
 historical unified Intent format 16. Format 18 composes unified Intents and

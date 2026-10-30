@@ -12,27 +12,17 @@ export const convexSourceRuntime = digest(convexSourceWorker);
 export function sourceWorkerPlan(env: Record<string, string | undefined>) {
   const provider = env.FORGE_SOURCE_PROVIDER ?? 'convex';
   invariant(
-    provider === 'convex' || provider === 'modal',
+    provider === 'convex',
     'SOURCE_PROVIDER_CHANGED',
-    'Select the configured source provider.',
+    'The Modal source provider has been retired. Select FORGE_SOURCE_PROVIDER=convex.',
   );
-  if (provider === 'convex')
-    return {
-      provider,
-      worker: convexSourceWorker,
-      runtime: convexSourceRuntime,
-      keyId: 'CONVEX',
-      workerLeaseMs: 60000,
-    };
-  const worker = env.FORGE_SOURCE_WORKER,
-    runtime = env.FORGE_SOURCE_RUNTIME,
-    keyId = env.FORGE_SOURCE_KEY_ID;
-  invariant(
-    worker && runtime && keyId,
-    'SOURCE_WORKER_UNAVAILABLE',
-    'The pinned Modal source worker is not configured.',
-  );
-  return { provider, worker, runtime, keyId, workerLeaseMs: 60000 };
+  return {
+    provider,
+    worker: convexSourceWorker,
+    runtime: convexSourceRuntime,
+    keyId: 'CONVEX',
+    workerLeaseMs: 60000,
+  };
 }
 /** Start commits the reservation, fixed execution identity and first schedule in
  * one transaction. Lost replies reconcile that identity; they never spawn again. */

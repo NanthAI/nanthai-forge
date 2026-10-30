@@ -13,7 +13,7 @@ import { assertCurrentWorkFormat } from '../dist/work-format.js';
 import { parseAgentAction } from '../dist/agent-action-parse.js';
 import { successfulCheck, retainedPassedCheck, validateReusedCheck } from '../dist/check-reuse-evidence.js';
 import { adoptFinishRun } from '../dist/agent-finish-reuse.js';
-import { modalPlan, validateModalPlan } from '../dist/modal-plan.js';
+import { remoteCheckPlan, validateRemoteCheckPlan } from '../dist/remote-check-plan.js';
 import { runActionsCheck } from '../scripts/github-actions-check.mjs';
 import { githubActionsWorkflow } from '../dist/github-actions-workflow.js';
 
@@ -163,16 +163,16 @@ for (const tests of [[], ['tests/a.test.mjs']])
 
     const directory = join(root, 'plan');
     mkdirSync(directory);
-    const plan = await modalPlan(work.store, run, directory, 8);
+    const plan = await remoteCheckPlan(work.store, run, directory, 8);
     assert.equal(plan.selection.scope, 'partial');
     assert.deepEqual(plan.groups.flat().sort(), tests);
     run.backend = { ...run.backend, pin: plan.pin };
-    validateModalPlan(plan, run);
+    validateRemoteCheckPlan(plan, run);
     assert.equal(new WorkService(root).store.select('runs', run.id).checkSelection.scope, 'partial');
     const missing = join(root, 'missing-plan');
     mkdirSync(missing);
     await assert.rejects(
-      modalPlan(
+      remoteCheckPlan(
         work.store,
         { ...run, checkSelection: { ...run.checkSelection, tests: ['tests/missing.test.mjs'] } },
         missing,

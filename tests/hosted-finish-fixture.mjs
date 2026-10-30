@@ -257,6 +257,8 @@ export async function finishFixture(
         task.name.startsWith('projectConvexSourceTask:') ||
         task.name.startsWith('projectConvexSourceFanout:')
       ) {
+        if (stop === 'before-source' && task.name.endsWith(':dispatch'))
+          throw new Error('synthetic crash before source job');
         metrics.convexSourceCalls.push(task.name);
         if (task.name.endsWith(':dispatch')) metrics.sourceJobs++;
         await convexSourceModules[task.name.split(':')[0]][task.name.split(':')[1]]._handler(
@@ -271,20 +273,17 @@ export async function finishFixture(
           },
           input,
         );
-      } else if (task.name === 'projectModalSource:dispatch') {
-        if (stop === 'before-source') throw new Error('synthetic crash before source job');
-        metrics.sourceJobs++;
-        const sourceRow = [...f.tables.projectHostedComposes.values()].find(r => r.jobId === input.jobId);
-        const source = JSON.parse(sourceRow.value),
-          x = { request: source.request };
-        const output = await c.work(x);
-        if (stop === 'after-source-callback') throw new Error('synthetic crash after source callback');
-        await tx('finishSourcePublish', composeJobs.publish, {
-          projectId: f.projectId,
-          jobId: output.jobId,
-          result: output.manifest,
-        });
-        if (stop === 'after-source-publish') throw new Error('synthetic crash after source publication');
+        if (stop === 'after-source-callback' && task.name.endsWith(':dispatch')) {
+          // Advance the exact source steps before simulating a lost completed reply.
+          while (
+            pending().some(t => t.name.startsWith('projectConvexSource') && !t.name.endsWith(':dispatch'))
+          ) {
+            await execute(
+              pending().find(t => t.name.startsWith('projectConvexSource') && !t.name.endsWith(':dispatch')),
+            );
+          }
+          throw new Error('synthetic crash after source callback');
+        }
       } else if (task.name === 'projectHostedComposeJobs:complete') {
         const job = await tx(
           'finishLoadJob',
@@ -296,6 +295,7 @@ export async function finishFixture(
           jobId: input.jobId,
           result: c.objects.get(job.output.sha256).toString(),
         });
+        if (stop === 'after-source-publish') throw new Error('synthetic crash after source publication');
       } else assert.fail(`Unexpected task ${task.name}`);
       f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
     } catch (error) {

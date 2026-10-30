@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ModalEvent } from './modal-client.js';
+import type { CheckExecutionEvent } from './check-execution-event.js';
 import type { TestVerdict as Verdict } from './check-flake-evidence.js';
 /** Only complete, attributed reports may remove a failure from the landing gate. */
-export function testExecutionVerdicts(result: Extract<ModalEvent, { kind: 'result' }>, groups: string[][]) {
+export function testExecutionVerdicts(
+  result: Extract<CheckExecutionEvent, { kind: 'result' }>,
+  groups: string[][],
+) {
   const latest = new Map<number, NonNullable<typeof result.executions>[number]>();
   for (const execution of result.executions ?? [])
     if ((latest.get(execution.index)?.attempt ?? -1) < execution.attempt)

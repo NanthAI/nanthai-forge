@@ -10,7 +10,7 @@ import { controls, environment } from './hosted-source-efficiency-fixture.mjs';
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { saveHostedLane } from '../dist/hosted-save-client.js';
 import { buildHostedSourceState } from '../dist/hosted-source-worker.js';
-import { signSourceJobCallback } from '../dist/hosted-source-job.js';
+import { sourceDispatch } from '../dist/hosted-source-job-controller.js';
 import { digest } from '../dist/hash.js';
 import { composeAgentSource, selectAgentLane, agentState } from '../dist/hosted-agent-source.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
@@ -99,11 +99,11 @@ function dogfood(s) {
       removed: false,
     });
 }
-async function changedSave(t, legacy, scale = false, provider = 'modal') {
+async function changedSave(t, legacy, scale = false, provider = 'synthetic') {
   environment(t);
   const now = Date.now();
   t.mock.method(Date, 'now', () => now);
-  process.env.FORGE_SOURCE_PROVIDER = provider;
+  process.env.FORGE_SOURCE_PROVIDER = 'convex';
   const s = await composeFixture();
   const files = Array.from({ length: 3000 }, (_, i) =>
     s.file(`f${String(i).padStart(4, '0')}`, `first\noriginal-${i}\nlast\n`),
@@ -158,8 +158,20 @@ async function changedSave(t, legacy, scale = false, provider = 'modal') {
     stats.totalCalls = stats.calls + stats.storageCalls;
     return { stats, calls: c.calls, s, c, root, command, transport };
   }
-  await c.call('projectModalSource:dispatch', args);
-  const dispatch = c.dispatch();
+  const owner = randomUUID();
+  await c.call('projectSourceJobApi:claim', { ...args, owner, leaseMs: 60000 });
+  const job = JSON.parse(
+    await c.call('projectSourceJobApi:advance', {
+      ...args,
+      owner,
+      token: 1,
+      command: JSON.stringify({ kind: 'reserve', recovery: false }),
+    }),
+  );
+  const dispatch = sourceDispatch(s.projectId, job);
+  const reservation = { ...args, input: JSON.stringify(dispatch), token: randomUUID() };
+  await c.call('projectSourceProviderApi:reserve', reservation);
+  await c.call('projectSourceProviderApi:created', { ...reservation, executionId: 'synthetic-execution' });
   const callback = async result => {
     const body = {
       schema: 1,
@@ -179,7 +191,6 @@ async function changedSave(t, legacy, scale = false, provider = 'modal') {
     await c.call('projectSourceJobApi:callback', {
       projectId: s.projectId,
       callback: JSON.stringify(body),
-      signature: signSourceJobCallback(body, 'synthetic-key'),
     });
   };
   await callback({ status: 'heartbeat', sequence: 1 });

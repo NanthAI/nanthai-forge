@@ -8,11 +8,11 @@ import { randomUUID } from 'node:crypto';
 import { WorkService } from '../dist/work.js';
 import { setPolicy, localPerson } from '../dist/work-autonomy.js';
 import { initNative } from '../dist/native-work.js';
-import { checkEnvironment, recoverRuns, adoptModalRun } from '../dist/work-run.js';
+import { checkEnvironment, recoverRuns, adoptRemoteRun } from '../dist/work-run.js';
 import { launchGithubActionsRun } from '../dist/work-github-actions-run.js';
 import { controlActions } from '../dist/github-actions-controller.js';
 import { exportActionsSnapshot, deleteActionsRef } from '../dist/github-actions-export.js';
-import { modalPlan } from '../dist/modal-plan.js';
+import { remoteCheckPlan } from '../dist/remote-check-plan.js';
 import { composedNativeMain } from '../dist/native-composition-candidate.js';
 import { NativeSource } from '../dist/native-source.js';
 import { standardSelection } from '../scripts/test-impact.mjs';
@@ -170,7 +170,7 @@ for (const mode of ['completed', 'discover', 'cancel', 'unfinished', 'unstarted'
   test(`pre-upgrade Actions runtime permits observation without new execution: ${mode}`, async t => {
     const { work, run, path } = fixture(t);
     mkdirSync(path, { recursive: true });
-    const plan = await modalPlan(
+    const plan = await remoteCheckPlan(
       work.store,
       run,
       path,
@@ -581,7 +581,7 @@ test('dead Actions controller can be claimed for adoption', async t => {
     work.store.commitRecords(tx);
   });
   let adopted = false;
-  await adoptModalRun(work.store, run.id, async (_, retained) => {
+  await adoptRemoteRun(work.store, run.id, async (_, retained) => {
     adopted = true;
     assert.equal(retained.backend.actual, 'github-actions');
   });
@@ -609,7 +609,7 @@ test('one real tiny Actions smoke', { skip: !process.env.FORGE_GITHUB_ACTIONS_SM
   assert.equal(read(join(path, 'github-actions.json')).deleted, true);
 });
 
-test('Actions shard command uses the pinned complete selection and Modal worker environment', async t => {
+test('Actions shard command uses the pinned complete selection and isolated worker environment', async t => {
   const { runActionsCheck } = await import('../scripts/github-actions-check.mjs');
   const { plan } = controllerFixture(t);
   const filename = join(plan.output, 'recipe.json');
@@ -812,7 +812,7 @@ for (const scenario of [
     interaction: true,
   },
 ]) {
-  test(`Actions scope matches local and Modal: ${scenario.name}`, async t => {
+  test(`Actions scope matches local: ${scenario.name}`, async t => {
     const { work, run, view, path } = fixture(t, {
       'docs/development.md': '# Synthetic docs\n',
       'src/a.ts': 'export const a = 1;\n',
@@ -881,9 +881,9 @@ for (const scenario of [
         overlap: [scenario.path],
       };
     }
-    const modalPath = join(work.store.directory, `modal-parity-${run.id}`);
-    mkdirSync(modalPath);
-    const modal = await modalPlan(work.store, run, modalPath, 1);
+    const referencePath = join(work.store.directory, `selection-parity-${run.id}`);
+    mkdirSync(referencePath);
+    const reference = await remoteCheckPlan(work.store, run, referencePath, 1);
     const files = new Map(
       source.state(run.head).files.map(file => [file.path, source.object(file.blob).toString('utf8')]),
     );
@@ -911,8 +911,8 @@ for (const scenario of [
       async (plan, journal, save) => {
         exported = githubActionsRecipe(plan);
         assert.deepEqual(exported.selection, local);
-        assert.deepEqual(exported.selection, modal.selection);
-        assert.deepEqual(exported.groups, modal.groups);
+        assert.deepEqual(exported.selection, reference.selection);
+        assert.deepEqual(exported.groups, reference.groups);
         journal.commit = 'a'.repeat(40);
         journal.pushed = true;
         save();
@@ -1001,7 +1001,7 @@ test('benchmark one and four shard plans match the Forge Actions plan and execut
       );
       const path = join(work.store.directory, `bench-parity-${observed}-${count}`);
       mkdirSync(path);
-      const forge = await modalPlan(work.store, run, path, count);
+      const forge = await remoteCheckPlan(work.store, run, path, count);
       const github = benchmarkPlan(count, {}, files, durations);
       assert.deepEqual(github.selection, forge.selection);
       assert.deepEqual(github.groups, forge.groups);
@@ -2094,7 +2094,7 @@ for (const alreadyRequested of [false, true]) {
     assert.equal(cancelled.result.cancellation.details, 'stop stuck discovery');
     assert.equal(read(join(path, 'result.json')).status, 'cancelled');
     let adopted = false;
-    await adoptModalRun(work.store, run.id, async () => {
+    await adoptRemoteRun(work.store, run.id, async () => {
       adopted = true;
     });
     assert.equal(adopted, false);

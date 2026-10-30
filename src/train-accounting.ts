@@ -1,6 +1,6 @@
 import { postAcceptMoves } from './post-accept-coverage.js';
 // SPDX-License-Identifier: Apache-2.0
-import { modalRunCost, unknownCost, type CheckCost } from './check-cost.js';
+import { retainedRunCost, type CheckCost } from './check-cost.js';
 import type { CheckRun, ChannelMove, WorkView } from './work-types.js';
 import type { LandingBatch, LandingEntry } from './landing-batch-types.js';
 
@@ -34,12 +34,7 @@ export type AccountingContext = {
   previews?: PreviewMeasurement[];
 };
 export function runCost(run: CostRun): CheckCost {
-  return (
-    run.backend?.cost ??
-    (run.backend?.costUsage || (run.backend?.actual === 'modal' && run.backend.estimatedCostUsd !== undefined)
-      ? modalRunCost(run.backend)
-      : unknownCost(run.backend?.actual ?? 'local'))
-  );
+  return retainedRunCost(run.backend);
 }
 const ms = (value?: string) => (value ? Date.parse(value) : NaN);
 const duration = (from: number, to: number) =>

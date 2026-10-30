@@ -7,7 +7,7 @@ import { processAlive } from './local-process.js';
 import type { CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 import type { ActionsJournal } from './github-actions-export.js';
-import type { ModalPlan } from './modal-plan.js';
+import type { RemoteCheckPlan } from './remote-check-plan.js';
 import type { Counts } from './land-phases.js';
 
 const markerCache = new Map<string, { stamp: string; files: Set<string>; markers: boolean }>();
@@ -48,7 +48,7 @@ export function progressJson<T>(path: string): T | undefined {
 }
 export function readLandCheckProgress(directory: string, runId: string, includeFiles = true) {
   const path = join(directory, `check-${runId}`);
-  const plan = progressJson<Pick<ModalPlan, 'groups' | 'selection'>>(join(path, 'modal-plan.json'));
+  const plan = progressJson<Pick<RemoteCheckPlan, 'groups' | 'selection'>>(join(path, 'modal-plan.json'));
   const journal = progressJson<ActionsJournal>(join(path, 'github-actions.json'));
   const usage = journal?.jobUsage ?? [];
   const starts = usage.flatMap(job => (job.started_at ? [job.started_at] : [])).sort();

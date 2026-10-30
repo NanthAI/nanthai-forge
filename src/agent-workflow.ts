@@ -42,7 +42,6 @@ import { undoOptimisticRevert } from './optimistic-undo.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { agentPeers, RECEIPT_PEER_LIMIT } from './agent-peers.js';
 import { cancelLandingEntry } from './landing-batch-cancel.js';
-import { modalMonthCost } from './check-backend.js';
 // SPDX-License-Identifier: Apache-2.0
 import { retryWorkPhase } from './work-retry.js';
 import { withWorkProgress } from './work-progress.js';
@@ -504,7 +503,6 @@ export class AgentWorkflow {
           ...(lane ? { lane } : {}),
           quarantine: checkQuarantine(store),
           metrics: statusMetrics(store.root, data),
-          modalCost: modalMonthCost(data.runs),
           checkCosts: (() => {
             const { submissions, ...train } = trainAccounting(data.runs, {
               batches: data.landingBatches ?? [],

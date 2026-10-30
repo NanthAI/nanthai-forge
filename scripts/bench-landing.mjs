@@ -86,8 +86,8 @@ export function parseArgs(argv) {
   if (options.scenarios.some(s => !SCENARIOS.includes(s)))
     throw new Error(`Scenarios: ${SCENARIOS.join(',')}`);
   if (options.sides.some(s => !['forge', 'github'].includes(s))) throw new Error('Sides: forge,github');
-  if (!['local', 'modal', 'github-actions'].includes(options.forgeRunner))
-    throw new Error('Forge runner: local|modal|github-actions');
+  if (!['local', 'github-actions'].includes(options.forgeRunner))
+    throw new Error('Forge runner: local|github-actions');
   if (![options.ghShards, ...options.burst, options.runs].every(n => Number.isSafeInteger(n) && n > 0))
     throw new Error('Shards, burst and runs must be positive integers');
   if (!['public', 'private'].includes(options.visibility)) throw new Error('Visibility: public|private');
@@ -182,7 +182,7 @@ export function plan(options, setup) {
       `BURST ${k}: prepare ${k} disjoint code+test changes per side; release all at one barrier; repeat ${options.runs} times; record per-change and set all-landed time, landings/hour, check count, red-main, retries`,
     );
   steps.push(
-    `merge: ${options.ghMergeQueue ? 'use merge queue when configured; otherwise squash after required checks' : 'squash after required checks'}; costs: Actions timing API, Blacksmith job minutes, Modal backend estimate`,
+    `merge: ${options.ghMergeQueue ? 'use merge queue when configured; otherwise squash after required checks' : 'squash after required checks'}; costs: Actions timing API, Blacksmith job minutes`,
   );
   steps.push(
     options.cleanup
@@ -314,7 +314,7 @@ async function forgeSample(forge, scenario, token, member, prepareOnly = false) 
       ).length,
       redMain:
         finished.acceptance?.head === finished.run?.head && finished.run?.status === 'passed' ? 0 : null,
-      cost: { modalEstimatedUsd: finished.run?.backend?.estimatedCostUsd ?? null },
+      cost: { runnerEstimatedUsd: finished.run?.backend?.estimatedCostUsd ?? null },
       mainHead: finished.acceptance?.head ?? null,
       progressLines: events.length,
     };

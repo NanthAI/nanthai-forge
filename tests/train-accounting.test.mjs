@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { actionsCost, actionsRate, modalRunCost } from '../dist/check-cost.js';
+import { actionsCost, actionsRate } from '../dist/check-cost.js';
 import { trainAccounting } from '../dist/train-accounting.js';
 const T = seconds => new Date(Date.UTC(2026, 0, 1) + seconds * 1000).toISOString();
 const cost = (id, seconds = 61, retry = false) =>
@@ -117,17 +117,13 @@ test('wait time follows recorded submission outcome, not a completed check or ne
 });
 
 test('Modal attempt metadata classifies replacement usage without counting shared executions twice', () => {
-  const usage = modalRunCost({
-    actual: 'modal',
-    costUsage: [0, 1].map(attempt => ({
-      executionId: `sandbox-${attempt}`,
-      attempt,
-      seconds: 10,
-      cpuCoreSeconds: 20,
-      memoryGiBSeconds: 40,
-      basis: 'worker-runtime',
-    })),
-  });
+  const usage = {
+    ...actionsCost('ubuntu-latest', 0.006, [
+      { id: 1, status: 'completed', started_at: T(0), completed_at: T(10) },
+      { id: 2, status: 'completed', started_at: T(10), completed_at: T(20), retry: true },
+    ]),
+    runner: 'modal',
+  };
   const result = trainAccounting([run('r', usage), run('adopt', usage)], {
     batches: [batch('b', 'completed', ['r'])],
   });
@@ -159,8 +155,9 @@ test('retained Modal usage stays charged when a legacy run eventually used local
       },
     ],
   };
+  backend.cost = { ...cost(1), runner: 'modal' };
   const result = trainAccounting([{ id: 'fallback', startedAt: T(0), backend }]);
   assert.equal(result.total.executions, 1);
   assert.equal(result.total.unknownCostExecutions, 0);
-  assert.equal(result.total.knownGrossCostUsd, 20 * 0.00003942 + 40 * 0.00000667);
+  assert.equal(result.total.knownGrossCostUsd, backend.cost.estimatedCostUsd);
 });

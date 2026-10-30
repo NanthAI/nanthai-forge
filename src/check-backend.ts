@@ -1,13 +1,13 @@
 import { semanticReportsSchema } from './intent-semantic-conflict.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { modalUsageCost } from './modal-cost.js';
-import { modalCredentialsRefSchema } from './check-runner-settings.js';
+import { invariant } from './errors.js';
+import { legacyCheckCredentialsRefSchema } from './legacy-check-credentials.js';
 import { checkCostSchema } from './check-cost.js';
 import type { CheckRun } from './work-types.js';
 import { partitionTests } from '../scripts/test-shards.mjs';
 
-export const modalCostUsageSchema = z.array(
+export const legacyCostUsageSchema = z.array(
   z.object({
     executionId: z.string(),
     attempt: z.number().int().nonnegative().optional(),
@@ -22,7 +22,7 @@ export const modalCostUsageSchema = z.array(
 export const checkBackendSchema = z.object({
   providerUrl: z.string().url().optional(),
   cost: checkCostSchema.optional(),
-  credentialsRef: modalCredentialsRefSchema.nullable().optional(),
+  credentialsRef: legacyCheckCredentialsRefSchema.nullable().optional(),
   retryable: z.boolean().optional(),
   verdict: z.enum(['clean', 'recovered', 'flake', 'quarantined', 'failed']).optional(),
   fileReports: semanticReportsSchema.optional(),
@@ -59,7 +59,7 @@ export const checkBackendSchema = z.object({
   lockfile: z.string().optional(),
   executionIds: z.array(z.string()).optional(),
   billableMinutes: z.array(z.object({ jobId: z.number(), minutes: z.number().nonnegative() })).optional(),
-  costUsage: modalCostUsageSchema.optional(),
+  costUsage: legacyCostUsageSchema.optional(),
   estimatedCostUsd: z.number().nonnegative().finite().optional(),
 });
 /** Keep the real process exit while admitting an explicitly assessed quarantine pass. */
@@ -76,6 +76,11 @@ export function checkRoute(
   check: CheckRun['check'],
   native: boolean,
 ) {
+  invariant(
+    runner !== 'modal',
+    'RUNNER_UNAVAILABLE',
+    'The Modal runner has been retired. Select checks.runner local or github-actions.',
+  );
   const fallback =
     runner === 'local'
       ? undefined
@@ -94,35 +99,4 @@ export function checkRoute(
 export function balanceShards(files: string[], durations: Record<string, number> = {}, full = false) {
   const count = Math.min(files.length, full ? 16 : Math.max(1, Math.ceil(files.length / 8)));
   return count ? partitionTests(files, count, durations) : [];
-}
-export function modalMonthCost(runs: Iterable<Pick<CheckRun, 'startedAt' | 'backend'>>, now = new Date()) {
-  const month = now.toISOString().slice(0, 7);
-  let estimatedCostUsd = 0,
-    recordedRuns = 0,
-    legacyRuns = 0;
-  const executions = new Set<string>();
-  for (const run of runs) {
-    if (run.backend?.actual === 'github-actions') continue;
-    if (!run.startedAt.startsWith(month) || run.backend?.estimatedCostUsd === undefined) continue;
-    recordedRuns++;
-    if (!run.backend.costUsage) {
-      estimatedCostUsd += run.backend.estimatedCostUsd;
-      legacyRuns++;
-      continue;
-    }
-    for (const usage of run.backend.costUsage) {
-      // Controller adoption and retries can report the same retained attempt.
-      if (executions.has(usage.executionId)) continue;
-      executions.add(usage.executionId);
-      estimatedCostUsd += modalUsageCost(usage);
-    }
-  }
-  return {
-    month,
-    estimatedCostUsd,
-    recordedRuns,
-    legacyRuns,
-    basis:
-      'Sandbox compute estimate (conservative) before credits and billing adjustments; CPU $0.00003942/core-second, memory $0.00000667/GiB-second at max(request, usage). Worker runtime when recorded; legacy controller-time estimates otherwise. Includes each retained safety margin; legacy estimates are uncalibrated. Excludes startup/teardown, image builds and egress. Billed spend is unknown; Modal billing is authoritative.',
-  };
 }

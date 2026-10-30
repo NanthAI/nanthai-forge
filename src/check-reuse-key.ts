@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { actionsCheckRuntime, checkRoute } from './check-backend.js';
 import { readPolicy } from './work-autonomy.js';
-import { modalRuntime } from './modal-plan.js';
 import { digest } from './hash.js';
 import { NativeSource } from './native-source.js';
 import { workGit } from './work-git.js';
@@ -95,10 +94,7 @@ export function currentCheckReuseKey(
       ...(route.actual === 'local'
         ? {}
         : {
-            runtime:
-              route.actual === 'github-actions'
-                ? actionsCheckRuntime(policy?.repo, policy?.runsOn)
-                : modalRuntime,
+            runtime: actionsCheckRuntime(policy?.repo, policy?.runsOn),
           }),
     };
   }
