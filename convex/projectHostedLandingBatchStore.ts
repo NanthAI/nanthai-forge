@@ -10,7 +10,7 @@ import {
   hostedLandingStateSchema,
   landingObservation,
 } from '../src/hosted-landing';
-import { HOSTED_BATCH_MEMBERS } from '../src/hosted-landing-batch';
+import { HOSTED_BATCH_MEMBERS, hostedBatching } from '../src/hosted-landing-batch';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import {
   landingRow,
@@ -94,6 +94,8 @@ export async function formLandingBatch(
 ) {
   if (!selected.row.batchSelection || selected.state.batchId || selected.state.batchSolo) return false;
   const own = hostedLandingAttemptSchema.parse(JSON.parse(selected.row.batchSelection));
+  // Opt-in is pinned with the admitted policy; members share its digest.
+  if (!hostedBatching(own.policy)) return false;
   const order = await activeLandingOrder(
     ctx,
     { projectId: input.projectId, channel: 'main' },

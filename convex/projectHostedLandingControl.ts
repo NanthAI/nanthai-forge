@@ -62,8 +62,9 @@ export async function claimLandingQueue(
     (row.attemptId !== queue.lease!.attemptId || row.phase === 'terminal-failed' || row.phase === 'landed')
   )
     row = null;
+  const held = { until: null as number | null };
   if (!row) {
-    row = await nextTrainLandingRow(ctx, queue);
+    row = await nextTrainLandingRow(ctx, queue, now, held);
     if (row?.priority === 'urgent' && queue.train?.length && !queue.train.includes(row.submissionId)) {
       const leader = await loadLanding(ctx, { projectId: input.projectId, submissionId: queue.train[0]! });
       if (leader.state.batchId) {
@@ -75,6 +76,9 @@ export async function claimLandingQueue(
   }
   if (!row) {
     await ctx.db.patch(queue._id, { lease: null, wake: null });
+    // A held train still owns one wake: when its hold ends the queue moves on.
+    if (held.until !== null)
+      await scheduleLandingWake(ctx, { ...queue, lease: null, wake: null }, held.until, now);
     return null;
   }
   const lease = {

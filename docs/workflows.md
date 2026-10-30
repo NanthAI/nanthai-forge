@@ -74,6 +74,10 @@ escalate to full. A full or docs pass satisfies either gate. Each acceptance sti
 checks the exact Candidate, current policy, main head and receipt; a contract from
 another run is not passing evidence.
 
+Trusted landings pass without a batch: each eligible entry checks alone at the
+head of the queue under this gate. Hosted landing batches are opt-in
+(`acceptance.landing: "batched"`) and always run the full gate.
+
 For a combined Candidate, every member must be eligible for the contract gate;
 its check covers the union of their declared tests. One full-gated member makes
 the combined check full.

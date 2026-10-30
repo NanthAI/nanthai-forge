@@ -191,4 +191,3 @@ export type HostedLandingState = z.infer<typeof hostedLandingStateSchema>;
 export const landingObservation = (status: string, code?: string) =>
   submissionOutcome({ status, ...(code ? { code } : {}) });
 export const HOSTED_LANDING_LEASE_MS = 30_000;
-export const HOSTED_LANDING_PAGE_ROWS = 100;

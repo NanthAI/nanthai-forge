@@ -6,6 +6,13 @@ import type { HostedRecord } from './hosted-records.js';
 
 /** Transaction/compose window, never an admission limit. Remaining work stays queued. */
 export const HOSTED_BATCH_MEMBERS = 8;
+/** A train with no member checking holds later deferred entries this long after
+ * its newest compose or selection; then the queue drops it and moves on. A healthy
+ * compose takes about 90 s; a dead one must never stop the queue. */
+export const HOSTED_TRAIN_HOLD_MS = 5 * 60_000;
+/** Batches are an opt-in optimisation (`acceptance.landing: 'batched'`). By
+ * default each eligible entry checks alone at the head of the queue. */
+export const hostedBatching = (policy: AutonomyPolicy) => policy.acceptance.landing === 'batched';
 export const batchComposeSchema = z
   .object({
     members: z.array(z.uuid()).min(2).max(HOSTED_BATCH_MEMBERS),

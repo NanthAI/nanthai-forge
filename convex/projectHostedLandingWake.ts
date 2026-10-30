@@ -16,12 +16,21 @@ import { landingRow } from './projectHostedLandingStore';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { nextLandingRow, nextReadyLandingRow, orderHostedLandingRows } from './projectHostedLandingOrder';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 
 /** The active eligible cohort retains its place while source/check IO runs.
- * Later arrivals accumulate for one current-main batch. Eight exact reads at
- * most, plus bounded priority-class heads for non-batchable work.
- * No history scan, parked-request writes, or polling wake. */
-export async function nextTrainLandingRow(ctx: MutationCtx, queue: Doc<'projectHostedLandingQueues'>) {
+ * Later deferred arrivals wait behind it only while it is live: a member is
+ * checking or ready, or its newest compose started under HOSTED_TRAIN_HOLD_MS ago. A dead
+ * compose never stops the queue; the train is dropped and its members return
+ * through their own finish and check wakes. `held.until` names the one wake a
+ * caller schedules when nothing is selectable yet. Eight exact reads at most,
+ * plus bounded priority-class heads for non-batchable work. No history scan. */
+export async function nextTrainLandingRow(
+  ctx: MutationCtx,
+  queue: Doc<'projectHostedLandingQueues'>,
+  now = Date.now(),
+  held: { until: number | null } = { until: null },
+) {
   // A passed proof accepts before any new check or cohort starts, urgent included.
   const ready = await nextReadyLandingRow(ctx, queue);
   if (ready) return ready;
@@ -61,6 +70,21 @@ export async function nextTrainLandingRow(ctx: MutationCtx, queue: Doc<'projectH
       }
       const own = pending.find(row => row!.runnable);
       if (own) return own;
+      // A checking or passed (publishing) member has a live owner of record.
+      const until = pending.some(row => row!.phase === 'checking' || row!.phase === 'ready')
+        ? null
+        : Math.max(
+            ...states.map(state =>
+              Math.max(
+                Date.parse(state.timing?.composeStartedAt ?? state.at),
+                Date.parse(state.timing?.selectedAt ?? state.at),
+              ),
+            ),
+          ) + HOSTED_TRAIN_HOLD_MS;
+      if (until !== null && until <= now) {
+        await ctx.db.patch(queue._id, { train: undefined });
+        return nextLandingRow(ctx, queue);
+      }
       // The train coalesces eligible deferred checks only. Ordinary owner,
       // contributor, dependency and recovery work retains its existing path.
       // Include legacy projections without batchable; at most eight train rows
@@ -94,7 +118,9 @@ export async function nextTrainLandingRow(ctx: MutationCtx, queue: Doc<'projectH
         }
         if (priority === 'urgent' && outside.length) break;
       }
-      return orderHostedLandingRows(outside)[0] ?? null;
+      const next = orderHostedLandingRows(outside)[0] ?? null;
+      if (!next) held.until = until;
+      return next;
     }
     await ctx.db.patch(queue._id, { train: undefined });
   }
@@ -112,8 +138,9 @@ export async function releaseLandingQueue(
   if (queue.wake) await ctx.scheduler.cancel(queue.wake.taskId);
   await ctx.db.patch(queue._id, { lease: null, wake: null });
   // Publication only needs a presence probe; the next claim applies priority.
+  const held = { until: null as number | null };
   const pending = queue.train?.length
-    ? await nextTrainLandingRow(ctx, queue)
+    ? await nextTrainLandingRow(ctx, queue, now, held)
     : (
         await ctx.db
           .query('projectHostedLandingRequests')
@@ -122,9 +149,9 @@ export async function releaseLandingQueue(
           )
           .take(1)
       )[0];
-  if (pending) {
+  if (pending || held.until !== null) {
     const current = (await landingQueue(ctx, queue))!;
-    await scheduleLandingWake(ctx, current, now, now);
+    await scheduleLandingWake(ctx, current, pending ? now : held.until!, now);
   }
 }
 /** Consume a bounded metadata window. Removing checking from the matching index

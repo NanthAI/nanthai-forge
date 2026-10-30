@@ -34,6 +34,8 @@ export const autonomyPolicySchema = z.object({
     disjointFastPath: z.boolean().optional(),
     /** Hosted clean-recomposition proof; absent means on. Independent of native fast path. */
     hostedCrossHeadReuse: z.boolean().optional(),
+    /** Native: `optimistic` opts into optimistic landing. Hosted: `batched` opts into
+     * landing batches; absent checks each deferred entry alone. */
     landing: z.enum(['batched', 'optimistic']).optional(),
     /** Remote runners only: wait up to this long after the oldest queued landing before the first check. */
     batchWindowMs: z.number().int().min(0).max(60_000).optional(),

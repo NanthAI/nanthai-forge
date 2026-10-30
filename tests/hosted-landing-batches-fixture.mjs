@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { finishFixture, compose, driver, records } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { policyPreset } from '../dist/autonomy-policy.js';
 export const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon.ts'));
 export const batchPublish = await import(moduleUrl('../convex/projectHostedLandingBatchPublish.ts'));
 export const batchStore = await import(moduleUrl('../convex/projectHostedLandingBatchStore.ts'));
@@ -19,11 +20,19 @@ export async function batchesFixture(
     memberContracts,
     memberPaths,
     memberFileCount = 1,
+    batching = true,
   } = {},
 ) {
   const f = await finishFixture(t, { fileCount });
+  // Hosted batches are opt-in; these fixtures exercise them unless told not to.
+  if (batching) {
+    const policy = policyPreset('trusted');
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, landing: 'batched' } },
+    });
+  }
   const entries = [];
-  for (let i = 0; i < count; i++) {
+  const add = async i => {
     const memberPath = memberPaths?.[i] ?? (conflict && i < 2 ? 'collision' : `member-${i}`);
     const pin = f.c.state(
       [
@@ -98,7 +107,9 @@ export async function batchesFixture(
     });
     const state = await f.enqueue(request);
     entries.push({ lane, selection, candidate, request, state });
-  }
+    return state;
+  };
+  for (let i = 0; i < count; i++) await add(i);
   const publications = [];
   const execute = async (task, stop = null) => {
     if (task.name === 'projectHostedBatchAbandon:reselect') {
@@ -183,7 +194,7 @@ export async function batchesFixture(
       }),
     );
   };
-  return { ...f, entries, execute, drain, runs, fail, publications };
+  return { ...f, entries, add, execute, drain, runs, fail, publications };
 }
 export const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',

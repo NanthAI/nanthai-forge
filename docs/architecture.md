@@ -1444,8 +1444,11 @@ Only runnable requests enter selection. Indexed priority-class heads select urge
 owner requests before normal requests; shared native ordering supplies arrival
 order and within-class fairness for batch selection and queue positions. Missing
 legacy priority means normal. Owner reprioritisation patches one queued submission
-without a wake or poller. Unstarted batches yield to urgent work before reserving
-a check; reserved checks continue. See [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). Checking,
+without a wake or poller. Hosted batches are opt-in (`acceptance.landing:
+"batched"`). Unstarted batches yield to urgent work before reserving
+a check; reserved checks continue. A retained train with no member checking holds
+later deferred entries for at most `HOSTED_TRAIN_HOLD_MS` after its newest compose;
+then selection drops it, with one scheduled queue wake for the hold's end. See [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). Checking,
 ready and terminal records remain readable without hiding later independent work.
 H10 run updates transactionally schedule one coalesced check wake; bounded metadata
 pages reactivate its waiters and wake their Channel. Fan-out automatically continues
