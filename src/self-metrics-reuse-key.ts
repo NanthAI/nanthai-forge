@@ -22,3 +22,31 @@ export function selfMetricReuseKey(input: {
     }),
   );
 }
+/** Hosted plan key: exact tree, definition, lockfile, runtime and environment pins
+ * plus the selected tests. The runtime pin includes the Node patch, so this
+ * can undercount reuse opportunities but never merges different evidence. */
+export function hostedRunReuseKey(
+  plan:
+    | {
+        head: string;
+        definition: string;
+        lockfile: string;
+        runtime: string;
+        environmentFingerprint: string;
+        selection: { sha256: string };
+      }
+    | null
+    | undefined,
+) {
+  if (!plan) return null;
+  return digest(
+    canonicalPayload({
+      tree: plan.head,
+      definition: plan.definition,
+      lockfile: plan.lockfile,
+      runtime: plan.runtime,
+      environment: plan.environmentFingerprint,
+      selection: plan.selection.sha256,
+    }),
+  );
+}

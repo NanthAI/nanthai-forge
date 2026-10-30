@@ -4,6 +4,7 @@ import { sourcePackUploadSchema } from './source-pack.js';
 import { checkHash, checkNumber, checkObject, checkPin, type HostedCheckRun } from './hosted-check.js';
 import { outputMessage, signOutput, type OutputMessage } from './hosted-check-output.js';
 import { hostedCheckCallbackSchema, type HostedCheckCallback } from './hosted-check-evidence.js';
+import { canonicalPayload } from './hosted-source-operation.js';
 import { semanticReportsSchema } from './intent-semantic-conflict.js';
 import { invariant } from './errors.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
@@ -24,8 +25,38 @@ export const directResultSchema = z
     contractReports: semanticReportsSchema.optional(),
     // Compatibility metadata only; retained summaries are derived from contractReports.
     testFiles: checkFileSummarySchema.optional(),
+    // Supervisor process start to result: includes setup and tests, not earlier workflow steps.
+    execution: z.object({ startedAt: z.iso.datetime(), endedAt: z.iso.datetime() }).strict().optional(),
   })
   .strip();
+/** GitHub's job limit plus clock slack. Implausible runner clocks stay unknown, never fail a check. */
+const maxShardSeconds = 6 * 3600 + 600,
+  clockSlackMs = 5 * 60_000;
+export function shardExecution(
+  input: z.infer<typeof directResultSchema>['execution'],
+  runAt: string,
+  now: number,
+) {
+  if (!input) return undefined;
+  const start = Date.parse(input.startedAt),
+    end = Date.parse(input.endedAt);
+  if (!(start <= end && start >= Date.parse(runAt) - clockSlackMs && end <= now + clockSlackMs))
+    return undefined;
+  const seconds = (end - start) / 1000;
+  return seconds <= maxShardSeconds ? { ...input, seconds } : undefined;
+}
+/** Observed only when every planned shard retained an interval; otherwise unknown. */
+export function actionsExecutionCost(run: Pick<HostedCheckRun, 'id' | 'execution'>, shardCount: number) {
+  if (!run.execution || run.execution.shards < shardCount) return { status: 'unknown' as const };
+  const summary = { runId: run.id, ...run.execution };
+  return {
+    status: 'observed' as const,
+    receipt: { sha256: checkPin(summary), size: Buffer.byteLength(canonicalPayload(summary)) },
+    seconds: run.execution.seconds,
+    // Billed dollars come only from owner-entered bills, never from runner minutes.
+    estimatedCostUsd: null,
+  };
+}
 export const directPlanSchema = z.object({ recipe: hostedActionsRecipeSchema, lockfile: checkHash }).strict();
 // Command/result metadata may grow. Identity, pins, logs and recipes remain strict.
 export const directCommandSchema = z.discriminatedUnion('kind', [

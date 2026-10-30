@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs, checkDocument } from './convex-args.mjs';
 const api = await import(moduleUrl('../convex/projectSelfMetrics.ts'));
+const bills = await import(moduleUrl('../convex/projectSelfMetricBills.ts'));
+const handlers = { 'projectSelfMetrics:page': api.page, 'projectSelfMetricBills:page': bills.page };
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 export const period = { from: '2026-10-28T00:00:00.000Z', to: '2026-11-04T00:00:00.000Z' };
 export const seam = '2026-10-28T00:00:00.000Z';
@@ -44,6 +46,10 @@ export function fixture() {
   const ctx = {
     auth: { getUserIdentity: async () => (actor ? { subject: actor } : null) },
     db: {
+      insert: async (table, row) => {
+        meter.writes++;
+        return put(table, row, new Date().toISOString())._id;
+      },
       get: async id => {
         const row =
           documentsById.get(id) ??
@@ -125,11 +131,18 @@ export function fixture() {
     },
   };
   const query = async (name, args) => {
-    assert.equal(name, 'projectSelfMetrics:page');
+    const handler = handlers[name];
+    assert(handler, name);
     meter.calls++;
     const input = { ...args, projectId: project._id };
-    checkArgs(api.page, input, name);
-    return api.page._handler(ctx, input);
+    checkArgs(handler, input, name);
+    return handler._handler(ctx, input);
+  };
+  // Owner bill writes use the registered mutation and validators.
+  const recordBill = async bill => {
+    const input = { projectId: project._id, bill: JSON.stringify(bill) };
+    checkArgs(bills.record, input, 'projectSelfMetricBills:record');
+    return JSON.parse(await bills.record._handler(ctx, input));
   };
   const landing = (id, submitted, accepted, trusted = true) => {
     const request = { id, at: submitted, phase: 'landed', timing: { submittedAt: submitted }, error: null };
@@ -203,6 +216,7 @@ export function fixture() {
     project,
     meter,
     query,
+    recordBill,
     put,
     landing,
     run,

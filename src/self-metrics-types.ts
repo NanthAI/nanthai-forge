@@ -74,6 +74,10 @@ export type MetricRecords = {
   receipts: SelfMetricReceipt[];
   incompleteReceiptRecords?: number;
   checkRequests?: { id: string; at: string; runId: string; reused: boolean; reuseKey?: string | undefined }[];
+  /** Owner-entered hosted bills, including superseded corrections. */
+  bills?: import('./self-metrics-bills.js').RecordedBill[];
+  /** Earliest landing read for bill-period denominators. */
+  billHistoryFrom?: string;
   /** Earliest instant for which the producer guarantees complete collection. */
   coverage?: {
     overlaps?: string | undefined;

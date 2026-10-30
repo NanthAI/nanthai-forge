@@ -13,6 +13,7 @@ import { hostedActionError } from './hosted-action-error.js';
 import { invariant } from './errors.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { minutesBetween, type MetricPeriod, type MetricRecords } from './self-metrics-types.js';
+import { readHostedBills } from './self-metrics-bills.js';
 import { metricReceiptRowSchema } from './self-metric-receipts.js';
 import { hostedCallerReceipts } from './self-metrics-hosted-receipts.js';
 export type MetricQuery = ((name: string, args: Record<string, unknown>) => Promise<unknown>) & {
@@ -73,6 +74,7 @@ const rowSchemas = {
     runnerMinutes: z.number().nonnegative().nullable(),
     fullSuite: z.boolean().nullable(),
     inputPin: pin,
+    reuseKey: z.string().nullable().optional(),
   }),
   attempts: z.object({
     id: z.string(),
@@ -88,10 +90,7 @@ const rowSchemas = {
   operations: z.object({ id: z.string(), mutation: mutation.optional() }),
   receipts: metricReceiptRowSchema,
 };
-const gaps = [
-  'Hosted overlap acknowledgements, provider bills and authority observations need durable coverage.',
-  'Hosted reuse keys and request/adoption receipts remain unavailable.',
-];
+const gaps = ['Hosted overlap acknowledgements and authority observations need durable coverage.'];
 export async function readHostedMetricPages(query: MetricQuery, period: MetricPeriod, summary = false) {
   const records: MetricRecords = {
     moves: [],
@@ -109,7 +108,8 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
       'Hosted results without explicit full-suite selection and pre-context boundary results remain unknown.',
     landingKindsComplete: true,
   };
-  let cutover: string | null = null;
+  let cutover: string | null = null,
+    reuseKeysProjected = true;
   const pins = new Map<string, MetricPin>();
   const attempts: MetricAttempt[] = [],
     lanes: MetricLane[] = [],
@@ -187,13 +187,24 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
           } else if (stream === 'runs') {
             const row = rowSchemas.runs.parse(rawRow);
             if (row.inputPin) pins.set(`run:${row.id}`, row.inputPin);
+            const { reuseKey, ...run } = row;
+            if (reuseKey === undefined) reuseKeysProjected = false;
             records.runs.push({
-              ...row,
+              ...run,
               inputs: [],
               endedAt: row.endedAt ?? undefined,
               wallMinutes: minutesBetween(row.at, row.endedAt ?? undefined),
               runnerMinutes: row.runnerMinutes ?? undefined,
               fullSuite: row.fullSuite ?? false,
+              ...(reuseKey ? { reuseKey } : {}),
+            });
+            // Hosted landing never adopts earlier check evidence: each run row is its own request.
+            (records.checkRequests ??= []).push({
+              id: row.id,
+              at: row.at,
+              runId: row.id,
+              reused: false,
+              ...(reuseKey ? { reuseKey } : {}),
             });
           } else if (stream === 'requests') {
             const row = rowSchemas.requests.parse(rawRow);
@@ -270,7 +281,13 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
       'METRICS_UNAVAILABLE: the hosted self-metrics module is unavailable; no native fallback was used.',
     );
   }
+  if (reuseKeysProjected && cutover) records.coverage = { ...records.coverage, checkRequests: cutover };
+  else records.gaps.push('Hosted reuse keys need the deployed projectSelfMetrics runs projection.');
   if (!records.error && !summary) {
+    records.billHistoryFrom = new Date(Date.parse(period.from) - 30 * 86400000).toISOString();
+    await readHostedBills(query, period, records).catch(error => {
+      throw hostedActionError(error, 'metrics');
+    });
     hostedCallerReceipts(records, receiptRows, receiptCoverage, period);
     const requests = records.submissions;
     joinMetricAttempts(records, attempts, pins);

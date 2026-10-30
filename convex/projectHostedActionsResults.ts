@@ -7,6 +7,8 @@ import {
   directResultSchema,
   directLogSchema,
   directCallback,
+  shardExecution,
+  actionsExecutionCost,
 } from '../src/hosted-actions-direct';
 import { outputSigningKey } from './projectHostedOutputApi';
 import { authorizeOutputWindow, commitHostedOutputWindow } from './projectHostedOutputStore';
@@ -71,6 +73,7 @@ export const result = internalMutation({
         })),
         outputSigningKey,
       );
+    const execution = shardExecution(result.execution, run.at, Date.now());
     const callback = directCallback(run, {
       kind: 'shard',
       shard: {
@@ -80,6 +83,7 @@ export const result = internalMutation({
         status: result.exitCode === 0 ? 'passed' : 'failed',
         exitCode: result.exitCode,
         output: result.log?.object ?? null,
+        ...(execution ? { execution } : {}),
       },
     });
     run = await receiveHostedCheckCallback(
@@ -91,6 +95,12 @@ export const result = internalMutation({
       },
       outputSigningKey,
     );
+    // Counted once per index: replays return before this point.
+    if (execution)
+      run.execution = {
+        seconds: (run.execution?.seconds ?? 0) + execution.seconds,
+        shards: (run.execution?.shards ?? 0) + 1,
+      };
     const combined = applyCheckRetryBudget({ ...run.contractReports, ...result.contractReports });
     run.contractReports = capCheckReports(combined).reports;
     run.testFiles = checkFileSummary(run.contractReports);
@@ -109,7 +119,7 @@ export const result = internalMutation({
         status: run.cancelRequested ? 'cancelled' : failed ? 'failed' : 'passed',
         exitCode: run.cancelRequested ? null : failed ? 1 : 0,
         output: null,
-        cost: { status: 'unknown' },
+        cost: actionsExecutionCost(run, run.plan!.shardCount),
         contractReports: run.contractReports,
       });
       run = await receiveHostedCheckCallback(

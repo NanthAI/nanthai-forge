@@ -8,6 +8,7 @@ import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-lan
 import type { HostedRecord } from '../src/hosted-records';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { invariant } from '../src/errors';
+import { hostedRunReuseKey } from '../src/self-metrics-reuse-key';
 import { report } from './errors';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
 
@@ -202,6 +203,7 @@ export const page = query({
               runnerMinutes:
                 run.cost.status === 'observed' && run.cost.seconds !== null ? run.cost.seconds / 60 : null,
               inputPin: run.candidate?.inputs ?? null,
+              reuseKey: hostedRunReuseKey(run.plan),
               // Explicit selection is evidence; a check name alone is not.
               fullSuite:
                 (run.gate ?? run.request.gate)

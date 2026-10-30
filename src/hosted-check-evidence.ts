@@ -15,6 +15,14 @@ import {
 } from './hosted-check.js';
 import { invariant } from './errors.js';
 
+/** Runner-clock interval of one supervised shard job. Optional for legacy rows. */
+export const shardExecutionSchema = z
+  .object({
+    startedAt: z.iso.datetime(),
+    endedAt: z.iso.datetime(),
+    seconds: z.number().finite().nonnegative(),
+  })
+  .strict();
 export const hostedCheckShardSchema = z
   .object({
     index: checkNumber,
@@ -23,6 +31,7 @@ export const hostedCheckShardSchema = z
     status: z.enum(['running', 'passed', 'failed', 'cancelled', 'interrupted']),
     exitCode: z.number().int().nullable(),
     output: checkObject.nullable(),
+    execution: shardExecutionSchema.optional(),
   })
   .strict();
 export const hostedCheckCallbackSchema = z

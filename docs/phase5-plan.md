@@ -128,6 +128,26 @@ linked-retry intervention receipts; other owner interventions remain a named gap
 JSON is the default for agents and redirected output; a terminal gets a short
 text table (`--text` also selects it explicitly).
 
+The owner records provider bills; Forge never fetches them:
+`nforge metrics record-bill ROOT --provider convex --from 2026-10-27 --to 2026-11-27 --billed-usd N --usage egress-gb=Q,db-io-gb=Q --rate egress-gb=0.132,db-io-gb=0.22`.
+Providers are `convex`, `github-actions`, `r2` and `netlify`; `blacksmith` and
+`modal` remain for retired runners. Each bill is one small idempotent write:
+identical input reconciles, and a correction for the same provider and period
+start replaces the earlier figure. Full reports add one bill page; status adds
+none. 5.8 `periods` reports each bill over its own provider cycle: landings,
+billed dollars per landing, and an estimate of quantity × configured rate.
+Actions estimates use Forge's own retained shard minutes, while other providers
+use the usage entered with the bill. Estimator error is undefined for a zero bill.
+
+Hosted Actions shards report their supervised execution interval (runner clock,
+from supervisor start to result; earlier workflow setup steps and the plan job
+are excluded). A run becomes `observed` once every planned shard has one, so
+5.6 runner minutes are real for new runs and stay unknown for older ones. Each
+hosted run carries a reuse key of exact tree, definition, lockfile, runtime,
+environment and test selection; hosted landing never adopts earlier evidence, so
+each run is its own request receipt and the reuse rate is measured. `missedReuse`
+counts fresh runs whose key already had a passing run.
+
 `nforge agent ROOT metrics '{"from":"2026-10-14","to":"2026-10-25"}'`
 and MCP `forge_work_overview` action `metrics` expose the same JSON. Owner status
 includes a compact last-seven-day summary. With source authority mode `server`,
@@ -138,7 +158,7 @@ Spanning windows join native evidence before the recorded cutover timestamp and
 hosted evidence at/after it, naming that authority seam. Hosted context is bounded
 to thirty days before the window (one day for status); pages are live observations,
 not a cross-page snapshot. Missing historical inputs, caller delivery, legacy
-full-suite selection, reuse keys, requester history and billing evidence stay named gaps. Trusted finish-to-main
+full-suite selection, requester history and missing bills stay named gaps. Trusted finish-to-main
 p50 uses submission/acceptance timestamps under the recorded attempt policy,
 never free text. An older deployment without `projectSelfMetrics` returns
 `METRICS_UNAVAILABLE` with coverage gaps. Deploy Convex before the client.

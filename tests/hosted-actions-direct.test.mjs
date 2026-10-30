@@ -350,6 +350,58 @@ test('duplicate results are immutable and complete shard evidence is needed to p
   assert.equal(s.scheduled.length, scheduled);
 });
 
+test('retained shard execution intervals make Actions runner seconds observed; a missing interval stays unknown', async t => {
+  for (const timed of [2, 1]) {
+    const s = await fixture(t);
+    await s.bind();
+    await s.prepare();
+    const start = Date.parse(s.run.at);
+    const send = (index, seconds) =>
+      s.call(results, 'result', {
+        ...s.input(),
+        result: JSON.stringify({
+          index,
+          exitCode: 0,
+          ...(index < timed
+            ? {
+                execution: {
+                  startedAt: new Date(start).toISOString(),
+                  endedAt: new Date(start + seconds * 1000).toISOString(),
+                },
+              }
+            : {}),
+        }),
+      });
+    await send(0, 90);
+    const terminal = await send(1, 30);
+    assert.equal(terminal.status, 'passed');
+    const shards = [...s.tables.projectHostedCheckShards.values()].map(row => JSON.parse(row.value));
+    assert.equal(shards.filter(shard => shard.execution).length, timed);
+    if (timed === 2) {
+      assert.equal(terminal.cost.status, 'observed');
+      assert.equal(terminal.cost.seconds, 120);
+      assert.equal(terminal.cost.estimatedCostUsd, null, 'runner minutes are never a bill');
+    } else assert.deepEqual(terminal.cost, { status: 'unknown' });
+  }
+});
+test('implausible runner clocks are dropped without failing the shard', async () => {
+  const { shardExecution, actionsExecutionCost } = await import('../dist/hosted-actions-direct.js');
+  const runAt = '2026-10-30T10:00:00.000Z',
+    now = Date.parse('2026-10-30T11:00:00.000Z');
+  const interval = (from, to) => ({ startedAt: from, endedAt: to });
+  assert.equal(shardExecution(interval(runAt, '2026-10-30T10:02:00.000Z'), runAt, now).seconds, 120);
+  assert.equal(shardExecution(interval('2026-10-30T10:02:00.000Z', runAt), runAt, now), undefined);
+  assert.equal(shardExecution(interval('2026-10-30T09:00:00.000Z', runAt), runAt, now), undefined);
+  assert.equal(shardExecution(interval(runAt, '2026-10-30T12:00:00.000Z'), runAt, now), undefined);
+  assert.equal(shardExecution(undefined, runAt, now), undefined);
+  const cost = actionsExecutionCost({ id: 'run', execution: { seconds: 12, shards: 2 } }, 2);
+  assert.equal(cost.status, 'observed');
+  assert.equal(cost.seconds, 12);
+  assert.deepEqual(actionsExecutionCost({ id: 'run', execution: { seconds: 5, shards: 1 } }, 2), {
+    status: 'unknown',
+  });
+  assert.deepEqual(actionsExecutionCost({ id: 'run' }, 2), { status: 'unknown' });
+});
 test('Actions timing history is advisory, project-scoped and records completed failures only once', async t => {
   const s = await fixture(t);
   await s.bind();

@@ -52,8 +52,11 @@ export function joinMetricAuthority(
     ...right.filter(after),
   ];
   const seam = `Authority seam at ${cutover}: native before cutover, hosted at/after cutover; authority epochs and collection gaps remain separate.`;
+  // Native history supplies landings before the hosted context horizon.
+  const joined = { ...hosted };
+  delete joined.billHistoryFrom;
   return {
-    ...hosted,
+    ...joined,
     moves: merge(native.moves, hosted.moves),
     submissions: merge(native.submissions, hosted.submissions),
     runs: merge(native.runs, hosted.runs),

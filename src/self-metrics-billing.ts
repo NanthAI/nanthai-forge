@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MetricRecords, MetricPeriod } from './self-metrics-types.js';
 import { observations, during, time, ratio } from './self-metrics-joins.js';
+import { calculateBillPeriods, currentBillProviders } from './self-metrics-bills.js';
 /** Bills, including real zero bills, are authoritative. Never infer an invoice from an estimate. */
 export function calculateBillingMetrics(records: MetricRecords, period: MetricPeriod) {
   const bills = observations(records)
@@ -74,9 +75,10 @@ export function calculateBillingMetrics(records: MetricRecords, period: MetricPe
         !selected.length || selected.some(b => b.estimateUsd === null)
           ? null
           : selected.reduce((n, bill) => n + bill.estimateUsd!, 0);
-      const missingProviders = (
-        ['modal', 'blacksmith', 'github-actions', 'convex', 'netlify', 'r2'] as const
-      ).filter(provider => !selected.some(bill => bill.provider === provider));
+      // Retired Modal/Blacksmith bills count when entered but are not required.
+      const missingProviders = currentBillProviders.filter(
+        provider => !selected.some(bill => bill.provider === provider),
+      );
       return {
         month,
         partial: !!missingProviders.length || listUsd === null || estimateUsd === null,
@@ -101,10 +103,13 @@ export function calculateBillingMetrics(records: MetricRecords, period: MetricPe
         })),
       };
     });
+  const periods = calculateBillPeriods(records, period);
   return {
-    partial: !months.length || months.some(month => month.partial),
+    partial: !months.length || months.some(month => month.partial) || periods.some(row => row.partial),
+    periods,
     gaps: [
       "Only entered project bills are included. Missing provider/month bills, list prices and estimates stay partial. Run-linked bills join exact saved inputs; unjoined runs and shared services are allocated evenly over the month's ordinary landings.",
+      'Bill periods follow the provider cycle; the monthly table attributes a whole bill to its start month.',
     ],
     months,
   };

@@ -247,7 +247,18 @@ export function calculateSelfMetrics(
         ),
     ).length;
   const unknownReuseHistory = coverage(records, 'checkRequests', period.from) || !!incompleteReceiptRecords;
-  const unknownReuseKeys = runs.filter(r => !r.reuseKey).length;
+  // A request that never started executed nothing, so its key cannot change reuse.
+  const unknownReuseKeys = runs.filter(r => !r.reuseKey && r.started !== false).length;
+  // Fresh runs whose exact key already had a passing run: evidence that reuse could have adopted.
+  const passedKeys = new Map<string, number>();
+  for (const run of records.runs)
+    if (run.status === 'passed' && run.reuseKey && run.endedAt) {
+      const ended = instant(run.endedAt);
+      passedKeys.set(run.reuseKey, Math.min(passedKeys.get(run.reuseKey) ?? ended, ended));
+    }
+  const repeatRuns = runs.filter(
+    r => !r.reusedFrom && r.started !== false && r.reuseKey && passedKeys.get(r.reuseKey)! < instant(r.at),
+  );
   const runGaps = [
     ...receiptGaps,
     ...(unknownReuseHistory
@@ -377,6 +388,14 @@ export function calculateSelfMetrics(
       reused: unknownReuseHistory && !reused ? null : reused,
       fullChecksStarted,
       reuseRate: unknownReuseKeys || unknownReuseHistory ? null : ratio(reused, reused + fullChecksStarted),
+      missedReuse: {
+        runs: repeatRuns.length,
+        runnerMinutes: repeatRuns.some(r => r.runnerMinutes === undefined)
+          ? null
+          : repeatRuns.reduce((n, r) => n + r.runnerMinutes!, 0),
+        basis:
+          'Fresh started runs whose complete reuse key matched an earlier passing run. Runs without a key are not counted.',
+      },
     },
     gaps: [...records.gaps, ...receiptGaps],
   };

@@ -7,6 +7,7 @@ export const actionsPreflightCapability = 'session.preflight';
 export const hostedActionsCapabilities = [
   'results.testFiles',
   'results.testFiles.truncated',
+  'results.execution',
   'session.timingHistory',
   'sourcePack',
   actionsPreflightCapability,
@@ -15,6 +16,7 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'session.timings': 'session.timingHistory',
   'result.result.testFiles': 'results.testFiles',
   'result.result.testFiles.truncated': 'results.testFiles.truncated',
+  'result.result.execution': 'results.execution',
 };
 /** Whole-command extensions gate every nested runner-sent field. */
 export const actionsCapabilityCommands: Readonly<Record<string, string>> = { sourcePack: 'sourcePack' };

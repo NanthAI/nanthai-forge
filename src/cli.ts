@@ -52,6 +52,7 @@ Browse packaged documentation: nforge docs
 Usage:
   nforge worker DEPLOYMENT_URL PROJECT_ID MACHINE_UUID
   nforge metrics ROOT [--from DATE] [--to DATE] [--json] [--report FILE.md] [--compare FROM..TO]
+  nforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [--list-usd N] [--usage unit=qty,...] [--rate unit=usd,...] [--basis TEXT]
   nforge improve ROOT [--json]
   nforge release ROOT --command-file FILE | --resume UUID | --status UUID
   nforge land ROOT LANE… [--message MESSAGE] [--operation-id UUID] [--wait]

@@ -204,6 +204,11 @@ export const hostedCheckRunSchema = z
     counts: z.object({ completed: checkNumber, passed: checkNumber, failed: checkNumber }).strict(),
     terminalDigest: checkHash.nullable(),
     macEvidence: hostedMacEvidenceSchema.optional(),
+    // Running sum of retained shard execution intervals; shard rows keep each interval.
+    execution: z
+      .object({ seconds: z.number().finite().nonnegative(), shards: checkNumber })
+      .strict()
+      .optional(),
     endedAt: z.iso.datetime().nullable(),
     exitCode: z.number().int().nullable(),
     output: checkObject.nullable(),

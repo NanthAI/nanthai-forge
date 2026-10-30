@@ -9,15 +9,19 @@ export function metricValues(t: MetricTotals): Record<keyof typeof metricNames, 
     '5.3': number(t['5.3'].dropped),
     '5.4': `${number(t['5.4'].delivered)}/${number(t['5.4'].overlappingSaves)} delivered; acknowledgement ${number(t['5.4'].acknowledgementRate)}; median ${number(t['5.4'].medianDeliverySeconds)} s`,
     '5.5': `${number(t['5.5'].perLanding)} (${number(t['5.5'].interventions)} interventions)`,
-    '5.6': `${number(t['5.6'].runnerMinutesPerLanding)} runner, ${number(t['5.6'].wallMinutesPerLanding)} wall; reuse ${number(t['5.6'].reuseRate)}; total ${number(t['5.6'].runnerMinutes)} runner / ${number(t['5.6'].wallMinutes)} wall min`,
+    '5.6': `${number(t['5.6'].runnerMinutesPerLanding)} runner, ${number(t['5.6'].wallMinutesPerLanding)} wall; reuse ${number(t['5.6'].reuseRate)} (missed ${number(t['5.6'].missedReuse.runs)} runs); total ${number(t['5.6'].runnerMinutes)} runner / ${number(t['5.6'].wallMinutes)} wall min`,
     '5.7': `${t['5.7'].totals.map(m => `${m.mode} ${m.revisions} revisions; p50/p95 ${number(m.secondsP50)}/${number(m.secondsP95)} s, ${number(m.revisionLagP50)}/${number(m.revisionLagP95)} revisions`).join('; ')}; contradictions ${number(t['5.7'].contradictionMinutes)} min`,
     '5.8':
-      t['5.8'].months
-        .map(
+      [
+        ...t['5.8'].periods.map(
+          p =>
+            `${p.provider} ${p.from.slice(0, 10)}..${p.to.slice(0, 10)}: $${number(p.billedUsd)} billed, $${number(p.billedUsdPerLanding)}/landing; estimate $${number(p.estimateUsd)} (${p.estimateSource}), error ${number(p.estimatorError)}`,
+        ),
+        ...t['5.8'].months.map(
           m =>
             `${m.month}: $${number(m.billedUsdPerLanding)} billed / $${number(m.listUsdPerLanding)} list; estimator error ${number(m.estimatorError)}`,
-        )
-        .join('; ') || 'unknown',
+        ),
+      ].join('; ') || 'unknown',
     R: t.R.sources.map(s => `${s.source}: ${number(s.minutes)}`).join('; '),
   };
 }

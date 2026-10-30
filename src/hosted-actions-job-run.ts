@@ -21,6 +21,8 @@ async function executeActiveActionsJob(
   shard: string,
   commandOverride?: string[],
 ) {
+  // Runner clock from supervisor process start; earlier workflow steps are not included.
+  const startedAt = new Date(Date.now() - process.uptime() * 1000).toISOString();
   // The plan artifact is a source pin, never a live execution permission.
   const run = await client.preflight();
   const recipe = JSON.parse(readFileSync(planPath, 'utf8'));
@@ -124,6 +126,7 @@ async function executeActiveActionsJob(
       ...(log ? { log } : {}),
       contractReports: reports.reports,
       testFiles: checkFileSummary(reports.reports),
+      execution: { startedAt, endedAt: new Date().toISOString() },
     },
   });
   return exitCode;

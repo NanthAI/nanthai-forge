@@ -266,7 +266,7 @@ test('the existing stdio CLI accepts explicit hosted addressing and discovers to
   assert(!existsSync(`${s.root}.forge-client`));
 });
 
-test('MCP hosted metrics uses eight finite metadata streams and its authenticated input transport', async t => {
+test('MCP hosted metrics uses eight finite metadata streams, one bill page and its authenticated input transport', async t => {
   const s = agentFixture(t);
   const api = await import(moduleUrl('../convex/projectSelfMetrics.ts'));
   const original = s.exchange.client.query.bind(s.exchange.client);
@@ -281,7 +281,12 @@ test('MCP hosted metrics uses eight finite metadata streams and its authenticate
     assert.deepEqual(pins, [input.manifest.root]);
     return [saveBytes(input.pages[0].value)];
   });
+  let billPages = 0;
   t.mock.method(s.exchange.client, 'query', async (ref, args) => {
+    if (getFunctionName(ref) === 'projectSelfMetricBills:page') {
+      billPages++;
+      return JSON.stringify({ page: [], isDone: true, continueCursor: '' });
+    }
     if (getFunctionName(ref) !== 'projectSelfMetrics:page') return original(ref, args);
     checkArgs(api.page, args, 'metrics');
     pages++;
@@ -318,6 +323,7 @@ test('MCP hosted metrics uses eight finite metadata streams and its authenticate
   assert.equal(result.operationId, null);
   assert.equal(result.result.source.kind, 'hosted');
   assert.equal(pages, 8);
+  assert.equal(billPages, 1);
   assert.deepEqual(streams, [
     'acceptances',
     'requests',

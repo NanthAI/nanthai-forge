@@ -216,7 +216,7 @@ test('source-authority gate preserves native/native-shadow readers; hosted handl
       const previous = f.meter.calls;
       const result = await readMetricRecords(root, period, { query: f.query });
       assert.equal(result.source.kind, mode === 'server' ? 'hosted' : 'native');
-      assert.equal(f.meter.calls - previous, mode === 'server' ? 8 : 0);
+      assert.equal(f.meter.calls - previous, mode === 'server' ? 9 : 0);
     }
     const previous = f.meter.calls;
     const summary = await hostedStatusMetrics(root, period.to, f.query);
@@ -238,7 +238,7 @@ test('source-authority gate preserves native/native-shadow readers; hosted handl
     });
     t.mock.method(globalThis, 'fetch', async (_url, init) => {
       const request = JSON.parse(init.body);
-      assert.equal(request.path, 'projectSelfMetrics:page');
+      assert(['projectSelfMetrics:page', 'projectSelfMetricBills:page'].includes(request.path));
       const { projectId, ...args } = request.args[0];
       assert.equal(projectId, 'project');
       return new Response(JSON.stringify({ status: 'success', value: await f.query(request.path, args) }), {
