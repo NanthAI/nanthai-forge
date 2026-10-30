@@ -80,6 +80,13 @@ function selectWithGraph({ paths, files, forceFull = false }, suppliedGraph) {
   const graph = suppliedGraph ?? testImportGraph(files, scriptsChanged);
   if (graph.error) return full(graph.error);
   const { reverse, evidence, packageGraph } = graph;
+  // Product source is data to the static tools (build, typecheck, lint, format,
+  // schema, package smoke), which run on every exact Candidate. Its chains stop at
+  // those commands, and at those tools when the tool reads it rather than imports it.
+  const fenced = (item, importer, edge) =>
+    productSource(item.changedPath) &&
+    (packageGraph.staticCommands?.has(importer) ||
+      (packageGraph.staticTools?.has(importer) && edge.kind !== 'import'));
   // The docs-check wrapper only spawns the docs check; the runner importing it is not a consumer.
   const affected = new Map();
   const spread = (items, blocked) => {
@@ -103,6 +110,7 @@ function selectWithGraph({ paths, files, forceFull = false }, suppliedGraph) {
         if (affected.has(importer)) continue;
         const previous = affected.get(current),
           edge = evidence.get(current).get(importer);
+        if (fenced(previous, importer, edge)) continue;
         affected.set(importer, {
           kind: previous.kind === 'dynamic' || edge.kind === 'dynamic' ? 'dynamic' : 'dependency',
           changedPath: previous.changedPath,
@@ -183,6 +191,8 @@ function selectWithGraph({ paths, files, forceFull = false }, suppliedGraph) {
     ),
   };
 }
+
+const productSource = path => /^(?:src|web\/src|convex|netlify)\//.test(path);
 
 function importersOf(path, reverse) {
   const visited = new Set(),

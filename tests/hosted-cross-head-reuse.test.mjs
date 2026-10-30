@@ -431,15 +431,22 @@ test('cancellation during proof analysis fences completion and cannot revive a s
 for (const incident of [true, false])
   test(
     incident
-      ? 'a39b1cdb READY 07:42–07:43 then B1.8 at 07:44:00: disjoint paths still recheck when conservative Convex impacts overlap'
+      ? 'a39b1cdb READY 07:42–07:43 then B1.8 at 07:44:00: disjoint paths still recheck when their Convex impacts overlap'
       : 'explicit hostedCrossHeadReuse:false retains the exact recheck',
     async t => {
       // Selected real changed path names; synthetic source bytes preserve privacy.
+      // Convex modules select their own graph, so the overlap is a real shared test.
       const { f, state } = await readyRace(
         t,
         incident
           ? {
-              extra: [['convex/projectFreshness.ts', 'export const freshness = 1;']],
+              extra: [
+                [
+                  'convex/projectFreshness.ts',
+                  "import './projectConvexSourceOutput.ts'; export const freshness = 1;",
+                ],
+                ['tests/project-freshness.test.mjs', "import '../convex/projectFreshness.ts';"],
+              ],
               mainFiles: [['convex/projectFreshness.ts', null]],
             }
           : { disabled: true },

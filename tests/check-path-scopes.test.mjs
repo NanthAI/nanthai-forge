@@ -70,8 +70,8 @@ test('manual QA/browser fixtures, including deletions, select UI regression cove
   }
 });
 
-test('Convex schema/functions share backend coverage; generated API includes web consumers', () => {
-  for (const path of ['convex/schema.ts', 'convex/first.ts', 'convex/_generated/api.js']) {
+test('Convex schema and generated API share backend coverage; a function module selects its graph', () => {
+  for (const path of ['convex/schema.ts', 'convex/_generated/api.js']) {
     const result = select([path]);
     assert.equal(result.scope, 'scoped');
     assert.equal(result.domain, 'convex');
@@ -80,6 +80,10 @@ test('Convex schema/functions share backend coverage; generated API includes web
     assert.ok(!result.tests.includes('tests/core.test.mjs'));
     if (path.includes('_generated')) assert.ok(result.tests.includes('tests/ui-flow.test.mjs'));
   }
+  const module = select(['convex/first.ts']);
+  assert.equal(module.domain, 'convex');
+  assert.ok(module.tests.includes('tests/first.test.mjs'));
+  assert.ok(!module.tests.includes('tests/second.test.mjs'));
 });
 
 test('core config-named modules stay core; TypeScript/Vite config widens only to its domain', () => {

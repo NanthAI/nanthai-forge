@@ -22,6 +22,11 @@ const scriptReferences = text =>
     match => match[1],
   );
 
+const staticCommand = name =>
+  /^(?:build(?::core|:web|:hosted|:core:tsc)?|typecheck(?::tsc)?|lint|format(?::check)?|check(?::schema)?|smoke:package)$/.test(
+    name,
+  );
+
 // Commands are data: never run package scripts to discover their dependencies.
 export function packageScriptGraph(files, edge) {
   let scripts;
@@ -75,8 +80,23 @@ export function packageScriptGraph(files, edge) {
   }
   for (const path of files.keys())
     if (/^scripts\/(?:package-.+|build(?:[./-].+)?)\.(?:mjs|js|ts)$/.test(path)) roots.add(path);
+  // Commands the static job runs on every exact Candidate (verify: build, typecheck,
+  // lint, format, schema and package smoke), and the scripts those commands name.
+  const staticCommands = new Set(
+    Object.keys(scripts)
+      .filter(name => staticCommand(name))
+      .map(commandNode),
+  );
+  const staticTools = new Set(
+    Object.entries(scripts)
+      .filter(([name]) => staticCommand(name))
+      .flatMap(([, command]) => scriptReferences(command))
+      .filter(path => files.has(path)),
+  );
   return {
     roots,
+    staticCommands,
+    staticTools,
     reference,
     get error() {
       return error;

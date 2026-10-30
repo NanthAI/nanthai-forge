@@ -93,6 +93,7 @@
     "scripts/hosted-actions-job.mjs",
     "scripts/test-impact.mjs",
     "scripts/test-import-graph.mjs",
+    "scripts/convex-function-names.mjs",
     "scripts/test-directory-path.mjs",
     "scripts/test-coverage.mjs",
     "scripts/test-coverage.d.mts",

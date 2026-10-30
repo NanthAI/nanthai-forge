@@ -105,8 +105,12 @@ export function classifyCheckPath(path, files) {
   if (/^scripts\/.+\.(?:mjs|js|ts)$/.test(path)) return { domain: 'scripts', seeds: [path] };
   if (/^src\/.+\.ts$/.test(path)) return { domain: 'core', seeds: [path] };
   if (/^web\/src\/.+\.(?:tsx?|css|svg)$/.test(path)) return { domain: 'web', seeds: [path] };
+  // Schema and deployment config shape every function; other modules are graphed
+  // through imports and function references (api.*, internal.*, "module:function").
+  if (/^convex\/(?:schema|convex\.config|auth\.config)\.ts$/.test(path))
+    return domain('convex', ['convex/'], 'Convex schema or deployment config shares the backend namespace');
   if (/^convex\/.+\.ts$/.test(path))
-    return domain('convex', ['convex/'], 'Convex function references share the backend namespace');
+    return { domain: 'convex', seeds: [path], reason: 'Convex importers and function-reference callers' };
   if (/^netlify\/.+\.(?:m?js|ts)$/.test(path)) return { domain: 'netlify', seeds: [path] };
   if (/^tests\/.+\.(?:mjs|tsx?|json|html)$/.test(path))
     return { domain: 'tests', seeds: [path], requireConsumer: !/^tests\/[^/]+\.test\.mjs$/.test(path) };
