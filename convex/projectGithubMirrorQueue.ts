@@ -13,9 +13,10 @@ export const mirrorRow = (ctx: MutationCtx | QueryCtx, projectId: Id<'hostedProj
 export async function scheduleMirror(
   ctx: MutationCtx,
   job: Pick<Doc<'projectGithubMirrorJobs'>, '_id' | 'step'>,
+  delay = 0,
 ) {
   const scheduledId = await ctx.scheduler.runAfter(
-    0,
+    delay,
     makeFunctionReference<'action'>('projectGithubMirror:step'),
     { jobId: job._id, step: job.step },
   );

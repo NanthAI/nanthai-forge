@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { needsFix } from '../src/culprit-bisect';
+import { githubMirrorStatus } from './projectGithubMirrorStatus';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
@@ -18,9 +19,13 @@ export const capabilities = query({
     noticeVersion: v.optional(v.literal(1)),
     resolveVersion: v.optional(v.literal(1)),
     overlapVersion: v.optional(v.literal(1)),
+    mirrorVersion: v.optional(v.literal(1)),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, clientVersion, noticeVersion, resolveVersion, overlapVersion }) => {
+  handler: async (
+    ctx,
+    { projectId, clientVersion, noticeVersion, resolveVersion, overlapVersion, mirrorVersion },
+  ) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to discover hosted agent capabilities.');
@@ -31,6 +36,7 @@ export const capabilities = query({
         hostedAgentCapabilitiesSchema.parse({
           ...(overlapVersion === 1 ? { overlapVersion: 1 } : {}),
           ...(noticeVersion === 1 ? { needsFix: needsFix(project) } : {}),
+          ...(mirrorVersion === 1 ? { githubMirror: await githubMirrorStatus(ctx, project) } : {}),
           schema: 1,
           projectId,
           actor: user.subject,

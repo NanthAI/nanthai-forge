@@ -45,6 +45,7 @@ export const workIndex = {
 };
 export type WorkIndexWorkspace = {
   needsFix?: readonly import('./cockpit/needs-fix').NeedsFixNotice[];
+  githubMirror?: import('../../src/hosted-github-mirror-status').HostedMirrorStatus | null;
   decisionVersion?: string;
   landingWorker?: import('../../src/pending-status').PendingStatus['landingWorker'];
   repairNotices?: import('../../src/agent-conflict-notice').ConflictNotice[];

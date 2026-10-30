@@ -1,4 +1,5 @@
 import { hostedRecordCommands } from './hosted-record-input.js';
+import { hostedMirrorStatusSchema } from './hosted-github-mirror-status.js';
 import { contractTestsInput } from './intent-test-contract.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
@@ -50,6 +51,7 @@ export const hostedAgentCapabilitiesSchema = z
   .object({
     overlapVersion: z.literal(1).optional(),
     needsFix: z.array(z.record(z.string(), z.json())).optional(),
+    githubMirror: hostedMirrorStatusSchema.nullable().optional(),
     schema: z.literal(1),
     projectId: z.string(),
     actor: z.string(),

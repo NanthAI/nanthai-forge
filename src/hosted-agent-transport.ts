@@ -123,7 +123,12 @@ export class HostedAgentTransport {
         invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'operationId must be a UUID.');
       let discovery: unknown;
       try {
-        let options: Record<string, 1> = { noticeVersion: 1, resolveVersion: 1, overlapVersion: 1 };
+        let options: Record<string, 1> = {
+          noticeVersion: 1,
+          resolveVersion: 1,
+          overlapVersion: 1,
+          mirrorVersion: 1,
+        };
         for (;;) {
           try {
             discovery = await this.query('projectHostedAgent:capabilities', {
@@ -138,16 +143,19 @@ export class HostedAgentTransport {
               !Object.keys(options).length
             )
               throw error;
-            const field = /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion)\b/i.exec(
-              error.message,
-            )?.[1];
+            const field =
+              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|mirrorVersion)\b/i.exec(
+                error.message,
+              )?.[1];
             // Preserve independently supported features, and never repeat a
             // named refusal. Pre-notice servers use the oldest argument shape.
             if (field === 'noticeVersion') options = {};
             else if (field && field in options) delete options[field];
             else
               options =
-                'resolveVersion' in options || 'overlapVersion' in options ? { noticeVersion: 1 } : {};
+                'resolveVersion' in options || 'overlapVersion' in options || 'mirrorVersion' in options
+                  ? { noticeVersion: 1 }
+                  : {};
           }
         }
       } catch (error) {
@@ -188,7 +196,10 @@ export class HostedAgentTransport {
         return this.response(
           action,
           null,
-          { needsFix: capabilities.needsFix ?? [] },
+          {
+            needsFix: capabilities.needsFix ?? [],
+            ...(capabilities.githubMirror !== undefined ? { githubMirror: capabilities.githubMirror } : {}),
+          },
           capabilities.overlapVersion === 1 ? readHostedLaneCheckout(this.root)?.selection.laneId : undefined,
         );
       if (observation)
@@ -200,6 +211,7 @@ export class HostedAgentTransport {
               command.data as z.infer<typeof hostedAgentCommandSchemas.status>,
             )) as Record<string, unknown>),
             ...(capabilities.needsFix ? { needsFix: capabilities.needsFix } : {}),
+            ...(capabilities.githubMirror !== undefined ? { githubMirror: capabilities.githubMirror } : {}),
           },
           capabilities.overlapVersion === 1 ? (command.data as { laneId?: string }).laneId : undefined,
         );

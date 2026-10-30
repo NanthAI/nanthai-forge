@@ -1,5 +1,6 @@
 import { formatIgnoredStatus, type IgnoredStatus } from './ignored-status.js';
 import { formatMetricsHeadline } from './self-metrics-format.js';
+import { hostedMirrorStatusText, type HostedMirrorStatus } from './hosted-github-mirror-status.js';
 // SPDX-License-Identifier: Apache-2.0
 import { submissionLine } from './landing-submission.js';
 import type { PendingStatus } from './pending-status.js';
@@ -12,6 +13,7 @@ export function formatPendingStatus(
     countsScope?: string;
     ignored?: IgnoredStatus;
     needsFixError?: { code: string };
+    githubMirror?: HostedMirrorStatus | null;
     needsFix?: Record<string, import('zod').z.infer<ReturnType<typeof import('zod').z.json>>>[];
     queue?: { total: number; items: unknown[] };
   },
@@ -65,7 +67,9 @@ export function formatPendingStatus(
     `Recovery: ${r?.captureId ?? 'unknown'} · history ${r?.completeHistory == null ? 'unknown' : r.completeHistory ? 'complete' : 'incomplete'} · unavailable ${r?.unavailable?.length ?? 'unknown'}`,
     `Pending: Work ${h.work} · evidence ${h.evidence} · age ${elapsed(h.pendingAgeMs)}`,
     `Transfers: ${h.metadataPending} metadata (source coverage separate)${h.metadataError ? ` · ${oneLine(h.metadataError.code)} seq ${h.metadataError.seq} at ${new Date(h.metadataError.at).toISOString()} attempts ${h.metadataError.attempts}: ${oneLine(h.metadataError.message)}${h.metadataNextAttemptAt ? ` · retry ${new Date(h.metadataNextAttemptAt).toISOString()}` : ''} · ${h.metadataRejected} rejected` : ''}`,
-    `GitHub main: ${pin(value.github.mainHead)} · ${value.github.source} · ${value.github.status} · age ${elapsed(value.github.ageMs)}`,
+    value.githubMirror
+      ? `${oneLine(hostedMirrorStatusText(value.githubMirror, value.snapshot.observedAt === null ? Date.now() : Date.parse(value.snapshot.observedAt)))} · GitHub head ${pin(value.githubMirror.gitHead)}`
+      : `GitHub main: ${pin(value.github.mainHead)} · ${value.github.source} · ${value.github.status} · age ${elapsed(value.github.ageMs)}`,
     `Checks: ${value.checks.length} queued/preparing/running${alarms.length ? ` · Landing alarms: ${alarms.map(oneLine).join('; ')}` : ''}${value.queue ? ` · queue ${value.queue.items.length}/${value.queue.total} entries loaded` : ''} · landing worker ${value.landingWorker.status}${value.landingWorker.code ? ` (${oneLine(value.landingWorker.code)})` : ''}${value.landingWorker.affected ? ` · operation ${value.landingWorker.affected.operationId ?? 'unknown'} · Lane ${value.landingWorker.affected.laneIds.join(', ') || 'unknown'}${value.landingWorker.affected.runId ? ` · run ${value.landingWorker.affected.runId}` : ''}` : ''} · ${value.landingWorker.pendingRecovery} pending recovery · ${value.landingWorker.dependencyWaits} dependency waits · last event ${value.landingWorker.observedAt ?? 'unknown'}`,
     `Audits: ${value.audits.filter(a => ['pending', 'queued', 'preparing', 'running'].includes(a.status)).length} pending · ${value.audits.filter(a => a.status === 'failed').length} failed`,
     `Deployment: ${pin(value.deployment?.head ?? null)} · ${value.deployment?.source ?? 'unknown'} (last observation); installed source unknown`,
@@ -84,7 +88,7 @@ export function formatPendingStatus(
     ['Audits:', 'Checks:'],
     ['Automatic hosted push:', 'Transfers:'],
     ['Checks/landing ', 'Metrics ·'],
-    ['Deployment:', 'GitHub main:'],
+    ['Deployment:', value.githubMirror ? 'GitHub mirror ' : 'GitHub main:'],
   ]) {
     if (lines.length <= headlineLimit) break;
     const source = lines.findIndex(line => line.startsWith(from!));

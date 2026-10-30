@@ -201,12 +201,13 @@ export async function hostedFixStatus(store: WorkStore, supplied?: HostedAgentTr
     new HostedAgentTransport(store.root, { url: binding.deployment, projectId: binding.projectId });
   try {
     const response = await transport.dispatch('status', {});
+    const status = response.result as {
+      needsFix: Record<string, import('zod').z.infer<ReturnType<typeof import('zod').z.json>>>[];
+      githubMirror?: import('./hosted-github-mirror-status.js').HostedMirrorStatus | null;
+    };
     return {
-      needsFix: (
-        response.result as {
-          needsFix: Record<string, import('zod').z.infer<ReturnType<typeof import('zod').z.json>>>[];
-        }
-      ).needsFix,
+      needsFix: status.needsFix,
+      ...(status.githubMirror !== undefined ? { githubMirror: status.githubMirror } : {}),
     };
   } catch (error) {
     // Keep local status available while explicitly recording unavailable hosted evidence.

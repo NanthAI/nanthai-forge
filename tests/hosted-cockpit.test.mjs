@@ -330,6 +330,33 @@ test('hosted Now retains GitHub divergence and its hosted settings handoff', () 
   assert.match(html, /settingsSection=github/);
 });
 
+test('Now exposes hosted mirror lag, scheduled retries and terminal failures from workspace facts', () => {
+  const f = hostedCockpitFixture();
+  const githubMirror = {
+    repository: 'synthetic/mirror',
+    status: 'retrying',
+    targetHead: 'target',
+    mirroredHead: 'prior',
+    gitHead: 'git',
+    lagging: true,
+    pendingSince: f.now - 600_000,
+    mirroredAt: null,
+    failures: 1,
+    nextAttemptAt: f.now + 60_000,
+    error: 'GITHUB_SYNC_API',
+    detail: 'HTTP 500',
+    jobId: 'job',
+  };
+  const retrying = renderNow(f, { githubMirror });
+  assert.match(retrying, /GitHub mirror synthetic\/mirror: retrying.*behind for 10m.*retry at/);
+  const terminal = renderNow(f, {
+    githubMirror: { ...githubMirror, status: 'failed', failures: 5, nextAttemptAt: null },
+  });
+  assert.match(terminal, /GitHub mirror synthetic\/mirror: failed.*5\/5 failed attempts.*HTTP 500/);
+  const healthy = renderNow(f, { githubMirror: { ...githubMirror, status: 'synced', lagging: false } });
+  assert.doesNotMatch(healthy, /GitHub mirror synthetic\/mirror/);
+});
+
 test('workspace recovery notices appear in Now and shell attention with matching counts and no extra copy', async () => {
   const f = recoveryNoticesFixture();
   const { hostedAttention } = await import(moduleUrl('../web/src/shell/Attention.tsx'));

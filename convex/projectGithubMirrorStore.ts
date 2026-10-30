@@ -124,6 +124,10 @@ export const commit = internalMutation({
         mapping: canonicalPayload(mapping),
         step: job.step + 1,
         cursor: null,
+        failures: 0,
+        nextAttemptAt: undefined,
+        error: undefined,
+        detail: undefined,
       });
       const next = await ctx.db
         .query('projectGithubMirrorJobs')
@@ -132,40 +136,108 @@ export const commit = internalMutation({
         )
         .order('asc')
         .take(1);
-      await ctx.db.patch(queue._id, { mapping: canonicalPayload(mapping), activeId: next[0]?._id ?? null });
+      await ctx.db.patch(queue._id, {
+        mapping: canonicalPayload(mapping),
+        mirroredAt: Date.now(),
+        activeId: next[0]?._id ?? null,
+      });
       if (next[0]) await scheduleMirror(ctx, next[0]);
     } else {
       invariant(input.cursor, 'SOURCE_UNAVAILABLE', 'Mirror continuation is unavailable.');
-      await ctx.db.patch(job._id, { status: 'running', step: job.step + 1, cursor: input.cursor });
+      await ctx.db.patch(job._id, {
+        status: 'running',
+        step: job.step + 1,
+        cursor: input.cursor,
+        failures: 0,
+        nextAttemptAt: undefined,
+        error: undefined,
+        detail: undefined,
+      });
       await scheduleMirror(ctx, { _id: job._id, step: job.step + 1 });
     }
     return null;
   },
 });
 export const failed = internalMutation({
-  args: { ...identity, code: v.string(), detail: v.string() },
+  args: {
+    ...identity,
+    code: v.string(),
+    detail: v.string(),
+    httpStatus: v.optional(v.number()),
+    apiOperation: v.optional(v.string()),
+    requestBytes: v.optional(v.number()),
+    cursor: v.optional(v.id('_storage')),
+  },
   returns: v.null(),
   handler: async (ctx, input) => {
     const job = await ctx.db.get(input.jobId);
-    if (job && job.step === input.step && job.status !== 'done')
-      await ctx.db.patch(job._id, { status: 'failed', error: input.code, detail: input.detail });
+    if (!job || job.step !== input.step || ['done', 'failed'].includes(job.status)) return null;
+    const queue = await mirrorRow(ctx, job.projectId);
+    if (queue?.activeId !== job._id) return null;
+    const failures = (job.failures ?? 0) + 1;
+    const transient =
+      input.code === 'GITHUB_SYNC_API' &&
+      (input.httpStatus === 429 ||
+        (input.httpStatus !== undefined && input.httpStatus >= 500 && input.httpStatus <= 599));
+    const delay = transient && failures < 5 ? 60_000 * 2 ** (failures - 1) : null;
+    // Advance the worker fence, retaining the exact cursor/seed. Duplicate or
+    // late callbacks cannot spend another attempt or overwrite newer progress.
+    const step = job.step + 1;
+    await ctx.db.patch(job._id, {
+      status: delay === null ? 'failed' : 'retrying',
+      step,
+      failures,
+      error: input.code,
+      detail: input.detail,
+      httpStatus: input.httpStatus,
+      apiOperation: input.apiOperation,
+      requestBytes: input.requestBytes,
+      ...(input.cursor ? { cursor: input.cursor } : {}),
+      nextAttemptAt: delay === null ? undefined : Date.now() + delay,
+    });
+    if (delay !== null) await scheduleMirror(ctx, { _id: job._id, step }, delay);
     return null;
   },
 });
-/** Explicit recovery of the same cursor; no periodic retry or concurrent worker. */
+/** Explicit recovery of the same cursor, fencing failed or expired workers. */
 export const resume = internalMutation({
   args: { jobId: v.id('projectGithubMirrorJobs') },
-  returns: v.null(),
+  returns: v.object({
+    status: v.union(
+      v.literal('missing'),
+      v.literal('done'),
+      v.literal('already-running'),
+      v.literal('scheduled'),
+    ),
+    step: v.union(v.number(), v.null()),
+  }),
   handler: async (ctx, input) => {
     const job = await ctx.db.get(input.jobId);
-    if (!job || job.status === 'done') return null;
+    if (!job) return { status: 'missing' as const, step: null };
+    if (job.status === 'done') return { status: 'done' as const, step: job.step };
     const queue = await mirrorRow(ctx, job.projectId);
     invariant(queue?.activeId === job._id, 'GITHUB_SYNC_PENDING', 'Resume the active retained mirror job.');
     const task = job.scheduledId ? await ctx.db.system.get(job.scheduledId) : null;
-    if (task && ['pending', 'inProgress'].includes(task.state.kind)) return null;
-    await ctx.db.patch(job._id, { status: 'running', error: undefined });
-    await mirrorJob(ctx, { jobId: job._id, step: job.step });
-    await scheduleMirror(ctx, job);
-    return null;
+    const live = task && ['pending', 'inProgress'].includes(task.state.kind);
+    // Actions have a ten-minute runtime limit. A future backoff is still live;
+    // an overdue task beyond that window is recoverable by explicit resume.
+    if (live && job.status !== 'failed' && task.scheduledTime + 11 * 60_000 > Date.now())
+      return { status: 'already-running' as const, step: job.step };
+    if (live) await ctx.scheduler.cancel(task._id);
+    const step = job.step + 1;
+    await ctx.db.patch(job._id, {
+      status: 'running',
+      step,
+      failures: 0,
+      nextAttemptAt: undefined,
+      error: undefined,
+      detail: undefined,
+      httpStatus: undefined,
+      apiOperation: undefined,
+      requestBytes: undefined,
+    });
+    await mirrorJob(ctx, { jobId: job._id, step });
+    await scheduleMirror(ctx, { _id: job._id, step });
+    return { status: 'scheduled' as const, step };
   },
 });

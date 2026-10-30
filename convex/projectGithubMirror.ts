@@ -5,7 +5,7 @@ import { makeFunctionReference } from 'convex/server';
 import { internalAction, type ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { installationToken } from './githubAppToken';
-import { githubRequest } from '../src/hosted-github-api';
+import { githubRequest, GithubMirrorApiError } from '../src/hosted-github-api';
 import { prepareMirror, stepMirror, type MirrorPlan, type MirrorIO } from '../src/hosted-github-mirror';
 import { MemorySourceReader, MemoryMergeSource } from '../src/hosted-source-memory';
 import { parseNativeState } from '../src/native-state-format';
@@ -79,18 +79,21 @@ export const step = internalAction({
   args: { jobId: v.id('projectGithubMirrorJobs'), step: v.number() },
   returns: v.null(),
   handler: async (ctx, input): Promise<null> => {
+    let plan: MirrorPlan | undefined;
+    let started: { phase: MirrorPlan['phase']; index: number } | undefined;
     try {
       const raw: string | null = await ctx.runMutation(mutation('projectGithubMirrorStore:begin'), input);
       if (!raw) return null;
       const loaded = JSON.parse(raw);
       const token = await installationToken(ctx, loaded.projectId, loaded.repository);
       const io: MirrorIO = { ...mirrorSource(ctx, input), api: githubRequest(token) };
-      let plan: MirrorPlan;
       if (loaded.cursor) {
         const blob = await ctx.storage.get(loaded.cursor);
         invariant(blob, 'SOURCE_UNAVAILABLE', 'Durable mirror continuation is absent.');
         plan = JSON.parse(await blob.text());
       } else plan = await prepareMirror(loaded.seed, io);
+      invariant(plan, 'SOURCE_UNAVAILABLE', 'Mirror continuation is unavailable.');
+      started = { phase: plan.phase, index: plan.index };
       plan = await stepMirror(plan, io);
       const cursor =
         plan.phase === 'done'
@@ -102,13 +105,36 @@ export const step = internalAction({
         mapping: plan.entry ? JSON.stringify(plan.entry) : null,
       });
     } catch (error) {
+      // A failed request must not discard earlier verified blob replies in this
+      // window. Persist that progress, but replay the failed call unchanged.
+      const progress =
+        error instanceof GithubMirrorApiError &&
+        plan &&
+        started &&
+        (plan.phase !== started.phase || plan.index !== started.index);
+      let cursor: Id<'_storage'> | undefined;
+      let progressUnavailable = false;
+      if (progress) {
+        try {
+          cursor = await ctx.storage.store(new Blob([JSON.stringify(plan)], { type: 'application/json' }));
+        } catch {
+          progressUnavailable = true;
+        }
+      }
       await ctx.runMutation(mutation('projectGithubMirrorStore:failed'), {
         ...input,
         code: error instanceof ForgeError ? error.code : 'GITHUB_SYNC_FAILED',
+        ...(cursor ? { cursor } : {}),
+        ...(error instanceof GithubMirrorApiError
+          ? { httpStatus: error.status, apiOperation: error.operation, requestBytes: error.requestBytes }
+          : {}),
         detail:
-          error instanceof ForgeError
+          (error instanceof ForgeError
             ? error.message
-            : 'Mirror action failed. Resume the retained step to reconcile its outcome.',
+            : 'Mirror action failed. Resume the retained step to reconcile its outcome.') +
+          (progressUnavailable
+            ? ' Partial progress could not be checkpointed; retry uses the previous retained cursor.'
+            : ''),
       });
     }
     return null;

@@ -49,6 +49,7 @@ export function hostedAttention(
   records: CockpitWork,
   live: {
     githubAutoPush?: import('../../../src/github-sync-types').GithubAutoPush;
+    githubMirror?: import('../../../src/hosted-github-mirror-status').HostedMirrorStatus | null;
     sessions: Parameters<typeof hostedDecisions>[1];
     events: Parameters<typeof withChangedFiles>[1];
     unacked: Parameters<typeof hostedDecisions>[0];
@@ -128,6 +129,7 @@ export function hostedAttention(
     pending,
     queue,
     notices: records.repairNotices ?? [],
+    githubMirror: live.githubMirror,
   };
 }
 export function HostedAttention({
@@ -188,7 +190,7 @@ export function HostedAttention({
           ...(workspace?.landingWorker ? { landingWorker: workspace.landingWorker } : {}),
           ...(workspace?.repairNotices ? { repairNotices: workspace.repairNotices } : {}),
         },
-        { ...live, githubAutoPush: githubPush.records[0] },
+        { ...live, githubAutoPush: githubPush.records[0], githubMirror: workspace?.githubMirror },
         now,
       ),
     [

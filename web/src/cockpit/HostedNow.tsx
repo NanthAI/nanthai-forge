@@ -50,6 +50,7 @@ import {
   type MoveRecord,
 } from './now-model';
 import { NowLayout, NowSituation } from './NowLayout';
+import { HostedMirrorStatus } from './HostedMirrorStatus';
 import { useAnswers, useCoordination } from './coordination';
 import { LaneList } from './LaneList';
 import { type CockpitWork } from './model';
@@ -66,6 +67,7 @@ type Records = CockpitWork & {
   channelMoves?: readonly MoveRecord[];
 };
 type Live = {
+  githubMirror?: import('../../../src/hosted-github-mirror-status').HostedMirrorStatus | null;
   sessions: Session[];
   events: ActivityEvent[];
   eventsPaging?: { more: boolean; loading: boolean; loadMore: () => void };
@@ -197,19 +199,22 @@ export function HostedNowView({
         <NowLayout
           title={example ? `Now · example for ${example}` : 'Now'}
           situation={
-            <NowSituation
-              firstRun={empty}
-              facts={{
-                decisions: shown.length,
-                open: open.filter(
-                  lane => !lane.accepted && (facts.get(lane.id)?.tone ?? lane.tone) !== 'stale',
-                ).length,
-                acceptedToday: today.length,
-                overlaps: overlaps.length,
-                unanswered: [...unanswered.values()].reduce((sum, notices) => sum + notices.length, 0),
-                working,
-              }}
-            />
+            <>
+              <NowSituation
+                firstRun={empty}
+                facts={{
+                  decisions: shown.length,
+                  open: open.filter(
+                    lane => !lane.accepted && (facts.get(lane.id)?.tone ?? lane.tone) !== 'stale',
+                  ).length,
+                  acceptedToday: today.length,
+                  overlaps: overlaps.length,
+                  unanswered: [...unanswered.values()].reduce((sum, notices) => sum + notices.length, 0),
+                  working,
+                }}
+              />
+              <HostedMirrorStatus status={attention.githubMirror} now={now} />
+            </>
           }
           actions={
             !example && (
@@ -395,7 +400,7 @@ function LiveNow({
           showFirstRun={!initialChannelId}
           now={now}
           records={records}
-          live={live}
+          live={{ ...live, githubMirror: workspace.githubMirror }}
           loading={
             intents.loading ||
             lanes.loading ||

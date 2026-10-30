@@ -136,7 +136,7 @@ test('continuations fence stale actions and failure recovery resumes the same st
   });
   assert.equal(f.scheduled.length, 2, 'failure never installs a poller');
   await f.run('mirrorResume', store.resume._handler, { jobId: active.jobId });
-  assert.deepEqual(f.scheduled[2].args, active);
+  assert.deepEqual(f.scheduled[2].args, { ...active, step: active.step + 2 });
 });
 test('source resolution batches 100 descriptors with bounded document reads, fails closed on changed authority', async t => {
   const f = fixture();

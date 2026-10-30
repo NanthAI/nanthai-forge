@@ -38,6 +38,7 @@ import { agentCli } from './agent-cli.js';
 import { readFileSync } from 'node:fs';
 import { nativeOwner } from './native-source.js';
 import { hostedFixStatus } from './hosted-agent-cache.js';
+import { readHostedCliStatus } from './hosted-cli-status.js';
 import { hostedStatusMetrics } from './self-metrics-source.js';
 import { readPendingStatus } from './pending-status-read.js';
 import { formatPendingStatus } from './pending-status-format.js';
@@ -304,6 +305,14 @@ async function main(args: string[]): Promise<unknown> {
       explicitHosted ? { url: args[4], projectId: args[6] } : {},
     );
     return undefined;
+  }
+  if (args[0] === 'status' && args[1] && !nativeOwner(resolve(args[1]))) {
+    const hosted = await readHostedCliStatus(args[1]);
+    if (hosted) {
+      if (args.includes('--json')) return hosted.value;
+      process.stdout.write(hosted.text + '\n');
+      return undefined;
+    }
   }
   if (args[0] === 'status' && args[1] && (args.includes('--pending') || !!nativeOwner(resolve(args[1])))) {
     const options: { detail?: boolean; ignored?: boolean; offset?: number; limit?: number } = {};

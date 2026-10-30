@@ -408,14 +408,30 @@ Git tree before trusting it. `GITHUB_SYNC_BOOTSTRAP_TREE` reports a mismatch;
 `GITHUB_SYNC_CHANGED` reports unexpected GitHub main movement. Neither forces
 or reconciles external GitHub history automatically.
 
-A failed action retains its cursor and structured error on the job. After
-resolving the cause, the operator can invoke the internal
-`projectGithubMirrorStore:resume` mutation with that job's `jobId`. It checks the
-original scheduled action is no longer running and resumes the same step.
+A failed action retains its cursor and structured error on the job, including
+the failed API operation, HTTP status and exact request byte count, without
+payloads, response bodies or credentials. HTTP 5xx and 429 schedule retries of
+that cursor after 1, 2, 4 and 8 minutes. Verified blob replies before a failed
+request are checkpointed so retry does not repeat the whole window. Five
+consecutive failed step attempts end in a terminal failure; a fully successful
+step resets the budget.
+Other failures stop immediately. `nforge status ROOT`, `nforge agent ROOT status`
+and Now show recorded mirror failure, lag and the next retry time. Status reads
+use selected rows through existing discovery/workspace requests, without polling.
+
+After resolving the cause, the operator can invoke the internal
+`projectGithubMirrorStore:resume` mutation with that job's `jobId`. Resume retains
+the cursor, resets the retry budget and fences late callbacks. Failed jobs can
+replace stale pending/in-progress tasks; otherwise resume preserves a live task
+until it is overdue by eleven minutes (beyond the action runtime limit). A
+missing or completed task can be resumed immediately.
+The mutation returns `scheduled`, `already-running`, `done` or `missing`, with the
+worker step, so a deliberate no-op is distinguishable from a scheduled retry.
 Deterministic commit bytes and GitHub ref observation reconcile lost replies
 without a second commit for the State. No periodic retries or idle functions
-are scheduled. `autoPush:false` stops future attempts; a request already sent
-to GitHub can still finish. Undo published source through a compensating Lane;
+are scheduled; healthy and terminal jobs schedule nothing. `autoPush:false`
+stops future attempts; a request already sent to GitHub can still finish.
+Undo published source through a compensating Lane;
 published history is retained.
 
 Enable on the native owner through CLI or the agent MCP `set-policy` action:
