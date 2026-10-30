@@ -15,6 +15,8 @@ const kinds: Record<DecisionItem['kind'], { label: string; glyph: GlyphName }> =
   handoff: { label: 'Handoff to you', glyph: 'handoff' },
   message: { label: 'Message', glyph: 'message' },
   failed: { label: 'Check failed', glyph: 'failed' },
+  revert: { label: 'Reverted from main', glyph: 'failed' },
+  'needs-fix': { label: 'Fix needed', glyph: 'wrench' },
 };
 const label = (item: DecisionItem) =>
   item.kind === 'message' && item.question ? 'Question' : kinds[item.kind].label;
@@ -133,6 +135,46 @@ export function NeedsYou({
           {subtitle && <span className="fx-dec-sub"> · {subtitle}</span>}
         </div>
         {item.gates ? <Gates now={now} gates={item.gates} /> : item.body && <MessageText text={item.body} />}
+        {Boolean(item.tests?.length) && (
+          <ul className="fx-dec-tests">
+            {item.tests!.slice(0, 3).map(file => (
+              <li key={file}>
+                <Glyph name="failed" size={12} />
+                <code>{file}</code>
+              </li>
+            ))}
+            {item.tests!.length + (item.moreTests ?? 0) > 3 && (
+              <li>
+                <a className="fx-dec-more" href={link}>
+                  +{Math.max(0, item.tests!.length - 3) + (item.moreTests ?? 0)} more
+                </a>
+              </li>
+            )}
+          </ul>
+        )}
+        {item.exact && (
+          <details className="fx-dec-exact">
+            <summary>Exact record</summary>
+            <dl>
+              {item.exact.reverted && (
+                <>
+                  <dt>Reverted</dt>
+                  <dd>{item.exact.reverted}</dd>
+                </>
+              )}
+              {item.exact.audit && (
+                <>
+                  <dt>Audit</dt>
+                  <dd>{item.exact.audit}</dd>
+                </>
+              )}
+              <dt>Undo</dt>
+              <dd>
+                <code>{item.exact.undo}</code>
+              </dd>
+            </dl>
+          </details>
+        )}
         {item.quote?.text && (
           <blockquote className="fx-quote">
             <MessageText text={item.quote.text} />
@@ -149,10 +191,14 @@ export function NeedsYou({
             ))}
           </details>
         )}
-        <div className="fx-answers">
-          {answers(item, { notNow: notNow(item.id) })}
-          {item.hint && <span className="fx-hint">{item.hint}</span>}
-        </div>
+        {item.kind === 'revert' || item.kind === 'needs-fix' ? (
+          answers(item, { notNow: notNow(item.id) })
+        ) : (
+          <div className="fx-answers">
+            {answers(item, { notNow: notNow(item.id) })}
+            {item.hint && <span className="fx-hint">{item.hint}</span>}
+          </div>
+        )}
       </li>
     );
   };

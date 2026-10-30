@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { FixNoticeAnswers, type FixNoticeActions } from './FixNoticeAnswers';
 import { queueHref } from './queue-model';
 import { settingsHref } from '../settings/SettingsLayout';
 import { useState } from 'react';
@@ -11,7 +12,8 @@ import type { useAnswers } from './coordination';
 import { CopyPrompt } from './CopyPrompt';
 import { ReplyBox } from './ReplyBox';
 
-type Ack = Pick<ReturnType<typeof useAnswers>, 'acknowledge' | 'reply' | 'busy' | 'retrying'>;
+type Ack = Pick<ReturnType<typeof useAnswers>, 'acknowledge' | 'reply' | 'busy' | 'retrying'> &
+  FixNoticeActions;
 
 /**
  * The answers for one hosted decision. Questions with offered choices answer in one click; the
@@ -23,7 +25,11 @@ export function HostedAnswers({
   laneHref,
   viewHref,
   notNow,
+  canStartFix = false,
+  owner = false,
 }: {
+  canStartFix?: boolean;
+  owner?: boolean;
   item: DecisionItem;
   ack: Ack;
   laneHref: (laneId: string) => string;
@@ -31,6 +37,16 @@ export function HostedAnswers({
   notNow: () => void;
 }) {
   const [acknowledging, setAcknowledging] = useState(false);
+  if ((item.kind === 'revert' || item.kind === 'needs-fix') && item.intentId)
+    return (
+      <FixNoticeAnswers
+        intentId={item.intentId}
+        ack={ack}
+        laneHref={laneHref}
+        canStart={canStartFix}
+        owner={owner}
+      />
+    );
   if (item.queue?.state === 'failed')
     return (
       <>

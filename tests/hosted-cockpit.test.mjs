@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { hostedCockpitFixture } from './hosted-cockpit-fixture.mjs';
+import { hostedCockpitFixture, recoveryNoticesFixture } from './hosted-cockpit-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { materializeWork, indexBatches } from '../dist/work-hosted-index.js';
 globalThis.location = { href: 'https://forge.example.test/?project=synthetic' };
@@ -328,4 +328,33 @@ test('hosted Now retains GitHub divergence and its hosted settings handoff', () 
   assert.match(html, /expected-git/);
   assert.match(html, /Open GitHub mirror/);
   assert.match(html, /settingsSection=github/);
+});
+
+test('workspace recovery notices appear in Now and shell attention with matching counts and no extra copy', async () => {
+  const f = recoveryNoticesFixture();
+  const { hostedAttention } = await import(moduleUrl('../web/src/shell/Attention.tsx'));
+  const live = { sessions: [], events: [], unacked: [], claims: [] };
+  const attention = hostedAttention(f.records, live, f.now);
+  assert.equal(attention.decisions.length, 2);
+  const html = renderNow(f);
+  assert.match(html, /2 things need you/);
+  assert.match(html, /Needs you<\/h2><span class="fx-count fx-count-hot">2/);
+  for (const text of [
+    'Reverted from main',
+    'Fix needed',
+    'main audit failed 2 tests after it landed',
+    'main audit failed 1 test; no single culprit, main unchanged',
+    'Exact record',
+    'tests/r2-range.test.mjs',
+    'tests/http-limits.test.mjs',
+    'Open Intent',
+  ])
+    assert.ok(html.includes(text), text);
+  assert.doesNotMatch(
+    html,
+    /Start a fix|Close without a fix|ask the owner|advisory|Forge never locks|please|this may take a while/,
+  );
+  f.records.needsFix = [];
+  assert.equal(hostedAttention(f.records, live, f.now).decisions.length, 0);
+  assert.doesNotMatch(renderNow(f), /Reverted from main|Fix needed|Exact record/);
 });

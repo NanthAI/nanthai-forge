@@ -41,13 +41,16 @@ export const agentNames: Record<BriefAgent, string> = {
 type Situation = Omit<BriefRequest, 'agent'>;
 /** The briefing that matches a decision waiting for the viewer. */
 export function decisionBrief(item: {
-  kind: 'review' | 'conflict' | 'handoff' | 'message' | 'failed';
+  kind: import('./attention').DecisionItem['kind'];
   laneId?: string;
   viewId?: string;
   messageId?: string;
 }): Situation | null {
   const lane = item.laneId ? { laneId: item.laneId } : {};
   switch (item.kind) {
+    case 'revert':
+    case 'needs-fix':
+      return null;
     case 'review':
       return { situation: 'review-and-accept', ...lane, ...(item.viewId ? { viewId: item.viewId } : {}) };
     case 'conflict':

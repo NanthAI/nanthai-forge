@@ -115,3 +115,32 @@ export function hostedCockpitFixture() {
     now: Date.parse('2026-10-14T10:20:00.000Z'),
   };
 }
+
+/** B2.4b workspace summaries, with no notice-only read or fabricated timestamps. */
+export function recoveryNoticesFixture() {
+  const f = hostedCockpitFixture();
+  const secondId = randomUUID();
+  f.records.intents[0].outcome = 'Faster first byte from R2';
+  f.records.intents.push({ id: secondId, outcome: 'Rate limit headers', status: 'active' });
+  f.records.runs = [];
+  f.records.needsFix = [
+    {
+      intentId: f.intentId,
+      state: 'reverted',
+      auditRunId: randomUUID(),
+      receiptId: randomUUID(),
+      head: 'b'.repeat(64),
+      summary: `Reverted receipt ${randomUUID()}: tests/r2-range.test.mjs, tests/hosted-source-bytes.test.mjs failed on ${'b'.repeat(64)}`,
+      undo: `nforge agent ROOT revert '{"receiptId":"retained-reverse"}'`,
+    },
+    {
+      intentId: secondId,
+      state: 'needs-fix',
+      auditRunId: randomUUID(),
+      head: 'c'.repeat(64),
+      summary: `Fix needed for receipt ${randomUUID()}: tests/http-limits.test.mjs failed on ${'c'.repeat(64)}`,
+      undo: 'nforge agent ROOT start fix-forward',
+    },
+  ];
+  return f;
+}

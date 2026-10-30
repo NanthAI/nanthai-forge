@@ -841,3 +841,30 @@ div.fx-fold > button:focus-visible { outline: 2px solid var(--fx-focus); outline
   .fx-now2 > .fx-ledger { margin-top: 12px; }
 }
 .fx-ledger > .fx-fold { color: var(--fx-accent); font-weight: 600; }
+
+/* NEW for B3.3a: revert and needs-fix notices. */
+/* 2. New Needs-you kinds: 'overlap' (waiting) and 'revert' (failed) / 'needs-fix' (waiting). */
+.fx-dec-revert .fx-dec-kind { color: var(--fx-failed); }
+.fx-dec-needs-fix .fx-dec-kind { color: var(--fx-waiting); }
+
+/* 4. Failing tests under a revert notice; same rhythm as fx-dec-files. */
+.fx-dec-tests { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.fx-dec-tests li { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.fx-dec-tests .fx-glyph { color: var(--fx-failed); align-self: center; }
+.fx-dec-tests code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fx-text); }
+.fx-dec-tests .fx-dec-more { color: var(--fx-text-3); }
+
+/* 5. Exact record fold under a revert notice: receipt ids and the undo command, closed by default. */
+.fx-dec-exact { font-size: 12px; color: var(--fx-text-2); }
+.fx-dec-exact summary { cursor: pointer; color: var(--fx-text-3); list-style: none; }
+.fx-dec-exact summary::before { content: '▸ '; }
+.fx-dec-exact[open] summary::before { content: '▾ '; }
+.fx-dec-exact dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 10px; margin: 6px 0 0; }
+.fx-dec-exact dt { color: var(--fx-text-3); }
+.fx-dec-exact dd { margin: 0; min-width: 0; }
+.fx-dec-exact code { display: block; overflow-x: auto; white-space: pre; padding: 4px 6px; border-radius: var(--fx-r-1); background: var(--fx-surface-2); border: 1px solid var(--fx-line); }
+
+/* 6. Inline close confirm (owner only), replaces the answers row while open. */
+.fx-dec-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; font-size: 12.5px; }
+.fx-dec-confirm b { font-weight: 600; }
+

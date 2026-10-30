@@ -21,6 +21,13 @@ const paths = {
   conflict: <path d="M3 3.5 7 8l-4 4.5M13 3.5 9 8l4 4.5" {...s} strokeWidth={1.7} />,
   passed: <path d="m3.3 8.4 3 3 6.4-6.8" {...s} strokeWidth={1.8} />,
   failed: <path d="m4 4 8 8M12 4l-8 8" {...s} strokeWidth={1.8} />,
+  wrench: (
+    <path
+      d="M10.5 2.5a3.5 3.5 0 0 0-3.2 4.9L2.5 12.2l1.3 1.3 4.8-4.8a3.5 3.5 0 0 0 4.9-3.2l-2 2-1.8-.5-.5-1.8 2-2a3.5 3.5 0 0 0-.7-.4Z"
+      {...s}
+      strokeWidth={1.6}
+    />
+  ),
   running: <path d="M8 2.6A5.4 5.4 0 1 1 2.6 8" {...s} strokeWidth={1.7} />,
   plain: <circle cx="8" cy="8" r="2.5" fill="currentColor" />,
   intent: (

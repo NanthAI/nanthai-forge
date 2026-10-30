@@ -31,6 +31,8 @@ import { useAttention } from '../shell/attention-context';
 import { hostedAttention } from '../shell/Attention';
 import { AwayStrip, AWAY_AFTER_MS, useLastVisit } from './AwayStrip';
 import { FirstRun } from './FirstRun';
+import { useFixAnswers } from './fix-answers';
+import type { FixNoticeActions } from './FixNoticeAnswers';
 import { HostedAnswers } from './HostedAnswers';
 import { InboxContext } from './DelegateSheet';
 import { Ledger } from './Ledger';
@@ -91,8 +93,10 @@ export function HostedNowView({
   project = 'hosted',
   activity = false,
   showFirstRun = true,
+  capabilities,
 }: {
   /** Renders a labelled example instead of the project's Now (no project actions). */
+  capabilities?: Pick<WorkIndexWorkspace['capabilities'], 'owner' | 'intent'>;
   example?: string;
   activity?: boolean;
   showFirstRun?: boolean;
@@ -101,7 +105,8 @@ export function HostedNowView({
   live: Live;
   loading: boolean;
   ack: Pick<Answers, 'acknowledge' | 'reply' | 'busy' | 'error' | 'retrying'> &
-    Partial<Pick<Answers, 'tell' | 'publish'>>;
+    Partial<Pick<Answers, 'tell' | 'publish'>> &
+    FixNoticeActions;
   newIntent: () => void;
   laneHref?: (laneId: string) => string;
   /** The signed-in account id, to say "you" and count the viewer's answers. */
@@ -226,10 +231,18 @@ export function HostedNowView({
                   ? { answered: answeredToday(live.events, viewer, startOfDay(now))! }
                   : {})}
                 {...(working.total ? { quiet: `${working.total} working.` } : {})}
-                href={item => (item.laneId ? laneHref(item.laneId) : undefined)}
+                href={item =>
+                  item.laneId
+                    ? laneHref(item.laneId)
+                    : item.intentId
+                      ? hostedHref({ projectTab: 'intent', intent: item.intentId })
+                      : undefined
+                }
                 answers={(item, { notNow }) => (
                   <HostedAnswers
                     item={item}
+                    canStartFix={capabilities?.owner === true || capabilities?.intent === true}
+                    owner={capabilities?.owner === true}
                     ack={ack}
                     laneHref={laneHref}
                     viewHref={id =>
@@ -330,9 +343,11 @@ function LiveNow({
     inbox: !live.initialLoading,
   });
   const ack = useAnswers(projectId);
+  const fix = useFixAnswers(projectId);
   const { user } = useUser();
   const records = useMemo(
     () => ({
+      needsFix: workspace.needsFix,
       planningItems: planning.records,
       intents: intents.records,
       lanes: lanes.records,
@@ -342,6 +357,7 @@ function LiveNow({
       channelMoves: publishedMoves(localMoves.records, hostedMoves.records, initialChannelId),
     }),
     [
+      workspace.needsFix,
       planning.records,
       intents.records,
       lanes.records,
@@ -371,7 +387,8 @@ function LiveNow({
             hostedMoves.loading ||
             localMoves.loading
           }
-          ack={ack}
+          ack={{ ...ack, startFix: fix.startFix, closeFix: fix.closeFix, error: fix.error || ack.error }}
+          capabilities={workspace.capabilities}
           newIntent={newIntent}
           project={projectId}
           {...(user?.id ? { viewer: user.id } : {})}

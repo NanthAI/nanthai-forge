@@ -1214,3 +1214,81 @@ test('Lane rows on Now take the pill, glyph and fact line from lane-facts', asyn
   assert.match(html, /Nobody working · last save 3 h ago by claude-docmerge · 2 saves/);
   assert.doesNotMatch(html, /Working|Unassigned|Active/);
 });
+
+test('recovery decisions map workspace notices without invented ages and keep record ids folded', () => {
+  const notices = [
+    {
+      intentId: 'i1',
+      state: 'reverted',
+      auditRunId: 'audit-one',
+      receiptId: 'receipt-one',
+      head: 'h',
+      summary: 'Reverted receipt r: tests/a.test.mjs, tests/b.test.mjs failed on h',
+      undo: 'undo-one',
+    },
+    {
+      intentId: 'i2',
+      state: 'needs-fix',
+      auditRunId: 'audit-two',
+      head: 'h',
+      summary: 'Fix needed for receipt r: tests/c.test.mjs failed on h',
+      undo: 'undo-two',
+    },
+  ];
+  const items = attention.needsFixDecisions(notices, [
+    { id: 'i1', outcome: 'Restore bytes' },
+    { id: 'i2', outcome: 'Fix headers' },
+  ]);
+  assert.deepEqual(
+    items.map(item => [item.id, item.kind, item.title, item.subtitle]),
+    [
+      ['needsfix:i1', 'revert', 'Restore bytes', 'main audit failed 2 tests after it landed'],
+      [
+        'needsfix:i2',
+        'needs-fix',
+        'Fix headers',
+        'main audit failed 1 test; no single culprit, main unchanged',
+      ],
+    ],
+  );
+  assert.ok(items.every(item => item.at === undefined));
+  assert.deepEqual(items[0].tests, ['tests/a.test.mjs', 'tests/b.test.mjs']);
+  assert.equal(items[1].exact.reverted, undefined);
+  const html = renderToStaticMarkup(h(NeedsYou, { items, now: 0, answers: () => null }));
+  assert.match(html, /fx-dec-revert/);
+  assert.match(html, /fx-dec-needs-fix/);
+  assert.equal((html.match(/<details class="fx-dec-exact">/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /fx-dec-age|<details[^>]+open/);
+  assert.match(html, /<dt>Reverted<\/dt><dd>receipt-one/);
+  assert.match(html, /<dt>Audit<\/dt><dd>audit-two/);
+  assert.match(html, /<dt>Undo<\/dt><dd><code>undo-two/);
+  const visible = html.replace(/<details class="fx-dec-exact">.*?<\/details>/g, '');
+  assert.doesNotMatch(visible, /receipt-one|audit-one|audit-two|undo-one/);
+});
+
+test('recovery tests cap at three, retain the server remainder, and never parse a truncated path', () => {
+  const notice = {
+    intentId: 'i',
+    state: 'reverted',
+    auditRunId: 'audit',
+    head: 'h',
+    undo: 'undo',
+    summary: 'Reverted receipt r: a.test.mjs, b.test.mjs, c.test.mjs (+9 more) failed on h',
+  };
+  const [item] = attention.needsFixDecisions([notice], []);
+  assert.equal(item.subtitle, 'main audit failed 12 tests after it landed');
+  const html = renderToStaticMarkup(
+    h(NeedsYou, { items: [item], now: 0, href: () => '#intent', answers: () => null }),
+  );
+  assert.match(html, /href="#intent">\+9 more/);
+  assert.equal((html.match(/<code>/g) ?? []).length, 4);
+  for (const summary of [
+    'Main audit r failed. Missing receipt range',
+    notice.summary.slice(0, 50),
+    'Reverted receipt r: static/unknown failure failed on h',
+  ]) {
+    const [unknown] = attention.needsFixDecisions([{ ...notice, summary }], []);
+    assert.deepEqual(unknown.tests, []);
+    assert.equal(unknown.subtitle, 'main audit failed after it landed');
+  }
+});

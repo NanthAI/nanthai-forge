@@ -4,13 +4,17 @@ import { displayLaneName } from '../../../src/lane-name';
 import type { CockpitWork } from './model';
 import type { CockpitLane } from './model';
 import { checkMeaning } from './check-meaning';
+export { needsFixDecisions } from './needs-fix';
 
 /** Something that needs a decision from the viewer, with its one-click answers. */
 export type DecisionItem = {
   id: string;
   githubMirror?: boolean;
   queue?: QueueFact;
-  kind: 'review' | 'conflict' | 'handoff' | 'message' | 'failed';
+  kind: 'review' | 'conflict' | 'handoff' | 'message' | 'failed' | 'revert' | 'needs-fix';
+  tests?: string[];
+  moreTests?: number;
+  exact?: { reverted?: string; audit?: string; undo: string };
   title: string;
   /** Recorded sender and audience belong in the item metadata, outside its body. */
   sender?: { name: string; agent: boolean };

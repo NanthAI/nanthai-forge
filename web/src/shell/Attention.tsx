@@ -13,6 +13,7 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import { byAttention, cockpitLanes, type CockpitWork } from '../cockpit/model';
 import {
   laneDecisions,
+  needsFixDecisions,
   mainCheckDecisions,
   githubPushDecisions,
   quarantineDecisions,
@@ -68,6 +69,7 @@ export function hostedAttention(
     ...quarantineDecisions(records.runs),
     ...hostedDecisions(live.unacked, live.sessions, lanes, records),
     ...laneDecisions(lanes, overlapCounts(overlaps)),
+    ...needsFixDecisions(records.needsFix ?? [], records.intents),
   ];
   return { lanes, overlaps, decisions, pending, queue, notices: records.repairNotices ?? [] };
 }
@@ -117,6 +119,7 @@ export function HostedAttention({
       hostedAttention(
         {
           revision: workspace?.revision,
+          needsFix: workspace?.needsFix,
           intents: intents.records,
           lanes: lanes.records,
           views: views.records,

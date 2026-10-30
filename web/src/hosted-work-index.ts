@@ -44,6 +44,7 @@ export const workIndex = {
   checksum: makeFunctionReference<'action', Project, string>('projectWorkIndexActions:checksum'),
 };
 export type WorkIndexWorkspace = {
+  needsFix?: readonly import('./cockpit/needs-fix').NeedsFixNotice[];
   decisionVersion?: string;
   landingWorker?: import('../../src/pending-status').PendingStatus['landingWorker'];
   repairNotices?: import('../../src/agent-conflict-notice').ConflictNotice[];
@@ -63,6 +64,7 @@ export type WorkIndexWorkspace = {
   capabilities: {
     recentSummaryPages?: boolean;
     owner: boolean;
+    intent?: boolean;
     editableIntentIds: string[];
     hostedChannels: boolean;
     planning?: boolean;

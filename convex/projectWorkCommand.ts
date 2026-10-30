@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { parseWork } from '../src/work-unified-types';
 import { commandPayloadRows, commandPlanningRows } from './projectWorkCommandRows';
 import { v } from 'convex/values';
@@ -71,6 +72,31 @@ export async function executeCommand(
       'Reconcile this operation’s original command.',
     );
     return original;
+  }
+  // Recovery notices belong to canonical hosted Intents, while this endpoint also updates Work.
+  // Keep both writes in this mutation, after the original-operation replay guard above.
+  if (
+    command.action === 'intent-status' &&
+    command.status === 'abandoned' &&
+    project.needsFix?.[command.intentId] &&
+    project.sourceAuthority &&
+    project.sourceAuthority.mode !== 'native-owner'
+  ) {
+    const row = await readHostedRecord(ctx, {
+      projectId: input.projectId,
+      actor: user.subject,
+      kind: 'intent',
+      key: command.intentId,
+    });
+    invariant(row, 'NOT_FOUND', 'The recovery Intent is unavailable.');
+    const intent = JSON.parse(row.value);
+    await writeHostedRecord(ctx, {
+      projectId: input.projectId,
+      actor: user.subject,
+      authorityEpoch: project.sourceAuthority.epoch,
+      expectedVersion: intent.version,
+      record: { ...intent, version: intent.version + 1, status: command.status },
+    });
   }
   const selected = await selectedGeneration(ctx, project);
   invariant(selected, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before writing.');

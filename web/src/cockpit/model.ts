@@ -58,6 +58,7 @@ export type CockpitLane = {
 /** Local records and deliberately slim hosted summaries share only these cockpit fields. */
 export type CockpitWork = {
   revision?: number;
+  needsFix?: readonly import('./needs-fix').NeedsFixNotice[];
   pendingStatus?: PendingStatus;
   landingEntries?: WorkData['landingEntries'];
   landingBatches?: WorkData['landingBatches'];
