@@ -16,6 +16,7 @@ export type MetricMove = {
   inputs: MetricInput[];
   kind: 'landing' | 'revert' | 'compensating';
   ancestorHeads?: string[];
+  path?: 'after-retry' | undefined;
 };
 export type MetricSubmission = {
   id: string;

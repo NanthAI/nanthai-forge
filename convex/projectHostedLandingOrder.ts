@@ -127,9 +127,17 @@ export async function landingQueuePosition(
 /** Released wait/stack readers parse submission bodies strictly. Keep their
  * original read shape unless the caller explicitly selects priority metadata. */
 export function landingStateForReader(state: HostedLandingState, priorityInfo?: 1): HostedLandingState {
-  if (priorityInfo === 1) return state;
-  const { priority: _priority, priorityReason: _reason, priorityVersion: _version, ...legacy } = state;
-  const { priority: _requested, ...request } = state.request;
+  // Retry links remain in canonical records and admission receipts. Selected
+  // read DTOs keep the released strict shape, including priority-aware readers.
+  const { supersedes: _supersedes, retryReason: _retryReason, ...publicState } = state;
+  const { retryReason: _requestedRetry, ...publicRequest } = state.request;
+  void _supersedes;
+  void _retryReason;
+  void _requestedRetry;
+  const readable = { ...publicState, request: publicRequest };
+  if (priorityInfo === 1) return readable;
+  const { priority: _priority, priorityReason: _reason, priorityVersion: _version, ...legacy } = readable;
+  const { priority: _requested, ...request } = readable.request;
   void _priority;
   void _reason;
   void _version;

@@ -104,3 +104,34 @@ test('digest-bound timestamp normalization remains supported but source mutation
   writeFileSync(path, altered);
   assert.throws(() => reader.read(0, 10, digest(bytes.subarray(0, 10))), { code: 'EXCHANGE_SOURCE_CHANGED' });
 });
+
+test('one caller-owned scan buffer can be reused across files and repeated reads', t => {
+  const root = fixture(t),
+    scratch = Buffer.allocUnsafe(7);
+  for (const [name, text] of [
+    ['one', 'first bytes across several reads'],
+    ['two', 'second file'],
+  ]) {
+    const bytes = Buffer.from(text);
+    writeFileSync(join(root, name), bytes);
+    const reader = new SourceFileReader(root, name);
+    try {
+      const parts = [];
+      const pin = reader.scan(
+        part => {
+          assert.equal(part.buffer, scratch.buffer);
+          parts.push(Buffer.from(part));
+        },
+        digest(bytes),
+        scratch,
+      );
+      assert.deepEqual(Buffer.concat(parts), bytes);
+      assert.deepEqual(pin, { sha256: digest(bytes), size: bytes.length });
+      assert.throws(() => reader.scan(() => {}, undefined, Buffer.alloc(0)), {
+        code: 'EXCHANGE_SOURCE_CHANGED',
+      });
+    } finally {
+      reader.close();
+    }
+  }
+});

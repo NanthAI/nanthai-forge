@@ -1,5 +1,6 @@
+import { hostedActionError } from './hosted-action-error.js';
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { makeFunctionReference } from 'convex/server';
@@ -141,6 +142,13 @@ export async function saveHostedLane(
       return request;
     });
   }
+  const pending = join(
+    `${root}.forge-client`,
+    `save-baseline-${digest(canonicalPayload(capture.marker))}.json`,
+  );
+  workLocked(join(`${root}.forge-client`, 'lock'), () => {
+    if (!checkoutPathExists(pending)) durableReplace(pending, canonicalPayload(command));
+  });
   const objects = hostedObjectWriter(exchange);
   const args = { projectId: exchange.projectId, operationId: command.operationId };
   const prepared = JSON.parse(
@@ -200,11 +208,28 @@ function applyHostedSaveReceipt(
   terminal: { outcome: { status: string; result?: unknown } },
 ) {
   workLocked(join(`${root}.forge-client`, 'lock'), () => {
-    if (terminal.outcome.status !== 'completed') return;
+    const pending = join(
+      `${root}.forge-client`,
+      `save-baseline-${digest(canonicalPayload(capture.marker))}.json`,
+    );
+    const clearPending = () => {
+      if (
+        checkoutPathExists(pending) &&
+        JSON.parse(readFileSync(pending, 'utf8')).operationId === request.operationId
+      )
+        rmSync(pending);
+    };
+    if (terminal.outcome.status !== 'completed') {
+      clearPending();
+      return;
+    }
     const result = saveResultSchema.parse(terminal.outcome.result),
       current = readHostedLaneCheckout(root),
       old = capture.marker;
-    if (!current || canonicalPayload(current) !== canonicalPayload(old)) return;
+    if (!current || canonicalPayload(current) !== canonicalPayload(old)) {
+      clearPending();
+      return;
+    }
     const files = new Map(old.state.files.map(file => [file.path, file]));
     for (const change of capture.changes) {
       if (change.after)
@@ -243,5 +268,43 @@ function applyHostedSaveReceipt(
       },
     });
     durableReplace(join(root, '.forge/hosted-lane.json'), JSON.stringify(marker));
+    clearPending();
   });
+}
+
+/** Reconcile the one save pinned to this marker without scanning history or
+ * installing working files. Unknown preparation/submission replies resume the
+ * original operation; completed async checkpoints only advance their marker. */
+export async function reconcileHostedSave(root: string, exchange: Parameters<typeof saveHostedLane>[2]) {
+  const marker = readHostedLaneCheckout(root);
+  if (!marker) return null;
+  const pending = join(`${root}.forge-client`, `save-baseline-${digest(canonicalPayload(marker))}.json`);
+  if (!checkoutPathExists(pending)) return null;
+  const command = z
+    .object({ operationId: z.uuid(), message: z.string() })
+    .parse(JSON.parse(readFileSync(pending, 'utf8')));
+  const directory = `${root}.forge-client/saves/${command.operationId}`;
+  const capture = JSON.parse(readFileSync(join(directory, 'capture.json'), 'utf8'));
+  const request = saveRequestSchema.parse(JSON.parse(readFileSync(join(directory, 'request.json'), 'utf8')));
+  let progress: { terminal?: { outcome: { status: string; result?: unknown } } };
+  try {
+    progress = JSON.parse(
+      await exchange.client.query(makeFunctionReference<'query'>('projectHostedSaves:progress'), {
+        projectId: exchange.projectId,
+        operationId: command.operationId,
+      }),
+    );
+  } catch (error) {
+    if (hostedActionError(error, 'checkpoint reconciliation').code !== 'NOT_FOUND') throw error;
+    progress = {};
+  }
+  if (progress.terminal) {
+    applyHostedSaveReceipt(root, capture, request, progress.terminal);
+    return null;
+  }
+  // The checkpoint may have stopped before preparation or job submission.
+  // Resume its retained bytes and operation rather than waiting for an unscheduled job.
+  const resumed = await saveHostedLane(root, command, exchange);
+  if (resumed.outcome) return null;
+  return { phase: 'save', saveOperationId: command.operationId, progress: resumed };
 }

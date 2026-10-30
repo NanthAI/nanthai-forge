@@ -89,8 +89,8 @@ test('pending source and finish steps return promptly and retain all child opera
     s.calls.slice(count).map(call => call.name),
     [
       'projectHostedAgent:capabilities',
-      'projectHostedCompose:progress', // One selected read detects a failed source child.
-      'projectHostedLandingDesired:submit',
+      'projectHostedLandingDesired:submit', // Reconcile the original outcome before probing source work.
+      'projectHostedCompose:progress',
     ],
   );
   assert.deepEqual(next.result.submission, first.result.submission);

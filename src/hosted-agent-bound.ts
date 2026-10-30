@@ -1,3 +1,4 @@
+import { finishRetryReasonSchema } from './hosted-landing.js';
 // SPDX-License-Identifier: Apache-2.0
 import { boundLandingStatus, watchBoundLanding } from './hosted-agent-bound-read.js';
 import { automaticFinishId, indexedFinish, nativeFinishReplay } from './native-finish-replay.js';
@@ -88,16 +89,43 @@ export async function boundAgentSubmission(
   supplied?: HostedAgentTransport,
 ): Promise<Response> {
   const response = await submitBoundAgent(store, input, native, supplied);
-  const result = response.result as Command | null;
+  let result = response.result as Command | null;
+  let retained: Retained | undefined;
   if (result && z.uuid().safeParse(result.operationId).success) {
     for (const directory of ['native-submissions', 'hosted-submissions']) {
       const path = join(store.directory, directory, `${result.operationId}.json`);
-      if (!existsSync(path)) continue;
-      const supersedes = read<Retained>(path).supersedes;
-      if (supersedes) return { ...response, result: { ...result, supersedes } };
+      if (existsSync(path)) {
+        retained = read<Retained>(path);
+        break;
+      }
     }
   }
-  return response;
+  const raw = input as Command | null;
+  if (
+    raw?.action === 'finish' &&
+    result?.transport === 'hosted' &&
+    result.terminal === true &&
+    result.complete !== true
+  ) {
+    const original = retained?.command ?? raw;
+    const retry = Object.fromEntries(Object.entries(original).filter(([key]) => key !== 'operationId'));
+    const command = {
+      ...retry,
+      retry: true,
+      reason: 'other',
+    };
+    const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+    result = {
+      ...result,
+      next: 'retry',
+      retry: command,
+      retryCommand: `nforge agent ${quote(store.root)} finish ${quote(JSON.stringify(command))}`,
+    };
+  }
+  return {
+    ...response,
+    result: retained?.supersedes ? { ...result, supersedes: retained.supersedes } : result,
+  };
 }
 
 async function submitBoundAgent(
@@ -111,6 +139,16 @@ async function submitBoundAgent(
   if (!['finish', 'land'].includes(String(raw.action))) return native(input);
   const binding = readHostState(store).binding;
   if (!binding || !store.native) return native(input);
+  invariant(
+    raw.action !== 'finish' ||
+      sourceAuthority(binding).mode !== 'server' ||
+      z
+        .object({ retry: z.boolean().optional(), reason: finishRetryReasonSchema.optional() })
+        .refine(value => !value.retry || Boolean(value.reason))
+        .safeParse({ retry: raw.retry, reason: raw.reason }).success,
+    'BAD_ARGUMENT',
+    'A hosted finish retry records reason: flake, main-moved, infra or other.',
+  );
   // Landing is asynchronous unless the caller explicitly asks to watch.
   if (raw.action === 'land' && raw.wait === undefined)
     return boundAgentSubmission(store, { ...raw, wait: false }, native, supplied);

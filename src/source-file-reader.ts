@@ -87,10 +87,11 @@ export class SourceFileReader {
       'Selected source changed during its read.',
     );
   }
-  scan(visit: (bytes: Buffer, offset: number) => void, expectedDigest?: string) {
+  scan(visit: (bytes: Buffer, offset: number) => void, expectedDigest?: string, scratch?: Buffer) {
+    const buffer = scratch ?? Buffer.allocUnsafe(1024 * 1024);
+    invariant(buffer.length > 0, this.code, 'A source scan needs a non-empty read buffer.');
     const pass = (visitor?: typeof visit) => {
-      const hash = createHash('sha256'),
-        buffer = Buffer.allocUnsafe(1024 * 1024);
+      const hash = createHash('sha256');
       let offset = 0;
       while (offset < this.size) {
         const length = readSync(this.fd, buffer, 0, Math.min(buffer.length, this.size - offset), offset);

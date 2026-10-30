@@ -2,6 +2,8 @@
 
 The installed package includes `skills/forge-agent/SKILL.md`. Install it in your coding agent's skill directory for recorded Work or graph context. It is optional and self-contained; ordinary local-file questions use normal tools without loading workflow guidance. Use Node 24.22.1+ (24.x). `nforge agent --help` lists actions; `nforge agent ROOT ACTION --help` gives required parameters. Use `--command-file FILE` for parameters that are awkward to quote.
 
+A hosted finish replays the original outcome when given the same `operationId`. On unchanged saved source after a terminal failure, use a new explicit `operationId`, or `retry:true` with `reason:"flake"`, `"main-moved"`, `"infra"` or `"other"`; the new attempt composes the retained saved inputs on current main, skips another save and records the failed submission it supersedes. A shorthand finish returns the failure and an exact retry command. Accepting after a passed check-only finish reuses its exact Candidate and run while main and source still match. Finish also reconciles a completed asynchronous checkpoint before capturing local changes.
+
 ## Working on Forge, not GitHub
 
 - Run only the tests your change affects, plus typecheck, lint and format checks on touched files. Never run the full suite locally: `finish` runs the project's check on the project's runner for the combined work of concurrent Lanes.

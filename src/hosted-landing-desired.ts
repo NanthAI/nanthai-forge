@@ -9,6 +9,7 @@ export const hostedLandingDesiredSchema = hostedLandingRequestSchema
     check: true,
     keepOpen: true,
     priority: true,
+    retryReason: true,
   })
   .extend({ composeOperationId: z.uuid(), after: z.uuid().nullable().default(null) })
   .strict();

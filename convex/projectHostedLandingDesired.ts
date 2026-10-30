@@ -91,8 +91,10 @@ export const submit = mutation({
         .withIndex('by_project_and_selection', q =>
           q.eq('projectId', input.projectId).eq('selectionKey', selectionKey),
         )
+        .order('desc')
         .take(1);
-      if (queued) {
+      const queuedState = queued && hostedLandingStateSchema.parse(JSON.parse(queued.value));
+      if (queued && queuedState?.observation.state !== 'terminal-failed') {
         await ctx.db.insert('projectHostedLandingAliases', {
           projectId: input.projectId,
           actor: actor.id,
@@ -107,8 +109,12 @@ export const submit = mutation({
         .withIndex('by_project_and_selection', q =>
           q.eq('projectId', input.projectId).eq('selectionKey', selectionKey),
         )
+        .order('desc')
         .take(1);
-      if (existing) {
+      const existingCanonical = existing && (await landingRow(ctx, existing));
+      const existingState =
+        existing && hostedLandingStateSchema.parse(JSON.parse(existingCanonical?.value ?? existing.value));
+      if (existing && existingState?.observation.state !== 'terminal-failed') {
         await ctx.db.insert('projectHostedLandingAliases', {
           projectId: input.projectId,
           actor: actor.id,
@@ -116,9 +122,9 @@ export const submit = mutation({
           requestHash: digest(request),
           submissionId: existing.submissionId,
         });
-        const canonical = await landingRow(ctx, existing);
-        return canonical?.value ?? existing.value;
+        return existingCanonical?.value ?? existing.value;
       }
+      const previous = queuedState ?? existingState;
       const id = crypto.randomUUID(),
         attemptId = crypto.randomUUID(),
         at = new Date().toISOString();
@@ -137,6 +143,9 @@ export const submit = mutation({
         attemptId,
         phase: 'composing',
         preparing: true,
+        ...(previous?.observation.state === 'terminal-failed'
+          ? { supersedes: previous.id, retryReason: command.retryReason ?? 'other' }
+          : {}),
         observation: landingObservation('queued'),
         error: null,
         timing: { submittedAt: at, composeStartedAt: source.operation.firstAttempt.at },
@@ -151,6 +160,7 @@ export const submit = mutation({
           agent: true,
           ...(command.priority ? { priority: command.priority } : {}),
           check: command.check,
+          ...(command.retryReason ? { retryReason: command.retryReason } : {}),
           ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
           finish: { composeOperationId: command.composeOperationId, after: command.after },
         },
@@ -220,7 +230,14 @@ export const advance = internalMutation({
           expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,
         },
         { id: row.actor, kind: 'agent' },
-        { submissionId: state.id, attemptId: state.attemptId, at: state.at, timing: state.timing },
+        {
+          submissionId: state.id,
+          attemptId: state.attemptId,
+          at: state.at,
+          timing: state.timing,
+          supersedes: state.supersedes,
+          retryReason: state.retryReason,
+        },
       );
       if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
       await ctx.db.patch(row._id, { value: canonicalPayload(result), wake: null });

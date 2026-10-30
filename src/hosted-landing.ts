@@ -11,6 +11,7 @@ import { composeRequestSchema } from './hosted-compose.js';
 import { submissionOutcome } from './landing-submission-state.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
+export const finishRetryReasonSchema = z.enum(['flake', 'main-moved', 'infra', 'other']);
 const object = z.object({ sha256: hash, size: checkNumber }).strict();
 export const landingCheckSelectionSchema = z.union([
   z.object({ kind: z.literal('run'), runId: z.uuid() }).strict(),
@@ -32,6 +33,7 @@ export const hostedLandingRequestSchema = z
     keepOpen: z.boolean().optional(),
     priority: z.enum(['urgent', 'normal']).optional(),
     revertOf: z.uuid().optional(),
+    retryReason: finishRetryReasonSchema.optional(),
     check: landingCheckSelectionSchema.nullable(),
     finish: z
       .object({
@@ -130,6 +132,8 @@ export const hostedLandingStateSchema = z
     attemptId: z.uuid(),
     phase: z.enum(['composing', 'queued', 'checking', 'ready', 'terminal-failed', 'landed']),
     preparing: z.literal(true).optional(),
+    supersedes: z.uuid().optional(),
+    retryReason: finishRetryReasonSchema.optional(),
     batchId: z.uuid().optional(),
     batchOriginId: z.uuid().optional(),
     batchNeedsSoloCompose: z.literal(true).optional(),

@@ -42,6 +42,8 @@ import {
   type HostedAgentCapabilities,
 } from './hosted-agent-contract.js';
 import { executeHostedAgent, hostedCheckSettings } from './hosted-agent-actions.js';
+import { selectHostedFinish } from './hosted-agent-finish-identity.js';
+import { reconcileHostedSave } from './hosted-save-client.js';
 export type HostedAgentExchange = Pick<
   ConvexExchange,
   | 'client'
@@ -218,14 +220,34 @@ export class HostedAgentTransport {
         );
       const root = hostedAgentRoot(this.root);
       if (action === 'start' || action === 'open') hostedRootLanePath(root, this.address);
-      const journal = new HostedAgentJournal(
-        root,
-        this.address,
-        capabilities.actor,
-        action,
-        command.data,
-        operationId as string | undefined,
-      );
+      const replaying =
+        typeof operationId === 'string' &&
+        existsSync(resolve(`${root}.forge-client`, 'agent', `${operationId}.json`));
+      const pendingSave =
+        action === 'finish' && !replaying ? await reconcileHostedSave(root, this.exchange) : null;
+      if (pendingSave)
+        return this.response(action, typeof operationId === 'string' ? operationId : null, pendingSave);
+      const journal =
+        action === 'finish'
+          ? await selectHostedFinish(
+              root,
+              this.address,
+              capabilities.actor,
+              hostedAgentCommandSchemas.finish.parse(command.data),
+              operationId as string | undefined,
+              (operationId, runId) =>
+                runId
+                  ? this.query('projectHostedCheckRead:status', { runId })
+                  : this.query('projectHostedFinishObserve:page', { operationId, nextVersion: 0 }),
+            )
+          : new HostedAgentJournal(
+              root,
+              this.address,
+              capabilities.actor,
+              action,
+              command.data,
+              operationId as string | undefined,
+            );
       metricOperationId(journal.operationId);
       const session: HostedAgentSession = {
         root,

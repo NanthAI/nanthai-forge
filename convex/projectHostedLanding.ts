@@ -211,6 +211,8 @@ export async function enqueueHostedLanding(
     attemptId: string;
     at?: string;
     timing?: import('../src/hosted-landing').HostedLandingState['timing'];
+    supersedes?: string | undefined;
+    retryReason?: import('../src/hosted-landing').HostedLandingState['retryReason'];
   },
 ) {
   const project = await activeProject(ctx, input.projectId, actor.id);
@@ -291,6 +293,12 @@ export async function enqueueHostedLanding(
     firstAttemptId: attempt.id,
     attemptId: attempt.id,
     phase: 'queued',
+    ...((reserved?.supersedes ?? reused.supersedes)
+      ? {
+          supersedes: reserved?.supersedes ?? reused.supersedes,
+          retryReason: reserved?.retryReason ?? reused.retryReason,
+        }
+      : {}),
     timing: { submittedAt: first.at, ...reserved?.timing, composedAt: new Date().toISOString() },
     observation: landingObservation('queued'),
     error: null,

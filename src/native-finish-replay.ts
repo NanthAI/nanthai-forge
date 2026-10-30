@@ -52,8 +52,8 @@ export function indexedFinish(directory: string, input: Command): Selection | un
 }
 
 /** Shared native/hosted shorthand rule, called under the owner admission lock.
- * Unknown outcomes always reconcile the original operation. Only terminal work
- * with different saved or capturable source advances the durable index. */
+ * Unknown outcomes always reconcile the original operation. Terminal work with
+ * changed source, or a deliberate hosted retry, advances the durable index. */
 export function automaticFinishId(store: WorkStore, input: Command, fallback: string, hosted: boolean) {
   const directory = join(store.directory, hosted ? 'hosted-submissions' : 'native-submissions');
   mkdirSync(directory, { recursive: true });
@@ -117,7 +117,8 @@ export function automaticFinishId(store: WorkStore, input: Command, fallback: st
                 source.tree(source.state(head).files))
           );
         });
-        if (!unchanged) selection = { operationId: fallback, supersedes: selection.operationId };
+        if (!unchanged || (hosted && input.retry === true && result?.complete !== true))
+          selection = { operationId: fallback, supersedes: selection.operationId };
       }
     }
   }

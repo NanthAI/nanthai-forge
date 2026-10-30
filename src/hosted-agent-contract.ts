@@ -1,3 +1,4 @@
+import { finishRetryReasonSchema } from './hosted-landing.js';
 import { hostedRecordCommands } from './hosted-record-input.js';
 import { hostedMirrorStatusSchema } from './hosted-github-mirror-status.js';
 import { contractTestsInput } from './intent-test-contract.js';
@@ -138,8 +139,11 @@ export const hostedAgentCommandSchemas = {
       accept: z.boolean().optional(),
       keepOpen: z.boolean().optional(),
       priority: z.enum(['urgent', 'normal']).optional(),
+      retry: z.boolean().optional(),
+      reason: finishRetryReasonSchema.optional(),
     })
-    .strict(),
+    .strict()
+    .refine(command => !command.retry || Boolean(command.reason), 'A retry records its reason.'),
   prioritize: z.object({ submissionId: uuid, priority: z.enum(['urgent', 'normal']) }).strict(),
   cancel: z.object({ submissionId: uuid }).strict(),
   revert: z.object({ ...message, target: revertTargetSchema }).strict(),

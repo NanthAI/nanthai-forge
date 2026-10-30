@@ -836,3 +836,62 @@ for (const mode of ['native-owner', 'server'])
         return true;
       });
   });
+
+test('new explicit finish after a failed saved head skips its already completed hosted save', async t => {
+  const f = fixture(t);
+  const c = shorthandChecks(t, f, false);
+  writeFileSync(join(f.store.path(f.lane.laneId), 'retry-source.txt'), 'Source saved by the first attempt\n');
+  const { operationId: _id, ...command } = f.command;
+  void _id;
+  const first = await boundAgentSubmission(f.store, command, noNative, c.transport);
+  const submission = f.operations.get(first.result.operationId);
+  submission.phase = 'terminal-failed';
+  submission.observation = { state: 'terminal-failed', cause: 'check-failed', pendingReason: null };
+  submission.error = { code: 'CHECK_FAILED', message: 'Synthetic flaky check' };
+  const replay = await boundAgentSubmission(f.store, command, noNative, c.transport);
+  assert.equal(replay.result.complete, false);
+  assert.equal(replay.result.next, 'retry');
+  assert.match(replay.result.retryCommand, /finish/);
+  const count = f.calls.length;
+  let sourceUploads = 0,
+    saves = 0;
+  const mutation = f.exchange.client.mutation;
+  f.exchange.client.mutation = (ref, args) => {
+    if (getFunctionName(ref) === 'projectHostedSaves:prepare') saves++;
+    return mutation(ref, args);
+  };
+  f.exchange.uploadFile = async () => {
+    sourceUploads++;
+  };
+  const retry = await boundAgentSubmission(
+    f.store,
+    { ...command, operationId: randomUUID(), reason: 'flake' },
+    noNative,
+    f.transport(),
+  );
+  assert.notEqual(retry.result.operationId, first.result.operationId);
+  assert.equal(sourceUploads, 0);
+  assert.equal(saves, 0);
+  assert(!f.calls.slice(count).some(c => /Saves:prepare|SaveJobs/.test(c.name)));
+  assert.equal(
+    (
+      await boundAgentSubmission(
+        f.store,
+        { ...command, operationId: first.result.operationId },
+        noNative,
+        f.transport(),
+      )
+    ).result.complete,
+    false,
+  );
+});
+
+test('hosted retry validates the reason before capturing or saving source', async t => {
+  const f = fixture(t);
+  for (const fields of [{ retry: true }, { retry: true, reason: 'unknown' }])
+    await assert.rejects(
+      boundAgentSubmission(f.store, { ...f.command, ...fields }, noNative, f.transport()),
+      code('BAD_ARGUMENT'),
+    );
+  assert.equal(f.calls.length, 0);
+});

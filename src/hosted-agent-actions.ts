@@ -1,8 +1,8 @@
-import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
-import { guideHostedSync, resolveHostedAgent, recoverHostedCandidate } from './hosted-agent-resolution.js';
+import { guideHostedSync, resolveHostedAgent } from './hosted-agent-resolution.js';
+import { hostedRecordSchema } from './hosted-records.js';
+import { executeHostedFinish } from './hosted-agent-finish.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
-import { hostedLandingDesiredSchema } from './hosted-landing-desired.js';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { githubActionsRunsOnSchema, githubActionsRunnerDescription } from './github-actions-runner-label.js';
@@ -20,8 +20,7 @@ import { hostedMacRuntime } from './hosted-mac-lease.js';
 import { checkEnvironment } from './check-environment.js';
 import { autonomyPolicySchema, reviewReason } from './autonomy-policy.js';
 import type { HostedAgentCapabilities } from './hosted-agent-contract.js';
-import { hostedLandingRequestSchema, hostedLandingCancelSchema } from './hosted-landing.js';
-import { hostedRecordSchema } from './hosted-records.js';
+import { hostedLandingCancelSchema } from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
 import { applyHostedSync } from './hosted-sync-client.js';
@@ -39,7 +38,7 @@ export function agentSourceOutcome(value: unknown) {
   const parsed = outcome.safeParse(value);
   return parsed.success ? parsed.data.outcome : null;
 }
-async function checkSelection(
+export async function checkSelection(
   session: HostedAgentSession,
   command: z.infer<typeof hostedAgentCommandSchemas.finish>['check'],
 ) {
@@ -522,159 +521,5 @@ export async function executeHostedAgent(
     return session.mutation('projectHostedLanding:cancel', { request: canonicalPayload(request) });
   }
   invariant(action === 'finish', 'HOSTED_ACTION_UNSUPPORTED', 'Unsupported hosted action.');
-  const command = hostedAgentCommandSchemas.finish.parse(input);
-  if (!command.after && !command.candidateId && !command.inputs)
-    command.after = await session.journal.retain('stack-parent-entry', async () => {
-      const selected = await selectAgentLane(session, command.laneId);
-      return selected.stack && !selected.stack.detached ? (selected.stack.entryId ?? null) : null;
-    });
-  const marker = session.marker();
-  if (
-    !command.candidateId &&
-    !command.inputs &&
-    marker &&
-    (!command.laneId || marker.selection.laneId === command.laneId)
-  ) {
-    const saveOperationId = await session.journal.id('save');
-    const saved = await saveHostedLane(
-      session.root,
-      { operationId: saveOperationId, message: command.message },
-      session.exchange,
-    );
-    if (agentSourceOutcome(saved)?.status !== 'completed')
-      return { phase: 'save', saveOperationId, progress: saved };
-  }
-  const composeOperationId = command.composeOperationId ?? (await session.journal.id('compose'));
-  const desired = session.journal.get<z.infer<typeof hostedLandingDesiredSchema>>('desired-landing');
-  if (desired) {
-    const observed = await session.query<{ status?: string }>('projectHostedCompose:progress', {
-      operationId: composeOperationId,
-    });
-    const progress =
-      observed.status === 'retryable'
-        ? await session.mutation('projectHostedComposeJobs:submit', { operationId: composeOperationId })
-        : sourceWaitSnapshot(observed);
-    return {
-      phase: 'finish',
-      composeOperationId,
-      ...(observed.status ? { progress } : {}),
-      submission: await session.mutation('projectHostedLandingDesired:submit', {
-        request: canonicalPayload({ ...desired, governanceVersion: 1 }),
-      }),
-    };
-  }
-  let candidateId = command.candidateId;
-  if (!candidateId) {
-    const progress = await composeAgentSource(
-      session,
-      hostedAgentCommandSchemas.compose.parse({
-        ...(command.laneId ? { laneId: command.laneId } : {}),
-        ...(command.intentId ? { intentId: command.intentId } : {}),
-        ...(command.inputs ? { inputs: command.inputs } : {}),
-        dependencies: command.dependencies,
-        message: command.message,
-      }),
-      composeOperationId,
-    );
-    const completed = agentSourceOutcome(progress);
-    if (completed?.status !== 'completed') {
-      if (command.accept === false) return { phase: 'compose', composeOperationId, progress };
-      const desired = await session.journal.retain('desired-landing', async () =>
-        hostedLandingDesiredSchema.parse({
-          governanceVersion: 1,
-          operationId,
-          authorityEpoch: epoch,
-          composeOperationId,
-          after: command.after,
-          ...(command.priority ? { priority: command.priority } : {}),
-          check: await checkSelection(session, command.check),
-          ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
-        }),
-      );
-      return {
-        phase: 'finish',
-        composeOperationId,
-        progress,
-        submission: await session.mutation('projectHostedLandingDesired:submit', {
-          request: canonicalPayload({ ...desired, governanceVersion: 1 }),
-        }),
-      };
-    }
-    const candidate = hostedRecordSchema.options[3].parse(completed.result);
-    if (candidate.result.status === 'conflict' && session.capabilities.actions.includes('resolve'))
-      return {
-        phase: 'conflict',
-        candidateId: candidate.id,
-        recovery: await recoverHostedCandidate(session, candidate.id),
-      };
-    candidateId = candidate.id;
-  } else
-    invariant(
-      command.composeOperationId,
-      'BAD_ARGUMENT',
-      'Existing Candidate finish requires its original composeOperationId.',
-    );
-  const request = await session.journal.retain('finish-request', async () => {
-    const candidate = hostedRecordSchema.options[3].parse(
-      await session.query('projectHostedCompose:candidate', { candidateId }),
-    );
-    if (command.accept === false) {
-      invariant(candidate.result.status === 'clean', 'VIEW_CONFLICT', 'Check a clean hosted Candidate.');
-      const check = await checkSelection(session, command.check);
-      const { kind: _kind, ...selection } = check;
-      void _kind;
-      return hostedCheckRequestSchema.parse({
-        operationId,
-        authorityEpoch: epoch,
-        candidateId,
-        expectedHead: candidate.result.head,
-        ...selection,
-      });
-    }
-    return hostedLandingRequestSchema.parse({
-      governanceVersion: 1,
-      operationId,
-      authorityEpoch: epoch,
-      channel: 'main',
-      expectedMain: candidate.base,
-      candidateId,
-      expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,
-      agent: true,
-      ...(command.priority ? { priority: command.priority } : {}),
-      check: await checkSelection(session, command.check),
-      finish: { composeOperationId, after: command.after },
-      ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
-    });
-  });
-  if (command.accept === false)
-    return {
-      phase: 'check',
-      composeOperationId,
-      run: await session.mutation('projectHostedChecks:enqueue', { request: canonicalPayload(request) }),
-    };
-  // Account JWTs still make agent requests. Person authority is never selected by CLI input.
-  const result = await session.mutation('projectHostedLanding:enqueue', {
-    request: canonicalPayload({ ...request, governanceVersion: 1 }),
-  });
-  let queueAheadSelection: unknown;
-  let queuePosition: number | null | undefined;
-  try {
-    const read = await session.query<{
-      queueAheadSelection?: unknown;
-      queuePosition?: number | null;
-    }>('projectHostedLanding:status', {
-      submissionId: (result as { id: string }).id,
-    });
-    queueAheadSelection = read.queueAheadSelection;
-    queuePosition = read.queuePosition;
-  } catch {
-    /* Advisory reads never affect admission. */
-  }
-  return {
-    phase: 'finish',
-    composeOperationId,
-    submission: result,
-    ...(queuePosition === undefined ? {} : { queuePosition }),
-    ...(queueAheadSelection ? { queueAheadSelection } : {}),
-  };
+  return executeHostedFinish(session, input);
 }

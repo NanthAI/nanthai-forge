@@ -22,6 +22,7 @@ const rowSchemas = {
     submittedAt: nullableStamp,
     trusted: z.boolean(),
     kind: z.enum(['landing', 'compensating']),
+    path: z.literal('after-retry').optional(),
   }),
   requests: z.object({
     id: z.string(),
@@ -30,6 +31,14 @@ const rowSchemas = {
     runIds: z.array(z.string()),
     progressAt: z.array(stamp),
     errorCode: z.string().nullable(),
+    retry: z
+      .object({
+        operationId: z.string(),
+        actor: z.string(),
+        supersedes: z.string(),
+        reason: z.enum(['flake', 'main-moved', 'infra', 'other']),
+      })
+      .optional(),
   }),
   runs: z.object({
     id: z.string(),
@@ -49,7 +58,7 @@ const gaps = [
   'Hosted terminal states do not establish delivery to a requester; terminal delivery and overlap delivery/acknowledgement remain unknown.',
   'Hosted full-suite selection flags are unavailable; exact-State results without that evidence cannot establish red-main minutes.',
   'Hosted complete reuse keys, request/adoption receipts, cache/surface observations and provider bills are unavailable.',
-  'Only requester-attributed hosted cancellations have mutation coverage; retries, restarts and other interventions remain partial.',
+  'Requester-attributed hosted cancellations and linked finish retries have mutation coverage; restarts and other interventions remain partial.',
   'Hosted context is limited to one day before the window by record creation time; older pending work and boundary red-main state may be missing. Pages are live observations, not an atomic cross-page snapshot.',
 ];
 export async function readHostedMetricPages(query: MetricQuery, period: MetricPeriod, summary = false) {
@@ -106,7 +115,14 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
           if (stream === 'acceptances') {
             const row = rowSchemas.acceptances.parse(rawRow);
             accepted.set(row.submissionId, row.at);
-            records.moves.push({ id: row.id, at: row.at, head: row.head, kind: row.kind, inputs: [] });
+            records.moves.push({
+              id: row.id,
+              at: row.at,
+              head: row.head,
+              kind: row.kind,
+              path: row.path,
+              inputs: [],
+            });
             records.finishTimings!.push({
               id: row.id,
               at: row.at,
@@ -125,6 +141,16 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
             });
           } else if (stream === 'requests') {
             const row = rowSchemas.requests.parse(rawRow);
+            if (row.retry)
+              records.receipts.push({
+                schema: 1,
+                kind: 'mutation',
+                origin: 'command',
+                action: 'retry',
+                at: row.at,
+                operationId: row.retry.operationId,
+                actor: { kind: 'agent', name: row.retry.actor },
+              });
             records.submissions.push({
               ...row,
               entryId: row.id,

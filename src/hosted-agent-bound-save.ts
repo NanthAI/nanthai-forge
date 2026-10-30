@@ -65,6 +65,18 @@ export async function saveBoundInput(
     const objects = new HostedObjectStore(join(store.directory, 'hosted-objects'), transport.exchange);
     const previous = join(store.directory, 'hosted-bound-lanes', `${input.laneId}.json`);
     const last = existsSync(previous) ? JSON.parse(readFileSync(previous, 'utf8')) : null;
+    if (
+      last?.nativeHead &&
+      last.hostedHead === selection.head &&
+      existsSync(join(source.directory, last.nativeHead)) &&
+      source.tree(source.state(last.nativeHead).files) === source.tree(source.state(input.head).files)
+    )
+      return {
+        result: { unchanged: true, ...selection },
+        outcome: { status: 'completed', result: selection },
+        root,
+        selection,
+      };
     invariant(
       selection.head === input.baseline ||
         selection.head === last?.hostedHead ||
@@ -189,12 +201,13 @@ export async function prepareBoundHostedCommands(
     const result = z
       .object({ head: z.string(), version: z.number(), sourceVersion: z.number() })
       .parse(saved.outcome.result);
-    const marker = readBoundJson<{ selection: { lifecycleVersion: number } }>(
-      join(saved.root, '.forge/hosted-lane.json'),
-    );
+    const selection =
+      saved.selection ??
+      readBoundJson<{ selection: { lifecycleVersion: number } }>(join(saved.root, '.forge/hosted-lane.json'))
+        .selection;
     inputs.push({
       laneId: pin.laneId,
-      expected: { ...result, lifecycleVersion: marker.selection.lifecycleVersion },
+      expected: { ...result, lifecycleVersion: selection.lifecycleVersion },
     });
   }
   const groups = new Map<string, typeof inputs>();
@@ -209,6 +222,9 @@ export async function prepareBoundHostedCommands(
     inputs,
     message: retained.command.message ?? 'Agent change',
     accept: retained.command.action === 'land' || Boolean(retained.command.accept),
+    ...(retained.command.action === 'finish' && retained.command.reason
+      ? { reason: retained.command.reason }
+      : {}),
     ...(retained.command.checkId
       ? {
           check: {

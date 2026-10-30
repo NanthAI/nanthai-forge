@@ -104,6 +104,7 @@ export const page = query({
               submittedAt: submitted?.timing?.submittedAt ?? submitted?.at ?? null,
               trusted: selected?.actor.kind === 'agent' && selected.policy.acceptance.mode === 'auto-on-pass',
               kind: request?.revertOf ? 'compensating' : 'landing',
+              ...(submitted?.supersedes ? { path: 'after-retry' } : {}),
             };
           }
           if (input.stream === 'runs') {
@@ -131,6 +132,16 @@ export const page = query({
               runIds: 'runId' in row && row.runId ? [row.runId] : [],
               progressAt: Object.values(request.timing ?? {}),
               errorCode: request.error?.code ?? null,
+              ...(request.supersedes
+                ? {
+                    retry: {
+                      operationId: request.operationId,
+                      actor: request.actor,
+                      supersedes: request.supersedes,
+                      reason: request.retryReason ?? 'other',
+                    },
+                  }
+                : {}),
             };
           }
           return { id: row._id, ...('metricMutation' in row ? { mutation: row.metricMutation } : {}) };

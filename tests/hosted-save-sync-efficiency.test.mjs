@@ -305,6 +305,10 @@ test('20-input compose setup selects and describes in page calls while retaining
 });
 
 test('sync batches missing merge objects at 3,000-file scale and leaves unchanged blobs unread', async t => {
+  // This budget test invokes the worker directly, without its heartbeat supervisor.
+  // Keep its synthetic lease active independently of machine load; expiry is tested separately.
+  const leaseNow = Date.now();
+  t.mock.method(Date, 'now', () => leaseNow);
   const { syncFixture } = await import('./hosted-sync-fixture.mjs');
   const { sourceDispatch } = await import('../dist/hosted-source-job-controller.js');
   const run = async (t, legacy) => {

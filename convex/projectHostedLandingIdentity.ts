@@ -84,15 +84,21 @@ export async function reuseHostedLanding(
     .withIndex('by_project_and_selection', q =>
       q.eq('projectId', input.projectId).eq('selectionKey', selectionKey),
     )
+    .order('desc')
     .take(1);
   if (!existing) return { selectionKey };
+  const state = (await loadLanding(ctx, { projectId: input.projectId, submissionId: existing.submissionId }))
+    .state;
+  if (state.observation.state === 'terminal-failed')
+    return {
+      selectionKey,
+      supersedes: state.id,
+      retryReason: input.request.retryReason ?? ('other' as const),
+    };
   await ctx.db.insert('projectHostedLandingAliases', {
     ...identity,
     requestHash,
     submissionId: existing.submissionId,
   });
-  return {
-    state: (await loadLanding(ctx, { projectId: input.projectId, submissionId: existing.submissionId }))
-      .state,
-  };
+  return { state };
 }

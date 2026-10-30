@@ -105,7 +105,7 @@ export function calculateSelfMetrics(
   const rows = landings.map(move => ({
     id: move.id,
     day: new Date(move.at).toISOString().slice(0, 10),
-    path: pathFor(move.inputs, move.at, histories, badRuns),
+    path: move.path ?? pathFor(move.inputs, move.at, histories, badRuns),
   }));
   const days = [...new Set(rows.map(row => row.day))].sort().map(day => ({
     day,

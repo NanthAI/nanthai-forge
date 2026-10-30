@@ -152,9 +152,9 @@ test('replaying a preparing finish reconciles its stalled compose child and expo
     s.calls.slice(count).map(call => call.name),
     [
       'projectHostedAgent:capabilities',
+      'projectHostedLandingDesired:submit',
       'projectHostedCompose:progress',
       'projectHostedComposeJobs:submit',
-      'projectHostedLandingDesired:submit',
     ],
   );
 });
