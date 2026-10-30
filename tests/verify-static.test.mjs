@@ -24,11 +24,12 @@ for (const failure of [
     for (const directory of [
       'scripts',
       'tests',
+      'convex',
       'node_modules/typescript/bin',
       'node_modules/@typescript/native/bin',
     ])
       mkdirSync(join(root, directory), { recursive: true });
-    for (const name of ['verify.mjs', 'verify-queue.mjs'])
+    for (const name of ['verify.mjs', 'verify-queue.mjs', 'prepare-convex-api.mjs'])
       write(`scripts/${name}`, readFileSync(`scripts/${name}`));
     write('scripts/check-schema-compat.mjs', `process.exit(${failure === 'schema' ? 9 : 0});`);
     write(

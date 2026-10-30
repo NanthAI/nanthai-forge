@@ -14,11 +14,18 @@ for (const flaky of [false, true])
     for (const dir of [
       'scripts',
       'tests',
+      'convex',
       'node_modules/typescript/bin',
       'node_modules/@typescript/native/bin',
     ])
       mkdirSync(join(root, dir), { recursive: true });
-    for (const name of ['verify.mjs', 'verify-queue.mjs', 'test-files.mjs', 'test-coverage.mjs'])
+    for (const name of [
+      'verify.mjs',
+      'verify-queue.mjs',
+      'test-files.mjs',
+      'test-coverage.mjs',
+      'prepare-convex-api.mjs',
+    ])
       write(`scripts/${name}`, readFileSync(`scripts/${name}`));
     write('scripts/oxc.mjs', '');
     write('scripts/check-schema-compat.mjs', '');

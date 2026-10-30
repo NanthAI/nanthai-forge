@@ -188,7 +188,7 @@ test('docs checks preserve package inventory and original-notice validation with
   writeFileSync(join(cwd, 'docs/unlisted.md'), 'Unlisted packaged prose\n');
   assert.throws(
     check,
-    /Unlisted packaged document: docs\/unlisted\.md\. Add it to packageDocuments in scripts\/package-documents\.mjs/,
+    /Unlisted packaged document: docs\/unlisted\.md\. Add its manifest under scripts\/package-documents\//,
   );
   rmSync(join(cwd, 'docs/unlisted.md'));
   rmSync(join(cwd, 'docs/concepts.md'));

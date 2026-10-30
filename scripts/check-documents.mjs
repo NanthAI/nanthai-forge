@@ -34,7 +34,7 @@ function inventory(directory) {
     else
       assert.ok(
         expected.has(path),
-        `Unlisted packaged document: ${path}. Add it to packageDocuments in scripts/package-documents.mjs.`,
+        `Unlisted packaged document: ${path}. Add its manifest under scripts/package-documents/.`,
       );
   }
 }

@@ -30,3 +30,6 @@ hosted-web-dist/
 
 # Generated Impeccable hook/session state.
 .impeccable/hook.cache.json
+
+# Derived from current Convex module filenames before builds and typechecks.
+convex/_generated/api.d.ts

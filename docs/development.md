@@ -201,7 +201,11 @@ Run `npm ci --ignore-scripts` and `npm run build:core` before focused core tests
 node --import ./tests/check-runtime.mjs --test tests/agent-action-parse.test.mjs
 ```
 
-For new prose under `docs/`, add its path to `packageDocuments` in `scripts/package-documents.mjs`; the explicit inventory avoids packaging private output. `node scripts/check-documents.mjs` validates the inventory without building.
+For new prose under `docs/`, add a matching JSON manifest under `scripts/package-documents/`: for example, `docs/operations/example.md` uses `scripts/package-documents/operations/example.json` with `{"path":"docs/operations/example.md","order":100}`. Existing order values preserve the installed documentation order; ties sort by path. Each document owns its manifest, so parallel additions do not edit one shared list. The explicit inventory avoids packaging private output. `node scripts/check-documents.mjs` validates the inventory without building.
+
+`convex/_generated/api.d.ts` is disposable and ignored by source control. Core builds, typechecks and verification regenerate its exact module inventory locally with `node scripts/prepare-convex-api.mjs`, using filenames without loading or executing modules. Convex codegen can also regenerate it. Adding or deleting a Convex module requires no shared generated-file edit; direct compiler invocations should run the preparation script first.
+
+`npm run build:web` emits a Vite manifest. `node scripts/web-bundle-report.mjs` reports bytes and gzip bytes for the entry and immediately imported Hosted dependency closure; optional screens stay outside that closure. Pass additional manifest entry names after the output directory to measure a selected screen. Font subsets are separate because Unicode ranges decide which are requested. This is a reproducible build measurement, excluding provider scripts, API responses and browser-selected icons; it is not a network trace.
 
 ### The standard check
 

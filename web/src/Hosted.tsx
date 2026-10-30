@@ -29,16 +29,10 @@ import { watchImport } from './import-watch';
 import { PointField } from './PointField';
 import { ActionPanel, Icon, PageTabs, LazyPage, useDestination, useSection } from './WorkspaceUI';
 import { hostedError as message, hostedFailure, snapshotDownload } from './snapshot';
-import ImportedSourceSettings from './settings/ImportedSourceSettings';
 import { SaveView } from './SavedViews';
-import Teams from './Teams';
-import Secrets from './Secrets';
 import { InterestControls } from './Interests';
 import PublicImports from './PublicImports';
 import UpstreamRequest from './UpstreamRequest';
-import ProjectBackups from './ProjectBackups';
-import AccountData from './AccountData';
-import DeviceLogin, { DeviceCredentials } from './DeviceLogin';
 import { HostedFrame } from './shell/HostedFrame';
 import { DryRun } from './landing/DryRun';
 import { Importing, Landing } from './landing/Landing';
@@ -48,6 +42,15 @@ import { liveReads } from './live-reads';
 import { Button } from './ui/primitives';
 
 const App = lazy(() => import('./App'));
+const ImportedSourceSettings = lazy(() => import('./settings/ImportedSourceSettings'));
+const Teams = lazy(() => import('./Teams'));
+const Secrets = lazy(() => import('./Secrets'));
+const ProjectBackups = lazy(() => import('./ProjectBackups'));
+const AccountData = lazy(() => import('./AccountData'));
+const DeviceLogin = lazy(() => import('./DeviceLogin'));
+const DeviceCredentials = lazy(() =>
+  import('./DeviceLogin').then(module => ({ default: module.DeviceCredentials })),
+);
 
 type Job = {
   opened?: boolean;
@@ -660,7 +663,9 @@ export default function Hosted() {
   return key ? (
     <ClerkProvider publishableKey={key}>
       <ConvexProviderWithClerk client={client} useAuth={useConvexTokenAuth}>
-        {location.pathname === '/device' ? <DeviceLogin /> : <ConnectedExplorer />}
+        <Suspense fallback={<AppLoader />}>
+          {location.pathname === '/device' ? <DeviceLogin /> : <ConnectedExplorer />}
+        </Suspense>
       </ConvexProviderWithClerk>
     </ClerkProvider>
   ) : (

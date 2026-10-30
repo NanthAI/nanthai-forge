@@ -10,6 +10,10 @@ import { fileTimeout } from './test-files.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { prepareConvexApi } from './prepare-convex-api.mjs';
+
+// Prepare once before parallel compilers; this file is deliberately not tracked.
+prepareConvexApi(fileURLToPath(new URL('../', import.meta.url)));
 
 function findNpmCli() {
   const candidates = [

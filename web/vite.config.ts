@@ -15,5 +15,5 @@ export default defineConfig({
     },
   ],
   worker: { format: 'es' },
-  build: { outDir: '../hosted-web-dist', emptyOutDir: true },
+  build: { outDir: '../hosted-web-dist', emptyOutDir: true, manifest: true },
 });
