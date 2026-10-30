@@ -45,7 +45,9 @@ nforge worker "$DEPLOYMENT_URL" "$PROJECT_ID" "$MACHINE_ID"
 ```
 
 Configure the check definition separately through the existing `configure-check`
-command. `configure-runner provider:"self-hosted"` derives runtime, platform and
+command. Import by name (default `verify`) or `checkId` reads the retained command
+fields from hosted Work, including compact indexed records, and preserves the
+original definition digest. `configure-runner provider:"self-hosted"` derives runtime, platform and
 clean-environment pins locally; optional `labels` and `machineId` select this
 machine. The legacy `provider:"mac"` spelling also writes `self-hosted`.
 `check-settings` reports, for example:

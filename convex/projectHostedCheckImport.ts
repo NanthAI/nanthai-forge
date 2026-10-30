@@ -6,6 +6,7 @@ import { saveCheckSetting } from './projectHostedCheckDefinitions';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { checkHash, checkNumber, importedHostedCheck } from '../src/hosted-check';
 import { invariant } from '../src/errors';
+import { assembleIndexValue, type IndexHeader } from '../src/work-index-value';
 import { report } from './errors';
 
 /** Projects hold a handful of checks; a larger set must be imported by id. */
@@ -55,11 +56,38 @@ export const fromWork = mutation({
           );
         }
         const wanted = 'name' in request.select ? request.select.name : null;
-        const found = rows
-          .map(row => JSON.parse(row.value) as { id: string; name: string; at: string })
-          .filter(check => wanted === null || check.name === wanted)
-          // A redefined name keeps its newest definition, as local selection does.
-          .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))[0];
+        const headers = rows
+          .map(row => JSON.parse(row.value) as { id: string; name: string; at: string } & IndexHeader)
+          .filter(check => wanted === null || check.name === wanted);
+        // Compact headers omit both command fields and the definition timestamp.
+        // Hydrate only matching checks, in bounded payload pages, before selection.
+        const checks = await Promise.all(
+          headers.map(async header => {
+            const parts: { position: number; value: string }[] = [];
+            if (header.payloadKey)
+              for (let offset = 0; offset < header.payloadParts!; offset += 100) {
+                const page = await ctx.db
+                  .query('projectWorkRecords')
+                  .withIndex('by_generation_and_collection_and_parent_and_position', q =>
+                    q
+                      .eq('generationId', partition)
+                      .eq('collection', 'checks:payload')
+                      .eq('parent', header.payloadKey!)
+                      .gt('position', offset - 1),
+                  )
+                  .take(Math.min(100, header.payloadParts! - offset));
+                parts.push(...page);
+                if (page.length < Math.min(100, header.payloadParts! - offset)) break;
+              }
+            return assembleIndexValue('checks', header, parts, {
+              incomplete: () => {
+                invariant(false, 'WORK_STALE', 'The selected Work check payload is incomplete.');
+              },
+            });
+          }),
+        );
+        // A redefined name keeps its newest definition, as local selection does.
+        const found = checks.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))[0];
         invariant(
           found,
           'CHECK_NOT_FOUND',

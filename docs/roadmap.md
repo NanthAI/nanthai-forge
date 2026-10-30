@@ -115,6 +115,8 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 
 ## Workflow friction
 
+- The hosted Lane helper sends `tests` a `laneId`, but the hosted command requires a `candidateId`; impact selection returns `BAD_ARGUMENT` before selecting tests. Keep the helper and hosted contract aligned so builders can run the affected suite before finishing.
+
 - Lifecycle mutations can commit their Lane head long before the CLI returns its advisory peer receipt. During writer contention, check the canonical saved head before replaying the same operation; expose durable mutation completion before expensive advisory hydration so builders can distinguish a committed save from a queued one.
 
 - A concurrent `start` reserved an active Lane before returning its receipt, then

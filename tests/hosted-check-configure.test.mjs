@@ -9,6 +9,7 @@ import { getFunctionName } from 'convex/server';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { hostedCheckDefinition, checkPin } from '../dist/hosted-check.js';
+import { indexedRecord } from '../dist/work-hosted-index.js';
 import { hostedMacRuntime } from '../dist/hosted-mac-lease.js';
 import { checkEnvironment } from '../dist/check-environment.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
@@ -40,7 +41,7 @@ const command = {
 
 /** A dogfood-shaped project: a ready Work generation with a few thousand non-check
  * records, 20 checks and a redefined verify (older and newer definitions). */
-function project({ verify = true } = {}) {
+function project({ verify = true, compact = true, checkCommand = command } = {}) {
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
     key: 'synthetic',
@@ -88,16 +89,25 @@ function project({ verify = true } = {}) {
     randomUUID(),
     '2026-01-01T00:00:00.000Z',
   );
-  const newer = hostedCheckDefinition(command, randomUUID(), '2026-02-01T00:00:00.000Z');
-  if (verify) checks.push(newer, older);
-  for (const check of checks) put('checks', check.id, check);
+  const newer = hostedCheckDefinition(checkCommand, randomUUID(), '2026-02-01T00:00:00.000Z');
+  if (verify) checks.push(older, newer);
+  for (const check of checks) {
+    if (!compact) put('checks', check.id, check);
+    else
+      for (const entry of indexedRecord('checks', check.id, '', position++, check, {
+        id: check.id,
+        name: check.name,
+        definition: check.definition,
+      }))
+        s.insert('projectWorkRecords', { projectId, generationId, ...entry });
+  }
   return { s, projectId, newer, older };
 }
 const importRequest = (select, expected = null, operationId = randomUUID()) =>
   JSON.stringify({ operationId, authorityEpoch: 1, expected, select });
 const settings = s => [...s.tables.projectHostedCheckSettings.values()];
 
-test('fromWork imports the newest verify from hosted Work with bounded reads and replays its receipt', async () => {
+test('fromWork imports the newest verify from hosted Work with bounded reads and replays its receipt', async t => {
   const { s, projectId, newer } = project();
   const operationId = randomUUID();
   const call = () =>
@@ -105,7 +115,9 @@ test('fromWork imports the newest verify from hosted Work with bounded reads and
       projectId,
       request: importRequest({ name: 'verify' }, null, operationId),
     });
+  const started = performance.now();
   const first = JSON.parse(await call());
+  const elapsedMs = performance.now() - started;
   assert.deepEqual(first.value, newer);
   assert.equal(first.digest, newer.definition);
   assert.equal(first.key, newer.id);
@@ -113,6 +125,18 @@ test('fromWork imports the newest verify from hosted Work with bounded reads and
   // Only the checks collection is scanned, never the thousands of other Work rows.
   assert(meter.documents <= 40 && meter.ranges <= 20, JSON.stringify(meter));
   assert(meter.writes <= 6, `writes ${meter.writes}`);
+  assert(meter.readBytes < 32 * 1024, `read bytes ${meter.readBytes}`);
+  assert.equal(meter.touched.filter(table => table === 'projectWorkRecords').length, 3);
+  assert.equal(s.counts.length, 1, 'one Convex function call');
+  t.diagnostic(
+    JSON.stringify({
+      documents: meter.documents,
+      ranges: meter.ranges,
+      writes: meter.writes,
+      readBytes: meter.readBytes,
+      elapsedMs,
+    }),
+  );
   assert.equal(await call(), JSON.stringify(first));
   assert.equal(settings(s).length, 1);
   assert.equal([...s.tables.projectHostedCheckSettingVersions.values()].length, 1);
@@ -128,6 +152,70 @@ test('fromWork imports the newest verify from hosted Work with bounded reads and
   const current = JSON.parse(await s.call('current', definitions.current, { projectId, checkId: newer.id }));
   assert.equal(current.check.definition, newer.definition);
 });
+
+test('fromWork still imports legacy inline check records', async () => {
+  const { s, projectId, newer } = project({ compact: false });
+  const result = JSON.parse(
+    await s.call('fromWork', imports.fromWork, {
+      projectId,
+      request: importRequest({ name: 'verify' }),
+    }),
+  );
+  assert.deepEqual(result.value, newer);
+});
+
+test('fromWork preserves all command fields across payload chunks and reused record partitions', async () => {
+  const { s, projectId, newer } = project({
+    checkCommand: {
+      ...command,
+      args: ['synthetic-' + 'x'.repeat(40000)],
+      env: ['BUILD_LABEL'],
+      credentials: ['FIXTURE_CREDENTIAL'],
+      artifactPaths: ['reports/result.json'],
+      static: false,
+      measureResources: true,
+      declaredInputs: [{ kind: 'source', path: 'package-lock.json' }],
+    },
+  });
+  const projectRow = s.tables.hostedProjects.get(projectId);
+  const partition = projectRow.work.generationId;
+  const { _id, _creationTime, ...generation } = s.tables.projectWorkGenerations.get(partition);
+  const next = s.insert('projectWorkGenerations', { ...generation, recordsGenerationId: partition });
+  s.patch('hostedProjects', projectId, { work: { ...projectRow.work, generationId: next } });
+  const result = JSON.parse(
+    await s.call('fromWork', imports.fromWork, {
+      projectId,
+      request: importRequest({ checkId: newer.id }),
+    }),
+  );
+  assert.deepEqual(result.value, newer);
+  const meter = s.counts.at(-1);
+  assert(meter.documents <= 20 && meter.ranges <= 20, JSON.stringify(meter));
+  assert.equal(meter.touched.filter(table => table === 'projectWorkRecords').length, 2);
+});
+
+for (const damage of ['missing', 'changed'])
+  test(`fromWork refuses ${damage} selected check payload without saving settings`, async () => {
+    const { s, projectId, newer } = project();
+    const part = [...s.tables.projectWorkRecords.values()].find(
+      row => row.collection === 'checks:payload' && row.parent.startsWith(newer.id + ':'),
+    );
+    if (damage === 'missing') s.tables.projectWorkRecords.delete(part._id);
+    else
+      s.patch('projectWorkRecords', part._id, {
+        value: part.value.replace('"executable":"node"', '"executable":"false"'),
+      });
+    await assert.rejects(
+      s.call('fromWork', imports.fromWork, {
+        projectId,
+        request: importRequest({ checkId: newer.id }),
+      }),
+      code(damage === 'missing' ? 'WORK_STALE' : 'EVIDENCE_CHANGED'),
+    );
+    assert.equal(settings(s).length, 0);
+    assert.equal(s.tables.projectHostedCheckSettingVersions.size, 0);
+    assert.equal(s.tables.projectHostedOperations.size, 0);
+  });
 
 test('fromWork enforces the expected digest and imports by checkId', async () => {
   const { s, projectId, newer, older } = project();
