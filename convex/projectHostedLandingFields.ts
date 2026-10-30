@@ -65,6 +65,7 @@ export const hostedLandingTables = {
     projectId: v.id('hostedProjects'),
     channel: v.literal('main'),
     sequence: v.number(),
+    train: v.optional(v.array(v.string())),
     fence: v.number(),
     wake: v.union(
       v.object({ taskId: v.id('_scheduled_functions'), id: v.string(), at: v.number() }),
@@ -129,6 +130,14 @@ export const hostedLandingTables = {
       'projectId',
       'channel',
       'runnable',
+      'sequence',
+    ])
+    .index('by_project_channel_runnable_batchable_priority_sequence', [
+      'projectId',
+      'channel',
+      'runnable',
+      'batchable',
+      'priority',
       'sequence',
     ])
     .index('by_project_and_channel_and_batchable_and_phase_and_sequence', [

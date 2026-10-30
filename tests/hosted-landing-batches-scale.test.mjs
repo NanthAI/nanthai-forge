@@ -18,8 +18,8 @@ test.after(() => {
   }
 });
 
-test('600 Intents and 575 retained receipts do not change bounded four-member landing costs', async t => {
-  const f = await batchesFixture(t);
+test('600 Intents and 575 retained receipts do not change bounded eight-member landing costs', async t => {
+  const f = await batchesFixture(t, { count: 8 });
   const template = [...f.tables.projectHostedRecords.values()].find(r => r.kind === 'intent');
   for (let i = 0; i < 600; i++) {
     const key = randomUUID();
@@ -79,12 +79,14 @@ test('600 Intents and 575 retained receipts do not change bounded four-member la
       maxReadBytes: Math.max(...counts.map(c => c.readBytes)),
       maxWriteBytes: Math.max(...counts.map(c => c.writeBytes)),
       wallMs: performance.now() - start,
+      peakRssBytes: process.resourceUsage().maxRSS * 1024,
     };
   assert(f.entries.every(entry => states(f).find(s => s.id === entry.state.id)?.phase === 'landed'));
   assert.equal(f.runs().length, 1);
   assert(costs.transactions < 150, JSON.stringify(costs));
   assert(costs.documentsRead < 4000, JSON.stringify(costs));
   assert(costs.documentsWritten < 1300, JSON.stringify(costs));
+  assert(costs.peakRssBytes < 768 * 1024 * 1024, JSON.stringify(costs));
   assert.equal(f.pending().length, 0, 'zero idle work');
   const solo = await batchesFixture(t, { count: 1 });
   const soloBefore = solo.counts.length;
@@ -99,18 +101,18 @@ test('600 Intents and 575 retained receipts do not change bounded four-member la
   };
   t.diagnostic(
     JSON.stringify({
-      members: 4,
+      members: 8,
       intents: 600,
       retainedReceipts: 575,
       ...costs,
-      perBatchedLandingCalls: costs.transactions / 4,
+      perBatchedLandingCalls: costs.transactions / 8,
       includingAdmission: {
         calls: costs.transactions + admissions.length,
         reads: costs.documentsRead + admissions.reduce((sum, c) => sum + c.documents, 0),
         writes: costs.documentsWritten + admissions.reduce((sum, c) => sum + c.writes, 0),
       },
       solo: soloCosts,
-      fourSoloCalls: soloCosts.transactions * 4,
+      eightSoloCalls: soloCosts.transactions * 8,
       soloCallsIncludingAdmission:
         soloCosts.transactions + solo.counts.filter(c => c.name === 'finishEnqueue').length,
     }),

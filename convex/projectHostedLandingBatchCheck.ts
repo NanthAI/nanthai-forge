@@ -17,9 +17,12 @@ import {
 import { loadLanding, writeLanding } from './projectHostedLandingStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { enqueueHostedCheck } from './projectHostedChecks';
-import { releaseLandingQueue } from './projectHostedLandingWake';
+import { retainLandingTrain, releaseLandingQueue } from './projectHostedLandingWake';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { landingObservation } from '../src/hosted-landing';
+import { hostedStartMain } from './projectHostedChannels';
+import { loadFinish } from './projectHostedFinishStore';
+import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 
 /** Runs within the ordinary queue tick. There is no second check observer. */
@@ -129,6 +132,14 @@ async function prepareLandingCheckOnce(
   }
   if (!attempt.deferredCheck) return false;
   if (!state.batchSolo && (await formLandingBatch(ctx, claim, { row: selected.row, state }))) {
+    await releaseLandingQueue(ctx, queue, now);
+    return true;
+  }
+  await retainLandingTrain(ctx, claim, [state.id]);
+  const main = await hostedStartMain(ctx, claim.projectId);
+  if (main.head !== attempt.main.head || main.receipt.id !== attempt.main.receiptId) {
+    const finish = await loadFinish(ctx, claim);
+    if (!finish.value.pending) await reserveFinishRetry(ctx, finish.row, finish.value);
     await releaseLandingQueue(ctx, queue, now);
     return true;
   }

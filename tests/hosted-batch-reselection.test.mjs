@@ -168,6 +168,9 @@ for (const endedPhase of ['fallback', 'landed'])
     });
     // Retain a real landed leader and its accepted main bytes. Restore the two
     // pre-fix queued memberships and lose their wakes; only the alarm may act.
+    // These legacy rows predate the active-cohort queue field too.
+    for (const queue of f.tables.projectHostedLandingQueues.values())
+      f.patch('projectHostedLandingQueues', queue._id, { train: undefined });
     for (const task of f.pending())
       f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
     for (const current of f.tables.projectHostedLandingRequests.values()) {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import { requireLandingLease, type LandingClaim } from './projectHostedLandingControl';
-import { loadBatch, writeBatch, wakeBatch } from './projectHostedLandingBatchStore';
+import { loadBatch, writeBatch, wakeBatch, retryLandingBatch } from './projectHostedLandingBatchStore';
 import {
   loadLanding,
   loadLandingAttempt,
@@ -119,7 +119,8 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     'EVIDENCE_CHANGED',
     'Publish only the exact checked stacked Candidate.',
   );
-  let retry = candidate.base.head !== main.head || candidate.base.receiptId !== main.receipt.id;
+  const mainChanged = candidate.base.head !== main.head || candidate.base.receiptId !== main.receipt.id;
+  let retry = false;
   for (const member of members) {
     await hostedWriteProject(ctx, claim.projectId, member.attempt.actor.id, member.attempt.authorityEpoch);
     const own = await readHostedRecord(ctx, {
@@ -138,7 +139,15 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       member.attempt.policyDigest !== policyDigest ||
       !batchEligible(project, policy, member.attempt.actor, originalCandidate);
   }
-  if (retry) {
+  if (mainChanged && !retry && members.length === batch.members.length) {
+    await retryLandingBatch(ctx, key, batch);
+    await releaseLandingQueue(ctx, queue, now);
+    return {
+      status: 'pending' as const,
+      reason: 'Main changed; the cohort is recomposing one exact shared check.',
+    };
+  }
+  if (retry || mainChanged) {
     await writeBatch(ctx, key, { ...batch, phase: 'fallback' });
     await releaseLandingQueue(ctx, queue, now);
     await wakeBatch(ctx, key);

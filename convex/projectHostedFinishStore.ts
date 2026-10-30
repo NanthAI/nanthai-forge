@@ -15,6 +15,7 @@ import { landingObservation, type HostedLandingState } from '../src/hosted-landi
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
+import { wakeLandingQueue } from './projectHostedLandingWake';
 import { invariant } from '../src/errors';
 export async function loadFinish(ctx: MutationCtx | QueryCtx, input: LandingIdentity) {
   const row = await finishRow(ctx, input);
@@ -170,4 +171,5 @@ export async function failFinish(ctx: MutationCtx, input: LandingIdentity, code:
   };
   await writeLanding(ctx, row, next, false);
   await settleLandingOperation(ctx, next);
+  await wakeLandingQueue(ctx, { projectId: input.projectId, channel: state.request.channel });
 }

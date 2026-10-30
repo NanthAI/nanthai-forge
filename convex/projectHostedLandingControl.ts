@@ -1,4 +1,5 @@
-import { nextLandingRow } from './projectHostedLandingOrder';
+import { loadBatch } from './projectHostedLandingBatchStore';
+import { releaseUnstartedBatchForPriority } from './projectHostedLandingBatchPriority';
 import { prepareLandingCheck } from './projectHostedLandingBatchCheck';
 import {
   semanticVerdict,
@@ -18,7 +19,7 @@ import {
   landingRow,
   type LandingChannel,
 } from './projectHostedLandingStore';
-import { scheduleLandingWake, releaseLandingQueue } from './projectHostedLandingWake';
+import { nextTrainLandingRow, scheduleLandingWake, releaseLandingQueue } from './projectHostedLandingWake';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
@@ -62,7 +63,15 @@ export async function claimLandingQueue(
   )
     row = null;
   if (!row) {
-    row = await nextLandingRow(ctx, input);
+    row = await nextTrainLandingRow(ctx, queue);
+    if (row?.priority === 'urgent' && queue.train?.length && !queue.train.includes(row.submissionId)) {
+      const leader = await loadLanding(ctx, { projectId: input.projectId, submissionId: queue.train[0]! });
+      if (leader.state.batchId) {
+        const key = { projectId: input.projectId, batchId: leader.state.batchId };
+        const { batch } = await loadBatch(ctx, key);
+        await releaseUnstartedBatchForPriority(ctx, key, batch);
+      }
+    }
   }
   if (!row) {
     await ctx.db.patch(queue._id, { lease: null, wake: null });

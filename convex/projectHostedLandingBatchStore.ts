@@ -12,10 +12,18 @@ import {
 } from '../src/hosted-landing';
 import { HOSTED_BATCH_MEMBERS } from '../src/hosted-landing-batch';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { landingRow, loadLanding, insertLandingAttempt, writeLanding } from './projectHostedLandingStore';
+import {
+  landingRow,
+  landingQueue,
+  loadLanding,
+  loadLandingAttempt,
+  insertLandingAttempt,
+  writeLanding,
+} from './projectHostedLandingStore';
 import { enqueueHostedCheck } from './projectHostedChecks';
 import { loadHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
+import { retainLandingTrain } from './projectHostedLandingWake';
 import { invariant } from '../src/errors';
 
 export type BatchIdentity = { projectId: Id<'hostedProjects'>; batchId: string };
@@ -50,12 +58,23 @@ export async function loadBatch(ctx: QueryCtx | MutationCtx, input: BatchIdentit
   invariant(row, 'SOURCE_UNAVAILABLE', 'The retained landing batch is unavailable.');
   return { row, batch: batchSchema.parse(JSON.parse(row.value)) };
 }
-export async function writeBatch(ctx: MutationCtx, input: BatchIdentity, batch: LandingBatch) {
+export async function writeBatch(
+  ctx: MutationCtx,
+  input: BatchIdentity,
+  batch: LandingBatch,
+  replace = false,
+) {
   const { row } = await loadBatch(ctx, input);
   await ctx.db.patch(row._id, {
-    value: canonicalPayload(batchSchema.parse({ ...JSON.parse(row.value), ...batch })),
+    composeOperationId: batch.composeOperationId,
+    value: canonicalPayload(batchSchema.parse(replace ? batch : { ...JSON.parse(row.value), ...batch })),
   });
   if (batch.phase === 'fallback' || batch.phase === 'landed') await releaseBatchMembers(ctx, input, batch);
+  if (batch.phase === 'superseded') {
+    const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
+    if (queue?.train?.some(id => batch.members.some(member => member.submissionId === id)))
+      await ctx.db.patch(queue._id, { train: undefined });
+  }
 }
 export async function wakeBatch(ctx: MutationCtx, input: BatchIdentity) {
   const { batch } = await loadBatch(ctx, input);
@@ -133,6 +152,11 @@ export async function formLandingBatch(
       },
       false,
     );
+  await retainLandingTrain(
+    ctx,
+    { projectId: input.projectId, channel: 'main' },
+    members.map(m => m.state.id),
+  );
   await wakeBatch(ctx, { projectId: input.projectId, batchId: batch.id });
   return true;
 }
@@ -166,22 +190,27 @@ export async function installBatchAttempt(
   },
 ) {
   const { original } = input;
+  const row = await landingRow(ctx, { projectId: input.projectId, submissionId: original.submissionId });
+  invariant(row, 'SOURCE_UNAVAILABLE', 'The batch member is unavailable.');
+  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  const parent = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: state.attemptId });
   const { deferredCheck: _deferred, ...pins } = original;
   void _deferred;
   const attempt = {
     ...pins,
     ...(input.main ? { main: input.main } : {}),
-    ...(input.checkOperationId ? { operations: { ...pins.operations, check: input.checkOperationId } } : {}),
+    operations: {
+      ...pins.operations,
+      ...(parent.id !== original.id ? { accept: crypto.randomUUID() } : {}),
+      ...(input.checkOperationId ? { check: input.checkOperationId } : {}),
+    },
     id: crypto.randomUUID(),
-    parentAttemptId: original.id,
-    number: original.number + 1,
+    parentAttemptId: parent.id,
+    number: parent.number + 1,
     check: input.check,
     ...(input.candidate ? { candidate: input.candidate, memberCandidate: original.candidate } : {}),
   };
   await insertLandingAttempt(ctx, attempt);
-  const row = await landingRow(ctx, { projectId: input.projectId, submissionId: original.submissionId });
-  invariant(row, 'SOURCE_UNAVAILABLE', 'The batch member is unavailable.');
-  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
   await writeLanding(
     ctx,
     row,
@@ -196,4 +225,45 @@ export async function installBatchAttempt(
     false,
   );
   return attempt;
+}
+
+/** Main moved, not a check failure: retain the cohort and create one new exact
+ * shared source/check generation. Late uploads retain their old operation pins. */
+export async function retryLandingBatch(ctx: MutationCtx, input: BatchIdentity, batch: LandingBatch) {
+  const { uploads: _uploads, runId: _run, included: _included, ...retained } = batch;
+  void _uploads;
+  void _run;
+  void _included;
+  await writeBatch(
+    ctx,
+    input,
+    {
+      ...retained,
+      composeOperationId: crypto.randomUUID(),
+      checkOperationId: crypto.randomUUID(),
+      phase: 'composing',
+      uploadIndex: 0,
+    },
+    true,
+  );
+  for (const member of batch.members) {
+    const { row, state } = await loadLanding(ctx, {
+      projectId: input.projectId,
+      submissionId: member.submissionId,
+    });
+    await writeLanding(
+      ctx,
+      row,
+      {
+        ...state,
+        version: state.version + 1,
+        phase: 'queued',
+        observation: landingObservation('queued'),
+        error: null,
+        timing: { submittedAt: state.at, composeStartedAt: new Date().toISOString() },
+      },
+      false,
+    );
+  }
+  await wakeBatch(ctx, input);
 }

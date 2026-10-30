@@ -13,6 +13,7 @@ import {
   wakeBatch,
   enqueueBatchCheck,
   installBatchAttempt,
+  retryLandingBatch,
 } from './projectHostedLandingBatchStore';
 import { prepareBatchCompose } from './projectHostedLandingBatchCompose';
 import { submitHostedCompose } from './projectHostedComposeJobs';
@@ -22,6 +23,8 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import type { FinishCommand } from '../src/hosted-finish';
 import { r2Key } from './r2';
 import { scheduleFinish } from './projectHostedFinishWake';
+import { isStored } from './projectObjectFields';
+import { hostedStartMain } from './projectHostedChannels';
 import { invariant } from '../src/errors';
 
 export async function batchFinishStep(
@@ -101,6 +104,15 @@ export async function batchFinishStep(
       await writeBatch(ctx, key, { ...batch, phase: 'landed' });
       return { handled: true, command: null };
     }
+    const main = await hostedStartMain(ctx, input.projectId);
+    if (
+      included.length === batch.members.length &&
+      (main.head !== source.state.request.expectedMain.head ||
+        main.receipt.id !== source.state.request.expectedMain.receiptId)
+    ) {
+      await retryLandingBatch(ctx, key, batch);
+      return { handled: true, command: null };
+    }
     const settings = (await loadFinish(ctx, input)).value.check;
     invariant(
       settings?.kind === 'request',
@@ -166,7 +178,21 @@ export async function batchFinishStep(
       )
       .unique();
     const objectKey = r2Key(input.projectId, upload.pin.sha256);
-    if (!object)
+    if (object) {
+      invariant(
+        !object.removed && object.size === upload.pin.size,
+        'SOURCE_HASH_MISMATCH',
+        'Batch metadata object differs.',
+      );
+      if (isStored(object)) {
+        // Empty selection pages are shared with ordinary compose and may live
+        // in Convex storage or a recipe. Their location is not source identity.
+        await writeBatch(ctx, key, { ...batch, uploadIndex: batch.uploadIndex + 1 });
+        await wakeBatch(ctx, key);
+        return { handled: true, command: null };
+      }
+      await ctx.db.patch(object._id, { location: 'r2', r2Key: objectKey });
+    } else
       await ctx.db.insert('projectObjects', {
         projectId: input.projectId,
         digest: upload.pin.sha256,
@@ -176,12 +202,6 @@ export async function batchFinishStep(
         location: 'r2',
         r2Key: objectKey,
       });
-    else
-      invariant(
-        !object.removed && object.size === upload.pin.size && object.r2Key === objectKey,
-        'SOURCE_HASH_MISMATCH',
-        'Batch metadata object differs.',
-      );
     await scheduleFinish(ctx, originalRow, 30_000, true);
     return { handled: true, command: { kind: 'plan', ...upload, batchId: batch.id } };
   }
