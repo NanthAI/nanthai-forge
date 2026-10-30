@@ -173,6 +173,7 @@ test('real MCP discovery preserves agent-only authority with strict schemas and 
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
     'forge_check',
     'forge_current',
+    'forge_planning',
     'forge_review',
     'forge_source',
     'forge_task',
@@ -260,7 +261,7 @@ test('the existing stdio CLI accepts explicit hosted addressing and discovers to
   t.after(() => client.close());
   await client.connect(transport, requestOptions('connect'));
   const tools = (await client.listTools(undefined, requestOptions('listTools'))).tools;
-  assert.equal(tools.length, 7);
+  assert.equal(tools.length, 8);
   assert(tools.some(tool => tool.name === 'forge_task'));
   assert(!existsSync(s.root));
   assert(!existsSync(`${s.root}.forge-client`));

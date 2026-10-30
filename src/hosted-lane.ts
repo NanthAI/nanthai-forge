@@ -14,6 +14,15 @@ export const hostedIntentInputSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   z.object({ kind: z.literal('existing'), intentId: z.uuid() }).strict(),
+  /** A planned Issue: the Intent shares the Issue's id, and a repeated start adds a Lane to it. */
+  z
+    .object({
+      kind: z.literal('planned'),
+      intentId: z.uuid(),
+      outcome: intentCreateSchema.shape.outcome,
+      constraints: intentCreateSchema.shape.constraints,
+    })
+    .strict(),
 ]);
 export const hostedStartSchema = z
   .object({

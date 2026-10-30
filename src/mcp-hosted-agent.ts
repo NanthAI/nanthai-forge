@@ -116,6 +116,23 @@ export function registerHostedAgentWorkflow(
         }),
     );
   }
+  const planning = (['planning', 'put-planning-item', 'comment-planning-item'] as const).map(action =>
+    hostedAgentCommandSchemas[action].extend({ action: z.literal(action), operationId: z.uuid().optional() }),
+  );
+  server.registerTool(
+    'forge_planning',
+    {
+      description:
+        'The backlog: Initiatives and Issues. planning {id?,kind?,status?,initiativeId?,limit?,cursor?} reads a page or one item with comments (closes Issues whose Intent finished unless reconcile:false). put-planning-item replaces an item at expectedVersion (0 creates). comment-planning-item records a decision. Start work with forge_task start {planningItemId}.',
+      inputSchema: { command: z.union([planning[0]!, planning[1]!, planning[2]!]) },
+      annotations: { ...read, readOnlyHint: false },
+    },
+    ({ command }, extra) =>
+      result(() => {
+        const { action, ...body } = command;
+        return hostedAgentCli(transport.root, action, body, transport.address, transport, extra?.signal);
+      }),
+  );
   server.registerTool(
     'forge_current',
     {

@@ -9,6 +9,7 @@ import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { revertTargetSchema } from './hosted-sync.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import { safeRelative } from './safe-relative.js';
+import { planningCommentCommandSchema, planningPutSchema } from './work-planning-types.js';
 import { invariant } from './errors.js';
 import { hostedCheckCommandSchema, hostedCheckRunnerSchema } from './hosted-check.js';
 export const hostedAgentActions = [
@@ -29,7 +30,13 @@ export const hostedAgentActions = [
   'status',
   'observe',
   'capabilities',
+  'planning',
+  'put-planning-item',
+  'comment-planning-item',
 ] as const;
+/** Backlog actions are advertised only to clients that ask (planningVersion), so released clients
+ * that parse the capability list strictly keep working. */
+export const hostedAgentPlanningActions = ['planning', 'put-planning-item', 'comment-planning-item'] as const;
 /** Owner settings commands. Not advertised in capabilities: released clients parse
  * that list strictly, and the server enforces owner authority on each call. */
 export const hostedAgentOwnerActions = [
@@ -69,6 +76,7 @@ export const hostedAgentCapabilitiesSchema = z
   })
   .strict();
 export type HostedAgentCapabilities = z.infer<typeof hostedAgentCapabilitiesSchema>;
+const planningStatuses = ['proposed', 'open', 'in-progress', 'closed', 'abandoned'] as const;
 const uuid = z.uuid(),
   hash = z.string().regex(/^[0-9a-f]{64}$/);
 const lane = { laneId: uuid.optional() };
@@ -103,6 +111,8 @@ export const hostedAgentCommandSchemas = {
       initialHead: hash.optional(),
       stackOn: uuid.optional(),
       stackEntry: uuid.optional(),
+      /** Start from a planned Issue: its title and body become the Intent, and it moves to in-progress. */
+      planningItemId: uuid.optional(),
     })
     .strict(),
   open: z
@@ -227,6 +237,24 @@ export const hostedAgentCommandSchemas = {
     })
     .strict(),
   'check-settings': z.object({}).strict(),
+  /** Finite page of the backlog (Initiatives and Issues). id reads one item with its comments. */
+  planning: z
+    .object({
+      id: uuid.optional(),
+      kind: z.enum(['issue', 'initiative']).optional(),
+      status: z.enum(planningStatuses).optional(),
+      initiativeId: uuid.optional(),
+      limit: z.number().int().min(1).max(100).default(50),
+      cursor: z.string().nullable().default(null),
+      /** Close or abandon Issues whose Intent finished; reports what it changed. */
+      reconcile: z.boolean().default(true),
+    })
+    .strict(),
+  'put-planning-item': planningPutSchema
+    .omit({ action: true, operationId: true, itemId: true })
+    .extend({ itemId: uuid.optional() })
+    .strict(),
+  'comment-planning-item': planningCommentCommandSchema.omit({ action: true, operationId: true }).strict(),
 };
 export type HostedAgentAction = keyof typeof hostedAgentCommandSchemas;
 export function hostedAgentAction(action: string): HostedAgentAction {

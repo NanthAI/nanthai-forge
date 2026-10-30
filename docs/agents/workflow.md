@@ -26,6 +26,23 @@ Agents use three verbs: `start`, `save` and `land`. Reads keep their names (`sta
 
 Old names keep working for at least one released version and print their new form once on stderr; stdout, JSON and replay identity do not change. Later sections still name the underlying actions (for example `finish`, `checkpoint`) where they describe receipts and wire fields; those are the actions the verbs above run. MCP tools keep their current names and arguments in this release.
 
+## The backlog is Forge planning
+
+Hosted projects keep their backlog as planning: Initiatives group Issues, and an Issue is the work an agent starts. The same records show in the web app under Work > Planning. Read, write and start from them without leaving the agent command surface:
+
+```sh
+nforge agent ROOT planning '{"status":"open","limit":50}'                 # one page; filters: kind, status, initiativeId; cursor continues
+nforge agent ROOT planning '{"id":"ITEM_ID"}'                             # one item, full body, newest 50 comments
+nforge agent ROOT put-planning-item '{"kind":"initiative","title":"Phase 6","status":"open"}'
+nforge agent ROOT put-planning-item '{"kind":"issue","title":"Fix X","body":"Why and acceptance","status":"open","initiativeId":"INITIATIVE_ID"}'
+nforge agent ROOT comment-planning-item '{"itemId":"ITEM_ID","text":"Decision: use A, because B"}'
+nforge agent ROOT start '{"planningItemId":"ISSUE_ID"}'                  # Lane on the Issue; Issue becomes in-progress
+```
+
+`put-planning-item` and `comment-planning-item` take the schemas of `src/work-planning-types.ts` and the usual hosted `operationId` replay rules (identical parameters replay; a new `operationId` or changed parameters start new work). A put replaces the whole item at `expectedVersion` (0 creates; omit `itemId` to create one); a stale version fails with `PLANNING_CHANGED`. Writes need the project owner. `planning` reads indexed pages of the current Work records: `limit` is the page size, filters apply within a page, and an empty page continues up to five pages per call. Idle projects make no calls.
+
+`start {planningItemId}` starts an Intent with the Issue's id, title and body and moves the Issue to `in-progress`; another start on an in-progress Issue adds a Lane. When the Intent completes or is abandoned, the next `planning` read closes (or abandons) the Issue, naming what it changed and how to undo it; pass `reconcile:false` to read without changing anything. Older deployments return `HOSTED_ACTION_UNSUPPORTED` with an upgrade message. MCP: `forge_planning`.
+
 ## Working on Forge, not GitHub
 
 - Run only the tests your change affects, plus typecheck, lint and format checks on touched files. Never run the full suite locally: `land --save` runs the project's check on the project's runner for the combined work of concurrent Lanes.

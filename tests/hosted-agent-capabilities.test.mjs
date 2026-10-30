@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
-import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
+import { hostedAgentActions, hostedAgentPlanningActions } from '../dist/hosted-agent-contract.js';
 const { capabilities } = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 function setup() {
@@ -28,6 +28,14 @@ test('discovery reports protocol and actual project authority with constant read
   let result = await s.read('owner');
   assert.deepEqual(
     result.actions,
+    hostedAgentActions.filter(action => action !== 'resolve' && !hostedAgentPlanningActions.includes(action)),
+  );
+  // Backlog actions are advertised only to clients that ask, so released clients keep parsing.
+  const planning = await s
+    .call('capabilities', capabilities, { projectId: s.projectId, planningVersion: 1 }, 'owner')
+    .then(JSON.parse);
+  assert.deepEqual(
+    planning.actions,
     hostedAgentActions.filter(action => action !== 'resolve'),
   );
   assert.equal(result.mainReady, false);
@@ -110,5 +118,8 @@ test('resolve advertisement is opt-in so released strict capability readers rema
   const current = JSON.parse(
     await s.call('capabilities', capabilities, { projectId: s.projectId, resolveVersion: 1 }, 'owner'),
   );
-  assert.deepEqual(current.actions, hostedAgentActions);
+  assert.deepEqual(
+    current.actions,
+    hostedAgentActions.filter(action => !hostedAgentPlanningActions.includes(action)),
+  );
 });

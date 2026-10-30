@@ -31,6 +31,12 @@ const args = {
   intent: v.union(
     v.object({ kind: v.literal('new'), outcome: v.string(), constraints: v.optional(v.string()) }),
     v.object({ kind: v.literal('existing'), intentId: v.string() }),
+    v.object({
+      kind: v.literal('planned'),
+      intentId: v.string(),
+      outcome: v.string(),
+      constraints: v.optional(v.string()),
+    }),
   ),
 };
 type Input = {
@@ -42,7 +48,10 @@ type Input = {
   initialHead?: string;
   stackOn?: string;
   stackEntry?: string;
-  intent: { kind: 'new'; outcome: string; constraints?: string } | { kind: 'existing'; intentId: string };
+  intent:
+    | { kind: 'new'; outcome: string; constraints?: string }
+    | { kind: 'existing'; intentId: string }
+    | { kind: 'planned'; intentId: string; outcome: string; constraints?: string };
 };
 
 function startReply(value: unknown, noticeVersion?: 1) {
@@ -71,26 +80,39 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
   const { noticeVersion, ...semanticRequest } = validated.data;
   const payload = { action, ...semanticRequest };
   invariant(action === 'start' || payload.intent.kind === 'new', 'BAD_ARGUMENT', 'Create a new Intent.');
-  let overlapIntent = payload.intent.kind === 'new' ? payload.intent.outcome : payload.intent.intentId;
+  let overlapIntent = payload.intent.kind === 'existing' ? payload.intent.intentId : payload.intent.outcome;
   let recovery: import('../src/culprit-bisect').NeedsFix | undefined;
-  if (payload.intent.kind === 'existing') {
+  let plannedExists = false;
+  if (payload.intent.kind === 'existing' || payload.intent.kind === 'planned') {
     const row = await readHostedRecord(ctx, {
       projectId,
       actor,
       kind: 'intent',
       key: payload.intent.intentId,
     });
-    invariant(row, 'NOT_FOUND', 'Hosted Intent not found on this project.');
-    const intent = hostedIntentSchema.parse(JSON.parse(row.value));
-    overlapIntent = intent.outcome;
-    if (!['abandoned', 'completed'].includes(intent.status)) recovery = intent.needsFix;
+    plannedExists = Boolean(row);
     invariant(
-      project.owner === actor ||
-        intent.creatorAccountId === actor ||
-        intent.assigneeAccountIds.includes(actor),
-      'PROJECT_UNAVAILABLE',
-      'Select an Intent created by or assigned to this account on this Forge project.',
+      row || payload.intent.kind === 'planned',
+      'NOT_FOUND',
+      'Hosted Intent not found on this project.',
     );
+    if (row) {
+      const intent = hostedIntentSchema.parse(JSON.parse(row.value));
+      overlapIntent = intent.outcome;
+      invariant(
+        payload.intent.kind === 'existing' || !['abandoned', 'completed'].includes(intent.status),
+        'INTENT_CLOSED',
+        'This planned Issue already finished. Reopen the Issue to start new work.',
+      );
+      if (!['abandoned', 'completed'].includes(intent.status)) recovery = intent.needsFix;
+      invariant(
+        project.owner === actor ||
+          intent.creatorAccountId === actor ||
+          intent.assigneeAccountIds.includes(actor),
+        'PROJECT_UNAVAILABLE',
+        'Select an Intent created by or assigned to this account on this Forge project.',
+      );
+    }
   }
   const expected = { authorityEpoch: payload.authorityEpoch, ...payload.expectedMain },
     at = new Date().toISOString(),
@@ -115,7 +137,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       at,
       expected,
       ids: {
-        intent: payload.intent.kind === 'existing' ? payload.intent.intentId : crypto.randomUUID(),
+        intent: payload.intent.kind === 'new' ? crypto.randomUUID() : payload.intent.intentId,
         lane: crypto.randomUUID(),
       },
     },
@@ -179,7 +201,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     intentId = first.ids.intent!,
     laneId = first.ids.lane!;
   const base = { head: main.head, receiptId: main.receipt.id };
-  if (payload.intent.kind === 'new')
+  if (payload.intent.kind === 'new' || (payload.intent.kind === 'planned' && !plannedExists))
     await writeHostedRecord(ctx, {
       projectId,
       actor,

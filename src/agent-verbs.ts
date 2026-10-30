@@ -53,7 +53,8 @@ export const operatorActions = [
   'prioritize',
 ] as const;
 
-/** Named reads keep their names; no notice. `resolve` is the hosted conflict save, kept as-is. */
+/** Named reads keep their names; no notice. `resolve` is the hosted conflict save, kept as-is. The planning
+ * actions are the hosted backlog: one read and two writes under their Work names. */
 export const namedReads = [
   'tests',
   'landing',
@@ -82,6 +83,9 @@ export const namedReads = [
   'check-settings',
   'capabilities',
   'resolve',
+  'planning',
+  'put-planning-item',
+  'comment-planning-item',
 ] as const;
 
 /** Old lifecycle spellings that are now a start/save/land mode (the alias rows of the V1 table). */

@@ -83,7 +83,8 @@ composes and submits durable agent landing. Pending is not accepted.
 
 Reads: tests, status, landing, observe, wait, log, link,
        records, candidate, provenance, candidates, review, diff, show, brief, peers,
-       handoff-read, making-of, metrics, improve, decisions, policy, check-settings, capabilities.
+       handoff-read, making-of, metrics, improve, decisions, policy, check-settings, capabilities,
+       planning (hosted backlog; writes: put-planning-item, comment-planning-item; start planningItemId).
 Operator (nforge x ROOT ACTION): accept, cancel, revert, undo-revert, undo-sync, abandon,
        complete, complete-merged, clean, take, guidance, pre-edit, install-hooks, uninstall-hooks,
        friction-triage, set-policy, define-check, configure-check, configure-runner, prioritize.
@@ -196,6 +197,9 @@ const examples: Record<string, unknown> = {
   status: { laneId: 'LANE_ID' },
   records: { collection: 'lanes', state: 'active', merged: false, offset: 0, limit: 50 },
   'making-of': { intentId: 'INTENT_ID' },
+  planning: { status: 'open', limit: 50 },
+  'put-planning-item': { kind: 'issue', title: 'Outcome', body: 'Why and acceptance', status: 'open' },
+  'comment-planning-item': { itemId: 'ITEM_ID', text: 'Decision and why' },
   report: { laneId: 'LANE_ID', harness: 'claude-code', model: 'MODEL', tokens: { input: 1200, output: 340 } },
   diff: { laneId: 'LANE_ID', paths: ['src/file.ts'] },
   show: { state: 'STATE', path: 'src/file.ts' },
@@ -290,6 +294,9 @@ function actionHelp(action: string): string {
   if (action === 'report')
     result +=
       'Totals are cumulative for this Lane session (actor + optional sessionId); a new report replaces them. Advisory and local; nothing is verified.\n';
+  if (action === 'planning' || action === 'put-planning-item' || action === 'comment-planning-item')
+    result +=
+      'Hosted backlog (Work > Planning). planning {id?,kind?,status?,initiativeId?,limit?,cursor?,reconcile?} reads one indexed page, or one item with comments; reconcile (default true) closes Issues whose Intent finished and reports it. put-planning-item replaces an item at expectedVersion (0 creates; omit itemId to create); comment-planning-item adds a comment. Writes need the project owner; replay operationId after an unknown reply. start planningItemId starts an Issue.\n';
   if (action === 'start')
     result +=
       'intentId adds a Lane to an open Intent; after declares a landing dependency. Default uses accepted main when present; channel:null explicitly selects workspace source.\n';

@@ -100,6 +100,9 @@ const rows = [
   ['capabilities', null],
   ['integrate', 'save --preview', 'integrate', 'integrate'],
   ['resolve', null],
+  ['planning', null],
+  ['put-planning-item', null],
+  ['comment-planning-item', null],
 ];
 
 function captured(stream) {

@@ -5,7 +5,8 @@ import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
 import type { HostedRunSubscription } from './hosted-agent-observe.js';
 import { executeHostedRecords } from './hosted-agent-records.js';
-import { hostedAgentRecordActions } from './hosted-agent-contract.js';
+import { hostedAgentRecordActions, hostedAgentPlanningActions } from './hosted-agent-contract.js';
+import { executeHostedPlanning, markPlanningStarted } from './hosted-agent-planning.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { recordLane } from './lane-registry.js';
 import { convexLaneStates, laneHousekeeping, markerIdentity } from './lane-prune.js';
@@ -159,7 +160,7 @@ export class HostedAgentTransport {
     outcome: { result?: unknown; error?: unknown },
     operationId: string | null,
   ) {
-    if (['capabilities', 'metrics', 'check-settings'].includes(action)) return;
+    if (['capabilities', 'metrics', 'check-settings', ...hostedAgentPlanningActions].includes(action)) return;
     writeCallerReceipts(
       metricOutboxDirectory(this.address),
       callerReceipts({
@@ -177,7 +178,15 @@ export class HostedAgentTransport {
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
     if (
-      ['capabilities', 'status', 'observe', 'landing', 'check-settings', 'metrics'].includes(requestedAction)
+      [
+        'capabilities',
+        'status',
+        'observe',
+        'landing',
+        'check-settings',
+        'metrics',
+        ...hostedAgentPlanningActions,
+      ].includes(requestedAction)
     )
       return this.dispatchRequest(requestedAction, input, signal);
     const metricRoot = resolve(this.root);
@@ -240,6 +249,7 @@ export class HostedAgentTransport {
           overlapVersion: 1,
           mirrorVersion: 1,
           metricReceiptVersion: 1,
+          planningVersion: 1,
         };
         for (;;) {
           try {
@@ -256,7 +266,7 @@ export class HostedAgentTransport {
             )
               throw error;
             const field =
-              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|mirrorVersion|metricReceiptVersion)\b/i.exec(
+              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|mirrorVersion|metricReceiptVersion|planningVersion)\b/i.exec(
                 error.message,
               )?.[1];
             // Preserve independently supported features, and never repeat a
@@ -297,6 +307,21 @@ export class HostedAgentTransport {
         )
       )
         throw unadvertisedActionError(action);
+      if ((hostedAgentPlanningActions as readonly string[]).includes(action)) {
+        const planning = await executeHostedPlanning(
+          {
+            root: this.root,
+            address: this.address,
+            exchange: this.exchange,
+            query: this.query.bind(this),
+          },
+          capabilities.actor,
+          action as (typeof hostedAgentPlanningActions)[number],
+          command.data as Record<string, unknown>,
+          operationId as string | undefined,
+        );
+        return this.response(action, planning.operationId, planning.result);
+      }
       if (action === 'metrics')
         return this.response(
           action,
@@ -412,6 +437,15 @@ export class HostedAgentTransport {
         });
       } else {
         result = await executeHostedAgent(session, action, command.data);
+        const planningItemId =
+          action === 'start' && (command.data as { planningItemId?: string }).planningItemId;
+        const planning = planningItemId
+          ? await markPlanningStarted(
+              { root, address: this.address, exchange: this.exchange, query: this.query.bind(this) },
+              planningItemId,
+              journal.operationId,
+            )
+          : undefined;
         if (action === 'finish') result = await recoverHostedFinish(session, result);
         if (action === 'start') {
           const started = hostedStartResultSchema.parse(result);
@@ -455,6 +489,7 @@ export class HostedAgentTransport {
             };
           }
         }
+        if (planning) result = { ...(result as object), planning };
       }
       if (action === 'open') {
         const opened = result as { root?: unknown; laneId?: unknown };

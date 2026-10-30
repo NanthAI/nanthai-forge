@@ -31,6 +31,8 @@ import {
   selectAgentLane,
 } from './hosted-agent-source.js';
 import { invariant } from './errors.js';
+import { plannedIntent } from './hosted-agent-planning.js';
+import { unadvertisedActionError } from './hosted-agent-version.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 const outcome = z.object({ outcome: z.object({ status: z.string(), result: z.unknown().optional() }) });
@@ -354,6 +356,18 @@ export async function executeHostedAgent(
   }
   if (action === 'start') {
     const command = hostedAgentCommandSchemas.start.parse(input);
+    invariant(
+      !command.planningItemId || (!command.intentId && !command.outcome),
+      'BAD_ARGUMENT',
+      'Start from a planning Issue, an Intent, or a new outcome, not a mix.',
+    );
+    if (command.planningItemId && !session.capabilities.actions.includes('planning'))
+      throw unadvertisedActionError('planning');
+    const planned = command.planningItemId
+      ? await session.journal.retain('start-planned-intent', () =>
+          plannedIntent(session, command.planningItemId!),
+        )
+      : undefined;
     const request = await session.journal.retain('start-request', async () => {
       const main = await session.main();
       const parent = command.stackOn ? await selectAgentLane(session, command.stackOn) : null;
@@ -367,13 +381,15 @@ export async function executeHostedAgent(
           : {}),
         ...(command.stackOn ? { stackOn: command.stackOn } : {}),
         ...(command.stackEntry ? { stackEntry: command.stackEntry } : {}),
-        intent: command.intentId
-          ? { kind: 'existing', intentId: command.intentId }
-          : {
-              kind: 'new',
-              outcome: command.outcome,
-              ...(command.constraints === undefined ? {} : { constraints: command.constraints }),
-            },
+        intent: planned
+          ? planned
+          : command.intentId
+            ? { kind: 'existing', intentId: command.intentId }
+            : {
+                kind: 'new',
+                outcome: command.outcome,
+                ...(command.constraints === undefined ? {} : { constraints: command.constraints }),
+              },
       });
     });
     return hostedStartResultSchema.parse(await session.mutation('projectHostedStart:start', request));

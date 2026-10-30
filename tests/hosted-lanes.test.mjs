@@ -10,6 +10,7 @@ const start = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const reads = await import(moduleUrl('../convex/projectHostedLanes.ts'));
 const channels = await import(moduleUrl('../convex/projectHostedChannels.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const planning = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
 const head = 'a'.repeat(64),
   nextHead = 'b'.repeat(64);
 const code = expected => error => (error.data?.code ?? error.code) === expected;
@@ -486,4 +487,70 @@ test('explicit initial source is committed before hosted start; main receipt CAS
   assert.deepEqual(await s.begin(input), result);
   await assert.rejects(s.begin({ ...input, initialHead: 'd'.repeat(64) }), code('WORK_OPERATION_CHANGED'));
   await assert.rejects(s.begin({ ...input, operationId: randomUUID() }), code('CHANNEL_CHANGED'));
+});
+
+test('planned start gives the Intent the Issue id, adds sibling Lanes, and reports Intent state per Issue', async () => {
+  const s = await setup(),
+    issue = randomUUID(),
+    planned = { kind: 'planned', intentId: issue, outcome: 'Planned Issue', constraints: 'Acceptance' };
+  const first = await s.begin(s.input(planned));
+  assert.equal(first.intentId, issue);
+  assert.equal(first.lane.intentId, issue);
+  assert.deepEqual(await s.begin(s.input(planned)).then(r => r.intentId), issue);
+  const intent = JSON.parse(
+    await s.invoke('intent', reads.intent, { projectId: s.projectId, intentId: issue }),
+  );
+  assert.equal(intent.outcome, 'Planned Issue');
+  assert.equal(intent.constraints, 'Acceptance');
+  assert.equal(intent.creatorAccountId, 'owner');
+  // Same Issue again: a sibling Lane on the same Intent, no second Intent record.
+  const second = await s.begin(s.input(planned));
+  assert.equal(second.intentId, issue);
+  assert.notEqual(second.lane.laneId, first.lane.laneId);
+  assert.equal([...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'intent').length, 1);
+  const states = await s.invoke('states', planning.intentStates, {
+    projectId: s.projectId,
+    ids: [issue, randomUUID()],
+  });
+  assert.deepEqual(JSON.parse(states), { [issue]: 'active' });
+  // One project read plus one indexed head read per Issue; never a body or a scan.
+  assert(s.counts.at(-1).documents <= 3 && s.counts.at(-1).writes === 0, 'head reads only');
+  await s.call('states', planning.intentStates, {
+    projectId: s.projectId,
+    ids: Array.from({ length: 100 }, () => randomUUID()),
+  });
+  assert(s.counts.at(-1).documents <= 101 && s.counts.at(-1).writes === 0, '100 Issues: 101 reads');
+  await assert.rejects(
+    s.invoke('states', planning.intentStates, {
+      projectId: s.projectId,
+      ids: Array.from({ length: 101 }, () => randomUUID()),
+    }),
+    code('BAD_ARGUMENT'),
+  );
+  await assert.rejects(
+    s.invoke('states', planning.intentStates, { projectId: s.projectId, ids: [issue] }, 'stranger'),
+    code('PROJECT_UNAVAILABLE'),
+  );
+
+  // A finished Intent is not restarted; the Issue must be reopened.
+  const original = JSON.parse(
+    await s.invoke('intent', reads.intent, { projectId: s.projectId, intentId: issue }),
+  );
+  await s.call('complete', {
+    _handler: ctx =>
+      records.writeHostedRecord(ctx, {
+        projectId: s.projectId,
+        actor: 'owner',
+        authorityEpoch: 1,
+        expectedVersion: 0,
+        record: { ...original, version: 1, status: 'completed' },
+      }),
+  });
+  assert.deepEqual(
+    JSON.parse(await s.invoke('states', planning.intentStates, { projectId: s.projectId, ids: [issue] })),
+    { [issue]: 'completed' },
+  );
+  await assert.rejects(s.begin(s.input(planned)), code('INTENT_CLOSED'));
+  // Another account cannot attach Lanes to someone else's Intent by naming its Issue id.
+  await assert.rejects(s.begin(s.input({ ...planned, intentId: first.intentId }), 'stranger'));
 });

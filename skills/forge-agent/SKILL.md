@@ -12,6 +12,8 @@ Use ordinary search/read/edit tools on the selected source. For recorded deliver
 - Read peers and presence before editing to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
 - Governance: contributors propose and cannot write source or Channels directly; the owner accepts. Protected paths and review-required policy stop at `awaiting-review` for a person; never change policy to bypass review.
 
+- The backlog is Forge planning: read `planning`, start from an Issue (`start {"planningItemId":"ISSUE_ID"}`), comment decisions on it (`comment-planning-item`).
+
 ## Short forms
 
 ```sh

@@ -6,7 +6,11 @@ import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { channelRow } from './projectHostedChannels';
 import { sourceAuthority } from '../src/hosted-source-authority';
-import { hostedAgentActions, hostedAgentCapabilitiesSchema } from '../src/hosted-agent-contract';
+import {
+  hostedAgentActions,
+  hostedAgentCapabilitiesSchema,
+  hostedAgentPlanningActions,
+} from '../src/hosted-agent-contract';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -21,6 +25,7 @@ export const capabilities = query({
     overlapVersion: v.optional(v.literal(1)),
     mirrorVersion: v.optional(v.literal(1)),
     metricReceiptVersion: v.optional(v.literal(1)),
+    planningVersion: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (
@@ -33,6 +38,7 @@ export const capabilities = query({
       overlapVersion,
       mirrorVersion,
       metricReceiptVersion,
+      planningVersion,
     },
   ) => {
     try {
@@ -54,7 +60,12 @@ export const capabilities = query({
           actions:
             authority.mode === 'native-owner'
               ? ['capabilities']
-              : hostedAgentActions.filter(action => action !== 'resolve' || resolveVersion === 1),
+              : hostedAgentActions.filter(
+                  action =>
+                    (action !== 'resolve' || resolveVersion === 1) &&
+                    (!(hostedAgentPlanningActions as readonly string[]).includes(action) ||
+                      planningVersion === 1),
+                ),
           mainReady: (await channelRow(ctx, projectId)) !== null,
           sourceWorkerConfigured: (process.env.FORGE_SOURCE_PROVIDER ?? 'convex') === 'convex',
           checkCallbackConfigured: Boolean(process.env.FORGE_HOSTED_CHECK_KEY_ID),
