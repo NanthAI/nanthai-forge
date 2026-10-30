@@ -10,7 +10,7 @@ import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { writeRecoveryState } from './recovery-state.js';
 import { hostedRecoveryRows } from './recovery-hosted-read.js';
-import { saveObjectSchema } from './hosted-save.js';
+import { saveObjectSchema, savePin, saveBytes } from './hosted-save.js';
 import { RecoveryObjects, recoveryContentPins } from './recovery-hosted-objects.js';
 import {
   recoveryTables,
@@ -23,6 +23,8 @@ import type { RecoveryTransport } from './recovery-source.js';
 
 const initialHash = digest('forge-hosted-recovery-rows-v1');
 const rowHash = (previous: string, row: string) => digest(canonicalPayload({ previous, row }));
+const emptyChanges = savePin([]);
+const inlineSave = z.object({ kind: z.literal('save'), changes: saveObjectSchema });
 type Progress = {
   identity: string;
   baseline: string;
@@ -124,7 +126,18 @@ export async function foldHostedRecovery(
       hash = rowHash(hash, text);
       if (state.phase !== 'capture') continue;
       let metadata: unknown;
-      if (table === 'projectHostedRecordBodies') metadata = JSON.parse(String(row.value));
+      if (table === 'projectHostedRecordBodies') {
+        metadata = JSON.parse(String(row.value));
+        const saved = inlineSave.safeParse(metadata);
+        // Unchanged saves publish savePin([]) without storing a change-page
+        // object. Recover that protocol value, keeping its exact content pin.
+        if (
+          saved.success &&
+          saved.data.changes.sha256 === emptyChanges.sha256 &&
+          saved.data.changes.size === emptyChanges.size
+        )
+          source.put(Buffer.from(saveBytes([])));
+      }
       for (const pin of recoveryContentPins(metadata)) {
         const closure = await retained.retain(pin);
         state.recovery.objects = put({

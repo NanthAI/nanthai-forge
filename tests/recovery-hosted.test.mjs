@@ -206,3 +206,57 @@ test('opaque source bytes identical to an inventory node do not suppress its met
   const ids = [...hostedRecoveryObjects(source, { hostedRecovery: { objects: root, pages: null } })];
   assert(ids.includes(f.blob));
 });
+
+test('unchanged hosted saves recover their exact inline empty changes without downloading an absent object', async t => {
+  const { randomUUID } = await import('node:crypto');
+  const { savePin } = await import('../dist/hosted-save.js');
+  const { canonicalPayload } = await import('../dist/hosted-source-operation.js');
+  const f = await hostedRecoveryFixture(t);
+  const empty = savePin([]);
+  f.tables.projectHostedRecordBodies.push({
+    _id: randomUUID(),
+    projectId: f.selection.projectId,
+    value: canonicalPayload({
+      kind: 'save',
+      id: randomUUID(),
+      version: 0,
+      at: '2026-10-25T12:00:00.000Z',
+      actor: 'owner',
+      laneId: f.lane.id,
+      operationId: randomUUID(),
+      expectedHead: f.head,
+      expectedSourceVersion: 0,
+      head: f.head,
+      sourceVersion: 0,
+      changes: empty,
+    }),
+  });
+  const download = f.transport.download;
+  f.transport.download = pin => {
+    assert.notEqual(pin.sha256, empty.sha256, 'the inline no-op value has no storage object');
+    return download(pin);
+  };
+  const recovered = await recoverSnapshot(f.target, f.request, f.transport);
+  assert.equal(recovered.coverage.main.head, f.head);
+  assert.equal(new NativeSource(f.target).object(empty.sha256).toString(), '[]');
+});
+for (const kind of ['save', 'candidate'])
+  test(`inline no-op recovery keeps missing ${kind} metadata failures`, async t => {
+    const { randomUUID } = await import('node:crypto');
+    const { savePin } = await import('../dist/hosted-save.js');
+    const f = await hostedRecoveryFixture(t);
+    const pin = savePin(kind === 'save' ? [1] : []);
+    f.tables.projectHostedRecordBodies.push({
+      _id: randomUUID(),
+      projectId: f.selection.projectId,
+      value: JSON.stringify({ kind, changes: pin }),
+    });
+    const download = f.transport.download;
+    f.transport.download = selected => {
+      if (selected.sha256 === pin.sha256)
+        throw Object.assign(Error('Synthetic missing stored metadata'), { code: 'INVALID_WORK_BACKUP' });
+      return download(selected);
+    };
+    await assert.rejects(recoverSnapshot(f.target, f.request, f.transport), { code: 'INVALID_WORK_BACKUP' });
+    assert(!existsSync(f.target));
+  });

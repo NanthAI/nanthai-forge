@@ -197,6 +197,8 @@ node --import ./tests/check-runtime.mjs --test --test-concurrency=2 \
   tests/phase5-hosted-lifecycle-script.test.mjs
 ```
 
+Unchanged hosted saves retain the canonical empty change-list pin without a stored change-page object. Recovery materializes that protocol-defined `[]` value locally with its exact hash and size before folding the saved metadata. Missing nonempty change pages and other unavailable objects retain their existing failures.
+
 The tests use production hosted queue, check, source-save, lifecycle, acceptance
 and recovery handlers with synthetic provider/storage IO. Virtual time models
 client disconnection while hosted execution continues. A separate injected
@@ -258,3 +260,65 @@ the private handoff, along with every passed/failed step, remaining scratch
 project, exact receipt and observed call coverage. Q4 moves metrics 5.5 and 5.6;
 metric 5.3 (dropped landings) must remain zero. Automated zero reruns and zero
 stranded entries are qualification evidence, not a production before/after rate.
+
+### Live GitHub Actions client interruption drill
+
+`scripts/phase5-hosted-actions-drill.mjs` provides explicit stages for the public
+`NanthAI/forge-q4-bench` qualification repository. The operator supplies that
+repository, includes it in the existing Forge App installation, and seeds its
+control source and **only** `.github/workflows/forge-check.yml` from compatible
+public Forge source. Do not copy deployment, backup or push-triggered CI workflows
+into the bench. The script neither creates nor deletes the repository.
+
+Build core, choose a private evidence directory under the working Lane, then run:
+
+```sh
+node scripts/phase5-hosted-actions-drill.mjs setup .forge/q4-actions
+# Use the returned new project ID, existing dev deployment and owner sign-in:
+nforge github connect PROJECT_ID --url DEPLOYMENT --repo NanthAI/forge-q4-bench
+# The owner opens the exact returned authorization URL. Do not automate consent.
+node scripts/phase5-hosted-actions-drill.mjs prepare .forge/q4-actions
+node scripts/phase5-hosted-actions-drill.mjs configure .forge/q4-actions
+node scripts/phase5-hosted-actions-drill.mjs restart .forge/q4-actions
+node scripts/phase5-hosted-actions-drill.mjs sleep .forge/q4-actions
+node scripts/phase5-hosted-actions-drill.mjs wifi-loss .forge/q4-actions
+node scripts/phase5-hosted-actions-drill.mjs finalize .forge/q4-actions
+node scripts/phase5-hosted-actions-drill.mjs cleanup .forge/q4-actions
+```
+
+`prepare` can run while owner authorization is pending. `configure` reads the
+actual initial runner and requires the existing owner-proven numeric repository
+binding before selecting App-direct Actions on `ubuntu-latest`, workflow `main`.
+`configure` explicitly sets only the disposable hosted fixture to `auto-on-pass` with the full gate and preserves its other policy fields; hosting does not copy the local fixture policy. The harmless check uses portable `node`; its tiny Candidate includes dependency-free npm metadata because the existing executor runs `npm ci` first. After a save completes, the harness replays that same save UUID to acknowledge its head locally before finish. Each interruption submits a changed
+Candidate from a separate client process, exits while finish is pending, lets
+hosted authority complete, then replays the retained public finish payload from
+another process. Passed run ID, provider execution, plan/terminal digests, counts,
+acceptance receipt and main must remain identical. Each Candidate must have one
+check run. The final recovery fold verifies all selected submissions are terminal
+and each acceptance occurs once, retaining source and receipts without creating
+an accepting native owner. It recovers an Actions client's read cache; it does
+not register a replacement Mac runner or change the Actions configuration.
+
+The sleep and Wi-Fi cases advance an isolated harness clock by thirty and ten
+minutes while a synthetic offline transport refuses calls. They do not change
+server time, wait for those real durations or disable physical networking.
+Separate process exits and real GitHub/hosted completion are live evidence;
+virtual elapsed time remains synthetic client evidence. The restart case tests
+requesting-client process loss, not a forced crash of the hosted driver.
+
+After an interrupted recovery fold, use the explicit `recover` phase with the same evidence directory to resume its retained pages and pins without repeating the cancellation case or any check.
+
+Keep `report.json`, request/reply files and original operation journals. Stages
+are explicit; a failed stage does not automatically create a replacement project,
+submission or check. Inspect its retained pins before resuming. Run `cleanup`
+on success or failure once evidence is recorded; it performs normal project
+deletion and requires its deleted tombstone. Leave the bench repository for the
+lead to delete.
+
+The planning budget is 1,900 function invocations, including a 700-call internal
+allowance. The staged harness includes its measured implementation-delivery calls, reserves 100 calls for uninstrumented initial CLI/bootstrap work, and reserves another 180 calls for cleanup when stopping
+ordinary work before the 2,000 threshold. It records HTTP query/mutation/action
+invocations separately from subscription registrations and reactive updates,
+counting all observations conservatively against its stop budget. Server-internal
+and billed totals, actual documents read/written, and GitHub/Convex memory remain
+unknown. GitHub REST and object-storage traffic are separate.
