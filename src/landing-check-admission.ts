@@ -17,6 +17,7 @@ import { batchEdit } from './landing-batch-store.js';
 import { reuseLandingCheck } from './landing-check-reuse.js';
 import { retainDiagnosisNode, validatePrefixRun } from './landing-diagnosis.js';
 import { retryWorkPhase } from './work-retry.js';
+import { withWorkLockOptions } from './work-lock.js';
 import type { WorkService } from './work.js';
 import type { CheckRun } from './work-types.js';
 import type { LandingBatch, BatchPrefix } from './landing-batch-types.js';
@@ -180,20 +181,24 @@ export async function admitLandingCheck(
           reservation,
           JSON.stringify({ runId: prefix.runId, viewId: prefix.viewId, head: prefix.head }),
         );
+        // Parallel probes also publish through async FIFO writers. A blocking
+        // run-check waiter could strand an earlier ticket on this event loop.
         const dispatch = () =>
-          retryWorkPhase(prefix.runId, () =>
-            work.dispatch(
-              {
-                action: 'run-check',
-                operationId: prefix.runId,
-                viewId: prefix.viewId,
-                expectedHead: prefix.head,
-                checkId: first.checkId,
-                expectedDefinition: first.definition,
-                expectedEnvironment: batch.environment?.fingerprint ?? first.environment,
-              },
-              store.revision(),
-              { beforePublish: driver.beforePublish },
+          withWorkLockOptions({ nonblocking: true }, () =>
+            retryWorkPhase(prefix.runId, () =>
+              work.dispatch(
+                {
+                  action: 'run-check',
+                  operationId: prefix.runId,
+                  viewId: prefix.viewId,
+                  expectedHead: prefix.head,
+                  checkId: first.checkId,
+                  expectedDefinition: first.definition,
+                  expectedEnvironment: batch.environment?.fingerprint ?? first.environment,
+                },
+                store.revision(),
+                { beforePublish: driver.beforePublish },
+              ),
             ),
           );
         await (route.actual === 'github-actions' ? withDetachedChecks(dispatch) : dispatch());

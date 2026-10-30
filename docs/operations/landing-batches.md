@@ -127,6 +127,11 @@ replacing a driver does not cancel or restart that execution. No locks are held
 while checks execute or while their outcomes are observed. A saturated drain
 observes without writing unchanged Work.
 
+Check admission returns Work-lock contention to its existing asynchronous retry
+loop, including finite drains outside the owner worker. This lets earlier FIFO
+writers on the same event loop advance while parallel diagnostic checks reserve
+their original run IDs.
+
 The cursor is additive and optional; current older writers preserve unknown record
 fields. The generation journal does not change Work's format, revision or queue
 contents. Keep it with the owner-local control journals on recovery; canonical

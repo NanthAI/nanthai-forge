@@ -19,9 +19,68 @@ import { preserveFields } from '../dist/work-normalization.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readPendingStatus } from '../dist/pending-status-read.js';
+import { admitLandingCheck } from '../dist/landing-check-admission.js';
+import { CheckQueue } from '../dist/check-queue.js';
+import { historyFixture } from './landing-starvation-fixture.mjs';
 
 const select = f => batchEdit(f.work, 'select', data => selectBatch(f.work, data, 'main'));
 const runs = f => f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id));
+
+test('diagnostic admission yields to an earlier asynchronous writer after a revision race', async t => {
+  const f = await historyFixture(t, { github: true, journals: false });
+  const batch = f.batch,
+    driver = await claimLandingDriver(f.work, 'main');
+  const prefix = batch.prefixes[0];
+  const dispatch = f.work.dispatch.bind(f.work);
+  let attempts = 0,
+    writer,
+    writerAdmitted = false;
+  f.work.dispatch = async (...args) => {
+    if (args[0].action === 'run-check') {
+      if (++attempts === 1) {
+        // Another diagnostic publication invalidates the already selected revision.
+        await batchEdit(
+          f.work,
+          batch.id,
+          data => {
+            data.landingBatches.find(item => item.id === batch.id).mode = 'halving';
+          },
+          driver.beforePublish,
+          'main',
+        );
+      } else if (attempts === 2) {
+        // Hold admission just long enough to put a real async writer ahead of
+        // run-check. Releasing the holder leaves only its scheduled continuation.
+        const holder = new CheckQueue(join(f.store.directory, 'lock-queue'), {
+          limit: 1,
+          serializeAdmission: false,
+          anchor: f.store.directory,
+        });
+        try {
+          assert.equal(holder.position().acquired, true);
+          writer = f.store.lockedAsync(() => {
+            writerAdmitted = true;
+          });
+        } finally {
+          holder.release();
+        }
+      }
+    }
+    return dispatch(...args);
+  };
+  try {
+    assert.equal(await admitLandingCheck(f.work, batch, prefix, driver), true);
+    assert.equal(writerAdmitted, true);
+    await waitForAgentRun(f.store, prefix.runId);
+    assert.equal(f.store.select('runs', prefix.runId).status, 'passed');
+    assert.equal(runs(f).length, 1, 'admission retains one physical run');
+    assert.ok(attempts <= 4, '550 entries and 450 batches do not multiply dispatch attempts');
+    t.diagnostic(`550 entries / 450 batches: ${attempts} dispatch attempts, 1 physical run`);
+  } finally {
+    await writer;
+  }
+});
+
 function assertCheckedMoves(f) {
   const data = f.store.load();
   assert.ok(data.channelMoves.some(move => move.status === 'accepted'));
