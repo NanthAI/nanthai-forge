@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } f
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ForgeError } from './errors.js';
+import { refuseRealUserState } from './test-isolation.js';
 
 const NO_RESULT = 'No successful result is claimed.';
 export const DIAGNOSTICS_MAX_BYTES = 256 * 1024;
@@ -61,6 +62,7 @@ export function writeDiagnostics(
   existingParentOnly = false,
 ): string | undefined {
   try {
+    refuseRealUserState(directory, 'diagnostics');
     if (existingParentOnly) {
       try {
         mkdirSync(directory, { mode: 0o700 });

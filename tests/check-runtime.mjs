@@ -11,9 +11,16 @@ process.env.FORGE_LANDING_LOCK_WAIT_MS = '60000';
 // Tests never see the machine's saved `nforge login`: it would register account-only MCP tools.
 const config = mkdtempSync(join(tmpdir(), 'forge-test-config-'));
 process.env.XDG_CONFIG_HOME = config;
+// Nor the real home: ~/.forge (queue, logs) and ~/.config/forge (login, metric outbox) are the owner's.
+// Spawned children inherit both. src/test-isolation.ts refuses real-path writes if this file is skipped.
+const home = mkdtempSync(join(tmpdir(), 'forge-test-home-'));
+process.env.HOME = home;
+process.env.USERPROFILE = home;
+process.env.FORGE_TEST_MODE = '1';
 process.once('exit', () => {
   rmSync(directory, { recursive: true, force: true });
   rmSync(config, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true });
 });
 
 // Optional per-file wall times include module loading, test execution and teardown.

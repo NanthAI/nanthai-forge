@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import './check-runtime.mjs';
 import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { initNative } from '../dist/native-work.js';

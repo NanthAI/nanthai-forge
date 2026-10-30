@@ -12,6 +12,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ForgeError, invariant } from './errors.js';
+import { refuseRealUserState } from './test-isolation.js';
 export type SavedCredential = {
   token: string;
   credentialId: string;
@@ -72,6 +73,7 @@ export function readAuth(): Store {
 }
 export function writeAuth(store: Store) {
   const directory = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'forge');
+  refuseRealUserState(directory, 'the saved Forge login');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
   const file = authFile(),

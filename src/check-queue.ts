@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { invariant, ForgeError } from './errors.js';
+import { refuseRealUserState } from './test-isolation.js';
 import { workLocked } from './work-lock.js';
 import { workProgressIdentity } from './work-progress.js';
 import { processesAliveCached, processGroupAlive, processIdentity } from './local-process.js';
@@ -58,6 +59,7 @@ export class CheckQueue {
       'FORGE_MAX_CONCURRENT_CHECKS must be a positive integer.',
     );
     const identity = processIdentity();
+    refuseRealUserState(directory, 'the check queue');
     if (options.anchor) mkdirBelow(options.anchor, directory);
     else mkdirSync(directory, { recursive: true, mode: 0o700 });
     this.path = join(

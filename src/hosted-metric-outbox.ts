@@ -13,6 +13,7 @@ import {
   type CallerReceipt,
 } from './self-metric-receipts.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
+import { refuseRealUserState } from './test-isolation.js';
 
 /** Pending receipts per deployment/project, shared by every CLI process of this user. */
 const OUTBOX_LIMIT = 1000;
@@ -119,6 +120,7 @@ export function callerReceipts(input: {
 export function writeCallerReceipts(directory: string, receipts: CallerReceipt[]) {
   if (!receipts.length) return;
   try {
+    refuseRealUserState(directory, 'the metric outbox');
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     if (readdirSync(directory).filter(name => name.endsWith('.json')).length >= OUTBOX_LIMIT) return;
     for (const receipt of receipts) {
