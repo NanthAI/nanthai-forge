@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { actionsPreflightTicketSchema, type ActionsPreflightTicket } from './hosted-actions-preflight.js';
 import type { HostedCheckRun } from './hosted-check.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { sourcePackDownloadSchema, type SourcePackDownload } from './source-pack.js';
@@ -7,13 +8,18 @@ import { objectRecipeSchema, objectChunkPageSchema } from './object-chunks.js';
 import { invariant } from './errors.js';
 import type { z } from 'zod';
 import type { directCommandSchema } from './hosted-actions-direct.js';
-import { actionsCommandForCapabilities, actionsRefusalReasons } from './hosted-actions-capabilities.js';
+import {
+  actionsCommandForCapabilities,
+  actionsRefusalReasons,
+  actionsPreflightCapability,
+} from './hosted-actions-capabilities.js';
 import { parseTimingHistory, timingDurations } from '../scripts/test-shards.mjs';
 export class ActionsJobClient {
   run: HostedCheckRun | null = null;
   timings: Record<string, number> = {};
   capabilities: string[] = [];
   sourcePack: SourcePackDownload | null = null;
+  preflightTicket: ActionsPreflightTicket | null = null;
   private token = '';
   private expires = 0;
   private refreshing: Promise<void> | null = null;
@@ -48,11 +54,27 @@ export class ActionsJobClient {
       const reason = actionsRefusalReasons.find(value => value === body?.reason);
       invariant(
         false,
-        'RUNNER_UNAVAILABLE',
+        reason === 'cancelled' ? 'CHECK_CANCELLED' : 'RUNNER_UNAVAILABLE',
         `Convex Actions request failed (${response.status}${reason ? `; reason: ${reason}` : ''}).`,
       );
     }
-    return response.json();
+    const value = await response.json();
+    if (
+      command.kind === 'session' &&
+      Array.isArray(value.capabilities) &&
+      value.capabilities.includes(actionsPreflightCapability)
+    ) {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(response.headers.get('X-Forge-Actions-Preflight') ?? 'null');
+      } catch {
+        raw = null;
+      }
+      const ticket = actionsPreflightTicketSchema.safeParse(raw);
+      invariant(ticket.success, 'RUNNER_UNAVAILABLE', 'Pre-spawn authorization is unavailable.');
+      this.preflightTicket = ticket.data;
+    }
+    return value;
   }
   private async refreshToken() {
     const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL!);
@@ -73,6 +95,11 @@ export class ActionsJobClient {
     const { capabilities, ...run } = (await this.call({ kind: 'session' })) as HostedCheckRun & {
       capabilities?: string[];
     };
+    invariant(
+      !run.cancelRequested && run.status !== 'cancelled',
+      'CHECK_CANCELLED',
+      'The check was cancelled.',
+    );
     this.run = run as HostedCheckRun;
     this.capabilities = Array.isArray(capabilities)
       ? capabilities.filter(value => typeof value === 'string')
@@ -93,6 +120,50 @@ export class ActionsJobClient {
       this.timings = timingDurations(parseTimingHistory(result.timingHistory));
     }
     return this.run;
+  }
+  async preflight() {
+    // If bootstrap is already needed here, its live session is the pre-spawn check.
+    if (!this.run) return this.session();
+    const run = this.run;
+    invariant(
+      !run.cancelRequested && run.status !== 'cancelled',
+      'CHECK_CANCELLED',
+      'The check was cancelled.',
+    );
+    if (!this.capabilities.includes(actionsPreflightCapability)) return run; // oldest server
+    const ticket = actionsPreflightTicketSchema.safeParse(this.preflightTicket);
+    invariant(ticket.success, 'RUNNER_UNAVAILABLE', 'Pre-spawn authorization is unavailable.');
+    const response = await this.request(`${ticket.data.endpoint}/api/query`, {
+      method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(60_000),
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        path: 'projectHostedActionsPreflight:check',
+        format: 'convex_encoded_json',
+        args: [
+          {
+            projectId: this.projectId,
+            runId: this.runId,
+            fence: run.fence,
+            signature: ticket.data.signature,
+          },
+        ],
+      }),
+    });
+    const reply = (await response.json().catch(() => null)) as {
+      status?: string;
+      value?: { status?: string };
+    } | null;
+    invariant(
+      response.ok &&
+        reply?.status === 'success' &&
+        ['active', 'cancelled'].includes(reply.value?.status ?? ''),
+      'RUNNER_UNAVAILABLE',
+      'Pre-spawn authorization failed.',
+    );
+    invariant(reply.value?.status !== 'cancelled', 'CHECK_CANCELLED', 'The check was cancelled.');
+    return run;
   }
   transport() {
     const rows = new Map<

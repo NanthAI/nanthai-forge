@@ -1,3 +1,4 @@
+import { cancelAbandonedLanesLandings } from './projectHostedLifecycleCancel';
 // SPDX-License-Identifier: Apache-2.0
 import { markHostedOverlapLifecycle } from './projectHostedOverlapStore';
 import { makeFunctionReference } from 'convex/server';
@@ -111,7 +112,14 @@ export async function materializeLifecycle(ctx: MutationCtx, plan: LifecyclePlan
       maximumBytesRead: 128 * 1024,
     });
   for (const event of page.page)
-    if (event.kind === 'lane') await materializeLifecycleLane(ctx, plan.projectId, event.key);
+    if (event.kind === 'lane') {
+      await materializeLifecycleLane(ctx, plan.projectId, event.key);
+    }
+  await cancelAbandonedLanesLandings(
+    ctx,
+    plan,
+    page.page.filter(event => event.kind === 'lane').map(event => ({ laneId: event.key, cursor: null })),
+  );
   // Keep the provider cursor opaque; appliedThrough is an event count only.
   await ctx.db.patch(plan._id, {
     materialized: page.isDone,

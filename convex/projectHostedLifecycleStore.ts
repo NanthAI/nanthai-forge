@@ -1,5 +1,7 @@
 import { scheduleAbandonedBatchReselection } from './projectHostedBatchAbandon';
 // SPDX-License-Identifier: Apache-2.0
+import { cancelAbandonedLaneLandings } from './projectHostedLifecycleCancel';
+import { landingQueue } from './projectHostedLandingEvents';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
@@ -187,6 +189,15 @@ export async function applyLifecycleRecord(
       version: before.version + 1,
     });
   await writeLifecycleEvent(ctx, plan, before, -1);
+  if (request.action === 'abandon') {
+    // Freeze the queue at application, after any save or cascade staging.
+    // Enqueue writes this same row, so concurrent admissions serialize here.
+    const landingSequence =
+      (await landingQueue(ctx, { projectId: plan.projectId, channel: 'main' }))?.sequence ?? 0;
+    await ctx.db.patch(plan._id, { landingSequence });
+    if (before.kind === 'lane')
+      await cancelAbandonedLaneLandings(ctx, { ...plan, landingSequence }, before.id, null);
+  }
 }
 export async function lifecycleCaller(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();

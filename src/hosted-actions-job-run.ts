@@ -14,14 +14,15 @@ import { invariant } from './errors.js';
 import { setupActionsJob } from './hosted-actions-job-setup.js';
 /** Credentials remain in the fixed supervisor; the project receives a clean env.
  * Full stdout stays on Actions. Forge retains at most 64 KiB per job. */
-export async function executeActionsJob(
+async function executeActiveActionsJob(
   client: ActionsJobClient,
   directory: string,
   planPath: string,
   shard: string,
   commandOverride?: string[],
 ) {
-  const run = client.run ?? (await client.session());
+  // The plan artifact is a source pin, never a live execution permission.
+  const run = await client.preflight();
   const recipe = JSON.parse(readFileSync(planPath, 'utf8'));
   const index = shard === 'static' ? recipe.groups.length : Number(shard);
   invariant(
@@ -126,4 +127,14 @@ export async function executeActionsJob(
     },
   });
   return exitCode;
+}
+
+export async function executeActionsJob(...args: Parameters<typeof executeActiveActionsJob>) {
+  try {
+    return await executeActiveActionsJob(...args);
+  } catch (error) {
+    if ((error as { code?: string })?.code !== 'CHECK_CANCELLED') throw error;
+    console.log('Forge check cancelled.');
+    return 0;
+  }
 }

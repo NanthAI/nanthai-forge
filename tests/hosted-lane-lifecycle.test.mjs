@@ -262,7 +262,7 @@ test('scheduler failure rolls back preparation; stopped tasks resume original pa
   await f.advance(r);
   assert.equal(f.pending().length, 0);
 });
-test('abandonment leaves a running check unchanged; cancellation is separately requested and provider-acknowledged', async () => {
+test('abandonment preserves standalone checks; explicit cancellation stops them immediately', async () => {
   const f = await lifecycleFixture();
   const candidate = {
     kind: 'candidate',
@@ -302,9 +302,9 @@ test('abandonment leaves a running check unchanged; cancellation is separately r
   assert.deepEqual(f.tables.projectHostedCheckRuns, before);
   const cancelled = await c.cancel(run.id);
   assert(cancelled.cancelRequested);
-  assert.equal(cancelled.endedAt, null);
-  assert.equal(cancelled.status, active.status);
-  await c.callback(c.complete(active, 'cancelled'));
+  assert(cancelled.endedAt);
+  assert.equal(cancelled.status, 'cancelled');
+  await assert.rejects(c.callback(c.complete(active, 'cancelled')), code('CHECK_CANCELLED'));
   assert.equal((await c.status(run.id)).status, 'cancelled');
 });
 test.after(() => console.log('H16 fake maxima', JSON.stringify(maxima)));

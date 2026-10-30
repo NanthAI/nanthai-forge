@@ -407,12 +407,13 @@ test('explicit pending resume refuses a stale epoch while completed receipt resu
   );
 });
 
-test('landing cancellation leaves its check and Lane intact and a delayed passing callback cannot revive finish', async t => {
+test('landing cancellation stops its unused check, preserves its Lane and refuses delayed passing callbacks', async t => {
   const f = await finishFixture(t),
     { state } = await begin(f),
     lane = await f.readLane(f.lane.laneId),
     main = f.currentMain(),
     run = (await f.status(state.id)).attempt.check.runId;
+  const active = await f.rawChecks.activate(run);
   const cancelled = JSON.parse(
     await f.tx('finishLandingCancel', landingApi.cancel, {
       projectId: f.projectId,
@@ -420,9 +421,10 @@ test('landing cancellation leaves its check and Lane intact and a delayed passin
     }),
   );
   assert.equal(cancelled.error.code, 'LANDING_CANCELLED');
-  assert.equal((await f.rawChecks.status(run)).status, 'queued');
+  assert.equal((await f.rawChecks.status(run)).status, 'cancelled');
   assert.deepEqual(await f.readLane(f.lane.laneId), lane);
-  await complete(f);
+  await assert.rejects(f.rawChecks.pass(active), code('CHECK_CANCELLED'));
+  await f.drain();
   assert.equal((await f.current(state.id)).submission.error.code, 'LANDING_CANCELLED');
   assert.deepEqual(f.currentMain(), main);
   assert.equal(f.tables.projectHostedAcceptances.size, 0);

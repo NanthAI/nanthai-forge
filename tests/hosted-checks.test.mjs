@@ -184,7 +184,7 @@ test('untrusted stdout/source verdict claims cannot pass through a provider even
   await assert.rejects(s.evidence(r), code('EVIDENCE_CHANGED'));
   assert.equal((await s.status(r.id)).status, 'running');
 });
-test('cancellation before dispatch is terminal; after ambiguous dispatch waits for provider acknowledgement', async () => {
+test('cancellation is terminal before and after an ambiguous dispatch and refuses late evidence', async () => {
   const s = await checksFixture(),
     a = await s.enqueue(s.selection()),
     operationId = randomUUID();
@@ -195,11 +195,15 @@ test('cancellation before dispatch is terminal; after ambiguous dispatch waits f
   await s.control(b.id, { kind: 'reserve', owner: p.owner, token: p.token });
   await s.control(b.id, { kind: 'observe', owner: p.owner, token: p.token, result: { status: 'unknown' } });
   const pending = await s.cancel(b.id);
-  assert.equal(pending.status, 'unknown');
+  assert.equal(pending.status, 'cancelled');
   assert(pending.cancelRequested);
-  assert.equal(
-    (await s.callback(s.complete({ ...p.run, dispatchStarted: true }, 'cancelled'))).status,
-    'cancelled',
+  await assert.rejects(
+    s.callback(s.complete({ ...p.run, dispatchStarted: true }, 'cancelled')),
+    code('CHECK_CANCELLED'),
+  );
+  await assert.rejects(
+    s.control(b.id, { kind: 'claim', owner: randomUUID(), leaseMs: 60000 }),
+    code('CHECK_CANCELLED'),
   );
   await assert.rejects(s.evidence(await s.status(b.id)), code('EVIDENCE_CHANGED'));
 });

@@ -56,7 +56,14 @@ export const receive = internalMutation({
       'EVIDENCE_CHANGED',
       'Webhook selected another Actions execution.',
     );
-    if (hostedCheckTerminal(run)) return null;
+    if (hostedCheckTerminal(run)) {
+      if (run.status === 'cancelled' && payload.action !== 'completed' && !run.executionId) {
+        run.executionId = String(workflow.id);
+        await writeHostedCheck(ctx, selected.row._id, run);
+        await requestDirectCancel(ctx, run);
+      }
+      return null;
+    }
     invariant(
       !run.actions.workflowSha || run.actions.workflowSha === workflow.head_sha,
       'EVIDENCE_CHANGED',
@@ -83,8 +90,14 @@ export const cancellation = internalMutation({
   args: { projectId: v.id('hostedProjects'), runId: v.string() },
   returns: v.any(),
   handler: async (ctx, input) => {
-    const { run } = await writableHostedCheck(ctx, input);
-    return run.actions && run.cancelRequested && run.executionId && !hostedCheckTerminal(run) ? run : null;
+    const { row, run } = await writableHostedCheck(ctx, input);
+    if (!run.actions || !run.cancelRequested || !run.executionId || run.actions.cancelScheduled !== true)
+      return null;
+    // Consume before IO. Replays/duplicate action deliveries never resend an
+    // unknown outcome; true = scheduled, false = attempted, absent = unscheduled.
+    run.actions.cancelScheduled = false;
+    await writeHostedCheck(ctx, row._id, run);
+    return run;
   },
 });
 export const cancel = internalAction({
@@ -105,7 +118,11 @@ export const cancel = internalAction({
     await githubAppRequest(
       `repos/${run.configuration.repository}/actions/runs/${run.executionId}/cancel`,
       token,
-      fetch,
+      // A completed workflow is already stopped. Keep all other failures explicit.
+      async (url, init) => {
+        const response = await fetch(url, init);
+        return response.status === 409 ? new Response(null, { status: 204 }) : response;
+      },
       {},
     );
     return null;

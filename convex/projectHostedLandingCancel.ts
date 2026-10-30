@@ -32,13 +32,17 @@ export async function cancelHostedLanding(
     actor: string;
     reason?: string;
     request: z.infer<typeof hostedLandingCancelSchema>;
+    abandonOperationId?: string;
   },
 ) {
   const { projectId, actor, request } = input;
   const expected = { authorityEpoch: request.authorityEpoch, resourceId: request.submissionId };
+  // Automatic child cancellations retain requester and parent provenance without
+  // counting as additional operator intervention commands in self-metrics.
   const payload = {
-    kind: 'hosted-landing-cancel',
+    kind: input.abandonOperationId ? 'hosted-abandon-landing-cancel' : 'hosted-landing-cancel',
     request,
+    ...(input.abandonOperationId ? { parentOperationId: input.abandonOperationId } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
   };
   const { operation } = await beginHostedOperation(ctx, {

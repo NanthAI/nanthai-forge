@@ -43,7 +43,7 @@ import { finishRow } from './projectHostedFinishWake';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 
-/** Cancel a submission, independently of Lane lifecycle or check execution. */
+/** Cancel a submission without changing Lane lifecycle; release its unneeded check. */
 export const cancel = mutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },
   returns: v.string(),

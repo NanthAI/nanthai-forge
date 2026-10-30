@@ -1,3 +1,4 @@
+import { assertHostedCheckActive } from './projectHostedCheckStore';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './_generated/server';
@@ -22,6 +23,7 @@ export type SessionInput = { projectId: Id<'hostedProjects'>; runId: string; cla
 export async function actionsSession(ctx: MutationCtx, input: SessionInput) {
   const selected = await writableHostedCheck(ctx, input),
     { row, run } = selected;
+  assertHostedCheckActive(run);
   invariant(
     directActions(run) &&
       run.configuration.provider === 'github-actions' &&

@@ -102,6 +102,13 @@ export async function reconcileHostedActions(
       await remote.api.request(`${base}/runs/${m.run}/cancel`, 'POST');
       await save({ kind: 'cancel-sent' });
     }
+    // Cancellation is already terminal in Forge. Legacy adapters may still stop
+    // their retained provider run, but must never publish further shard evidence.
+    if (run.status === 'cancelled') {
+      if (observed.status === 'completed') return { run, nextAt: null };
+      await save({ kind: 'wait', terminal: false });
+      return { run, nextAt: m.nextAt };
+    }
     const latest = new Map<number, Job>();
     // Provider pages live on the fixed worker, never inside a Convex transaction.
     for (let page = 1; ; page++) {

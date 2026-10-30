@@ -17,8 +17,7 @@ import {
 } from '../src/main-audit';
 import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { recordLandingObservation } from './projectHostedLandingStore';
-import { wakeLandingQueue } from './projectHostedLandingWake';
+import { recordLandingObservation, wakeLandingQueue } from './projectHostedLandingEvents';
 
 export const auditRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
   ctx.db

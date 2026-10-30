@@ -1,3 +1,4 @@
+import { assertHostedCheckActive } from './projectHostedCheckStore';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
@@ -61,6 +62,7 @@ export async function controlHostedCheck(
 ) {
   const command = hostedCheckControlSchema.parse(input.command);
   let { row, run } = await writableHostedCheck(ctx, input);
+  assertHostedCheckActive(run);
   if (
     isMachineRunner(run.configuration) &&
     !hostedCheckTerminal(run) &&

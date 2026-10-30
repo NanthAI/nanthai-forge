@@ -109,6 +109,12 @@ export const hostedLandingTables = {
     .index('by_project_and_hold', ['projectId', 'hold'])
     .index('by_project_and_revert_and_sequence', ['projectId', 'revertOf', 'sequence'])
     .index('by_project_and_candidate_and_sequence', ['projectId', 'candidateId', 'sequence'])
+    .index('by_project_and_candidate_and_phase_and_sequence', [
+      'projectId',
+      'candidateId',
+      'phase',
+      'sequence',
+    ])
     .index('by_project_and_selection', ['projectId', 'selectionKey'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])

@@ -1,12 +1,11 @@
 import { fixGate } from '../src/culprit-bisect';
 import { isMachineRunner } from '../src/hosted-machine-runner';
-import { requestDirectCancel } from './projectHostedActionsDirect';
+import { cancelHostedCheck } from './projectHostedCheckCancel';
 import { scheduleDirectActions } from './projectHostedActionsDirect';
 import { hostedGateForCandidates } from './projectHostedGate';
 import { semanticPayload } from '../src/semantic-payload';
 import { mergeSemanticMembers, semanticMember } from './projectSemanticContracts';
 // SPDX-License-Identifier: Apache-2.0
-import { notifyActionsProgress } from './projectHostedActionsWake';
 import { z } from 'zod';
 import { watchMacLease, macLeaseMs } from './projectHostedCheckLease';
 import { v } from 'convex/values';
@@ -18,8 +17,6 @@ import {
   beginCheckOperation,
   completeCheckOperation,
   loadHostedCheck,
-  writeHostedCheck,
-  completeHostedCheck,
 } from './projectHostedCheckStore';
 import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
 import { saveObject } from './projectHostedSaveStore';
@@ -66,7 +63,7 @@ export const cancel = mutation({
     try {
       const request = cancelSchema.parse(JSON.parse(input.request));
       const { actor, project } = await checkCaller(ctx, input.projectId);
-      const { row, run } = await loadHostedCheck(ctx, { projectId: input.projectId, runId: request.runId });
+      const { run } = await loadHostedCheck(ctx, { projectId: input.projectId, runId: request.runId });
       invariant(
         actor === run.actor || actor === project.owner,
         'PROJECT_UNAVAILABLE',
@@ -82,23 +79,7 @@ export const cancel = mutation({
       if (prepared.replayed) return canonicalPayload(run);
       if (!hostedCheckTerminal(run)) {
         await hostedWriteProject(ctx, input.projectId, run.actor, run.request.authorityEpoch);
-        run.cancelRequested = true;
-        // Nothing external was submitted: cancellation is already certain. Once
-        // dispatch is reserved, only the provider can acknowledge cancellation.
-        if (!run.dispatchStarted || isMachineRunner(run.configuration)) {
-          // Fencing makes cancellation immediate even when the Mac is gone.
-          if (isMachineRunner(run.configuration)) {
-            run.fence++;
-            run.lease = null;
-          }
-          run.status = 'cancelled';
-          run.endedAt = new Date().toISOString();
-          run.terminalDigest = checkPin({ kind: 'cancel-before-dispatch', request });
-          await completeHostedCheck(ctx, run);
-        }
-        await writeHostedCheck(ctx, row._id, run);
-        await notifyActionsProgress(ctx, run);
-        await requestDirectCancel(ctx, run);
+        Object.assign(run, await cancelHostedCheck(ctx, { projectId: input.projectId, runId: run.id }));
       }
       await completeCheckOperation(ctx, prepared.operation, {
         runId: run.id,

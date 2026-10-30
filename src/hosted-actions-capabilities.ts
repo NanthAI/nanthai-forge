@@ -2,12 +2,14 @@
 import type { z } from 'zod';
 import type { directCommandSchema } from './hosted-actions-direct.js';
 import { invariant } from './errors.js';
+export const actionsPreflightCapability = 'session.preflight';
 /** Advertise only implemented extensions. Absent advertisement means the oldest protocol. */
 export const hostedActionsCapabilities = [
   'results.testFiles',
   'results.testFiles.truncated',
   'session.timingHistory',
   'sourcePack',
+  actionsPreflightCapability,
 ] as const;
 export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'session.timings': 'session.timingHistory',
@@ -41,4 +43,4 @@ export function actionsCommandForCapabilities(
   }
   return result;
 }
-export const actionsRefusalReasons = ['validation', 'authorization', 'storage'] as const;
+export const actionsRefusalReasons = ['validation', 'authorization', 'storage', 'cancelled'] as const;

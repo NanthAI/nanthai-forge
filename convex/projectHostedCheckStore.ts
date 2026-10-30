@@ -2,10 +2,11 @@ import { onGateRunTerminal } from './projectHostedMainAuditState';
 import { semanticPayload } from '../src/semantic-payload';
 import { wakeExpiredLogs } from './projectCheckLogRetention';
 // SPDX-License-Identifier: Apache-2.0
+import { ConvexError } from 'convex/values';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
-import { notifyLandingCheck } from './projectHostedLandingWake';
+import { notifyLandingCheck } from './projectHostedLandingCheckWake';
 import { hostedWriteProject } from './projectHostedRecords';
 import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import {
@@ -130,4 +131,14 @@ export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun)
     head: run.request.expectedHead,
     terminalDigest: run.terminalDigest,
   });
+}
+
+/** Structured across internal function/HTTP boundaries; never includes source or credentials. */
+export function assertHostedCheckActive(run: HostedCheckRun) {
+  if (run.status === 'cancelled' || run.cancelRequested)
+    throw new ConvexError({
+      code: 'CHECK_CANCELLED',
+      reason: 'cancelled',
+      message: 'The check was cancelled.',
+    });
 }

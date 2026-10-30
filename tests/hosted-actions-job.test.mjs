@@ -5,8 +5,12 @@ import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync, lstatSync,
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { hostedActionsCapabilities } from '../dist/hosted-actions-capabilities.js';
+import {
+  hostedActionsCapabilities,
+  actionsPreflightCapability,
+} from '../dist/hosted-actions-capabilities.js';
 import { z } from 'zod';
+import { ConvexHttpClient } from 'convex/browser';
 import { ActionsJobClient } from '../dist/hosted-actions-job-client.js';
 import { prepareActionsJob } from '../dist/hosted-actions-job-plan.js';
 import { executeActionsJob } from '../dist/hosted-actions-job-run.js';
@@ -108,6 +112,24 @@ function fixture(
       traffic.active--;
       return new Response(objects.get(String(url).split('/').at(-1)));
     }
+    if (url === 'https://convex.invalid/api/query') {
+      assert(capabilities?.includes(actionsPreflightCapability), 'old servers receive no new query');
+      const body = JSON.parse(init.body);
+      assert.equal(body.path, 'projectHostedActionsPreflight:check');
+      assert.deepEqual(body.args, [
+        {
+          projectId: run.projectId,
+          runId: run.id,
+          fence: run.fence,
+          signature: 'a'.repeat(64),
+        },
+      ]);
+      calls.push({ kind: 'preflight' });
+      return Response.json({
+        status: 'success',
+        value: { status: run.cancelRequested ? 'cancelled' : 'active' },
+      });
+    }
     assert.equal(url, 'https://convex.invalid/checks/actions');
     const body = JSON.parse(init.body),
       command = body.command;
@@ -139,6 +161,14 @@ function fixture(
               ...(capabilities ? { capabilities } : {}),
             }
           : { ...run, ...(capabilities ? { capabilities } : {}) },
+        {
+          headers: {
+            'X-Forge-Actions-Preflight': JSON.stringify({
+              endpoint: 'https://convex.invalid',
+              signature: 'a'.repeat(64),
+            }),
+          },
+        },
       );
     if (command.kind === 'output') return Response.json({ url: 'https://output.invalid/log', headers: {} });
     if (command.kind === 'result') {
@@ -538,7 +568,7 @@ test('recipe-backed source batches metadata and leaf descriptors instead of call
 });
 
 for (const flaky of [false, true])
-  test(`600 file reports (${flaky ? 'one flake' : 'clean'}) post exactly one existing result and add no source/session calls`, async t => {
+  test(`600 file reports (${flaky ? 'one flake' : 'clean'}) post one result and one pre-spawn query`, async t => {
     const s = fixture(t),
       candidate = join(s.directory, 'candidate');
     const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
@@ -561,6 +591,7 @@ for (const flaky of [false, true])
     assert.equal(posted.filter(command => command.kind === 'result').length, 1);
     assert.equal(posted.filter(command => command.kind === 'output').length, 1);
     assert.equal(posted.length, 2);
+    assert.equal(s.calls.filter(command => command.kind === 'preflight').length, 1);
     const reports = posted.find(command => command.kind === 'result').result.contractReports;
     assert.equal(Object.keys(reports).length, 600);
     if (flaky) {
@@ -788,7 +819,12 @@ for (const capabilities of [
     const sessions = s.calls.filter(call => call.kind === 'session');
     assert.deepEqual(sessions[0], { kind: 'session' });
     assert.equal(sessions.length, capabilities?.includes('session.timingHistory') ? 2 : 1);
-    if (sessions.length === 2) assert.deepEqual(sessions[1], { kind: 'session', timings: true });
+    assert.equal(
+      s.calls.filter(command => command.kind === 'preflight').length,
+      capabilities?.includes(actionsPreflightCapability) ? 1 : 0,
+    );
+    if (capabilities?.includes('session.timingHistory'))
+      assert.deepEqual(sessions[1], { kind: 'session', timings: true });
     const result = s.calls.find(call => call.kind === 'result').result;
     assert.equal('testFiles' in result, !!capabilities?.includes('results.testFiles'));
     if (result.testFiles) assert.deepEqual(result.testFiles.counts, { total: 1, failed: 0, flaky: 0 });
@@ -802,6 +838,7 @@ test('runner errors print only allowlisted refusal reasons, including old and ma
     [JSON.stringify({ reason: 'validation', error: 'secret-response' }), '; reason: validation'],
     [JSON.stringify({ reason: 'authorization' }), '; reason: authorization'],
     [JSON.stringify({ reason: 'storage' }), '; reason: storage'],
+    [JSON.stringify({ reason: 'cancelled' }), '; reason: cancelled'],
     [JSON.stringify({ reason: 'secret-response' }), ''],
     [JSON.stringify({ error: 'old refusal' }), ''],
     ['not JSON', ''],
@@ -809,7 +846,7 @@ test('runner errors print only allowlisted refusal reasons, including old and ma
   ]) {
     s.client.request = async () => new Response(body, { status: 403 });
     await assert.rejects(s.client.call({ kind: 'session' }), error => {
-      assert.equal(error.code, 'RUNNER_UNAVAILABLE');
+      assert.equal(error.code, suffix === '; reason: cancelled' ? 'CHECK_CANCELLED' : 'RUNNER_UNAVAILABLE');
       assert.equal(error.message, `Convex Actions request failed (403${suffix}).`);
       assert.doesNotMatch(error.stack, /secret-response/);
       return true;
@@ -975,4 +1012,88 @@ test('Actions setup resolves a relative cache path once for setup and tests', as
   ]);
   assert.equal(exit, 0);
   assert.equal(readFileSync(join(cache, 'warm'), 'utf8'), 'cache');
+});
+
+test('cancel after planning exits neutrally before spawning a shard and accepts no results', async t => {
+  const s = fixture(t),
+    candidate = join(s.directory, 'candidate');
+  const setupMarker = join(s.directory, 'setup-spawned');
+  s.run.check.actions = {
+    setup: {
+      executable: process.execPath,
+      args: ['--eval', `require('node:fs').writeFileSync(${JSON.stringify(setupMarker)},'spawned')`],
+    },
+  };
+  const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  const path = join(s.directory, 'plan.json'),
+    marker = join(s.directory, 'spawned');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  s.run.cancelRequested = true;
+  assert.equal(
+    await executeActionsJob(s.client, candidate, path, 'static', [
+      process.execPath,
+      '--eval',
+      `require('node:fs').writeFileSync(${JSON.stringify(marker)},'spawned')`,
+    ]),
+    0,
+  );
+  assert.equal(existsSync(marker), false);
+  assert.equal(existsSync(setupMarker), false);
+  assert.equal(s.calls.filter(command => command.kind === 'result').length, 0);
+});
+
+test('preflight uses one query with no nested invocation, OIDC refresh or timer; absent capability uses the oldest path', async t => {
+  const bootstrap = fixture(t);
+  await bootstrap.client.preflight();
+  assert.equal(bootstrap.calls.filter(command => command.kind === 'session').length, 1);
+  assert.equal(
+    bootstrap.calls.filter(command => command.kind === 'preflight').length,
+    0,
+    'fresh bootstrap already checked cancellation',
+  );
+  for (const capabilities of [[], hostedActionsCapabilities]) {
+    const s = fixture(t, { capabilities });
+    await prepareActionsJob(s.client, join(s.directory, 'candidate'), join(s.directory, 'objects'));
+    const before = s.calls.length,
+      oidc = s.traffic.oidc;
+    await s.client.preflight();
+    assert.equal(s.calls.length - before, capabilities.includes(actionsPreflightCapability) ? 1 : 0);
+    assert.equal(s.traffic.oidc, oidc);
+  }
+});
+
+test('preflight refuses missing or malformed advertised tickets and never logs remote private errors', async t => {
+  const s = fixture(t);
+  await s.client.session();
+  const ticket = s.client.preflightTicket;
+  s.client.preflightTicket = null;
+  await assert.rejects(s.client.preflight(), /Pre-spawn authorization is unavailable/);
+  s.client.preflightTicket = ticket;
+  s.client.request = async () => Response.json({ status: 'error', errorMessage: 'private-response' });
+  await assert.rejects(s.client.preflight(), error => {
+    assert.equal(error.code, 'RUNNER_UNAVAILABLE');
+    assert.doesNotMatch(error.stack, /private-response/);
+    return true;
+  });
+});
+
+test('preflight uses the pinned Convex SDK query wire format', async t => {
+  const s = fixture(t);
+  await s.client.session();
+  const requests = [];
+  const request = async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json({ status: 'success', value: { status: 'active' } });
+  };
+  s.client.request = request;
+  await s.client.preflight();
+  const args = {
+    projectId: s.run.projectId,
+    runId: s.run.id,
+    fence: s.run.fence,
+    signature: s.client.preflightTicket.signature,
+  };
+  const sdk = new ConvexHttpClient('https://convex.invalid', { fetch: request });
+  await sdk.query('projectHostedActionsPreflight:check', args);
+  assert.deepEqual(requests[0], requests[1]);
 });

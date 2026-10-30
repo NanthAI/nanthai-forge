@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { landingFixture, api, code, maxima } from './hosted-landing-fixture.mjs';
+import { landingFixture, api, code, maxima, store } from './hosted-landing-fixture.mjs';
 import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 
 async function cancel(f, submissionId, operationId = randomUUID(), actor = 'owner', authorityEpoch = 1) {
@@ -242,4 +242,121 @@ test('cancel stays bounded with 10050 unrelated request and acceptance records',
   }
   await cancel(f, state.id);
   t.diagnostic(JSON.stringify({ cancellationMaxima: maxima.landingCancel }));
+});
+
+async function sharedCheck(f) {
+  const check = await f.rawChecks.enqueue(f.rawChecks.selection());
+  const request = () => f.request({ check: { kind: 'run', runId: check.id } });
+  return { check, request };
+}
+
+test('a shared check stops only when the last live submission is cancelled, including queued peers', async () => {
+  const f = await landingFixture(),
+    { check, request } = await sharedCheck(f);
+  const first = await f.enqueue(request()),
+    second = await f.enqueue(request());
+  await cancel(f, first.id);
+  assert.equal((await f.rawChecks.status(check.id)).status, 'queued');
+  const result = await cancel(f, second.id);
+  assert.equal(result.error.code, 'LANDING_CANCELLED');
+  assert.equal((await f.rawChecks.status(check.id)).status, 'cancelled');
+  await cancel(f, second.id);
+  assert.equal((await f.rawChecks.status(check.id)).cancelRequested, true);
+});
+
+test('explicit check-run cancellation stops the selected shared run and replays inertly', async () => {
+  const f = await landingFixture(),
+    { check, request } = await sharedCheck(f);
+  await f.enqueue(request());
+  await f.enqueue(request());
+  const submissions = structuredClone(f.tables.projectHostedLandingRequests);
+  const operationId = randomUUID();
+  const result = await f.rawChecks.cancel(check.id, 'owner', operationId);
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.cancelRequested, true);
+  assert.deepEqual(f.tables.projectHostedLandingRequests, submissions);
+  const after = structuredClone(f.tables);
+  assert.deepEqual(await f.rawChecks.cancel(check.id, 'owner', operationId), result);
+  assert.deepEqual(f.tables, after);
+});
+
+test('superseding an attempt stops its old check once no submission needs it', async () => {
+  const f = await landingFixture(),
+    { check, request } = await sharedCheck(f);
+  const state = await f.enqueue(request());
+  const attempt = (await f.status(state.id)).attempt;
+  const nextAttempt = {
+    ...attempt,
+    id: randomUUID(),
+    parentAttemptId: attempt.id,
+    number: attempt.number + 1,
+    check: null,
+  };
+  await f.transaction(
+    'supersedeCheck',
+    {
+      _handler: async ctx => {
+        await store.insertLandingAttempt(ctx, nextAttempt);
+        const { row, state: live } = await store.loadLanding(ctx, {
+          projectId: f.projectId,
+          submissionId: state.id,
+        });
+        await store.writeLanding(
+          ctx,
+          row,
+          { ...live, attemptId: nextAttempt.id, version: live.version + 1 },
+          false,
+        );
+      },
+    },
+    {},
+  );
+  assert.equal((await f.rawChecks.status(check.id)).status, 'cancelled');
+});
+
+test('last-consumer cancellation stays constant at dogfood size with 1500 checks and 575 landing records', async t => {
+  const f = await landingFixture(),
+    { check, request } = await sharedCheck(f);
+  const state = await f.enqueue(request());
+  for (let i = 0; i < 1500; i++)
+    f.insert('projectHostedCheckRuns', {
+      projectId: f.projectId,
+      runId: randomUUID(),
+      candidateId: randomUUID(),
+      status: 'running',
+      value: '{}',
+    });
+  for (let i = 0; i < 575; i++)
+    f.insert('projectHostedLandingRequests', {
+      projectId: f.projectId,
+      channel: 'main',
+      submissionId: randomUUID(),
+      operationId: randomUUID(),
+      actor: 'owner',
+      sequence: i + 2,
+      runnable: false,
+      phase: 'checking',
+      runId: randomUUID(),
+      attemptId: randomUUID(),
+      value: '{}',
+    });
+  const start = performance.now(),
+    calls = f.counts.length,
+    rss = process.memoryUsage().rss;
+  await cancel(f, state.id);
+  const meter = f.counts.slice(calls).find(c => c.name === 'landingCancel');
+  assert.equal(f.counts.length - calls, 1);
+  assert(meter.documents <= 40 && meter.writes <= 20);
+  assert.equal((await f.rawChecks.status(check.id)).status, 'cancelled');
+  t.diagnostic(
+    JSON.stringify({
+      calls: 1,
+      documents: meter.documents,
+      writes: meter.writes,
+      readBytes: meter.readBytes,
+      elapsedMs: performance.now() - start,
+      rssBytes: process.memoryUsage().rss,
+      rssGrowthBytes: process.memoryUsage().rss - rss,
+    }),
+  );
 });

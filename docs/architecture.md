@@ -1057,8 +1057,14 @@ terminal save publication and a parent wake commit together. Failed saves never
 apply abandonment. Pending work sleeps until its save callback or explicit resume.
 Working files and sparse scope stay intact, including newer local edits after
 capture and lost replies. Only a matching baseline's metadata advances on replay.
-Check cancellation remains a separate H10 request and provider acknowledgement;
-lifecycle receipts say `cancellation: not-requested`.
+Abandoning a Lane cancels its live landing submissions through the ordinary
+idempotent cancellation path. Indexed, bounded pages follow that Lane's canonical
+compose selections; continuations recheck authority and exclude submissions
+beyond the queue sequence pinned when abandonment applies. Requests queued during
+a pending save or cascade are included. Intent cascades start the same work from their existing
+materialization pages. Standalone checks remain independent; the legacy lifecycle
+receipt field `cancellation: not-requested` refers to standalone check cancellation.
+An abandonment receipt does not claim the provider has already stopped.
 
 Lifecycle plans, events and staged versions remain retained authoritative
 metadata. Portable source-return/export folding and authority-cutover recovery
@@ -1217,8 +1223,10 @@ An overall provider success cannot pass a run until every selected shard has
 settled successfully with exit zero. Missing, running or failed shard evidence
 leaves that success unresolved under the same run. Failed, cancelled,
 interrupted, runner-unavailable and unknown outcomes remain distinct. Cancellation
-before dispatch is certain; after reservation it records a request until the
-provider acknowledges it. No cancellation request claims remote compute stopped.
+makes an unneeded check locally terminal before or after dispatch reservation and
+refuses late evidence. Live landing consumers preserve their shared check. The
+provider-stop request is separate; local cancellation never claims remote compute
+has already stopped.
 Cost starts unknown and only signed provider usage supplies observations. New
 stdout/artifact bytes never enter these Convex APIs; only object references do.
 
@@ -1428,7 +1436,13 @@ as rejected, releases only its queue claim and invalidates pending finish IO.
 Acceptance and cancellation read/write the same request and queue, so concurrent
 publication resolves through OCC and the actual receipt. A committed acceptance
 is preserved; late source/check results cannot revive a cancelled request.
-Cancellation leaves Lane lifecycle and shared source/check execution independent.
+Cancellation leaves Lane lifecycle and source execution independent. It releases
+an unneeded check atomically after its last queued/checking/ready submission leaves,
+including superseded attempts. Live batch peers keep their shared check running
+when an individual landing is cancelled. An explicit check-run cancellation stops
+the selected run, including a run shared by live landings.
+Direct Actions cancellation schedules the provider run-cancel API; restored jobs
+make one signed read-only preflight query before spawn, with no new heartbeat.
 
 ### Hosted final acceptance
 

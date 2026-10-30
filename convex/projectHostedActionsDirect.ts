@@ -27,8 +27,8 @@ export async function requestDirectCancel(ctx: MutationCtx, run: HostedCheckRun)
     !run.actions ||
     !run.cancelRequested ||
     !run.executionId ||
-    hostedCheckTerminal(run) ||
-    run.actions.cancelScheduled
+    (hostedCheckTerminal(run) && run.status !== 'cancelled') ||
+    run.actions.cancelScheduled !== undefined
   )
     return;
   run.actions.cancelScheduled = true;
@@ -106,7 +106,7 @@ export const observe = internalMutation({
       'WORK_STALE',
       'Actions dispatch fence changed.',
     );
-    if (hostedCheckTerminal(run)) return null;
+    if (hostedCheckTerminal(run) && run.status !== 'cancelled') return null;
     run.actions.outcome = input.outcome;
     if (input.executionId) {
       invariant(
@@ -116,7 +116,10 @@ export const observe = internalMutation({
       );
       run.executionId = input.executionId;
     }
-    if (input.outcome === 'rejected' && !run.executionId)
+    if (run.status === 'cancelled') {
+      await writeHostedCheck(ctx, row._id, run);
+      await requestDirectCancel(ctx, run);
+    } else if (input.outcome === 'rejected' && !run.executionId)
       await settleDirectActions(ctx, selected, 'runner-unavailable', 'GitHub App dispatch was refused.');
     else {
       if (!run.plan) run.status = run.executionId ? 'preparing' : 'unknown';

@@ -6,6 +6,7 @@ import { getFunctionName } from 'convex/server';
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { verifyActionsOidc, validateActionsClaims, actionsIssuer } from '../dist/github-actions-oidc.js';
+import { actionsPreflightSignature } from '../dist/hosted-actions-preflight.js';
 import { hostedActionsCapabilities } from '../dist/hosted-actions-capabilities.js';
 import { hostedCheckRunSchema } from '../dist/hosted-check.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
@@ -17,6 +18,7 @@ const { githubAppJwt, installationToken, actionsPermissions } = await import(
 const direct = await import(moduleUrl('../convex/projectHostedActionsDirect.ts'));
 const packs = await import(moduleUrl('../convex/projectSourcePacks.ts'));
 const sessions = await import(moduleUrl('../convex/projectHostedActionsSession.ts'));
+const preflight = await import(moduleUrl('../convex/projectHostedActionsPreflight.ts'));
 const source = await import(moduleUrl('../convex/projectHostedActionsSource.ts'));
 const plans = await import(moduleUrl('../convex/projectHostedActionsPlan.ts'));
 const results = await import(moduleUrl('../convex/projectHostedActionsResults.ts'));
@@ -81,6 +83,7 @@ const jwks = () =>
 async function fixture(t, shards = 2, runsOn = 'ubuntu-latest') {
   variables(t, {
     CONVEX_SITE_URL: audience,
+    CONVEX_CLOUD_URL: 'https://forge.convex.cloud',
     FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-check-key',
     R2_ACCOUNT_ID: 'synthetic-account',
     R2_BUCKET: 'synthetic-bucket',
@@ -497,7 +500,14 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
     documents = meters.reduce((n, m) => n + m.documents, 0);
   assert(documents <= 6200);
   assert(meters.every(m => m.writes === 0));
+  const preparedRun = await s.status(s.run.id);
+  const spawnInput = {
+    ...s.id,
+    fence: preparedRun.fence,
+    signature: actionsPreflightSignature(preparedRun, 'synthetic-check-key'),
+  };
   for (let index = 0; index < 9; index++) {
+    assert.deepEqual(await s.call(preflight, 'check', spawnInput), { status: 'active' });
     await s.call(results, 'result', {
       ...s.input(),
       result: JSON.stringify({
@@ -517,10 +527,14 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
   await s.call(direct, 'expire', { ...s.id, fence: 1 });
   await s.call(sessions, 'session', s.input());
   assert.equal(s.scheduled.length, terminalSchedules);
-  // HTTP+transaction source: 2*ceil(N/400). Each job: output (2) + result (3).
-  const budget = (n, jobs) => 2 * Math.ceil(n / 400) + jobs * 5 + 17;
-  assert(budget(3000, 9) <= 80);
-  assert(budget(6000, 9) <= 92);
+  // Preserve the old budget independently; the approved pre-spawn query is +1/job.
+  const legacyBudget = (n, jobs) => 2 * Math.ceil(n / 400) + jobs * 5 + 17;
+  assert(legacyBudget(3000, 9) <= 80);
+  assert(legacyBudget(6000, 9) <= 92);
+  const budget = (n, jobs) => legacyBudget(n, jobs) + jobs;
+  const preflights = s.counts.filter(m => m.name === 'direct-check');
+  assert.equal(preflights.length, 9);
+  assert(preflights.every(m => m.writes === 0 && m.documents <= 5));
   t.diagnostic(
     JSON.stringify({
       objects: pins.length,
@@ -533,6 +547,9 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
       writes: meters.reduce((n, m) => n + m.writes, 0),
       elapsedMs: performance.now() - started,
       rssBytes: process.memoryUsage().rss,
+      preflightQueries: preflights.length,
+      preflightReads: preflights.reduce((n, m) => n + m.documents, 0),
+      legacyCheckCalls3000Full: legacyBudget(3000, 9),
       checkCalls3000Full: budget(3000, 9),
       checkCalls3000Scoped: budget(3000, 2),
       checkCalls6000Full: budget(6000, 9),
@@ -981,4 +998,181 @@ test('expired pending uploads are fenced before DELETE so late commit cannot pub
   await assert.rejects(s.call(packs, 'commit', input('1')), code('WORK_STALE'));
   assert.equal([...s.tables.projectSourcePacks.values()][0].latest, undefined);
   assert.equal([...s.tables.projectSourcePacks.values()][0].other.deleting, true);
+});
+
+for (const responseStatus of [202, 409])
+  test(`cancelled check schedules and sends one bound App cancellation (${responseStatus}), then ignores completed webhook`, async t => {
+    const s = await fixture(t);
+    await s.bind();
+    await s.prepare();
+    bindRepository(t, s.id.projectId, repository);
+    variables(t, {
+      GITHUB_APP_ID: '12345',
+      GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    });
+    let cancels = 0;
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+      if (url.endsWith('/installation')) return Response.json({ id: 9 });
+      if (url.endsWith('/access_tokens')) {
+        assert.deepEqual(JSON.parse(init.body).permissions, actionsPermissions);
+        return Response.json({ token: 'synthetic-token' });
+      }
+      assert.equal(url, `https://api.github.com/repos/${repository}/actions/runs/123/cancel`);
+      assert.equal(init.method, 'POST');
+      cancels++;
+      return new Response(null, { status: responseStatus });
+    });
+    assert.equal((await s.cancel(s.run.id)).status, 'cancelled');
+    await s.cancel(s.run.id);
+    assert.equal(s.scheduled.filter(task => task.name === 'projectHostedActionsWebhook:cancel').length, 1);
+    const ctx = { runMutation: (ref, args) => s.call(webhooks, getFunctionName(ref).split(':')[1], args) };
+    await Promise.all([webhooks.cancel._handler(ctx, s.id), webhooks.cancel._handler(ctx, s.id)]);
+    await webhooks.cancel._handler(ctx, s.id);
+    assert.equal(cancels, 1);
+    const before = await s.status(s.run.id),
+      tasks = s.scheduled.length;
+    for (let i = 0; i < 2; i++) await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s)) });
+    assert.deepEqual(await s.status(s.run.id), before);
+    assert.equal(s.scheduled.length, tasks);
+    assert(s.counts.filter(c => c.name === 'direct-receive').every(c => c.writes === 0));
+    for (const [module, method, args] of [
+      [sessions, 'session', s.input()],
+      [source, 'resolve', { ...s.input(), digests: ['a'.repeat(64)] }],
+      [results, 'result', { ...s.input(), result: JSON.stringify({ index: 0, exitCode: 0 }) }],
+    ])
+      await assert.rejects(s.call(module, method, args), code('CHECK_CANCELLED'));
+    assert.equal(s.tables.projectHostedActionsResults.size, 0);
+  });
+
+test('cancellation enforces current repository binding before token minting or cancel IO', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  await s.cancel(s.run.id);
+  variables(t, { FORGE_GITHUB_REPO_BINDINGS: `${s.id.projectId}=other/repository` });
+  variables(t, {
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  let installations = 0;
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert(url.endsWith('/installation'), 'no token minting or cancel IO without binding');
+    installations++;
+    return Response.json({ id: 9 });
+  });
+  const ctx = {
+    runMutation: (ref, args) => s.call(webhooks, getFunctionName(ref).split(':')[1], args),
+    runQuery: async ref => {
+      assert.equal(getFunctionName(ref), 'githubBindingStore:page');
+      return JSON.stringify({ page: [], isDone: true, continueCursor: '' });
+    },
+  };
+  await assert.rejects(webhooks.cancel._handler(ctx, s.id), code('GITHUB_REPOSITORY_UNBOUND'));
+  assert.equal(installations, 1);
+});
+
+test('cancelled HTTP calls return a distinct safe 403 that old runners already refuse', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  await s.prepare();
+  await s.cancel(s.run.id);
+  t.mock.method(globalThis, 'fetch', async () => jwks());
+  const ctx = { runMutation: (_ref, args) => s.call(sessions, 'session', args) };
+  const response = await handle._handler(
+    ctx,
+    new Request(`${audience}/checks/actions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${oidc()}` },
+      body: JSON.stringify({ ...s.id, command: { kind: 'session' } }),
+    }),
+  );
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).reason, 'cancelled');
+});
+
+test('single-call preflight rechecks cancellation, authority and exact run/fence with no writes or nested calls', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  await s.prepare();
+  const run = await s.status(s.run.id);
+  const input = {
+    ...s.id,
+    fence: run.fence,
+    signature: actionsPreflightSignature(run, 'synthetic-check-key'),
+  };
+  assert.deepEqual(await s.call(preflight, 'check', input), { status: 'active' });
+  const withIdentity = identity => ({
+    _handler: ctx =>
+      preflight.check._handler(
+        {
+          db: ctx.db,
+          auth: { getUserIdentity: async () => identity },
+        },
+        input,
+      ),
+  });
+  // Restored shards have only their run-scoped proof. The public wrapper adds
+  // no device lookup for them and can run with db/auth only, without nested IO.
+  assert.deepEqual(await s.transaction('proofOnlyPreflight', withIdentity(null), {}), { status: 'active' });
+  await assert.rejects(
+    s.transaction(
+      'revokedDevicePreflight',
+      withIdentity({ subject: run.actor, forgeCredential: 'revoked-device' }),
+      {},
+    ),
+    code('AUTH_REVOKED'),
+  );
+  for (const change of [{ signature: '0'.repeat(64) }, { fence: 99 }, { runId: randomUUID() }])
+    await assert.rejects(s.call(preflight, 'check', { ...input, ...change }));
+  const other = await fixture(t);
+  await other.bind();
+  await other.prepare();
+  await assert.rejects(
+    other.call(preflight, 'check', { ...other.id, fence: 1, signature: input.signature }),
+    code('EVIDENCE_CHANGED'),
+  );
+  await s.cancel(s.run.id);
+  assert.deepEqual(await s.call(preflight, 'check', input), { status: 'cancelled' });
+  const meters = s.counts.filter(c =>
+    ['direct-check', 'proofOnlyPreflight', 'revokedDevicePreflight'].includes(c.name),
+  );
+  assert(meters.every(c => c.writes === 0 && c.documents <= 5));
+  // The query receives db/auth only: it cannot call another function or scheduler.
+  s.patch('hostedProjects', s.projectId, { sourceAuthority: { mode: 'server', epoch: 2 } });
+  await assert.rejects(s.call(preflight, 'check', input), code('SOURCE_AUTHORITY_CHANGED'));
+  s.patch('hostedProjects', s.projectId, { owner: 'other', sourceAuthority: { mode: 'server', epoch: 1 } });
+  await assert.rejects(s.call(preflight, 'check', input), code('PROJECT_UNAVAILABLE'));
+});
+
+test('existing OIDC session issues preflight ticket in a header without changing oldest JSON or adding calls', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  await s.prepare();
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => jwks());
+  const response = await handle._handler(
+    {
+      runMutation: (ref, input) => {
+        calls++;
+        assert.equal(getFunctionName(ref), 'projectHostedActionsSession:session');
+        return s.call(sessions, 'session', input);
+      },
+    },
+    new Request(`${audience}/checks/actions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${oidc()}` },
+      body: JSON.stringify({ ...s.id, command: { kind: 'session' } }),
+    }),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(calls, 1);
+  const { capabilities, ...run } = await response.json();
+  assert(capabilities.includes('session.preflight'));
+  assert.equal(hostedCheckRunSchema.parse(run).id, s.run.id);
+  const ticket = JSON.parse(response.headers.get('X-Forge-Actions-Preflight'));
+  assert.equal(ticket.endpoint, 'https://forge.convex.cloud');
+  assert.equal(ticket.signature, actionsPreflightSignature(run, 'synthetic-check-key'));
+  assert.deepEqual(
+    await s.call(preflight, 'check', { ...s.id, fence: run.fence, signature: ticket.signature }),
+    { status: 'active' },
+  );
 });

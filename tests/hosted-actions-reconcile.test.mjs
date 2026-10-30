@@ -171,10 +171,10 @@ test('lost shard acknowledgement replays the same terminal shard event', async (
   assert.equal((await s.tick()).run.status, 'passed');
   assert.equal(s.tables.projectHostedCheckCallbacks.size, 2);
 });
-test('cancel request is retained until provider completion; cancel acknowledgement is not a verdict', async () => {
+test('cancel is terminal in Forge while the legacy adapter stops its provider run', async () => {
   const s = await fixture();
   await s.cancel(s.input.id);
-  assert.equal((await s.tick()).run.status, 'running');
+  assert.equal((await s.tick()).run.status, 'cancelled');
   assert.equal(s.counts().cancels, 1);
   s.advance(300000);
   await s.tick();
@@ -444,7 +444,7 @@ test('provider job pages are fetched outside transactions and only selected exac
   assert.equal((await s.tick()).run.status, 'passed');
   assert.deepEqual(pages, [1, 2]);
 });
-test('lost cancel reply retries only cancellation for the retained run, without committing a verdict', async () => {
+test('legacy lost cancel reply retries only provider cancellation without changing the cancelled check', async () => {
   const s = await fixture(),
     request = s.remote.api.request;
   let cancel = 0;
@@ -455,7 +455,7 @@ test('lost cancel reply retries only cancellation for the retained run, without 
     return request(path, ...args);
   };
   const first = await s.tick();
-  assert.equal(first.run.status, 'running');
+  assert.equal(first.run.status, 'cancelled');
   assert(!s.mapping().reconciliation.cancelSent);
   s.advance(300000);
   await s.tick();

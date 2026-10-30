@@ -6,7 +6,12 @@ import { notifyActionsProgress } from './projectHostedActionsWake';
 import { requireMacMachine } from './projectHostedCheckMachines';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { writableHostedCheck, writeHostedCheck, completeHostedCheck } from './projectHostedCheckStore';
+import {
+  assertHostedCheckActive,
+  writableHostedCheck,
+  writeHostedCheck,
+  completeHostedCheck,
+} from './projectHostedCheckStore';
 import {
   hostedCheckCallbackSchema,
   hostedCheckShardSchema,
@@ -34,6 +39,7 @@ export async function receiveHostedCheckCallback(
   invariant(callback.projectId === input.projectId, 'EVIDENCE_CHANGED', 'Callback project differs.');
   const { row, run } = await writableHostedCheck(ctx, { projectId: input.projectId, runId: callback.runId });
   verifyHostedCheckCallback(callback, input.signature, key(run.keyId));
+  assertHostedCheckActive(run);
   const plan = run.plan,
     r = run.request;
   invariant(

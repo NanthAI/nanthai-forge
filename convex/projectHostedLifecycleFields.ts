@@ -18,6 +18,7 @@ export const hostedLifecycleTables = {
     ready: v.boolean(),
     saveOperationId: v.union(v.string(), v.null()),
     savedExpected: v.union(v.string(), v.null()),
+    landingSequence: v.optional(v.number()),
     materialized: v.boolean(),
     appliedThrough: v.number(),
     materializeCursor: v.union(v.string(), v.null()),

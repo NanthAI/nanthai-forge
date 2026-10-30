@@ -64,7 +64,15 @@ export async function claimActionsReconciliation(
 ) {
   const { run } = await writableHostedCheck(ctx, input);
   // No mapping creation, provider call, schedule or recurring scan for idle/finished runs.
-  if (hostedCheckTerminal(run) || !run.dispatchStarted) return { run, mapping: null, acquired: false };
+  if ((hostedCheckTerminal(run) && run.status !== 'cancelled') || !run.dispatchStarted)
+    return { run, mapping: null, acquired: false };
+  if (run.status === 'cancelled') {
+    const mapping = await ctx.db
+      .query('projectHostedActionsExports')
+      .withIndex('by_project_and_run', q => q.eq('projectId', input.projectId).eq('runId', input.runId))
+      .unique();
+    if (!mapping) return { run, mapping: null, acquired: false };
+  }
   const claim = await controlHostedActions(
     ctx,
     { ...input, command: { kind: 'claim', owner: input.owner } },

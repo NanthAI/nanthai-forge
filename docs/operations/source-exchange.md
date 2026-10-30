@@ -483,9 +483,10 @@ start live compute. Existing native check requests are unchanged.
   until `isDone`; these windows are not a total run/shard/output limit.
 - `projectHostedChecks:cancel({projectId,request})` takes its own original
   `operationId`, `authorityEpoch` and `runId`. The requester or project owner can
-  cancel. Before dispatch this is terminal; after dispatch reservation it sets
-  `cancelRequested` and retains an honest running/unknown status until a provider
-  acknowledgement. Cancellation does not assert remote compute was terminated.
+  request cancellation. Live queued/checking/ready landing consumers preserve a
+  shared check. Otherwise it becomes terminal `cancelled` before or after dispatch,
+  refuses late evidence and requests provider cancellation. This local result
+  does not assert remote compute has terminated.
 
 The internal `projectHostedCheckApi:control` mutation takes project/run identity
 and a strict JSON `command`: `claim`, `prepare`, `reserve`, `empty` or `observe`.
@@ -756,13 +757,14 @@ and a successful run with no contradictory job conclusion. Missing or failed
 logs cannot pass. Installation credentials are never forwarded to a signed log
 storage redirect. Export/dispatch success alone supplies no passing evidence.
 
-H10 cancellation remains a request until the mapped provider run settles. A
-successful cancel POST records acknowledgement; a lost reply can retry that
-idempotent cancellation for the same run. It never starts another execution or
+An unneeded H10 check becomes locally cancelled immediately; the legacy adapter
+retains its provider-stop request until the mapped run settles. A successful cancel
+POST records acknowledgement; a lost reply can retry that idempotent provider
+cancellation for the same run. It never starts another execution or
 claims compute stopped. Transient observation failures retain the original run
 and backoff. The durable wake re-arms before calling the fixed worker, respects
-its lease/`nextAt`, ignores duplicate generations, and becomes a read-only no-op
-after terminal evidence. There is no project sweep or recurring finished-job
+its lease/`nextAt`, ignores duplicate generations, and stops after terminal provider
+evidence. A locally cancelled run can still need this existing provider cleanup. There is no project sweep or recurring finished-job
 observation. The fixed controller ingress is provisioned through
 `FORGE_HOSTED_ACTIONS_CONTROLLER_URL` and its backend-only
 `FORGE_HOSTED_ACTIONS_CONTROLLER_KEY`; it receives only project/run/dispatch
@@ -849,8 +851,10 @@ original outcome: a pending request becomes `terminal-failed` with
 `LANDING_CANCELLED` and the shared `rejected` cause. Its original request,
 attempts and source pins remain readable. An already terminal failure stays
 unchanged. Cancellation releases only this request's queue claim and fences its
-pending finish metadata IO; it neither abandons a Lane nor cancels a shared check
-or source execution. Late callbacks cannot revive the request. Final acceptance
+pending finish metadata IO. It leaves Lane lifecycle and source execution alone;
+a shared check stays live while any queued/checking/ready submission needs it.
+Once the last consumer leaves, the check becomes cancelled and its provider stop
+is requested. Late callbacks cannot revive the request. Final acceptance
 and cancellation race transactionally: acceptance first returns the actual landed
 receipt; cancellation first prevents publication. Accepted source is never undone.
 Retry the same operation and parameters after an unknown reply to get its
@@ -958,8 +962,17 @@ Reconciliation advances only matching checkout metadata, never working bytes;
 reopen retains newer drafts. Intent cascade closes saved server work and cannot
 claim to save a disconnected client's unknown edits.
 
-Cancellation uses the separate `projectHostedChecks:cancel` API. An abandon
-receipt never means a running check or arbitrary process stopped. Main,
+Abandoning a Lane also cancels its queued/checking/ready landing submissions through
+`projectHostedLanding:cancel`'s transaction helper, including the last-consumer
+provider stop. Existing canonical compose selections provide an indexed reverse
+Lane lookup, so older submissions need no backfill. Bounded continuations retain
+stable child operation IDs, recheck authority and skip submissions beyond the
+queue sequence pinned when abandonment applies. Requests queued during a pending
+save or cascade are included. Intent cascades reuse their materialization pages.
+Standalone checks can still be cancelled with `projectHostedChecks:cancel`; the
+legacy lifecycle `cancellation: not-requested` field refers to that separate action.
+An abandon receipt never claims that a provider or arbitrary process has already
+stopped. Main,
 acceptance receipts, source objects and saves are untouched by lifecycle changes.
 The hosted agent CLI and MCP use these same primitives. Site controls
 remain separate work.

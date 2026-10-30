@@ -1,3 +1,4 @@
+import { assertHostedCheckActive } from './projectHostedCheckStore';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 // SPDX-License-Identifier: Apache-2.0
 import { macMachine, requireMacMachine } from './projectHostedCheckMachines';
@@ -176,6 +177,7 @@ export const heartbeat = mutation({
       const value = macHeartbeatSchema.parse(JSON.parse(input.callback));
       invariant(value.projectId === input.projectId, 'EVIDENCE_CHANGED', 'Heartbeat project differs.');
       const { row, run } = await writableHostedCheck(ctx, { projectId: input.projectId, runId: value.runId });
+      assertHostedCheckActive(run);
       verifyMacHeartbeat(value, input.signature, outputSigningKey(run.keyId));
       invariant(isMachineRunner(run.configuration), 'EVIDENCE_CHANGED', 'Select a machine execution.');
       await worker(ctx, {

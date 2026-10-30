@@ -395,14 +395,14 @@ workflow without complete per-job evidence is interrupted, never passed. One
 12-hour watchdog bounds a missing completion event and is cancelled on terminal
 results. There are no project scans, active-run pollers, or idle scheduled functions.
 
-For 3,000 raw source objects, a full nine-job check uses 78 Convex function
+For 3,000 raw source objects, a full nine-job check uses 87 Convex function
 invocations including HTTP actions, nested functions, enqueue, dispatch and webhook;
-a two-job scoped check uses 43, and docs-only uses 38. The formula is
-`17 + 2 * ceil(sourceObjects / 400) + 5 * jobs`, including one Candidate/base
+a two-job scoped check uses 45, and docs-only uses 39. The formula is
+`17 + 2 * ceil(sourceObjects / 400) + 6 * jobs`, including one Candidate/base
 manifest window. Recipe metadata/leaves add their actual bounded descriptor
 windows; issued download grants expire after five minutes. GitHub API and object
 storage requests are separate from Convex function calls. A 6,000-object full
-fixture budgets 92 calls. Page concurrency does not change these call counts:
+fixture budgets 101 calls. The added term is one pre-spawn query per job, with no nested call or active polling. Page concurrency does not change these call counts:
 raw content needs one descriptor request per page (two function invocations,
 including its HTTP action). Recipe and leaf windows are unchanged. Timing history
 adds one indexed document read to the existing planning session and one read/write
@@ -601,3 +601,71 @@ latency. Keep the shared-build path only if its measured net critical path drops
 Repeat with a scoped Candidate to assess the five-minute target. These checks use
 existing free GitHub-hosted Actions; no paid runner, idle service or vendor is
 needed.
+
+### Hosted cancellation
+
+Cancelling a hosted landing releases its check in the same transaction. Abandoning
+a Lane uses this same cancellation path for its live submissions. A queued,
+checking or ready submission that still pins the check keeps it live, including
+another member of a batch. Replacing an attempt releases its old check as well.
+Once the last live submission leaves, the check is terminal `cancelled`; signed
+results cannot revive it. Runner sessions, control, heartbeats and results refuse
+cancelled checks with `CHECK_CANCELLED`, and the Actions HTTP endpoint returns
+403 with the non-secret reason `cancelled`. Old runners already stop on that 403.
+The new Actions runner checks live permission before spawning tests and prints
+`Forge check cancelled.` with exit zero for cancellation.
+
+The existing OIDC planning session supplies a run-specific signed preflight ticket
+in the `X-Forge-Actions-Preflight` response header, leaving the oldest session JSON
+shape unchanged. The fixed supervisor retains it beside the plan, outside the
+project command environment. A shard calls the read-only
+`projectHostedActionsPreflight:check` query once before spawn. This is one Convex
+function invocation with no HTTP action, nested function, refresh or polling. It
+verifies the ticket, current actor/authority epoch and exact execution/fence, then
+returns only active/cancelled. The ticket uses a separate signature domain and
+grants no source access, result publication, provider IO or signing authority. Its
+lifetime inherits the original run; it introduces no additional expiry or user step.
+
+The `session.preflight` capability gates this query and all its request fields.
+A new runner on an old server uses the original saved-plan path and existing
+result refusal points, sending no unsupported query or new session fields. An old
+runner on a new server ignores the header and retains its existing 403 stop behavior.
+Deploy the backend before publishing the new runner modules and supervisor script.
+
+Direct App-backed Actions cancellation schedules one provider cancel action. It
+uses the existing project/repository binding and an installation token requesting
+`actions: write` and `contents: read`. The action consumes its reservation before
+IO, sends the cancel endpoint once, and tolerates 409 when the workflow has already
+completed. An unknown network outcome is not resent. Dispatch acknowledgements or
+requested/in-progress webhooks arriving after cancellation can bind the retained
+run ID and schedule the same cancellation without reviving the check. Completed
+webhooks for a cancelled check leave its state and scheduling unchanged.
+
+An explicit check-run cancellation stops the selected run even when live landing
+requests reference it. Cancelling an individual landing stops its check only after
+the last live consumer leaves.
+
+The Actions mid-shard stop bound is **GitHub cancellation latency**: the provider's
+run-cancel mechanism stops running jobs, normally in seconds; no fixed latency is
+asserted by the local fakes. Actions has no new heartbeat or file-boundary polling.
+The existing 60-second request deadline bounds a stalled pre-spawn/result request;
+it prevents spawn on an unknown preflight outcome. It is not an active Actions
+lease and does not kill an already-running child after 60 seconds. Mac and Forge
+G9 self-hosted workers keep their existing 20-second heartbeat/subscription stop,
+with their last acknowledged 60-second lease as fallback for a hung heartbeat.
+Actions jobs on self-hosted labels use GitHub cancellation, like other Actions jobs.
+
+Direct cancellation uses its mutation plus one scheduled action and one claim
+mutation (three invocations), independent of shard count, plus one workflow-cancel
+POST and existing App token acquisition. Before dispatch there is no provider call.
+The planning header adds zero calls; preflight adds one call per shard because the
+restored shard had no session/lease call before spawn to fold it into. Results keep
+their existing call path. For a plan with eight test shards plus static, the routine check delta
+is **+9 calls**, or **+12 including the complete cancellation operation**; relative
+to an old explicit cancel operation, the marginal cancel plumbing is +2. Adaptive plans use the actual number of test jobs plus static; pack refresh adds
+no preflight query. Existing repository-binding and App-token lookups remain
+additional. No new timers, crons, polling or idle function calls were added. Legacy credential-adapter observation/cleanup
+retains its prior call and retry behavior.
+
+Installed App permissions and real-provider stop latency require operator
+qualification; the local tests use synthetic installations only.

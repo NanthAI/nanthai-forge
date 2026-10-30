@@ -3,7 +3,7 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction, type MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { writableHostedCheck } from './projectHostedCheckStore';
+import { assertHostedCheckActive, writableHostedCheck } from './projectHostedCheckStore';
 import { saveObject } from './projectHostedSaveStore';
 import {
   hostedActionsTransferSchema,
@@ -38,6 +38,7 @@ export async function authorizeActionsTransfer(
 ) {
   const input = hostedActionsTransferSchema.parse(JSON.parse(request.input));
   const { run } = await writableHostedCheck(ctx, { projectId: request.projectId, runId: input.runId });
+  assertHostedCheckActive(run);
   const row = await ctx.db
     .query('projectHostedActionsExports')
     .withIndex('by_project_and_run', q => q.eq('projectId', request.projectId).eq('runId', input.runId))

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { actionsPreflightSignature } from '../src/hosted-actions-preflight';
 import { makeFunctionReference } from 'convex/server';
 import { httpAction } from './_generated/server';
 import { z } from 'zod';
@@ -15,7 +16,7 @@ import type { HostedCheckRun } from '../src/hosted-check';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 export const handle = httpAction(async (ctx, request) => {
-  let reason: 'authorization' | 'validation' | 'storage' = 'authorization';
+  let reason: 'authorization' | 'validation' | 'storage' | 'cancelled' = 'authorization';
   try {
     const site = process.env.CONVEX_SITE_URL;
     invariant(
@@ -138,7 +139,16 @@ export const handle = httpAction(async (ctx, request) => {
         }
       }
     }
-    return Response.json(value, { headers: { 'Cache-Control': 'no-store' } });
+    const headers: Record<string, string> = { 'Cache-Control': 'no-store' };
+    if (command.kind === 'session') {
+      const run = (command.timings ? (value as { run: HostedCheckRun }).run : value) as HostedCheckRun;
+      // Additive header keeps the oldest session JSON shape unchanged.
+      headers['X-Forge-Actions-Preflight'] = JSON.stringify({
+        endpoint: process.env.CONVEX_CLOUD_URL!,
+        signature: actionsPreflightSignature(run, outputSigningKey(run.keyId)),
+      });
+    }
+    return Response.json(value, { headers });
   } catch (error) {
     // Codes and schema paths only: request bodies and messages may carry runner data.
     console.error(
@@ -147,7 +157,8 @@ export const handle = httpAction(async (ctx, request) => {
         ? `validation ${error.issues.map(issue => issue.path.join('.')).join(',')}`
         : ((error as { code?: unknown })?.code ?? (error as Error)?.name ?? 'unknown'),
     );
-    if (error instanceof z.ZodError) reason = 'validation';
+    if ((error as { data?: { code?: string } })?.data?.code === 'CHECK_CANCELLED') reason = 'cancelled';
+    else if (error instanceof z.ZodError) reason = 'validation';
     else if (String((error as { code?: unknown })?.code ?? '').startsWith('R2_')) reason = 'storage';
     return Response.json(
       { reason, error: 'Actions request failed authorization, validation or storage verification.' },

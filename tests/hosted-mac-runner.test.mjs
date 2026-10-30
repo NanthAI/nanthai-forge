@@ -247,7 +247,8 @@ test('cancel fences a reserved execution immediately and late signed success can
   assert.deepEqual(await f.cancel(id), cancelled);
   const callback = f.complete(running, 'passed');
   callback.provider = 'mac';
-  await assert.rejects(f.callback(callback), code('EVIDENCE_CHANGED'));
+  await assert.rejects(f.callback(callback), code('CHECK_CANCELLED'));
+  await assert.rejects(f.heartbeat(running), code('CHECK_CANCELLED'));
   assert.equal((await f.status(id)).status, 'cancelled');
 });
 
@@ -841,3 +842,60 @@ test('dogfood-sized idle queue is bounded and a settled empty subscription makes
     `1500 retained runs: initial work query ${startup[0].documents} document reads, 0 writes; idle 24h: 0 calls/reads/writes; fixture wall ${Math.round(performance.now() - start)}ms; process maxRSS ${process.resourceUsage().maxRSS} KiB`,
   );
 });
+
+for (const provider of ['mac', 'self-hosted'])
+  test(`${provider} cancellation stops at its next existing 20-second heartbeat even without a watch update`, async t => {
+    const f = await fixture(t, false, provider),
+      queued = await f.enqueue();
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+    let started,
+      stopped = false,
+      heartbeats = 0;
+    const ready = new Promise(resolve => {
+      started = resolve;
+    });
+    const stop = new AbortController();
+    const running = runHostedMacWorker(
+      {
+        sessionId: f.address.sessionId,
+        key: secret,
+        work: update => {
+          update([queued.id]);
+          return () => {};
+        },
+        watch: () => () => {},
+        control: f.control,
+        heartbeat: async (callback, signature) => {
+          heartbeats++;
+          return JSON.parse(
+            await f.call('cancelHeartbeat', worker.heartbeat, {
+              projectId: f.projectId,
+              callback: JSON.stringify(callback),
+              signature,
+            }),
+          );
+        },
+        execute: async (_, signal) => {
+          started();
+          await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+          stopped = true;
+        },
+        close: async () => {},
+      },
+      stop.signal,
+    );
+    await ready;
+    await f.cancel(queued.id);
+    t.mock.timers.tick(19_999);
+    await immediate();
+    assert.equal(stopped, false);
+    t.mock.timers.tick(1);
+    await immediate();
+    assert.equal(stopped, true);
+    assert.equal(heartbeats, 1);
+    t.mock.timers.tick(60_000);
+    await immediate();
+    assert.equal(heartbeats, 1);
+    stop.abort();
+    await running;
+  });
