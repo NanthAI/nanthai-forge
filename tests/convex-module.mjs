@@ -12,6 +12,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // every module it compiles. Any source edit therefore yields a new file; an old
 // one is never read. Files are written to a temp name and renamed, so readers
 // see either nothing or a complete module. TypeScript itself loads only on a miss.
+// Server diagnostics belong to Convex's separate log stream in production.
+// Route these in-process server markers away from CLI/result JSON stdout too.
+const moduleConsoleLog = console.log;
+console.log = (...args) => {
+  if (args.length === 1 && typeof args[0] === 'string' && args[0].startsWith('FORGE_PROJECT_EXECUTION '))
+    process.stderr.write(args[0] + '\n');
+  else moduleConsoleLog(...args);
+};
+
 const require = createRequire(import.meta.url);
 const selfSource = readFileSync(fileURLToPath(import.meta.url));
 const root = new URL('../', import.meta.url);

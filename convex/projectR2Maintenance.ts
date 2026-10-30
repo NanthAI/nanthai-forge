@@ -1,3 +1,4 @@
+import { projectExecution } from './projectExecution';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -130,6 +131,7 @@ export const deletingProject = internalQuery({
   returns: v.boolean(),
   handler: async (ctx, { projectId, generation }) => {
     const project = await ctx.db.get(projectId);
+    projectExecution(ctx, projectId, project?.name, project?.key);
     return (
       project?.removal === 'deleting' &&
       !project.r2PrefixPurged &&
@@ -143,6 +145,7 @@ export const prefixComplete = internalMutation({
   returns: v.null(),
   handler: async (ctx, { projectId, generation }) => {
     const project = await ctx.db.get(projectId);
+    projectExecution(ctx, projectId, project?.name, project?.key);
     if (
       project?.removal === 'deleting' &&
       generation !== undefined &&
@@ -167,6 +170,7 @@ export const pageResult = internalMutation({
   returns: v.null(),
   handler: async (ctx, { projectId, generation, outcome, cursor }) => {
     const project = await ctx.db.get(projectId);
+    projectExecution(ctx, projectId, project?.name, project?.key);
     if (
       project?.removal !== 'deleting' ||
       project.r2PrefixPurged ||

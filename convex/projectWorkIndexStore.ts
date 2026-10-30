@@ -9,6 +9,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { generationDocument, indexEntry } from './projectWorkIndexFields';
 import { invariant } from '../src/errors';
+import { projectExecution } from './projectExecution';
 
 // Incremental source returns retain the public generation. Its disposable
 // record partition can be reused directly; this pointer never forms a chain.
@@ -164,6 +165,7 @@ export const batch = internalMutation({
     ) {
       await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {
         generationId: generation._id,
+        projectId: generation.projectId,
       });
       return false;
     }
@@ -209,6 +211,7 @@ export const publish = internalMutation({
     ) {
       await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {
         generationId: generation._id,
+        projectId: generation.projectId,
       });
       return false;
     }
@@ -233,7 +236,10 @@ export const publish = internalMutation({
     const previous = project.work.generationId;
     await ctx.db.patch(project._id, { work: { ...project.work, generationId: generation._id } });
     if (previous && previous !== generation._id)
-      await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, { generationId: previous });
+      await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {
+        generationId: previous,
+        projectId: project._id,
+      });
     await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.sweep, {
       projectId: project._id,
       cursor: null,
@@ -243,12 +249,14 @@ export const publish = internalMutation({
 });
 /** Only derived rows can retire; original backup, source and event history are never touched. */
 export const retire = internalMutation({
-  args: { generationId: v.id('projectWorkGenerations') },
+  args: { generationId: v.id('projectWorkGenerations'), projectId: v.optional(v.id('hostedProjects')) },
   returns: v.null(),
-  handler: async (ctx, { generationId }) => {
+  handler: async (ctx, { generationId, projectId }) => {
+    if (projectId) projectExecution(ctx, projectId);
     const generation = await ctx.db.get(generationId);
     if (!generation || generation.retainedForIntentMigration) return null;
     const project = await ctx.db.get(generation.projectId);
+    projectExecution(ctx, generation.projectId, project?.name, project?.key);
     if (project?.work?.generationId === generationId) return null;
     const current = project?.work?.generationId ? await ctx.db.get(project.work.generationId) : null;
     if (current?.recordsGenerationId === generationId) return null;
@@ -262,7 +270,10 @@ export const retire = internalMutation({
       .take(100);
     for (const row of rows) await ctx.db.delete(row._id);
     if (rows.length === 100)
-      await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, { generationId });
+      await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {
+        generationId,
+        projectId: generation.projectId,
+      });
     else await ctx.db.delete(generationId);
     return null;
   },
@@ -408,6 +419,7 @@ export const sweep = internalMutation({
   returns: v.null(),
   handler: async (ctx, { projectId, cursor }) => {
     const project = await ctx.db.get(projectId);
+    projectExecution(ctx, projectId, project?.name, project?.key);
     if (!project) return null;
     const page = await ctx.db
       .query('projectWorkGenerations')
@@ -422,6 +434,7 @@ export const sweep = internalMutation({
       ) {
         await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {
           generationId: generation._id,
+          projectId: generation.projectId,
         });
       }
     if (!page.isDone)
@@ -435,12 +448,15 @@ export const sweep = internalMutation({
 export const retirePayload = internalMutation({
   args: {
     generationId: v.id('projectWorkGenerations'),
+    projectId: v.optional(v.id('hostedProjects')),
     collection: v.string(),
     key: v.string(),
     payloadKey: v.string(),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
+    const projectId = input.projectId ?? (await ctx.db.get(input.generationId))?.projectId;
+    if (projectId) projectExecution(ctx, projectId);
     const header = await record(ctx, input.generationId, input.collection, input.key);
     if (header && JSON.parse(header.value).payloadKey === input.payloadKey) return null;
     const rows = await ctx.db
@@ -454,7 +470,10 @@ export const retirePayload = internalMutation({
       .take(100);
     for (const row of rows) await ctx.db.delete(row._id);
     if (rows.length === 100)
-      await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retirePayload, input);
+      await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retirePayload, {
+        ...input,
+        ...(projectId ? { projectId } : {}),
+      });
     return null;
   },
 });

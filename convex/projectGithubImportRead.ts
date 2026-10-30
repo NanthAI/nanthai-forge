@@ -2,6 +2,7 @@
 import type { QueryCtx } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
 import { invariant } from '../src/errors';
+import { projectExecution } from './projectExecution';
 export async function readJob(
   ctx: QueryCtx,
   { id, actor }: { id: import('./_generated/dataModel').Id<'projectGithubImports'>; actor: string },
@@ -12,6 +13,7 @@ export async function readJob(
     'PROJECT_UNAVAILABLE',
     'This import is unavailable with current access.',
   );
+  projectExecution(ctx, row.projectId);
   await activeOwnedProject(ctx, row.projectId, actor);
   return row;
 }

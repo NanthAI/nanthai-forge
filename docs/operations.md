@@ -1731,3 +1731,10 @@ selects the whole launchd owner install, retains the previous install and an exa
 rollback command, and verifies the restarted owner's authenticated install identity.
 Legacy directory copies migrate to a retained rollback directory and a selected
 symlink. Worker launches reject a different install from their loaded parent.
+
+## Import benchmark guard
+
+The [scheduled import benchmark guard](operations/import-benchmark-guard.md)
+counts observed project executions, cancels scheduled import/index work on the
+approved benchmark stop conditions, runs temporary-project deletion and proves
+a quiet window without idle function polling.

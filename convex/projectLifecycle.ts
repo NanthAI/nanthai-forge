@@ -13,6 +13,7 @@ import { internal } from './_generated/api';
 import { matchesUpload, scanComplete, removeDuplicate, removeExclusive } from './projectStorage';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { projectExecution } from './projectExecution';
 
 const args = { projectId: v.id('hostedProjects'), operationId: v.string(), expectedRevision: v.number() };
 async function schedule(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
@@ -31,6 +32,12 @@ export async function transition(
 ) {
   const user = await ctx.auth.getUserIdentity(),
     project = await ctx.db.get(input.projectId);
+  projectExecution(
+    ctx,
+    input.projectId,
+    user && project?.owner === user.subject ? project.name : undefined,
+    user && project?.owner === user.subject ? project.key : undefined,
+  );
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to manage your Forge project.');
   // Delete reconciliation has no existence oracle.
   if (action === 'delete' && (!project || project.owner !== user.subject)) return null;
@@ -85,6 +92,12 @@ export const rename = mutation({
     try {
       const user = await ctx.auth.getUserIdentity(),
         project = await ctx.db.get(input.projectId);
+      projectExecution(
+        ctx,
+        input.projectId,
+        user && project?.owner === user.subject ? project.name : undefined,
+        user && project?.owner === user.subject ? project.key : undefined,
+      );
       invariant(
         user && project?.owner === user.subject && !project.removal,
         'PROJECT_UNAVAILABLE',
@@ -256,6 +269,7 @@ export const purge = internalMutation({
   returns: v.null(),
   handler: async (ctx, { projectId }) => {
     const project = await ctx.db.get(projectId);
+    projectExecution(ctx, projectId, project?.name, project?.key);
     if (project?.removal !== 'deleting' || (project.r2Purge && !project.r2PrefixPurged)) return null;
     const imports = await ctx.db
       .query('projectGithubImports')

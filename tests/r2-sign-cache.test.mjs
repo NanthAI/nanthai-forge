@@ -188,7 +188,18 @@ test('cached signed URLs never appear in console output, files, or download erro
     assert.doesNotMatch(String(error), /https?:|X-Amz-|Signature/i);
     return code('EXCHANGE_DOWNLOAD_DENIED')(error);
   });
-  assert.deepEqual(logs, []);
+  // Project attribution is intentional server telemetry. Permit only its exact
+  // non-secret identity fields; signed authority and payload bytes stay private.
+  const project = s.tables.hostedProjects.get('project');
+  for (const line of logs) {
+    assert.doesNotMatch(line, /https?:|X-Amz-|Signature|private payload/i);
+    assert.match(line, /^FORGE_PROJECT_EXECUTION /);
+    assert.deepEqual(JSON.parse(line.slice('FORGE_PROJECT_EXECUTION '.length)), {
+      projectId: 'project',
+      name: project.name,
+      key: project.key,
+    });
+  }
   assert.deepEqual(readdirSync(dir).sort(), ['first', 'second']);
   for (const name of readdirSync(dir)) assert.equal(readFileSync(join(dir, name), 'utf8'), 'private payload');
 });

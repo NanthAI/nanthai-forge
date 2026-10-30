@@ -115,6 +115,13 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 
 ## Workflow friction
 
+- An unchanged hosted Lane passed seven exact landing checks but remained
+  unaccepted because concurrent `main` updates superseded each checked Candidate.
+  The helper reached its 90-minute wait limit and required an exact-operation
+  replay. Preserve landing progress under concurrent updates and expose queue,
+  recomposition and settlement timing so builders can distinguish churn from a
+  failed check.
+
 - The hosted Lane helper sends `tests` a `laneId`, but the hosted command requires a `candidateId`; impact selection returns `BAD_ARGUMENT` before selecting tests. Keep the helper and hosted contract aligned so builders can run the affected suite before finishing.
 
 - The hosted builder helper hides a completed start receipt while materializing

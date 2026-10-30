@@ -328,6 +328,7 @@ export async function appendWork(
             const payloadKey = JSON.parse(old.value).payloadKey;
             if (payloadKey && JSON.parse(entry.value).payloadKey !== payloadKey)
               await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retirePayload, {
+                projectId: project._id,
                 generationId: recordPartition(generation),
                 collection: entry.collection,
                 key: entry.key,
