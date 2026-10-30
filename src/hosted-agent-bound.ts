@@ -191,7 +191,7 @@ async function submitBoundAgent(
         supplied,
       );
       if (terminalOwnerResult(observed.result as Command))
-        store.locked(() => {
+        await store.lockedAsync(() => {
           const current = read<Retained>(previousPath!);
           current.result = observed.result as Command;
           durableReplace(previousPath!, canonicalPayload(current));
@@ -232,7 +232,7 @@ async function submitBoundAgent(
   }
   const nativeDirectory = join(store.directory, 'native-submissions');
   let nativePath = join(nativeDirectory, `${operationId}.json`);
-  const selection = store.locked(() => {
+  const selection = await store.lockedAsync(() => {
     const state = readHostState(store);
     let supersedes: string | undefined;
     if (!raw.operationId) {
@@ -385,7 +385,7 @@ async function submitBoundAgent(
       ...selection.native,
       ...Object.fromEntries(Object.entries(raw).filter(([k]) => transient.has(k))),
     });
-    store.locked(() =>
+    await store.lockedAsync(() =>
       durableReplace(
         nativePath,
         canonicalPayload(
@@ -488,7 +488,7 @@ async function submitBoundAgent(
     if (responses.some(r => !(r.result as { submission?: unknown }).submission))
       return pending('prepare', responses);
     retained.admitted = true;
-    store.locked(() => durableReplace(path, canonicalPayload(retained)));
+    await store.lockedAsync(() => durableReplace(path, canonicalPayload(retained)));
     return raw.wait === false
       ? boundLandingStatus(store, { operationId }, () => native(input), transport)
       : watchBoundLanding(
@@ -523,7 +523,7 @@ async function submitBoundAgent(
         const response = await drive();
         if (terminalOwnerResult(response.result as Command)) {
           retained.result = response.result as Command;
-          store.locked(() => durableReplace(path, canonicalPayload(retained)));
+          await store.lockedAsync(() => durableReplace(path, canonicalPayload(retained)));
         }
         return response;
       } catch (error) {
@@ -546,7 +546,7 @@ async function submitBoundAgent(
           inputs: retained.inputs,
           table: `Hosted landing ${operationId}: terminal-failed (${error.code === 'WORK_STALE' ? 'LANE_STALE' : error.code})`,
         };
-        store.locked(() => durableReplace(path, canonicalPayload(retained)));
+        await store.lockedAsync(() => durableReplace(path, canonicalPayload(retained)));
         return { revision: store.revision(), result: retained.result };
       }
     },

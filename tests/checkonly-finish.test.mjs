@@ -11,6 +11,7 @@ import { FinishJournal, retainedFinishCommand, unfinishedFinishes } from '../dis
 import { watchLandingWorker } from '../dist/landing-worker.js';
 import { landingWorkerStates } from '../dist/landing-worker-status.js';
 import { withLandingWorker } from '../dist/landing-worker-context.js';
+import { CheckQueue } from '../dist/check-queue.js';
 
 async function boundFixture(t) {
   const f = await fixture(t, { remote: false });
@@ -67,6 +68,32 @@ test('bound check-only worker accepts resolved journal pins from a short native 
   assert.equal(f.store.load().runs.filter(run => !run.mainCheck).length, 1);
   assert.equal(f.store.load().channelMoves.length, 0);
   assert.equal(unfinishedFinishes(f.store).length, 0);
+});
+
+test('landing worker finish admission yields to an earlier asynchronous writer', async t => {
+  const f = await boundFixture(t);
+  // An async writer already queued on this event loop must advance; the worker's
+  // synchronous 0ms admission used to fail with WORK_BUSY instead of waiting behind it.
+  const holder = new CheckQueue(join(f.store.directory, 'lock-queue'), {
+    limit: 1,
+    serializeAdmission: false,
+    anchor: f.store.directory,
+  });
+  let admitted = false,
+    writer;
+  try {
+    assert.equal(holder.position().acquired, true);
+    writer = f.store.lockedAsync(() => {
+      admitted = true;
+    });
+    setTimeout(() => holder.release(), 50);
+    const first = (await driveOnce(f, f.command)).result;
+    assert.equal(admitted, true);
+    assert.equal(first.complete, false);
+  } finally {
+    holder.release();
+    await writer;
+  }
 });
 
 async function completeFinish(f, first) {
