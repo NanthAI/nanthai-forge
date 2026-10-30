@@ -50,7 +50,19 @@ export const sourceStepTables = {
   }).index('by_batch_and_index', ['batchId', 'index']),
   projectSourcePools: defineTable({
     key: v.literal('source'),
-    active: v.array(v.id('projectSourceTasks')),
+    // Slots carry the batch and scheduled run so a drain can skip reading full
+    // task documents (input windows) for work that is still running. Bare ids are
+    // the earlier form and are read once, then rewritten as slots.
+    active: v.array(
+      v.union(
+        v.id('projectSourceTasks'),
+        v.object({
+          task: v.id('projectSourceTasks'),
+          batch: v.id('projectSourceBatches'),
+          scheduled: v.id('_scheduled_functions'),
+        }),
+      ),
+    ),
     drainQueued: v.optional(v.boolean()),
   }).index('by_key', ['key']),
 };

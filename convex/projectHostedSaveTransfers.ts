@@ -32,10 +32,18 @@ type Transfer = {
 export async function authorizeSourceTransfer(
   ctx: MutationCtx,
   request: Omit<Transfer, 'pin'>,
-  { lease = true }: { lease?: boolean } = {},
+  {
+    lease = true,
+    loaded,
+  }: {
+    lease?: boolean;
+    /** The same job this transaction already loaded; it is not read again. */
+    loaded?: Awaited<ReturnType<typeof loadSourceJob>>;
+  } = {},
 ) {
   const input = JSON.parse(request.input),
-    job = await loadSourceJob(ctx, request.projectId, input.jobId);
+    job =
+      loaded && loaded.id === input.jobId ? loaded : await loadSourceJob(ctx, request.projectId, input.jobId);
   const row =
     job.jobKind === 'sync'
       ? await syncForJob(ctx, request.projectId, job.id)

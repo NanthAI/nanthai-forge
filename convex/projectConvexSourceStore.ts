@@ -190,7 +190,7 @@ async function sourceStep(
     await authorizeSourceTransfer(
       ctx,
       { projectId: args.projectId, input: row.dispatch, executionId: row.executionId },
-      { lease },
+      { lease, loaded: job },
     );
   else
     invariant(

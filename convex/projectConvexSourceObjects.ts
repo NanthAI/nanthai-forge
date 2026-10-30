@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import type { Id } from './_generated/dataModel';
+import type { Doc } from './_generated/dataModel';
 import { activeStep } from './projectConvexSourceStore';
-import { saveObject } from './projectHostedSaveStore';
+import { saveObjects } from './projectHostedSaveStore';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
@@ -34,13 +34,9 @@ export const resolve = sourceMutation({
       generation = project ? await selectedGeneration(ctx, project) : null;
     const pending = [...args.digests].reverse(),
       seen = new Set(args.known),
-      result: {
-        descriptor: Awaited<ReturnType<typeof saveObject>>;
-        storageId: Id<'_storage'> | null;
-        url: string | null;
-      }[] = [];
+      selected: { row: Doc<'projectObjects'>; url: string | null }[] = [];
     let bytes = 0;
-    while (pending.length && result.length < 100 * (args.windows ?? 1)) {
+    while (pending.length && selected.length < 100 * (args.windows ?? 1)) {
       const id = pending.pop()!;
       if (seen.has(id)) continue;
       seen.add(id);
@@ -52,11 +48,10 @@ export const resolve = sourceMutation({
         invariant(!args.digests.includes(id), 'SOURCE_UNAVAILABLE', 'Exact source object is absent.');
         continue;
       }
-      const descriptor = await saveObject(ctx, args.projectId, { sha256: id });
-      if (result.length && bytes + descriptor.object.size > 8 * 1024 * 1024 * (args.windows ?? 1)) break;
-      bytes += descriptor.object.size;
+      if (selected.length && bytes + row.size > 8 * 1024 * 1024 * (args.windows ?? 1)) break;
+      bytes += row.size;
       const url = row.location === 'r2' && row.r2Key ? await presignGet(r2Config(), row.r2Key) : null;
-      result.push({ descriptor, storageId: url ? null : (row.storageId ?? null), url });
+      selected.push({ row, url });
       if (args.ancestry && generation) {
         // Hints batch a linear ancestry chain, but never establish closure.
         // Actual verified manifest parents drive every subsequent frontier.
@@ -65,6 +60,18 @@ export const resolve = sourceMutation({
         if (Array.isArray(parents)) pending.push(...parents.filter((p: unknown) => typeof p === 'string'));
       }
     }
+    // One reference mark and cleanup fence for the whole window, from rows read above.
+    const descriptors = await saveObjects(
+      ctx,
+      args.projectId,
+      selected.map(({ row }) => ({ sha256: row.digest })),
+      selected.map(({ row }) => row),
+    );
+    const result = selected.map(({ row, url }, i) => ({
+      descriptor: descriptors[i]!,
+      storageId: url ? null : (row.storageId ?? null),
+      url,
+    }));
     return canonicalPayload(
       args.ancestry
         ? result

@@ -76,8 +76,12 @@ export async function saveObjects(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
   pins: readonly { sha256: string; size?: number }[],
+  /** Rows this transaction already read for the same project; they are not read again. */
+  loaded: readonly Doc<'projectObjects'>[] = [],
 ) {
-  const rows = new Map<string, Doc<'projectObjects'>>();
+  const rows = new Map<string, Doc<'projectObjects'>>(
+    loaded.filter(row => row.projectId === projectId).map(row => [row.digest, row]),
+  );
   const result = [];
   let fence: string | undefined;
   for (const pin of pins) {

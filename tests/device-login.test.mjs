@@ -239,16 +239,50 @@ test('full CLI token does not grant access to another owner and checks revocatio
     }),
     rejected('PROJECT_UNAVAILABLE'),
   );
-  const { action } = await import(moduleUrl('../convex/cliServer.ts'));
-  const operation = action({
+  const { action, credentialReuseMs } = await import(moduleUrl('../convex/cliServer.ts'));
+  const realNow = Date.now;
+  let now = realNow() + 10 * credentialReuseMs,
+    checks = 0;
+  Date.now = () => now;
+  t.after(() => (Date.now = realNow));
+  // A long action re-checks after it runs: revocation during the run is honoured.
+  const long = action({
     args: {},
     handler: async () => {
       row.revoked = true;
+      now += credentialReuseMs;
       return 'private result';
     },
   });
-  const actionCtx = { auth: s.ctx.auth, runQuery: s.ctx.runQuery };
-  await assert.rejects(operation._handler(actionCtx, {}), rejected('AUTH_REVOKED'));
+  const actionCtx = {
+    auth: s.ctx.auth,
+    runQuery: (...a) => {
+      checks++;
+      return s.ctx.runQuery(...a);
+    },
+  };
+  await assert.rejects(long._handler(actionCtx, {}), rejected('AUTH_REVOKED'));
+  assert.equal(checks, 2);
+  // A verified credential is reused within the bound (entry and post-run checks
+  // of short actions), and a revocation takes effect once the bound has passed.
+  row.revoked = false;
+  now += 1;
+  const short = action({ args: {}, handler: async () => 'result' });
+  checks = 0;
+  for (let i = 0; i < 5; i++) assert.equal(await short._handler(actionCtx, {}), 'result');
+  assert.equal(checks, 1, 'one credential read for five short actions inside the bound');
+  row.revoked = true;
+  now += credentialReuseMs - 2;
+  assert.equal(await short._handler(actionCtx, {}), 'result');
+  now += 2;
+  await assert.rejects(short._handler(actionCtx, {}), rejected('AUTH_REVOKED'));
+  assert.equal(checks, 2);
+  // Expiry is never extended by reuse.
+  row.revoked = false;
+  now += credentialReuseMs;
+  assert.equal(await short._handler(actionCtx, {}), 'result');
+  now = row.expiresAt;
+  await assert.rejects(short._handler(actionCtx, {}), rejected('AUTH_REVOKED'));
 });
 
 test('local store is 0600, deployment-bound, environment-overridable and rejects unsafe permissions', t => {

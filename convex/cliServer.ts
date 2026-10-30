@@ -22,6 +22,26 @@ export function isDeviceIdentity(user: { issuer?: string; forgeCredential?: unkn
     Boolean(process.env.FORGE_CLI_ISSUER && user.issuer === process.env.FORGE_CLI_ISSUER)
   );
 }
+/** Actions cannot read the credential row directly, so each check is a nested
+ * query. A positive check is reused for at most this long within one isolate
+ * (including an action's own post-run check); revocation and expiry therefore
+ * take effect within this bound. Queries and mutations always read the row. */
+export const credentialReuseMs = 30_000;
+const verified = new Map<string, { at: number; expiresAt: number }>();
+async function authorizeAction(ctx: ActionCtx, args: { credentialId: string; owner: string; scope: string }) {
+  const key = JSON.stringify([args.credentialId, args.owner, args.scope]),
+    now = Date.now(),
+    hit = verified.get(key);
+  if (hit && now - hit.at < credentialReuseMs && now >= hit.at && hit.expiresAt > now) return;
+  verified.delete(key);
+  const row = (await ctx.runQuery(
+    makeFunctionReference<'query', typeof args, { expiresAt: number }>('deviceStore:authorize'),
+    args,
+  )) as { expiresAt?: number } | null;
+  if (typeof row?.expiresAt !== 'number') return;
+  if (verified.size >= 256) verified.delete(verified.keys().next().value!);
+  verified.set(key, { at: now, expiresAt: row.expiresAt });
+}
 export async function guard(ctx: QueryCtx | MutationCtx | ActionCtx, scope: 'cli' | 'coordination') {
   try {
     const user = await ctx.auth.getUserIdentity();
@@ -44,11 +64,7 @@ export async function guard(ctx: QueryCtx | MutationCtx | ActionCtx, scope: 'cli
           'AUTH_SCOPE_DENIED',
           'This credential grants coordination only.',
         );
-      } else
-        await ctx.runQuery(
-          makeFunctionReference<'query', typeof args, unknown>('deviceStore:authorize'),
-          args,
-        );
+      } else await authorizeAction(ctx, args);
     }
     return {};
   } catch (error) {

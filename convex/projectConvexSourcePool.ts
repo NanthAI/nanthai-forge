@@ -36,30 +36,57 @@ export async function sourcePool(ctx: MutationCtx) {
   }
   return row;
 }
+export type SourceSlot = Doc<'projectSourcePools'>['active'][number];
+const slotTask = (slot: SourceSlot) => (typeof slot === 'string' ? slot : slot.task);
+const slot = (task: Doc<'projectSourceTasks'>, scheduled: Id<'_scheduled_functions'>) => ({
+  task: task._id,
+  batch: task.batchId,
+  scheduled,
+});
+const live = (state?: string) => state === 'pending' || state === 'inProgress';
 /** This is an event-driven drain, called inside enqueue/completion transactions.
- * The global cap includes every project. No idle loop or recovery timer exists. */
-export async function drainSourcePool(ctx: MutationCtx, validate: SourceBatchValidator) {
+ * The global cap includes every project. No idle loop or recovery timer exists.
+ * A slot whose batch is valid and whose recorded run is still pending or running
+ * is kept without reading its task document; any other slot reads the task. */
+export async function drainSourcePool(ctx: MutationCtx, check: SourceBatchValidator) {
   const pool = await sourcePool(ctx),
-    active: Id<'projectSourceTasks'>[] = [];
-  for (const id of pool.active) {
+    active: SourceSlot[] = [],
+    // The drain writes no job, project or step row, so one answer per batch holds
+    // for the whole transaction; filling several slots from one batch checks it once.
+    checked = new Map<Id<'projectSourceBatches'>, Promise<boolean>>();
+  const validate: SourceBatchValidator = batch => {
+    let answer = checked.get(batch._id);
+    if (!answer) checked.set(batch._id, (answer = check(batch)));
+    return answer;
+  };
+  for (const entry of pool.active) {
+    const id = slotTask(entry);
+    if (typeof entry !== 'string') {
+      const batch = await ctx.db.get(entry.batch);
+      if (batch && batch.status !== 'fenced') {
+        const hinted = await ctx.db.system.get(entry.scheduled);
+        if (live(hinted?.state.kind)) {
+          active.push(entry);
+          continue;
+        }
+      }
+    }
     const task = await ctx.db.get(id);
     if (!task || task.status === 'done') continue;
     const batch = await ctx.db.get(task.batchId),
       scheduled = task.scheduledId ? await ctx.db.system.get(task.scheduledId) : null;
     if (!batch || batch.status === 'fenced') {
       if (scheduled?.state.kind === 'pending') await ctx.scheduler.cancel(task.scheduledId!);
-      if (scheduled?.state.kind === 'inProgress') active.push(id);
+      if (scheduled?.state.kind === 'inProgress') active.push(slot(task, task.scheduledId!));
       else await ctx.db.patch(id, { status: 'done', failure: 'SOURCE_JOB_FENCED' });
       continue;
     }
-    if (scheduled && ['pending', 'inProgress'].includes(scheduled.state.kind)) {
-      active.push(id);
+    if (scheduled && live(scheduled.state.kind)) {
+      active.push(slot(task, task.scheduledId!));
       continue;
     }
-    if (await validate(batch)) {
-      await scheduleSourceTask(ctx, task);
-      active.push(id);
-    } else {
+    if (await validate(batch)) active.push(slot(task, await scheduleSourceTask(ctx, task)));
+    else {
       await ctx.db.patch(batch._id, { status: 'fenced' });
       await ctx.db.patch(id, { status: 'done', failure: 'SOURCE_JOB_FENCED' });
     }
@@ -85,8 +112,7 @@ export async function drainSourcePool(ctx: MutationCtx, validate: SourceBatchVal
       .withIndex('by_batch_and_index', q => q.eq('batchId', batch._id).eq('index', batch.next))
       .unique();
     invariant(task?.status === 'queued', 'SOURCE_JOB_INVALID', 'Queued source work changed.');
-    await scheduleSourceTask(ctx, task);
-    active.push(task._id);
+    active.push(slot(task, await scheduleSourceTask(ctx, task)));
     await ctx.db.patch(batch._id, {
       next: batch.next + 1,
       status: batch.next + 1 === batch.total ? 'waiting' : 'queued',
@@ -109,7 +135,7 @@ export async function drainSourcePool(ctx: MutationCtx, validate: SourceBatchVal
 }
 export async function releaseSourceTask(ctx: MutationCtx, id: Id<'projectSourceTasks'>) {
   const pool = await sourcePool(ctx);
-  await ctx.db.patch(pool._id, { active: pool.active.filter(value => value !== id) });
+  await ctx.db.patch(pool._id, { active: pool.active.filter(value => slotTask(value) !== id) });
 }
 /** Recovery of a batch fenced only by an expired lease, after the caller renewed
  * the same execution. Every child restarts at a new generation, so replies from
@@ -122,7 +148,7 @@ export async function requeueSourceBatch(ctx: MutationCtx, batch: Doc<'projectSo
     .take(batch.total);
   const ids = new Set(tasks.map(task => task._id)),
     pool = await sourcePool(ctx);
-  await ctx.db.patch(pool._id, { active: pool.active.filter(id => !ids.has(id)) });
+  await ctx.db.patch(pool._id, { active: pool.active.filter(value => !ids.has(slotTask(value))) });
   for (const task of tasks)
     await ctx.db.patch(task._id, {
       status: 'queued',
