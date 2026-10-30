@@ -26,6 +26,7 @@ import type { NativeFile } from './native-state-format.js';
 import type { SaveChange } from './hosted-save.js';
 import { workLocked } from './work-lock.js';
 import { canonicalPayload } from './hosted-source-operation.js';
+import { forgeCachePath } from './forge-cache-paths.js';
 
 /** Private disk snapshot: bounded buffers, no link target traversal or repository execution. */
 function captureFile(root: string, path: string, directory: string) {
@@ -111,7 +112,7 @@ export async function captureHostedSave(root: string, directory: string) {
   }
   const present = new Set(local);
   for (const path of marker.materialized)
-    if (!present.has(path)) {
+    if (!forgeCachePath(path) && !present.has(path)) {
       const old = baseline.get(path)!;
       changes.push({ path, before: { blob: old.blob, mode: old.mode }, after: null });
     }

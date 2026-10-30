@@ -1,4 +1,5 @@
 import { orderLandingEntries } from './landing-batch-order.js';
+import { join } from 'node:path';
 // SPDX-License-Identifier: Apache-2.0
 import { PeersSource } from './agent-peers-source.js';
 import { PeersCache } from './agent-peers-cache.js';
@@ -39,7 +40,7 @@ function readNativeQueueAhead(store: WorkStore, entry: LandingEntry) {
     if (!main) return undefined;
     return queueAheadPreview(
       new PeersSource(store, main),
-      new PeersCache(store.root),
+      new PeersCache(store.root, join(store.directory, 'queue-ahead-verdicts')),
       store.root,
       main,
       entry.head,

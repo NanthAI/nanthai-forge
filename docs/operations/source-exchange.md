@@ -1541,6 +1541,16 @@ request after an unknown response. Current access is rechecked on each dispatch;
 changing a retained request or actor fails explicitly. Keep the client cache to
 reconcile unknown operations across process restarts.
 
+Queue-ahead observations retain verified objects and advisory verdicts only in
+`ROOT.forge-client/queue-ahead-objects` and `ROOT.forge-client/queue-ahead-verdicts`.
+Native queue observations use the owner's `.forge` metadata. Save and capture
+exclude Forge metadata and the legacy root `queue-ahead-objects` directory even
+when tracked paths or ignore negations would otherwise include them. Existing
+stray files can remain in place: they are not captured. If an older saved baseline
+already contains these paths, captures preserve those original pins without
+reading local cache edits or recording removals as source deletions. Historical
+States and accepted main are unchanged by this migration.
+
 `capabilities` is a current authorized protocol/authority/configuration read;
 configuration flags report presence, not live provider health. `status` and
 `observe` are finite reads: select one `laneId`, `runId`, `submissionId` (optional

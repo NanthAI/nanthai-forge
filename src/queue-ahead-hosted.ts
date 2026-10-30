@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { HostedObjectStore } from './hosted-object-store.js';
 import { LazyMergeSource, lazyMerge } from './hosted-merge-reader.js';
 import { SourceWorkerReader } from './hosted-source-worker-reader.js';
@@ -15,7 +15,7 @@ import {
   type QueueAheadEntry,
   type QueueAheadCache,
 } from './queue-ahead-preview.js';
-import { hostedAgentRoot } from './hosted-agent-journal.js';
+import { hostedAgentDirectory } from './hosted-agent-journal.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
 /** Finite explicit observation. The server selects exact authorized pins, the
@@ -23,14 +23,12 @@ import type { HostedAgentTransport } from './hosted-agent-transport.js';
  * Generated preview States never upload and never become Candidates/evidence. */
 export async function hostedQueueAhead(transport: HostedAgentTransport, selection: unknown) {
   const selected = queueAheadSelectionSchema.parse(selection);
+  const cacheRoot = dirname(hostedAgentDirectory(transport.root));
   const root = await mkdtemp(join(tmpdir(), 'forge-queue-ahead-'));
   try {
     const source = new LazyMergeSource(root);
     await mkdir(source.directory, { recursive: true, mode: 0o700 });
-    const objects = new HostedObjectStore(
-      join(hostedAgentRoot(transport.root), 'queue-ahead-objects'),
-      transport.exchange,
-    );
+    const objects = new HostedObjectStore(join(cacheRoot, 'queue-ahead-objects'), transport.exchange);
     const fetched = new Map<string, Buffer>();
     const reader = new SourceWorkerReader(source.directory, {
       async describe(id) {
@@ -49,7 +47,10 @@ export async function hostedQueueAhead(transport: HostedAgentTransport, selectio
         throw new Error('Advisory previews never publish source.');
       },
     });
-    const retainedCache = new PeersCache(`${transport.address.url}/${transport.address.projectId}`);
+    const retainedCache = new PeersCache(
+      `${transport.address.url}/${transport.address.projectId}`,
+      join(cacheRoot, 'queue-ahead-verdicts'),
+    );
     const verdicts = new Map<string, unknown>();
     const cache: QueueAheadCache = {
       read<T>(key: string) {

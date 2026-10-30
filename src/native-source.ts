@@ -15,6 +15,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { nativePaths } from './source-paths.js';
+import { forgeCachePath } from './forge-cache-paths.js';
 export { nativePaths } from './source-paths.js';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
@@ -233,10 +234,11 @@ export class NativeSource {
     base?: string,
   ): { files: NativeFile[]; coverage: NativeCaptureCoverage } {
     root = realpathSync(root);
+    const baseline = base ? this.state(base).files : [];
     const excluded: { path: string; reason: string }[] = [];
     const files: NativeFile[] = nativePaths(
       root,
-      base ? this.state(base).files.map(file => file.path) : [],
+      baseline.map(file => file.path),
       excluded,
     ).map(path => {
       const { bytes, mode } = nativeFile(root, path);
@@ -246,6 +248,10 @@ export class NativeSource {
         mode,
       };
     });
+    // Ignore legacy cache bytes and their removal without turning migration
+    // into a deletion on main. Retained historical source stays immutable.
+    files.push(...baseline.filter(file => forgeCachePath(file.path)));
+    files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     return {
       files,
       coverage: { included: files.length, excludedCount: excluded.length, excluded: excluded.slice(0, 100) },

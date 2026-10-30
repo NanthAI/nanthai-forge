@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { exclusion, sourceExclusion, safeRelative } from './files.js';
 import { invariant } from './errors.js';
 import { ignoredBy, readIgnoreLayer, type IgnoreMatch } from './source-ignore.js';
+import { forgeCachePath } from './forge-cache-paths.js';
 
 export type NativeExcludedPath = { path: string; reason: string; ignore?: IgnoreMatch };
 type SourcePathOptions = {
@@ -51,6 +52,14 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
         continue;
       if (!safeRelative(path)) {
         invariant(!validate, 'UNSAFE_PATH', 'Native source paths must be portable relative paths.');
+        continue;
+      }
+      // Tracked-path and ignore-rule overrides must never re-include client
+      // metadata. Exact historical imports remain byte-for-byte unchanged.
+      if (!preserveRetained && forgeCachePath(path)) {
+        const item = { path, reason: 'forge-metadata' };
+        excluded?.push(item);
+        onExcluded?.(item);
         continue;
       }
       const selected = retainedFiles.has(path),

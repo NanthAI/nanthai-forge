@@ -9,8 +9,8 @@ import { digest } from './hash.js';
  * source identities; live entries additionally require fresh filesystem metadata. */
 export class PeersCache {
   private readonly directory: string;
-  constructor(root: string) {
-    this.directory = join(tmpdir(), `forge-peers-${process.getuid?.() ?? 'user'}`, digest(root));
+  constructor(root: string, directory?: string) {
+    this.directory = directory ?? join(tmpdir(), `forge-peers-${process.getuid?.() ?? 'user'}`, digest(root));
   }
   private validDirectory(path: string) {
     const stat = lstatSync(path);
