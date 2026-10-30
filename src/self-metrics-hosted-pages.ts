@@ -13,6 +13,8 @@ import { hostedActionError } from './hosted-action-error.js';
 import { invariant } from './errors.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { minutesBetween, type MetricPeriod, type MetricRecords } from './self-metrics-types.js';
+import { metricReceiptRowSchema } from './self-metric-receipts.js';
+import { hostedCallerReceipts } from './self-metrics-hosted-receipts.js';
 export type MetricQuery = ((name: string, args: Record<string, unknown>) => Promise<unknown>) & {
   objects?: MetricObjects;
 };
@@ -45,6 +47,8 @@ const rowSchemas = {
     runIds: z.array(z.string()),
     progressAt: z.array(stamp),
     errorCode: z.string().nullable(),
+    compensating: z.boolean().optional(),
+    noOwnerCause: z.string().nullable().optional(),
     retryCause: z.enum(['stall', 'conflict', 'check-failure-or-flake', 'other']).optional(),
     actor: z.string().optional(),
     operationId: z.string().optional(),
@@ -82,10 +86,10 @@ const rowSchemas = {
   lanes: z.object({ id: z.string(), version: z.number(), intentId: z.string(), revert: z.boolean() }),
   saves: z.object({ id: z.string(), laneId: z.string(), head: z.string(), at: stamp }),
   operations: z.object({ id: z.string(), mutation: mutation.optional() }),
+  receipts: metricReceiptRowSchema,
 };
 const gaps = [
-  'Hosted caller-visible lifecycle errors and no-owner incident tags are not recorded.',
-  'Hosted terminal delivery, overlap acknowledgements, provider bills and authority observations need durable coverage.',
+  'Hosted overlap acknowledgements, provider bills and authority observations need durable coverage.',
   'Hosted reuse keys and request/adoption receipts remain unavailable.',
 ];
 export async function readHostedMetricPages(query: MetricQuery, period: MetricPeriod, summary = false) {
@@ -111,10 +115,21 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
     lanes: MetricLane[] = [],
     saves: MetricSave[] = [];
   const accepted = new Map<string, string>();
+  const receiptRows: z.infer<typeof rowSchemas.receipts>[] = [];
+  let receiptCoverage: Record<string, string | null> | undefined;
   try {
     for (const stream of summary
       ? (['acceptances', 'requests', 'runs', 'operations'] as const)
-      : (['acceptances', 'requests', 'runs', 'operations', 'attempts', 'lanes', 'saves'] as const)) {
+      : ([
+          'acceptances',
+          'requests',
+          'runs',
+          'operations',
+          'attempts',
+          'lanes',
+          'saves',
+          'receipts',
+        ] as const)) {
       let cursor: string | null = null;
       const seen = new Set<string>();
       do {
@@ -132,6 +147,7 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
             continueCursor: z.string(),
             cutover: nullableStamp,
             authority: sourceAuthoritySchema,
+            coverage: z.record(z.string(), nullableStamp).optional(),
           })
           .parse(typeof raw === 'string' ? JSON.parse(raw) : raw);
         invariant(
@@ -193,6 +209,7 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
               });
             records.submissions.push({
               ...row,
+              ...(row.noOwnerCause ? { noOwner: true } : {}),
               entryId: row.id,
               entryAt: row.at,
               entryStatus: row.status,
@@ -207,6 +224,8 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
             lanes.push(rowSchemas.lanes.parse(rawRow));
           } else if (stream === 'saves') {
             saves.push(rowSchemas.saves.parse(rawRow));
+          } else if (stream === 'receipts') {
+            receiptRows.push(rowSchemas.receipts.parse(rawRow));
           } else {
             const row = rowSchemas.operations.parse(rawRow);
             if (row.mutation)
@@ -219,6 +238,7 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
               });
           }
         }
+        if (page.coverage) receiptCoverage = page.coverage;
         if (summary && !page.isDone) {
           records.surfaceGaps!.push(
             `Status read one hosted ${stream} page; use metrics for the remaining records.`,
@@ -251,6 +271,7 @@ export async function readHostedMetricPages(query: MetricQuery, period: MetricPe
     );
   }
   if (!records.error && !summary) {
+    hostedCallerReceipts(records, receiptRows, receiptCoverage, period);
     const requests = records.submissions;
     joinMetricAttempts(records, attempts, pins);
     await hydrateMetricInputs(records, pins, lanes, saves, query.objects);

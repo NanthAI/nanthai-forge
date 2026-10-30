@@ -11,7 +11,7 @@ import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { mutation, query } from './cliServer';
+import { mutation, query, receiptMutation } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { beginHostedOperation } from './projectHostedOperations';
@@ -63,7 +63,7 @@ export const cancel = mutation({
   },
 });
 
-export const enqueue = mutation({
+export const enqueue = receiptMutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },
   returns: v.string(),
   handler: async (ctx, input) => {

@@ -91,6 +91,7 @@ export type MetricRecords = {
   landingKindsComplete?: boolean;
   lifecycleCoverageGaps?: string[];
   mutationCoverageGaps?: string[];
+  deliveryCoverageGaps?: string[];
   landingCoverageGaps?: string[];
   source?: {
     kind: 'native' | 'hosted' | 'joined';

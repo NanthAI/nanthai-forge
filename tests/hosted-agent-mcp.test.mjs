@@ -266,7 +266,7 @@ test('the existing stdio CLI accepts explicit hosted addressing and discovers to
   assert(!existsSync(`${s.root}.forge-client`));
 });
 
-test('MCP hosted metrics uses seven finite metadata streams and its authenticated input transport', async t => {
+test('MCP hosted metrics uses eight finite metadata streams and its authenticated input transport', async t => {
   const s = agentFixture(t);
   const api = await import(moduleUrl('../convex/projectSelfMetrics.ts'));
   const original = s.exchange.client.query.bind(s.exchange.client);
@@ -317,8 +317,17 @@ test('MCP hosted metrics uses seven finite metadata streams and its authenticate
   assert.equal(result.action, 'metrics');
   assert.equal(result.operationId, null);
   assert.equal(result.result.source.kind, 'hosted');
-  assert.equal(pages, 7);
-  assert.deepEqual(streams, ['acceptances', 'requests', 'runs', 'operations', 'attempts', 'lanes', 'saves']);
+  assert.equal(pages, 8);
+  assert.deepEqual(streams, [
+    'acceptances',
+    'requests',
+    'runs',
+    'operations',
+    'attempts',
+    'lanes',
+    'saves',
+    'receipts',
+  ]);
   assert.equal(objectCalls, 1);
   assert(s.calls.every(call => call.name === 'projectHostedAgent:capabilities'));
   assert(!existsSync(`${s.root}.forge-metrics.jsonl`));

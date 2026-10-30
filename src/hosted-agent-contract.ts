@@ -52,6 +52,8 @@ export type HostedAgentAddress = z.infer<typeof hostedAgentAddressSchema>;
 export const hostedAgentCapabilitiesSchema = z
   .object({
     overlapVersion: z.literal(1).optional(),
+    /** Deferred caller outcome/delivery receipts may ride on CLI mutations. */
+    metricReceiptVersion: z.literal(1).optional(),
     needsFix: z.array(z.record(z.string(), z.json())).optional(),
     githubMirror: hostedMirrorStatusSchema.nullable().optional(),
     schema: z.literal(1),

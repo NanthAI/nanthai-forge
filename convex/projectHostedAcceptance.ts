@@ -18,6 +18,7 @@ import { completeAcceptedHeads } from './projectHostedAcceptanceCompletion';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
 async function publishSelected(
   ctx: MutationCtx,
   claim: import('./projectHostedLandingControl').LandingClaim,
@@ -128,11 +129,15 @@ export const approve = mutation({
         channel: 'main',
         owner: attempt.operations.accept,
       });
-      return canonicalPayload(
-        claim
-          ? await publishSelected(ctx, claim, Date.now(), actor)
-          : { status: 'pending', reason: 'queued' },
-      );
+      if (!claim) return canonicalPayload({ status: 'pending', reason: 'queued' });
+      const published = await publishSelected(ctx, claim, Date.now(), actor);
+      await recordMutationReceipt(ctx, {
+        projectId: input.projectId,
+        actor: actor.id,
+        operationId: attempt.operations.accept,
+        action: 'accept',
+      });
+      return canonicalPayload(published);
     } catch (error) {
       return report(error);
     }

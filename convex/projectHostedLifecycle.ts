@@ -49,6 +49,7 @@ export const transition = mutation({
       const auth = { projectId: input.projectId, actor, operationId: request.operationId };
       const prepared = await beginHostedOperation(ctx, {
         ...auth,
+        metricAction: request.action,
         payload: request,
         request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(request, expected) },
         firstAttempt: {

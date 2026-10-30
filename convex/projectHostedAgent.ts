@@ -20,11 +20,20 @@ export const capabilities = query({
     resolveVersion: v.optional(v.literal(1)),
     overlapVersion: v.optional(v.literal(1)),
     mirrorVersion: v.optional(v.literal(1)),
+    metricReceiptVersion: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (
     ctx,
-    { projectId, clientVersion, noticeVersion, resolveVersion, overlapVersion, mirrorVersion },
+    {
+      projectId,
+      clientVersion,
+      noticeVersion,
+      resolveVersion,
+      overlapVersion,
+      mirrorVersion,
+      metricReceiptVersion,
+    },
   ) => {
     try {
       const user = await ctx.auth.getUserIdentity();
@@ -35,6 +44,7 @@ export const capabilities = query({
       return canonicalPayload(
         hostedAgentCapabilitiesSchema.parse({
           ...(overlapVersion === 1 ? { overlapVersion: 1 } : {}),
+          ...(metricReceiptVersion === 1 ? { metricReceiptVersion: 1 } : {}),
           ...(noticeVersion === 1 ? { needsFix: needsFix(project) } : {}),
           ...(mirrorVersion === 1 ? { githubMirror: await githubMirrorStatus(ctx, project) } : {}),
           schema: 1,

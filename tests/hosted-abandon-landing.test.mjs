@@ -78,6 +78,16 @@ for (const phase of ['queued', 'checking'])
     assert.doesNotMatch(states(f)[0].error.message, /peers requeued/);
     assert.equal(states(f)[0].phase, 'terminal-failed');
     assert([...f.tables.projectHostedOperations.values()].every(op => !op.metricMutation));
+    assert(
+      [...(f.tables.projectSelfMetricReceipts?.values() ?? [])].every(row => !row.key.endsWith(':cancel')),
+      'automatic child cancellation is not an operator intervention',
+    );
+    assert.equal(
+      [...(f.tables.projectSelfMetricReceipts?.values() ?? [])].filter(row => row.key.endsWith(':abandon'))
+        .length,
+      1,
+      'the owner abandon is one intervention',
+    );
     if (phase === 'checking') {
       assert.equal(f.runs()[0].status, 'cancelled');
       assert.equal(providerCancels(f).length, 1);

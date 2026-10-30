@@ -9,6 +9,7 @@ import { landingPriorityState } from './projectHostedLandingOrder';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
 
 /** One submission patch, no wake/poller or progress fan-out. The retained CAS
  * prevents an old retry from undoing a later owner's priority change. */
@@ -61,6 +62,13 @@ export const prioritize = mutation({
         priorityChange: change,
       };
       await ctx.db.patch(row._id, patch);
+      // priorityChange keeps only the latest change; every change is its own receipt.
+      await recordMutationReceipt(ctx, {
+        projectId: input.projectId,
+        actor: actor.id,
+        operationId: input.operationId,
+        action: 'prioritize',
+      });
       return canonicalPayload(landingPriorityState({ ...row, ...patch }, state));
     } catch (error) {
       return report(error);

@@ -32,6 +32,29 @@ export type SelfMetricReceipt = Requester & {
   noOwner?: boolean;
   checkRequests?: { id: string; runId: string; reused: boolean; reuseKey?: string }[];
 };
+/** Structured codes a caller received in a successful response (not accepted/landed/passed). */
+export function metricErrorCodes(result: unknown): string[] {
+  const collect = (item: unknown): string[] => {
+    if (!item || typeof item !== 'object') return [];
+    const record = item as {
+      code?: string;
+      error?: { code?: string };
+      status?: string;
+      entries?: unknown[];
+      run?: unknown;
+      submission?: unknown;
+    };
+    if (['accepted', 'landed', 'already-accepted', 'passed'].includes(record.status ?? '')) return [];
+    return [
+      record.code,
+      record.error?.code,
+      ...(Array.isArray(record.entries) ? record.entries : []).flatMap(collect),
+      ...collect(record.run),
+      ...collect(record.submission),
+    ].filter((code): code is string => typeof code === 'string');
+  };
+  return [...new Set(collect(result))];
+}
 const request = new AsyncLocalStorage<Requester>();
 const writers = new WeakMap<Requester, Map<string, number>>();
 const closed = new WeakSet<Requester>();
@@ -194,26 +217,7 @@ export async function withLifecycleMetric<T>(
           };
         }
       )?.result;
-      const collect = (item: unknown): string[] => {
-        if (!item || typeof item !== 'object') return [];
-        const record = item as {
-          code?: string;
-          error?: { code?: string };
-          status?: string;
-          entries?: unknown[];
-          run?: unknown;
-          submission?: unknown;
-        };
-        if (['accepted', 'landed', 'already-accepted', 'passed'].includes(record.status ?? '')) return [];
-        return [
-          record.code,
-          record.error?.code,
-          ...(record.entries ?? []).flatMap(collect),
-          ...collect(record.run),
-          ...collect(record.submission),
-        ].filter((code): code is string => typeof code === 'string');
-      };
-      errorCodes = [...new Set(collect(result))];
+      errorCodes = metricErrorCodes(result);
       errorCode = errorCodes[0];
       deliveries = [
         ...(result?.submissions ?? []),

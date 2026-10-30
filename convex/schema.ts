@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { hostedOverlapTables } from './projectHostedOverlapFields';
 import { hostedFrictionTables } from './projectHostedFrictionFields';
+import { selfMetricReceiptTables } from './projectSelfMetricReceiptFields';
 import { hostedDecisionTables } from './projectHostedDecisionsFields';
 import { githubBindingTables } from './githubBindingFields';
 import { githubMirrorTables } from './projectGithubMirrorFields';
@@ -682,6 +683,7 @@ export default defineSchema({
     .index('by_owner', ['owner'])
     .index('by_owner_and_operationId', ['owner', 'operationId']),
   ...hostedFrictionTables,
+  ...selfMetricReceiptTables,
   ...hostedOverlapTables,
   ...hostedDecisionTables,
   imports: defineTable(jobFields)

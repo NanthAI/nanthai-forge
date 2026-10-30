@@ -81,7 +81,7 @@ test('contributors requesting urgent stay normal with an explicit governance rea
   assert.equal((await f.status(state.id)).request.priority, 'normal');
 });
 
-test('owner reprioritisation is one write, retries are inert and stale retries cannot undo newer priority', async () => {
+test('owner reprioritisation is one patch plus its receipt, retries are inert and stale retries cannot undo newer priority', async () => {
   const f = await landingFixture(),
     a = await f.enqueue(),
     b = await f.enqueue();
@@ -90,7 +90,7 @@ test('owner reprioritisation is one write, retries are inert and stale retries c
   const changed = await prioritize(f, input);
   assert.equal(changed.priority, 'urgent');
   assert.equal(changed.priorityVersion, 1);
-  assert.equal(f.counts.at(-1).writes, 1);
+  assert.equal(f.counts.at(-1).writes, 2, 'the change and its intervention receipt');
   assert.equal(f.metrics.scheduled, beforeTasks);
   assert.deepEqual(await prioritize(f, input), changed);
   assert.equal(f.counts.at(-1).writes, 0);
@@ -116,7 +116,7 @@ test('reprioritising never cancels an already running check or its lease', async
   assert.equal(changed.priority, 'urgent');
   assert.equal(changed.phase, 'checking');
   assert.equal(changed.attemptId, attempt);
-  assert.equal(f.counts.at(-1).writes, 1);
+  assert.equal(f.counts.at(-1).writes, 2, 'the change and its intervention receipt');
   assert.deepEqual(await f.rawChecks.status(run.id), before);
   assert.equal(f.metrics.cancelled, cancelled);
 });
@@ -130,7 +130,7 @@ test('urgent priority applies at READY and wins the next free acceptance lease',
   const changed = await prioritize(f, input);
   assert.equal(changed.phase, 'ready');
   assert.equal(changed.priority, 'urgent');
-  assert.equal(f.counts.at(-1).writes, 1);
+  assert.equal(f.counts.at(-1).writes, 2, 'the change and its intervention receipt');
   assert.deepEqual(await prioritize(f, input), changed);
   assert.equal(await f.claimAcceptance(normal.state), null);
   const lease = await f.claimAcceptance(urgent.state);
@@ -150,7 +150,7 @@ test('promoted member escapes a composing normal batch', async t => {
   assert.equal(batch.phase, 'composing');
   const selected = f.entries[2].state.id;
   await prioritize(f, command(f, selected));
-  assert.equal(f.counts.at(-1).writes, 1);
+  assert.equal(f.counts.at(-1).writes, 2, 'the change and its intervention receipt');
   const status = JSON.parse(
     await f.transaction('priorityFinishStatus', finishApi.status, {
       projectId: f.projectId,
@@ -326,7 +326,7 @@ test('fallback priority keeps an in-flight solo preparation and reads only its b
 });
 
 for (const size of [575, 1150])
-  test(`priority costs stay one write and constant selection reads at ${size} active entries`, async t => {
+  test(`priority costs stay one patch plus receipt and constant selection reads at ${size} active entries`, async t => {
     const f = await landingFixture(),
       first = await f.enqueue();
     const original = [...f.tables.projectHostedLandingRequests.values()][0];
@@ -381,8 +381,8 @@ for (const size of [575, 1150])
     assert(retainedKeyBytes <= size * 256, 'only compact ordering metadata retained');
     await prioritize(f, command(f, first.id));
     const change = f.counts.at(-1);
-    assert.equal(change.writes, 1);
-    assert(change.documents <= 4);
+    assert.equal(change.writes, 2, 'the change and its intervention receipt');
+    assert(change.documents <= 5);
     const selected = await f.transaction(
       'priorityScaleNext',
       { _handler: ctx => order.nextLandingRow(ctx, { projectId: f.projectId, channel: 'main' }) },

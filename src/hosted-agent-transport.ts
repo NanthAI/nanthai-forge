@@ -44,6 +44,20 @@ import {
 import { executeHostedAgent, hostedCheckSettings } from './hosted-agent-actions.js';
 import { selectHostedFinish } from './hosted-agent-finish-identity.js';
 import { reconcileHostedSave } from './hosted-save-client.js';
+import {
+  callerReceipts,
+  clearCallerReceipts,
+  metricOutboxDirectory,
+  takeCallerReceipts,
+  writeCallerReceipts,
+} from './hosted-metric-outbox.js';
+/** Existing CLI mutations that accept deferred caller receipts; no extra calls. */
+const receiptMutations = new Set([
+  'projectHostedStart:start',
+  'projectHostedLandingDesired:submit',
+  'projectHostedLanding:enqueue',
+  'projectHostedSync:prepare',
+]);
 export type HostedAgentExchange = Pick<
   ConvexExchange,
   | 'client'
@@ -70,6 +84,10 @@ export type HostedAgentResponse = {
  * every dispatch is finite and every mutation is pinned before network IO. */
 export class HostedAgentTransport {
   private priorityReads: boolean | undefined;
+  /** Requester whose deferred receipts this deployment accepts; unset until negotiated. */
+  private receiptActor: string | undefined;
+  private callerActor: string | null = null;
+  private callerOperationId: string | null = null;
   constructor(
     readonly root: string,
     readonly address: HostedAgentAddress,
@@ -83,6 +101,39 @@ export class HostedAgentTransport {
     readonly subscribeSource?: () => HostedRunSubscription,
   ) {}
   async dispatch(
+    requestedAction: string,
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<HostedAgentResponse> {
+    this.callerOperationId = typeof input.operationId === 'string' ? input.operationId : null;
+    try {
+      const response = await this.dispatchCaller(requestedAction, input, signal);
+      this.retainCaller(requestedAction, { result: response.result }, response.operationId);
+      return response;
+    } catch (error) {
+      this.retainCaller(requestedAction, { error }, this.callerOperationId);
+      throw error;
+    }
+  }
+  /** Record what the caller receives, locally; a later CLI mutation carries it. */
+  private retainCaller(
+    action: string,
+    outcome: { result?: unknown; error?: unknown },
+    operationId: string | null,
+  ) {
+    if (['capabilities', 'metrics', 'check-settings'].includes(action)) return;
+    writeCallerReceipts(
+      metricOutboxDirectory(this.address),
+      callerReceipts({
+        action,
+        operationId,
+        actor: this.callerActor,
+        at: new Date().toISOString(),
+        ...outcome,
+      }),
+    );
+  }
+  private async dispatchCaller(
     requestedAction: string,
     input: Record<string, unknown>,
     signal?: AbortSignal,
@@ -131,6 +182,7 @@ export class HostedAgentTransport {
           resolveVersion: 1,
           overlapVersion: 1,
           mirrorVersion: 1,
+          metricReceiptVersion: 1,
         };
         for (;;) {
           try {
@@ -147,7 +199,7 @@ export class HostedAgentTransport {
             )
               throw error;
             const field =
-              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|mirrorVersion)\b/i.exec(
+              /extra field\s+[`'"]?(noticeVersion|resolveVersion|overlapVersion|mirrorVersion|metricReceiptVersion)\b/i.exec(
                 error.message,
               )?.[1];
             // Preserve independently supported features, and never repeat a
@@ -170,6 +222,8 @@ export class HostedAgentTransport {
         );
       }
       const capabilities = hostedAgentCapabilitiesSchema.parse(discovery);
+      this.callerActor = capabilities.actor;
+      this.receiptActor = capabilities.metricReceiptVersion === 1 ? capabilities.actor : undefined;
       metricRequesterActor({ kind: 'agent', name: capabilities.actor });
       invariant(
         capabilities.projectId === this.address.projectId,
@@ -255,6 +309,7 @@ export class HostedAgentTransport {
               operationId as string | undefined,
             );
       metricOperationId(journal.operationId);
+      this.callerOperationId = journal.operationId;
       const session: HostedAgentSession = {
         root,
         address: this.address,
@@ -384,7 +439,14 @@ export class HostedAgentTransport {
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }
   async mutation<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
-    const request = { ...args, projectId: this.address.projectId };
+    const outbox = metricOutboxDirectory(this.address);
+    const pending =
+      this.receiptActor && receiptMutations.has(name) ? takeCallerReceipts(outbox, this.receiptActor) : null;
+    const request = {
+      ...args,
+      projectId: this.address.projectId,
+      ...(pending ? { metricReceipts: pending.payload } : {}),
+    };
     let value: unknown;
     for (let retry = 0; ; retry++) {
       try {
@@ -397,6 +459,7 @@ export class HostedAgentTransport {
         await new Promise(resolve => setTimeout(resolve, 25 * 2 ** retry));
       }
     }
+    if (pending) clearCallerReceipts(pending.files);
     const metricRoot = resolve(this.root);
     recordOwnerMutation(dirname(metricRoot), undefined, `${basename(metricRoot)}.forge-metrics.jsonl`);
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;

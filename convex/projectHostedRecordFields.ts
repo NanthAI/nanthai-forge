@@ -66,7 +66,18 @@ export const hostedRecordTables = {
     projectId: v.id('hostedProjects'),
     actor: v.string(),
     operationId: v.string(),
-    metricAction: v.optional(v.literal('cancel')),
+    metricAction: v.optional(
+      v.union(
+        v.literal('cancel'),
+        v.literal('prioritize'),
+        v.literal('revert'),
+        v.literal('abandon'),
+        v.literal('reopen'),
+        v.literal('set-policy'),
+        v.literal('accept'),
+      ),
+    ),
+    // Legacy cancel receipts; new successful commands append projectSelfMetricReceipts.
     metricMutation: v.optional(
       v.object({ action: v.literal('cancel'), actor: v.string(), operationId: v.string(), at: v.string() }),
     ),

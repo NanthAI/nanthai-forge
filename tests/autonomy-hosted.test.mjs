@@ -46,6 +46,7 @@ async function hosted(t) {
   const s = state([]),
     native = s.ctx.runQuery;
   s.tables.projectPolicyChanges = new Map();
+  s.tables.projectSelfMetricReceipts = new Map();
   s.ctx.runQuery = s.ctx.runMutation = (ref, input) => {
     const [module, name] = getFunctionName(ref).split(':');
     return (

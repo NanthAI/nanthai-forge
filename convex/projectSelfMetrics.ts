@@ -9,6 +9,7 @@ import type { HostedRecord } from '../src/hosted-records';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { metricReceiptCoverage } from '../src/self-metric-receipts';
 
 const tables = {
   acceptances: 'projectHostedAcceptances',
@@ -30,6 +31,7 @@ export const page = query({
       v.literal('attempts'),
       v.literal('lanes'),
       v.literal('saves'),
+      v.literal('receipts'),
     ),
     from: v.string(),
     to: v.string(),
@@ -63,6 +65,50 @@ export const page = query({
         'Use a finite metrics window [from,to).',
       );
       const context = from - (input.contextDays === 1 ? 1 : 30) * 86400000;
+      if (input.stream === 'receipts') {
+        const rows = await ctx.db
+          .query('projectSelfMetricReceipts')
+          .withIndex('by_project_and_at', q =>
+            q
+              .eq('projectId', input.projectId)
+              .gte('at', new Date(context).toISOString())
+              .lt('at', new Date(to).toISOString()),
+          )
+          .order('desc')
+          .paginate({
+            cursor: input.cursor,
+            numItems: 100,
+            maximumRowsRead: 100,
+            maximumBytesRead: 512 * 1024,
+          });
+        // Collection starts are three point reads, on the first page only.
+        const coverage: Record<string, string | null> = {};
+        if (input.cursor === null)
+          for (const [metric, kind] of Object.entries(metricReceiptCoverage))
+            coverage[metric] =
+              (
+                await ctx.db
+                  .query('projectSelfMetricReceipts')
+                  .withIndex('by_project_and_kind_and_at', q =>
+                    q.eq('projectId', input.projectId).eq('kind', kind),
+                  )
+                  .first()
+              )?.at ?? null;
+        return canonicalPayload({
+          page: rows.page.map(row => ({
+            kind: row.kind,
+            actor: row.actor,
+            at: row.at,
+            ...JSON.parse(row.value),
+          })),
+          ...(input.cursor === null ? { coverage } : {}),
+          contextFrom: new Date(context).toISOString(),
+          isDone: rows.isDone,
+          continueCursor: rows.continueCursor,
+          cutover: project.sourceCutover?.at ?? null,
+          authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
+        });
+      }
       const selected =
         input.stream === 'operations'
           ? ctx.db
@@ -177,6 +223,10 @@ export const page = query({
               runIds: 'runId' in row && row.runId ? [row.runId] : [],
               progressAt: Object.values(request.timing ?? {}),
               errorCode: request.error?.code ?? null,
+              compensating: 'revertOf' in row && !!row.revertOf,
+              noOwnerCause: request.observation?.stall?.missingOwner
+                ? `${request.observation.stall.missingOwner} at ${request.observation.stall.step}`
+                : null,
               retryCause: request.observation?.stall
                 ? 'stall'
                 : request.observation?.cause === 'conflict'

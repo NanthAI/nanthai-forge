@@ -20,6 +20,7 @@ import {
 } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
 /** Device identity always uses agent authority; callers may explicitly downscope to it. */
 export async function acceptanceActor(
   ctx: QueryCtx | MutationCtx | ActionCtx,
@@ -98,6 +99,12 @@ export const set = mutation({
         previous,
         policy,
         at: new Date().toISOString(),
+      });
+      await recordMutationReceipt(ctx, {
+        projectId: input.projectId,
+        actor: user.subject,
+        operationId: command.operationId,
+        action: 'set-policy',
       });
       return { operationId: command.operationId, policy };
     } catch (error) {

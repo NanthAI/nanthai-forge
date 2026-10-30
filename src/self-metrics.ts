@@ -270,7 +270,7 @@ export function calculateSelfMetrics(
         'Terminal-outcome delivery and timestamped batch progress were not recorded for the whole period; dropped rows are candidates where delivery is unknown.',
       ]
     : [];
-  deliveryGaps.push(...receiptGaps);
+  deliveryGaps.push(...(records.deliveryCoverageGaps ?? []), ...receiptGaps);
   return {
     period: { ...period, asOf },
     incompleteReceiptRecords,

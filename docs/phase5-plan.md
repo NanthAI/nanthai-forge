@@ -103,6 +103,19 @@ retained; older history and live pagination remain one explicit classification
 gap. Ordinary hosted landings and compensating reverts are counted separately.
 Status keeps its four-page read ceiling and omits this input hydration.
 
+Hosted metrics 5.2, 5.3 and 5.5 read durable receipts. Successful owner commands
+(cancel, prioritize, revert, abandon, reopen, set-policy, owner accept) write one
+idempotent, timestamped receipt in the same mutation; every priority change keeps
+its own receipt. A retry is the retried submission's `supersedes`. Hosted has no
+`take`. The CLI records what each caller received: one outcome per
+start/checkpoint/sync/finish operation and code, and one delivery per terminal
+state received, with any recorded no-owner cause. These receipts wait in a local
+outbox and travel with the caller's next start, finish or sync mutation, so they
+add no calls. Each metric's collection start is its earliest receipt; earlier
+windows stay partial. A finish older than 60 minutes with no caller receipt
+keeps 5.2 and 5.3 partial. Commands outside Forge (for example a manual service
+restart) are not observed.
+
 JSON totals and daily rows include `waste`: lost attempt elapsed time and runner
 minutes by main race, explicit flake retry, conflict, cancellation, supersession,
 stall and check failure. Passed checks discarded by a main race and the ensuing

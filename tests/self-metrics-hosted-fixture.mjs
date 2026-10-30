@@ -88,6 +88,10 @@ export function fixture() {
             descending = direction === 'desc';
             return q;
           },
+          async first() {
+            assert(selected);
+            return read(selected.slice(0, 1))[0] ?? null;
+          },
           async unique() {
             assert(selected);
             assert(selected.length <= 1);

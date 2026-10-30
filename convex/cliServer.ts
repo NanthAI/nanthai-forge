@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { customAction, customCtx, customMutation, customQuery } from 'convex-helpers/server/customFunctions';
 import { makeFunctionReference } from 'convex/server';
+import { v } from 'convex/values';
+import type { Id } from './_generated/dataModel';
+import { recordCallerReceipts } from './projectSelfMetricReceiptStore';
 import {
   query as baseQuery,
   mutation as baseMutation,
@@ -81,3 +84,26 @@ export const coordinationMutation = customMutation(
   baseMutation,
   customCtx((ctx: MutationCtx) => guard(ctx, 'coordination')),
 );
+/** A CLI mutation that may also carry deferred caller receipts (`metricReceipts`).
+ * They are written only if the host mutation succeeds, bound to its authorized
+ * project and authenticated requester. No extra call is made for them. */
+export const receiptMutation = customMutation(baseMutation, {
+  args: { metricReceipts: v.optional(v.string()) },
+  input: async (ctx: MutationCtx, { metricReceipts }) => {
+    await guard(ctx, 'cli');
+    return {
+      ctx: {},
+      args: {},
+      onSuccess: async ({ ctx: done, args }) => {
+        const user = metricReceipts ? await done.auth.getUserIdentity() : null;
+        if (user && typeof args.projectId === 'string')
+          await recordCallerReceipts(
+            done as MutationCtx,
+            args.projectId as Id<'hostedProjects'>,
+            user.subject,
+            metricReceipts!,
+          );
+      },
+    };
+  },
+});

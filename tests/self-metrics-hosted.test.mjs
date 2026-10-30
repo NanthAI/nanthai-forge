@@ -216,7 +216,7 @@ test('source-authority gate preserves native/native-shadow readers; hosted handl
       const previous = f.meter.calls;
       const result = await readMetricRecords(root, period, { query: f.query });
       assert.equal(result.source.kind, mode === 'server' ? 'hosted' : 'native');
-      assert.equal(f.meter.calls - previous, mode === 'server' ? 7 : 0);
+      assert.equal(f.meter.calls - previous, mode === 'server' ? 8 : 0);
     }
     const previous = f.meter.calls;
     const summary = await hostedStatusMetrics(root, period.to, f.query);

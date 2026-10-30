@@ -45,21 +45,21 @@ test('queued cancellation keeps original pins, settles both operations and repai
   assert.deepEqual((await f.status(state.id)).attempt, attempt);
   assert.equal(operation(f, request.operationId).terminal.outcome.error.code, 'LANDING_CANCELLED');
   assert.deepEqual(operation(f, operationId).terminal.outcome.result, result);
-  const metric = [...f.tables.projectHostedOperations.values()].find(
-    row => row.operationId === operationId,
-  ).metricMutation;
-  assert.deepEqual(metric, {
-    action: 'cancel',
-    actor: 'owner',
-    operationId,
-    at: operation(f, operationId).terminal.at,
-  });
+  const receipts = () =>
+    [...(f.tables.projectSelfMetricReceipts?.values() ?? [])].map(({ _id, _creationTime, ...row }) => row);
+  const metric = receipts();
+  assert.deepEqual(metric, [
+    {
+      projectId: f.projectId,
+      key: `mutation:owner:${operationId}:cancel`,
+      kind: 'mutation',
+      actor: 'owner',
+      at: operation(f, operationId).terminal.at,
+      value: JSON.stringify({ action: 'cancel', operationId }),
+    },
+  ]);
   assert.deepEqual(await cancel(f, state.id, operationId), result);
-  assert.deepEqual(
-    [...f.tables.projectHostedOperations.values()].find(row => row.operationId === operationId)
-      .metricMutation,
-    metric,
-  );
+  assert.deepEqual(receipts(), metric, 'a replayed cancellation is one intervention');
   assert.deepEqual(await cancel(f, state.id), result);
   await assert.rejects(cancel(f, randomUUID(), operationId), code('WORK_OPERATION_CHANGED'));
   assert.deepEqual(await f.enqueue(request), result);

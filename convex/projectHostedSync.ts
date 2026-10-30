@@ -2,7 +2,7 @@ import { sourceProgress } from './projectSourceProgress';
 import { loadLanding } from './projectHostedLandingStore';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { mutation, query, type QueryCtx, type MutationCtx } from './cliServer';
+import { receiptMutation, query, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { beginHostedOperation } from './projectHostedOperations';
@@ -27,7 +27,7 @@ async function caller(
   return { projectId: input.projectId, operationId: input.operationId, actor: user.subject };
 }
 /** Pin once. No current-source substitution on retry, and no source bytes in this mutation. */
-export const prepare = mutation({
+export const prepare = receiptMutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -51,6 +51,7 @@ export const prepare = mutation({
       };
       const prepared = await beginHostedOperation(ctx, {
         ...auth,
+        ...(request.kind === 'revert' ? { metricAction: 'revert' as const } : {}),
         payload: request,
         request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(request, expected) },
         firstAttempt: {

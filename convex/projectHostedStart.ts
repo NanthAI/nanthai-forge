@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { needsFix, fixBrief } from '../src/culprit-bisect';
 import { v } from 'convex/values';
-import { mutation, type MutationCtx } from './cliServer';
+import { mutation, receiptMutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { beginHostedOperation, finishHostedOperation } from './projectHostedOperations';
@@ -259,7 +259,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
   return canonicalPayload(startReply(result, noticeVersion));
 }
 
-export const start = mutation({
+export const start = receiptMutation({
   args,
   returns: v.string(),
   handler: async (ctx, input) => {

@@ -6,6 +6,8 @@ import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { activeProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
+import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
+import type { MetricMutationAction } from '../src/self-metric-receipts';
 import {
   prepareHostedOperation,
   completeHostedOperation,
@@ -40,6 +42,8 @@ export async function beginHostedOperation(
     payload: unknown;
     firstAttempt: unknown;
     expectedAuthority?: SourceAuthority;
+    /** Owner command counted as an intervention once it completes. */
+    metricAction?: MetricMutationAction;
   },
 ) {
   const project = await activeProject(ctx, input.projectId, input.actor);
@@ -69,9 +73,11 @@ export async function beginHostedOperation(
       projectId: input.projectId,
       actor: input.actor,
       operationId: request.operationId,
-      ...((input.payload as { kind?: string }).kind === 'hosted-landing-cancel'
-        ? { metricAction: 'cancel' as const }
-        : {}),
+      ...(input.metricAction
+        ? { metricAction: input.metricAction }
+        : (input.payload as { kind?: string }).kind === 'hosted-landing-cancel'
+          ? { metricAction: 'cancel' as const }
+          : {}),
       value: canonicalPayload(prepared.operation),
     });
   return prepared;
@@ -93,19 +99,16 @@ export async function finishHostedOperation(
     hostedTerminalReceiptSchema.parse(JSON.parse(semanticPayload(input.receipt))),
   );
   const value = semanticPayload(operation);
-  if (value !== row.value)
-    await ctx.db.patch(row._id, {
-      value,
-      ...(row.metricAction === 'cancel' && operation.terminal?.outcome.status === 'completed'
-        ? {
-            metricMutation: {
-              action: 'cancel' as const,
-              actor: input.actor,
-              operationId: input.operationId,
-              at: operation.terminal.at,
-            },
-          }
-        : {}),
-    });
+  if (value !== row.value) {
+    await ctx.db.patch(row._id, { value });
+    if (row.metricAction && operation.terminal?.outcome.status === 'completed')
+      await recordMutationReceipt(ctx, {
+        projectId: input.projectId,
+        actor: input.actor,
+        operationId: input.operationId,
+        action: row.metricAction,
+        at: operation.terminal.at,
+      });
+  }
   return operation;
 }

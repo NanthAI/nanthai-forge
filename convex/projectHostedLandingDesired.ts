@@ -5,7 +5,7 @@ import { desiredLanding, scheduleDesired as schedule } from './projectHostedLand
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { mutation, internalMutation, internalAction } from './cliServer';
+import { receiptMutation, internalMutation, internalAction } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
 import { activeProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
@@ -24,7 +24,7 @@ import { report } from './errors';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
 /** Register the goal while the first source job runs. The selected source pages
  * are already staged; no Mac, client journal or further client mutation is needed. */
-export const submit = mutation({
+export const submit = receiptMutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },
   returns: v.string(),
   handler: async (ctx, input) => {
