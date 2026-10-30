@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
+import { overlapBanner } from './hosted-overlap-notice.js';
 import { metricsCli } from './metrics-cli.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { improveCli } from './improve-cli.js';
@@ -468,6 +469,9 @@ try {
     process.stdout.write(
       `${JSON.stringify(output, null, process.argv[2] === 'agent' || (process.argv[2] === 'host' && process.argv.includes('--json')) ? undefined : 2)}\n`,
     );
+    // The JSON receipt on stdout carries overlapNotice too; the banner keeps it from being missed in a log.
+    const notice = (output as { overlapNotice?: Parameters<typeof overlapBanner>[0] } | null)?.overlapNotice;
+    if (process.argv[2] === 'agent' && notice) process.stderr.write(overlapBanner(notice));
     if (process.argv[2] === 'agent' && process.argv[4] === 'finish') {
       const result = (output as { result?: { status?: string } }).result;
       if (result?.status === 'awaiting-review')

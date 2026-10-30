@@ -40,3 +40,28 @@ export async function readHostedOverlapAdvice(
     };
   }
 }
+
+/** The delivery record behind metric 5.4. Best effort: a missing record is a gap, never a failed action. */
+export async function recordHostedOverlapDelivery(
+  transport: Pick<HostedAgentTransport, 'mutation'>,
+  laneId: string,
+  surface: string,
+  found: Awaited<ReturnType<typeof readHostedOverlapAdvice>>,
+) {
+  const overlaps = found.unacknowledgedOverlaps;
+  if (!overlaps.items.length || !overlaps.head || !overlaps.count) return;
+  try {
+    await transport.mutation('projectHostedOverlapDeliveries:record', {
+      request: JSON.stringify({
+        laneId,
+        head: overlaps.head,
+        surface,
+        count: overlaps.count,
+        coverage: overlaps.coverage,
+        items: overlaps.items.slice(0, 5).map(item => ({ noticeId: item.noticeId, file: item.file })),
+      }),
+    });
+  } catch {
+    /* Older servers have no delivery endpoint. */
+  }
+}

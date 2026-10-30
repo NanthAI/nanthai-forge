@@ -1,5 +1,6 @@
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
-import { readHostedOverlapAdvice } from './hosted-overlap-client.js';
+import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-overlap-client.js';
+import { hostedOverlapNotice, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
 import type { HostedRunSubscription } from './hosted-agent-observe.js';
@@ -79,6 +80,8 @@ export type HostedAgentResponse = {
   result: unknown;
   unacknowledgedOverlaps?: unknown;
   behindMain?: unknown;
+  /** Present only while an overlap is unanswered: who, which files and the acknowledge or route-around command. */
+  overlapNotice?: HostedOverlapNotice;
 };
 /** The shared CLI/MCP transport. Source bytes use the existing verified exchange;
  * every dispatch is finite and every mutation is pinned before network IO. */
@@ -363,8 +366,13 @@ export class HostedAgentTransport {
           result = { ...started, path: opened.root, checkout: opened };
         }
       }
+      // A replayed finish poll adds no read; the first call and the terminal answer carry the notice.
+      const finishDone =
+        action === 'finish' && /"phase":"(landed|ready|terminal-failed)"/.test(JSON.stringify(result));
       const overlapLane =
-        capabilities.overlapVersion === 1 && ['start', 'save'].includes(action)
+        capabilities.overlapVersion === 1 &&
+        (['start', 'save', 'sync', 'compose'].includes(action) ||
+          (action === 'finish' && (!replaying || finishDone)))
           ? ((result as { lane?: { laneId?: string } }).lane?.laneId ??
             (command.data as { laneId?: string }).laneId ??
             readHostedLaneCheckout(root)?.selection.laneId)
@@ -397,6 +405,12 @@ export class HostedAgentTransport {
     result: unknown,
     overlapLaneId?: string,
   ): Promise<HostedAgentResponse> {
+    const advice = overlapLaneId ? await readHostedOverlapAdvice(this, overlapLaneId) : undefined;
+    const notice =
+      advice && overlapLaneId ? hostedOverlapNotice(this.root, overlapLaneId, advice) : undefined;
+    // Delivered means returned on a Lane-changing action; a bare status read is not a delivery.
+    if (advice && notice && overlapLaneId && ['start', 'save', 'sync', 'compose', 'finish'].includes(action))
+      await recordHostedOverlapDelivery(this, overlapLaneId, action, advice);
     return {
       schema: 1,
       transport: 'hosted',
@@ -404,7 +418,8 @@ export class HostedAgentTransport {
       operationId,
       resolved: operationId ? { operationId } : null,
       result: await hostedConflictAdvice(this, await enrichHostedQueueAhead(this, result)),
-      ...(overlapLaneId ? await readHostedOverlapAdvice(this, overlapLaneId) : {}),
+      ...advice,
+      ...(notice ? { overlapNotice: notice } : {}),
     };
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {

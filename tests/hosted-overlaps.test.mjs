@@ -19,11 +19,13 @@ import {
   boundOverlapChanges,
 } from '../dist/hosted-overlap.js';
 import { hostedOverlapNotifications } from '../dist/mcp-hosted-overlaps.js';
+import { overlapBanner } from '../dist/hosted-overlap-notice.js';
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
 const capabilities = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const acks = await import(moduleUrl('../convex/projectHostedOverlapAcks.ts'));
+const deliveries = await import(moduleUrl('../convex/projectHostedOverlapDeliveries.ts'));
 const oldFile = { blob: 'a'.repeat(64), mode: 'file' };
 const newFile = { blob: 'b'.repeat(64), mode: 'file' };
 const delta = path => ({ path, before: oldFile, after: newFile });
@@ -141,6 +143,9 @@ async function setup(t) {
         const name = getFunctionName(ref);
         if (name === 'projectObjectDownloads:describe')
           return args.digests.map(id => ({ digest: id, size: s.objects.get(id).length, location: 'r2' }));
+        if (name === 'projectHostedOverlapDeliveries:record')
+          return s.transaction(name, deliveries.record, args);
+        if (name === 'projectHostedOverlapAcks:append') return s.transaction(name, acks.append, args);
         if (name === 'projectHostedSaves:prepare') return s.call('prepare', api.prepare, args);
         if (name === 'projectHostedSaves:stage') return s.call('stage', api.stage, args);
         if (name === 'projectHostedSaveJobs:submit') {
@@ -589,4 +594,82 @@ test('a resolve capability refusal retains independently supported overlap advic
   assert(started.result.lane);
   assert.equal(rejected, 1);
   assert.equal(f.calls.find(call => call.name === 'projectHostedAgent:capabilities').args.overlapVersion, 1);
+});
+
+test('CLI path: the second save returns a structured notice, delivery and one-command acknowledgement are recorded', async t => {
+  const { s, lane, peer, transport } = await setup(t);
+  const first = transport(lane),
+    second = transport(peer);
+  const quiet = await first.dispatch('save', { operationId: randomUUID(), message: 'first' });
+  assert.equal(quiet.overlapNotice, undefined, 'no notice without an overlap');
+  assert.equal(s.tables.projectHostedOverlapDeliveries.size, 0, 'no overlap, no delivery call');
+  const response = await second.dispatch('save', { operationId: randomUUID(), message: 'second' });
+  const notice = response.overlapNotice;
+  assert.equal(notice.required, true);
+  assert.equal(notice.items.length, 1);
+  assert.equal(notice.items[0].file, 'a.txt');
+  assert.deepEqual(
+    notice.items[0].with.map(p => [p.lane, p.intent]),
+    [[lane.id, 'My change']],
+    'names the other Lane, never this one',
+  );
+  assert.match(notice.acknowledge, /^nforge agent '.+' overlap-acks '\{.*\}'$/);
+  assert.match(notice.routeAround, /"choice":"split"/);
+  const banner = overlapBanner(notice);
+  assert.match(banner, /OVERLAP NOTICE: ACTION REQUIRED/);
+  assert(banner.includes('a.txt') && banner.includes(lane.id) && banner.includes('My change'));
+  assert(banner.includes(notice.acknowledge) && banner.includes(notice.routeAround));
+  const deliveriesBefore = [...s.tables.projectHostedOverlapDeliveries.values()];
+  assert.equal(deliveriesBefore.length, 1);
+  const delivered = JSON.parse(deliveriesBefore[0].value);
+  assert.equal(delivered.laneId, peer.id);
+  assert.equal(delivered.surface, 'save');
+  assert.equal(delivered.items[0].noticeId, notice.items[0].noticeId);
+  // A repeated observation is not a second delivery.
+  await second.dispatch('status', { laneId: peer.id });
+  assert.equal(s.tables.projectHostedOverlapDeliveries.size, 1);
+  // The printed acknowledge command is one valid call and replays safely.
+  const body = JSON.parse(/ overlap-acks '(.*)'$/.exec(notice.acknowledge)[1]);
+  for (let i = 0; i < 2; i++) {
+    const acked = await second.dispatch('overlap-acks', body);
+    assert.equal(acked.result.answers[0].disposition, 'acknowledged');
+  }
+  assert.equal(s.tables.projectHostedOverlapAcks.size, 1, 'replay records one answer');
+  const ack = JSON.parse([...s.tables.projectHostedOverlapAcks.values()][0].value);
+  assert.equal(ack.deliveryId, delivered.items[0].deliveryId, 'ack joins its delivery (metric 5.4)');
+  const after = await second.dispatch('status', { laneId: peer.id });
+  assert.equal(after.unacknowledgedOverlaps.count, 0);
+  assert.equal(after.overlapNotice, undefined);
+  // The other participant routes around instead; its answer is its own.
+  const routed = JSON.parse(
+    / overlap-acks '(.*)'$/.exec(
+      (await first.dispatch('status', { laneId: lane.id })).overlapNotice.routeAround,
+    )[1],
+  );
+  assert.equal((await first.dispatch('overlap-acks', routed)).result.answers[0].disposition, 'routed-around');
+});
+
+test('retained stale active Lanes never hide a live peer from the notice', async t => {
+  const { s, lane, peer, transport } = await setup(t);
+  // 2026-10-30: 125 active Lane heads; the oldest 51 hid all 32 live peers, so no notice was ever sent.
+  const live = [...s.tables.projectHostedRecordHeads.values()].filter(row => row.kind === 'lane');
+  for (const row of live) s.tables.projectHostedRecordHeads.delete(row._id);
+  for (let i = 0; i < 60; i++)
+    s.insert('projectHostedRecordHeads', {
+      projectId: s.projectId,
+      kind: 'lane',
+      key: randomUUID(),
+      parent: randomUUID(),
+      status: 'active',
+      version: 0,
+      recordId: 'synthetic',
+    });
+  for (const row of live)
+    s.insert('projectHostedRecordHeads', { ...row, _id: undefined, _creationTime: undefined });
+  const first = transport(lane),
+    second = transport(peer);
+  await first.dispatch('save', { operationId: randomUUID(), message: 'first' });
+  const response = await second.dispatch('save', { operationId: randomUUID(), message: 'second' });
+  assert.equal(response.unacknowledgedOverlaps.count, 1);
+  assert.equal(response.overlapNotice.items[0].file, 'a.txt');
 });

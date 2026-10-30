@@ -34,6 +34,7 @@ export const read = query({
         ctx.db
           .query('projectHostedOverlapLanes')
           .withIndex('by_project_and_open', q => q.eq('projectId', projectId).eq('open', true))
+          .order('desc')
           .take(51),
         hostedStartMain(ctx, projectId),
         ctx.db
@@ -49,6 +50,7 @@ export const read = query({
           .withIndex('by_project_and_kind_and_status', q =>
             q.eq('projectId', projectId).eq('kind', 'lane').eq('status', 'active'),
           )
+          .order('desc')
           .take(51),
       ]);
       let baseSequence = mine?.baseSequence ?? null;
@@ -80,6 +82,19 @@ export const read = query({
               complete: lane.head === lane.base.head,
             };
       const versions = new Map(headers.map(header => [header.key, header.version]));
+      // Newest-first windows hold current work, but retained stale active Lanes can still push
+      // a live peer out of the 51-row window (2026-10-30: 125 active heads hid every peer).
+      // An exact indexed head read keeps such a peer's currency check correct.
+      for (const peer of peers.slice(0, 50))
+        if (!versions.has(peer.laneId)) {
+          const head = await ctx.db
+            .query('projectHostedRecordHeads')
+            .withIndex('by_project_and_kind_and_key', q =>
+              q.eq('projectId', projectId).eq('kind', 'lane').eq('key', peer.laneId),
+            )
+            .unique();
+          if (head?.status === 'active') versions.set(peer.laneId, head.version);
+        }
       const plans = new Map();
       for (const peer of peers)
         if (peer.lifecyclePlanId && !plans.has(peer.lifecyclePlanId)) {
