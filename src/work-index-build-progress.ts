@@ -37,9 +37,13 @@ export const indexBuildProgressSchema = z.object({
     .optional(),
   done: z.number().safe().nonnegative(),
   total: z.number().safe().nonnegative(),
+  filesDone: z.number().safe().nonnegative().optional(),
+  filesTotal: z.number().safe().nonnegative().optional(),
+  filesTotalComplete: z.boolean().optional(),
   step: z.number().safe().nonnegative(),
 });
 export type IndexBuildProgress = z.infer<typeof indexBuildProgressSchema>;
 export const hostIndexProgressSchema = indexBuildProgressSchema.extend({
   stepsPerSecond: z.number().nonnegative(),
+  filesPerMinute: z.number().nonnegative().optional(),
 });

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { ConvexError } from 'convex/values';
+import { indexReadContext, indexTransient } from './projectWorkIndexRetry';
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -27,6 +29,7 @@ import { invariant } from '../src/errors';
  * Each durable step consumes a bounded record or source State page. No complete Work
  * object, projection, or historical State file map survives in the action. */
 export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
+  ctx = indexReadContext(ctx);
   const existing: Doc<'projectWorkGenerations'> | null = await ctx.runQuery(
     internal.projectWorkIndexStore.current,
     input,
@@ -95,77 +98,101 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
   // Both a work window and a step window: tests and very fast local storage do
   // not turn a single action into an unbounded loop.
   for (let steps = 0; steps < 20 && Date.now() - started < 10_000; steps++) {
+    if (generation.status === 'failed') throw new ConvexError(JSON.parse(generation.ensureRetry!));
+    const durableGeneration = generation;
     const expected: string = generation.ensureCursor!;
-    let cursor = JSON.parse(expected!) as Cursor;
-    if (cursor.phase === 'done') {
-      const metadata = JSON.parse(generation.metadata) as IndexMetadata;
-      for (const name of scratch) delete metadata.counts[name];
-      if (
-        await ctx.runMutation(internal.projectWorkIndexStore.publish, {
+    try {
+      let cursor = JSON.parse(expected!) as Cursor;
+      if (cursor.phase === 'done') {
+        const metadata = JSON.parse(generation.metadata) as IndexMetadata;
+        for (const name of scratch) delete metadata.counts[name];
+        if (
+          await ctx.runMutation(internal.projectWorkIndexStore.publish, {
+            ...selected,
+            batches: generation.nextBatch,
+            metadata: JSON.stringify(metadata),
+          })
+        )
+          return generation._id;
+        return {
+          pending: true as const,
+          progress: buildProgress(generation, exchange),
+        };
+      }
+      let metadata: string | undefined;
+      const cleanup = cursor.phase === 'cleanup' ? scratch[cursor.cleanup ?? 0] : undefined;
+      let entries: IndexEntry[] = [];
+      if (cursor.output) {
+        const output = cursor.output;
+        const body: string = await ctx.runQuery(readPageRef, {
           ...selected,
-          batches: generation.nextBatch,
-          metadata: JSON.stringify(metadata),
-        })
-      )
-        return generation._id;
+          key: output.key,
+          position: output.part,
+        });
+        entries = JSON.parse(body) as IndexEntry[];
+        if (output.part + 1 === output.parts) metadata = output.metadata;
+        cursor =
+          output.part + 1 === output.parts
+            ? output.after
+            : { ...cursor, output: { ...output, part: output.part + 1 } };
+      } else {
+        const after = structuredClone(cursor);
+        after.filesTotal ??= JSON.parse(generation.metadata).counts.viewFiles ?? 0;
+        if (cursor.phase === 'journal') {
+          const projected = await replayStep(ctx, selected, exchange, backup, generation, project, after);
+          entries = projected.entries;
+          metadata = projected.metadata;
+        } else entries = await projectStep(ctx, selected, exchange, backup, after, context);
+        const batches = indexBatches(entries, { rows: 500, bytes: 500000 });
+        if (batches.length > 1) {
+          // Stage one independently readable RPC page at a time. Cursor+rows are
+          // published together below, so a lost reply never repeats completed IO.
+          const key = crypto.randomUUID();
+          for (const [position, batch] of batches.entries())
+            await ctx.runMutation(putPageRef, {
+              ...selected,
+              key,
+              position,
+              body: JSON.stringify(batch),
+            });
+          cursor = {
+            ...cursor,
+            output: { key, part: 0, parts: batches.length, after, ...(metadata ? { metadata } : {}) },
+          };
+          entries = [];
+          metadata = undefined;
+        } else cursor = after;
+      }
+      const committed: Doc<'projectWorkGenerations'> | null = await ctx.runMutation(stepRef, {
+        ...selected,
+        expected,
+        cursor: JSON.stringify(cursor),
+        entries,
+        ...(cleanup ? { cleanup } : {}),
+        ...(metadata ? { metadata } : {}),
+      });
+      generation = committed ?? (await ctx.runQuery(resume, input));
+      invariant(generation?.ensureCursor, 'WORK_STALE', 'The snapshot changed during index preparation.');
+    } catch (error) {
+      if (!indexTransient(error)) throw error;
+      const detail =
+        error instanceof ConvexError ? (error.data as { pin?: { sha256: string; size: number } }) : {};
+      const saved = await ctx.runMutation(internal.projectWorkIndexBuildFailure.pending, {
+        ...selected,
+        expected,
+        expectedBatch: durableGeneration.nextBatch,
+        operationId: crypto.randomUUID(),
+        ...(detail.pin ? { pin: detail.pin } : {}),
+      });
+      if (saved?.status === 'failed') throw new ConvexError(JSON.parse(saved.ensureRetry!));
       return {
         pending: true as const,
-        progress: buildProgress(generation, exchange),
+        progress: JSON.stringify({
+          ...JSON.parse(buildProgress(saved ?? durableGeneration, exchange)),
+          retryable: true,
+        }),
       };
     }
-    let metadata: string | undefined;
-    const cleanup = cursor.phase === 'cleanup' ? scratch[cursor.cleanup ?? 0] : undefined;
-    let entries: IndexEntry[] = [];
-    if (cursor.output) {
-      const output = cursor.output;
-      const body: string = await ctx.runQuery(readPageRef, {
-        ...selected,
-        key: output.key,
-        position: output.part,
-      });
-      entries = JSON.parse(body) as IndexEntry[];
-      if (output.part + 1 === output.parts) metadata = output.metadata;
-      cursor =
-        output.part + 1 === output.parts
-          ? output.after
-          : { ...cursor, output: { ...output, part: output.part + 1 } };
-    } else {
-      const after = structuredClone(cursor);
-      if (cursor.phase === 'journal') {
-        const projected = await replayStep(ctx, selected, exchange, backup, generation, project, after);
-        entries = projected.entries;
-        metadata = projected.metadata;
-      } else entries = await projectStep(ctx, selected, exchange, backup, after, context);
-      const batches = indexBatches(entries, { rows: 500, bytes: 500000 });
-      if (batches.length > 1) {
-        // Stage one independently readable RPC page at a time. Cursor+rows are
-        // published together below, so a lost reply never repeats completed IO.
-        const key = crypto.randomUUID();
-        for (const [position, batch] of batches.entries())
-          await ctx.runMutation(putPageRef, {
-            ...selected,
-            key,
-            position,
-            body: JSON.stringify(batch),
-          });
-        cursor = {
-          ...cursor,
-          output: { key, part: 0, parts: batches.length, after, ...(metadata ? { metadata } : {}) },
-        };
-        entries = [];
-        metadata = undefined;
-      } else cursor = after;
-    }
-    const committed: Doc<'projectWorkGenerations'> | null = await ctx.runMutation(stepRef, {
-      ...selected,
-      expected,
-      cursor: JSON.stringify(cursor),
-      entries,
-      ...(cleanup ? { cleanup } : {}),
-      ...(metadata ? { metadata } : {}),
-    });
-    generation = committed ?? (await ctx.runQuery(resume, input));
-    invariant(generation?.ensureCursor, 'WORK_STALE', 'The snapshot changed during index preparation.');
   }
   return {
     pending: true as const,

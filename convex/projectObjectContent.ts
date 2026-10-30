@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import type { ActionCtx } from './_generated/server';
+import { indexObjectRead, isIndexReadContext } from './projectWorkIndexRetry';
 import { blobStore } from './blobStore';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -20,14 +21,19 @@ export const rawKey = (row: Doc<'projectObjects'>) => row.storageId ?? row.r2Key
 
 /** Server-side read of an R2 object by signed GET. Used only where Convex itself needs the bytes
  * (publication, derived views); clients read R2 directly. Verifies size and sha256. */
-async function r2Content(row: Doc<'projectObjects'>, pin: ChunkPin) {
+async function r2Content(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) {
   const url = await presignGet(r2Config(), row.r2Key!);
   const response = await exchangeFetch(
     'server R2 object download',
     url,
     { headers: { 'accept-encoding': 'identity' } },
-    { retries: 1 },
+    { retries: isIndexReadContext(ctx) ? 0 : 1 },
   );
+  if (
+    isIndexReadContext(ctx) &&
+    (response.status === 429 || (response.status >= 500 && response.status !== 560))
+  )
+    throw new Error(`Transient error reading index object storage (HTTP ${response.status}).`);
   invariant(
     response.ok,
     'R2_OBJECT_UNAVAILABLE',
@@ -42,7 +48,7 @@ async function r2Content(row: Doc<'projectObjects'>, pin: ChunkPin) {
   return data;
 }
 
-export async function rawMetadata(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) {
+async function readMetadata(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) {
   if (isR2Object(row)) {
     // Existence and bytes are proven by the verified read itself; there is no separate metadata read.
     invariant(
@@ -64,8 +70,8 @@ export async function rawMetadata(ctx: ActionCtx, row: Doc<'projectObjects'>, pi
     'Stored content differs from its digest.',
   );
 }
-export async function rawContent(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) {
-  if (isR2Object(row)) return r2Content(row, pin);
+async function readContent(ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) {
+  if (isR2Object(row)) return r2Content(ctx, row, pin);
   const blob = await blobStore(ctx).get(row.storageId!);
   invariant(blob, 'INVALID_WORK_BACKUP', 'Stored content is unavailable.');
   const bytes = Buffer.from(await blob.arrayBuffer());
@@ -76,6 +82,10 @@ export async function rawContent(ctx: ActionCtx, row: Doc<'projectObjects'>, pin
   );
   return bytes;
 }
+export const rawMetadata = (ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) =>
+  indexObjectRead(ctx, pin, () => readMetadata(ctx, row, pin));
+export const rawContent = (ctx: ActionCtx, row: Doc<'projectObjects'>, pin: ChunkPin) =>
+  indexObjectRead(ctx, pin, () => readContent(ctx, row, pin));
 type RawReader = typeof rawContent;
 
 type Selected = { pin: ChunkPin; ancestors: ReadonlySet<string> };

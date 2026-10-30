@@ -242,6 +242,7 @@ export const step = internalMutation({
     }
     const update = {
       ensureCursor: cursor,
+      ensureRetry: undefined,
       metadata: JSON.stringify(metadata),
       nextBatch: generation.nextBatch + 1,
     };

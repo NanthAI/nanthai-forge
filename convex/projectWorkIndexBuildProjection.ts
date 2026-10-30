@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { indexReadContext, indexObjectRead } from './projectWorkIndexRetry';
 import type { ActionCtx } from './_generated/server';
 import { fields, family, rowsRef, type Selected, type Exchange } from './projectWorkIndexBuildTypes';
 import { partialWork } from '../src/work-exchange-delta';
@@ -24,6 +25,9 @@ export async function viewContext(
     ),
   ),
 ) {
+  ctx = indexReadContext(ctx);
+  const read = e.read;
+  e = { ...e, read: pin => indexObjectRead(ctx, pin, () => read(pin)) };
   const data = partialWork(e.records, [
     { collection: 'views', value: contextView(view) as unknown as Record<string, unknown> },
   ]);

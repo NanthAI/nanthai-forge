@@ -71,3 +71,17 @@ bounded-range reads, existing shared-reference deletion semantics, and atomic
 publication through the same hosted-main receipt. It must preserve operation IDs,
 source modes, private-repository authorization and lost-reply reconciliation.
 No R2 integration is included here.
+
+Hosted Work index reads retry transient transport/storage faults up to three total
+attempts, with short backoff inside the same action; application, validation and
+access errors are not retried. Exhausted reads return `pending` at the committed
+cursor. Resume continues that generation, retaining its View and changed-file
+counters; five consecutive unsuccessful resumes without cursor movement mark it
+`failed` with `WORK_INDEX_READ_FAILED` and the failing storage object pin when
+available. A failed generation returns that error on subsequent resumes. Advancing
+the cursor resets the failure streak. The host CLI shows committed Views and
+changed files, files/minute and a resume-relative ETA for discovered file output;
+file totals are labelled discovered until all Views have been projected. Legacy
+in-flight cursors remain resumable: missing counters start from committed index
+rows, and new counters are saved with the next ordinary step. No timer, scheduler
+or idle index polling is introduced.

@@ -2,6 +2,7 @@
 'use node';
 import { internalAction } from './_generated/server';
 import { v } from 'convex/values';
+import { indexReadContext } from './projectWorkIndexRetry';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { contextualHunks } from '../src/review-hunks';
 import type { Pin } from './projectDiffstatProjection';
@@ -18,6 +19,7 @@ export const compare = internalAction({
   },
   returns: v.array(v.object({ add: v.number(), del: v.number(), exact: v.boolean() })),
   handler: async (ctx, input) => {
+    ctx = indexReadContext(ctx);
     invariant(input.files.length <= 50, 'BAD_ARGUMENT', 'Compare one changed-file window.');
     const reader = exchangeObjectReader(ctx, false, 0),
       result: Counts[] = [];

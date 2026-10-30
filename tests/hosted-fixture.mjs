@@ -47,6 +47,7 @@ const projectActorNames = await import(moduleUrl('../convex/projectActorNames.ts
 const projectWorkIndexStore = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
 const projectWorkIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const projectWorkAncestry = await import(moduleUrl('../convex/projectWorkAncestry.ts'));
+const projectWorkIndexBuildFailure = await import(moduleUrl('../convex/projectWorkIndexBuildFailure.ts'));
 const projectWorkIndexBuildStore = await import(moduleUrl('../convex/projectWorkIndexBuildStore.ts'));
 const projectWorkIndexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 export const job = (id = 'own') => ({
@@ -454,6 +455,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     inventoryAccess,
     projectWorkIndexStore,
     projectWorkIndexBuildStore,
+    projectWorkIndexBuildFailure,
     projectWorkAncestry,
     projectActorNames,
     projectWorkIndex,

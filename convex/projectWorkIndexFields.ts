@@ -21,6 +21,7 @@ export const returnProjection = v.object({
 });
 export const generationFields = {
   ensureCursor: v.optional(v.string()),
+  ensureRetry: v.optional(v.string()),
   returnRetired: v.optional(v.literal(true)),
   returnCleanupRefs: v.optional(v.string()),
   returnCleanupOffset: v.optional(v.number()),
@@ -60,7 +61,7 @@ export const generationFields = {
   revision: v.number(),
   initialRevision: v.number(),
   recordsGenerationId: v.optional(v.id('projectWorkGenerations')),
-  status: v.union(v.literal('building'), v.literal('ready')),
+  status: v.union(v.literal('building'), v.literal('ready'), v.literal('failed')),
   nextBatch: v.number(),
   metadata: v.string(),
 };

@@ -20,7 +20,7 @@ import { indexedRecord, type IndexEntry } from '../src/work-hosted-index';
 import { viewReadModels } from '../src/view-read-model';
 import { viewIndexEntries } from '../src/view-hosted-index';
 import { viewSummary, laneSummary, runSummary } from '../src/work-hosted-summary';
-import { indexTransient } from './projectWorkIndexRetry';
+import { indexReadContext, indexTransient } from './projectWorkIndexRetry';
 import { summaryStates } from './projectWorkIndexBuildStates';
 import { viewStates } from './projectSourceProjection';
 import type { ChangedStates } from './projectDiffstatProjection';
@@ -35,6 +35,7 @@ export async function projectSummaries(
   c: Cursor,
   context: BuildContext = buildContext(ctx, selected, exchange),
 ): Promise<IndexEntry[]> {
+  ctx = indexReadContext(ctx);
   const field = ['lanes', 'views', 'runs'][c.field];
   if (!field) {
     c.phase = 'trees';
@@ -256,5 +257,7 @@ export async function projectSummaries(
     if (!result.some(row => row.collection === 'diffstats' && row.key === key))
       result.push({ collection: 'diffstats', key, parent: '', position: 0, value: JSON.stringify(changes) });
   }
+  if (field === 'views')
+    c.filesTotal = (c.filesTotal ?? 0) + result.filter(row => row.collection === 'viewFiles').length;
   return result;
 }

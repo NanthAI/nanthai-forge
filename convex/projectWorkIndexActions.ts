@@ -12,7 +12,8 @@ import { workBytes } from '../src/work-metadata';
 import { report } from './errors';
 import { ForgeError } from '../src/errors';
 import { longActionExpired } from '../src/long-action';
-import { indexReadContext, indexTransient } from './projectWorkIndexRetry';
+import { indexReadContext, indexTransient, retryCode } from './projectWorkIndexRetry';
+import { buildProgress } from './projectWorkIndexBuildProgress';
 import { resume } from './projectWorkIndexBuildTypes';
 async function ensureIndex(
   ctx: ActionCtx,
@@ -25,7 +26,11 @@ async function ensureIndex(
   if (paged) {
     if (typeof paged === 'string' || resumable) return paged;
     let result = paged as Id<'projectWorkGenerations'> | { pending: true; progress: string };
-    while (typeof result !== 'string') result = (await buildRecordIndex(ctx, { projectId, owner }))!;
+    while (typeof result !== 'string') {
+      if (JSON.parse(result.progress).retryable)
+        throw new ConvexError({ code: retryCode, message: 'Resume the saved index build cursor.' });
+      result = (await buildRecordIndex(ctx, { projectId, owner }))!;
+    }
     return result;
   }
   const started = Date.now();
@@ -127,7 +132,10 @@ export const ensure = action({
     v.id('projectWorkGenerations'),
     v.object({ pending: v.literal(true), progress: v.string() }),
   ),
-  handler: async (ctx, { projectId }) => {
+  handler: async (
+    ctx,
+    { projectId },
+  ): Promise<Id<'projectWorkGenerations'> | { pending: true; progress: string }> => {
     let owner: string | undefined;
     try {
       owner = await caller(ctx);
@@ -141,14 +149,32 @@ export const ensure = action({
         } catch (resumeError) {
           if (!indexTransient(resumeError)) throw resumeError;
         }
+        if (generation?.ensureCursor) {
+          const detail =
+            error instanceof ConvexError ? (error.data as { pin?: { sha256: string; size: number } }) : {};
+          generation = await ctx.runMutation(internal.projectWorkIndexBuildFailure.pending, {
+            projectId,
+            owner,
+            generationId: generation._id,
+            expected: generation.ensureCursor,
+            expectedBatch: generation.nextBatch,
+            operationId: crypto.randomUUID(),
+            ...(detail.pin ? { pin: detail.pin } : {}),
+          });
+          if (generation?.status === 'failed') throw new ConvexError(JSON.parse(generation.ensureRetry!));
+        }
         return {
           pending: true as const,
           progress: JSON.stringify({
-            phase: 'index',
-            step: generation?.nextBatch ?? 0,
-            buildPhase: generation?.ensureCursor ? JSON.parse(generation.ensureCursor).phase : 'settings',
-            done: 0,
-            total: 0,
+            ...(generation
+              ? JSON.parse(buildProgress(generation))
+              : {
+                  phase: 'index',
+                  step: 0,
+                  buildPhase: 'settings',
+                  done: 0,
+                  total: 0,
+                }),
             retryable: true,
           }),
         };

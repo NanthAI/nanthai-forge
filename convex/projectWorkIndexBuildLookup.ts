@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { indexReadContext } from './projectWorkIndexRetry';
 import type { ActionCtx } from './_generated/server';
 import type { IndexEntry } from '../src/work-hosted-index';
 import { lookupsRef, type Selected } from './projectWorkIndexBuildTypes';
@@ -10,6 +11,7 @@ export async function buildLookups(
   selected: Selected,
   keys: { collection: string; key: string }[],
 ) {
+  ctx = indexReadContext(ctx);
   const result: (IndexEntry | null)[] = [];
   while (result.length < keys.length) {
     const page = await ctx.runQuery(lookupsRef, {

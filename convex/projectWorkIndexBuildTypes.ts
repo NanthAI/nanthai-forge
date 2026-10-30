@@ -67,6 +67,7 @@ export type Cursor = {
   record: number;
   source: number;
   cleanup?: number;
+  filesTotal?: number;
   journalCursor?: string | null;
   replayRevision?: number;
   output?: { key: string; part: number; parts: number; after: Omit<Cursor, 'output'>; metadata?: string };

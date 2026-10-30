@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { indexReadContext, indexObjectRead } from './projectWorkIndexRetry';
 import type { ActionCtx } from './_generated/server';
 import { type Exchange, type Selected } from './projectWorkIndexBuildTypes';
 import { buildLookups } from './projectWorkIndexBuildLookup';
@@ -10,6 +11,7 @@ import type { RecordPin } from '../src/work-exchange-records';
 /** Invocation-local metadata and bounded immutable bytes. The next invocation
  * reparses its freshly authorized checkpoint; no access decision is memoized. */
 export function buildContext(ctx: ActionCtx, selected: Selected, exchange: Exchange) {
+  ctx = indexReadContext(ctx);
   const catalogs = new Map(
     exchange.records.fields.flatMap(f =>
       'records' in f ? [[f.name, new Map(f.records.map(p => [p.key, p]))] as const] : [],
@@ -114,7 +116,7 @@ export function buildContext(ctx: ActionCtx, selected: Selected, exchange: Excha
       read: async (pin: RecordPin) => {
         const bytes = bodies.get(pin.sha256);
         if (bytes) return bytes;
-        const value = await exchange.read(pin);
+        const value = await indexObjectRead(ctx, pin, () => exchange.read(pin));
         remember(pin, value);
         return value;
       },
