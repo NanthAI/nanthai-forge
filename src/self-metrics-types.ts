@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { DiskSample } from './self-metrics-disk.js';
-import type { MetricObservation } from './self-metrics-observations.js';
+import type { MetricObservation } from './self-metrics-observation-schema.js';
 import type { SelfMetricReceipt } from './self-metrics-journal.js';
 export type MetricInput = {
   laneId: string;

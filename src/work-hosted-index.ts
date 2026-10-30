@@ -517,7 +517,7 @@ export function indexBatches(entries: IndexEntry[], limits = { rows: 100, bytes:
   let batch: IndexEntry[] = [],
     bytes = 0;
   for (const entry of entries) {
-    const size = Buffer.byteLength(json(entry));
+    const size = new TextEncoder().encode(json(entry)).length;
     if (batch.length && (batch.length >= limits.rows || bytes + size > limits.bytes)) {
       batches.push(batch);
       batch = [];
@@ -537,7 +537,7 @@ export function firstIndexBatch(entries: IndexEntry[], limits = { rows: 100, byt
   let bytes = 0;
   for (const entry of entries) {
     if (batch.length >= limits.rows) break;
-    const size = Buffer.byteLength(json(entry));
+    const size = new TextEncoder().encode(json(entry)).length;
     if (batch.length && bytes + size > limits.bytes) break;
     batch.push(entry);
     bytes += size;

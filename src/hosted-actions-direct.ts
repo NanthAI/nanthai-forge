@@ -51,7 +51,7 @@ export function actionsExecutionCost(run: Pick<HostedCheckRun, 'id' | 'execution
   const summary = { runId: run.id, ...run.execution };
   return {
     status: 'observed' as const,
-    receipt: { sha256: checkPin(summary), size: Buffer.byteLength(canonicalPayload(summary)) },
+    receipt: { sha256: checkPin(summary), size: new TextEncoder().encode(canonicalPayload(summary)).length },
     seconds: run.execution.seconds,
     // Billed dollars come only from owner-entered bills, never from runner minutes.
     estimatedCostUsd: null,

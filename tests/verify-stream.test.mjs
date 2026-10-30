@@ -29,6 +29,7 @@ for (const flaky of [false, true])
       write(`scripts/${name}`, readFileSync(`scripts/${name}`));
     write('scripts/oxc.mjs', '');
     write('scripts/check-schema-compat.mjs', '');
+    write('scripts/check-convex-runtime.mjs', '');
     write('scripts/check-documents.mjs', '');
     write('tests/worker-budget.mjs', 'export const workerBudget = () => 2;');
     write('tests/check-runtime.mjs', '');

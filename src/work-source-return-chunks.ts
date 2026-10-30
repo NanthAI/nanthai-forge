@@ -22,7 +22,7 @@ export function* sourceReturnChunks(current: WorkData, target = 256 * 1024) {
       batch: unknown[] = [],
       bytes = 0;
     for (const value of values) {
-      const size = Buffer.byteLength(JSON.stringify(value) ?? 'null');
+      const size = new TextEncoder().encode(JSON.stringify(value) ?? 'null').length;
       if (batch.length && bytes + size > target) {
         yield { data: { ...empty, [collection]: batch }, collection, offset, hostedMoves };
         offset += batch.length;

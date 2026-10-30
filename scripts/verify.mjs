@@ -190,6 +190,7 @@ const results = await Promise.all([
   npm('check', 'check'),
   run('documents', process.execPath, ['scripts/check-documents.mjs']),
   run('schema compatibility', process.execPath, ['scripts/check-schema-compat.mjs']),
+  run('convex runtime imports', process.execPath, ['scripts/check-convex-runtime.mjs']),
   run('format:check (oxfmt)', process.execPath, ['scripts/oxc.mjs', 'format:check']),
   tsc('typecheck:core', '--types', '*', '--noEmit'),
   tsc('typecheck:web', '-p', 'web/tsconfig.json'),

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { MetricObservation } from './self-metrics-observations.js';
+import type { MetricObservation } from './self-metrics-observation-schema.js';
 import type { MetricPeriod, MetricRecords } from './self-metrics-types.js';
 export const time = (at: string) => Date.parse(at);
 export const during = (at: string, p: MetricPeriod) => time(at) >= time(p.from) && time(at) < time(p.to);

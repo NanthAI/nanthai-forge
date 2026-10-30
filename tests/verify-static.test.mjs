@@ -32,6 +32,7 @@ for (const failure of [
     for (const name of ['verify.mjs', 'verify-queue.mjs', 'prepare-convex-api.mjs'])
       write(`scripts/${name}`, readFileSync(`scripts/${name}`));
     write('scripts/check-schema-compat.mjs', `process.exit(${failure === 'schema' ? 9 : 0});`);
+    write('scripts/check-convex-runtime.mjs', 'process.exit(0);');
     write(
       'scripts/check-documents.mjs',
       `import { writeFileSync } from 'node:fs'; writeFileSync('documents-checked', ''); process.exit(${failure === 'documents' ? 8 : 0});`,

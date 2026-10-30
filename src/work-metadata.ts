@@ -156,7 +156,7 @@ export function validateHostedChannel(
 export const workBytes = (data: WorkData) => JSON.stringify(data, null, 2);
 export const workDigest = (data: WorkData) => digestChunks(jsonChunks(data, 2));
 export function parseWorkBytes(bytes: Uint8Array): WorkData {
-  const raw = JSON.parse(Buffer.from(bytes).toString('utf8'));
+  const raw = JSON.parse(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes));
   // Preserve uninterpreted fields in an imported journal; validation is not permission to discard them.
   return { ...parseWork(raw), ...raw };
 }

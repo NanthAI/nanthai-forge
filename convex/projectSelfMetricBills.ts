@@ -4,7 +4,7 @@ import { query, mutation, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/hash';
+import { digest } from '../src/portable-hash';
 import { hostedBillSchema } from '../src/self-metrics-bills';
 import { invariant } from '../src/errors';
 import { report } from './errors';
