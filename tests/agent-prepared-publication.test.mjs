@@ -7,7 +7,6 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import childProcess, { execFileSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { queueAgentSync } from '../dist/agent-hosted-sync.js';
 import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 import { agentCheckpoint } from '../dist/agent-workflow-mutations.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
@@ -162,6 +161,9 @@ test('sync restores collected preparation outside the lock without merging or ap
   await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'Diverged Lane' });
   const locked = store.locked.bind(store),
     compose = NativeSource.prototype.compose;
+  const realNow = Date.now;
+  let collectionDelay = 0;
+  t.mock.method(Date, 'now', () => realNow() + collectionDelay);
   let collected = false,
     merges = 0;
   t.mock.method(NativeSource.prototype, 'compose', function (...args) {
@@ -173,6 +175,8 @@ test('sync restores collected preparation outside the lock without merging or ap
       collected = true;
       const result = nativeObjects(peer, { action: 'collect-native-objects' });
       assert.ok(result.result.removed.length > 0);
+      // The initial collection can outlast lock patience without consuming retry time.
+      collectionDelay += 2000;
     }
     return locked(run, options);
   });
@@ -235,71 +239,6 @@ test('Git checkpoint and sync source operations stay outside owner commits and r
   const after = { viewId: landed.view.viewId };
   agentCheckpoint(store, command, { ...command, after }, { allowUnchanged: true });
   assert.deepEqual(store.select('lanes', other.laneId).after, after);
-});
-
-test('read-only MCP workflow actions and brief never acquire the owner writer lock for activity', async t => {
-  const { root, lane } = await fixture(t);
-  const tools = new Map();
-  registerAgentWorkflow(
-    {
-      registerTool(name, _config, handler) {
-        tools.set(name, handler);
-      },
-    },
-    root,
-  );
-  const liveAgent = new AgentWorkflow(root, true);
-  let locks = 0;
-  t.mock.method(WorkStore.prototype, 'locked', () => {
-    locks++;
-    throw Error('Read-only action acquired writer lock');
-  });
-  for (const command of [
-    { action: 'status', laneId: lane.laneId },
-    { action: 'tests', laneId: lane.laneId },
-    { action: 'peers', laneId: lane.laneId },
-    { action: 'review', kind: 'lane', id: lane.laneId, expectedHead: lane.head },
-    { action: 'diff', laneId: lane.laneId },
-    { action: 'show', laneId: lane.laneId, path: 'a.txt' },
-    { action: 'brief', situation: 'continue-lane', laneId: lane.laneId },
-  ])
-    await liveAgent.dispatch(command);
-  const brief = await tools.get('forge_brief')({ situation: 'continue-lane', laneId: lane.laneId });
-  assert.ok(!brief.isError);
-  assert.equal(JSON.parse(brief.content[0].text).context.laneId, lane.laneId);
-  assert.equal(locks, 0);
-});
-
-test('lifecycle activity retries metadata CAS without repeating source reads or taking the owner lock', async t => {
-  const { agent, store, peer, lane } = await fixture(t);
-  writeFileSync(join(lane.path, 'a.txt'), 'activity source\n');
-  await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'Activity fixture' });
-  const object = NativeSource.prototype.object;
-  let reads = 0,
-    lockedReads = 0,
-    raced = false;
-  t.mock.method(NativeSource.prototype, 'object', function (...args) {
-    reads++;
-    if (existsSync(join(store.directory, 'lock'))) lockedReads++;
-    const result = object.apply(this, args);
-    if (!raced && reads === 2) {
-      raced = true;
-      peer.locked(() => {
-        const tx = peer.records();
-        tx.patchFields('lanes', lane.laneId, { concurrentExtension: 'retained' });
-        peer.commitRecords(tx, undefined, { advisory: false });
-      });
-    }
-    return result;
-  });
-  t.mock.method(store, 'locked', () => {
-    throw new Error('Activity must not join the owner writer queue');
-  });
-  queueAgentSync(store, { action: 'checkpoint', laneId: lane.laneId }, {});
-  assert.ok(raced);
-  assert.equal(lockedReads, 0);
-  assert.equal(reads, 2, 'same base/head reuses the prepared path difference');
-  assert.equal(store.select('lanes', lane.laneId).concurrentExtension, 'retained');
 });
 
 for (const changed of ['unrelated metadata', 'Lane head', 'Intent base'])

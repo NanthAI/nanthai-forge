@@ -14,7 +14,7 @@ import { autoSnapshotNotices } from './lane-auto-snapshot.js';
 import { indexPeerSource } from './agent-peers-index.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { agentPeers, RECEIPT_PEER_LIMIT } from './agent-peers.js';
-import { queueAgentSync } from './agent-hosted-sync.js';
+import { recordAgentActivity } from './agent-activity.js';
 import { agentLinks } from './agent-links.js';
 import { retryWorkPhase } from './work-retry.js';
 import { ForgeError } from './errors.js';
@@ -61,14 +61,14 @@ export async function agentResponseAdvisory(
   const friction = delivered ? frictionReceipt(store, command, response.result) : {};
   const ownershipStop =
     command.action === 'take' && (response.result as { status: string }).status === 'ownership';
-  const hostedSync =
+  const activity =
     !delivered ||
     ownershipStop ||
     command.action === 'handoff' ||
     ['pre-edit', 'install-hooks', 'uninstall-hooks'].includes(command.action) ||
     READ_ONLY_ACTIONS.has(command.action)
       ? undefined
-      : queueAgentSync(store, command, response.result, false, liveMcp ? 'MCP call' : undefined);
+      : recordAgentActivity(store, command, response.result, false, liveMcp ? 'MCP call' : undefined);
   let links: unknown;
   if (delivered && ['checkpoint', 'finish'].includes(command.action) && 'laneId' in command) {
     try {
@@ -214,7 +214,7 @@ export async function agentResponseAdvisory(
       ...(response.result as object),
       ...friction,
       ...(peers ? { peers } : {}),
-      ...(hostedSync ? { hostedSync } : {}),
+      ...(activity ? { activity } : {}),
       ...(links ? { links } : {}),
       ...(resolved ? { resolved } : {}),
       ...(warnings.length ? { warnings } : {}),

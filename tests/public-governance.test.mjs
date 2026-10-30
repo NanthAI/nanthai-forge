@@ -33,7 +33,7 @@ for (const name of [
   'projectProposals',
   'projectGithubImportStore',
   'projectContributors',
-  'projectOwnerSync',
+  'projectGithubStatus',
   'projectSourceAuthority',
   'projectHostedSeed',
   'secrets',
@@ -223,7 +223,7 @@ test('signed-in public stranger matrix refuses writes, including forged owner ap
     ],
     ['proposal', modules.projectProposals.register, { projectId, actor: 'stranger' }],
     ['main seed', modules.projectHostedSeed.begin, { projectId, request: '{}' }],
-    ['owner sync', modules.projectOwnerSync.publish, { projectId }],
+    ['owner sync', modules.projectGithubStatus.publish, { projectId }],
     ['authority transition', modules.projectSourceAuthority.transition, { projectId }],
     [
       'contributor grant',

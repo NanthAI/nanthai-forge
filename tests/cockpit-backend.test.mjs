@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostname } from 'node:os';
-import { setup, actions } from './hosted-planning-fixture.mjs';
+import { setup } from './hosted-planning-fixture.mjs';
 import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { NativeSource } from '../dist/native-source.js';
@@ -130,23 +130,26 @@ test('native hosted summaries track actual ancestry when main moves without read
     [true, true, false, false],
     'Lane heads already in main are done; a descendant containing main is still open',
   );
-  const initial = await s.read();
-  const select = async move =>
-    actions.acceptChannel._handler(s.ctx, {
+  // Seed the historical display projection directly: the owner acceptance
+  // publication RPC is retired; these assertions exercise summary reads.
+  const generation = [...s.tables.projectWorkGenerations.values()].find(row => row.status === 'ready');
+  const select = async move => {
+    const old = [...s.tables.projectWorkRecords.values()].find(
+      row => row.collection === 'hostedChannels' && row.key === 'main',
+    );
+    const row = {
       projectId: s.projectId,
-      operationId: randomUUID(),
-      revision: JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId })).revision,
-      command: JSON.stringify({
-        action: 'accept-hosted-channel',
-        channel: 'main',
-        acceptanceId: move.id,
-        viewId: move.viewId,
-        head: move.head,
-        previousId: null,
-        archiveSha256: initial.backupDigest,
-      }),
-    });
-  // First select A, then advance to B through the real hosted metadata mutation.
+      generationId: generation.recordsGenerationId ?? generation._id,
+      collection: 'hostedChannels',
+      key: 'main',
+      parent: '',
+      position: 0,
+      value: JSON.stringify({ ...move, actor: 'owner' }),
+    };
+    if (old) await s.ctx.db.patch(old._id, row);
+    else await s.ctx.db.insert('projectWorkRecords', row);
+  };
+  // First select A, then advance the display projection to B.
   await select(pins.moves[0]);
   assert.deepEqual(
     (await readPage(s, 'views')).page.map(row => JSON.parse(row.value).main.included),
@@ -157,24 +160,7 @@ test('native hosted summaries track actual ancestry when main moves without read
     [true, false, false, false],
     'Lane membership is recomputed against the newly selected main',
   );
-  const first = [...s.tables.projectWorkRecords.values()].find(
-    row => row.collection === 'hostedChannels' && row.key === 'main',
-  );
-  const previousId = JSON.parse(first.value).id;
-  await actions.acceptChannel._handler(s.ctx, {
-    projectId: s.projectId,
-    operationId: randomUUID(),
-    revision: JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId })).revision,
-    command: JSON.stringify({
-      action: 'accept-hosted-channel',
-      channel: 'main',
-      acceptanceId: pins.moves[1].id,
-      viewId: pins.moves[1].viewId,
-      head: pins.b,
-      previousId,
-      archiveSha256: initial.backupDigest,
-    }),
-  });
+  await select(pins.moves[1]);
   s.ctx.storage.getUrl = s.ctx.storage.get = async () => assert.fail('summary reads never fetch source');
   const query = s.ctx.db.query;
   s.ctx.db.query = table => {

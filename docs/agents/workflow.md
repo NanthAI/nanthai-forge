@@ -458,54 +458,18 @@ The receipt records reason, actor, time and operation id. Retry with the origina
 
 MCP uses `forge_task` with `command.action:"abandon"`. The authenticated local HTTP `POST /api/work` accepts `{revision,command:{action:"abandon",laneId,reason,…}}` with the same semantics. Push with `nforge exchange ROOT push` to publish lifecycle history and state to hosted. This uses Work format 13; upgrade readers/writers before sharing an owner with abandonment records.
 
-### Automatic updates from bound owners
+### Local presence and hosted activity
 
-A local owner bound by `nforge host` queues agent activity and incremental cockpit
-metadata on `start`, `checkpoint`, `sync`, `finish`, `accept`, `complete`, `abandon`, `reopen`
-and `complete-merged`, plus `run`/`observe`/`cancel`. A detached sender uses the saved login (or
-`FORGE_AUTH_TOKEN`); network/authentication failures never fail the local command.
-Pending original operation IDs and payloads remain beside Work in
-`hosted-agent-sync.json`; the next queue update or drain migrates older binding queues.
-Unsent metadata snapshots coalesce to the highest revision per session; newer
-presence-only observations remain separately until a metadata snapshot supersedes
-them, and expire after 15 minutes. The queue retains at most 100 entries and 512 KiB
-of payloads, evicting oldest presence first; status records the discarded count.
-`PROJECT_WORK_INDEX_MISSING` retains the queued metadata and records the local
-index-preparation/source pin. While that pin is unchanged, neither coordination
-nor metadata publication retries, regardless of elapsed time or new presence.
-A successful local hosting/index preparation, source push, or `nforge host ROOT --auto-sync`
-(operator retry after an external prepare) resumes the sender. The drainer never
-prepares hosted Work itself. Other rejected application entries are discarded with
-the latest 20 error diagnostics,
-then later entries continue. Network, timeout, rate-limit, server and authentication
-failures retain exact payloads and back off from one second up to five minutes.
-The next lifecycle command or presence signal retries after backoff; an explicit
-`nforge host ROOT --sync-agent` observes the same backoff. A process reservation
-prevents duplicate sender starts, and drain admission is nonblocking. One detached observer per owner watches Lane directories and coalesces native filesystem notifications into at most one edited-files signal per minute. On macOS it also reconciles file metadata on that minute tick, so delayed or missing FSEvents notifications do not hide edits. On attachment it compares live source with the saved Lane head once, including edits made before observation started. Subsequent ticks walk included paths and compare metadata without reading source contents or hashing files; other platforms keep native notifications only. Generated/protected directories are ignored, and metadata reconciliation never follows symlinks. It observes queued/preparing/running check records once a minute and reports working until the check ends. A process queue prevents duplicate owner observers; completion stops the Lane watcher. `host --status` reports `pendingAgentSync`, `agentSyncError` (code, message,
-sequence, time and attempts), `agentSyncNextAttemptAt`, `rejectedAgentSync` and
-`discardedAgentSync`. Owner status exposes the same failure and retry time in its
-hosted metadata section. That observer exits on its own when its owner directory is deleted or replaced, its installed runtime is deleted, or nothing has changed for 2 hours (`FORGE_PRESENCE_IDLE_MS` overrides); the next lifecycle command starts it again.
+Native lifecycle commands record local presence beside Work, including for unbound
+owners. Each Lane and actor has a separate session. Local observation retains the
+existing filesystem observer and presence display rules, but derives no source
+paths and sends no hosted metadata. Hosted lifecycle and source changes use the
+authoritative hosted APIs; explicit coordination remains available for activity.
+There is no owner acceptance listener, activity delivery queue or retry sender.
+Old listener and sender CLI switches return `CLI_UPGRADE_REQUIRED`; retain local
+edits and operation IDs when installing the matching release. Historical queue
+records remain readable for recovery and are never replayed by a background worker.
 
-Each Lane and actor has a distinct session. `actor:"gpt-u4"` overrides
-`FORGE_AGENT_NAME`, then `FORGE_ACTOR`, then the Lane starter. Activity includes
-Intent/Lane/head and up to the coordination protocol's first 100 changed paths.
-Checks report working while queued/running; review and landing waits can report waiting. Only explicit completion or Lane acceptance/closure ends the session. Hosted Now uses `src/presence.ts` defaults: working through 15 minutes since activity, quiet through 90 minutes (still listed, muted, e.g. “quiet 25 min · last: edited files”), then folded as “not seen since 14:02” (“yesterday 19:23” or “15 Oct” when older than today). After 24 hours without activity, or once its Lane or the session is completed, a session leaves Who’s working; Activity still shows it and nothing is deleted. Duplicate name+Lane observations collapse to the latest, including completion. Thresholds are display defaults, not timeouts or work restrictions; project settings come later. Local observations persist beside Work, including for unbound owners.
-
-Metadata-only updates show Lane creation, save count, ready/completed state and
-local main acceptance promptly. They do not upload source, run logs or check
-artifacts, and cannot create hosted acceptance/check evidence. Source reads for a
-new local head remain unavailable until an explicit `nforge exchange ROOT push`.
-The endpoint requires the bound project's current owner login; coordination-only
-credentials can publish activity; rejected metadata is reported locally. Hosted Intent titles,
-notes and unrelated fields are preserved by lifecycle updates.
-
-Automatic metadata and presence are enabled by default on bindings, including
-existing bindings. Disable with `nforge host ROOT --no-auto-sync`; restore with
-`--auto-sync`. Opt-out preserves the pending queue without sending it. This is the
-binding's `autoSync` flag. Full source push always stays explicit; acceptance never
-starts a source upload. Receipts report the queued/deferred update and the opt-out
-command. Low-level `coordination publish` accepts an omitted `command.context` as
-an empty context.
 
 ## Making-of record
 

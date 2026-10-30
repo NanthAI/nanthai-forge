@@ -391,29 +391,6 @@ test('green resumes 205 held requests in bounded pages and clears their retained
   assert.equal(f.pending().length, 0);
 });
 
-test('owner status and check-settings expose the same additive audit payload', async () => {
-  const f = await auditFixture();
-  await f.land();
-  await f.start();
-  await f.terminal('failed');
-  const { definitions } = await import('./hosted-checks-fixture.mjs');
-  const { moduleUrl } = await import('./convex-module.mjs');
-  const owner = await import(moduleUrl('../convex/ownerAcceptance.ts'));
-  const settings = JSON.parse(
-    await f.call('auditCheckSettings', definitions.current, { projectId: f.projectId, checkId: f.checkId }),
-  );
-  const status = await f.call('auditOwnerStatus', owner.status, {
-    projectId: f.projectId,
-    viewId: randomUUID(),
-  });
-  assert.equal(settings.mainAudit.redSince, f.row().red.since);
-  assert.equal(status.mainAudit.head, settings.mainAudit.head);
-  await assert.rejects(
-    f.call('auditOwnerStatus', owner.status, { projectId: f.projectId, viewId: randomUUID() }, 'outside'),
-    error => error.data?.code === 'PROJECT_UNAVAILABLE',
-  );
-});
-
 test('rollout seed adopts only the last retained exact full-passed check', async () => {
   const f = await auditFixture();
   const { run } = await f.land('full');
@@ -535,4 +512,24 @@ test('an obsolete audit completing after a full fix still schedules newer counte
   assert.equal(f.row().red, undefined);
   assert.equal(f.row().unaudited.count, 1);
   assert.equal(f.pending().length, 1);
+});
+
+test('hosted audit status and check-settings expose the same audit payload', async () => {
+  const f = await auditFixture();
+  await f.land();
+  await f.start();
+  await f.terminal('failed');
+  const { definitions } = await import('./hosted-checks-fixture.mjs');
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const audit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
+  const settings = JSON.parse(
+    await f.call('auditCheckSettings', definitions.current, { projectId: f.projectId, checkId: f.checkId }),
+  );
+  const status = JSON.parse(await f.call('auditStatus', audit.status, { projectId: f.projectId }));
+  assert.equal(settings.mainAudit.redSince, f.row().red.since);
+  assert.equal(status.head, settings.mainAudit.head);
+  await assert.rejects(
+    f.call('auditStatus', audit.status, { projectId: f.projectId }, 'outside'),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
+  );
 });

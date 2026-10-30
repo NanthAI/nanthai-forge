@@ -1,3 +1,4 @@
+import { CUTOVER_UPGRADE } from './cutover-version.js';
 // SPDX-License-Identifier: Apache-2.0
 import { workerPath } from './worker-install.js';
 import { transitionBoundSourceAuthority } from './source-authority-client.js';
@@ -8,9 +9,6 @@ import { checkServiceEnv } from './worker-environment.js';
 import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { readRecoveryInventory } from './recovery-inventory.js';
 
-import { consumeOwnerRequests, startOwnerAcceptanceListener } from './owner-acceptance-consumer.js';
-import { runAgentSyncRetries } from './agent-sync-retry.js';
-import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { spawn } from 'node:child_process';
 
 import { WorkStore } from './work-store.js';
@@ -59,40 +57,8 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
     });
     return json ? { type: 'host-delete-result', ...result } : result;
   }
-  if (flags.length === 1 && flags[0] === '--sync-agent') {
-    const store = new WorkStore(root);
-    return runAgentSyncRetries(store);
-  }
-  if (flags.length === 1 && flags[0] === '--listen') {
-    const store = new WorkStore(root);
-    const binding = readHostState(store).binding;
-    invariant(binding, 'HOST_NOT_BOUND', 'Host this owner first.');
-    invariant(
-      binding.acceptanceOwner === true,
-      'OWNER_NOT_CANONICAL',
-      'Run the acceptance listener on the original canonical owner; this binding has no canonical-owner role.',
-    );
-    process.stderr.write('Listening for hosted acceptance requests; stop with Ctrl+C.\n');
-    const stop = startOwnerAcceptanceListener(store, error =>
-      process.stderr.write(
-        `${error instanceof ForgeError ? error.message : 'Owner connection unavailable; retrying.'}\n`,
-      ),
-    );
-    process.once('SIGINT', stop);
-    process.once('SIGTERM', stop);
-    return;
-  }
-  if (flags.length === 1 && ['--no-auto-sync', '--auto-sync'].includes(flags[0]!)) {
-    const store = new WorkStore(root);
-    const result = updateHostState(store, state => {
-      invariant(state.binding, 'HOST_NOT_BOUND', 'Host this owner first.');
-      state.binding.autoSync = flags[0] === '--auto-sync';
-      if (state.binding.autoSync) markAgentSyncPrepared(state, state.binding);
-      return { autoSync: state.binding.autoSync, sourcePush: 'explicit' };
-    });
-    if (result.autoSync) startAgentSyncWorker(store);
-    return result;
-  }
+  if (flags.some(flag => ['--listen', '--sync-agent', '--auto-sync', '--no-auto-sync'].includes(flag)))
+    throw new ForgeError('CLI_UPGRADE_REQUIRED', CUTOVER_UPGRADE);
   if (flags.includes('--status') || (json && flags.length === 0)) {
     invariant(flags.length === 0 || flags.length === 1, 'BAD_ARGUMENT', HOST_HELP);
     const store = new WorkStore(root, { readOnly: true });
@@ -168,7 +134,6 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
       });
     throw error;
   });
-  await consumeOwnerRequests(new WorkStore(root)).catch(() => {});
   if ('historyBackfilling' in result && result.historyBackfilling) {
     const store = new WorkStore(root);
     // FORGE_AUTH_TOKEN authenticates this worker's hosted source/metadata requests.

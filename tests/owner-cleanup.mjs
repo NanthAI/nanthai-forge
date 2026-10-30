@@ -193,7 +193,17 @@ export async function waitForOwnerChildren(
     await yieldTurn();
     const pending = [...children].filter(([, entry]) => belongs(entry));
     for (const [child] of pending) child.ref();
-    if (stopChecks) await stopOwnerCheckControllers(root);
+    let publishing = false;
+    if (stopChecks) {
+      try {
+        await stopOwnerCheckControllers(root);
+      } catch (error) {
+        if (error.code !== 'WORK_BUSY') throw error;
+        // The controller can still be publishing after its caller exits. Join
+        // under this cleanup loop's existing deadline before stopping it.
+        publishing = true;
+      }
+    }
     const owned = ownerWorkers(roots, workerDirectory, processes, WorkStore, stopChecks);
     for (const worker of owned) {
       // Presence is deliberately long-lived. Finite preview/audit workers finish their writes normally.
@@ -205,7 +215,7 @@ export async function waitForOwnerChildren(
         }
       }
     }
-    if (!pending.length && !owned.length) return;
+    if (!publishing && !pending.length && !owned.length) return;
     assert.ok(
       Date.now() < deadline,
       `Owner teardown still has ${pending.length} child handles and ${owned.length} workers`,

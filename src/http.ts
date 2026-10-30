@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { retainOwnerRuntime } from './release-owner-runtime.js';
-import { startOwnerAcceptanceListener } from './owner-acceptance-consumer.js';
 import { startOwnerPresence } from './presence-worker-start.js';
 import { createServer, type ServerResponse } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -127,7 +126,6 @@ export async function serveRepository(requestedRoot: string, port = 4173) {
       return undefined;
     }
   })();
-  const stopAcceptance = startOwnerAcceptanceListener(new WorkStore(root));
   const url = `http://127.0.0.1:${boundPort}/#token=${token}`;
   return {
     url,
@@ -135,7 +133,6 @@ export async function serveRepository(requestedRoot: string, port = 4173) {
     token,
     async close() {
       ownerRuntime?.close();
-      await stopAcceptance();
       await stopPresence?.();
       server.closeAllConnections();
       await new Promise<void>(resolve => server.close(() => resolve()));

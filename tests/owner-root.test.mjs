@@ -228,20 +228,42 @@ test('concurrent disjoint owner acceptances serialize root at newest main', asyn
       const script = `import { WorkStore } from './dist/work-store.js';
       import { nativeExecute } from './dist/native-work.js';
       const store = new WorkStore(${JSON.stringify(f.root)}), command = ${JSON.stringify(command)};
-      // Pin the revision under the publication lock; the other acceptance may
-      // replace work.json while an unlocked revision() is reading its path.
-      for (;;) { try { nativeExecute(store, command, store.locked(() => store.revision()), { ownerRequest: true }); break; }
-        catch (e) { if (e.code !== 'WORK_STALE') throw e; } }`;
+      // A retired relay bypass used to compose inside acceptance. Native callers
+      // now compose explicitly after a CAS race, retaining both accepted deltas.
+      const { NativeSource } = await import('./dist/native-source.js');
+      const source = new NativeSource(store.root);
+      let composed = command;
+      for (;;) {
+        try { nativeExecute(store, composed, store.locked(() => store.revision())); console.log(JSON.stringify(composed)); break; }
+        catch (e) {
+          if (e.code === 'WORK_STALE') continue;
+          if (e.code !== 'CHANNEL_CHANGED') throw e;
+          composed = store.locked(() => {
+            const data = store.load(), previous = data.channelMoves.at(-1).head;
+            const merged = source.compose(previous, command.expectedHead, 'Retry owner acceptance', new Date().toISOString());
+            if (!merged.head || merged.conflicts.length) throw new Error('Unexpected compose conflict');
+            const viewId = crypto.randomUUID(), view = data.views.find(view => view.id === command.viewId);
+            data.views.push({ ...view, id: viewId, head: merged.head, base: previous });
+            data.revision++;
+            store.save(data);
+            return { ...command, operationId: crypto.randomUUID(), viewId, expectedHead: merged.head, expectedPrevious: previous };
+          });
+        }
+      }`;
       const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
         env: { ...process.env, FORGE_WORK_LOCK_WAIT_MS: '60000' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-      let errors = '';
+      let errors = '',
+        output = '';
+      child.stdout.on('data', bytes => {
+        output += bytes;
+      });
       child.stderr.on('data', bytes => {
         errors += bytes;
       });
       child.on('error', reject);
-      child.on('exit', code => (code === 0 ? resolve() : reject(new Error(errors))));
+      child.on('exit', code => (code === 0 ? resolve(JSON.parse(output)) : reject(new Error(errors))));
     });
   const results = await Promise.allSettled(commands.map(run));
   for (const result of results) if (result.status === 'rejected') throw result.reason;
@@ -249,7 +271,7 @@ test('concurrent disjoint owner acceptances serialize root at newest main', asyn
   assert.equal(ownerRootNotice(f.store).head, main);
   assert.equal(readFileSync(join(f.root, 'a.txt'), 'utf8'), 'accepted a');
   assert.equal(readFileSync(join(f.root, 'b.txt'), 'utf8'), 'accepted b');
-  f.accept(commands[0]);
+  f.accept(results[0].value);
   assert.equal(ownerRootNotice(f.store).head, main);
 });
 

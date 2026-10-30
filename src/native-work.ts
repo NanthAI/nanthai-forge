@@ -10,7 +10,6 @@ import { pendingStatus } from './pending-status.js';
 import { decorateRepair } from './agent-repair-lineage.js';
 import { landingRepairNotices } from './landing-repair-notice.js';
 // SPDX-License-Identifier: Apache-2.0
-import { composeOwnerAcceptance } from './owner-acceptance.js';
 import { finishChild } from './agent-finish-journal.js';
 import { scopedPostAccept } from './post-accept-request.js';
 import { wakeGithubPush } from './github-auto-push.js';
@@ -241,7 +240,6 @@ export function nativeExecute(
     compact?: boolean;
     actor?: AcceptanceActor;
     attribution?: WorkActor;
-    ownerRequest?: boolean;
     reconcileComposition?: boolean;
     beforePublish?: () => void;
   } = {},
@@ -319,15 +317,11 @@ export function nativeExecute(
           const existing = data.channelMoves.find(move => move.id === command.operationId);
           if (existing) {
             invariant(
-              (options.ownerRequest
-                ? existing.ownerRequest?.viewId === command.viewId &&
-                  existing.ownerRequest.head === command.expectedHead &&
-                  existing.ownerRequest.expectedMain === command.expectedPrevious
-                : existing.acceptanceRequest
-                  ? existing.acceptanceRequest === digest(JSON.stringify(command))
-                  : existing.viewId === command.viewId &&
-                    existing.head === command.expectedHead &&
-                    existing.previous === command.expectedPrevious) &&
+              (existing.acceptanceRequest
+                ? existing.acceptanceRequest === digest(JSON.stringify(command))
+                : existing.viewId === command.viewId &&
+                  existing.head === command.expectedHead &&
+                  existing.previous === command.expectedPrevious) &&
                 existing.channel === command.channel &&
                 existing.invariant?.policy.id === command.invariant?.id &&
                 existing.invariant?.policy.definition === command.invariant?.definition,
@@ -442,7 +436,7 @@ export function nativeExecute(
             break;
           }
           case 'accept-channel': {
-            let view = data.views.find(
+            const view = data.views.find(
               item =>
                 item.id === command.viewId && item.head === command.expectedHead && item.status === 'clean',
             );
@@ -464,30 +458,11 @@ export function nativeExecute(
             );
             source.state(command.expectedHead);
             const previous = nativeChannels(data).find(item => item.name === command.channel)?.head ?? null;
-            const ownerRequest = options.ownerRequest
-              ? {
-                  viewId: command.viewId,
-                  head: command.expectedHead,
-                  expectedMain: command.expectedPrevious,
-                }
-              : undefined;
-            let disjoint;
-            if (options.ownerRequest && previous !== command.expectedPrevious) {
-              invariant(
-                (options.actor ?? localPerson()).kind === 'person',
-                'NEEDS_RECHECK',
-                'Needs re-check: main moved since the agent request.',
-              );
-              const composed = composeOwnerAcceptance(source, data, view, command.expectedPrevious, previous);
-              view = composed.view;
-              disjoint = composed.evidence;
-            }
             const acceptedHead = view.head!;
-            if (!options.ownerRequest && (options.actor ?? localPerson()).kind !== 'person')
+            if ((options.actor ?? localPerson()).kind !== 'person')
               assertContractsSynced(source, data, command.channel, view, previous);
             let fastPathRejection = 'Fast path not applicable';
             const fast =
-              !options.ownerRequest &&
               previous &&
               (command.reuseRunId ||
                 previous !== command.expectedPrevious ||
@@ -510,15 +485,14 @@ export function nativeExecute(
               `Passing evidence changed; re-check this candidate. Fast path: ${fastPathRejection}.`,
             );
             invariant(
-              previous === command.expectedPrevious || fast || Boolean(disjoint),
+              previous === command.expectedPrevious || fast,
               'CHANNEL_CHANGED',
               `Native Channel changed. Fast path: ${fastPathRejection}.`,
             );
             invariant(
               previous === null ||
                 fast ||
-                (!options.ownerRequest &&
-                  (options.actor ?? localPerson()).kind === 'person' &&
+                ((options.actor ?? localPerson()).kind === 'person' &&
                   acceptedOn(data, command.channel, acceptedHead)) ||
                 source.contains(acceptedHead, previous),
               'CHANNEL_DIVERGED',
@@ -571,9 +545,6 @@ export function nativeExecute(
               head: fast?.head ?? acceptedHead,
               previous,
               acceptanceRequest: digest(JSON.stringify(command)),
-              ...(ownerRequest
-                ? { ownerRequest: { ...ownerRequest, ...(disjoint ? { disjoint } : {}) } }
-                : {}),
               ...(fast ? { fastPath: fast.evidence } : {}),
               ...(postAccept ? { postAccept } : {}),
               at,

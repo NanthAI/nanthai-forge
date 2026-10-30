@@ -17,7 +17,7 @@ import { Glyph } from '../ui/Glyph';
 import { routeUrlState } from '../shell/location';
 import { useAttention } from '../shell/attention-context';
 // SPDX-License-Identifier: Apache-2.0
-import { useOwnerLifecycle, type LifecycleParts } from './OwnerLifecycle';
+import type { LifecycleParts } from './LifecycleParts';
 import { hostedViewHref } from '../views/links';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useConvex, useMutation, useQuery } from 'convex/react';
@@ -546,15 +546,7 @@ export function HostedLane({
       return false;
     }
   };
-  const laneRecord = records.lanes.find(l => l.id === laneId) ?? currentLane;
-  const lifecycle = useOwnerLifecycle({
-    projectId,
-    collection: 'lanes',
-    id: laneId,
-    head: laneRecord.head,
-    state: laneRecord.state,
-    editable: workspace.capabilities.owner,
-  });
+  const lifecycle = null;
   const client = useConvex();
   const briefs = useMemo(() => hostedBriefs(client, projectId), [client, projectId]);
   return (

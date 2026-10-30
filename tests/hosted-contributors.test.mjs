@@ -269,7 +269,7 @@ test('native contributor grant discovers full project and source without GitHub 
       revision: 0,
       command: '{}',
     }),
-    unavailable,
+    error => error.data?.code === 'CLI_UPGRADE_REQUIRED',
   );
 
   assert.equal(s.tables.hostedProjects.get('project').currentBackup, before.currentBackup);

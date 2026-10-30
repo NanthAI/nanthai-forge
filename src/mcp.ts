@@ -2,7 +2,7 @@ import { withCallerOverlaps } from './agent-caller-overlaps.js';
 import { candidateActionSchema } from './candidate-names.js';
 import { hostedAgentAddress } from './hosted-agent-cli.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
-import { queueAgentSync } from './agent-hosted-sync.js';
+import { recordAgentActivity } from './agent-activity.js';
 import { policyWriteSchema } from './autonomy-policy.js';
 import { localAgent } from './work-autonomy.js';
 // SPDX-License-Identifier: Apache-2.0
@@ -121,7 +121,8 @@ export async function startMcp(
     }
   }
   async function sourceResult(laneId: string | undefined, query: (source: RepositoryQuery) => unknown) {
-    if (work && laneId) queueAgentSync(work.store, { action: 'activity', laneId }, {}, false, 'MCP call');
+    if (work && laneId)
+      recordAgentActivity(work.store, { action: 'activity', laneId }, {}, false, 'MCP call');
     return result(
       () =>
         sources!.run(laneId, async selected => {

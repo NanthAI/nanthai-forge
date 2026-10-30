@@ -5,7 +5,7 @@ import { watchLocal } from './local-watcher.js';
 import { join } from 'node:path';
 import { WorkStore } from './work-store.js';
 import { withQueueSlot } from './landing-queue.js';
-import { queueAgentSync } from './agent-hosted-sync.js';
+import { recordAgentActivity } from './agent-activity.js';
 import { PRESENCE, collapseSessions } from './presence.js';
 import { exclusion } from './files.js';
 import { observePresenceFiles } from './presence-files.js';
@@ -109,7 +109,7 @@ export async function watchLanePresence(
               for (const session of Object.values(readHostState(store).presence ?? {}).filter(
                 session => session.context.laneId === laneId && session.status !== 'completed',
               ))
-                queueAgentSync(
+                recordAgentActivity(
                   store,
                   { action: 'activity', laneId, actor: session.name },
                   {},
@@ -153,7 +153,7 @@ export async function watchLanePresence(
                 : [{ name: lane.startedBy?.name }];
               let recorded = true;
               for (const session of actors) {
-                const result = queueAgentSync(
+                const result = recordAgentActivity(
                   store,
                   { action: 'activity', laneId, ...(session.name ? { actor: session.name } : {}) },
                   {},

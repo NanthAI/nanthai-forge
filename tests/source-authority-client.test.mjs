@@ -16,7 +16,6 @@ import {
   transitionBoundSourceAuthority,
   rememberSourceAuthorityError,
 } from '../dist/source-authority-client.js';
-import { consumeOwnerRequests } from '../dist/owner-acceptance-consumer.js';
 import { hostedActionError } from '../dist/hosted-action-error.js';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -182,21 +181,11 @@ test('completed transition replays its immutable drain proof after local work an
   assert.equal(f.s.tables.projectSourceAuthorityTransitions.size, 2);
 });
 
-test('normal offline accepts work at epoch zero; owner writer stale feedback blocks subsequent local accepts', async t => {
+test('normal offline accepts work at epoch zero; current writer feedback blocks subsequent local accepts', t => {
   const f = setup(t);
   assert.equal(nativeExecute(f.store, f.command, f.store.revision()).result.status, 'accepted');
   const revision = f.store.revision();
-  let calls = 0;
-  await assert.rejects(
-    consumeOwnerRequests(f.store, {
-      mutation: async () => {
-        calls++;
-        throw stale(server);
-      },
-    }),
-    isStale,
-  );
-  assert.equal(calls, 1);
+  rememberSourceAuthorityError(f.store, stale(server), f.projectId);
   assert.deepEqual(readHostState(f.store).binding.sourceAuthority, server);
   assert.throws(
     () => nativeExecute(f.store, f.command, f.store.revision()),

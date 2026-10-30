@@ -1,15 +1,14 @@
-// SPDX-License-Identifier: Apache-2.0
 'use node';
-import { requireSourceAuthority } from '../src/hosted-source-authority';
+import { CUTOVER_UPGRADE } from '../src/cutover-version';
+import { ConvexError } from 'convex/values';
+// SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { api } from './_generated/api';
-import { acceptanceRequestDocument } from './ownerAcceptanceFields';
 import { action, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { exportPlanning as planningExport } from '../src/work-planning-state';
 import { invariant } from '../src/errors';
-import { metadataCommandSchema, hostedChannelCommandSchema } from '../src/work-types';
+import { metadataCommandSchema } from '../src/work-types';
 import { metadataRequest, workDigest } from '../src/work-metadata';
 import { report } from './errors';
 import { indexedCommand } from './projectWorkIndexedCommand';
@@ -182,74 +181,8 @@ export const acceptChannel = action({
     command: v.string(),
     authorityEpoch: v.optional(v.number()),
   },
-  returns: v.union(hostedWorkEventDocument, acceptanceRequestDocument),
-  handler: async (ctx, input): Promise<Doc<'projectWorkEvents'> | Doc<'ownerAcceptanceRequests'>> => {
-    try {
-      const owner = await caller(ctx);
-      const project = await ctx.runQuery(internal.projectWork.owner, { projectId: input.projectId, owner });
-      requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
-      let command;
-      try {
-        command = hostedChannelCommandSchema.parse(JSON.parse(input.command));
-      } catch {
-        invariant(false, 'BAD_ARGUMENT', 'Send a pinned hosted Channel selection.');
-      }
-      invariant(
-        /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.operationId) &&
-          Number.isSafeInteger(input.revision) &&
-          input.revision >= 0,
-        'BAD_ARGUMENT',
-        'Use the original operation UUID and hosted Work revision.',
-      );
-      const native = project.hostingRequest
-        ? await ctx.runMutation(internal.ownerAcceptance.route, {
-            projectId: input.projectId,
-            operationId: input.operationId,
-            viewId: command.viewId,
-            head: command.head,
-            channel: command.channel,
-            ...(input.authorityEpoch === undefined ? {} : { authorityEpoch: input.authorityEpoch }),
-          })
-        : null;
-      if (native) {
-        return await ctx.runMutation(api.ownerAcceptance.request, {
-          projectId: input.projectId,
-          operationId: input.operationId,
-          viewId: command.viewId,
-          head: command.head,
-          expectedMain: native.expectedMain,
-          ...(input.authorityEpoch === undefined ? {} : { authorityEpoch: input.authorityEpoch }),
-          channel: command.channel,
-          ...(command.agent ? { agent: true as const } : {}),
-        });
-      }
-      const request = metadataRequest(command),
-        original: Doc<'projectWorkEvents'> | null = await ctx.runQuery(internal.projectWork.find, {
-          projectId: input.projectId,
-          owner,
-          operationId: input.operationId,
-        });
-      if (original) {
-        invariant(
-          original.request === request && original.previousRevision === input.revision,
-          'WORK_OPERATION_CHANGED',
-          'Reconcile this Channel selection’s original inputs.',
-        );
-        return original;
-      }
-      const projection = await indexedCommand(ctx, input, owner, command, request);
-      return await ctx.runMutation(internal.projectWork.append, {
-        projectId: input.projectId,
-        owner,
-        operationId: input.operationId,
-        request,
-        previousRevision: input.revision,
-        command: JSON.stringify(command),
-        projection,
-        ...(input.authorityEpoch === undefined ? {} : { authorityEpoch: input.authorityEpoch }),
-      });
-    } catch (error) {
-      return report(error);
-    }
+  returns: v.null(),
+  handler: async () => {
+    throw new ConvexError({ code: 'CLI_UPGRADE_REQUIRED', message: CUTOVER_UPGRADE });
   },
 });

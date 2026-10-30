@@ -17,7 +17,6 @@ import { automaticCleanup } from '../dist/work-auto-clean.js';
 import { allRecords } from '../dist/agent-lifecycle.js';
 import { agentClean } from '../dist/agent-clean.js';
 import { inspectArtifacts } from '../dist/work-artifacts.js';
-import { applyOwnerLifecycle } from '../dist/owner-lifecycle.js';
 import { withWorkLockOptions } from '../dist/work-lock.js';
 import { mockProcessCoverage } from './cleanup-process-fixture.mjs';
 
@@ -402,32 +401,6 @@ test('concurrent finish and cleanup preserve accepted bytes and keep an active L
   assert.ok(existsSync(active.path));
   await run(p.agent, 'reopen', { laneId: lane.laneId });
   assert.equal(readFileSync(join(lane.path, 'accepted.txt'), 'utf8'), 'accepted once');
-});
-
-test('owner lifecycle complete cleans and reopen re-materializes the retained head', async t => {
-  const p = await fixture(t),
-    lane = await p.start(),
-    actor = { kind: 'person', name: 'Synthetic owner' };
-  const command = {
-    action: 'complete',
-    collection: 'lanes',
-    id: lane.laneId,
-    expectedHead: lane.head,
-    expectedState: 'active',
-    reason: 'Done',
-    saveFirst: false,
-    cascade: false,
-  };
-  const closed = applyOwnerLifecycle(p.store, command, randomUUID(), actor);
-  assert.ok(removedLane(closed.cleanup, lane.laneId));
-  assert.equal(existsSync(lane.path), false);
-  applyOwnerLifecycle(
-    p.store,
-    { ...command, action: 'reopen', expectedState: 'completed' },
-    randomUUID(),
-    actor,
-  );
-  assert.equal(readFileSync(join(lane.path, 'file.txt'), 'utf8'), 'original\n');
 });
 
 test('missing receipts and retained artifacts never authorize terminal workspace removal', async t => {

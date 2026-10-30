@@ -49,7 +49,7 @@ import { withWorkProgress } from './work-progress.js';
 import { withWorkLockOptions } from './work-lock.js';
 import { agentAbandon } from './agent-abandon.js';
 import { agentLinks } from './agent-links.js';
-import { queueAgentSync } from './agent-hosted-sync.js';
+import { recordAgentActivity } from './agent-activity.js';
 import { readView } from './view-reads.js';
 import { localActor, type WorkActor } from './work-actor.js';
 import { agentGitSync } from './agent-git-sync.js';
@@ -319,7 +319,7 @@ export class AgentWorkflow {
         throw error;
       }
     }
-    if (command.action === 'finish') queueAgentSync(store, command, {}, true);
+    if (command.action === 'finish') recordAgentActivity(store, command, {}, true);
     const response = await withWorkProgress(
       'operationId' in command && typeof command.operationId === 'string'
         ? { operationId: command.operationId }
@@ -866,7 +866,7 @@ export class AgentWorkflow {
           /* Advisory coordination never invalidates a saved checkpoint. */
         }
         scheduleIntegrationPreview(store);
-        queueAgentSync(store, command, response.result, true);
+        recordAgentActivity(store, command, response.result, true);
         return response;
       },
       ['WORK_BUSY'],

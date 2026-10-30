@@ -22,7 +22,6 @@ import { launchDetachedCheck } from '../dist/check-controller.js';
 import { watcherRuntime } from '../dist/local-watcher-runtime.js';
 import { openBrowser } from '../dist/auth-cli.js';
 import { hostCli } from '../dist/host-command.js';
-import { queueAgentSync } from '../dist/agent-hosted-sync.js';
 import { scheduleIntegrationPreview } from '../dist/integration-preview-auto.js';
 import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
@@ -287,37 +286,6 @@ test('detached host backfill drops unrelated secrets and keeps Forge authenticat
   assert.ok(call);
   clean(call.options.env);
   assert.equal(call.options.env.FORGE_AUTH_TOKEN, 'fake-test-secret');
-});
-test('detached agent metadata sync drops unrelated secrets and keeps Forge authentication', async t => {
-  const calls = capture(t);
-  plant(t, ['FORGE_AUTH_TOKEN', 'FORGE_DEPLOYMENT_URL', 'DECLARED_INPUT', 'GH_TOKEN']);
-  const { workflow } = await fixture(t);
-  const result = await workflow.dispatch({ action: 'start', outcome: 'synthetic metadata' });
-  const store = workflow.work.store;
-  workflow.work.execute(
-    {
-      action: 'define-check',
-      name: 'Synthetic input',
-      executable: process.execPath,
-      args: ['--version'],
-      env: ['DECLARED_INPUT'],
-    },
-    store.revision(),
-  );
-  store.locked(() => {
-    const data = store.load();
-    data.autonomyPolicy = { ...policyPreset('trusted'), checks: { runner: 'github-actions' } };
-    data.revision++;
-    store.save(data);
-  });
-  bind(store);
-  await queueAgentSync(store, { action: 'start', outcome: 'synthetic metadata' }, result.result);
-  const call = calls.find(call => call.args[1]?.includes('--sync-agent'));
-  assert.ok(call);
-  clean(call.options.env);
-  assert.equal(call.options.env.FORGE_AUTH_TOKEN, 'fake-test-secret');
-  for (const name of ['FORGE_DEPLOYMENT_URL', 'DECLARED_INPUT', 'GH_TOKEN'])
-    assert.equal(call.options.env[name], process.env[name]);
 });
 
 test('release stage worker launch and ordinary command both drop planted unrelated secrets', t => {

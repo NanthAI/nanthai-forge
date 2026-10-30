@@ -12,7 +12,6 @@ const modules = {};
 for (const name of [
   'agentGuidance',
   'coordinationCounts',
-  'ownerAcceptance',
   'projectAutonomy',
   'projectBackupActions',
   'projectBackups',
@@ -113,7 +112,6 @@ const reads = [
   ['projectCheckRequests', 'list', { viewId: 'view', paginationOpts }],
   ['projectAutonomy', 'read', {}],
   ['agentGuidance', 'read', {}],
-  ['ownerAcceptance', 'status', { viewId: 'view' }],
   ['projectCoordination', 'sessions', { paginationOpts }],
   ['projectCoordination', 'feed', { paginationOpts }],
   ['projectCoordination', 'recent', { paginationOpts }],

@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const authority = await import(moduleUrl('../convex/projectSourceAuthority.ts'));
-const owner = await import(moduleUrl('../convex/ownerAcceptance.ts'));
 const work = await import(moduleUrl('../convex/projectWork.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const channels = await import(moduleUrl('../convex/projectHostedChannels.ts'));
@@ -85,7 +84,7 @@ for (const sameOperation of [false, true])
     assert.deepEqual(s.tables.hostedProjects.get(s.projectId).sourceAuthority, server);
   });
 
-test('old owner completion is refused after switch and remains stale after rollback to owner mode', async () => {
+test('authority transition requires retained owner requests to be settled before cutover', async () => {
   const s = setup();
   const input = {
     projectId: s.projectId,
@@ -107,21 +106,14 @@ test('old owner completion is refused after switch and remains stale after rollb
   const requestId = s.insert('ownerAcceptanceRequests', { ...input, ...request });
   const another = { ...input, operationId: randomUUID() };
   const completed = s.insert('ownerAcceptanceRequests', { ...another, ...request });
-  await s.call('complete-before', owner.complete, another);
+  s.patch('ownerAcceptanceRequests', completed, { state: 'rejected', receipt: another.receipt });
   assert.equal(s.tables.ownerAcceptanceRequests.get(completed).state, 'rejected');
-  assert.equal(s.counts.at(-1).touched.filter(x => x === 'hostedProjects').length, 1);
   await assert.rejects(s.transition(), code('SOURCE_AUTHORITY_DRAIN_REQUIRED'));
-  await s.call('complete-original-before-switch', owner.complete, input);
+  s.patch('ownerAcceptanceRequests', requestId, { state: 'rejected', receipt: input.receipt });
   await s.transition();
-  await assert.rejects(s.call('stale-complete', owner.complete, input), stale(server));
   assert.equal(s.tables.ownerAcceptanceRequests.get(requestId).state, 'rejected');
   await s.transition(server, 'native-owner');
-  await assert.rejects(
-    s.call('rollback-stale-complete', owner.complete, input),
-    stale({ mode: 'native-owner', epoch: 2 }),
-  );
-  s.patch('ownerAcceptanceRequests', requestId, { authorityEpoch: 2 });
-  await s.call('rollback-complete', owner.complete, input);
+
   assert.equal(s.tables.ownerAcceptanceRequests.get(requestId).state, 'rejected');
 });
 
@@ -133,7 +125,7 @@ test('legacy accept action and its final append transaction both fence a switch 
     auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
     runQuery: async () => s.tables.hostedProjects.get(s.projectId),
   };
-  await assert.rejects(actions.acceptChannel._handler(ctx, input), stale(server));
+  await assert.rejects(actions.acceptChannel._handler(ctx, input), code('CLI_UPGRADE_REQUIRED'));
   const command = JSON.stringify({
     action: 'accept-hosted-channel',
     channel: 'main',

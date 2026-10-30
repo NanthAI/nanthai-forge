@@ -7,7 +7,7 @@ import { usePageCritical } from '../ui/page-critical';
 import { useAttention } from '../shell/attention-context';
 // SPDX-License-Identifier: Apache-2.0
 import type { ReactNode } from 'react';
-import { useOwnerLifecycle, type LifecycleParts } from '../lane/OwnerLifecycle';
+import type { LifecycleParts } from '../lane/LifecycleParts';
 import { initiativeLinks } from '../cockpit/scale-model';
 import type { PlanningItem } from '../../../src/work-planning-types';
 import { intentBoardFacts } from './board-facts';
@@ -80,11 +80,6 @@ export default function HostedIntents({
 }) {
   const now = useNow();
   const canonicalContract = useQuery(readTestContract, intentId ? { projectId, intentId } : 'skip');
-  const ownerStatus = useQuery(api.ownerAcceptance.status, {
-    projectId,
-    viewId: intentId ?? '',
-    channel: 'lifecycle',
-  });
   const { user } = useUser();
   const intents = useWorkRecords<IntentHeader>(projectId, workspace, 'intents');
   const lanes = useWorkRecords<HostedLaneSummary>(projectId, workspace, 'lanes');
@@ -205,15 +200,7 @@ export default function HostedIntents({
       attributedVersions,
     ],
   );
-  const selectedIntent = intents.records.find(intent => intent.id === intentId);
-  const lifecycle = useOwnerLifecycle({
-    projectId,
-    collection: 'intents',
-    id: intentId ?? '',
-    head: selectedIntent?.base ?? '',
-    state: selectedIntent?.status ?? 'creating',
-    editable: workspace.capabilities.owner && Boolean(selectedIntent?.base),
-  });
+  const lifecycle = null;
   return (
     <BriefSourceContext.Provider value={briefs}>
       <HostedIntentsView
@@ -245,7 +232,7 @@ export default function HostedIntents({
         {...(addLane ? { addLane } : {})}
         {...(combine ? { combine } : {})}
         {...(planningAct ? { addNote: addPlanningComment } : addNote ? { addNote } : {})}
-        {...(setStatus && ownerStatus && !ownerStatus.native ? { setStatus } : {})}
+        {...(setStatus ? { setStatus } : {})}
         lifecycle={lifecycle}
         planningAct={planningAct}
         loadPlanningItem={async item =>

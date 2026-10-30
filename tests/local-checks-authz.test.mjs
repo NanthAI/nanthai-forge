@@ -6,7 +6,6 @@ import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 const checks = await import(moduleUrl('../convex/projectCheckRequests.ts'));
-const acceptance = await import(moduleUrl('../convex/ownerAcceptance.ts'));
 const code = expected => error => error.data?.code === expected;
 
 async function fixture() {
@@ -193,26 +192,4 @@ test('retained foreign requests are skipped without blocking an owned request or
     checks.claim._handler(s.ctx, { ...s.selection, operationId: own.operationId }),
     code('PROJECT_UNAVAILABLE'),
   );
-});
-
-test('canonical owner recheck requests remain project-owner-only', async () => {
-  const s = await fixture();
-  s.tables.ownerAcceptanceRequests = new Map();
-  const input = {
-    projectId: s.scope.projectId,
-    operationId: randomUUID(),
-    recheck: true,
-    viewId: s.input.viewId,
-    head: s.input.head,
-    expectedMain: null,
-  };
-  for (const caller of ['requester', 'runner-owner', 'unrelated', 'reader', 'outsider', null]) {
-    s.caller(caller);
-    await assert.rejects(acceptance.request._handler(s.ctx, input), code('PROJECT_UNAVAILABLE'));
-  }
-  s.caller('owner');
-  const result = await acceptance.request._handler(s.ctx, input);
-  assert.equal(result.requester, 'owner');
-  assert.equal(result.recheck, true);
-  assert.deepEqual(await acceptance.request._handler(s.ctx, input), result);
 });

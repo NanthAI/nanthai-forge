@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { cleanupOwner, registerOwnerPresence, stopOwnerCheckControllers } from './owner-cleanup.mjs';
 import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
+import { WorkStore } from '../dist/work-store.js';
 import { processAlive, processIdentity } from '../dist/local-process.js';
 
 // Use a standalone process so no unrelated referenced handle can hide an unref'd join.
@@ -130,7 +131,20 @@ test('failed-replay teardown stops only a leased controller in its synthetic own
     const lane = (await new AgentWorkflow(other).dispatch({ action: 'start', outcome: 'Synthetic guard' }))
       .result;
     await assert.rejects(stopOwnerCheckControllers(lane.path), /limited to synthetic/);
+    const locked = WorkStore.prototype.locked,
+      cleanupRoot = new WorkStore(root).root;
+    let publishing = true;
+    t.mock.method(WorkStore.prototype, 'locked', function (...args) {
+      if (this.root === cleanupRoot && publishing) {
+        publishing = false;
+        throw Object.assign(new Error('Synthetic controller is publishing its receipt'), {
+          code: 'WORK_BUSY',
+        });
+      }
+      return locked.apply(this, args);
+    });
     await cleanupOwner(root, undefined, { stopChecks: true });
+    assert.equal(publishing, false, 'cleanup encountered the publishing controller');
     assert.equal(processAlive(identity), false);
     assert.equal(existsSync(root), false);
     assert.equal(existsSync(other), true, 'unrelated owners are untouched');

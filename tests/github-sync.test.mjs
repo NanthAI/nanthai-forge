@@ -446,7 +446,7 @@ test('CLI supports dry-run and rejects retargeting an existing binding', async t
 test('GitHub status uses audit-compatible Work format and retries hosted metadata with stable pins', async t => {
   const { publishGithubStatus } = await import('../dist/github-sync-status.js');
   const { updateHostState } = await import('../dist/host-binding.js');
-  const { ownerSyncSchema } = await import('../dist/owner-sync-types.js');
+  const { githubStatusSchema } = await import('../dist/github-status-types.js');
   const { unifiedWorkSchema } = await import('../dist/work-unified-types.js');
   const f = fixture(t),
     schema = f.work.store.load().schema;
@@ -479,7 +479,7 @@ test('GitHub status uses audit-compatible Work format and retries hosted metadat
   assert.equal((await publishGithubStatus(f.work.store, client)).status, 'deferred');
   assert.equal((await publishGithubStatus(f.work.store, client)).status, 'published');
   assert.deepEqual(sent[0], sent[1]);
-  const payload = ownerSyncSchema.parse(JSON.parse(sent[1].metadata));
+  const payload = githubStatusSchema.parse(JSON.parse(sent[1].metadata));
   const binding = payload.entries[0].value;
   assert.equal(binding.repository, 'tests/sync');
   assert.equal(binding.branch, 'main');

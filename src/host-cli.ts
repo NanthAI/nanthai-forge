@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { rememberSourceAuthorityError } from './source-authority-client.js';
-import { markAgentSyncPrepared, startAgentSyncWorker } from './agent-sync-worker.js';
 import { hostProgress, type ProgressSink } from './host-progress.js';
 import { basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -18,14 +17,11 @@ import { continueLongAction } from './long-action.js';
 export const HOST_HELP = `nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--new] [--json] [--wait]
 nforge host ROOT --delete-project PROJECT_ID --confirm SLUG [--deployment URL] [--allow-bound-project] [--json]
 nforge host ROOT --abandon-pending OPERATION_UUID --confirm OPERATION_UUID
-nforge host ROOT --listen
 nforge host ROOT --status
 nforge host ROOT --resume [--json]
 nforge host ROOT --cutover-file REQUEST.json --dry-run|--apply
 nforge host ROOT --cutover-pins
 nforge host ROOT --source-authority '{"operationId":"UUID","expected":{"mode":"native-owner","epoch":0},"mode":"server"}'
-nforge host ROOT --no-auto-sync | --auto-sync
---listen consumes hosted acceptance requests every five seconds while running.
 Run nforge login first (cli scope). Only missing source/Work objects are uploaded.
 Source and records are seeded in bounded pages, then main is validated and selected.
 --json streams progress and result events as JSON lines; --wait remains accepted for compatibility. With no action, --json reads status only. --resume explicitly resumes interrupted hosting with its original operation. An already bound owner needs --new to create another project.
@@ -215,10 +211,8 @@ export async function hostProject(
         'Hosting operation changed.',
       );
       state.binding = binding;
-      markAgentSyncPrepared(state, binding);
       delete state.hosting;
     });
-    startAgentSyncWorker(store);
     progress.phase('complete');
     return {
       ...binding,

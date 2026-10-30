@@ -176,7 +176,7 @@ export function agentSync(
         lane = tx.fields('lanes', command.laneId)?.record;
       invariant(lane, 'NOT_FOUND', 'Lane not found.');
       const publish = (objects = new Map<string, Buffer>()) => {
-        const end = Date.now() + (workLockWaitMs() || 1000);
+        let end: number | undefined;
         for (;;) {
           const prepared = prepareNativeObjects(source, objects);
           try {
@@ -191,6 +191,9 @@ export function agentSync(
             return revision;
           } catch (error) {
             if (error !== checkpointPreparationChanged) throw error;
+            // Initial preparation/collection is not retry time. Start patience
+            // when a race is observed so its retained bytes can be restored once.
+            end ??= Date.now() + (workLockWaitMs() || 1000);
             if (Date.now() >= end)
               throw new ForgeError(
                 'SOURCE_CHANGED',

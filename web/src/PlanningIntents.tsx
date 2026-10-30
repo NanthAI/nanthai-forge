@@ -16,7 +16,7 @@ import { planningDestination } from './shell/route';
 import { age } from './ui/status';
 import { Glyph } from './ui/Glyph';
 import { ErrorToast } from './ui/Toast';
-import type { LifecycleParts } from './lane/OwnerLifecycle';
+import type { LifecycleParts } from './lane/LifecycleParts';
 import './planning.css';
 
 export function PlanningIntents({

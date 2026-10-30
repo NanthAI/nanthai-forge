@@ -30,16 +30,6 @@ export const agentSyncSchema = z.object({
 });
 export type AgentSyncState = z.infer<typeof agentSyncSchema>;
 export type SyncEntry = AgentSyncState['pending'][number];
-/** Preparation identity fences a missing-index reply racing a local preparation. */
-export const syncIndexState = (binding?: {
-  operationId: string;
-  backupId: string;
-  workIndexPreparation?: string | undefined;
-}) => JSON.stringify([binding?.operationId, binding?.backupId, binding?.workIndexPreparation]);
-export const syncUnprepared = (state: {
-  agentSync?: AgentSyncState | undefined;
-  binding?: Parameters<typeof syncIndexState>[0];
-}) => state.agentSync?.unprepared === syncIndexState(state.binding);
 const activity = (entry: SyncEntry) =>
   entry.activity as { sessionId?: string; sequence?: number; activityAt?: number };
 const metadata = (entry: SyncEntry) => {
