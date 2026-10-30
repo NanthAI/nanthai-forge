@@ -334,6 +334,19 @@ pins; local drafts are separate. `forge_check` observe is finite; only an explic
 Account credentials still request agent acceptance under current policy. See the
 [hosted CLI and MCP contract](../operations/source-exchange.md#hosted-agent-cli-and-mcp).
 
+Hosted source replies distinguish `submitted`, `retryable` and `failed`. A failed
+scheduled worker step returns `SOURCE_WORKER_STEP_FAILED`; a job with no progress
+past its worker lease returns `SOURCE_JOB_STALLED`. `SOURCE_PUBLICATION_STALLED`
+identifies completed source whose publication needs reconciliation. These include `failedPhase`
+and the retained job ID. Save, compose, sync and resolve replies include an exact
+`replay.command` with the original action, parameters and operation ID, including
+when finish is waiting on a source child. A retryable reply's `command` replays
+that operation to reconcile the same execution and cursor. Terminal failures
+retain the original receipt; their `command` starts a separately identified retry.
+Progress reads never schedule work or renew leases. An active source wait returns
+a stopped job immediately and uses the latest observed lease at its deadline,
+so a dead job is not reported as merely submitted after sixty seconds.
+
 For native MCP source queries after start, pass the returned `laneId` on every selected call. Omission uses startup source. `nforge mcp-config ROOT --agent` emits an optional configuration fragment without editing client settings. Autonomy and reversible-action records use Work format 11; keep a capable reader for recovery. Local tools operate under your OS account, without a sandbox claim. See [milestone qualification](../status.md) for actual measurements, package/source pins and remaining acceptance.
 
 When given a Forge prompt, run `nforge agent ROOT brief` (or `forge_brief`) for the linked situation and fresh context before working.

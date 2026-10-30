@@ -1,3 +1,4 @@
+import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
 import { guideHostedSync, resolveHostedAgent, recoverHostedCandidate } from './hosted-agent-resolution.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
@@ -529,14 +530,23 @@ export async function executeHostedAgent(
   }
   const composeOperationId = command.composeOperationId ?? (await session.journal.id('compose'));
   const desired = session.journal.get<z.infer<typeof hostedLandingDesiredSchema>>('desired-landing');
-  if (desired)
+  if (desired) {
+    const observed = await session.query<{ status?: string }>('projectHostedCompose:progress', {
+      operationId: composeOperationId,
+    });
+    const progress =
+      observed.status === 'retryable'
+        ? await session.mutation('projectHostedComposeJobs:submit', { operationId: composeOperationId })
+        : sourceWaitSnapshot(observed);
     return {
       phase: 'finish',
       composeOperationId,
+      ...(observed.status ? { progress } : {}),
       submission: await session.mutation('projectHostedLandingDesired:submit', {
         request: canonicalPayload({ ...desired, governanceVersion: 1 }),
       }),
     };
+  }
   let candidateId = command.candidateId;
   if (!candidateId) {
     const progress = await composeAgentSource(
@@ -567,6 +577,7 @@ export async function executeHostedAgent(
       return {
         phase: 'finish',
         composeOperationId,
+        progress,
         submission: await session.mutation('projectHostedLandingDesired:submit', {
           request: canonicalPayload({ ...desired, governanceVersion: 1 }),
         }),

@@ -1,3 +1,4 @@
+import { sourceProgress } from './projectSourceProgress';
 import { semanticPayload } from '../src/semantic-payload';
 import {
   mainSemanticMembers,
@@ -271,8 +272,14 @@ export const progress = query({
   handler: async (ctx, input) => {
     try {
       const auth = await caller(ctx, input),
-        { state, operation } = await loadCompose(ctx, auth, false);
+        { row, state, operation } = await loadCompose(ctx, auth, false);
       return canonicalPayload({
+        ...(state.status === 'submitted' || state.status === 'failed'
+          ? await sourceProgress(ctx, input.projectId, row.jobId)
+          : {}),
+        ...(operation.terminal?.outcome.status === 'failed'
+          ? { status: 'failed', error: operation.terminal.outcome.error }
+          : {}),
         state,
         terminal: operation.terminal,
         input: state.status === 'staging' ? null : hostedComposeInput(state, operation.firstAttempt.at),

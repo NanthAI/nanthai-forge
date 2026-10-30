@@ -1,3 +1,4 @@
+import { sourceProgress } from './projectSourceProgress';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { sourceWorkerPlan } from '../src/convex-source-provider';
@@ -82,7 +83,7 @@ export const submit = mutation({
         ),
         { projectId: input.projectId, jobId: row.jobId },
       );
-      return canonicalPayload({ status: 'submitted', jobId: row.jobId });
+      return canonicalPayload(await sourceProgress(ctx, input.projectId, row.jobId, job));
     } catch (error) {
       return report(error);
     }

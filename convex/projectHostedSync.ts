@@ -1,3 +1,4 @@
+import { sourceProgress } from './projectSourceProgress';
 import { loadLanding } from './projectHostedLandingStore';
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
@@ -191,8 +192,14 @@ export const progress = query({
   handler: async (ctx, input) => {
     try {
       const auth = await caller(ctx, input),
-        { state, operation } = await loadSync(ctx, auth, false);
+        { row, state, operation } = await loadSync(ctx, auth, false);
       return canonicalPayload({
+        ...(state.status === 'submitted' || state.status === 'failed'
+          ? await sourceProgress(ctx, input.projectId, row.jobId)
+          : {}),
+        ...(operation.terminal?.outcome.status === 'failed'
+          ? { status: 'failed', error: operation.terminal.outcome.error }
+          : {}),
         state,
         terminal: operation.terminal,
         input: hostedSyncInput(state, operation.firstAttempt.at),

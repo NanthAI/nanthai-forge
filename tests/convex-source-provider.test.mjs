@@ -396,3 +396,136 @@ test('a step that failed on a platform error is retried after the 60 s lease exp
     s.restore();
   }
 });
+
+test('a thrown worker failure is public and replayable before and after lease expiry, without another execution', async () => {
+  const s = await fixture();
+  const real = Date.now;
+  let offset = 0;
+  Date.now = () => real() + offset;
+  try {
+    await s.submit();
+    await s.execute(s.scheduled.shift());
+    const step = s.scheduled.shift();
+    const job = await s.load();
+    s.hooks.failStore = true;
+    await assert.rejects(s.execute(step), /synthetic platform failure/);
+    const args = {
+      projectId: s.projectId,
+      operationId: [...s.tables.projectHostedSaves.values()][0].operationId,
+    };
+    s.hooks.scheduled = 'failed';
+    const failed = JSON.parse(await s.call('failedProgress', saveApi.progress, args));
+    assert.equal(failed.status, 'retryable');
+    assert.equal(failed.error.code, 'SOURCE_WORKER_STEP_FAILED');
+    assert.equal(failed.failedPhase, `source-step:${step.args.step}`);
+    assert.equal(failed.jobId, job.id);
+    assert.equal(s.scheduled.length, 0, 'observation never schedules recovery');
+    offset += 61000;
+    const expired = JSON.parse(await s.call('expiredProgress', saveApi.progress, args));
+    assert.equal(expired.status, 'retryable');
+    assert.equal(expired.error.code, 'SOURCE_JOB_STALLED');
+    assert.equal(expired.failedPhase, failed.failedPhase);
+    const replay = JSON.parse(await s.submit());
+    assert.equal(replay.status, 'retryable', 'same-operation replay returns the stalled state immediately');
+    assert.equal(replay.jobId, job.id);
+    s.hooks.scheduled = 'failed';
+    await s.execute(s.scheduled.shift());
+    await s.execute(s.scheduled.shift());
+    assert.equal((await s.load()).status, 'completed');
+    assert.equal((await s.load()).executionId, job.executionId);
+    assert.equal(s.tables.projectSourceSteps.size, 1);
+  } finally {
+    Date.now = real;
+    s.restore();
+  }
+});
+
+test('an expired pending step is renewed in place by explicit replay, without duplicate scheduling', async () => {
+  const s = await fixture();
+  const real = Date.now;
+  let offset = 0;
+  Date.now = () => real() + offset;
+  try {
+    await s.submit();
+    await s.execute(s.scheduled.shift());
+    const step = s.scheduled.shift();
+    const job = await s.load();
+    offset += 61000;
+    const replay = JSON.parse(await s.submit());
+    assert.equal(replay.error.code, 'SOURCE_JOB_STALLED');
+    await s.execute(s.scheduled.shift());
+    assert.equal(s.scheduled.length, 0, 'the pending scheduler delivery already owns this step');
+    await s.execute(step);
+    assert.equal((await s.load()).status, 'completed');
+    assert.equal((await s.load()).executionId, job.executionId);
+  } finally {
+    Date.now = real;
+    s.restore();
+  }
+});
+
+test('lost publication delivery becomes retryable instead of staying submitted forever', async () => {
+  const s = await fixture();
+  const real = Date.now;
+  let offset = 0;
+  Date.now = () => real() + offset;
+  try {
+    await s.submit();
+    await s.execute(s.scheduled.shift());
+    await s.execute(s.scheduled.shift());
+    const job = await s.load();
+    offset += 61000;
+    const args = {
+      projectId: s.projectId,
+      operationId: [...s.tables.projectHostedSaves.values()][0].operationId,
+    };
+    const progress = JSON.parse(await s.call('lostDeliveryProgress', saveApi.progress, args));
+    assert.equal(progress.status, 'retryable');
+    assert.equal(progress.error.code, 'SOURCE_PUBLICATION_STALLED');
+    assert.equal(progress.failedPhase, 'source-publication');
+    const replay = JSON.parse(await s.submit());
+    assert.equal(replay.status, 'retryable');
+    assert.equal(replay.jobId, job.id);
+    assert.equal(
+      (await s.load()).version,
+      job.version,
+      'observation and submit never repeat output publication',
+    );
+  } finally {
+    Date.now = real;
+    s.restore();
+  }
+});
+
+test('a failed fanout task is public before its parent join runs or its lease expires', async () => {
+  const s = await fixture();
+  try {
+    await s.submit();
+    await s.execute(s.scheduled.shift());
+    const step = [...s.tables.projectSourceSteps.values()][0];
+    const batchId = s.insert('projectSourceBatches', {
+      projectId: s.projectId,
+      jobId: step.jobId,
+      step: step.step,
+      kind: 'verify',
+      end: 1,
+      total: 1,
+      next: 1,
+      completed: 1,
+      status: 'done',
+      failure: 'SOURCE_HASH_MISMATCH',
+    });
+    s.patch('projectSourceSteps', step._id, { batchId });
+    const args = {
+      projectId: s.projectId,
+      operationId: [...s.tables.projectHostedSaves.values()][0].operationId,
+    };
+    const observed = JSON.parse(await s.call('fanoutFailureProgress', saveApi.progress, args));
+    assert.equal(observed.status, 'retryable');
+    assert.equal(observed.error.code, 'SOURCE_HASH_MISMATCH');
+    assert.equal(observed.failedPhase, `source-step:${step.step}`);
+    assert((await s.load()).control.workerUntil > Date.now());
+  } finally {
+    s.restore();
+  }
+});

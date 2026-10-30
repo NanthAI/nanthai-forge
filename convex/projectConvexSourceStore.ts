@@ -117,6 +117,8 @@ export async function lookupConvexSource(
     // Scheduled actions are never retried by Convex. Only a step whose action
     // failed, was cancelled or aged out of the system table is resumed.
     const scheduled = await ctx.db.system.get(row.scheduledId);
+    if (scheduled?.state.kind === 'pending' && job.control.workerUntil <= Date.now())
+      await renewConvexSource(ctx, { ...args, step: row.step });
     if (
       (!scheduled || scheduled.state.kind === 'failed' || scheduled.state.kind === 'canceled') &&
       (await renewConvexSource(ctx, { ...args, step: row.step }))

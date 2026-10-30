@@ -1,3 +1,4 @@
+import { withSourceRecovery } from './hosted-agent-source-recovery.js';
 import { readHostedOverlapAdvice } from './hosted-overlap-client.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
@@ -272,7 +273,12 @@ export class HostedAgentTransport {
             (command.data as { laneId?: string }).laneId ??
             readHostedLaneCheckout(root)?.selection.laneId)
           : undefined;
-      return this.response(action, journal.operationId, result, overlapLane);
+      return this.response(
+        action,
+        journal.operationId,
+        await withSourceRecovery(session, action, command.data, result),
+        overlapLane,
+      );
     } catch (error) {
       const owner = nativeOwner(existsSync(this.root) ? realpathSync(this.root) : this.root);
       if (owner) rememberSourceAuthorityError(new WorkStore(owner), error, this.address.projectId);

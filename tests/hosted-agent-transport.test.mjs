@@ -85,9 +85,15 @@ test('pending source and finish steps return promptly and retain all child opera
   assert.equal(next.operationId, first.operationId);
   assert.equal(next.result.composeOperationId, first.result.composeOperationId);
   assert.equal(next.result.phase, 'finish');
-  assert.equal(s.calls.length - count, 2); // Discovery plus replay of the same server-owned goal.
+  assert.deepEqual(
+    s.calls.slice(count).map(call => call.name),
+    [
+      'projectHostedAgent:capabilities',
+      'projectHostedCompose:progress', // One selected read detects a failed source child.
+      'projectHostedLandingDesired:submit',
+    ],
+  );
   assert.deepEqual(next.result.submission, first.result.submission);
-  assert(!s.calls.slice(count).some(call => /Compose|Checks:enqueue/.test(call.name)));
   assert.equal(next.result.submission.request.finish.composeOperationId, first.result.composeOperationId);
 });
 
