@@ -393,17 +393,22 @@ For recorded historical replays, `scripts/measure-test-impact.mjs` accepts expli
 ### CI
 
 `.github/workflows/foundation.yml` compares exact Git pins. Markdown-only changes,
-including packaged docs, run foundation and package-document checks. Other changes
+including packaged docs, run foundation and package-document checks on pull requests. Other changes
 run full verification on pinned Node 24.22.1, plus native self-host.
 For each Node version, one static job runs the non-test verify stages and package
-smoke, and shares its builds with 24 parallel test shards on GitHub-hosted
+smoke, and shares its builds with eight parallel test shards on GitHub-hosted
 `ubuntu-latest` runners. `scripts/public-verify.mjs` reuses Forge's full selection,
 round-robin partition and Actions executor; every current test file is assigned
 once per Node version, including newly added files. Both matrices disable
 fail-fast, and native self-host is independent. The final `verify` job always runs
 and requires every selected job to succeed, including all shards; only jobs
 excluded by the docs-only scope may be skipped. Branch protection can require
-this single `verify` check.
+this single `verify` check. Pushes to main share a concurrency group: a newer push
+cancels older queued or running main verifies. Main pushes always select the full
+audit, including docs-only pushes that may supersede an unfinished code audit.
+Pull requests and manual runs each
+keep their own group. Eight test shards keep one full audit below the Free org
+concurrency allowance while preserving the full suite and every static stage.
 
 ## Code map
 

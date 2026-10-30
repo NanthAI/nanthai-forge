@@ -14,7 +14,7 @@ test('public full-suite partitions are deterministic and cover every file exactl
     .filter(name => name.endsWith('.test.mjs'))
     .map(name => `tests/${name}`)
     .sort();
-  for (const count of [1, 24, expected.length + 5]) {
+  for (const count of [1, 8, 24, expected.length + 5]) {
     const plan = benchmarkPlan(count, {}, files);
     assert.equal(plan.selection.scope, 'full');
     assert.deepEqual(plan.selection.tests, expected);
