@@ -3,6 +3,7 @@ import { hostedOverlapNotifications } from './mcp-hosted-overlaps.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
+import { lowerMcpCommand, verbInputSchemas } from './mcp-verbs.js';
 import { hostedAgentCli } from './hosted-agent-cli.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { observeHostedRun, hostedWaitSchema, type HostedRunSubscription } from './hosted-agent-observe.js';
@@ -71,13 +72,13 @@ export function registerHostedAgentWorkflow(
         'overlap-acks',
       ],
       description:
-        'Hosted Lane actions over the same CLI transport and recovery journal. checkpoint aliases save. Retain original parameters/operationId after unknown replies; a new UUID starts new work. Finish always requests agent acceptance under current project policy, including with account credentials. Pending is not accepted. finish priority:urgent is owner-only (other submitters retain normal with a reason). prioritize changes a queued Candidate submission priority:urgent|normal; it never cancels a running check.',
+        'Hosted Lane actions over the same CLI transport and recovery journal. Verbs: {action:start|save|land, mode?, ...fields of the old action}: start open|reopen; save sync|candidate|overlap-answer|overlap-answers|friction|decision; land save (checkOnly:true checks without landing). Old names still work; checkpoint aliases save. Retain original parameters/operationId after unknown replies; a new UUID starts new work. Finish always requests agent acceptance under current project policy, including with account credentials. Pending is not accepted. finish priority:urgent is owner-only (other submitters retain normal with a reason). prioritize changes a queued Candidate submission priority:urgent|normal; it never cancels a running check.',
     },
     {
       name: 'forge_check',
       actions: ['check', 'run', 'observe', 'tests', 'confirm-tests'],
       description:
-        'tests proposes proving tests for a Candidate; confirm-tests stores the under-90-second contract using complete timings from an exact-Candidate runId, expectedHead and expectedVersion. Optional tests replaces the proposed list. Acceptance gates are unchanged. Check a pinned hosted Candidate or observe one run/source operation/submission. run aliases check. Observation is one finite authorized read; it starts no compute or subscription. Use forge_wait for explicitly requested live run or submission observation.',
+        '{action:save, mode:check|contract, ...fields of check or confirm-tests}; old names still work. tests proposes proving tests for a Candidate; confirm-tests stores the under-90-second contract using complete timings from an exact-Candidate runId, expectedHead and expectedVersion. Optional tests replaces the proposed list. Acceptance gates are unchanged. Check a pinned hosted Candidate or observe one run/source operation/submission. run aliases check. Observation is one finite authorized read; it starts no compute or subscription. Use forge_wait for explicitly requested live run or submission observation.',
     },
     {
       name: 'forge_work_overview',
@@ -92,19 +93,21 @@ export function registerHostedAgentWorkflow(
       const body = hostedAgentCommandSchemas[canonical as keyof typeof hostedAgentCommandSchemas];
       return body.extend({ action: z.literal(action), operationId: z.uuid().optional() }).strict();
     });
+    // New verb forms come first: the older action objects strip unknown keys such as `mode`.
+    const all = [...verbInputSchemas(true, group.actions, false), ...options];
     server.registerTool(
       group.name,
       {
         description: group.description,
-        inputSchema: { command: z.union([options[0]!, options[1]!, ...options.slice(2)]) },
+        inputSchema: { command: z.union([all[0]!, all[1]!, ...all.slice(2)]) },
         annotations: { ...read, readOnlyHint: group.name === 'forge_work_overview' },
       },
       async ({ command }, extra) =>
         result(() => {
-          const { action, ...body } = command;
+          const { action, ...body } = lowerMcpCommand(command as Record<string, unknown>, true);
           return hostedAgentCli(
             transport.root,
-            action,
+            action as string,
             body,
             transport.address,
             transport,
