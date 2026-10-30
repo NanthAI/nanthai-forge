@@ -6,6 +6,7 @@ import { composeFixture, jobApi as composeJobs } from './hosted-compose-fixture.
 import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 import { driver as landingDriver, control as landingControl } from './hosted-landing-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { analyzeCrossHeadReuse } from '../dist/hosted-cross-head-analysis.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { digest } from '../dist/hash.js';
 import { convexStoreBlob } from './convex-storage-fake.mjs';
@@ -29,6 +30,7 @@ const convexSourceModules = Object.fromEntries(
   ),
 );
 const sourceJobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
+const reuseStore = await import(moduleUrl('../convex/projectHostedReuseStore.ts'));
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 export const maxima = {};
 export const code = value => error => (error.data?.code ?? error.code) === value;
@@ -40,11 +42,30 @@ export async function compose(c, selection) {
 }
 export async function finishFixture(
   t,
-  { overlap = false, inputCount = 1, selectedFileCount = 0, fileCount = 3 } = {},
+  {
+    overlap = false,
+    inputCount = 1,
+    selectedFileCount = 0,
+    fileCount = 3,
+    baselineFiles = [],
+    selectedFiles = null,
+    mainFiles = null,
+  } = {},
 ) {
   let now = Date.now();
   t.mock.method(Date, 'now', () => now);
-  const c = await composeFixture();
+  const c = await composeFixture({ baselineFiles });
+  const extraBase = JSON.parse(c.objects.get(c.baseline.sha256)).files.filter(
+    file => !['a.txt', 'hidden.bin'].includes(file.path),
+  );
+  const apply = (files, delta) => {
+    const next = new Map(files.map(file => [file.path, file]));
+    for (const [path, text] of delta) {
+      if (text === null) next.delete(path);
+      else next.set(path, c.file(path, text));
+    }
+    return [...next.values()];
+  };
   const largePin = selectedFileCount ? c.put(Buffer.alloc(100 * 1024, 65)) : null;
   const largeFiles = Array.from({ length: selectedFileCount }, (_, i) => ({
     path: `deep/a/b/c/d/${String(i).padStart(6, '0')}`,
@@ -55,7 +76,7 @@ export async function finishFixture(
     [
       overlap ? c.file('a.txt', 'ours\nb\nc\n') : c.baseFile,
       c.hidden,
-      c.file('selected.txt', 'selected\n'),
+      ...apply(extraBase, selectedFiles ?? [['selected.txt', 'selected\n']]),
       ...largeFiles,
       ...Array.from({ length: Math.max(0, fileCount - 3) }, (_, i) =>
         c.file(`extra-${i}.txt`, `selected ${i}\n`),
@@ -186,6 +207,29 @@ export async function finishFixture(
     [...f.tables._scheduled_functions.values()]
       .filter(x => x.state.kind === 'pending')
       .sort((a, b) => a.scheduledTime - b.scheduledTime);
+  const runReuseAction = async (ref, args) => {
+    assert.equal(getFunctionName(ref), 'projectHostedReuse:prove');
+    const context = await tx('reuseContext', reuseStore.context, {
+      projectId: f.projectId,
+      submissionId: args.submissionId,
+    });
+    if (!context) return null;
+    const owner = await tx('reuseClaim', reuseStore.claim, { ...args, owner: randomUUID() });
+    if (!owner) return null;
+    let proof = null;
+    try {
+      proof = await analyzeCrossHeadReuse(context.basis, context.selection, async hashes =>
+        hashes.map(hash => c.objects.get(hash)),
+      );
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+    }
+    return tx('reuseComplete', reuseStore.complete, {
+      ...args,
+      owner,
+      proof: proof ? JSON.stringify(proof) : null,
+    });
+  };
   const execute = async (task = pending()[0], stop = null) => {
     assert(task, 'pending task');
     now = Math.max(now, task.scheduledTime);
@@ -199,6 +243,7 @@ export async function finishFixture(
         metrics.stepCalls.push(calls);
         await driver.drive._handler(
           {
+            runAction: runReuseAction,
             runMutation: async (ref, args) => {
               const name = getFunctionName(ref);
               calls.push(name);
@@ -325,7 +370,7 @@ export async function finishFixture(
             [
               overlap ? c.file('a.txt', 'theirs\nb\nc\n') : c.baseFile,
               c.hidden,
-              c.file('accepted.txt', 'already accepted\n'),
+              ...apply(extraBase, mainFiles ?? [['accepted.txt', 'already accepted\n']]),
             ],
             [old.head],
           );
@@ -393,6 +438,7 @@ export async function finishFixture(
     execute,
     drain,
     passChecks,
+    runReuseAction,
     moveMain,
     metrics,
     advanceClock: ms => {

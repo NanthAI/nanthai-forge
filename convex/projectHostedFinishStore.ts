@@ -32,6 +32,7 @@ export async function writeFinish(ctx: MutationCtx, row: Doc<'projectHostedFinis
   await ctx.db.patch(row._id, {
     value: canonicalPayload(hostedFinishSchema.parse(value)),
     composeOperationId: value.pending?.operations.compose ?? null,
+    ...(!value.pending ? { reuseLease: undefined } : {}),
   });
 }
 export async function initializeFinish(ctx: MutationCtx, state: HostedLandingState) {

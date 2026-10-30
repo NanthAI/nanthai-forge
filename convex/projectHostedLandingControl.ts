@@ -238,8 +238,8 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
           projectId: claim.projectId,
           runId: check.runId,
           actor: attempt.actor.id,
-          candidateId: attempt.candidate.id,
-          head: attempt.candidate.head,
+          candidateId: attempt.crossHeadProof?.checked.id ?? attempt.candidate.id,
+          head: attempt.crossHeadProof?.checked.head ?? attempt.candidate.head,
           checkId: check.checkId,
           definition: check.definition,
           configuration: check.configuration,
@@ -303,7 +303,7 @@ export async function claimReadyLanding(
 ): Promise<LandingClaim | null> {
   const queue = await landingQueue(ctx, input);
   invariant(queue, 'NOT_FOUND', 'Hosted landing queue not found.');
-  const { state } = await loadLanding(ctx, input);
+  const { state, row } = await loadLanding(ctx, input);
   invariant(
     state.phase === 'ready' && state.attemptId === input.attemptId,
     'WORK_STALE',
@@ -315,6 +315,29 @@ export async function claimReadyLanding(
       queue.lease.attemptId === input.attemptId
       ? { ...input, token: queue.lease.token }
       : null;
+  }
+  if (row.priority !== 'urgent') {
+    const [urgent] = await ctx.db
+      .query('projectHostedLandingRequests')
+      .withIndex('by_project_and_channel_and_phase_and_priority_and_sequence', q =>
+        q
+          .eq('projectId', input.projectId)
+          .eq('channel', input.channel)
+          .eq('phase', 'ready')
+          .eq('priority', 'urgent'),
+      )
+      .order('asc')
+      .take(1);
+    if (urgent && !urgent.hold) {
+      const selected = JSON.parse(urgent.value) as HostedLandingState;
+      if (
+        !selected.error &&
+        selected.observation.pendingReason !== 'waiting-for-review' &&
+        selected.observation.pendingReason !== 'waiting-for-dependency' &&
+        !(state.batchId && state.batchId === selected.batchId)
+      )
+        return null;
+    }
   }
   if (queue.wake) await ctx.scheduler.cancel(queue.wake.taskId);
   const lease = {

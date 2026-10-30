@@ -171,7 +171,7 @@ export async function writeLanding(
     'WORK_OPERATION_CHANGED',
     'The selected attempt must belong to this original request.',
   );
-  if (previous.attemptId !== state.attemptId) await retainLandingProgress(ctx, previous, true);
+  if (previous.attemptId !== state.attemptId) await retainLandingProgress(ctx, previous, true, attempt.main);
   if (
     state.observation.stall &&
     (state.observation.state !== 'pending' ||
@@ -252,12 +252,30 @@ export async function settleLandingOperation(ctx: MutationCtx, state: HostedLand
 
 /** Mutable evidence is separate from immutable attempt/source/operation pins. A
  * replaced attempt is frozen before the request starts its next source phase. */
-export async function retainLandingProgress(ctx: MutationCtx, state: HostedLandingState, replaced = false) {
+export async function retainLandingProgress(
+  ctx: MutationCtx,
+  state: HostedLandingState,
+  replaced: boolean | { code: string; message: string } = false,
+  nextMain?: HostedLandingAttempt['main'],
+) {
   const row = await landingAttemptRow(ctx, {
     projectId: state.projectId as Id<'hostedProjects'>,
     attemptId: state.attemptId,
   });
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original attempt is unavailable.');
+  const mainChanged =
+    nextMain &&
+    canonicalPayload(hostedLandingAttemptSchema.parse(JSON.parse(row.value)).main) !==
+      canonicalPayload(nextMain);
+  const replacement =
+    replaced === true
+      ? mainChanged
+        ? {
+            code: 'CHANNEL_CHANGED',
+            message: 'Main changed; a named child recomposes the original selection.',
+          }
+        : { code: 'ATTEMPT_REPLACED', message: 'A named child or check binding replaced this attempt.' }
+      : replaced || null;
   if (row.progress) {
     const retained = hostedLandingProgressSchema.parse(JSON.parse(row.progress));
     if (retained.settled) {
@@ -277,16 +295,11 @@ export async function retainLandingProgress(ctx: MutationCtx, state: HostedLandi
     progress: semanticPayload({
       ...(state.semanticConflicts ? { semanticConflicts: state.semanticConflicts } : {}),
       ...(state.batchDiagnostic ? { batchDiagnostic: state.batchDiagnostic } : {}),
-      observation: replaced ? landingObservation('failed', 'CHANNEL_CHANGED') : state.observation,
+      observation: replacement ? landingObservation('failed', replacement.code) : state.observation,
       phase: replaced ? 'terminal-failed' : state.phase,
-      error: replaced
-        ? {
-            code: 'CHANNEL_CHANGED',
-            message: 'Main changed; a named child recomposes the original selection.',
-          }
-        : state.error,
+      error: replacement ?? state.error,
       acceptance: state.acceptance ?? null,
-      settled: replaced || state.phase === 'landed' || state.phase === 'terminal-failed',
+      settled: Boolean(replacement) || state.phase === 'landed' || state.phase === 'terminal-failed',
       version: state.version,
       ...(state.timing || replaced
         ? {

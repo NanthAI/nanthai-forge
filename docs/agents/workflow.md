@@ -528,6 +528,51 @@ static checks and select transitive test importers plus smoke coverage. Set
 is captured in the environment fingerprint. Missing runner comparison inputs
 fall back to full. Pinned main-audit Candidates (`mainCheck.channel`) always run full, including manual reruns without an environment override. See [development](../development.md#scope-aware-standard-check).
 
+A shared batch fallback preserves an already-reserved individual check when its
+Candidate, input/dependency roots, authority and run pins still match. It repairs
+legacy scheduling flags without changing that attempt or starting another run;
+a later pass on the original run can accept on unchanged main. A genuinely shared
+check still needs an individual composition after fallback. Attempt history names
+that transition `BATCH_FALLBACK`; only an actual main head or receipt advance is
+`CHANNEL_CHANGED`. A check-binding change is `ATTEMPT_REPLACED`, and an audit
+proof refresh without source churn is `CHECK_EVIDENCE_REFRESH`.
+
+Hosted main-only finish retries can reuse a READY pass through
+`acceptance.hostedCrossHeadReuse` (absent means on). This is separate from the
+native `disjointFastPath` setting. Single-Candidate owner-agent automatic landings recompose their
+pinned inputs cleanly on current main. Verified manifests must have disjoint
+changed paths, including file/directory prefixes, and conservative affected-test
+selections must be disjoint across the base, checked, current-main and recomposed
+inventories. Fixed smoke coverage is separate; a smoke test reached by either
+delta remains affected. The original passing selection must cover every affected
+Candidate test. Unknown imports, unclassified changes, incomplete source or
+coverage, semantic contract interactions, missing full main evidence and audit
+red/debt retain the ordinary exact recheck. A newer main race repeats the proof
+against the original checked head, without constructing a chain of inherited passes.
+Batches retain one shared exact recheck: their multiple same-head receipt snapshots
+do not yet provide the single-transition recovery proof required for this optimization.
+
+Proof analysis holds one renewable owner lease on the existing finish watchdog.
+Duplicate delivery starts no second analysis, cancellation fences late callbacks,
+and an expired proof falls back once to its named exact retry.
+
+The receipt records `crossHeadProof`: both source heads, both path/test proofs,
+the immutable check/selection digests and a comparable full-passing main baseline.
+A legacy full main receipt can seed that baseline only after its exact passing
+run and full selection are verified. The recomposed head adds main-audit debt;
+it never adopts the old pass as a full audit of new bytes. Existing coalesced
+main auditing and culprit classification, fix-forward or compensating revert
+handle a failed audit. Authority, policy, source registration, governance, input
+pins and current main/receipt CAS are still checked at publication. Set
+`acceptance.hostedCrossHeadReuse:false` to retain ordinary exact retries.
+
+Hosted `prioritize` accepts queued, checking and ready submissions with the
+existing owner authority and priority-version CAS. It changes one submission row
+and preserves its check, attempt and live lease. Urgent READY work takes the next
+free acceptance lease ahead of normal READY work; an existing live lease and a
+reserved shared batch check continue unchanged. Settled submissions retain their
+recorded priority. Use another priority change with the current version to undo.
+
 ### Landing wait progress
 
 `nforge land ROOT LANE… --wait` and agent/MCP `land` with `wait:true` report

@@ -29,6 +29,7 @@ export type HostedFinish = z.infer<typeof hostedFinishSchema>;
  * synchronous loop: every further race gets its own retained source/check work. */
 export const hostedFinishBackoff = (number: number) => Math.min(30_000, 250 * 2 ** Math.min(number - 1, 7));
 export type FinishCommand =
+  | { kind: 'reuse'; pendingId: string }
   | {
       kind: 'page';
       url: string;

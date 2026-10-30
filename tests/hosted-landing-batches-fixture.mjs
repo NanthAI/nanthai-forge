@@ -114,6 +114,7 @@ export async function batchesFixture(
     try {
       await driver.drive._handler(
         {
+          runAction: f.runReuseAction,
           runMutation: (ref, args) => {
             const name = getFunctionName(ref).split(':')[1];
             if (name === 'resume' && stop === 'before-resume')

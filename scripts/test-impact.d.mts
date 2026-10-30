@@ -11,6 +11,7 @@ export type TestSelection = {
   scope: string;
   reason: string;
   tests: string[];
+  affectedTests?: string[];
   reasons?: Record<string, SelectionReason>;
   coverage?: CoverageShadow;
 };
@@ -28,3 +29,4 @@ export function standardSelection(input: {
 export function selectionSourcePath(path: string): boolean;
 
 export function selectTests(input: { files: Map<string, string>; paths: string[] }): TestSelection;
+export function selectImpactPair(files: Map<string, string>, comparisons: string[][]): TestSelection[];

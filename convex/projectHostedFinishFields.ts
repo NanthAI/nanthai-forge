@@ -8,6 +8,7 @@ export const hostedFinishTables = {
     composeOperationId: v.union(v.string(), v.null()),
     parentSubmissionId: v.union(v.string(), v.null()),
     waiting: v.boolean(),
+    reuseLease: v.optional(v.object({ pendingId: v.string(), owner: v.string(), until: v.number() })),
     wake: v.union(
       v.object({ id: v.string(), taskId: v.id('_scheduled_functions'), at: v.number() }),
       v.null(),

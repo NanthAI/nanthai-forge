@@ -2,7 +2,9 @@
 import type { MutationCtx } from './_generated/server';
 import { batchMemberDiagnostic } from '../src/hosted-batch-diagnosis';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { loadLanding, writeLanding } from './projectHostedLandingStore';
+import { loadLanding, loadLandingAttempt, writeLanding } from './projectHostedLandingStore';
+import { individualLandingRun } from './projectHostedLandingIndividual';
+import { landingObservation } from '../src/hosted-landing';
 import { loadFinish } from './projectHostedFinishStore';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { writeBatch, type BatchIdentity, type LandingBatch } from './projectHostedLandingBatchStore';
@@ -26,6 +28,33 @@ export async function advanceBatchFallback(
     ),
   );
   const pending = current.filter(member => !['landed', 'terminal-failed'].includes(member.state.phase));
+  for (const member of pending) {
+    if (!member.state.batchNeedsSoloCompose || !member.row.runId) continue;
+    const original = batch.members.find(entry => entry.submissionId === member.state.id)!;
+    const run = await individualLandingRun(
+      ctx,
+      input.projectId,
+      await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: member.state.attemptId }),
+      original.candidate,
+    );
+    if (!run) continue;
+    const { batchNeedsSoloCompose: _needs, ...state } = member.state;
+    void _needs;
+    member.state = await writeLanding(
+      ctx,
+      member.row,
+      {
+        ...state,
+        batchSolo: true,
+        phase: run.status === 'passed' ? 'ready' : 'checking',
+        observation: landingObservation(run.status === 'passed' ? 'queued' : 'checking'),
+        error: null,
+        version: state.version + 1,
+      },
+      true,
+    );
+    member.row = (await loadLanding(ctx, { projectId: input.projectId, submissionId: member.state.id })).row;
+  }
   // Preserve an already-running original attempt, including replay after a lost wake.
   const running = pending.find(member => member.state.batchSolo && !member.state.batchNeedsSoloCompose);
   let next = running ?? pending[0];
@@ -91,6 +120,6 @@ export async function advanceBatchFallback(
     await ctx.db.patch(next.row._id, { runnable: false });
     return { handled: next.state.id !== submissionId, command: null };
   }
-  await reserveFinishRetry(ctx, finish.row, finish.value);
+  await reserveFinishRetry(ctx, finish.row, finish.value, 'BATCH_FALLBACK');
   return { handled: true, command: null };
 }

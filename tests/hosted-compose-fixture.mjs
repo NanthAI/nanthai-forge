@@ -16,7 +16,7 @@ const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
 const callbacks = await import(moduleUrl('../convex/projectSourceJobApi.ts'));
 export const code = value => error => (error.data?.code ?? error.code) === value;
 export const maxima = {};
-export async function composeFixture() {
+export async function composeFixture({ baselineFiles = [] } = {}) {
   const s = lanesFixture(),
     objects = new Map(),
     scheduled = [];
@@ -121,7 +121,7 @@ export async function composeFixture() {
   const file = (path, bytes, mode = 'file') => ({ path, blob: put(bytes).sha256, mode });
   const baseFile = file('a.txt', 'a\nb\nc\n'),
     hidden = file('hidden.bin', Buffer.alloc(4096, 0));
-  const baseline = state([baseFile, hidden]);
+  const baseline = state([baseFile, hidden, ...baselineFiles.map(([path, text]) => file(path, text))]);
   register(baseline);
   const main = {
     schema: 2,

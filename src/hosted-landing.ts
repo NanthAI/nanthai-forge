@@ -9,6 +9,7 @@ import { hostedCheckRequestSchema, checkNumber } from './hosted-check.js';
 import { autonomyPolicySchema } from './autonomy-policy.js';
 import { composeRequestSchema } from './hosted-compose.js';
 import { submissionOutcome } from './landing-submission-state.js';
+import { crossHeadProofSchema } from './hosted-cross-head-proof.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const finishRetryReasonSchema = z.enum(['flake', 'main-moved', 'infra', 'other']);
@@ -55,6 +56,7 @@ export const hostedLandingCancelSchema = z
   .strict();
 export const hostedLandingAttemptSchema = z
   .object({
+    crossHeadProof: crossHeadProofSchema.optional(),
     semanticPlan: semanticPlanSchema.optional(),
     deferredCheck: z.literal(true).optional(),
     memberCandidate: z

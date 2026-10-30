@@ -129,7 +129,7 @@ export async function noteMainLanding(
   input: { project: Doc<'hostedProjects'>; receipt: HostedAcceptance; run: HostedCheckRun | null },
 ): Promise<void> {
   const { receipt, run } = input;
-  if (!run?.gate || run.status !== 'passed') return;
+  if (!run || (!run.gate && !receipt.crossHeadProof) || run.status !== 'passed') return;
   const projectId = input.project._id;
   let row = await auditRow(ctx, projectId);
   if (!row) {
@@ -152,7 +152,22 @@ export async function noteMainLanding(
     }
   }
   if ((row.lastGreen?.sequence ?? -1) >= receipt.snapshot.revision) return;
-  if (fullGate(run) && !docsGate(run)) {
+  const baseline = receipt.crossHeadProof?.audit;
+  if (baseline?.source === 'main-receipt' && (row.lastGreen?.sequence ?? -1) < baseline.sequence) {
+    if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+    // The proof action read this predecessor's immutable full selection; H14
+    // revalidated its exact run. Bootstrap legacy full-gated projects without
+    // falsely stamping the newly recomposed head as full-audited.
+    const patch = {
+      lastGreen: { sequence: baseline.sequence, head: baseline.head, runId: baseline.runId },
+      unaudited: { count: 0, firstAt: null },
+      debt: false,
+      wake: undefined,
+    };
+    await ctx.db.patch(row._id, patch);
+    row = { ...row, ...patch };
+  }
+  if (!receipt.crossHeadProof && fullGate(run) && !docsGate(run)) {
     if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
     await ctx.db.patch(row._id, {
       lastGreen: { sequence: receipt.snapshot.revision, head: receipt.candidate.head, runId: run.id },
@@ -175,15 +190,22 @@ export async function noteMainLanding(
     }
     return;
   }
-  if (docsGate(run) && row.lastGreen?.head === receipt.previous.head && !row.red && !row.unaudited?.count) {
+  if (
+    !receipt.crossHeadProof &&
+    docsGate(run) &&
+    row.lastGreen?.head === receipt.previous.head &&
+    !row.red &&
+    !row.unaudited?.count
+  ) {
     await ctx.db.patch(row._id, {
       lastGreen: { ...row.lastGreen, sequence: receipt.snapshot.revision, head: receipt.candidate.head },
     });
     return;
   }
   // A docs pass cannot bless an unknown or already unaudited parent.
-  const count = (row.unaudited?.count ?? 0) + (docsGate(run) ? 0 : 1);
-  const firstAt = row.unaudited?.firstAt ?? (docsGate(run) ? null : receipt.at);
+  const docs = !receipt.crossHeadProof && docsGate(run);
+  const count = (row.unaudited?.count ?? 0) + (docs ? 0 : 1);
+  const firstAt = row.unaudited?.firstAt ?? (docs ? null : receipt.at);
   const settings = await auditSettings(ctx, projectId);
   await ctx.db.patch(row._id, {
     unaudited: { count, firstAt: count ? firstAt : null },

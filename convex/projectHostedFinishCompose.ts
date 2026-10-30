@@ -25,12 +25,15 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { landingObservation } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
+import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
+import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 /** A main race is not a retry of the old request or a reusable check. Retain a
  * named child before IO, yield with bounded backoff, and resume that child only. */
 export async function reserveFinishRetry(
   ctx: MutationCtx,
   row: Doc<'projectHostedFinishes'>,
   value: HostedFinish,
+  cause: 'BATCH_FALLBACK' | 'CHECK_EVIDENCE_REFRESH' = 'CHECK_EVIDENCE_REFRESH',
 ) {
   invariant(!value.pending, 'WORK_STALE', 'Resume the already pending finish attempt.');
   const input = { projectId: row.projectId, submissionId: row.submissionId };
@@ -45,7 +48,15 @@ export async function reserveFinishRetry(
     main: { head: main.head, receiptId: main.receipt.id },
     operations: { compose: crypto.randomUUID(), check: crypto.randomUUID(), accept: crypto.randomUUID() },
   };
-  await retainLandingProgress(ctx, state, true);
+  const mainChanged = main.head !== previous.main.head || main.receipt.id !== previous.main.receiptId;
+  await retainLandingProgress(ctx, state, {
+    code: mainChanged ? 'CHANNEL_CHANGED' : cause,
+    message: mainChanged
+      ? 'Main changed; a named child recomposes the original selection.'
+      : cause === 'BATCH_FALLBACK'
+        ? 'The shared batch fell back to an individual Candidate; main did not change.'
+        : 'The acceptance evidence needs an exact refresh; main did not change.',
+  });
   await writeFinish(ctx, row, { ...value, pending });
   await writeLanding(
     ctx,
@@ -131,6 +142,7 @@ export async function installFinishCompose(
   ctx: MutationCtx,
   row: Doc<'projectHostedFinishes'>,
   value: HostedFinish,
+  proof?: CrossHeadProof,
 ) {
   const input = { projectId: row.projectId, submissionId: row.submissionId };
   const { row: landing, state } = await loadLanding(ctx, input),
@@ -159,16 +171,51 @@ export async function installFinishCompose(
     projectId: row.projectId,
     attemptId: state.firstAttemptId,
   });
+  const previous = proof
+    ? await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: pending.parentAttemptId })
+    : null;
+  if (proof && previous?.check && previous.candidate.head) {
+    const checked = previous.crossHeadProof?.checked ?? previous.candidate;
+    const checkedBase = previous.crossHeadProof?.checkedBase ?? previous.main;
+    invariant(
+      validCrossHeadProof(proof) &&
+        proof.checked.id === checked.id &&
+        proof.checked.head === checked.head &&
+        proof.checked.digest === checked.digest &&
+        canonicalPayload(proof.checkedBase) === canonicalPayload(checkedBase) &&
+        canonicalPayload(proof.main) === canonicalPayload(pending.main) &&
+        candidate.result.status === 'clean' &&
+        proof.head === candidate.result.head &&
+        proof.runId === previous.check.runId,
+      'EVIDENCE_CHANGED',
+      'Reuse only the exact verified recomposition proof.',
+    );
+    const run = await requireHostedCheckEvidence(ctx, {
+      projectId: row.projectId,
+      actor: previous.actor.id,
+      candidateId: checked.id,
+      head: checked.head!,
+      authorityEpoch: previous.authorityEpoch,
+      ...previous.check,
+    });
+    invariant(
+      run.terminalDigest === proof.terminalDigest &&
+        run.planDigest === proof.planDigest &&
+        run.plan?.selection.sha256 === proof.checkedSelection,
+      'EVIDENCE_CHANGED',
+      'The original check proof changed.',
+    );
+  } else proof = undefined;
   const attempt = await pinLandingAttempt(ctx, {
     ...input,
     actor: original.actor,
-    deferCheck: !state.batchSolo,
+    deferCheck: proof ? false : !state.batchSolo,
     request: {
       ...state.request,
       expectedMain: pending.main,
       candidateId: candidate.id,
       expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,
-      check: value.check,
+      check: proof ? null : value.check,
     },
     attemptId: pending.id,
     parentAttemptId: pending.parentAttemptId,
@@ -177,6 +224,10 @@ export async function installFinishCompose(
     operations: { check: pending.operations.check, accept: pending.operations.accept },
     retainedSelection: original.candidate,
   });
+  if (proof && previous?.check) {
+    attempt.check = previous.check;
+    attempt.crossHeadProof = proof;
+  }
   await insertLandingAttempt(ctx, attempt);
   await writeFinish(ctx, row, { ...value, pending: null });
   const { batchNeedsSoloCompose: _needsSolo, ...installedState } = state;

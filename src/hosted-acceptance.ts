@@ -4,6 +4,7 @@ import { hostedMacEvidenceSchema } from './hosted-check.js';
 import { hostedLandingAttemptSchema } from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';
+import { crossHeadProofSchema } from './hosted-cross-head-proof.js';
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 /** Immutable publication evidence. Input roots retain the exact ordered Lane
@@ -23,6 +24,7 @@ export const hostedAcceptanceSchema = z
     candidate: hostedLandingAttemptSchema.shape.candidate.extend({ head: hash }),
     memberCandidate: hostedLandingAttemptSchema.shape.candidate.optional(),
     batchId: z.uuid().optional(),
+    crossHeadProof: crossHeadProofSchema.optional(),
     actor: hostedLandingAttemptSchema.shape.actor,
     policyDigest: hash,
     check: z

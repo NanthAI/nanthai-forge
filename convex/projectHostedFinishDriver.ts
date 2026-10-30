@@ -79,6 +79,14 @@ export const drive = internalAction({
     );
     if (!raw) return null;
     const command = JSON.parse(raw) as FinishCommand;
+    if (command.kind === 'reuse') {
+      await ctx.runAction(makeFunctionReference<'action'>('projectHostedReuse:prove'), {
+        projectId: input.projectId,
+        submissionId: input.submissionId,
+        pendingId: command.pendingId,
+      });
+      return null;
+    }
     if (command.kind === 'plan') {
       const bytes = new TextEncoder().encode(command.value),
         key = r2Key(input.projectId, command.pin.sha256);

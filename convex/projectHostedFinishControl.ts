@@ -24,6 +24,7 @@ import { savePin } from '../src/hosted-save';
 import { landingObservation } from '../src/hosted-landing';
 import type { FinishCommand } from '../src/hosted-finish';
 import { ForgeError, invariant } from '../src/errors';
+import { reuseContext } from './projectHostedReuseStore';
 export type FinishIdentity = LandingIdentity & { wakeId: string };
 export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promise<FinishCommand | null> {
   const { row, value } = await loadFinish(ctx, input);
@@ -80,6 +81,20 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
     if (value.pending) {
       const source = await prepareFinishCompose(ctx, input, value);
       if (source.operation.terminal) {
+        if (row.reuseLease?.pendingId === value.pending.id) {
+          if (row.reuseLease.until > Date.now()) {
+            await scheduleFinish(ctx, row, row.reuseLease.until - Date.now(), true);
+          } else {
+            // Unknown proof outcome: one ordinary exact check, never a second
+            // simultaneous analysis. Late callbacks are fenced by pending ID.
+            await installFinishCompose(ctx, row, value);
+          }
+          return null;
+        }
+        if (await reuseContext(ctx, input)) {
+          await scheduleFinish(ctx, row, 30_000, true);
+          return { kind: 'reuse', pendingId: value.pending.id };
+        }
         await installFinishCompose(ctx, row, value);
         return null;
       }
@@ -173,7 +188,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       if (state.batchId && !state.batchSolo) await publishLandingBatch(ctx, claim);
       else await publishAcceptance(ctx, claim);
     } catch (error) {
-      if (error instanceof ForgeError && error.code === 'CHANNEL_CHANGED') {
+      if (error instanceof ForgeError && ['CHANNEL_CHANGED', 'CHECK_EVIDENCE_REFRESH'].includes(error.code)) {
         // Yield the Channel so later independent runnable requests can advance.
         const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
         if (queue) await releaseLandingQueue(ctx, queue);
@@ -206,6 +221,11 @@ async function resumeFinishIOOnce(
   input: FinishIdentity & { command: FinishCommand; page?: unknown; storageId?: string; key?: string },
 ) {
   const { row, value } = await loadFinish(ctx, input);
+  invariant(
+    input.command.kind !== 'reuse',
+    'WORK_OPERATION_CHANGED',
+    'Proof completion uses its internal source verifier.',
+  );
   if (row.wake?.id !== input.wakeId) return;
   const { state } = await loadLanding(ctx, input);
   if (input.command.kind === 'plan' && input.command.batchId) {

@@ -1,7 +1,7 @@
 import { trackHostedOverlapMain } from './projectHostedOverlapStore';
 import { hostedAcceptGate, holdMainRed } from './projectHostedGate';
 import { protectedGatePaths } from '../src/contract-gate-policy';
-import { noteMainLanding } from './projectHostedMainAuditState';
+import { noteMainLanding, mainGate } from './projectHostedMainAuditState';
 import type { HostedCheckRun } from '../src/hosted-check';
 // SPDX-License-Identifier: Apache-2.0
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
@@ -25,6 +25,8 @@ import { landingObservation } from '../src/hosted-landing';
 import { digest } from '../src/portable-hash';
 import { governanceReason, requiresGovernedCheck } from '../src/public-governance';
 import { invariant } from '../src/errors';
+import { validCrossHeadProof } from '../src/hosted-cross-head-proof';
+import { requireReuseAudit } from './projectHostedReuseAudit';
 /** One constant-size publication transaction. A completed replay authorizes the
  * reader first, then returns the original receipt without rechecking old policy,
  * acquiring another lease or rewinding any later main/saved Lane. */
@@ -117,6 +119,36 @@ export async function publishAcceptance(
     'Accept only the original clean Candidate composed on the current main receipt.',
   );
   const head = candidate.result.head;
+  const reuse = attempt.crossHeadProof;
+  if (reuse) {
+    invariant(
+      policy.acceptance.hostedCrossHeadReuse !== false &&
+        policy.acceptance.mode === 'auto-on-pass' &&
+        attempt.actor.kind === 'agent' &&
+        attempt.actor.id === project.owner &&
+        validCrossHeadProof(reuse) &&
+        reuse.head === head &&
+        reuse.main.head === main.head &&
+        reuse.main.receiptId === main.receipt.id &&
+        attempt.check?.runId === reuse.runId,
+      'EVIDENCE_CHANGED',
+      'The current acceptance does not match the cross-head proof.',
+    );
+    const audit = await mainGate(ctx, claim.projectId);
+    invariant(
+      !audit.debt && audit.status !== 'red',
+      'CHECK_EVIDENCE_REFRESH',
+      'Main audit changed; prepare fresh evidence.',
+    );
+    await requireReuseAudit(ctx, {
+      projectId: claim.projectId,
+      actor: attempt.actor.id,
+      authorityEpoch: attempt.authorityEpoch,
+      proof: reuse,
+      main,
+      check: attempt.check!,
+    });
+  }
   const registered = await ctx.db
     .query('projectHostedStates')
     .withIndex('by_project_and_head', q => q.eq('projectId', claim.projectId).eq('head', head))
@@ -144,13 +176,17 @@ export async function publishAcceptance(
     run = await requireHostedCheckEvidence(ctx, {
       projectId: claim.projectId,
       actor: attempt.actor.id,
-      candidateId: candidate.id,
-      head,
+      candidateId: reuse?.checked.id ?? candidate.id,
+      head: reuse?.checked.head ?? head,
       authorityEpoch: attempt.authorityEpoch,
       ...attempt.check,
     });
     invariant(
-      run.candidate.digest === candidateRow.digest,
+      run.candidate.digest === (reuse?.checked.digest ?? candidateRow.digest) &&
+        (!reuse ||
+          (run.terminalDigest === reuse.terminalDigest &&
+            run.planDigest === reuse.planDigest &&
+            run.plan?.selection.sha256 === reuse.checkedSelection)),
       'EVIDENCE_CHANGED',
       'The exact run selected another Candidate record.',
     );
@@ -178,7 +214,9 @@ export async function publishAcceptance(
     policy.acceptance.gate === 'contract' &&
     !protectedGatePaths(policy, candidate.governance?.paths ?? null);
   const gate =
-    run && !ownerReview ? await hostedAcceptGate(ctx, project, candidate, attempt.actor, run) : 'pass';
+    run && !ownerReview && !reuse
+      ? await hostedAcceptGate(ctx, project, candidate, attempt.actor, run)
+      : 'pass';
   if (gate === 'main-red') {
     const reason = 'Main audit is red; contract acceptance resumes when main is green.';
     const next = {
@@ -233,6 +271,7 @@ export async function publishAcceptance(
     actor,
     policyDigest: attempt.policyDigest,
     check,
+    ...(reuse ? { crossHeadProof: reuse } : {}),
     snapshot: { id: identity.receiptId, previousId: main.snapshotId, revision: main.sourceRevision + 1 },
     completion: {
       root: plan.root,

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import type { BatchIdentity, LandingBatch } from './projectHostedLandingBatchStore';
-import { loadLanding, writeLanding } from './projectHostedLandingStore';
+import { loadLanding, loadLandingAttempt, writeLanding } from './projectHostedLandingStore';
+import { individualLandingRun } from './projectHostedLandingIndividual';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { wakeLandingQueue } from './projectHostedLandingWake';
 import { landingObservation } from '../src/hosted-landing';
@@ -13,10 +14,20 @@ export async function releaseBatchMembers(ctx: MutationCtx, input: BatchIdentity
   for (const member of batch.members) {
     const current = await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId });
     if (current.state.phase === 'landed' || current.state.batchId !== batch.id) continue;
-    const { batchId: _batch, ...state } = current.state;
+    const { batchId: _batch, batchNeedsSoloCompose: needsCompose, ...state } = current.state;
     void _batch;
     const terminal = state.phase === 'terminal-failed';
-    const solo = terminal || state.batchSolo === true;
+    const run =
+      !terminal && current.row.runId
+        ? await individualLandingRun(
+            ctx,
+            input.projectId,
+            await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: state.attemptId }),
+            member.candidate,
+          )
+        : null;
+    const solo =
+      terminal || Boolean(run) || (state.batchSolo === true && !needsCompose && !current.row.runId);
     await writeLanding(
       ctx,
       current.row,
@@ -24,6 +35,15 @@ export async function releaseBatchMembers(ctx: MutationCtx, input: BatchIdentity
         ...state,
         batchOriginId: batch.id,
         batchSolo: true,
+        ...(run
+          ? {
+              phase: run.status === 'passed' ? ('ready' as const) : ('checking' as const),
+              observation: landingObservation(run.status === 'passed' ? 'queued' : 'checking'),
+              error: null,
+            }
+          : needsCompose
+            ? { batchNeedsSoloCompose: needsCompose }
+            : {}),
         ...(!solo
           ? {
               batchNeedsSoloCompose: true as const,
@@ -34,7 +54,7 @@ export async function releaseBatchMembers(ctx: MutationCtx, input: BatchIdentity
           : {}),
         version: state.version + 1,
       },
-      !terminal && (!solo || current.row.runnable),
+      !terminal && (Boolean(run) || !solo || current.row.runnable),
     );
     const finish = await finishRow(ctx, { projectId: input.projectId, submissionId: state.id });
     if (finish && !terminal) await scheduleFinish(ctx, finish);

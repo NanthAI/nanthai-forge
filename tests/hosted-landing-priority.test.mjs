@@ -9,6 +9,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { hostedLandingStateSchema, hostedLandingRequestSchema } from '../dist/hosted-landing.js';
 import { api as landingApi } from './hosted-landing-fixture.mjs';
 import { orderLandingEntries } from '../dist/landing-batch-order.js';
+import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 const priority = await import(moduleUrl('../convex/projectHostedLandingPriority.ts'));
 const order = await import(moduleUrl('../convex/projectHostedLandingOrder.ts'));
 const batchPriority = await import(moduleUrl('../convex/projectHostedLandingBatchPriority.ts'));
@@ -108,9 +109,38 @@ test('reprioritising never cancels an already running check or its lease', async
   await f.drain();
   const before = await f.rawChecks.status(run.id),
     cancelled = f.metrics.cancelled;
-  await assert.rejects(prioritize(f, command(f, s.id)), code('WORK_STALE'));
+  const current = (await f.status(s.id)).request;
+  assert.equal(current.phase, 'checking');
+  const attempt = current.attemptId;
+  const changed = await prioritize(f, command(f, s.id));
+  assert.equal(changed.priority, 'urgent');
+  assert.equal(changed.phase, 'checking');
+  assert.equal(changed.attemptId, attempt);
+  assert.equal(f.counts.at(-1).writes, 1);
   assert.deepEqual(await f.rawChecks.status(run.id), before);
   assert.equal(f.metrics.cancelled, cancelled);
+});
+
+test('urgent priority applies at READY and wins the next free acceptance lease', async () => {
+  const f = await acceptanceFixture();
+  const normal = await f.ready();
+  const urgent = await f.ready();
+  const before = (await f.status(urgent.state.id)).attempt;
+  const input = command(f, urgent.state.id);
+  const changed = await prioritize(f, input);
+  assert.equal(changed.phase, 'ready');
+  assert.equal(changed.priority, 'urgent');
+  assert.equal(f.counts.at(-1).writes, 1);
+  assert.deepEqual(await prioritize(f, input), changed);
+  assert.equal(await f.claimAcceptance(normal.state), null);
+  const lease = await f.claimAcceptance(urgent.state);
+  assert(lease);
+  assert.deepEqual((await f.status(urgent.state.id)).attempt, before);
+  assert.equal((await f.commit(lease)).status, 'landed');
+  await assert.rejects(
+    prioritize(f, command(f, urgent.state.id, { expectedVersion: 1 })),
+    code('WORK_STALE'),
+  );
 });
 
 test('promoted member escapes a composing normal batch', async t => {

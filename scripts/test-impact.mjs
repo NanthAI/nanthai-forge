@@ -41,7 +41,23 @@ export function sourceFiles(root = '.') {
 
 /** Static imports plus literal runtime source paths used by moduleUrl/readFile/CLI tests.
  * Nonliteral paths widen to their entire source domain, never prove independence. */
-export function selectTests({ paths, files, forceFull = false }) {
+export function selectTests(input) {
+  return selectWithGraph(input);
+}
+/** Paired independence analysis parses one graph per immutable inventory.
+ * Changed-script uncertainty is widened across both comparisons. */
+export function selectImpactPair(files, comparisons) {
+  const scripts = [...new Set(comparisons.flat())]
+    .filter(path => scriptPath(path) && files.has(path))
+    .map(path => ({ path }));
+  const graph = testImportGraph(files, scripts);
+  return comparisons.map(paths =>
+    paths.length
+      ? selectWithGraph({ paths, files }, graph)
+      : { scope: 'docs', reason: 'No paths in this inventory', tests: [], affectedTests: [] },
+  );
+}
+function selectWithGraph({ paths, files, forceFull = false }, suppliedGraph) {
   const tests = [...files.keys()].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort();
   const full = reason => explainAll({ scope: 'full', reason, tests });
   if (forceFull) return full('FORGE_CHECK_FULL=1');
@@ -61,7 +77,7 @@ export function selectTests({ paths, files, forceFull = false }) {
     classifications.push({ path, ...classification, seeds: classification.seeds.sort() });
   }
   const scriptsChanged = classifications.filter(item => scriptPath(item.path) && files.has(item.path));
-  const graph = testImportGraph(files, scriptsChanged);
+  const graph = suppliedGraph ?? testImportGraph(files, scriptsChanged);
   if (graph.error) return full(graph.error);
   const { reverse, evidence, packageGraph } = graph;
   // The docs-check wrapper only spawns the docs check; the runner importing it is not a consumer.
@@ -139,6 +155,11 @@ export function selectTests({ paths, files, forceFull = false }) {
   const reasons = [...new Set(classifications.map(item => item.reason).filter(Boolean))];
   return {
     scope: 'scoped',
+    // Proof consumers need affected tests, separately from fixed smoke coverage.
+    // A smoke test reached by an actual dependency remains affected.
+    affectedTests: tests.filter(
+      path => affected.has(path) || explicit.has(path) || (webChanged && webTest(path)),
+    ),
     domain: scopeDomains.length === 1 ? scopeDomains[0] : 'mixed',
     reason:
       `${scopeDomains.join('+')} scope; ` +

@@ -20,6 +20,104 @@ const retained = f => {
   return { row, batch: JSON.parse(row.value) };
 };
 const transaction = (f, name, callback) => f.transaction(name, { _handler: callback }, {});
+const fallback = await import(moduleUrl('../convex/projectHostedLandingBatchFallback.ts'));
+const landingStore = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
+
+for (const passed of [false, true])
+  for (const legacy of [false, true])
+    test(`5bac4814 replay: ${passed ? 'passed' : 'running'} individual survives ${legacy ? 'legacy stale fallback guard' : 'unstarted batch fallback'} on unchanged main`, async t => {
+      const f = await batchesFixture(t, { count: 2 });
+      const rows = [...f.tables.projectHostedLandingRequests.values()];
+      f.patch('projectHostedLandingRequests', rows[1]._id, { batchable: false, runnable: false });
+      while (!f.runs().length) await f.execute(f.pending()[0]);
+      const original = (await f.status(f.entries[0].state.id)).attempt;
+      const running = await f.rawChecks.activate(original.check.runId);
+      if (passed) await f.rawChecks.pass(running);
+      f.patch('projectHostedLandingRequests', rows[1]._id, { batchable: true, runnable: true });
+      const id = f.entries[0].state.id;
+      assert(
+        await transaction(f, 'form-around-individual', async ctx =>
+          batchStore.formLandingBatch(
+            ctx,
+            { projectId: f.projectId, submissionId: id },
+            await landingStore.loadLanding(ctx, { projectId: f.projectId, submissionId: id }),
+          ),
+        ),
+      );
+      const { row, batch } = retained(f),
+        main = f.currentMain();
+      if (legacy) {
+        f.patch('projectHostedLandingBatches', row._id, {
+          value: JSON.stringify({ ...batch, phase: 'fallback' }),
+        });
+        for (const entry of f.tables.projectHostedLandingRequests.values()) {
+          const { batchId: _batch, ...state } = JSON.parse(entry.value);
+          void _batch;
+          Object.assign(state, {
+            batchOriginId: batch.id,
+            batchSolo: true,
+            batchNeedsSoloCompose: true,
+            phase: 'queued',
+            error: null,
+            observation: { state: 'pending', pendingReason: 'queued', cause: null },
+          });
+          f.patch('projectHostedLandingRequests', entry._id, {
+            phase: 'queued',
+            runnable: true,
+            batchable: false,
+            batchSelection: undefined,
+            value: JSON.stringify(state),
+          });
+        }
+      } else
+        await transaction(f, 'release-individual-original', ctx =>
+          batchStore.writeBatch(
+            ctx,
+            { projectId: f.projectId, batchId: batch.id },
+            { ...batch, phase: 'fallback' },
+          ),
+        );
+      for (let n = 0; n < 2; n++)
+        await transaction(f, 'repeat-individual-fallback', ctx =>
+          fallback.advanceBatchFallback(
+            ctx,
+            { projectId: f.projectId, batchId: batch.id },
+            { ...batch, phase: 'fallback' },
+            id,
+          ),
+        );
+      const current = await f.status(id);
+      assert.equal(current.attempt.id, original.id);
+      assert.equal(current.attempt.check.runId, original.check.runId);
+      assert.equal(current.request.batchNeedsSoloCompose, undefined);
+      assert.equal(JSON.parse(f.row(id).value).pending, null);
+      assert.equal(f.runs().length, 1);
+      assert.deepEqual(f.currentMain(), main);
+      if (!passed) await f.rawChecks.pass(running);
+      for (let n = 0; n < 80 && states(f)[0].phase !== 'landed'; n++) await f.execute(f.pending()[0]);
+      assert.equal(states(f)[0].phase, 'landed');
+      assert.equal(f.runs().length, 1);
+      const receipt = JSON.parse(
+        [...f.tables.projectHostedAcceptances.values()].find(r => r.submissionId === id).value,
+      );
+      assert.equal(receipt.check.runId, original.check.runId);
+    });
+
+test('a necessary shared-to-individual fallback records BATCH_FALLBACK rather than a fictitious main advance', async t => {
+  const f = await batchesFixture(t, { count: 2 });
+  await f.drain();
+  const original = (await f.status(f.entries[0].state.id)).attempt,
+    main = f.currentMain();
+  await f.fail(f.runs()[0].id);
+  while (retained(f).batch.phase !== 'fallback') await f.execute(f.pending()[0]);
+  const { batch } = retained(f);
+  await transaction(f, 'reserve-actual-fallback', ctx =>
+    fallback.advanceBatchFallback(ctx, { projectId: f.projectId, batchId: batch.id }, batch),
+  );
+  const row = [...f.tables.projectHostedLandingAttempts.values()].find(r => r.attemptId === original.id);
+  assert.equal(JSON.parse(row.progress).error.code, 'BATCH_FALLBACK');
+  assert.deepEqual(f.currentMain(), main);
+});
 
 test('incident replay: fallback detaches and requeues all three members atomically; lost leader wake cannot strand them', async t => {
   const f = await batchesFixture(t, { count: 3 });

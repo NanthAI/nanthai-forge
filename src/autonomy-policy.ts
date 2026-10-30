@@ -29,6 +29,8 @@ export const autonomyPolicySchema = z.object({
     /** Absent preserves the full hosted gate. */
     gate: z.enum(['full', 'contract']).optional(),
     disjointFastPath: z.boolean().optional(),
+    /** Hosted clean-recomposition proof; absent means on. Independent of native fast path. */
+    hostedCrossHeadReuse: z.boolean().optional(),
     landing: z.enum(['batched', 'optimistic']).optional(),
     /** Remote runners only: wait up to this long after the oldest queued landing before the first check. */
     batchWindowMs: z.number().int().min(0).max(60_000).optional(),

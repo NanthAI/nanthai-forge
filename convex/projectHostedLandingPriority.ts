@@ -50,9 +50,9 @@ export const prioritize = mutation({
         'Queue priority changed; read the current Candidate submission before changing it again.',
       );
       invariant(
-        state.phase === 'queued',
+        ['queued', 'checking', 'ready'].includes(state.phase),
         'WORK_STALE',
-        'Reprioritise a queued Candidate; a running check is never cancelled for priority.',
+        'Reprioritise an active Candidate; settled submissions retain their priority.',
       );
       const patch = {
         priority: input.priority,
