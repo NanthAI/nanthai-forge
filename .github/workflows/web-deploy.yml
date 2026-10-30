@@ -1,0 +1,64 @@
+name: Deploy dev web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'src/**'
+      - 'netlify/**'
+      - 'netlify.toml'
+      - 'docs/**'
+      - 'README.md'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/llm-documents.mjs'
+      - 'scripts/web-smoke-load.mjs'
+      - '.github/workflows/web-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer main replaces a queued one, never interrupts a running one.
+concurrency:
+  group: web-deploy-nanthai-forge-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # The Netlify token lives only in this environment; it deploys from main alone, so forks and PRs never see it.
+    environment: netlify-dev
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts
+      - run: node scripts/prepare-convex-api.mjs
+      - name: Build the web app
+        run: npm run build:web
+        env:
+          # Public build-time config from the netlify-dev environment variables; the deploy below uploads this build as is.
+          VITE_CONVEX_URL: ${{ vars.VITE_CONVEX_URL }}
+          VITE_CONVEX_SITE_URL: ${{ vars.VITE_CONVEX_SITE_URL }}
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
+          # Same value as netlify.toml [build.environment].
+          VITE_FORGE_DEMO_REPOSITORY: thevarsek/nanthai-edge-oss
+      - name: Guard the browser bundle against Node-only code
+        run: node --test tests/web-bundle-node-free.test.mjs
+      - name: Smoke-load the built Hosted chunk and check the build config is baked in
+        # Fails on a module-evaluation error, or on a build that would show "Forge backend is not configured".
+        run: node scripts/web-smoke-load.mjs hosted-web-dist VITE_CONVEX_URL VITE_CONVEX_SITE_URL VITE_CLERK_PUBLISHABLE_KEY
+        env:
+          VITE_CONVEX_URL: ${{ vars.VITE_CONVEX_URL }}
+          VITE_CONVEX_SITE_URL: ${{ vars.VITE_CONVEX_SITE_URL }}
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
+      - name: Deploy to the dev site
+        run: npx --yes netlify-cli@27.16.1 deploy --prod --no-build --dir hosted-web-dist --site "$NETLIFY_SITE_ID"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}

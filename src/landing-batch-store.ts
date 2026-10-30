@@ -1,7 +1,8 @@
 import { semanticCompositionPlan } from './native-semantic-plan.js';
 import { prepareLandingRecords } from './landing-records-index.js';
 import { editWork } from './work-edit.js';
-import { recordLandingWaits, landingWait, checkingWait } from './landing-waiting.js';
+import { landingWait, checkingWait } from './landing-waiting.js';
+import { recordLandingWaits } from './landing-wait-record.js';
 import { editLandingRecords, type LandingRecordSelection } from './landing-records.js';
 import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 import { assertLandingWorkerActive } from './landing-worker-context.js';

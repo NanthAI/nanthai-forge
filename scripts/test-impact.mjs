@@ -11,6 +11,8 @@ export const smokeTests = [
   'tests/ci-scope.test.mjs',
   'tests/test-impact.test.mjs',
   'tests/check-path-scopes.test.mjs',
+  // Any src, web or convex change can pull Node-only code into the browser bundle.
+  'tests/web-bundle-node-free.test.mjs',
 ];
 export const documentation = path => /^(?:docs\/.+|[^/]+)\.md$/.test(path);
 export const safePath = path =>

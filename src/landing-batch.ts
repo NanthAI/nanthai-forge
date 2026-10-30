@@ -1,6 +1,6 @@
 import { withLandingAttempt, recordAttemptLock } from './landing-attempt-timing.js';
 import { observeWorkLocks, type WorkLockSpan } from './work-lock.js';
-import { recordLandingWaits } from './landing-waiting.js';
+import { recordLandingWaits } from './landing-wait-record.js';
 import { observeLandingQueue } from './landing-records.js';
 import { landingWorkerSignal } from './landing-worker-context.js';
 import { observeWorkProgress } from './work-progress.js';
