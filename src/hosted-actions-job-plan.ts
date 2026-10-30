@@ -8,7 +8,7 @@ import { checkPin } from './hosted-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { digest } from './hash.js';
 import { standardSelection } from '../scripts/test-impact.mjs';
-import { partitionTests } from '../scripts/test-shards.mjs';
+import { timedShards } from '../scripts/test-shards.mjs';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { invariant } from './errors.js';
@@ -37,7 +37,12 @@ class SourceFiles extends Map<string, string> {
     for (const path of this.keys()) yield this.get(path)!;
   }
 }
-export async function prepareActionsJob(client: ActionsJobClient, directory: string, cache: string) {
+export async function prepareActionsJob(
+  client: ActionsJobClient,
+  directory: string,
+  cache: string,
+  capacity?: { activeChecks: number; jobCap: number },
+) {
   console.log('Actions source: preparing pinned Candidate');
   const run = await client.session(true);
   invariant(run.configuration.provider === 'github-actions', 'RUNNER_UNAVAILABLE', 'Select Actions.');
@@ -69,7 +74,17 @@ export async function prepareActionsJob(client: ActionsJobClient, directory: str
       : {}),
   };
   const groups =
-    standard && selection.scope !== 'docs' ? partitionTests(selection.tests, 8, client.timings) : [];
+    standard && selection.scope !== 'docs'
+      ? timedShards(selection.tests, client.timings, {
+          full: selection.scope === 'full',
+          concurrencyBudget: run.configuration.concurrencyBudget ?? 9,
+          ...capacity,
+        })
+      : [];
+  if (capacity)
+    console.log(
+      `Actions capacity: ${capacity.activeChecks} active checks, ${capacity.jobCap} slots; ${groups.length} test shards`,
+    );
   const pins = {
     head: run.request.expectedHead,
     definition: run.check.definition,
@@ -105,6 +120,7 @@ export async function prepareActionsJob(client: ActionsJobClient, directory: str
     },
     refreshSourcePack: () => refreshActionsSourcePack(client, source, cache),
     run: client.run,
+    stateBytes: source.stateBytes,
     recipe,
     matrix: [...groups.map((_, index) => String(index)), 'static'],
   };

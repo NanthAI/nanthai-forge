@@ -107,6 +107,7 @@ const currentSettings = z.object({
       machineId: z.string().optional(),
       repository: z.string().optional(),
       runsOn: githubActionsRunsOnSchema.optional(),
+      concurrencyBudget: z.number().safe().int().min(2).optional(),
       credential: z.unknown().optional(),
     })
     .nullable(),
@@ -136,6 +137,7 @@ function actionsRunnerSettings(configuration: z.infer<typeof currentSettings>['c
     workflow: '.github/workflows/forge-check.yml',
     ref: 'main',
     runsOn: configuration.runsOn ?? 'ubuntu-latest',
+    concurrencyBudget: configuration.concurrencyBudget ?? 9,
     runner: githubActionsRunnerDescription(configuration.runsOn ?? 'ubuntu-latest'),
     installation: direct ? 'derived per operation via the GitHub App' : 'from the credential reference',
     results: direct ? 'OIDC session plus workflow_run webhook' : 'controller callback',
@@ -237,7 +239,8 @@ async function configureRunnerRequest(
       !(command.machineId && !['mac', 'self-hosted'].includes(command.provider ?? '')) &&
       !(command.labels && !['mac', 'self-hosted'].includes(command.provider ?? '')) &&
       !(command.repository && command.provider !== 'github-actions') &&
-      !(command.runsOn !== undefined && command.provider !== 'github-actions'),
+      !(command.runsOn !== undefined && command.provider !== 'github-actions') &&
+      !(command.concurrencyBudget !== undefined && command.provider !== 'github-actions'),
     'BAD_ARGUMENT',
     'Choose provider:"self-hosted" (optional machineId and labels; mac is a legacy alias), provider:"github-actions" (repository, optional runsOn), or a full configuration for another provider.',
   );
@@ -263,6 +266,9 @@ async function configureRunnerRequest(
         expected: command.expected !== undefined ? command.expected : current.configurationDigest,
         repository,
         runsOn: command.runsOn ?? 'ubuntu-latest',
+        ...((command.concurrencyBudget ?? current.configuration?.concurrencyBudget) !== undefined
+          ? { concurrencyBudget: command.concurrencyBudget ?? current.configuration?.concurrencyBudget }
+          : {}),
       },
     };
   }

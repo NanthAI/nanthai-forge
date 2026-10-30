@@ -6,8 +6,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   partitionTests,
+  timedShards,
   shardDuration,
   testDuration,
+  shardJobOverheadMs,
   updateTimingHistory,
   timingHistoryLimits,
 } from '../scripts/test-shards.mjs';
@@ -130,4 +132,68 @@ test('missing, corrupt, oversized and invalid history reads fall back to round-r
   assert.equal(readTimingHistory(path).files[file].durationMs, 100);
   assert.equal(readTimingHistory(path).files.bad, undefined);
   assert.ok(readFileSync(path).length < timingHistoryLimits.bytes);
+});
+
+test('timing targets choose scoped and full shard counts within the total job budget', () => {
+  const files = Array.from({ length: 80 }, (_, i) => `tests/timed-${i}.test.mjs`);
+  const timings = Object.fromEntries(files.map(file => [file, 45000]));
+  const full = timedShards(files, timings, { full: true });
+  const scoped = timedShards(files, timings);
+  assert.equal(full.length, 4);
+  assert.equal(scoped.length, 8); // Need ten to hit 180s, so report the capped plan honestly.
+  assert.equal(timedShards(files.slice(0, 8), timings).length, 1);
+  for (const budget of [2, 3, 9, 12]) {
+    const groups = timedShards(files, timings, { concurrencyBudget: budget });
+    assert(groups.length + 1 <= budget);
+    assert.deepEqual(groups.flat().sort(), files.slice().sort());
+  }
+  assert.equal(timedShards(files).length, 8);
+  assert.equal(timedShards(files, {}, { concurrencyBudget: 3 }).length, 2);
+  assert.deepEqual(timedShards([]), []);
+  for (const budget of [0, 1, -1, 2.5, Infinity])
+    assert.throws(() => timedShards(files, timings, { concurrencyBudget: budget }));
+});
+
+test('dogfood size timing selection stays local, bounded and covers unknown files once', t => {
+  const files = Array.from({ length: 6000 }, (_, i) => `tests/dogfood-${i}.test.mjs`);
+  const timings = Object.fromEntries(files.slice(0, 3000).map(file => [file, 1000]));
+  const start = performance.now(),
+    rss = process.memoryUsage().rss;
+  const groups = timedShards(files, timings, { full: true });
+  assert.equal(groups.length, 7);
+  assert.deepEqual(groups.flat().sort(), files.slice().sort());
+  assert(process.memoryUsage().rss - rss < 128 * 1024 * 1024);
+  t.diagnostic(
+    JSON.stringify({
+      files: files.length,
+      shards: groups.length,
+      convexCalls: 0,
+      elapsedMs: performance.now() - start,
+      rssBytes: process.memoryUsage().rss,
+    }),
+  );
+});
+
+test('deep queues prefer fuller shards and fewer job-minutes under the org cap', () => {
+  const files = Array.from({ length: 80 }, (_, i) => `tests/pressure-${i}.test.mjs`);
+  const timings = Object.fromEntries(files.map(file => [file, 45000]));
+  const idle = timedShards(files, timings, { full: true });
+  const busy = timedShards(files, timings, { full: true, activeChecks: 15, jobCap: 20 });
+  const saturated = timedShards(files, timings, { full: true, activeChecks: 20, jobCap: 20 });
+  assert.equal(idle.length, 4);
+  assert.equal(busy.length, 2);
+  assert.equal(saturated.length, 1);
+  const cost = groups =>
+    groups.reduce((sum, group) => sum + shardDuration(group, timings) + shardJobOverheadMs, 0);
+  assert(cost(busy) < cost(idle));
+  assert(cost(saturated) < cost(busy));
+  for (const groups of [idle, busy, saturated]) assert.deepEqual(groups.flat().sort(), files.slice().sort());
+  assert.equal(timedShards(files.slice(0, 8), timings, { activeChecks: 15 }).length, 1);
+  assert.equal(timedShards(files, {}, { activeChecks: 15 }).length, 2);
+  assert(timedShards(files, timings, { concurrencyBudget: 30, jobCap: 6 }).length <= 4);
+  const long = Object.fromEntries(files.map(file => [file, 500000]));
+  assert.equal(timedShards(files, long, { full: true, concurrencyBudget: 30 }).length, 29);
+  assert.equal(timedShards(files, long, { full: true, concurrencyBudget: 30, jobCap: 20 }).length, 18);
+  for (const capacity of [{ activeChecks: 0 }, { activeChecks: NaN }, { jobCap: 2 }])
+    assert.throws(() => timedShards(files, timings, capacity));
 });

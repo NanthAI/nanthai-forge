@@ -67,6 +67,7 @@ export function recordEvidence(
     ...(command.static !== undefined ? { static: command.static } : {}),
     ...(command.measureResources ? { measureResources: true } : {}),
     ...(command.declaredInputs?.length ? { declaredInputs: command.declaredInputs } : {}),
+    ...(command.actions ? { actions: command.actions } : {}),
   };
   const check = {
     ...definition,

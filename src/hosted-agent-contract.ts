@@ -203,6 +203,7 @@ export const hostedAgentCommandSchemas = {
     .object({
       provider: z.enum(['mac', 'self-hosted', 'github-actions']).optional(),
       runsOn: githubActionsRunsOnSchema.optional(),
+      concurrencyBudget: z.number().safe().int().min(2).optional(),
       machineId: uuid.optional(),
       labels: z.array(z.string().min(1)).optional(),
       repository: z

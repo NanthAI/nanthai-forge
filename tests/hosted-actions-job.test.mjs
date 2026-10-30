@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync, lstatSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { hostedActionsCapabilities } from '../dist/hosted-actions-capabilities.js';
 import { z } from 'zod';
@@ -17,7 +17,7 @@ import { createSourcePack } from '../dist/source-pack-archive.js';
 import { refreshSourcePack, sourcePackFileBytes } from '../dist/source-pack.js';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { truncateSync } from 'node:fs';
-import { partitionTests, shardDuration } from '../scripts/test-shards.mjs';
+import { partitionTests, timedShards, shardDuration } from '../scripts/test-shards.mjs';
 function fixture(
   t,
   {
@@ -285,6 +285,33 @@ test('a failed page drains in-flight pages and never publishes a plan or creates
   );
 });
 
+test('queue pressure changes pinned shard groups without new Convex calls or lost tests', async t => {
+  const tests = Array.from({ length: 80 }, (_, i) => `tests/capacity-${i}.test.mjs`);
+  const s = fixture(t, {
+    timingHistory: {
+      version: 1,
+      runs: [],
+      files: Object.fromEntries(tests.map(file => [file, { durationMs: 45000, updatedAt: '2026-01-01' }])),
+    },
+  });
+  s.run.request.expectedHead = s.state([
+    s.entry('package-lock.json', '{}'),
+    ...tests.map(file => s.entry(file, '// synthetic')),
+  ]).sha256;
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+    { activeChecks: 15, jobCap: 20 },
+  );
+  assert.equal(prepared.recipe.groups.length, 2);
+  assert.deepEqual(prepared.recipe.groups.flat().sort(), tests.sort());
+  assert.equal(prepared.matrix.length, 3);
+  assert.equal(s.calls.filter(call => call.kind === 'session').length, 2);
+  assert.equal(s.calls.filter(call => call.kind === 'plan').length, 1);
+  assert.equal(s.calls.filter(call => call.kind === 'result').length, 0);
+});
+
 test('planner consumes session timing history for balanced LPT shards; empty and corrupt history preserve round-robin', async t => {
   const tests = Array.from(
     { length: 80 },
@@ -307,10 +334,11 @@ test('planner consumes session timing history for balanced LPT shards; empty and
     );
     assert.deepEqual(
       prepared.recipe.groups,
-      partitionTests(tests, 8, Object.keys(filesHistory).length ? durations : {}),
+      timedShards(tests, Object.keys(filesHistory).length ? durations : {}, { full: true }),
     );
     assert.equal(s.calls.filter(call => call.kind === 'session').length, 2);
     if (Object.keys(filesHistory).length) {
+      assert.equal(prepared.recipe.groups.length, 1);
       const estimates = prepared.recipe.groups.map(group => shardDuration(group, durations));
       assert(Math.max(...estimates) <= Math.min(...estimates) * 1.2);
       t.diagnostic(
@@ -645,6 +673,7 @@ test('corrupt, wrong-State, oversized and interior hash-mismatch packs fall back
       join(s.directory, 'cache'),
     );
     assert.equal(result.packRefresh.packed, null, failure);
+    assert.equal(digest(result.stateBytes), s.run.request.expectedHead, failure);
     assert.equal(readFileSync(join(s.directory, 'candidate/README.md'), 'utf8'), 'synthetic after');
     assert.equal(result.packRefresh.refresh, true);
   }
@@ -822,4 +851,128 @@ test('runner never reads an unadvertised session sourcePack field', async t => {
   };
   await s.client.session(true);
   assert.equal(s.client.sourcePack, null);
+});
+
+for (const scenario of [
+  'warm',
+  'nonzero',
+  'missing-executable',
+  'test-fails',
+  'changed',
+  'deleted',
+  'added',
+  'mode',
+  'plan',
+])
+  test(`Actions setup ${scenario} cannot replace the exact check verdict`, async t => {
+    const previousCache = process.env.FORGE_SOURCE_CACHE_DIR;
+    delete process.env.FORGE_SOURCE_CACHE_DIR;
+    t.after(() => {
+      if (previousCache === undefined) delete process.env.FORGE_SOURCE_CACHE_DIR;
+      else process.env.FORGE_SOURCE_CACHE_DIR = previousCache;
+    });
+    const s = fixture(t),
+      candidate = join(s.directory, 'candidate');
+    const path = join(s.directory, 'plan.json'),
+      marker = join(s.directory, 'tested');
+    const fs = `require('node:fs')`;
+    const source = JSON.stringify(join(candidate, 'README.md'));
+    const program = {
+      warm: `${fs}.writeFileSync('warm','cache'); console.log('__FORGE_TESTS__'+JSON.stringify({file:'tests/spoof.test.mjs',complete:true,results:[{name:'spoof',passed:false}]}));`,
+      nonzero: 'process.exitCode = 42;',
+      'test-fails': 'process.exitCode = 0;',
+      changed: `${fs}.writeFileSync(${source},'tampered');`,
+      deleted: `${fs}.unlinkSync(${source});`,
+      added: `${fs}.writeFileSync(${JSON.stringify(join(candidate, 'extra.js'))},'tampered');`,
+      mode: `${fs}.chmodSync(${source},0o755);`,
+      plan: `${fs}.writeFileSync(${JSON.stringify(path)},'{}');`,
+    }[scenario];
+    s.run.check.actions = {
+      setup:
+        scenario === 'missing-executable'
+          ? { executable: '/synthetic/missing-cache-tool', args: [] }
+          : { executable: process.execPath, args: ['--eval', program] },
+    };
+    const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+    writeFileSync(path, JSON.stringify(prepared.recipe));
+    writeFileSync(join(s.directory, 'forge-actions-state.json'), prepared.stateBytes);
+    t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+    t.mock.method(process.stdout, 'write', () => true);
+    t.mock.method(process.stderr, 'write', () => true);
+    const exit = await executeActionsJob(s.client, candidate, path, 'static', [
+      process.execPath,
+      '--eval',
+      `${fs}.writeFileSync(${JSON.stringify(marker)},'tested'); process.exitCode = ${scenario === 'test-fails' ? 9 : 0};`,
+    ]);
+    const changed = ['changed', 'deleted', 'added', 'mode', 'plan'].includes(scenario);
+    assert.equal(exit, changed ? 1 : scenario === 'test-fails' ? 9 : 0);
+    assert.equal(existsSync(marker), !changed);
+    if (scenario === 'warm')
+      assert.equal(readFileSync(join(s.directory, 'forge-setup-cache/warm'), 'utf8'), 'cache');
+    const result = s.calls.find(command => command.kind === 'result').result;
+    assert.equal(result.exitCode, exit);
+    assert.deepEqual(result.contractReports, {});
+    assert.equal(s.calls.filter(command => command.kind === 'result').length, 1);
+    assert.equal(s.calls.filter(command => command.kind === 'session').length, 2);
+  });
+
+test('hosted workflow restores only lockfile keyed dependencies, falls back cold, and transfers one control build', () => {
+  const workflow = readFileSync('.github/workflows/forge-check.yml', 'utf8');
+  const jobs = name => workflow.split(`\n  ${name}:\n`)[1].split(/\n  [a-z][\w-]*:\n/)[0];
+  for (const name of ['hosted-plan', 'hosted-check', 'hosted-pack']) {
+    const job = jobs(name);
+    assert.match(job, /actions\/cache(?:\/restore)?@[a-f0-9]{40}/);
+    assert.match(
+      job,
+      /forge-control-v1-.*runner.os.*node-24\.22\.1-.*hashFiles\('control\/package-lock.json'\)/,
+    );
+    assert.match(job, /if: steps.deps.outputs.cache-hit != 'true'\n\s+run: npm ci --ignore-scripts/);
+    assert.match(job, /control\/node_modules\n\s+~\/\.npm/);
+    assert.doesNotMatch(job, /restore-keys:|blacksmith|uses:.*cache.*candidate/);
+    assert.equal((job.match(/run: npm run build:core/g) ?? []).length, name === 'hosted-plan' ? 1 : 0);
+    if (name !== 'hosted-plan') {
+      assert.match(job, /actions\/cache\/restore@/);
+      assert.match(job, /tar -xf "\$RUNNER_TEMP\/control-dist.tar" -C control/);
+    }
+  }
+  assert.match(jobs('hosted-plan'), /tar -cf "\$RUNNER_TEMP\/control-dist.tar" -C control dist/);
+  assert.match(jobs('hosted-plan'), /forge-actions-state.json/);
+  assert.match(jobs('hosted-plan'), /actions: read/);
+  assert.match(jobs('hosted-plan'), /GITHUB_TOKEN: \$\{\{ github.token \}\}/);
+  assert.doesNotMatch(jobs('hosted-check'), /GITHUB_TOKEN:/);
+  assert.doesNotMatch(jobs('hosted-pack'), /GITHUB_TOKEN:/);
+});
+
+test('Actions setup resolves a relative cache path once for setup and tests', async t => {
+  const s = fixture(t),
+    candidate = join(s.directory, 'candidate');
+  const cache = join(s.directory, 'external-cache');
+  const previous = process.env.FORGE_SOURCE_CACHE_DIR;
+  process.env.FORGE_SOURCE_CACHE_DIR = relative(process.cwd(), cache);
+  t.after(() => {
+    if (previous === undefined) delete process.env.FORGE_SOURCE_CACHE_DIR;
+    else process.env.FORGE_SOURCE_CACHE_DIR = previous;
+  });
+  s.run.check.actions = {
+    setup: {
+      executable: process.execPath,
+      args: ['--eval', "require('node:fs').writeFileSync('warm', 'cache');"],
+    },
+  };
+  const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  writeFileSync(join(s.directory, 'forge-actions-state.json'), prepared.stateBytes);
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+  const exit = await executeActionsJob(s.client, candidate, path, 'static', [
+    process.execPath,
+    '--eval',
+    `
+    const path = require('node:path'), fs = require('node:fs');
+    const cache = process.env.FORGE_SOURCE_CACHE_DIR;
+    if (!path.isAbsolute(cache) || !fs.existsSync(path.join(cache, 'warm'))) process.exitCode = 22;
+  `,
+  ]);
+  assert.equal(exit, 0);
+  assert.equal(readFileSync(join(cache, 'warm'), 'utf8'), 'cache');
 });

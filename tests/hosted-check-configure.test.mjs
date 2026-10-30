@@ -558,6 +558,7 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
     workflow: '.github/workflows/forge-check.yml',
     ref: 'main',
     runsOn: 'ubuntu-latest',
+    concurrencyBudget: 9,
     runner: 'runner: ubuntu-latest',
     installation: 'derived per operation via the GitHub App',
     results: 'OIDC session plus workflow_run webhook',
@@ -616,6 +617,36 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
   await assert.rejects(run('configure-runner', { provider: 'mac', runsOn: 'linux' }), code('BAD_ARGUMENT'));
   assert.equal(github.length, lookups);
   assert.equal(settings(fixture.s).length, versions);
+
+  const budgeted = await run('configure-runner', {
+    provider: 'github-actions',
+    concurrencyBudget: 5,
+    operationId: randomUUID(),
+  });
+  assert.equal(budgeted.value.concurrencyBudget, 5);
+  assert.equal((await run('check-settings')).actions.concurrencyBudget, 5);
+  const retainedBudget = await run('configure-runner', {
+    provider: 'github-actions',
+    operationId: randomUUID(),
+  });
+  assert.equal(retainedBudget.digest, budgeted.digest);
+  for (const concurrencyBudget of [0, 1, -1, 1.5, null])
+    await assert.rejects(
+      run('configure-runner', {
+        provider: 'github-actions',
+        concurrencyBudget,
+        operationId: randomUUID(),
+      }),
+      code('BAD_ARGUMENT'),
+    );
+  await assert.rejects(
+    run('configure-runner', {
+      provider: 'mac',
+      concurrencyBudget: 5,
+      operationId: randomUUID(),
+    }),
+    code('BAD_ARGUMENT'),
+  );
 
   state.actor = 'peer';
   await assert.rejects(

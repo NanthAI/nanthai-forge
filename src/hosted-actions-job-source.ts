@@ -20,7 +20,8 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   await resolve(heads);
   await prepareRecipes(heads);
   const [candidateRef, baseRef] = await transport.describeBatch!(heads);
-  const state = parseNativeState(await reader.bytes(candidateRef!));
+  const stateBytes = await reader.bytes(candidateRef!);
+  const state = parseNativeState(stateBytes);
   const base = parseNativeState(await reader.bytes(baseRef!));
   let selected = state.files,
     reason = 'no pack',
@@ -135,7 +136,17 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
       ? `source: pack ${client.sourcePack!.stateRef} + delta ${changed.length} files (${deltaBytes} bytes) in ${((Date.now() - started) / 1000).toFixed(1)}s`
       : `source: full download (${reason})`,
   );
-  return { state, base, packed, deltaFiles: changed.length, deltaBytes, totalBytes, connection, reader };
+  return {
+    state,
+    stateBytes,
+    base,
+    packed,
+    deltaFiles: changed.length,
+    deltaBytes,
+    totalBytes,
+    connection,
+    reader,
+  };
 }
 export async function verifySourceTree(state: NativeState, directory: string) {
   for (const file of state.files) {

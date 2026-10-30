@@ -343,6 +343,12 @@ const artifactPaths = z.array(
     ),
 );
 const checkEnvNames = z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/));
+/** Optional fixed Actions supervisor preparation; never a verdict or source hook. */
+const checkActions = z
+  .object({
+    setup: z.object({ executable: z.string().trim().min(1), args: z.array(z.string()).default([]) }).strict(),
+  })
+  .strict();
 export const checkSchema = z.object({
   id,
   name: z.string().trim().min(1),
@@ -355,6 +361,7 @@ export const checkSchema = z.object({
   static: z.boolean().optional(),
   measureResources: z.boolean().optional(),
   declaredInputs: z.array(declaredInputSchema).optional(),
+  actions: checkActions.optional(),
   definition: oid,
   at: z.string(),
 });
@@ -1190,6 +1197,7 @@ export const defineCheckCommandSchema = z.object({
   static: z.boolean().optional(),
   measureResources: z.boolean().optional(),
   declaredInputs: z.array(declaredInputSchema).optional(),
+  actions: checkActions.optional(),
 });
 export const commandSchema = z.discriminatedUnion('action', [
   z.object({

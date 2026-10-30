@@ -11,11 +11,23 @@ const client = new ActionsJobClient(
 const directory = resolve(process.env.FORGE_CANDIDATE);
 if (process.argv[2] === 'plan') {
   const { prepareActionsJob } = await import('../dist/hosted-actions-job-plan.js');
+  const { readActionsCapacity } = await import('./actions-capacity.mjs');
+  const capacity =
+    process.env.RUNNER_ENVIRONMENT === 'github-hosted'
+      ? await readActionsCapacity({
+          repository: process.env.GITHUB_REPOSITORY,
+          workflow: process.env.GITHUB_WORKFLOW_REF?.match(/\.github\/workflows\/([^/@]+)@/)?.[1],
+          runId: process.env.GITHUB_RUN_ID,
+          token: process.env.GITHUB_TOKEN,
+        })
+      : undefined;
   const result = await prepareActionsJob(
     client,
     directory,
     resolve(process.env.RUNNER_TEMP, 'forge-objects'),
+    capacity,
   );
+  writeFileSync(resolve(process.env.RUNNER_TEMP, 'forge-actions-state.json'), result.stateBytes);
   writeFileSync(resolve(process.env.RUNNER_TEMP, 'forge-actions-plan.json'), JSON.stringify(result.recipe));
   writeFileSync(
     resolve(process.env.RUNNER_TEMP, 'forge-actions-run.json'),

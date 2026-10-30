@@ -30,6 +30,7 @@ export function hostedCheckDefinition(command: unknown, id: string, at: string) 
     ...(c.static !== undefined ? { static: c.static } : {}),
     ...(c.measureResources ? { measureResources: true } : {}),
     ...(c.declaredInputs?.length ? { declaredInputs: c.declaredInputs } : {}),
+    ...(c.actions ? { actions: c.actions } : {}),
   };
   return checkSchema.parse({ ...fields, id, at, definition: digest(JSON.stringify(fields)) });
 }
@@ -50,6 +51,7 @@ export const hostedActionsRunnerSchema = z
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     installationId: text.optional(),
     runsOn: githubActionsRunsOnSchema,
+    concurrencyBudget: z.number().safe().int().min(2).optional(),
     runtime: checkHash,
     environmentFingerprint: checkHash,
     credential: credential.optional(),

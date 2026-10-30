@@ -127,6 +127,8 @@ Goal: open Forge to public use with a free core and sustainable hosting.
   and advertised hosted command fields aligned; local dependency analysis and the
   full landing check currently supply that missing validation selection.
 
+- The Phase 5 `lane.sh tests LANE_ID` helper sends a Lane selection to a hosted `tests` command that now requires `candidateId`; it returns `BAD_ARGUMENT` before selecting tests. Keep the helper aligned with the current Candidate-based contract and expose a local live-Lane impact path.
+
 - Lifecycle mutations can commit their Lane head long before the CLI returns its advisory peer receipt. During writer contention, check the canonical saved head before replaying the same operation; expose durable mutation completion before expensive advisory hydration so builders can distinguish a committed save from a queued one.
 
 - A concurrent `start` reserved an active Lane before returning its receipt, then

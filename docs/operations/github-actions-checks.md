@@ -501,3 +501,103 @@ Then change the runner configuration with its expected digest; already-enqueued
 Mac runs keep their original configuration and execution owner. Acceptance policy
 and outbound GitHub mirroring are independent prerequisites and are not changed
 by configuring this runner.
+
+
+### Warm hosted Actions jobs and optional setup
+
+The App/OIDC workflow uses free `ubuntu-latest` runners by default. Its existing
+`hosted-plan` job restores `control/node_modules` and the npm download cache using
+SHA-pinned `actions/cache`, keyed by OS, architecture, Node 24.22.1 and the control lockfile hash.
+A miss runs `npm ci --ignore-scripts`. Only the trusted planning job saves this
+cache; test and source-pack jobs restore it read-only. Candidate source, plans and
+check results are never cache entries. Lockfile changes create independent keys;
+there are no partial-key restores. Cache loss changes preparation time only.
+
+Planning builds control `dist` once and includes it in the existing run artifact.
+Shards and the optional source-pack job unpack that build beside the exact
+`github.sha` control checkout. Candidate installs/builds still use Candidate code
+and its lockfile; the shared control build is not evidence for Candidate tests.
+There is no additional serial build job. Cache archives contain dependencies only;
+monitor Actions cache storage across old lockfile keys when comparing the roughly
+1 GiB cache budget. This workflow does not introduce a cache deletion policy.
+
+Hosted test shard counts use the existing per-file timing history and two-worker
+LPT estimates. When capacity is idle the planner picks the smallest count predicted to fit 480 seconds
+for a full check or 180 seconds for a scoped/contract check, reserving 120 seconds
+of the ten/five minute target for planning and preparation. The runner setting
+`concurrencyBudget` includes the static job and defaults to nine (eight test jobs).
+Planning is serial; an optional pack job is additional. Eight test jobs therefore
+mean eleven total jobs per check, or ten concurrent jobs after planning.
+Configure it through the existing owner command, for example:
+
+```sh
+nforge agent ROOT configure-runner '{"provider":"github-actions","repository":"OWNER/REPO","concurrencyBudget":9}'
+```
+
+On standard GitHub-hosted runners, planning samples this workflow's queued and
+running checks once: two Actions read requests, at most twenty records and 1 MiB
+per response, with a five-second deadline and no pagination or polling. The Free
+organization job cap is twenty. Repo demand is a lower bound on organization
+demand; unrelated workflows/repos can also occupy those slots. The automatic
+workflow token receives Actions read permission only in planning and never enters
+Candidate code. Unavailable or malformed samples retain timing-only planning;
+self-hosted runners do not use this Free-hosted capacity sample.
+
+With competing checks, the planner compares all counts up to the idle target.
+It models throughput as occupied test slots divided by predicted runner time:
+slots are `min(20, activeChecks * testShards)`; runner time includes the sum of
+two-worker shard estimates plus one minute per test job and the three possible
+non-test jobs (plan, static, pack). The minute is a conservative preparation
+estimate, above the observed 23-second p75 before test execution, not measured
+test evidence. Ties prefer fewer jobs. This favors fuller shards under a deep
+queue instead of spending more job-minutes chasing an isolated wall target.
+For example, a fifteen-check queue selects two test shards for the recorded full
+workload instead of eight; a small scoped workload still needs one. The selected
+groups remain digest-pinned. This is a planning estimate, not an org reservation
+or a new admission rule; GitHub enforces its actual concurrency limit.
+
+Without a capacity sample, missing history retains the previous eight-shard fallback within that budget;
+unknown test files use historical p75. Every selected file remains in the plan.
+A long individual file or a saturated budget can exceed the target; the planner
+never drops tests or turns a failed test green to meet a duration. Contract tests,
+changed tests and composed-Intent unions retain the existing gate selection.
+This planning/cache work adds zero Convex function calls or idle activity.
+
+A hosted check definition may declare an optional Actions preparation command:
+
+```json
+{"name":"verify","executable":"node","args":["scripts/forge-check.mjs"],"environmentLabel":"Node 24","actions":{"setup":{"executable":"/opt/forge/warm-cache","args":[]}}}
+```
+
+`actions.setup` belongs to the App/OIDC Actions supervisor, including when that
+workflow uses a self-hosted runner. Other runner providers do not use this
+Actions-specific option. The definition digest includes the command. It runs once
+per check job, before the selected check, with the same credential-free child
+environment, in an external cache directory. `FORGE_SOURCE_CACHE_DIR` names that
+directory (the runner-provided value, or a run-local temporary directory). Setup
+can warm npm downloads, a sticky disk or an already installed cache integration;
+it does not install or select a vendor. The check command receives the directory
+as well. Relative cache paths are resolved once by the supervisor so setup and
+tests use the same directory. Setup output is not test evidence and its exit status is advisory: a
+missing executable or failed cache warm continues through the cold path.
+
+The supervisor verifies the artifact State hash against the exact run head, then
+checks Candidate paths, hashes and modes before and after setup and rechecks the
+execution plan. Added, removed or modified source fails the check before tests
+start. Cache preparation must keep its files outside Candidate source. This is
+source verification under ordinary OS rights, not a sandbox against a malicious
+process with access to supervisor files or other account resources.
+
+To qualify performance after installing the workflow, run the same full Candidate
+and definition twice through normal Forge finish/check operations: first with a
+new lockfile cache key, then with the same key. Record each Actions run URL,
+Candidate/control heads, gate, selected file count, matrix, cache hit/miss, job
+start/end times, dependency preparation, artifact transfer and test duration.
+Compare cold and warm critical-path wall time and total runner minutes with run
+40852593458 (722 seconds wall, plan 86 seconds, slowest shard 628 seconds).
+Use the same timing history and workload for a causal comparison; contract gates,
+batch unions and concurrent organisation jobs can change both counts and queue
+latency. Keep the shared-build path only if its measured net critical path drops.
+Repeat with a scoped Candidate to assess the five-minute target. These checks use
+existing free GitHub-hosted Actions; no paid runner, idle service or vendor is
+needed.

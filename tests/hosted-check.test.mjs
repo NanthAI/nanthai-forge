@@ -27,6 +27,7 @@ test('hosted definitions retain the exact local normalization and definition dig
     static: false,
     measureResources: true,
     declaredInputs: [{ kind: 'environment', name: 'TZ' }],
+    actions: { setup: { executable: 'cache-restore', args: ['--warm'] } },
   };
   const at = '2026-01-01T00:00:00.000Z',
     data = { schema: 5, checks: [] };
@@ -34,6 +35,10 @@ test('hosted definitions retain the exact local normalization and definition dig
   const hosted = hostedCheckDefinition(c, local.id, at);
   assert.deepEqual(hosted, local);
   assert.deepEqual(importedHostedCheck(local), local);
+  assert.throws(
+    () => importedHostedCheck({ ...local, actions: { setup: { executable: 'changed', args: [] } } }),
+    { code: 'EVIDENCE_CHANGED' },
+  );
   assert.throws(() => importedHostedCheck({ ...local, args: ['changed.mjs'] }), { code: 'EVIDENCE_CHANGED' });
 });
 test('hosted request/configuration schemas carry references and reject byte or verdict claims', () => {

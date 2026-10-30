@@ -17,6 +17,7 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
         'FORGE_TEST_COVERAGE_HEAD',
         'FORGE_TEST_TIMINGS',
         'FORGE_TEST_TIMINGS_HISTORY',
+        'FORGE_SOURCE_CACHE_DIR',
         'npm_config_cache',
         'npm_config_userconfig',
         'npm_config_globalconfig',

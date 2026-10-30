@@ -117,3 +117,18 @@ The same owner/revocation and exact-Candidate acceptance checks apply on Linux.
 Windows is unqualified: execution has an existing Windows child-kill branch,
 but private Unix modes, symlink privileges and descendant cleanup need a real
 Windows qualification before claiming parity. No new platform block is applied.
+
+
+## Optional Actions cache preparation
+
+When this machine is used through the GitHub Actions workflow (runner labels in
+`configure-runner`), the hosted check definition can declare `actions.setup`.
+The fixed Actions supervisor runs that command in `FORGE_SOURCE_CACHE_DIR`, before
+the tests, to warm an existing sticky disk or cache. Keep that directory outside
+Candidate source and use a command already installed on the runner. Setup receives
+no Actions/OIDC credentials; its stdout cannot supply test reports and a cache
+failure continues cold. Candidate paths, bytes, modes and the execution plan are
+verified afterwards; a setup command that changes source fails the exact check.
+The native `self-hosted`/legacy `mac` provider does not execute Actions-specific
+setup. See [the Actions setup contract](github-actions-checks.md#warm-hosted-actions-jobs-and-optional-setup)
+for the definition example, shard budget and cold/warm measurement procedure.

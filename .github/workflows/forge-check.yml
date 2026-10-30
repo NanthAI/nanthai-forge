@@ -68,6 +68,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      actions: read
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       pack_refresh: ${{ steps.plan.outputs.pack_refresh }}
@@ -80,20 +81,36 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.22.1'
-      - run: npm ci --ignore-scripts && npm run build:core
+      # Save only trusted control dependencies; Candidate source/results are never cached.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: deps
+        with:
+          path: |
+            control/node_modules
+            ~/.npm
+          key: forge-control-v1-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ hashFiles('control/package-lock.json') }}
+      - if: steps.deps.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
+        working-directory: control
+      - run: npm run build:core
         working-directory: control
       - id: plan
         run: node control/scripts/hosted-actions-job.mjs plan
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           FORGE_CONVEX_SITE: ${{ inputs.deployment }}
           FORGE_PROJECT_ID: ${{ inputs.projectId }}
           FORGE_RUN_ID: ${{ inputs.runId }}
           FORGE_CANDIDATE: ${{ runner.temp }}/candidate
-      - run: tar -cf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP" candidate forge-actions-plan.json forge-actions-run.json forge-pack-refresh.json
+      - run: tar -cf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP" candidate forge-actions-plan.json forge-actions-run.json forge-pack-refresh.json forge-actions-state.json
+      - run: tar -cf "$RUNNER_TEMP/control-dist.tar" -C control dist
       - uses: actions/upload-artifact@v4
         with:
           name: forge-candidate
-          path: ${{ runner.temp }}/candidate.tar
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/candidate.tar
+            ${{ runner.temp }}/control-dist.tar
   hosted-check:
     needs: hosted-plan
     name: forge-hosted-${{ matrix.shard }}
@@ -114,13 +131,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.22.1'
-      - run: npm ci --ignore-scripts && npm run build:core
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: deps
+        with:
+          path: |
+            control/node_modules
+            ~/.npm
+          key: forge-control-v1-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ hashFiles('control/package-lock.json') }}
+      # A miss retains the cold install; dist comes from this run's pinned control commit.
+      - if: steps.deps.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
         working-directory: control
       - uses: actions/download-artifact@v4
         with:
           name: forge-candidate
           path: ${{ runner.temp }}
-      - run: tar -xf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP"
+      - run: |
+          tar -xf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP"
+          tar -xf "$RUNNER_TEMP/control-dist.tar" -C control
       - run: node control/scripts/hosted-actions-job.mjs run
         env:
           FORGE_CONVEX_SITE: ${{ inputs.deployment }}
@@ -147,13 +175,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24.22.1'
-      - run: npm ci --ignore-scripts && npm run build:core
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: deps
+        with:
+          path: |
+            control/node_modules
+            ~/.npm
+          key: forge-control-v1-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ hashFiles('control/package-lock.json') }}
+      # A miss retains the cold install; dist comes from this run's pinned control commit.
+      - if: steps.deps.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
         working-directory: control
       - uses: actions/download-artifact@v4
         with:
           name: forge-candidate
           path: ${{ runner.temp }}
-      - run: tar -xf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP"
+      - run: |
+          tar -xf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP"
+          tar -xf "$RUNNER_TEMP/control-dist.tar" -C control
       - run: node control/scripts/hosted-actions-job.mjs pack
         env:
           FORGE_CONVEX_SITE: ${{ inputs.deployment }}

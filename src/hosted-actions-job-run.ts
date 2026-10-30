@@ -11,6 +11,7 @@ import { directLogBytes } from './hosted-actions-direct.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { checkFileSummary } from './check-file-summary.js';
 import { invariant } from './errors.js';
+import { setupActionsJob } from './hosted-actions-job-setup.js';
 /** Credentials remain in the fixed supervisor; the project receives a clean env.
  * Full stdout stays on Actions. Forge retains at most 64 KiB per job. */
 export async function executeActionsJob(
@@ -42,11 +43,33 @@ export async function executeActionsJob(
   ];
   if (!recipe.standard && !commandOverride)
     command = semanticCheckCommand(command, run.semanticPlan, process.execPath);
+  let sourceCache: string | undefined;
+  try {
+    sourceCache = await setupActionsJob(run, directory, planPath);
+    invariant(
+      savePin(JSON.parse(readFileSync(planPath, 'utf8'))).sha256 === run.plan.manifest.sha256,
+      'EVIDENCE_CHANGED',
+      'Actions setup changed the plan.',
+    );
+  } catch {
+    // Record a failed exact check through the ordinary result callback. Never run
+    // tests against changed bytes or treat a setup exit as passing evidence.
+    command = [
+      process.execPath,
+      '--eval',
+      "console.error('SOURCE_HASH_MISMATCH: Actions setup verification failed.'); process.exitCode = 1;",
+    ];
+  }
   const child = spawn(command[0]!, command.slice(1), {
     cwd: directory,
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...childEnv({ allow: ['CI', 'PATH'] }), FORGE_ACTIONS_PLAN: planPath, FORGE_ACTIONS_SHARD: shard },
+    env: {
+      ...childEnv({ allow: ['CI', 'PATH'] }),
+      ...(sourceCache ? { FORGE_SOURCE_CACHE_DIR: sourceCache } : {}),
+      FORGE_ACTIONS_PLAN: planPath,
+      FORGE_ACTIONS_SHARD: shard,
+    },
   });
   let tail = Buffer.alloc(0);
   const reports = new ContractTimingReader({ secrets: [], paths: [directory, process.env.HOME ?? ''] });

@@ -88,9 +88,10 @@ export function testDuration(file, durations = {}) {
 /** Simulate the supervisor's FIFO queue of whole files across its worker slots. */
 export function shardDuration(files, durations = {}, workers = 2) {
   const slots = Array.from({ length: workers }, () => 0);
+  const fallback = testDuration('', durations);
   for (const file of files) {
     const slot = slots.indexOf(Math.min(...slots));
-    slots[slot] += testDuration(file, durations);
+    slots[slot] += positive(durations[file]) ? durations[file] : fallback;
   }
   return Math.max(...slots);
 }
@@ -105,7 +106,10 @@ export function partitionTests(files, count, durations = {}, workers = 2) {
     ordered.forEach((file, index) => groups[index % groups.length].push(file));
     return groups;
   }
-  const weights = Object.fromEntries(ordered.map(file => [file, testDuration(file, durations)]));
+  const fallback = testDuration('', durations);
+  const weights = Object.fromEntries(
+    ordered.map(file => [file, positive(durations[file]) ? durations[file] : fallback]),
+  );
   const slots = groups.map(() => Array.from({ length: workers }, () => 0));
   for (const file of ordered.sort((a, b) => weights[b] - weights[a] || compare(a, b))) {
     let best = 0;
@@ -124,4 +128,55 @@ export function partitionTests(files, count, durations = {}, workers = 2) {
     groups[best].push(file);
   }
   return groups;
+}
+
+// Rounded above the observed 23s p75 control preparation, allowing Candidate build
+// and result upload too. This is a planning estimate, never measured test evidence.
+export const shardJobOverheadMs = 60_000;
+
+/** Prefer the wall target when capacity is idle. Under pressure maximize estimated
+ * checks per occupied runner-second, accounting for unused slots and job startup.
+ * Budget includes static; org capacity also reserves the optional parallel pack. */
+export function timedShards(
+  files,
+  durations = {},
+  { full = false, concurrencyBudget = 9, activeChecks = 1, jobCap } = {},
+) {
+  if (!Number.isSafeInteger(concurrencyBudget) || concurrencyBudget < 2)
+    throw new Error('Expected a concurrency budget of at least two jobs.');
+  const capacity = jobCap ?? 20;
+  if (
+    !Number.isSafeInteger(activeChecks) ||
+    activeChecks < 1 ||
+    !Number.isSafeInteger(capacity) ||
+    capacity < 3
+  )
+    throw new Error('Expected positive check demand and capacity for test, static and pack jobs.');
+  const maximum = Math.min(
+    concurrencyBudget - 1,
+    jobCap === undefined ? Infinity : capacity - 2,
+    new Set(files).size,
+  );
+  if (!maximum) return [];
+  // Reserve two minutes for planning, job startup and artifact/dependency restore.
+  const target = (full ? 480 : 180) * 1000;
+  const measured = Object.values(durations).some(positive);
+  const limit = measured ? maximum : Math.min(8, maximum);
+  let groups,
+    best,
+    bestRate = -1;
+  for (let count = 1; count <= limit; count++) {
+    groups = partitionTests(files, count, durations);
+    const estimates = groups.map(group => shardDuration(group, durations));
+    // Plan, static and optional pack consume runner time too. The org hard cap
+    // remains GitHub's; this is a fluid throughput estimate, not a reservation.
+    const runnerMs = estimates.reduce((sum, ms) => sum + ms, 0) + (count + 3) * shardJobOverheadMs;
+    const rate = Math.min(capacity, activeChecks * count) / runnerMs;
+    if (rate > bestRate) {
+      best = groups;
+      bestRate = rate;
+    }
+    if (measured && Math.max(...estimates) <= target) break;
+  }
+  return activeChecks > 1 ? best : groups;
 }
