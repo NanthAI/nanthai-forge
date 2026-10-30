@@ -6,7 +6,7 @@ import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import { loadFinish, failFinish } from './projectHostedFinishStore';
 import { loadLanding, writeLanding, type LandingIdentity } from './projectHostedLandingStore';
-import { scheduleFinish } from './projectHostedFinishWake';
+import { scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
 import { prepareFinishCompose, installFinishCompose, reserveFinishRetry } from './projectHostedFinishCompose';
 import { hostedComposeInput } from './projectHostedComposeStore';
 import { submitHostedCompose } from './projectHostedComposeJobs';
@@ -106,6 +106,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
           actor: state.actor,
           operationId: value.pending.operations.compose,
         });
+        await watchFinishCompose(ctx, row._id, value.pending.at);
         return null;
       }
       const plan = canonicalPayload(hostedComposeInput(source.state, source.operation.firstAttempt.at));
@@ -120,6 +121,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
           actor: state.actor,
           operationId: value.pending.operations.compose,
         });
+        await watchFinishCompose(ctx, row._id, value.pending.at);
         return null;
       }
       r2Config();
@@ -304,6 +306,7 @@ async function resumeFinishIOOnce(
   if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
   await ctx.db.patch(row._id, { wake: null });
   if (input.command.kind === 'page') await scheduleFinish(ctx, (await ctx.db.get(row._id))!);
+  else await watchFinishCompose(ctx, row._id, value.pending!.at);
 }
 
 /** A controller observing a newer saved head settles the goal rather than

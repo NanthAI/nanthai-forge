@@ -304,6 +304,9 @@ export async function finishFixture(
       ) {
         if (stop === 'before-source' && task.name.endsWith(':dispatch'))
           throw new Error('synthetic crash before source job');
+        // The platform error the 2026-10-30 queue stall step action died on.
+        if (stop === 'step-fetch-failed' && task.name === 'projectConvexSource:step')
+          throw new TypeError('fetch failed');
         metrics.convexSourceCalls.push(task.name);
         if (task.name.endsWith(':dispatch')) metrics.sourceJobs++;
         await convexSourceModules[task.name.split(':')[0]][task.name.split(':')[1]]._handler(

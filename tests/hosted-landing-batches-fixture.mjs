@@ -108,7 +108,7 @@ export async function batchesFixture(
       f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
       return;
     }
-    if (task.name !== 'projectHostedFinishDriver:drive') return f.execute(task);
+    if (task.name !== 'projectHostedFinishDriver:drive') return f.execute(task, stop);
     f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
     f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
     try {

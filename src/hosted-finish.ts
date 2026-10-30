@@ -28,6 +28,10 @@ export type HostedFinish = z.infer<typeof hostedFinishSchema>;
 /** Contended CAS creates one named attempt, then yields. No retry ceiling or
  * synchronous loop: every further race gets its own retained source/check work. */
 export const hostedFinishBackoff = (number: number) => Math.min(30_000, 250 * 2 ** Math.min(number - 1, 7));
+/** A submitted source job resumes a failed or killed step action only on an
+ * explicit trigger. Its finish owner retains one deadline for at most 15 ticks. */
+export const HOSTED_FINISH_COMPOSE_WATCHDOG_MS = 120_000;
+export const HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS = 30 * 60_000;
 export type FinishCommand =
   | { kind: 'reuse'; pendingId: string }
   | {

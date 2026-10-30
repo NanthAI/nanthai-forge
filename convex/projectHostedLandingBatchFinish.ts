@@ -22,7 +22,7 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { FinishCommand } from '../src/hosted-finish';
 import { r2Key } from './r2';
-import { scheduleFinish } from './projectHostedFinishWake';
+import { scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
 import { isStored } from './projectObjectFields';
 import { hostedStartMain } from './projectHostedChannels';
 import { invariant } from '../src/errors';
@@ -206,6 +206,7 @@ export async function batchFinishStep(
     return { handled: true, command: { kind: 'plan', ...upload, batchId: batch.id } };
   }
   await submitHostedCompose(ctx, source.auth);
+  await watchFinishCompose(ctx, originalRow._id, batch.at);
   return { handled: true, command: null };
 }
 export async function resumeBatchIO(

@@ -3,6 +3,10 @@ import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { HostedLandingState } from '../src/hosted-landing';
+import {
+  HOSTED_FINISH_COMPOSE_WATCHDOG_MS,
+  HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
+} from '../src/hosted-finish';
 export const finishRow = (
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; submissionId: string },
@@ -37,6 +41,17 @@ export async function scheduleFinish(
     },
   );
   await ctx.db.patch(row._id, { wake: { id, taskId, at: Date.now() + delay } });
+}
+/** Incident 2026-10-30: a source step action that threw (fetch failed) left its
+ * compose running with no owner wake; the whole train waited for the 15-minute
+ * stall alarm. The wake replays submit, whose lookup resumes the same step. */
+export async function watchFinishCompose(
+  ctx: MutationCtx,
+  rowId: Id<'projectHostedFinishes'>,
+  startedAt: string,
+) {
+  if (Date.now() - Date.parse(startedAt) >= HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS) return;
+  await scheduleFinish(ctx, (await ctx.db.get(rowId))!, HOSTED_FINISH_COMPOSE_WATCHDOG_MS);
 }
 export async function notifyFinish(ctx: MutationCtx, state: HostedLandingState) {
   const projectId = state.projectId as Id<'hostedProjects'>;
@@ -87,7 +102,8 @@ export async function notifyFinishCompose(
       q.eq('projectId', projectId).eq('composeOperationId', operationId),
     )
     .unique();
-  if (row) await scheduleFinish(ctx, row);
+  // Completion replaces the compose watchdog; no IO is in flight while it waits.
+  if (row) await scheduleFinish(ctx, row, 0, true);
   const batch = await ctx.db
     .query('projectHostedLandingBatches')
     .withIndex('by_project_and_compose', q =>
@@ -99,6 +115,6 @@ export async function notifyFinishCompose(
       projectId,
       submissionId: JSON.parse(batch.value).leaderId ?? batch.batchId,
     });
-    if (leader) await scheduleFinish(ctx, leader);
+    if (leader) await scheduleFinish(ctx, leader, 0, true);
   }
 }
