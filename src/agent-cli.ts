@@ -48,7 +48,10 @@ Use the parent finish operationId, not an attempt's child operation ID.
 Hosted addressing: pass {url,projectId,...} on this same command surface, or use
 a hosted Lane checkout ROOT. No native owner/listener is needed. Read capabilities
 and use status/observe for finite reads. Hosted checkpoint/save and run/check are aliases.
-Hosted also supports open, save, check, revert and capabilities.
+Hosted also supports open, save, check, resolve, revert and capabilities.
+Hosted sync {candidateId} opens an exact conflict draft. Edit its files, call resolve
+in the returned root, then finish there; a clean saved resolution needs no fake edit.
+Hosted finish prepares conflict files automatically; pending source work stays durable.
 Hosted owners configure checks with configure-check, configure-runner and check-settings.
 Hosted commands retain generated UUIDs and exact pins in ROOT.forge-client/agent;
 retry identical parameters after a lost reply. A new explicit operationId starts new work.
@@ -79,6 +82,7 @@ const examples: Record<string, unknown> = {
   capabilities: { url: 'https://deployment.convex.cloud', projectId: 'PROJECT_ID' },
   open: { laneId: 'LANE_ID', paths: ['src'] },
   save: { laneId: 'LANE_ID', message: 'Save edits' },
+  resolve: { laneId: 'RESOLUTION_LANE_ID', message: 'Resolve conflict' },
   check: { candidateId: 'CANDIDATE_ID', checkId: 'CHECK_ID' },
   revert: { target: { kind: 'receipt', receiptId: 'RECEIPT_ID' }, message: 'Revert acceptance' },
   handoff: {
@@ -262,6 +266,7 @@ function actionHelp(action: string): string {
       'checkpoint',
       'compose',
       'sync',
+      'resolve',
       'check',
       'run',
       'finish',

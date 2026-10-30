@@ -172,7 +172,11 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
     invariant(lane, 'SOURCE_JOB_INVALID', 'A sync needs its original Lane.');
     const changed = lane.head !== result.state.sha256;
     const stack = state.work.mode === 'sync' ? state.work.stackAfter : undefined;
-    if (changed || (stack && canonicalPayload(stack) !== canonicalPayload(lane.stack))) {
+    if (
+      changed ||
+      result.status === 'resolved' ||
+      (stack && canonicalPayload(stack) !== canonicalPayload(lane.stack))
+    ) {
       lane = {
         ...lane,
         ...(stack ? { stack } : {}),

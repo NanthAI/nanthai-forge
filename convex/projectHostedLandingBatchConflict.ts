@@ -66,6 +66,6 @@ export async function retainBatchConflict(
     ctx,
     { projectId: input.projectId, submissionId: member.submissionId },
     'COMPOSITION_CONFLICT',
-    `Batch member ${member.candidate.id} conflicts in Candidate ${candidate.id}; retained conflict root ${input.conflict.conflicts.sha256}.`,
+    `Batch member ${member.candidate.id} conflicts in Candidate ${candidate.id}; retained conflict root ${input.conflict.conflicts.sha256}. Run nforge agent . sync '${JSON.stringify({ candidateId: candidate.id })}', edit the returned conflict files, then run its resolve command.`,
   );
 }

@@ -117,6 +117,16 @@ Goal: open Forge to public use with a free core and sustainable hosting.
 
 - The hosted Lane helper sends `tests` a `laneId`, but the hosted command requires a `candidateId`; impact selection returns `BAD_ARGUMENT` before selecting tests. Keep the helper and hosted contract aligned so builders can run the affected suite before finishing.
 
+- The hosted builder helper hides a completed start receipt while materializing
+  a Lane, then opens the same Lane into a second full checkout. A builder recovered
+  its exact operation journal and moved the completed first checkout to the helper's
+  expected path after stopping the redundant copy. Return the durable Lane ID and
+  reuse its first checkout instead of materializing the tree twice.
+- The builder helper sends `tests {laneId}` to a hosted command schema that accepts
+  `candidateId`, producing `BAD_ARGUMENT` before test selection. Keep the helper
+  and advertised hosted command fields aligned; local dependency analysis and the
+  full landing check currently supply that missing validation selection.
+
 - Lifecycle mutations can commit their Lane head long before the CLI returns its advisory peer receipt. During writer contention, check the canonical saved head before replaying the same operation; expose durable mutation completion before expensive advisory hydration so builders can distinguish a committed save from a queued one.
 
 - A concurrent `start` reserved an active Lane before returning its receipt, then

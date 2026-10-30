@@ -37,36 +37,63 @@ export async function buildHostedSyncState(
     result = { status: 'merged', state: { sha256: head, size: source.object(head).length } };
   } else if (work.mode === 'resolve') {
     await reader.file(work.left);
+    // Resolution follows only the saved draft lineage and selected conflict
+    // files. Merge frontier prefetch would hydrate unrelated historical States.
+    const resolveCalculate = <T>(action: () => T) => lazyMerge(reader, progress, action);
     const resolution = work.resolution;
     invariant(resolution.status === 'pending', 'SOURCE_JOB_INVALID', 'Select the pending resolution.');
     invariant(
-      await calculate(() => source.contains(work.left.object.sha256, resolution.draftHead)),
+      await resolveCalculate(() => source.contains(work.left.object.sha256, resolution.draftHead)),
       'WORK_STALE',
       'Resolution source no longer descends from its exact draft.',
     );
-    const pending = await calculate(() =>
-      conflictPlan(source, resolution.left, resolution.right, 'target', resolution.mergeBase),
-    );
     const state = source.state(work.left.object.sha256);
-    for (const conflict of pending.conflicts.filter(item => item.kind === 'text')) {
-      const file = state.files.find(file => file.path === conflict.path);
-      if (!file) continue;
-      if (source.resolvedContent) {
-        source.resolvedContent(file);
-        continue;
-      }
-      const bytes = await calculate(() => source.object(file.blob));
+    const draft = await resolveCalculate(() => source.state(resolution.draftHead));
+    const draftFiles = new Map(draft.files.map(file => [file.path, file]));
+    const currentFiles = new Map(state.files.map(file => [file.path, file]));
+    let pin: WorkerPin | null = resolution.conflicts;
+    const seen = new Set<string>();
+    while (pin) {
+      invariant(!seen.has(pin.sha256), 'SOURCE_HASH_MISMATCH', 'Conflict pages must advance.');
+      seen.add(pin.sha256);
+      const page = composeConflictPageSchema.parse(await reader.json(pin));
       invariant(
-        !/^(<<<<<<< |>>>>>>> |=======\r?$)/m.test(bytes.toString('utf8')),
-        'CONFLICT_MARKERS',
-        `Resolve the conflict markers before completing resolution: ${file.path}.`,
+        page.left === resolution.left && page.right === resolution.right,
+        'SOURCE_HASH_MISMATCH',
+        'Resolve the original conflict source.',
       );
+      if (!source.resolvedContent) {
+        // Fixed workers resolve a whole conflict page together; distinct edited
+        // blobs must not turn into a Convex descriptor request per file.
+        await reader.resolveMany(
+          page.paths.flatMap(conflict => {
+            const original = draftFiles.get(conflict.path),
+              file = currentFiles.get(conflict.path);
+            return original && original.blob !== conflict.left?.blob && file ? [file.blob] : [];
+          }),
+        );
+      }
+      for (const conflict of page.paths) {
+        const original = draftFiles.get(conflict.path),
+          file = currentFiles.get(conflict.path);
+        // Text drafts contain generated marker bytes. Binary and file/directory
+        // conflicts retain the left side unchanged and need no marker parsing.
+        if (!original || original.blob === conflict.left?.blob || !file) continue;
+        if (source.resolvedContent) {
+          source.resolvedContent(file);
+          continue;
+        }
+        const bytes = await resolveCalculate(() => source.object(file.blob));
+        invariant(
+          !/^(<<<<<<< |>>>>>>> |=======\r?$)/m.test(bytes.toString('utf8')),
+          'CONFLICT_MARKERS',
+          `Resolve the conflict markers before completing resolution: ${file.path}.`,
+        );
+      }
+      pin = page.next;
     }
-    const head = source.writeState(
-      state.files,
-      [work.left.object.sha256, resolution.right],
-      plan.message,
-      plan.at,
+    const head = await resolveCalculate(() =>
+      source.writeState(state.files, [work.left.object.sha256, resolution.right], plan.message, plan.at),
     );
     result = {
       status: 'resolved',

@@ -171,7 +171,7 @@ export default function HostedSettings({
       )}
       {section === 'autonomy' &&
         (policy ? (
-          <Autonomy policy={policy} editable={owner} save={save} />
+          <Autonomy policy={policy} editable={owner} save={save} hosted />
         ) : (
           <p role="status">Reading autonomy…</p>
         ))}

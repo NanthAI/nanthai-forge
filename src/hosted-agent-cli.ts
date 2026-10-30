@@ -42,6 +42,7 @@ export async function hostedAgentCli(
   selected: Record<string, unknown>,
   address: HostedAgentAddress,
   transport = new HostedAgentTransport(root, address),
+  signal?: AbortSignal,
 ) {
   const command = Object.fromEntries(
     Object.entries(selected).filter(([key]) => !['url', 'projectId', 'action'].includes(key)),
@@ -72,7 +73,19 @@ export async function hostedAgentCli(
       process.removeListener('SIGTERM', stop);
     }
   }
-  const result = await transport.dispatch(action, command);
+  const controller = new AbortController(),
+    stop = () => controller.abort();
+  if (!signal) {
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  }
+  let result;
+  try {
+    result = await transport.dispatch(action, command, signal ?? controller.signal);
+  } finally {
+    process.removeListener('SIGINT', stop);
+    process.removeListener('SIGTERM', stop);
+  }
   // Retain only after an authorized successful response. An invalid/incomplete
   // address never silently turns into a local owner/listener dependency.
   durableReplace(join(hostedAgentDirectory(root), 'address.json'), JSON.stringify(address));

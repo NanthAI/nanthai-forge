@@ -1,3 +1,4 @@
+import { guideHostedSync, resolveHostedAgent, recoverHostedCandidate } from './hosted-agent-resolution.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
 import { hostedLandingDesiredSchema } from './hosted-landing-desired.js';
@@ -389,9 +390,13 @@ export async function executeHostedAgent(
   }
   if (action === 'compose')
     return composeAgentSource(session, hostedAgentCommandSchemas.compose.parse(input), operationId);
+  if (action === 'resolve') return resolveHostedAgent(session, input);
   if (action === 'sync') {
     const command = hostedAgentCommandSchemas.sync.parse(input);
-    const result = await syncAgentSource(session, command, operationId),
+    const result = await session.waitSource(
+        operationId,
+        await syncAgentSource(session, command, operationId),
+      ),
       completed = agentSourceOutcome(result);
     if (completed?.status === 'completed') {
       const source = syncResultSchema.parse(completed.result);
@@ -410,7 +415,7 @@ export async function executeHostedAgent(
         return { source: result, applied };
       }
     }
-    return result;
+    return guideHostedSync(session, result, command.apply);
   }
   if (action === 'revert') {
     const command = hostedAgentCommandSchemas.revert.parse(input);
@@ -561,7 +566,14 @@ export async function executeHostedAgent(
         }),
       };
     }
-    candidateId = hostedRecordSchema.options[3].parse(completed.result).id;
+    const candidate = hostedRecordSchema.options[3].parse(completed.result);
+    if (candidate.result.status === 'conflict' && session.capabilities.actions.includes('resolve'))
+      return {
+        phase: 'conflict',
+        candidateId: candidate.id,
+        recovery: await recoverHostedCandidate(session, candidate.id),
+      };
+    candidateId = candidate.id;
   } else
     invariant(
       command.composeOperationId,

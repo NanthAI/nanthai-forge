@@ -14,10 +14,12 @@ export function Autonomy({
   policy,
   save,
   editable = true,
+  hosted = false,
 }: {
   policy: AutonomyPolicy;
   save: (command: PolicyWrite) => Promise<AutonomyPolicy>;
   editable?: boolean;
+  hosted?: boolean;
 }) {
   const [draft, setDraft] = useState(policy),
     [base, setBase] = useState(policy);
@@ -80,7 +82,9 @@ export function Autonomy({
               policy.acceptance.disjointFastPath ? 'On' : 'Off',
             ],
             ['Protected paths', policy.acceptance.protectedPaths.join(', ') || 'None'],
-            ['Update Lanes from main automatically', policy.laneUpdates === 'auto' ? 'On' : 'Off'],
+            ...(!hosted
+              ? [['Update Lanes from main automatically', policy.laneUpdates === 'auto' ? 'On' : 'Off']]
+              : []),
             [
               'Complete Intents when all their Lanes are accepted',
               policy.lifecycle.completeOnAccept ? 'On' : 'Off',
@@ -198,11 +202,13 @@ export function Autonomy({
             checked={draft.acceptance.disjointFastPath ?? false}
             change={disjointFastPath => edit({ acceptance: { ...draft.acceptance, disjointFastPath } })}
           />
-          <Toggle
-            label="Update Lanes from main automatically"
-            checked={draft.laneUpdates === 'auto'}
-            change={checked => edit({ laneUpdates: checked ? 'auto' : 'ask' })}
-          />
+          {!hosted && (
+            <Toggle
+              label="Update Lanes from main automatically"
+              checked={draft.laneUpdates === 'auto'}
+              change={checked => edit({ laneUpdates: checked ? 'auto' : 'ask' })}
+            />
+          )}
           <Toggle
             label="Complete Intents when all their Lanes are accepted"
             checked={draft.lifecycle.completeOnAccept}

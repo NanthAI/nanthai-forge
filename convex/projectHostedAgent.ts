@@ -16,9 +16,10 @@ export const capabilities = query({
     projectId: v.id('hostedProjects'),
     clientVersion: v.optional(v.string()),
     noticeVersion: v.optional(v.literal(1)),
+    resolveVersion: v.optional(v.literal(1)),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, clientVersion, noticeVersion }) => {
+  handler: async (ctx, { projectId, clientVersion, noticeVersion, resolveVersion }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to discover hosted agent capabilities.');
@@ -32,7 +33,10 @@ export const capabilities = query({
           projectId,
           actor: user.subject,
           authority,
-          actions: authority.mode === 'native-owner' ? ['capabilities'] : hostedAgentActions,
+          actions:
+            authority.mode === 'native-owner'
+              ? ['capabilities']
+              : hostedAgentActions.filter(action => action !== 'resolve' || resolveVersion === 1),
           mainReady: (await channelRow(ctx, projectId)) !== null,
           sourceWorkerConfigured:
             (process.env.FORGE_SOURCE_PROVIDER ?? 'convex') === 'convex' ||

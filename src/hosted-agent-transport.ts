@@ -1,3 +1,6 @@
+import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
+import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
+import type { HostedRunSubscription } from './hosted-agent-observe.js';
 import { executeHostedRecords } from './hosted-agent-records.js';
 import { hostedAgentRecordActions } from './hosted-agent-contract.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
@@ -70,23 +73,29 @@ export class HostedAgentTransport {
       '',
       null,
     ),
+    readonly subscribeSource?: () => HostedRunSubscription,
   ) {}
-  async dispatch(requestedAction: string, input: Record<string, unknown>): Promise<HostedAgentResponse> {
+  async dispatch(
+    requestedAction: string,
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<HostedAgentResponse> {
     if (
       ['capabilities', 'status', 'observe', 'landing', 'check-settings', 'metrics'].includes(requestedAction)
     )
-      return this.dispatchRequest(requestedAction, input);
+      return this.dispatchRequest(requestedAction, input, signal);
     const metricRoot = resolve(this.root);
     return withLifecycleMetric(
       dirname(metricRoot),
       { ...input, action: requestedAction },
-      () => this.dispatchRequest(requestedAction, input),
+      () => this.dispatchRequest(requestedAction, input, signal),
       `${basename(metricRoot)}.forge-metrics.jsonl`,
     );
   }
   private async dispatchRequest(
     requestedAction: string,
     input: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
     const action = hostedAgentAction(requestedAction);
     invariant(
@@ -114,12 +123,30 @@ export class HostedAgentTransport {
           discovery = await this.query('projectHostedAgent:capabilities', {
             clientVersion: CUTOVER_CLI_VERSION,
             noticeVersion: 1,
+            resolveVersion: 1,
           });
         } catch (error) {
           if (!(error instanceof Error) || !error.message.includes('ArgumentValidationError')) throw error;
-          discovery = await this.query('projectHostedAgent:capabilities', {
-            clientVersion: CUTOVER_CLI_VERSION,
-          });
+          // A named noticeVersion refusal already establishes the oldest
+          // shape; do not repeat that known-unsupported field on the next probe.
+          if (/extra field\s+[`'"]?noticeVersion\b/i.test(error.message)) {
+            discovery = await this.query('projectHostedAgent:capabilities', {
+              clientVersion: CUTOVER_CLI_VERSION,
+            });
+          } else {
+            try {
+              discovery = await this.query('projectHostedAgent:capabilities', {
+                clientVersion: CUTOVER_CLI_VERSION,
+                noticeVersion: 1,
+              });
+            } catch (legacy) {
+              if (!(legacy instanceof Error) || !legacy.message.includes('ArgumentValidationError'))
+                throw legacy;
+              discovery = await this.query('projectHostedAgent:capabilities', {
+                clientVersion: CUTOVER_CLI_VERSION,
+              });
+            }
+          }
         }
       } catch (error) {
         const safe = hostedActionError(error, 'agent capability discovery');
@@ -192,6 +219,8 @@ export class HostedAgentTransport {
           );
           return main;
         },
+        waitSource: (operationId, initial, kind) =>
+          waitHostedAgentSource(this.address, operationId, initial, signal, this.subscribeSource, kind),
         marker: () => {
           const marker = readHostedLaneCheckout(root);
           if (marker)
@@ -215,6 +244,7 @@ export class HostedAgentTransport {
         });
       } else {
         result = await executeHostedAgent(session, action, command.data);
+        if (action === 'finish') result = await recoverHostedFinish(session, result);
         if (action === 'start' && hostedRootLanePath(root, this.address)) {
           const started = hostedStartResultSchema.parse(result);
           invariant(started.lane, 'SOURCE_UNAVAILABLE', 'Hosted start has no Lane source.');
@@ -253,7 +283,7 @@ export class HostedAgentTransport {
       action,
       operationId,
       resolved: operationId ? { operationId } : null,
-      result: await enrichHostedQueueAhead(this, result),
+      result: await hostedConflictAdvice(this, await enrichHostedQueueAhead(this, result)),
     };
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
@@ -308,6 +338,11 @@ export type HostedAgentSession = {
   exchange: HostedAgentExchange;
   capabilities: HostedAgentCapabilities;
   journal: HostedAgentJournal;
+  waitSource: (
+    operationId: string,
+    initial: unknown,
+    kind?: 'Sync' | 'Saves' | 'Compose',
+  ) => Promise<unknown>;
   query: <T = unknown>(name: string, args: Record<string, unknown>) => Promise<T>;
   mutation: <T = unknown>(name: string, args: Record<string, unknown>) => Promise<T>;
   main: () => Promise<z.infer<typeof hostedMainV2Schema>>;

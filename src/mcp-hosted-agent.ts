@@ -56,6 +56,7 @@ export function registerHostedAgentWorkflow(
         'checkpoint',
         'compose',
         'sync',
+        'resolve',
         'finish',
         'cancel',
         'revert',
@@ -95,10 +96,10 @@ export function registerHostedAgentWorkflow(
         inputSchema: { command: z.union([options[0]!, options[1]!, ...options.slice(2)]) },
         annotations: { ...read, readOnlyHint: group.name === 'forge_work_overview' },
       },
-      async ({ command }) =>
+      async ({ command }, extra) =>
         result(() => {
           const { action, ...body } = command;
-          return hostedAgentCli(transport.root, action, body, transport.address, transport);
+          return hostedAgentCli(transport.root, action, body, transport.address, transport, extra?.signal);
         }),
     );
   }

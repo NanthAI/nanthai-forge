@@ -13,6 +13,7 @@ import { syncRequestSchema } from './hosted-sync.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
+import { hostedRecordSchema } from './hosted-records.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 export type SourceProgress = {
   terminal?: { outcome: { status: string; result?: unknown } } | null;
@@ -137,6 +138,29 @@ export async function syncAgentSource(
   operationId: string,
 ) {
   const request = await session.journal.retain(`sync:${operationId}`, async () => {
+    if (command.candidateId) {
+      invariant(
+        !command.target && !command.laneId && command.ontoMain === undefined,
+        'BAD_ARGUMENT',
+        'Select one conflicted Candidate or a Lane sync target.',
+      );
+      const candidate = hostedRecordSchema.options[3].parse(
+        await session.query('projectHostedCompose:candidate', { candidateId: command.candidateId }),
+      );
+      invariant(
+        candidate.result.status === 'conflict',
+        'VIEW_CONFLICT',
+        'Select the exact conflicted Candidate.',
+      );
+      return syncRequestSchema.parse({
+        kind: 'resolution',
+        operationId,
+        authorityEpoch: session.capabilities.authority.epoch,
+        candidateId: candidate.id,
+        conflicts: candidate.result.conflicts,
+        message: command.message,
+      });
+    }
     const marker = session.marker(),
       lane: HostedLaneSelection =
         marker && (!command.laneId || command.laneId === marker.selection.laneId)

@@ -1484,6 +1484,8 @@ nforge agent ./edit open '{"laneId":"LANE_UUID"}'
 nforge agent ./edit save '{"message":"Search implementation"}'
 nforge agent ./edit compose '{"laneId":"LANE_UUID"}'
 nforge agent ./edit sync '{"laneId":"LANE_UUID"}'
+# If conflict files were returned, edit them in the returned root, then:
+nforge agent ./resolution resolve '{"laneId":"RESOLUTION_LANE_UUID"}'
 nforge agent ./edit check '{"candidateId":"CANDIDATE_UUID","checkId":"CHECK_UUID"}'
 nforge agent ./edit finish '{"laneId":"LANE_UUID","message":"Add search"}'
 nforge agent ./edit cancel '{"submissionId":"SUBMISSION_UUID"}'
@@ -1672,3 +1674,37 @@ upload carries the explicit project setting and a finite expiry. Lifecycle event
 wake already-due expiries and schedule no idle expiry timer.
 
 
+
+### Hosted conflict recovery
+
+Hosted `finish` prepares a sibling resolution Lane when its composition conflicts.
+Its `recovery.conflict` response names the editing root, the conflicting paths,
+conflict-marker file contents and the exact next `resolve` command. A pending
+source job remains durable; replay the original finish parameters/operation ID
+when it has not completed. Recovery subscribes only while the active call waits
+for its exact source job, then closes; it never polls.
+
+For an existing rejected submission (including a batch member), `status` or
+`observe` returns capped conflict paths and an exact `sync` command selecting
+that attempt's conflicted Candidate. `sync {"candidateId":"CANDIDATE_UUID"}`
+opens that immutable conflict draft. Ordinary Lane sync conflicts return the
+same guided response. The original Lane and accepted main remain unchanged.
+
+Edit the files in the returned root and run `resolve` there. It saves those
+bytes, checks the original conflict files for remaining markers, and completes
+the server's resolution operation. Its response gives a fresh `finish` command.
+No extra edit or separate checkpoint is needed, including when the resolution
+was already saved. Unknown replies reuse the original operation ID; changed
+edits after a terminal failure need a new operation ID.
+
+Path summaries show at most 100 paths and inline text at most 128 KiB. All
+conflicting paths remain editable in the sparse resolution checkout; omitted,
+binary, deleted or large contents are read from that root. These response bounds
+do not limit resolution. Current access is checked before returning cached source.
+The `resolve` action is advertised only when capability discovery requests
+`resolveVersion:1`, so released clients with strict action enums keep working.
+
+Hosted finish follows the merge-queue default: compose and check against current
+main automatically, with explicit resolution for overlapping edits. The native
+`laneUpdates` setting does not control this hosted behavior and is hidden in
+hosted settings. Native settings and sync policy are unchanged.

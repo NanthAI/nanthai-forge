@@ -26,7 +26,10 @@ function setup() {
 test('discovery reports protocol and actual project authority with constant reads and zero writes/wakes', async () => {
   const s = setup();
   let result = await s.read('owner');
-  assert.deepEqual(result.actions, hostedAgentActions);
+  assert.deepEqual(
+    result.actions,
+    hostedAgentActions.filter(action => action !== 'resolve'),
+  );
   assert.equal(result.mainReady, false);
   assert.equal(result.nativeOwnerRequired, false);
   assert.equal(result.observation, 'finite');
@@ -99,4 +102,13 @@ test('default Convex discovery needs no worker configuration and explicit Modal 
       else process.env[key] = value;
     }
   }
+});
+
+test('resolve advertisement is opt-in so released strict capability readers remain compatible', async () => {
+  const s = setup();
+  assert(!(await s.read('owner')).actions.includes('resolve'));
+  const current = JSON.parse(
+    await s.call('capabilities', capabilities, { projectId: s.projectId, resolveVersion: 1 }, 'owner'),
+  );
+  assert.deepEqual(current.actions, hostedAgentActions);
 });

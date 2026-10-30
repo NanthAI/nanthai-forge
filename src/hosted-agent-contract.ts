@@ -17,6 +17,7 @@ export const hostedAgentActions = [
   'save',
   'compose',
   'sync',
+  'resolve',
   'check',
   'finish',
   'cancel',
@@ -110,6 +111,7 @@ export const hostedAgentCommandSchemas = {
     .object({
       ...lane,
       ...message,
+      candidateId: uuid.optional(),
       target: z
         .union([
           z.object({ kind: z.literal('main'), head: hash, receiptId: z.string() }).strict(),
@@ -120,6 +122,7 @@ export const hostedAgentCommandSchemas = {
       apply: z.boolean().default(true),
     })
     .strict(),
+  resolve: z.object({ ...lane, ...message }).strict(),
   check: check.extend({ candidateId: uuid, expectedHead: hash.optional() }).strict(),
   finish: z
     .object({
