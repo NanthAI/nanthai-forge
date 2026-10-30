@@ -85,6 +85,36 @@ and how to undo it. A contract attempt ready during red main waits with `MAIN_RE
 and releases the queue without polling. Full-gated fixes continue. Green main
 releases held attempts through the audit's event-driven wake.
 
+### Trust per path per actor
+
+`autonomyPolicy.trust` is absent by default, which turns trust off. With
+`trust: {"enabled": false}` Forge records the history but changes no gate (shadow
+mode). The owner approves the thresholds before setting `enabled: true`
+(`set-policy` with `trust`).
+
+- **Earned per path and actor.** Each accepted landing adds a weight to every area
+  (directory, two levels deep) it changed: 1 without a contract, then 2, 3 and 4
+  at 1, 3 and 7 or more contract tests. The score halves every `halfLifeDays` of
+  idleness (computed when read; nothing runs on a timer).
+- **Levels.** Below `trustedAt` an area is `supervised`, from `trustedAt`
+  `trusted`, from `autonomousAt` `autonomous`. A Candidate takes the lowest level
+  of the areas it changed; unknown paths are supervised. Enforcement only demotes
+  the gate: a supervised area runs the full gate, and trust never grants a gate the
+  acceptance policy withholds.
+- **Lost on culprits, on that path only.** A culprit finding multiplies the score
+  of the areas of the culprit landing by `culpritKeep`; other areas are unchanged.
+- **New vendors.** An actor starts supervised everywhere and stays supervised
+  until it has `probationLandings` green landings, unless its vendor is listed in
+  `establishedVendors` (`vendors` maps an actor id to its vendor; an unlisted actor
+  is its own vendor).
+- **Delegation.** `decide` accepts `delegation: {actor, paths, level, until?}`;
+  only the project owner may record it. The decision is the record; superseding it
+  revokes the delegation. A delegation overrides earned level and probation on
+  the matching paths only.
+- **Shown** in agent briefs and by `projectHostedTrust:effective` (the caller's
+  level for given paths). State is one bounded row per actor, updated on landing
+  and culprit events: one read and one write per landing, nothing when idle.
+
 The gate ships dark for existing projects. Deploy the server, runner, main audit
 and automatic recovery before enabling it. With a drained queue and the current
 main receipt fully checked, the owner enables it with

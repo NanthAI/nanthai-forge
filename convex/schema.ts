@@ -4,6 +4,7 @@ import { hostedFrictionTables } from './projectHostedFrictionFields';
 import { selfMetricBillTables } from './projectSelfMetricBillFields';
 import { selfMetricReceiptTables } from './projectSelfMetricReceiptFields';
 import { hostedDecisionTables } from './projectHostedDecisionsFields';
+import { hostedTrustTables } from './projectHostedTrustFields';
 import { githubBindingTables } from './githubBindingFields';
 import { githubMirrorTables } from './projectGithubMirrorFields';
 import { sourceStepTables } from './projectSourceStepFields';
@@ -688,6 +689,7 @@ export default defineSchema({
   ...selfMetricReceiptTables,
   ...hostedOverlapTables,
   ...hostedDecisionTables,
+  ...hostedTrustTables,
   imports: defineTable(jobFields)
     .index('by_scope_and_repository_and_ref', ['scope', 'repository', 'ref'])
     .index('by_repository', ['repository'])

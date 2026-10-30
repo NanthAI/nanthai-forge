@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { noteTrustCulprit } from './projectHostedTrust';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction, internalMutation, type MutationCtx, type QueryCtx } from './_generated/server';
@@ -151,6 +152,7 @@ async function notice(ctx: MutationCtx, project: Doc<'hostedProjects'>, intentId
     canonicalPayload(intent.needsFix) === canonicalPayload(n)
   )
     return;
+  if (n.receiptId) await noteTrustCulprit(ctx, project, n.receiptId);
   await writeHostedRecord(ctx, {
     projectId: project._id,
     actor: project.owner,

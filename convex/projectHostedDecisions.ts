@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { recordCaller, recordRequest, replayRequest, recordPageOptions } from './projectHostedFrictionStore';
+import { applyTrustDelegation } from './projectHostedTrust';
 import { appendDecision, decisionRow, decisionTargetKey } from './projectHostedDecisionsStore';
 import { decideInputSchema, decisionRecordSchema, decisionsInputSchema } from '../src/decision-types';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -15,7 +16,7 @@ export const decide = mutation({
   returns: v.string(),
   handler: async (ctx, { projectId, request: input }) => {
     try {
-      const { actor } = await recordCaller(ctx, projectId, true, true);
+      const { actor, project } = await recordCaller(ctx, projectId, true, true);
       const parsed = decideInputSchema.required({ operationId: true }).safeParse(JSON.parse(input));
       invariant(parsed.success, 'BAD_ARGUMENT', 'Send the original decision inputs and operation UUID.');
       const old = await decisionRow(ctx, projectId, parsed.data.operationId);
@@ -38,6 +39,11 @@ export const decide = mutation({
         command.overrides?.kind === 'decision' ? command.overrides.decisionId : undefined,
       ]))
         if (id) invariant(await decisionRow(ctx, projectId, id), 'NOT_FOUND', 'Earlier decision not found.');
+      invariant(
+        !command.delegation || project.owner === actor,
+        'PROJECT_UNAVAILABLE',
+        'Only the project owner delegates trust areas to an actor.',
+      );
       const at = new Date().toISOString();
       const record = decisionRecordSchema.parse({
         ...command,
@@ -59,7 +65,8 @@ export const decide = mutation({
             ? { overrides: { kind: 'decision', decisionId: command.supersedes } }
             : {}),
       });
-      await appendDecision(ctx, projectId, actor, record);
+      if (await appendDecision(ctx, projectId, actor, record))
+        await applyTrustDelegation(ctx, projectId, record);
       return canonicalPayload(record);
     } catch (error) {
       return report(error);

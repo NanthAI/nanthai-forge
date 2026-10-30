@@ -2,6 +2,7 @@ import { trackHostedOverlapMain } from './projectHostedOverlapStore';
 import { hostedAcceptGate, holdMainRed } from './projectHostedGate';
 import { protectedGatePaths } from '../src/contract-gate-policy';
 import { noteMainLanding, mainGate } from './projectHostedMainAuditState';
+import { noteTrustLanding } from './projectHostedTrust';
 import type { HostedCheckRun } from '../src/hosted-check';
 // SPDX-License-Identifier: Apache-2.0
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
@@ -338,6 +339,14 @@ export async function publishAcceptance(
   await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, queue, now);
   await noteMainLanding(ctx, { project, receipt, run });
+  await noteTrustLanding(ctx, {
+    project,
+    actor: attempt.actor.id,
+    receiptId: receipt.id,
+    at: receipt.at,
+    paths: candidate.governance?.paths ?? null,
+    run,
+  });
   await enqueueGithubMirror(ctx, project, receipt);
   if (receipt.completion.enabled && plan.inputPages) await scheduleAcceptanceCompletion(ctx, identity);
   return { status: 'landed' as const, receipt };

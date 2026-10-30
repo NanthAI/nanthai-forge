@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { checkLogsSchema } from './check-log-policy.js';
 import { invariant } from './errors.js';
 import { legacyCheckCredentialsRefSchema } from './legacy-check-credentials.js';
+import { trustConfigSchema } from './agent-trust-config.js';
 export const autoExchangeSchema = z.object({
   enabled: z.boolean().default(false),
   debounceMs: z.number().safe().nonnegative().default(30_000),
@@ -23,6 +24,8 @@ export const autonomyPolicySchema = z.object({
     .optional(),
   autoExchange: autoExchangeSchema.optional(),
   checkLogs: checkLogsSchema.optional(),
+  /** B2.6: absent is off; enabling is an owner decision. */
+  trust: trustConfigSchema.optional(),
   preset: z.enum(['supervised', 'trusted', 'autonomous', 'custom']),
   acceptance: z.object({
     mode: z.enum(['review', 'auto-on-pass']),
@@ -120,6 +123,7 @@ export const policyWriteSchema = z
     lifecycle: autonomyPolicySchema.shape.lifecycle.partial().optional(),
     notify: autonomyPolicySchema.shape.notify.partial().optional(),
     githubMirror: autonomyPolicySchema.shape.githubMirror,
+    trust: trustConfigSchema.optional(),
     autoExchange: z
       .object({
         enabled: z.boolean().optional(),
@@ -158,11 +162,13 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     command.laneUpdates ||
     command.lifecycle ||
     command.notify ||
-    command.githubMirror;
+    command.githubMirror ||
+    command.trust;
   const githubMirror = command.githubMirror ?? previous.githubMirror;
   const policy = autonomyPolicySchema.parse({
     ...base,
     ...(githubMirror ? { githubMirror } : {}),
+    ...((command.trust ?? previous.trust) ? { trust: command.trust ?? previous.trust } : {}),
     autoExchange: { ...autoExchangeSchema.parse({}), ...previous.autoExchange, ...command.autoExchange },
     ...(edited ? { preset: 'custom' } : {}),
     ...(command.checks

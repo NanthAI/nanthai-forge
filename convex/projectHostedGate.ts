@@ -14,6 +14,7 @@ import { invariant } from '../src/errors';
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { mainGate } from './projectHostedMainAuditState';
+import { trustGateReader } from './projectHostedTrust';
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { gateFor, gateForCandidates, acceptGate, type GateInput } from '../src/contract-gate-policy';
 import type { HostedCheckRun } from '../src/hosted-check';
@@ -37,11 +38,15 @@ export async function hostedGateInput(
 ): Promise<GateInput> {
   const policy = effectivePolicy(project);
   const enabled = policy.acceptance.gate === 'contract';
+  const paths = candidate.governance?.paths ?? null;
   return {
     project,
     policy,
     actor,
-    paths: candidate.governance?.paths ?? null,
+    paths,
+    ...(enabled && policy.trust?.enabled
+      ? { trust: await trustGateReader(ctx, project)(actor.id, paths) }
+      : {}),
     contract: enabled && !fixGate({ needsFix: project.needsFix?.[candidate.intentId] }) ? member : null,
     main: enabled
       ? await mainGate(ctx, project._id)
@@ -65,11 +70,19 @@ export async function hostedGateForCandidates(
   const first = candidates[0];
   if (!first) return gateForCandidates([]);
   const shared = await hostedGateInput(ctx, project, first.candidate, first.actor, first.contract);
+  const trustFor = trustGateReader(ctx, project);
+  const trusts =
+    shared.policy.acceptance.gate === 'contract' && shared.policy.trust?.enabled
+      ? await Promise.all(
+          candidates.map(({ candidate, actor }) => trustFor(actor.id, candidate.governance?.paths ?? null)),
+        )
+      : [];
   return gateForCandidates(
-    candidates.map(({ candidate, actor, contract }) => ({
+    candidates.map(({ candidate, actor, contract }, index) => ({
       ...shared,
       actor,
       paths: candidate.governance?.paths ?? null,
+      ...(trusts.length ? { trust: trusts[index] } : {}),
       contract:
         shared.policy.acceptance.gate === 'contract' &&
         !fixGate({ needsFix: project.needsFix?.[candidate.intentId] })

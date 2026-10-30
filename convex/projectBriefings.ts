@@ -2,6 +2,7 @@ import { needsFix } from '../src/culprit-bisect';
 import { hostedPaths } from '../src/hosted-paths';
 // SPDX-License-Identifier: Apache-2.0
 import { effectivePolicy } from '../src/autonomy-policy';
+import { trustBrief } from './projectHostedTrust';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { briefArgs, briefingResult } from './agentBriefFields';
@@ -74,6 +75,8 @@ export const brief = query({
         },
       );
       context.autonomyPolicy = effectivePolicy(project);
+      const trust = await trustBrief(ctx, project, user.subject, context.paths);
+      if (trust) context.guidance.project += `\n${trust}`;
       const pendingFixes = needsFix(project);
       if (pendingFixes.length)
         context.guidance.project +=

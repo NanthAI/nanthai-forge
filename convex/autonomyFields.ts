@@ -11,6 +11,18 @@ export const autonomyPolicy = v.object({
       pauseOnDailySpend: v.optional(v.boolean()),
     }),
   ),
+  trust: v.optional(
+    v.object({
+      enabled: v.boolean(),
+      trustedAt: v.optional(v.number()),
+      autonomousAt: v.optional(v.number()),
+      halfLifeDays: v.optional(v.number()),
+      culpritKeep: v.optional(v.number()),
+      probationLandings: v.optional(v.number()),
+      vendors: v.optional(v.record(v.string(), v.string())),
+      establishedVendors: v.optional(v.array(v.string())),
+    }),
+  ),
   preset: v.union(
     v.literal('supervised'),
     v.literal('trusted'),

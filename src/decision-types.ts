@@ -12,6 +12,15 @@ export const decisionOverrideSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('decision'), decisionId: id, link: text.optional() }),
   z.object({ kind: z.literal('default'), description: text, link: text.optional() }),
 ]);
+/** B2.6: an explicit owner delegation of path areas to an actor, stored as the decision itself. */
+export const trustDelegationSchema = z
+  .object({
+    actor: text.max(200),
+    paths: z.array(text.max(300)).min(1).max(16),
+    level: z.enum(['trusted', 'autonomous']),
+    until: z.iso.datetime().optional(),
+  })
+  .strict();
 export const decideInputSchema = z.object({
   conversation: conversationSchema.optional(),
   operationId: id.optional(),
@@ -23,6 +32,7 @@ export const decideInputSchema = z.object({
   decidedAt: z.union([z.iso.datetime(), z.iso.date()]).optional(),
   overrides: decisionOverrideSchema.optional(),
   supersedes: id.optional(),
+  delegation: trustDelegationSchema.optional(),
   actor: workActorSchema.shape.name.optional(),
   tool: workActorSchema.shape.tool,
 });
@@ -44,6 +54,7 @@ export const decisionRecordSchema = z.object({
   decidedAt: z.union([z.iso.datetime(), z.iso.date()]),
   overrides: decisionOverrideSchema.optional(),
   supersedes: id.optional(),
+  delegation: trustDelegationSchema.optional(),
   actor: workActorSchema,
   requester: workActorSchema,
 });

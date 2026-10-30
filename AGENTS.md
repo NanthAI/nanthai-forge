@@ -48,6 +48,10 @@ pauses while main is red; full-gated fixes can still land. Enable this policy on
 after the hosted audit and automatic recovery slices are deployed. See
 [the effective gate table](docs/workflows.md#hosted-acceptance-gate).
 
+Trust per path per actor (`autonomyPolicy.trust`) is off until the owner approves
+its defaults. Enabled, a supervised path runs the full gate; your level shows in
+your brief. Details: [trust](docs/workflows.md#trust-per-path-per-actor).
+
 ## Agent source commands
 
 `nforge agent OWNER diff '{"laneId":"…"}'` summarizes base-to-live Lane changes.

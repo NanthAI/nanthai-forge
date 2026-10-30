@@ -10,6 +10,8 @@ export type GateInput = {
   paths: string[] | null;
   contract: { version: number; tests: { path: string }[] } | null;
   main: MainGate;
+  /** B2.6, only when `policy.trust.enabled`: trust can demote a contract-eligible actor to the full gate, never grant more. */
+  trust?: { level: 'supervised' | 'trusted' | 'autonomous'; reason: string } | null;
 };
 export function protectedGatePaths(policy: AutonomyPolicy, paths: string[] | null) {
   if (paths === null) return true;
@@ -21,7 +23,7 @@ export function protectedGatePaths(policy: AutonomyPolicy, paths: string[] | nul
 }
 /** Eligibility is recomputed from current server policy, never request gate metadata. */
 export function gateFor(input: GateInput): CheckGate {
-  const { policy, project, actor, paths, contract, main } = input;
+  const { policy, project, actor, paths, contract, main, trust } = input;
   let reason = 'Full gate';
   if (policy.acceptance.gate !== 'contract') reason = 'Contract gate is off';
   else if (policy.acceptance.mode !== 'auto-on-pass') reason = 'Supervised acceptance';
@@ -32,6 +34,7 @@ export function gateFor(input: GateInput): CheckGate {
   )
     reason = 'Owner review, contributor or system acceptance';
   else if (protectedGatePaths(policy, paths)) reason = 'Protected or unknown paths';
+  else if (trust?.level === 'supervised') reason = trust.reason;
   else if (!contract) reason = 'Intent has no contract';
   else if (main.status !== 'green' || main.debt)
     reason = main.status === 'red' ? 'Main is red' : 'Main audit unavailable or in debt';
