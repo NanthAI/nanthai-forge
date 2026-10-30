@@ -3,7 +3,15 @@
 import { posix } from 'node:path';
 import { builtinModules } from 'node:module';
 import ts from 'typescript';
-import { directoryDependency } from './test-directory-path.mjs';
+import {
+  builtNames,
+  directoryDependency,
+  escape,
+  packageSelf,
+  pathKind,
+  repositoryWorkspaceUsers,
+  shadowsRequire,
+} from './test-directory-path.mjs';
 import { docsPackager, packageScriptGraph, scriptPath } from './script-impact.mjs';
 import {
   byNameDispatch,
@@ -26,13 +34,21 @@ export function testImportGraph(files, scriptsChanged = []) {
     if (!reverse.has(dependency)) reverse.set(dependency, new Set());
     if (!evidence.has(dependency)) evidence.set(dependency, new Map());
     const previous = evidence.get(dependency).get(importer);
-    if (!previous || previous.kind === 'dynamic')
+    // A workspace path is the narrowest evidence; dynamic is replaced by specific evidence.
+    if (
+      !previous ||
+      previous.kind === 'workspace-path' ||
+      (previous.kind === 'dynamic' && kind !== 'workspace-path')
+    )
       evidence.get(dependency).set(importer, { kind, ...(detail ? { detail } : {}) });
     reverse.get(dependency).add(importer);
   };
   const packageGraph = packageScriptGraph(files, edge);
   if (scriptsChanged.length && packageGraph.error) return { error: packageGraph.error };
+  const self = packageSelf(files);
   function resolve(from, value) {
+    if (self && (value === self.name || value.startsWith(`${self.name}/`)))
+      value = self.exports.get(`.${value.slice(self.name.length)}`)?.slice(2) ?? value;
     let path = value.startsWith('.') ? posix.normalize(posix.join(posix.dirname(from), value)) : value;
     path = path.replace(/^dist\//, 'src/').replace(/^(src\/.+)\.(?:js|d\.ts)$/, '$1.ts');
     return [
@@ -105,11 +121,18 @@ export function testImportGraph(files, scriptsChanged = []) {
     const ast = ts.createSourceFile(path, files.get(path), ts.ScriptTarget.Latest, true);
     if (ast.parseDiagnostics.length)
       return { error: `Unparseable ${scriptPath(path) ? 'script' : 'module'}: ${path}` };
+    const loaders = shadowsRequire(ast)
+      ? ['moduleUrl', 'moduleSource']
+      : ['require', 'moduleUrl', 'moduleSource'];
     // The generated API is anyApi itself; its own changes widen to the namespace.
     const apiNames = path.startsWith('convex/_generated/')
       ? new Set()
       : convexApiBindings(ast, value => resolve(path, value));
+    // A template widens only to files its literal skeleton can name, as itself or as a
+    // folder: `src/file-${i}.ts` names no source file, `../dist/${name}.js` every module.
     const widen = (prefix, detail = 'Computed module path') => {
+      const template = typeof prefix === 'string' ? null : prefix;
+      if (template) prefix = template.head.text;
       const normalized = prefix.startsWith('.')
         ? posix.normalize(posix.join(posix.dirname(path), prefix))
         : prefix;
@@ -118,8 +141,18 @@ export function testImportGraph(files, scriptsChanged = []) {
         : normalized.startsWith('scripts/')
           ? 'scripts/'
           : domains.find(dir => normalized.startsWith(dir));
+      const pattern =
+        template && domain
+          ? new RegExp(
+              `^${[normalized, ...template.templateSpans.map(span => span.literal.text)].map(escape).join('.*')}(?:/.*)?$`,
+              's',
+            )
+          : null;
       for (const candidate of files.keys())
-        if (domain ? candidate.startsWith(domain) : domains.some(dir => candidate.startsWith(dir)))
+        if (
+          (domain ? candidate.startsWith(domain) : domains.some(dir => candidate.startsWith(dir))) &&
+          (!pattern || builtNames(candidate).some(name => pattern.test(name)))
+        )
           edge(candidate, path, 'dynamic', detail);
     };
     function visit(node) {
@@ -186,9 +219,8 @@ export function testImportGraph(files, scriptsChanged = []) {
             ts.isExternalModuleReference(parent) ||
             (ts.isCallExpression(parent) &&
               (parent.expression.kind === ts.SyntaxKind.ImportKeyword ||
-                (ts.isIdentifier(parent.expression) &&
-                  ['require', 'moduleUrl', 'moduleSource'].includes(parent.expression.text))));
-          edge(target, path, importing ? 'import' : 'runtime-path');
+                (ts.isIdentifier(parent.expression) && loaders.includes(parent.expression.text))));
+          edge(target, path, importing ? 'import' : pathKind(path, value));
         }
         if (path.startsWith('tests/') || path.startsWith('scripts/')) packageGraph.reference?.(value, path);
         // Built web bundles, directory enumeration and generated CLI module paths.
@@ -222,21 +254,22 @@ export function testImportGraph(files, scriptsChanged = []) {
         const literal = prefix.match(/^((?:\.\.\/|\.\/)?[\w./-]+)[^\w./-]/)?.[1];
         const file = literal && resolve(path, literal);
         const enumerated = templateStrings(node);
-        if (file && file.endsWith(literal.replace(/^(?:\.\.?\/)+/, ''))) edge(file, path, 'runtime-path');
+        if (file && file.endsWith(literal.replace(/^(?:\.\.?\/)+/, '')))
+          edge(file, path, pathKind(path, literal));
         else if (functionNameLoader(node, path)) nameLoaders.add(path);
         else if (/^(?:\.\.\/|\.\/)?(?:dist|src|web|convex|netlify|scripts)\//.test(prefix)) {
           // `../convex/${name}.ts` over a literal list names exactly those files.
           const targets = enumerated?.map(value => resolve(path, value));
-          if (targets?.every(Boolean)) for (const target of targets) edge(target, path, 'runtime-path');
-          else widen(prefix);
+          if (targets?.every(Boolean))
+            for (const [i, target] of targets.entries()) edge(target, path, pathKind(path, enumerated[i]));
+          else widen(node);
         }
       }
       // Unknown module loading widens coverage, including wrapper calls such as moduleUrl().
       if (
         ts.isCallExpression(node) &&
         (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-          (ts.isIdentifier(node.expression) &&
-            ['require', 'moduleUrl', 'moduleSource'].includes(node.expression.text)) ||
+          (ts.isIdentifier(node.expression) && loaders.includes(node.expression.text)) ||
           (ts.isPropertyAccessExpression(node.expression) &&
             node.expression.name.text === 'glob' &&
             ts.isMetaProperty(node.expression.expression)))
@@ -247,7 +280,12 @@ export function testImportGraph(files, scriptsChanged = []) {
           if (scriptsChanged.some(item => item.path === path) && !docsPackager(path))
             uncertain = `Unknown module loading in changed script: ${path}`;
           for (const prefix of prefixes)
-            widen(prefix, prefix ? `Computed loader domain: ${prefix}` : 'Unknown module loader');
+            widen(
+              prefix,
+              typeof prefix !== 'string' || prefix
+                ? `Computed loader domain: ${typeof prefix === 'string' ? prefix : prefix.head.text}`
+                : 'Unknown module loader',
+            );
         }
       }
       ts.forEachChild(node, visit);
@@ -257,9 +295,10 @@ export function testImportGraph(files, scriptsChanged = []) {
     visit(ast);
   }
   if (uncertain) return { error: uncertain };
+  const workspaceUsers = repositoryWorkspaceUsers(files);
   if (scriptsChanged.length && packageGraph.error) return { error: packageGraph.error };
   byNameDispatch(files, reverse, evidence, edge, named, nameLoaders);
-  return { reverse, evidence, packageGraph };
+  return { reverse, evidence, packageGraph, workspaceUsers };
 }
 
 // A resolved literal in one branch must never hide an unknown alternative.
@@ -273,9 +312,7 @@ function loadingPrefixes(node, known) {
   if (ts.isTemplateExpression(node)) {
     const values = templateStrings(node);
     // A by-name loader's modules are added from dispatched names (byNameDispatch).
-    return values?.every(known) || functionNameLoader(node, node.getSourceFile().fileName)
-      ? []
-      : [node.head.text];
+    return values?.every(known) || functionNameLoader(node, node.getSourceFile().fileName) ? [] : [node];
   }
   if (ts.isPropertyAccessExpression(node) && node.name.text === 'href')
     return loadingPrefixes(node.expression, known);
@@ -288,6 +325,14 @@ function loadingPrefixes(node, known) {
         : '';
     if (['moduleUrl', 'moduleSource', 'URL', 'pathToFileURL', 'fileURLToPath'].includes(name))
       return loadingPrefixes(node.arguments?.[0], known);
+    // createRequire(...).resolve('pkg'), import.meta.resolve('pkg'): a literal specifier.
+    if (
+      name === 'resolve' &&
+      node.arguments?.length === 1 &&
+      ts.isStringLiteralLike(node.arguments[0]) &&
+      known(node.arguments[0].text)
+    )
+      return [];
     if (['join', 'resolve'].includes(name)) {
       const dirs = (node.arguments ?? [])
         .filter(ts.isStringLiteralLike)

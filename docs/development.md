@@ -288,8 +288,20 @@ ignore tables and cleanup helpers from turning those modules into catch-all hubs
 Unknown loaders include test and script helpers as well as product source. A known
 literal branch never hides an unknown branch of a conditional loader. Unparseable
 modules fail toward full coverage.
-Web edits also run the UI regression files. Computed module paths, including joined `dist/` paths, widen to their source domain; unknown dynamic imports
-widen to all source domains. The existing `tests/convex-module.mjs` adapter is modelled
+Web edits also run the UI regression files. A computed path widens only to files its
+literal skeleton can name (`head*mid*tail`, or a folder under it); source modules also
+match by their built `dist/` name, so `` `../dist/${name}.js` `` still names every module
+while a fixture template like `` `src/file-${i}.ts` `` names none. Unknown dynamic imports
+widen to all source domains. The package's own name (`@nanthai/forge[/sub]`) resolves
+through `package.json` `exports`, so package smoke depends on the exported entry
+modules; an unmapped subpath stays unknown. A file that declares its own `require`
+(function, parameter or non-`createRequire` variable) does not load modules through it.
+A bare repository path in product source (`'convex/schema.ts'`, not `./worker.js`) is a
+`workspace-path` edge: product code resolves it in a caller's workspace, so the chain
+counts only when it reaches a test or script that makes this repository the workspace
+(`process.cwd()`, the repo root from `import.meta.url`, or a child process spawned without
+`cwd`). Any stronger edge between the same files replaces it, and by-name Convex loader
+closures ignore it. The existing `tests/convex-module.mjs` adapter is modelled
 through its callers' paths and the loaded sources' imports. Its recursive moduleUrl
 implementation does not imply every module depends on every other module.
 
@@ -308,6 +320,9 @@ name those commands are consumers too. A standalone script runs static checks,
 smoke and any exact basename test (`scripts/example.mjs` → `tests/example.test.mjs`).
 Selection evidence states the changed script, whether it has consuming tests, and
 basename coverage. Known manual UI capture scripts retain their UI regressions.
+A workflow other than the landing check (no product source names its file) selects the
+tests and scripts that name it or `.github/workflows`; the landing check stays full.
+`plans/*.md` selects the tests and scripts that read `plans/`.
 
 Check-runner dependencies stay full: the graph traces imports and literal paths
 from `scripts/forge-check.mjs`, the selector/classifier, package `verify`, `test`,
@@ -339,8 +354,8 @@ acceptance, independently of its disjoint acceptance fast-path setting. The acce
 
 The standard command writes `{scope, reason, tests, reasons}` to the runner-owned
 `FORGE_CHECK_SELECTION` output. Each selected file's `reasons` entry identifies a
-changed-path dependency chain (with import, runtime-path, package-command or dynamic
-edges), a conservative domain rule, explicit coverage, smoke, audit recovery or full
+changed-path dependency chain (with import, runtime-path, workspace-path, package-command
+or dynamic edges), a conservative domain rule, explicit coverage, smoke, audit recovery or full
 fallback. The retained `selection.json` and command stdout include this explanation;
 existing Work summaries retain their established scope/reason/test-list fields.
 The runner retains the selection as command-reported

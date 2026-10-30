@@ -167,7 +167,8 @@ test('a file path inside a message names that file, not its folder', () => {
     'tests/report.test.mjs': "import '../dist/report.js';",
   });
   assert.ok(!tests(files, 'convex/other.ts').includes('tests/report.test.mjs'));
-  assert.equal(edge(testImportGraph(files), 'convex/schema.ts', 'src/report.ts')?.kind, 'runtime-path');
+  // Product code names a file in its workspace: one file, reached only through workspace users.
+  assert.equal(edge(testImportGraph(files), 'convex/schema.ts', 'src/report.ts')?.kind, 'workspace-path');
 });
 
 test('7967038f: a test enumerating ../convex/ depends on every module; data strings do not', () => {

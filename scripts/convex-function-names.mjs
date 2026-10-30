@@ -55,6 +55,7 @@ export function byNameDispatch(files, reverse, evidence, edge, named, nameLoader
       !dependency.startsWith('package-script:') &&
       !importer.startsWith('package-script:') &&
       kind !== 'package-command' &&
+      kind !== 'workspace-path' &&
       (kind !== 'runtime-path' || importer.startsWith('tests/'))
     );
   };

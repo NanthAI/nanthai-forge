@@ -188,3 +188,85 @@ export function directoryDependency(literal, ast) {
   }
   return false;
 }
+
+export const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// A source module is also addressable by its built name. (No path template here:
+// this file's own text would widen like any computed path.)
+export const builtNames = path =>
+  /^src\/.+\.ts$/.test(path)
+    ? [path, path.replace(/^src\/(.+)\.ts$/, 'dist/$1.js'), path.replace(/^src\/(.+)\.ts$/, 'dist/$1.d.ts')]
+    : [path];
+
+// Product code resolves a repository-relative path ('convex/schema.ts') in the workspace
+// it is given; only module-relative paths ('./worker.js', '../package.json') name its own files.
+export const pathKind = (path, value) =>
+  /^(?:src|web\/src|convex|netlify)\//.test(path) && !value.startsWith('.')
+    ? 'workspace-path'
+    : 'runtime-path';
+
+// This package's own name resolves through its exports map (package-smoke loads it so).
+export function packageSelf(files) {
+  try {
+    const manifest = JSON.parse(files.get('package.json'));
+    const exports = typeof manifest.exports === 'string' ? { '.': manifest.exports } : manifest.exports;
+    if (typeof manifest.name !== 'string' || !exports || typeof exports !== 'object') return null;
+    const target = value =>
+      typeof value === 'string'
+        ? value
+        : value && typeof value === 'object'
+          ? target(value.default ?? value.import)
+          : null;
+    return {
+      name: manifest.name,
+      exports: new Map(
+        Object.entries(exports)
+          .map(([key, value]) => [key, target(value)])
+          .filter(([key, value]) => key.startsWith('.') && !key.includes('*') && value?.startsWith('./')),
+      ),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// A file's own helper named require (function require(value, message)) loads no module.
+// A createRequire binding is a loader, so any such binding keeps require a loader.
+export function shadowsRequire(ast) {
+  if (!/\b(?:function|const|let|var)\s+require\b|[(,]\s*require\s*[,):]/.test(ast.text)) return false;
+  let local = false,
+    loader = false;
+  const visit = node => {
+    const name = node.name && ts.isIdentifier(node.name) ? node.name.text : null;
+    if (name === 'require') {
+      if (
+        ts.isVariableDeclaration(node) &&
+        node.initializer &&
+        /\bcreateRequire\b/.test(node.initializer.getText())
+      )
+        loader = true;
+      else if (ts.isFunctionDeclaration(node) || ts.isParameter(node) || ts.isVariableDeclaration(node))
+        local = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  return local && !loader;
+}
+
+// Tests and scripts that make this repository a workspace: they name its root,
+// or spawn children in the inherited working directory.
+export function repositoryWorkspaceUsers(files) {
+  return new Set(
+    [...files.keys()].filter(path => {
+      if (!/^(?:tests|scripts)\/.+\.[cm]?[jt]sx?$/.test(path)) return false;
+      const text = files.get(path);
+      return (
+        /process\.cwd\(\)|new URL\(\s*['"]\.\.?\/?['"]\s*,\s*import\.meta\.url|import\.meta\.dirname\s*,\s*['"]\.\.\/?['"]/.test(
+          text,
+        ) ||
+        (/\b(?:spawn|spawnSync|execFile|execFileSync|execSync|exec|fork)\s*\(/.test(text) &&
+          !/\bcwd\b/.test(text))
+      );
+    }),
+  );
+}

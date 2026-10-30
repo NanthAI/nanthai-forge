@@ -101,6 +101,37 @@ export function classifyCheckPath(path, files) {
       reason: 'Agent skill document and the tests that read it directly or through the module that does',
     };
   }
+  // A workflow product code dispatches is the landing check itself; any other workflow
+  // runs outside the suite, and only the tests and scripts that read it can observe it.
+  const workflow = path.match(/^\.github\/workflows\/([^/]+\.ya?ml)$/)?.[1];
+  if (workflow) {
+    const product = /^(?:src|convex|web\/src|netlify)\//;
+    if ([...files].some(([file, text]) => product.test(file) && text.includes(workflow))) return null;
+    return {
+      domain: 'tooling',
+      seeds: [
+        path,
+        ...[...files.keys()].filter(
+          file =>
+            /^(?:tests|scripts)\//.test(file) &&
+            (files.get(file).includes(workflow) || files.get(file).includes('.github/workflows')),
+        ),
+      ],
+      reason: 'GitHub workflow outside the landing check and the tests and scripts that read it',
+    };
+  }
+  // Planning notes are read only by the code naming them or their folder.
+  if (/^plans\/[^/]+\.md$/.test(path))
+    return {
+      domain: 'tooling',
+      seeds: [
+        path,
+        ...[...files.keys()].filter(
+          file => /^(?:tests|scripts)\//.test(file) && /plans\//.test(files.get(file)),
+        ),
+      ],
+      reason: 'Planning note and the tests and scripts that read plans',
+    };
   if (!files.has(path)) return null;
   if (/^scripts\/.+\.(?:mjs|js|ts)$/.test(path)) return { domain: 'scripts', seeds: [path] };
   if (/^src\/.+\.ts$/.test(path)) return { domain: 'core', seeds: [path] };

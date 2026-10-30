@@ -79,7 +79,7 @@ function selectWithGraph({ paths, files, forceFull = false }, suppliedGraph) {
   const scriptsChanged = classifications.filter(item => scriptPath(item.path) && files.has(item.path));
   const graph = suppliedGraph ?? testImportGraph(files, scriptsChanged);
   if (graph.error) return full(graph.error);
-  const { reverse, evidence, packageGraph } = graph;
+  const { reverse, evidence, packageGraph, workspaceUsers } = graph;
   // Product source is data to the static tools (build, typecheck, lint, format,
   // schema, package smoke), which run on every exact Candidate. Its chains stop at
   // those commands, and at those tools when the tool reads it rather than imports it.
@@ -89,6 +89,34 @@ function selectWithGraph({ paths, files, forceFull = false }, suppliedGraph) {
       (packageGraph.staticTools?.has(importer) && edge.kind !== 'import'));
   // The docs-check wrapper only spawns the docs check; the runner importing it is not a consumer.
   const affected = new Map();
+  // Workspace-path edges wait here; they reach only code that makes this repository a workspace.
+  const held = new Map();
+  const step = (previous, edge, importer) => ({
+    kind: previous.kind === 'dynamic' || edge.kind === 'dynamic' ? 'dynamic' : 'dependency',
+    changedPath: previous.changedPath,
+    chain: [...previous.chain, importer],
+    edges: [...previous.edges, edge.kind],
+    ...(edge.detail || previous.detail ? { detail: edge.detail ?? previous.detail } : {}),
+  });
+  const walk = (queue, blocked) => {
+    for (let i = 0; i < queue.length; i++) {
+      const current = queue[i];
+      if (blocked && docsWrapper(current)) continue;
+      const previous = affected.get(current) ?? held.get(current);
+      const holding = !affected.has(current);
+      for (const importer of reverse.get(current) ?? []) {
+        if (affected.has(importer) || (holding && held.has(importer))) continue;
+        const edge = evidence.get(current).get(importer);
+        if (fenced(previous, importer, edge)) continue;
+        const entry = step(previous, edge, importer);
+        if ((holding || edge.kind === 'workspace-path') && !workspaceUsers?.has(importer)) {
+          if (held.has(importer)) continue;
+          held.set(importer, entry);
+        } else affected.set(importer, entry);
+        queue.push(importer);
+      }
+    }
+  };
   const spread = (items, blocked) => {
     const queue = [];
     for (const item of items)
@@ -103,24 +131,7 @@ function selectWithGraph({ paths, files, forceFull = false }, suppliedGraph) {
         });
         queue.push(seed);
       }
-    for (let i = 0; i < queue.length; i++) {
-      const current = queue[i];
-      if (blocked && docsWrapper(current)) continue;
-      for (const importer of reverse.get(current) ?? []) {
-        if (affected.has(importer)) continue;
-        const previous = affected.get(current),
-          edge = evidence.get(current).get(importer);
-        if (fenced(previous, importer, edge)) continue;
-        affected.set(importer, {
-          kind: previous.kind === 'dynamic' || edge.kind === 'dynamic' ? 'dynamic' : 'dependency',
-          changedPath: previous.changedPath,
-          chain: [...previous.chain, importer],
-          edges: [...previous.edges, edge.kind],
-          ...(edge.detail || previous.detail ? { detail: edge.detail ?? previous.detail } : {}),
-        });
-        queue.push(importer);
-      }
-    }
+    walk(queue, blocked);
   };
   spread(
     classifications.filter(item => !docsPackager(item.path)),
