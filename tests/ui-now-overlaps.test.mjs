@@ -138,9 +138,19 @@ test('dogfood 560 Lanes, 50 sessions and 100 answers do no IO with a bounded map
   }));
   const answers = Array.from({ length: 100 }, (_, i) => ({ laneId: `lane-${i}`, noticeId: `${i}-0` }));
   for (let i = 0; i < 10; i++) unansweredOverlaps(lanes, answers);
-  const started = performance.now();
-  const result = unansweredOverlaps(lanes, answers);
-  const ms = performance.now() - started;
+  // Shared CI can pause a single wall-clock slice. Budget warmed median latency,
+  // and retain tail samples so a scheduling or runtime pause stays visible.
+  const samples = [];
+  let result;
+  for (let i = 0; i < 25; i++) {
+    const started = performance.now();
+    result = unansweredOverlaps(lanes, answers);
+    samples.push(performance.now() - started);
+  }
+  samples.sort((a, b) => a - b);
+  const ms = samples[Math.floor(samples.length / 2)];
+  const p95 = samples[Math.ceil(samples.length * 0.95) - 1];
+  const max = samples.at(-1);
   assert.equal(
     [...result.values()].reduce((n, items) => n + items.length, 0),
     11100,
@@ -151,6 +161,9 @@ test('dogfood 560 Lanes, 50 sessions and 100 answers do no IO with a bounded map
       lanes: 560,
       answers: 100,
       ms,
+      p95,
+      max,
+      samples,
       calls: 0,
       reads: 0,
       writes: 0,
