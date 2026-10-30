@@ -34,6 +34,9 @@ export const autonomyPolicySchema = z.object({
     disjointFastPath: z.boolean().optional(),
     /** Hosted clean-recomposition proof; absent means on. Independent of native fast path. */
     hostedCrossHeadReuse: z.boolean().optional(),
+    /** Hosted main-race recheck under the contract gate: run only tests affected by
+     * both the main delta and this change; absent means on. */
+    scopedRecheck: z.boolean().optional(),
     /** Native: `optimistic` opts into optimistic landing. Hosted: `batched` opts into
      * landing batches; absent checks each deferred entry alone. */
     landing: z.enum(['batched', 'optimistic']).optional(),

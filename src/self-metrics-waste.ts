@@ -99,6 +99,10 @@ export function calculateWaste(records: MetricRecords, period: MetricPeriod) {
     gaps,
     mainRaceRecheckRuns: rechecks.length,
     mainRaceRecheckRunnerMinutes: rechecks.reduce((sum, run) => sum + (run.runnerMinutes ?? 0), 0),
+    mainRaceScopedRecheckRuns: rechecks.filter(run => run.scopedRecheck).length,
+    mainRaceScopedRecheckRunnerMinutes: rechecks
+      .filter(run => run.scopedRecheck)
+      .reduce((sum, run) => sum + (run.runnerMinutes ?? 0), 0),
     unknownRecheckRunnerRuns: rechecks.filter(run => run.runnerMinutes === undefined).length,
     byCause: causes.map(cause => {
       const selected = rows.filter(row => row.cause === cause);

@@ -73,6 +73,7 @@ const rowSchemas = {
     started: z.boolean(),
     runnerMinutes: z.number().nonnegative().nullable(),
     fullSuite: z.boolean().nullable(),
+    scopedRecheck: z.literal(true).optional(),
     inputPin: pin,
     reuseKey: z.string().nullable().optional(),
   }),

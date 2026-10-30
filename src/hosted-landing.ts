@@ -10,6 +10,7 @@ import { autonomyPolicySchema } from './autonomy-policy.js';
 import { composeRequestSchema } from './hosted-compose.js';
 import { submissionOutcome } from './landing-submission-state.js';
 import { crossHeadProofSchema } from './hosted-cross-head-proof.js';
+import { scopedRecheckBasisSchema } from './scoped-recheck-policy.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const finishRetryReasonSchema = z.enum(['flake', 'main-moved', 'infra', 'other']);
@@ -57,6 +58,8 @@ export const hostedLandingCancelSchema = z
 export const hostedLandingAttemptSchema = z
   .object({
     crossHeadProof: crossHeadProofSchema.optional(),
+    /** Main-race retry basis: its check may run the scoped recheck selection. */
+    recheck: scopedRecheckBasisSchema.optional(),
     semanticPlan: semanticPlanSchema.optional(),
     deferredCheck: z.literal(true).optional(),
     memberCandidate: z

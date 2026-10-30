@@ -78,6 +78,17 @@ Trusted landings pass without a batch: each eligible entry checks alone at the
 head of the queue under this gate. Hosted landing batches are opt-in
 (`acceptance.landing: "batched"`) and always run the full gate.
 
+When main moves under a passing full check and the clean recomposition cannot
+reuse it, the retry may run a scoped recheck (`acceptance.scopedRecheck`, absent
+means on; only with `gate: contract`). Eligibility is the contract gate's, apart
+from the Intent contract: owner agent, automatic acceptance, unprotected paths,
+green main without audit debt. The planner runs the tests affected by both the main
+delta since the checked base and this change, the change's own test files, the
+composed Intent union and fixed smoke. Unclassified or deleted paths, package or
+lockfile, root configuration and the selector itself select the full suite. The
+skipped tests become main-audit debt; a failed scoped recheck fails the landing as
+usual. Set `scopedRecheck: false` to keep full rechecks.
+
 For a combined Candidate, every member must be eligible for the contract gate;
 its check covers the union of their declared tests. One full-gated member makes
 the combined check full.

@@ -297,6 +297,8 @@ export async function finishFixture(
         await tx('finishDependents', driver.dependents, input);
       } else if (task.name === 'projectHostedAcceptance:complete') {
         await f.materialize(input.receiptId);
+      } else if (task.name === 'projectHostedActionsDirect:dispatch') {
+        // Provider dispatch IO; tests drive the run lifecycle directly.
       } else if (
         task.name.startsWith('projectConvexSource:') ||
         task.name.startsWith('projectConvexSourceTask:') ||

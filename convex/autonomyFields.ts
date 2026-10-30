@@ -34,6 +34,7 @@ export const autonomyPolicy = v.object({
     gate: v.optional(v.union(v.literal('full'), v.literal('contract'))),
     disjointFastPath: v.optional(v.boolean()),
     hostedCrossHeadReuse: v.optional(v.boolean()),
+    scopedRecheck: v.optional(v.boolean()),
     landing: v.optional(v.union(v.literal('batched'), v.literal('optimistic'))),
     batchWindowMs: v.optional(v.number()),
     autoActors: v.optional(v.array(v.string())),

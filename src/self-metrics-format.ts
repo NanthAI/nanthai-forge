@@ -53,10 +53,16 @@ export function formatMetricReport(current: MetricsSurface, before?: MetricsSurf
       row =>
         `| ${row.cause} | ${row.attempts} | ${number(row.elapsedMinutes)} | ${number(row.runnerMinutes)} | ${number(row.discardedPassedRunnerMinutes)} | ${row.unknownElapsedAttempts} / ${row.unknownRunnerRuns} |`,
     ),
-    `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner minutes. ${cell(current.totals.waste.gaps.join(' '))}`,
+    `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner minutes; ${recheckShare(current)}. ${cell(current.totals.waste.gaps.join(' '))}`,
     `Finish-to-main p50 (trusted actors): ${number(current.totals.finishToMain.p50Minutes)} minutes. ${cell(current.totals.finishToMain.gaps.join(' '))}`,
     '',
   ].join('\n');
+}
+/** Scoped share, and recheck runner minutes per main-race attempt. */
+function recheckShare(current: MetricsSurface) {
+  const waste = current.totals.waste;
+  const races = waste.byCause.find(row => row.cause === 'main-race')?.attempts ?? 0;
+  return `${waste.mainRaceScopedRecheckRuns} scoped (${number(waste.mainRaceScopedRecheckRunnerMinutes)} runner min); ${races ? number(waste.mainRaceRecheckRunnerMinutes / races) : 'n/a'} recheck runner min per main-race attempt`;
 }
 export function formatMetrics(current: MetricsSurface) {
   const values = metricValues(current.totals);
@@ -74,7 +80,7 @@ export function formatMetrics(current: MetricsSurface) {
         row =>
           `Waste ${row.cause}: ${number(row.elapsedMinutes)} elapsed / ${number(row.runnerMinutes)} runner min; discarded passed ${number(row.discardedPassedRunnerMinutes)} runner min`,
       ),
-    `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner min`,
+    `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner min; ${recheckShare(current)}`,
     'Daily values and named gaps: --json; report: --report FILE.md',
   ].join('\n');
 }

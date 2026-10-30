@@ -20,6 +20,7 @@ import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
+import type { ScopedRecheckBasis } from '../src/scoped-recheck-policy';
 
 /** Pin canonical metadata once. H14 still rechecks current main/policy/evidence
  * in its final transaction; neither this snapshot nor ready grants acceptance. */
@@ -38,6 +39,7 @@ export async function pinLandingAttempt(
     allowStaleMain?: boolean;
     deferCheck?: boolean;
     retainedSelection?: HostedLandingAttempt['candidate'];
+    recheck?: ScopedRecheckBasis;
   },
 ) {
   invariant(
@@ -121,6 +123,7 @@ export async function pinLandingAttempt(
           : await enqueueHostedCheck(ctx, {
               projectId: input.projectId,
               actor: input.actor.id,
+              ...(input.recheck ? { recheck: input.recheck } : {}),
               request: {
                 ...(recoveryGate ? { gate: recoveryGate } : r.check.gate ? { gate: r.check.gate } : {}),
                 operationId: input.operations.check,
@@ -170,6 +173,7 @@ export async function pinLandingAttempt(
   return hostedLandingAttemptSchema.parse({
     ...(semanticPlan ? { semanticPlan } : {}),
     ...(deferredCheck ? { deferredCheck: true } : {}),
+    ...(input.recheck ? { recheck: input.recheck } : {}),
     schema: 1,
     projectId: input.projectId,
     submissionId: input.submissionId,

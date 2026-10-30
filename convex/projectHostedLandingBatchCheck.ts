@@ -150,6 +150,7 @@ async function prepareLandingCheckOnce(
   const run = await enqueueHostedCheck(ctx, {
     projectId: claim.projectId,
     actor: attempt.actor.id,
+    ...(attempt.recheck ? { recheck: attempt.recheck } : {}),
     request: {
       ...settings,
       operationId: attempt.operations.check,

@@ -13,6 +13,9 @@ import { hostedActionsRecipeSchema } from './hosted-actions.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { invariant } from './errors.js';
 import { materializeActionsSource } from './hosted-actions-job-source.js';
+import { scopedRecheckBase } from './scoped-recheck-policy.js';
+import { scopedRecheckSelection } from './scoped-recheck.js';
+import type { NativeState } from './native-state-format.js';
 import { refreshSourcePack } from './source-pack.js';
 import { refreshActionsSourcePack } from './hosted-actions-job-pack.js';
 /** Keep only paths/hashes in memory. Import analysis reads one source file at a time. */
@@ -49,17 +52,20 @@ export async function prepareActionsJob(
   await mkdir(directory, { recursive: true });
   await mkdir(cache, { recursive: true });
   const source = await materializeActionsSource(client, directory, cache);
-  const { state, base } = source;
-  const inventory = new Map(state.files.map(file => [file.path, file])),
-    old = new Map(base.files.map(file => [file.path, file]));
-  const paths = [...new Set([...inventory.keys(), ...old.keys()])].filter(
-    path => checkPin(inventory.get(path) ?? null) !== checkPin(old.get(path) ?? null),
-  );
+  const { state, base, checkedBase } = source;
+  const inventory = new Map(state.files.map(file => [file.path, file]));
+  const paths = changedPaths(base, state);
   const standard =
     /(?:^|\/)node$/.test(run.check.executable) &&
     JSON.stringify(run.check.args) === '["scripts/forge-check.mjs"]';
   const files = new SourceFiles(new Map(state.files.map(file => [file.path, file.blob])), cache);
-  const selected = actionsGateSelection(run, paths, files, standard);
+  const selected = actionsGateSelection(
+    run,
+    paths,
+    files,
+    standard,
+    checkedBase ? changedPaths(checkedBase, base) : null,
+  );
   const selection = {
     scope: selected.scope,
     reason: selected.reason,
@@ -126,12 +132,21 @@ export async function prepareActionsJob(
   };
 }
 
-/** Gate metadata is sent only in response to a server-stamped run (skew handshake). */
+const changedPaths = (before: NativeState, after: NativeState) => {
+  const a = new Map(before.files.map(file => [file.path, file])),
+    b = new Map(after.files.map(file => [file.path, file]));
+  return [...new Set([...b.keys(), ...a.keys()])].filter(
+    path => checkPin(b.get(path) ?? null) !== checkPin(a.get(path) ?? null),
+  );
+};
+/** Gate metadata is sent only in response to a server-stamped run (skew handshake).
+ * `mainPaths` is the main delta since a scoped recheck's checked base. */
 export function actionsGateSelection(
   run: HostedCheckRun,
   paths: string[],
   files: Map<string, string>,
   standard: boolean,
+  mainPaths: string[] | null = null,
 ) {
   if (!standard) return { scope: 'full', reason: 'Exact configured command', tests: [] as string[] };
   const gate = run.gate;
@@ -152,6 +167,17 @@ export function actionsGateSelection(
       'A probe test is absent from the exact Candidate.',
     );
     return { scope: 'scoped', reason: gate.reason ?? 'Failed-file probe', tests };
+  }
+  if (scopedRecheckBase(gate)) {
+    if (mainPaths)
+      return scopedRecheckSelection({ lanePaths: paths, mainPaths, files, semanticTests: union });
+    const selected = standardSelection({
+      paths,
+      files,
+      semanticTests: union,
+      env: { FORGE_CHECK_FULL: '1' },
+    });
+    return { ...selected, reason: `Scoped recheck base unavailable; ${selected.reason}` };
   }
   const selected = standardSelection({ paths, files, semanticTests: union, env });
   if (!gate || gate.mode !== 'contract' || selected.scope === 'full' || selected.scope === 'docs')

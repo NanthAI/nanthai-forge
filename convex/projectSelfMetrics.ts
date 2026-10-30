@@ -9,6 +9,7 @@ import type { HostedRecord } from '../src/hosted-records';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { invariant } from '../src/errors';
 import { hostedRunReuseKey } from '../src/self-metrics-reuse-key';
+import { scopedRecheckBase } from '../src/scoped-recheck-policy';
 import { report } from './errors';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
 
@@ -210,6 +211,7 @@ export const page = query({
                   ? ['full', 'audit'].includes((run.gate ?? run.request.gate)!.mode) ||
                     (run.gate ?? run.request.gate)!.effective === 'full'
                   : null,
+              ...(scopedRecheckBase(run.gate) ? { scopedRecheck: true } : {}),
             };
           }
           if (input.stream === 'requests') {

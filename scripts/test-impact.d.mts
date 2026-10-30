@@ -30,3 +30,5 @@ export function selectionSourcePath(path: string): boolean;
 
 export function selectTests(input: { files: Map<string, string>; paths: string[] }): TestSelection;
 export function selectImpactPair(files: Map<string, string>, comparisons: string[][]): TestSelection[];
+export const smokeTests: string[];
+export function documentation(path: string): boolean;

@@ -578,6 +578,9 @@ against the original checked head, without constructing a chain of inherited pas
 Batches retain one shared exact recheck: their multiple same-head receipt snapshots
 do not yet provide the single-transition recovery proof required for this optimization.
 
+When the proof is refused, a contract-gated project's retry runs a scoped recheck
+instead of the full suite: see [hosted acceptance gate](../workflows.md#hosted-acceptance-gate).
+
 Proof analysis holds one renewable owner lease on the existing finish watchdog.
 Duplicate delivery starts no second analysis, cancellation fences late callbacks,
 and an expired proof falls back once to its named exact retry.

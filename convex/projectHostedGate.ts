@@ -18,6 +18,7 @@ import { trustGateReader } from './projectHostedTrust';
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { gateFor, gateForCandidates, acceptGate, type GateInput } from '../src/contract-gate-policy';
 import type { HostedCheckRun } from '../src/hosted-check';
+import { acceptScopedRecheck, scopedRecheckBase } from '../src/scoped-recheck-policy';
 import type { HostedRecord } from '../src/hosted-records';
 
 /** Behaviour-neutral S0 placeholder; the owning slice supplies the implementation. */
@@ -111,6 +112,9 @@ export async function hostedAcceptGate(
       },
       run.gate,
     );
+  // A scoped main-race recheck is accepted on the contract gate's terms.
+  if (scopedRecheckBase(run.gate))
+    return acceptScopedRecheck(await hostedGateInput(ctx, project, candidate, actor, null));
   // The authoritative run retains the contract selected at enqueue. Re-reading
   // today's Intent would add a record-head/body fan-in and replace that declaration.
   const contract =

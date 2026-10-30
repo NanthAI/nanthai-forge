@@ -9,6 +9,7 @@ import { directSourceWindow } from './hosted-actions-direct.js';
 import { fileDigest, downloadSourcePack, unpackSourcePack } from './source-pack-archive.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
+import { scopedRecheckBase } from './scoped-recheck-policy.js';
 
 export async function materializeActionsSource(client: ActionsJobClient, directory: string, cache: string) {
   const started = Date.now(),
@@ -16,13 +17,29 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   const connection = client.transport(),
     { transport, resolve, prepareRecipes } = connection;
   let reader = new SourceWorkerReader(cache, transport);
-  const heads = [run.request.expectedHead, run.candidate.base.head];
-  await resolve(heads);
-  await prepareRecipes(heads);
-  const [candidateRef, baseRef] = await transport.describeBatch!(heads);
+  // A scoped recheck also needs the checked base inventory; it shares this window.
+  const recheckBase = scopedRecheckBase(run.gate);
+  let heads = [run.request.expectedHead, run.candidate.base.head, ...(recheckBase ? [recheckBase] : [])];
+  try {
+    await resolve(heads);
+    await prepareRecipes(heads);
+  } catch (error) {
+    if (heads.length < 3) throw error;
+    heads = heads.slice(0, 2);
+    await resolve(heads);
+    await prepareRecipes(heads);
+  }
+  const [candidateRef, baseRef, checkedBaseRef] = await transport.describeBatch!(heads);
   const stateBytes = await reader.bytes(candidateRef!);
   const state = parseNativeState(stateBytes);
   const base = parseNativeState(await reader.bytes(baseRef!));
+  // Unavailable or invalid checked-base bytes select the full suite, never fail the check.
+  const checkedBase = checkedBaseRef
+    ? await reader
+        .bytes(checkedBaseRef)
+        .then(bytes => (digest(bytes) === recheckBase ? parseNativeState(bytes) : null))
+        .catch(() => null)
+    : null;
   let selected = state.files,
     reason = 'no pack',
     packed: NativeState | null = null;
@@ -140,6 +157,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     state,
     stateBytes,
     base,
+    checkedBase,
     packed,
     deltaFiles: changed.length,
     deltaBytes,

@@ -2,7 +2,12 @@ import { fixGate } from '../src/culprit-bisect';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { cancelHostedCheck } from './projectHostedCheckCancel';
 import { scheduleDirectActions } from './projectHostedActionsDirect';
-import { hostedGateForCandidates } from './projectHostedGate';
+import { hostedGateForCandidates, hostedGateInput } from './projectHostedGate';
+import {
+  scopedRecheckEligible,
+  scopedRecheckGate,
+  type ScopedRecheckBasis,
+} from '../src/scoped-recheck-policy';
 import { semanticPayload } from '../src/semantic-payload';
 import { mergeSemanticMembers, semanticMember } from './projectSemanticContracts';
 // SPDX-License-Identifier: Apache-2.0
@@ -100,6 +105,8 @@ export async function enqueueHostedCheck(
     projectId: Id<'hostedProjects'>;
     actor: string;
     request: unknown;
+    /** Main-race retry: a full gate may become the scoped recheck selection. */
+    recheck?: ScopedRecheckBasis;
   },
 ) {
   const request = hostedCheckRequestSchema.parse(input.request);
@@ -190,13 +197,20 @@ export async function enqueueHostedCheck(
   // direct Actions session has the additive gate handshake; all other routes
   // retain their existing full-check wire shape.
   const recoveryGate = fixGate({ needsFix: row.restoreBases ?? project.needsFix?.[candidate.intentId] });
-  const gate =
+  let gate =
     runner.provider === 'github-actions' && !runner.credential && project.autonomyPolicy?.acceptance.gate
       ? (recoveryGate ??
         (await hostedGateForCandidates(ctx, project, [
           { candidate, actor: { kind: 'agent', id: actor }, contract: member ?? null },
         ])))
       : undefined;
+  if (
+    gate?.mode === 'full' &&
+    !recoveryGate &&
+    input.recheck &&
+    scopedRecheckEligible(await hostedGateInput(ctx, project, candidate, { kind: 'agent', id: actor }, null))
+  )
+    gate = scopedRecheckGate(input.recheck);
   const run = hostedCheckRunSchema.parse({
     ...(gate ? { gate } : {}),
     ...(semantic && semantic.members.length > 1 ? { semanticPlan: semantic } : {}),

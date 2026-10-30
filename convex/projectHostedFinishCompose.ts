@@ -26,6 +26,7 @@ import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operat
 import { landingObservation } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
+import { scopedRecheckBasis } from './projectHostedScopedRecheck';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 /** A main race is not a retry of the old request or a reusable check. Retain a
  * named child before IO, yield with bounded backoff, and resume that child only. */
@@ -171,7 +172,7 @@ export async function installFinishCompose(
     projectId: row.projectId,
     attemptId: state.firstAttemptId,
   });
-  const previous = proof
+  const previous = pending.parentAttemptId
     ? await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: pending.parentAttemptId })
     : null;
   if (proof && previous?.check && previous.candidate.head) {
@@ -206,7 +207,13 @@ export async function installFinishCompose(
       'The original check proof changed.',
     );
   } else proof = undefined;
+  // A main race without a transferable proof may recheck only the shared impact.
+  const recheck =
+    !proof && previous && candidate.result.status === 'clean'
+      ? await scopedRecheckBasis(ctx, previous)
+      : undefined;
   const attempt = await pinLandingAttempt(ctx, {
+    ...(recheck ? { recheck } : {}),
     ...input,
     actor: original.actor,
     deferCheck: proof ? false : !state.batchSolo,

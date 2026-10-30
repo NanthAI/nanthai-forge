@@ -48,6 +48,8 @@ export type MetricSubmission = {
 export type MetricRun = {
   head?: string;
   fullSuite?: boolean;
+  /** A main-race retry that ran only the shared-impact selection. */
+  scopedRecheck?: boolean | undefined;
   id: string;
   at: string;
   endedAt?: string | undefined;
