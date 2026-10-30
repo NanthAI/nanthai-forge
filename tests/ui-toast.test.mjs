@@ -83,6 +83,13 @@ test('actual acknowledge hook reports failure to toast and Retry reuses its oper
     calls = [];
   let failNextAck = false;
   const hooks = {
+    // The overlap writer is exercised by the mounted Now overlap fixture; this harness isolates message retries.
+    useOverlapAnswers: () => ({
+      error: '',
+      acknowledgeOverlaps: () => {
+        throw new Error('Unexpected overlap answer in a message retry');
+      },
+    }),
     useToast: () => store,
     useRef: value => ({ current: value }),
     useState: value => [value, () => {}],

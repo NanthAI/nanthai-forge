@@ -183,6 +183,9 @@ const checkpointSchema = z.object({
 });
 export const afterSchema = z.union([z.object({ intentId: id }).strict(), z.object({ viewId: id }).strict()]);
 export const laneSchema = z.object({
+  overlapInbox: z
+    .array(z.object({ noticeId: z.string(), file: z.string(), lanes: z.array(z.string()), at: z.string() }))
+    .optional(),
   startReceipt: z
     .object({
       revision: z.number().safe().nonnegative(),

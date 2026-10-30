@@ -11,23 +11,29 @@ export function sessionTreeRows(
   now: number,
   showStale: boolean,
   endedLaneIds: readonly string[] = [],
+  keep: ReadonlySet<string> = new Set(),
 ) {
   const latest = collapseSessions(flattenSessions(sessions)).filter(
     session => !/^agent workflow$/i.test(session.name.trim()),
   );
   const retained = latest.filter(
     session =>
-      session.status !== 'completed' &&
+      (keep.has(session.sessionId) || session.status !== 'completed') &&
       !endedLaneIds.includes(session.context.laneId ?? '') &&
-      now - activityAt(session) <= PRESENCE.hideMs,
+      (keep.has(session.sessionId) || now - activityAt(session) <= PRESENCE.hideMs),
   );
   const selected = new Set(retained.map(session => session.sessionId));
-  const folded = retained.filter(session => presenceState(session, now) === 'not-seen');
+  const folded = retained.filter(
+    session => presenceState(session, now) === 'not-seen' && !keep.has(session.sessionId),
+  );
   const visit = (nodes: readonly Session[]): Session[] =>
     nodes
       .flatMap(session => {
         const subagents = visit(session.subagents ?? []);
-        if (!selected.has(session.sessionId) || (!showStale && presenceState(session, now) === 'not-seen'))
+        if (
+          !selected.has(session.sessionId) ||
+          (!showStale && presenceState(session, now) === 'not-seen' && !keep.has(session.sessionId))
+        )
           return subagents;
         return [{ ...session, subagents }];
       })

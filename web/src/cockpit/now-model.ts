@@ -269,13 +269,17 @@ export function answeredToday(
   events: readonly { command: { kind: string }; actor: string; at: number }[],
   viewer: string | undefined,
   since: number,
+  overlapAnswers?: readonly { actor?: string; at?: string }[],
+  complete = false,
 ) {
   if (!viewer) return undefined;
-  const count = events.filter(
-    event => event.command.kind === 'ack' && event.actor === viewer && event.at >= since,
-  ).length;
-  if (!count) return undefined;
-  const covered = events.some(event => event.at < since);
+  const count =
+    (overlapAnswers?.filter(answer => answer.actor === viewer && Date.parse(answer.at ?? '') >= since)
+      .length ?? 0) +
+    events.filter(event => event.command.kind === 'ack' && event.actor === viewer && event.at >= since)
+      .length;
+  if (!count && overlapAnswers === undefined) return undefined;
+  const covered = complete || events.some(event => event.at < since);
   return `Answered today · ${count}${covered ? '' : '+'}`;
 }
 

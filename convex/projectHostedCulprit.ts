@@ -169,6 +169,7 @@ async function notice(ctx: MutationCtx, project: Doc<'hostedProjects'>, intentId
     needsFix: {
       ...current.needsFix,
       [intentId]: canonicalPayload({
+        at: new Date().toISOString(),
         state: n.state,
         auditRunId: n.auditRunId,
         ...(n.receiptId ? { receiptId: n.receiptId } : {}),

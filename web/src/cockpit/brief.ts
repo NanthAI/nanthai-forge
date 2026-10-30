@@ -48,6 +48,8 @@ export function decisionBrief(item: {
 }): Situation | null {
   const lane = item.laneId ? { laneId: item.laneId } : {};
   switch (item.kind) {
+    case 'overlap':
+      return null;
     case 'revert':
     case 'needs-fix':
       return null;

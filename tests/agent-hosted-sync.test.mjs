@@ -139,6 +139,18 @@ test('bound lifecycle publishes named sessions and incremental metadata; offline
   assert.equal(rows(s, 'intents')[0].status, 'active');
   assert.equal([...s.tables.projectCoordinationSessions.values()][0].name, 'gpt-b5-fixture');
   const session = [...s.tables.projectCoordinationSessions.values()][0].sessionId;
+  const delivered = {
+    noticeId: 'd'.repeat(64),
+    file: 'hello.txt',
+    lanes: [start.result.laneId, randomUUID()],
+    at: new Date().toISOString(),
+  };
+  mkdirSync(join(store.directory, 'overlap-inbox', start.result.laneId), { recursive: true });
+  writeFileSync(
+    join(store.directory, 'overlap-inbox', start.result.laneId, `${delivered.noticeId}.json`),
+    JSON.stringify(delivered),
+  );
+  const callsBeforeSave = calls.length;
   writeFileSync(join(start.result.path, 'hello.txt'), 'two\n');
   const saved = await workflow.dispatch({
     action: 'checkpoint',
@@ -147,6 +159,13 @@ test('bound lifecycle publishes named sessions and incremental metadata; offline
   });
   await flushAgentSync(store, client);
   assert.equal(rows(s, 'lanes')[0].checkpointCount, 1);
+  assert.deepEqual(rows(s, 'lanes')[0].overlaps, [delivered]);
+  assert.deepEqual(store.select('lanes', start.result.laneId).overlapInbox, [delivered]);
+  assert.equal(
+    calls.length - callsBeforeSave,
+    2,
+    'inbox publication reuses the existing activity and summary calls',
+  );
   const activity = [...s.tables.projectCoordinationSessions.values()][0];
   assert.equal(activity.sessionId, session);
   assert.deepEqual(activity.context.paths, ['hello.txt']);

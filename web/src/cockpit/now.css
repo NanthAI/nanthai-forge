@@ -868,3 +868,26 @@ div.fx-fold > button:focus-visible { outline: 2px solid var(--fx-focus); outline
 .fx-dec-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; font-size: 12.5px; }
 .fx-dec-confirm b { font-weight: 600; }
 
+
+/* 1. Per-agent unanswered count on a Who's working row. Waiting tone: it is the agent's to answer. */
+.fx-person-overlaps { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font: 500 11.5px/16px var(--fx-font-ui); color: var(--fx-waiting); }
+.fx-person-overlaps .fx-glyph { color: var(--fx-waiting); }
+.fx-person-overlaps a { color: inherit; }
+.fx-person-overlaps a:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* When the agent is gone, the same line goes stale and the item moves to Needs you. */
+.fx-person-stale .fx-person-overlaps { color: var(--fx-stale); }
+.fx-person-stale .fx-person-overlaps .fx-glyph { color: var(--fx-stale); }
+
+/* 2. New Needs-you kinds: 'overlap' (waiting) and 'revert' (failed) / 'needs-fix' (waiting). */
+.fx-dec-overlap .fx-dec-kind { color: var(--fx-waiting); }
+
+/* 3. The files an unanswered overlap is about, one line each: file · with whom. */
+.fx-dec-files { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--fx-text-2); }
+.fx-dec-files li { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.fx-dec-files code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fx-text); }
+.fx-dec-files .fx-dec-with { color: var(--fx-text-3); white-space: nowrap; }
+.fx-dec-files .fx-dec-more { color: var(--fx-text-3); }
+
+
+.fx-ov-unanswered { color: var(--fx-waiting); }
+.fx-answers .fx-done { color: var(--fx-text-3); font-size: 12px; }

@@ -4,6 +4,7 @@ import type { DecisionItem } from './attention';
 /** Compact recovery notices already carried by the workspace subscription. */
 export type NeedsFixNotice = {
   intentId: string;
+  at?: string;
   state: 'reverted' | 'needs-fix';
   auditRunId: string;
   receiptId?: string;
@@ -38,6 +39,7 @@ export function needsFixDecisions(
       id: `needsfix:${notice.intentId}`,
       kind: notice.state === 'reverted' ? 'revert' : 'needs-fix',
       intentId: notice.intentId,
+      ...(notice.at ? { at: notice.at } : {}),
       title: titles.get(notice.intentId) ?? 'Intent',
       subtitle: `${failure}${notice.state === 'reverted' ? ' after it landed' : '; no single culprit, main unchanged'}`,
       tests,

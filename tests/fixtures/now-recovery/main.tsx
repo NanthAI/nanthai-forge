@@ -20,10 +20,10 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 const intentId = id(1), otherIntentId = id(2), fixLane = id(3), audit = id(4), receipt = id(5);
 const head = 'b'.repeat(64), now = Date.parse('2026-10-14T10:20:00Z');
 const notices = [
-  { intentId, state: 'reverted' as const, auditRunId: audit, receiptId: receipt, head,
+  { at: '2026-10-14T10:02:00Z', intentId, state: 'reverted' as const, auditRunId: audit, receiptId: receipt, head,
     summary: `Reverted receipt ${receipt}: tests/r2-range.test.mjs, tests/hosted-source-bytes.test.mjs failed on ${head}`,
     undo: `nforge agent ROOT revert '{"receiptId":"${receipt}"}'` },
-  { intentId: otherIntentId, state: 'needs-fix' as const, auditRunId: id(6), head,
+  { at: '2026-10-14T09:20:00Z', intentId: otherIntentId, state: 'needs-fix' as const, auditRunId: id(6), head,
     summary: `Fix needed for receipt ${receipt}: tests/http-limits.test.mjs failed on ${head}`,
     undo: `nforge agent ROOT start '{"intentId":"${otherIntentId}"}'` },
 ];

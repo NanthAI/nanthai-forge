@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readNowOverlaps } from './projectNowOverlaps';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { recordCaller, recordRequest, replayRequest, recordPageOptions } from './projectHostedFrictionStore';
@@ -75,16 +76,24 @@ export const append = mutation({
   },
 });
 export const list = query({
-  args: { projectId: v.id('hostedProjects'), cursor: v.union(v.string(), v.null()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    cursor: v.union(v.string(), v.null()),
+    signals: v.optional(v.boolean()),
+  },
   returns: v.string(),
-  handler: async (ctx, { projectId, cursor }) => {
+  handler: async (ctx, { projectId, cursor, signals }) => {
     try {
       await recordCaller(ctx, projectId);
       const page = await ctx.db
         .query('projectHostedOverlapAcks')
         .withIndex('by_project_and_id', q => q.eq('projectId', projectId))
         .paginate(recordPageOptions(cursor));
-      return canonicalPayload({ ...page, page: page.page.map(row => JSON.parse(row.value)) });
+      return canonicalPayload({
+        ...page,
+        page: page.page.map(row => ({ ...JSON.parse(row.value), ...(signals ? { actor: row.actor } : {}) })),
+        ...(signals ? { signals: await readNowOverlaps(ctx, projectId) } : {}),
+      });
     } catch (error) {
       return report(error);
     }

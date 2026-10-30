@@ -15,6 +15,7 @@ const kinds: Record<DecisionItem['kind'], { label: string; glyph: GlyphName }> =
   handoff: { label: 'Handoff to you', glyph: 'handoff' },
   message: { label: 'Message', glyph: 'message' },
   failed: { label: 'Check failed', glyph: 'failed' },
+  overlap: { label: 'Overlap unanswered', glyph: 'overlap' },
   revert: { label: 'Reverted from main', glyph: 'failed' },
   'needs-fix': { label: 'Fix needed', glyph: 'wrench' },
 };
@@ -135,6 +136,23 @@ export function NeedsYou({
           {subtitle && <span className="fx-dec-sub"> · {subtitle}</span>}
         </div>
         {item.gates ? <Gates now={now} gates={item.gates} /> : item.body && <MessageText text={item.body} />}
+        {Boolean(item.files?.length) && (
+          <ul className="fx-dec-files">
+            {item.files!.slice(0, 3).map(file => (
+              <li key={file.path}>
+                <code title={file.path}>{file.path}</code>
+                {file.with && <span className="fx-dec-with">with {file.with}</span>}
+              </li>
+            ))}
+            {item.files!.length > 3 && (
+              <li>
+                <a className="fx-dec-more" href={link}>
+                  +{item.files!.length - 3} more
+                </a>
+              </li>
+            )}
+          </ul>
+        )}
         {Boolean(item.tests?.length) && (
           <ul className="fx-dec-tests">
             {item.tests!.slice(0, 3).map(file => (

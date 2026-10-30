@@ -283,6 +283,10 @@ test('one of five culprits is named; bounded probes and one range page at dogfoo
     await f.transaction('capabilities', agent.capabilities, { projectId: f.projectId, noticeVersion: 1 }),
   );
   assert.equal(capabilities.needsFix[0].intentId, intent.id);
+  assert.ok(
+    Number.isFinite(Date.parse(capabilities.needsFix[0].at)),
+    'workspace notice retains its actual publication time',
+  );
   const metrics = f.counts.slice(before);
   t.diagnostic(
     JSON.stringify({

@@ -12,13 +12,20 @@ import { useQuery } from 'convex/react';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { byAttention, cockpitLanes, type CockpitWork } from '../cockpit/model';
 import {
+  overlapDecisions,
   laneDecisions,
   needsFixDecisions,
   mainCheckDecisions,
   githubPushDecisions,
   quarantineDecisions,
 } from '../cockpit/attention';
-import { overlapCounts } from '../cockpit/overlap-model';
+import {
+  overlapCounts,
+  unansweredOverlaps,
+  unansweredBySession,
+  unansweredNames,
+  overlapRows,
+} from '../cockpit/overlap-model';
 import {
   CoordinationContext,
   hostedDecisions,
@@ -46,6 +53,8 @@ export function hostedAttention(
     events: Parameters<typeof withChangedFiles>[1];
     unacked: Parameters<typeof hostedDecisions>[0];
     claims: Parameters<typeof hostedOverlaps>[0];
+    overlapAnswers?: readonly import('../cockpit/overlap-model').OverlapAnswer[];
+    overlapSignals?: import('../../../src/now-overlap-signals').NowOverlapSignals;
   },
   now: number,
 ) {
@@ -60,18 +69,66 @@ export function hostedAttention(
       )
     : undefined;
   const lanes = byAttention(
-    withChangedFiles(withSessions(cockpitLanes(records, queue), live.sessions, now), live.events),
+    withChangedFiles(withSessions(cockpitLanes(records, queue), live.sessions, now, true), live.events),
   );
-  const overlaps = hostedOverlaps(live.claims, live.sessions, lanes, live.events);
+  const nativeAnswers = records.intents.flatMap(
+    intent => intent.notes?.flatMap(note => (note.overlapAnswer ? [note.overlapAnswer] : [])) ?? [],
+  );
+  const answers = [...(live.overlapAnswers ?? []), ...nativeAnswers];
+  const laneById = new Map(lanes.map(lane => [lane.id, lane]));
+  const current = live.overlapSignals;
+  const pins = new Map(current?.edits.map(edit => [edit.laneId, edit.head]) ?? []);
+  const pinned = (id: string) => {
+    const lane = laneById.get(id);
+    return lane?.open && lane.head === pins.get(id);
+  };
+  const detected = current?.notices.filter(notice => notice.lanes.every(pinned));
+  const unanswered = unansweredOverlaps(lanes, answers, detected);
+  const deliveredUnanswered = unansweredOverlaps(lanes, answers);
+  const currentRows = current
+    ? overlapRows(
+        current.edits.flatMap(edit =>
+          pinned(edit.laneId)
+            ? [{ lane: laneById.get(edit.laneId)!, paths: edit.paths.map(path => ({ path })) }]
+            : [],
+        ),
+        [],
+        current.behindMain.flatMap(edit =>
+          pinned(edit.laneId) ? [{ lane: laneById.get(edit.laneId)!, paths: edit.paths }] : [],
+        ),
+      )
+    : [];
+  const fallbackEvents = live.events.filter(
+    event => event.command.kind !== 'change' || !event.command.laneId || !pins.has(event.command.laneId),
+  );
+  const mergedRows = new Map(
+    hostedOverlaps(live.claims, live.sessions, lanes, fallbackEvents).map(row => [row.path, row]),
+  );
+  for (const row of currentRows) mergedRows.set(row.path, row);
+  const overlaps = unansweredNames([...mergedRows.values()], unanswered, lanes);
+  const overlapsComplete =
+    current?.complete !== false && (current?.edits.every(edit => pinned(edit.laneId)) ?? true);
   const decisions = [
     ...githubPushDecisions(live.githubAutoPush),
     ...mainCheckDecisions(records.runs),
     ...quarantineDecisions(records.runs),
     ...hostedDecisions(live.unacked, live.sessions, lanes, records),
     ...laneDecisions(lanes, overlapCounts(overlaps)),
+    ...overlapDecisions(lanes, unanswered, now),
     ...needsFixDecisions(records.needsFix ?? [], records.intents),
   ];
-  return { lanes, overlaps, decisions, pending, queue, notices: records.repairNotices ?? [] };
+  return {
+    lanes,
+    overlaps,
+    overlapsComplete,
+    unanswered,
+    deliveredUnanswered,
+    unansweredBySession: unansweredBySession(unanswered, lanes),
+    decisions,
+    pending,
+    queue,
+    notices: records.repairNotices ?? [],
+  };
 }
 export function HostedAttention({
   projectId,
@@ -152,6 +209,8 @@ export function HostedAttention({
       live.events,
       live.claims,
       live.unacked,
+      live.overlapAnswers,
+      live.overlapSignals,
       now,
     ],
   );

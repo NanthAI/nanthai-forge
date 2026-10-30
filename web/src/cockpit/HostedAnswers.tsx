@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { OverlapAnswers, type OverlapActions } from './OverlapAnswers';
 import { FixNoticeAnswers, type FixNoticeActions } from './FixNoticeAnswers';
 import { queueHref } from './queue-model';
 import { settingsHref } from '../settings/SettingsLayout';
@@ -13,7 +14,8 @@ import { CopyPrompt } from './CopyPrompt';
 import { ReplyBox } from './ReplyBox';
 
 type Ack = Pick<ReturnType<typeof useAnswers>, 'acknowledge' | 'reply' | 'busy' | 'retrying'> &
-  FixNoticeActions;
+  FixNoticeActions &
+  OverlapActions;
 
 /**
  * The answers for one hosted decision. Questions with offered choices answer in one click; the
@@ -37,6 +39,16 @@ export function HostedAnswers({
   notNow: () => void;
 }) {
   const [acknowledging, setAcknowledging] = useState(false);
+  if (item.kind === 'overlap' && item.laneId)
+    return (
+      <OverlapAnswers
+        key={item.noticeIds?.join('|')}
+        item={item}
+        ack={ack}
+        laneHref={laneHref}
+        notNow={notNow}
+      />
+    );
   if ((item.kind === 'revert' || item.kind === 'needs-fix') && item.intentId)
     return (
       <FixNoticeAnswers

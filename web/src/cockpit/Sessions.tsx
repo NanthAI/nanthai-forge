@@ -6,6 +6,7 @@ import { flattenSessions } from '../coordination-view';
 import { MessageComposer } from '../lane/MessageComposer';
 import type { CoordinationCommand } from '../../../src/coordination-types';
 import { Menu } from '../ui/Menu';
+import { COORDINATION_STALE_MS } from '../../../src/coordination-types';
 import { activityAt, presenceState } from '../../../src/presence';
 import { WorkText } from './WorkReferences';
 import { sessionTreeRows } from './session-tree';
@@ -29,7 +30,9 @@ export function Sessions({
   viewer,
   endedLaneIds,
   send,
+  unanswered = new Map(),
 }: {
+  unanswered?: ReadonlyMap<string, number>;
   send?: (command: CoordinationCommand) => Promise<unknown>;
   sessions: readonly Session[];
   now: number;
@@ -42,7 +45,8 @@ export function Sessions({
   const [compose, setCompose] = useState<{ session: Session; kind: 'message' | 'handoff' } | null>(null);
   const [showStale, setShowStale] = useState(false);
   const [showAll, setShowAll] = useState(false);
-  const tree = sessionTreeRows(sessions, now, showStale, endedLaneIds);
+  const keep = new Set([...unanswered].filter(([, count]) => count > 0).map(([id]) => id));
+  const tree = sessionTreeRows(sessions, now, showStale, endedLaneIds, keep);
   const newest = tree.folded.reduce((max, session) => Math.max(max, activityAt(session)), 0);
   const label = (session: Session) => {
     const state = presenceState(session, now);
@@ -75,6 +79,22 @@ export function Sessions({
       </Menu>
     );
   };
+  const overlaps = (session: Session) => {
+    const count = unanswered.get(session.sessionId) ?? 0;
+    return (
+      count > 0 && (
+        <div className="fx-person-overlaps">
+          <Glyph name="overlap" size={12} />
+          <a
+            href="#fx-overlaps"
+            title="Overlap alerts delivered to this agent's Lane and not yet acknowledged or routed around. Its next edit of those files waits for its answer."
+          >
+            {count} {count === 1 ? 'overlap' : 'overlaps'} unanswered
+          </a>
+        </div>
+      )
+    );
+  };
   const children = (session: Session): ReactNode =>
     (session.subagents ?? []).length > 0 && (
       <div className="fx-session-children" aria-label={`${session.name}'s subagents`}>
@@ -95,6 +115,7 @@ export function Sessions({
               <span className="fx-person-seen" title={new Date(activityAt(child)).toLocaleString()}>
                 {label(child)}
               </span>
+              {overlaps(child)}
               {actions(child, child.name)}
               {children(child)}
             </li>
@@ -103,7 +124,11 @@ export function Sessions({
       </div>
     );
   const row = (session: Session) => {
-    const tone = freshness(activityAt(session), now, session.status);
+    const tone =
+      keep.has(session.sessionId) &&
+      (session.status === 'completed' || now - session.lastSeen > COORDINATION_STALE_MS)
+        ? 'stale'
+        : freshness(activityAt(session), now, session.status);
     const name =
       !session.name.trim() ||
       /^agent workflow$/i.test(session.name.trim()) ||
@@ -146,10 +171,17 @@ export function Sessions({
               )}
             </span>
           </div>
+          {overlaps(session)}
         </div>
         <span className="fx-person-seen" title={new Date(activityAt(session)).toLocaleString()}>
           <Dot tone={tone} />
-          {label(session)}
+          {keep.has(session.sessionId)
+            ? age(activityAt(session), now)
+                .replace(' min', 'm')
+                .replace(' h', 'h')
+                .replace(' s', 's')
+                .replace(' d', 'd')
+            : label(session)}
         </span>
         {actions(session, name)}
         {children(session)}

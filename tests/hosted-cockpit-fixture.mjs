@@ -144,3 +144,5 @@ export function recoveryNoticesFixture() {
   ];
   return f;
 }
+
+export { overlapNowFixture } from './now-overlaps-fixture.mjs';

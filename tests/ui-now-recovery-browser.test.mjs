@@ -48,7 +48,7 @@ test('Now recovery D/D2/D3 works in both themes with fakes, zero idle calls, ret
     const open = async (theme, role = 'owner') => {
       await page.goto(`https://forge.test/?theme=${theme}&role=${role}`);
       await page
-        .getByText('Reverted from main', { exact: true })
+        .locator('.fx-dec-revert .fx-dec-kind')
         .waitFor()
         .catch(error => {
           t.diagnostic(JSON.stringify(errors));
@@ -67,7 +67,7 @@ test('Now recovery D/D2/D3 works in both themes with fakes, zero idle calls, ret
       assert.deepEqual(await calls(), [], 'a simulated idle minute makes no Convex calls');
       await page.clock.resume();
       assert.equal(await page.locator('.fx-dec').count(), 2);
-      assert.equal(await page.locator('.fx-dec-age').count(), 0);
+      assert.deepEqual(await page.locator('.fx-dec-age').allTextContents(), ['18 min', '1 h']);
       assert.equal(await page.locator('.fx-dec-exact[open]').count(), 0);
       assert.match(await first().innerText(), /main audit failed 2 tests after it landed/);
       assert.equal(await first().getByRole('button', { name: 'Start a fix', exact: true }).count(), 1);

@@ -21,6 +21,7 @@ export function laneSummary(
     ...(lane.after ? { after: lane.after } : {}),
     ...(lane.stack ? { stack: lane.stack } : {}),
     name: lane.name,
+    ...(lane.overlapInbox?.length ? { overlaps: lane.overlapInbox.slice(0, 20) } : {}),
     ...(lane.startedBy ? { startedBy: lane.startedBy } : {}),
     ...(lane.startedAt ? { startedAt: lane.startedAt } : {}),
     state: lane.state,

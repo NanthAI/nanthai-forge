@@ -19,15 +19,16 @@ export type NowFacts = {
     unannounced?: number;
   };
   overlaps: number;
+  unanswered?: number;
 };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** One sentence: what needs the viewer first, then movement, people, overlaps and today's acceptances. */
 export function NowSituation({ facts, firstRun = false }: { facts: NowFacts; firstRun?: boolean }) {
-  const { decisions, open, acceptedToday = 0, working, overlaps } = facts;
+  const { decisions, open, acceptedToday = 0, working, overlaps, unanswered = 0 } = facts;
   if (firstRun) return <Situation lead="Nothing is in progress yet.">Start with one Intent.</Situation>;
-  if (open === 0 && decisions === 0 && !working?.total && !acceptedToday)
+  if (open === 0 && decisions === 0 && !working?.total && !acceptedToday && !overlaps && !unanswered)
     return <Situation lead="Nothing needs you.">No work in motion.</Situation>;
   const parts: ReactNode[] = [];
   if (open)
@@ -58,10 +59,12 @@ export function NowSituation({ facts, firstRun = false }: { facts: NowFacts; fir
       </>,
     );
   }
-  if (overlaps)
+  if (overlaps || unanswered)
     parts.push(
       <>
-        <a href="#fx-overlaps">{plural(overlaps, 'overlapping file')}</a>
+        {overlaps > 0 && <a href="#fx-overlaps">{plural(overlaps, 'overlapping file')}</a>}
+        {overlaps > 0 && unanswered > 0 && ', '}
+        {unanswered > 0 && <a href="#fx-who">{unanswered} unanswered</a>}
       </>,
     );
   if (acceptedToday) parts.push(<a href="#fx-accepted-title">{acceptedToday} accepted today</a>);

@@ -28,7 +28,17 @@ export function Overlaps({
         <div className="fx-ov-file">
           <code title={row.path}>{row.path}</code>
           <small>
-            {row.detail}{' '}
+            {row.detail}
+            {Boolean(row.unanswered?.length) && (
+              <>
+                {' '}
+                ·{' '}
+                <span className="fx-ov-unanswered">
+                  unanswered by {row.unanswered!.slice(0, 2).join(', ')}
+                  {row.unanswered!.length > 2 ? ` +${row.unanswered!.length - 2}` : ''}
+                </span>
+              </>
+            )}{' '}
             <InfoTip label={`About overlap in ${row.path}`} inline>
               {row.meaning}
             </InfoTip>

@@ -6,6 +6,7 @@ export type OverlapParty = { label: string; laneId?: string; agent?: boolean; ma
 /** One file where work meets. Advisory: never a lock or a verdict. */
 export type OverlapRow = {
   path: string;
+  unanswered?: string[];
   kind: 'edited' | 'claimed' | 'main';
   who: OverlapParty[];
   /** "edited by both · lines 40–61 and 48–70" */
@@ -132,4 +133,96 @@ export function overlapCounts(rows: readonly OverlapRow[]): Map<string, number> 
       for (const other of lanes) if (other !== id) others.set(id, (others.get(id) ?? new Set()).add(other));
   }
   return new Map([...others].map(([id, set]) => [id, set.size]));
+}
+
+export type OverlapAnswer = { laneId: string; noticeId: string; actor?: string; at?: string };
+export type UnansweredNotice = {
+  noticeId: string;
+  noticeIds: string[];
+  file: string;
+  lanes: string[];
+  at?: string;
+};
+/** Merge detections with delivered notices by participant/file identity, retaining all answer ids. */
+export function unansweredOverlaps(
+  lanes: readonly CockpitLane[],
+  answers: readonly OverlapAnswer[],
+  detected: readonly import('../../../src/now-overlap-signals').DetectedOverlap[] = [],
+): Map<string, UnansweredNotice[]> {
+  const answered = new Map<string, Set<string>>();
+  for (const answer of answers) {
+    const ids = answered.get(answer.laneId) ?? new Set<string>();
+    ids.add(answer.noticeId);
+    answered.set(answer.laneId, ids);
+  }
+  const byLane = new Map<string, Map<string, UnansweredNotice>>();
+  for (const lane of lanes)
+    if (lane.open) {
+      const items = new Map<string, UnansweredNotice>();
+      for (const notice of lane.overlaps ?? []) {
+        const key = detected.length
+          ? JSON.stringify([notice.file, [...notice.lanes].sort()])
+          : notice.noticeId;
+        const old = items.get(key);
+        if (old) old.noticeIds.push(notice.noticeId);
+        else items.set(key, { ...notice, noticeIds: [notice.noticeId] });
+      }
+      byLane.set(lane.id, items);
+    }
+  for (const notice of detected) {
+    const items = byLane.get(notice.laneId);
+    if (!items) continue;
+    const key = JSON.stringify([notice.file, [...notice.lanes].sort()]);
+    const old = items.get(key);
+    if (old) {
+      if (!old.noticeIds.includes(notice.noticeId)) old.noticeIds.push(notice.noticeId);
+    } else items.set(key, { ...notice, noticeIds: [notice.noticeId] });
+  }
+  const result = new Map<string, UnansweredNotice[]>();
+  for (const [id, items] of byLane) {
+    const pending = [...items.values()].filter(
+      item => !item.noticeIds.some(noticeId => answered.get(id)?.has(noticeId)),
+    );
+    if (pending.length) result.set(id, pending);
+  }
+  return result;
+}
+export function unansweredBySession(
+  notices: ReadonlyMap<string, readonly UnansweredNotice[]>,
+  lanes: readonly CockpitLane[],
+) {
+  const result = new Map<string, number>();
+  for (const lane of lanes) {
+    const id = lane.session?.id;
+    if (id) result.set(id, (result.get(id) ?? 0) + (notices.get(lane.id)?.length ?? 0));
+  }
+  return result;
+}
+export function unansweredNames(
+  rows: readonly OverlapRow[],
+  notices: ReadonlyMap<string, readonly UnansweredNotice[]>,
+  lanes: readonly CockpitLane[],
+) {
+  const names = new Map(
+    lanes.map(lane => [lane.id, lane.session?.name ?? lane.startedBy?.name ?? lane.owner]),
+  );
+  const byPath = new Map<string, Set<string>>();
+  for (const [laneId, items] of notices)
+    for (const item of items) {
+      const ids = byPath.get(item.file) ?? new Set<string>();
+      ids.add(laneId);
+      byPath.set(item.file, ids);
+    }
+  return rows.map(row => ({
+    ...row,
+    unanswered: [
+      ...new Set(
+        row.who.flatMap(who =>
+          who.laneId && byPath.get(row.path)?.has(who.laneId) && names.get(who.laneId)
+            ? [names.get(who.laneId)!]
+            : [],
+        ),
+      ),
+    ],
+  }));
 }
