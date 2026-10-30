@@ -13,7 +13,10 @@ import type { WorkerObject, WorkerPin } from './hosted-source-worker-format.js';
 export class MemoryMergeSource extends LazyMergeSource {
   readonly objects = new Map<string, Buffer>();
   private readonly parsed = new Map<string, NativeState>();
-  constructor(readonly parents: Record<string, string[]>) {
+  constructor(
+    readonly parents: Record<string, string[]>,
+    public ancestryBoundary?: string,
+  ) {
     super(null);
   }
   override object(id: string): Buffer {
@@ -28,7 +31,9 @@ export class MemoryMergeSource extends LazyMergeSource {
     return id;
   }
   override state(id: string): NativeState {
-    const parents = this.parents[id];
+    // This is an explicit proven graph cut, not a claim about stored parents.
+    // File bytes still come from the exact original hash-verified State.
+    const parents = id === this.ancestryBoundary ? [] : this.parents[id];
     if (!parents) return this.fullState(id);
     const fullFiles = () => this.fullState(id).files;
     return {

@@ -27,6 +27,7 @@ export const reuse = internalMutation({
       );
       if (isStored(bound)) return true;
     }
+    if (r2Enabled()) return false;
     const shared = await ctx.db
       .query('projectObjects')
       .withIndex('by_digest_and_removed', q => q.eq('digest', input.digest).eq('removed', false))
@@ -134,7 +135,7 @@ export const placement = internalQuery({
   args: { projectId: v.id('hostedProjects'), actor: v.string() },
   returns: v.boolean(),
   handler: async (ctx, { projectId, actor }) => {
-    const project = await activeOwnedProject(ctx, projectId, actor);
-    return !!(r2Enabled() && project.r2Writes);
+    await activeOwnedProject(ctx, projectId, actor);
+    return r2Enabled();
   },
 });

@@ -5,7 +5,7 @@ import type { Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
 import { isStored } from './projectObjectFields';
 import { storageDigest, removeExclusive } from './projectStorage';
-import { r2Config, r2Key } from './r2';
+import { r2Config, r2Key, r2Enabled } from './r2';
 import { invariant } from '../src/errors';
 import { importPageFiles } from '../src/github-import-pages';
 export const objectPin = v.object({ digest: v.string(), size: v.number() });
@@ -34,7 +34,8 @@ export const prepare = internalMutation({
       'Split physical objects into bounded pages.',
     );
     // Placement is pinned at creation, never silently changed by a later switch.
-    if (project.r2Writes) r2Config();
+    const r2 = r2Enabled();
+    if (r2) r2Config();
     const result = [];
     for (const pin of input.objects) {
       invariant(
@@ -53,7 +54,7 @@ export const prepare = internalMutation({
       );
       if (!row) {
         let storageId: Id<'_storage'> | undefined;
-        if (!project.r2Writes) {
+        if (!r2) {
           // Bounded candidate search, not a source/existence oracle. Larger sets
           // can miss reuse and upload identical bytes without changing content.
           const shared = await ctx.db
@@ -75,7 +76,7 @@ export const prepare = internalMutation({
           nonce: crypto.randomUUID(),
           removed: false,
           ...(storageId ? { storageId } : {}),
-          ...(project.r2Writes ? { location: 'r2' as const, r2Key: r2Key(project._id, pin.digest) } : {}),
+          ...(r2 ? { location: 'r2' as const, r2Key: r2Key(project._id, pin.digest) } : {}),
         });
         row = (await ctx.db.get(id))!;
       }

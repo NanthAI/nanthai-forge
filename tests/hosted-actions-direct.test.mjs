@@ -12,6 +12,8 @@ import { hostedCheckRunSchema } from '../dist/hosted-check.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
 import { checkPin } from '../dist/hosted-check.js';
 import { savePin } from '../dist/hosted-save.js';
+import { canonicalPayload } from '../dist/hosted-source-operation.js';
+import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 const { githubAppJwt, installationToken, actionsPermissions } = await import(
   moduleUrl('../convex/githubAppToken.ts')
 );
@@ -748,6 +750,95 @@ test('workflow_run uses the existing HMAC webhook boundary', async t => {
   assert.equal((await s.status(s.run.id)).status, 'dispatching');
   assert.equal((await send(signature)).status, 204);
   assert.equal((await s.status(s.run.id)).status, 'cancelled');
+});
+
+test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on retry', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  const r2 = fakeSourceR2(t),
+    r2Fetch = globalThis.fetch;
+  globalThis.fetch = (url, init) =>
+    new URL(url).hostname === 'token.actions.githubusercontent.com'
+      ? Promise.resolve(jwks())
+      : r2Fetch(url, init);
+  const pins = {
+    head: s.run.request.expectedHead,
+    definition: s.run.check.definition,
+    selection: {
+      scope: 'full',
+      reason: 'synthetic dogfood selection',
+      tests: Array.from({ length: 3000 }, (_, i) => `tests/synthetic-${i}.test.mjs`),
+    },
+    standard: true,
+    interaction: false,
+    command: ['node', 'scripts/forge-check.mjs'],
+  };
+  const recipePins = { ...pins, groups: [pins.selection.tests] },
+    recipe = { ...recipePins, pin: checkPin(recipePins) },
+    mutations = [];
+  const ctx = {
+    storage: {
+      store() {
+        assert.fail('R2 HTTP plan wrote Convex bytes');
+      },
+    },
+    runMutation: (ref, input) => {
+      const [name, method] = getFunctionName(ref).split(':');
+      mutations.push(name);
+      return s.call(
+        { projectHostedActionsSession: sessions, projectHostedActionsPlan: plans }[name],
+        method,
+        input,
+      );
+    },
+  };
+  const send = () =>
+    handle._handler(
+      ctx,
+      new Request(`${audience}/checks/actions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${oidc()}` },
+        body: JSON.stringify({
+          ...s.id,
+          command: { kind: 'plan', plan: { recipe, lockfile: 'e'.repeat(64) } },
+        }),
+      }),
+    );
+  r2.hooks.mismatch = true;
+  assert.equal((await send()).status, 403);
+  assert.equal((await s.status(s.run.id)).plan, null, 'unverified bytes never publish a plan');
+  assert.deepEqual(mutations, ['projectHostedActionsSession']);
+  r2.hooks.mismatch = false;
+  mutations.length = 0;
+  const before = process.memoryUsage().rss,
+    started = performance.now();
+  assert.equal((await send()).status, 200);
+  assert.deepEqual(mutations, ['projectHostedActionsSession', 'projectHostedActionsPlan']);
+  for (const value of [recipe.selection, recipe]) {
+    const pin = savePin(value),
+      key = `/synthetic/v1/p/${s.projectId}/o/${pin.sha256}`;
+    assert.equal(r2.objects.get(key).toString(), canonicalPayload(value));
+    const row = [...s.tables.projectObjects.values()].find(row => row.digest === pin.sha256);
+    assert.equal(row.location, 'r2');
+    assert.equal(row.r2Committed, true);
+    assert.equal(row.storageId, undefined);
+  }
+  const puts = r2.requests.filter(method => method === 'PUT').length;
+  mutations.length = 0;
+  assert.equal((await send()).status, 200);
+  assert.deepEqual(mutations, ['projectHostedActionsSession', 'projectHostedActionsPlan']);
+  assert.equal(r2.requests.filter(method => method === 'PUT').length, puts);
+  assert.equal(r2.objects.size, 2);
+  t.diagnostic(
+    JSON.stringify({
+      tests: 3000,
+      convexCallsPerPlan: 2,
+      convexStorageBytes: 0,
+      repeatedPutBytes: 0,
+      rssGrowth: process.memoryUsage().rss - before,
+      wallMs: Math.round(performance.now() - started),
+    }),
+  );
 });
 
 test('legacy HTTP session shape remains a run with additive capabilities; unknown metadata is stripped', async t => {

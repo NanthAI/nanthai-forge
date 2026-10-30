@@ -69,12 +69,12 @@ function indexed(s, optIn = true) {
   });
 }
 
-test('server-built project artifacts use the project opt-in and retain dual reads', async t => {
+test('server-built project artifacts use deployment R2 mode and retain dual reads', async t => {
   for (const options of [{}, { flag: '' }, { optIn: false }]) {
     await t.test(JSON.stringify(options), async t => {
       const { s, fake } = await setup(t, options),
         bytes = Buffer.from('project artifact');
-      const r2 = options.flag !== '' && options.optIn !== false;
+      const r2 = options.flag !== '';
       if (r2) noConvexWrites(s);
       await storeProjectArtifact(s.ctx, 'project', 'owner', bytes);
       const [row] = s.tables.projectObjects.values();

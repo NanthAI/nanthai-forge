@@ -16,6 +16,8 @@ import { applySourceFanout, type SourceFanout, type SourceTaskProgress } from '.
 import { loadTaskData } from '../src/hosted-source-task-data';
 import type { SourceOutput } from './projectConvexSourceOutput';
 import { digest } from '../src/hash';
+import { sourceStorage, sourceR2Pin } from './projectConvexSourceStorage';
+import { r2Key } from './r2';
 import {
   loadSourceProgress,
   saveSourceProgress,
@@ -39,6 +41,7 @@ export function convexSourceTransport(
   const input = { projectId, jobId, step };
   const locations = new Map<string, ObjectLocation>(initial.map(row => [row.descriptor.object.sha256, row])),
     outputs: SourceOutput[] = [];
+  const storage = sourceStorage(ctx, projectId);
   const resolve = async (
     ids: string[],
     ancestry = false,
@@ -84,7 +87,7 @@ export function convexSourceTransport(
         'SOURCE_HASH_MISMATCH',
         'Source physical size changed.',
       );
-      const blob = row.storageId ? await ctx.storage.get(row.storageId) : null;
+      const blob = !row.url && row.storageId ? await ctx.storage.get(row.storageId) : null;
       if (blob)
         return (async function* () {
           const reader = blob.stream().getReader();
@@ -120,10 +123,12 @@ export function convexSourceTransport(
         'SOURCE_HASH_MISMATCH',
         'Source output changed.',
       );
-      const storageId = await ctx.storage.store(
-        new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }),
-      );
-      outputs.push({ ...pin, storageId });
+      const ref = await storage.store(bytes),
+        r2 = sourceR2Pin(ref);
+      outputs.push({
+        ...pin,
+        ...(r2 ? { r2Key: r2Key(projectId, r2.sha256) } : { storageId: ref as Id<'_storage'> }),
+      });
     },
     uploadBatch: async objects => {
       for (const object of objects) await io.upload(object.pin, object.bytes);
@@ -143,17 +148,12 @@ export const step = internalAction({
     const loaded: string | null = await ctx.runMutation(reference('projectConvexSourceStore:begin'), input);
     if (!loaded) return null;
     const state = JSON.parse(loaded),
-      { io, outputs } = convexSourceTransport(ctx, input, state.locations);
+      { io, outputs } = convexSourceTransport(ctx, input, state.locations),
+      storage = sourceStorage(ctx, input.projectId);
     let cursor: SourceStepCursor = initialSourceStep(state.input),
       progress: SourceProgress | null = null;
     if (state.cursor) {
-      const blob = await ctx.storage.get(state.cursor);
-      invariant(blob, 'SOURCE_UNAVAILABLE', 'Durable source cursor is absent.');
-      const loaded = await loadSourceProgress(new Uint8Array(await blob.arrayBuffer()), async id => {
-        const section = await ctx.storage.get(id as Id<'_storage'>);
-        invariant(section, 'SOURCE_UNAVAILABLE', 'Durable source metadata is absent.');
-        return new Uint8Array(await section.arrayBuffer());
-      });
+      const loaded = await loadSourceProgress(await storage.read(state.cursor), storage.read);
       cursor = loaded.cursor;
       progress = loaded.value;
     }
@@ -169,15 +169,7 @@ export const step = internalAction({
         );
         invariant(!joined.failure, joined.failure ?? 'SOURCE_WORKER_FAILED', 'A bounded source step failed.');
         const results: SourceTaskProgress[] = [];
-        for (const ref of joined.outputs)
-          if (ref)
-            results.push(
-              await loadTaskData(ref, async id => {
-                const blob = await ctx.storage.get(id as Id<'_storage'>);
-                invariant(blob, 'SOURCE_UNAVAILABLE', 'Source task result is absent.');
-                return new Uint8Array(await blob.arrayBuffer());
-              }),
-            );
+        for (const ref of joined.outputs) if (ref) results.push(await loadTaskData(ref, storage.read));
         applySourceFanout(cursor, joined, results, ref => enqueueSourceObject(cursor, ref));
       }
       result = await runSourceStep(cursor, io);
@@ -195,11 +187,7 @@ export const step = internalAction({
     const saved =
       result.cursor.phase === 'done'
         ? null
-        : (
-            await saveSourceProgress(result.cursor, progress, bytes =>
-              ctx.storage.store(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' })),
-            )
-          ).id;
+        : (await saveSourceProgress(result.cursor, progress, storage.store)).id;
     if (fanout) {
       const plan = fanout as SourceFanout;
       await ctx.runMutation(reference('projectConvexSourceFanout:fork'), {

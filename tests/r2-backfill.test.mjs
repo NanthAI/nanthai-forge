@@ -35,14 +35,14 @@ async function harness(t) {
   return { s, fake, transport, options, lines, dir };
 }
 const seed = async (h, texts) => {
-  // Backfill starts with legacy Convex bytes; single-object prepare now honors the opt-in.
-  const project = h.s.tables.hostedProjects.get('project'),
-    optIn = project.r2Writes;
-  project.r2Writes = false;
+  // Seed the original Convex placement before switching this synthetic deployment to R2.
+  const mode = process.env.FORGE_BLOBS;
+  process.env.FORGE_BLOBS = 'convex';
   try {
     for (const text of texts) await upload(h.s, Buffer.from(text));
   } finally {
-    project.r2Writes = optIn;
+    if (mode === undefined) delete process.env.FORGE_BLOBS;
+    else process.env.FORGE_BLOBS = mode;
   }
 };
 const stored = (s, id) => s.tables.projectObjects.get(id);
@@ -324,7 +324,7 @@ test('verification corrupt sample or an unflipped row produces no safe-to-purge 
   );
 });
 
-test('owner checks, opt-in and page bounds protect every maintenance route', async t => {
+test('owner checks, deployment mode and page bounds protect every maintenance route', async t => {
   const h = await harness(t);
   await seed(h, ['guarded']);
   const pins = (await h.transport.page('objects', null, false)).page;
@@ -333,9 +333,9 @@ test('owner checks, opt-in and page bounds protect every maintenance route', asy
   await assert.rejects(h.transport.targets(pins));
   await assert.rejects(h.transport.check(pins, 'op', true));
   h.s.caller('owner');
-  h.s.tables.hostedProjects.get('project').r2Writes = false;
+  process.env.FORGE_BLOBS = 'convex';
   await assert.rejects(runR2Backfill(h.transport, h.options), e => e.code === 'R2_NOT_ENABLED');
-  h.s.tables.hostedProjects.get('project').r2Writes = true;
+  process.env.FORGE_BLOBS = 'r2';
   await assert.rejects(h.transport.targets(Array(101).fill(pins[0])), e => e.data?.code === 'BAD_ARGUMENT');
   await assert.rejects(
     h.transport.check(Array(101).fill(pins[0]), 'op', true),

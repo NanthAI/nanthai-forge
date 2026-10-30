@@ -106,7 +106,7 @@ export const grant = internalMutation({
     if (object && isStored(object)) return { stored: true as const };
     const project = await ctx.db.get(input.projectId);
     invariant(
-      r2Enabled() && project?.r2Writes,
+      r2Enabled() && project,
       'SOURCE_WORKER_UNAVAILABLE',
       'Hosted source output requires the configured project object-store path.',
     );

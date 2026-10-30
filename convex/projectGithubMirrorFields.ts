@@ -26,7 +26,7 @@ export const githubMirrorTables = {
     state: v.string(),
     seed: v.optional(v.string()),
     step: v.number(),
-    cursor: v.union(v.id('_storage'), v.null()),
+    cursor: v.union(v.string(), v.null()),
     scheduledId: v.optional(v.id('_scheduled_functions')),
     error: v.optional(v.string()),
     detail: v.optional(v.string()),

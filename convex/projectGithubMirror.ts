@@ -11,6 +11,7 @@ import { MemorySourceReader, MemoryMergeSource } from '../src/hosted-source-memo
 import { parseNativeState } from '../src/native-state-format';
 import type { WorkerObject, WorkerPin } from '../src/hosted-source-worker-format';
 import { ForgeError, invariant } from '../src/errors';
+import { sourceStorage } from './projectConvexSourceStorage';
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Same recipe-aware verified reader as the fixed source worker, with one
  * logical-file cache. Descriptors and storage grants are per 100-object window. */
@@ -43,7 +44,7 @@ export function mirrorSource(ctx: ActionCtx, input: { jobId: Id<'projectGithubMi
         'SOURCE_HASH_MISMATCH',
         'Mirror source size changed.',
       );
-      const blob = row.storageId ? await ctx.storage.get(row.storageId) : null;
+      const blob = !row.url && row.storageId ? await ctx.storage.get(row.storageId) : null;
       if (blob) return blob.stream() as unknown as AsyncIterable<Uint8Array>;
       invariant(row.url, 'SOURCE_UNAVAILABLE', 'Mirror source bytes are unavailable.');
       const response = await fetch(row.url, { redirect: 'error', signal: AbortSignal.timeout(30000) });
@@ -81,24 +82,21 @@ export const step = internalAction({
   handler: async (ctx, input): Promise<null> => {
     let plan: MirrorPlan | undefined;
     let started: { phase: MirrorPlan['phase']; index: number } | undefined;
+    let storage: ReturnType<typeof sourceStorage> | undefined;
     try {
       const raw: string | null = await ctx.runMutation(mutation('projectGithubMirrorStore:begin'), input);
       if (!raw) return null;
       const loaded = JSON.parse(raw);
+      storage = sourceStorage(ctx, loaded.projectId);
       const token = await installationToken(ctx, loaded.projectId, loaded.repository);
       const io: MirrorIO = { ...mirrorSource(ctx, input), api: githubRequest(token) };
       if (loaded.cursor) {
-        const blob = await ctx.storage.get(loaded.cursor);
-        invariant(blob, 'SOURCE_UNAVAILABLE', 'Durable mirror continuation is absent.');
-        plan = JSON.parse(await blob.text());
+        plan = JSON.parse(Buffer.from(await storage.read(loaded.cursor)).toString('utf8'));
       } else plan = await prepareMirror(loaded.seed, io);
       invariant(plan, 'SOURCE_UNAVAILABLE', 'Mirror continuation is unavailable.');
       started = { phase: plan.phase, index: plan.index };
       plan = await stepMirror(plan, io);
-      const cursor =
-        plan.phase === 'done'
-          ? null
-          : await ctx.storage.store(new Blob([JSON.stringify(plan)], { type: 'application/json' }));
+      const cursor = plan.phase === 'done' ? null : await storage!.store(Buffer.from(JSON.stringify(plan)));
       await ctx.runMutation(mutation('projectGithubMirrorStore:commit'), {
         ...input,
         cursor,
@@ -112,11 +110,11 @@ export const step = internalAction({
         plan &&
         started &&
         (plan.phase !== started.phase || plan.index !== started.index);
-      let cursor: Id<'_storage'> | undefined;
+      let cursor: string | undefined;
       let progressUnavailable = false;
       if (progress) {
         try {
-          cursor = await ctx.storage.store(new Blob([JSON.stringify(plan)], { type: 'application/json' }));
+          cursor = await storage!.store(Buffer.from(JSON.stringify(plan)));
         } catch {
           progressUnavailable = true;
         }

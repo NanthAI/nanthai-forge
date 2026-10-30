@@ -19,6 +19,7 @@ import { readJson, sourceStepBytes, full, type StepMeter } from './hosted-source
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 import { sourceWindows } from './hosted-source-fanout.js';
 import { invariant } from './errors.js';
+import { sourceAncestryCut } from './hosted-source-ancestry-cut.js';
 import type { WorkerObject } from './hosted-source-worker-format.js';
 
 export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
@@ -154,6 +155,11 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
     }
   }
   c.states = [...new Set(c.states)].filter(id => !c.parents[id]);
+  const boundary = sourceAncestryCut(c.parents, c.states);
+  if (boundary) {
+    c.ancestryBoundary = boundary;
+    c.states = [];
+  }
   if (!c.states.length) {
     c.phase = 'compute';
     return;
@@ -162,9 +168,13 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
   // Derived parent rows are prefetch hints only. Every returned manifest is
   // hash verified and its actual parents extend the frontier, even on gaps.
   let refs: WorkerObject[];
-  if (io.ancestry)
+  if (io.ancestry && Object.keys(c.parents).length >= 32)
     refs = await io.ancestry(c.states.slice(0, 100), Object.keys(c.parents), io.fanout ? 4 : 1);
   else {
+    // Nearby branches usually meet after a few verified frontiers. Reading a
+    // 400-State hint window first can cross that common cut and transfer the
+    // whole retained history before we can prove it unnecessary. Deep graphs
+    // retain the existing paged hint traversal after this bounded local search.
     invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve ancestry in windows.');
     refs = await io.describeBatch(c.states.slice(0, 100));
   }
@@ -207,7 +217,7 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
 export async function computeMergeStep(
   c: SourceStepCursor,
   io: StepTransport,
-  source = new MemoryMergeSource(c.parents),
+  source = new MemoryMergeSource(c.parents, c.ancestryBoundary),
 ) {
   if ((c.plan as { kind: string }).kind === 'forge-hosted-sync-input') {
     const reader = new MemorySourceReader(source, io);

@@ -53,6 +53,8 @@ export type SourceStepCursor = {
   states: string[];
   seen: Record<string, boolean>;
   parents: Record<string, string[]>;
+  /** Proven common frontier; older history cannot contain a maximal merge base. */
+  ancestryBoundary?: string;
   verify: VerifyCursor | null;
   selections: unknown[];
   head: string | null;
@@ -135,7 +137,7 @@ export function enqueueSourceObject(c: SourceStepCursor, ref: WorkerObject) {
 async function saveStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
   const plan = saveInputSchema.parse(c.plan);
   if (c.pages === 0 && c.count === 0 && !c.files.length && !c.changes.length) {
-    const source = new MemoryMergeSource(c.parents),
+    const source = new MemoryMergeSource(c.parents, c.ancestryBoundary),
       reader = new MemorySourceReader(source, io);
     await io.prepareRead?.([plan.baseline.object, plan.pages]);
     const baseline = parseNativeState(await reader.bytes(plan.baseline));
@@ -299,7 +301,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
   const c = structuredClone(cursor),
     m = meter(),
     original = io;
-  const mergeSource = new MemoryMergeSource(c.parents);
+  const mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary);
   io = {
     ...original,
     upload: async (pin, bytes) => {
@@ -347,6 +349,8 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
     else if (c.phase === 'closure') await closureStep(c, io, m);
     else if (c.phase === 'selection' || c.phase === 'graph') await prepareMergeStep(c, io, m);
     else if (c.phase === 'compute') {
+      // The graph can establish its cut earlier in this same quantum.
+      mergeSource.ancestryBoundary = c.ancestryBoundary;
       const kind = (c.plan as { kind: string }).kind;
       if (kind === 'forge-hosted-save-input' || kind === 'forge-source-worker-state')
         await publishSourceStepState(c, io);

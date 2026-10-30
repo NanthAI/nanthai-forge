@@ -10,6 +10,7 @@ import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { emptyHostedProject } from '../dist/hosted-bootstrap.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
+import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 const names = [
   'projectBootstrap',
   'projectBootstrapStore',
@@ -254,4 +255,25 @@ test('fresh hosted main checks out zero file blobs with a valid receipt and repl
   assert.deepEqual(downloaded, [selection.head]); // One State manifest; zero source-file blobs.
   assert.equal(first.downloadedObjects, 1);
   assert.equal((await checkoutHostedMain(root, request, transport)).downloadedObjects, 0);
+});
+
+test('R2 bootstrap retries an incomplete reservation without any Convex byte store', async t => {
+  const r2 = fakeSourceR2(t),
+    s = setup(),
+    args = input('R2 project');
+  s.ctx.storage.store = () => {
+    assert.fail('R2 bootstrap called Convex storage.store');
+  };
+  r2.hooks.lostPut = true;
+  await assert.rejects(s.create(args));
+  assert.equal(s.tables.hostedProjects.size, 1);
+  assert.equal(s.tables.projectBackups.size, 0, 'reservation is not published completion');
+  const id = await s.create(args);
+  assert.equal(await s.create(args), id);
+  assert.equal(s.tables.hostedProjects.size, 1);
+  const rows = [...s.tables.projectObjects.values()];
+  assert.equal(rows.length, 3);
+  assert(rows.every(r => r.location === 'r2' && r.r2Committed && !r.storageId));
+  assert.equal(s.tables.hostedProjects.get(id).r2StorageUsed, true);
+  assert.equal(r2.objects.size, 3);
 });

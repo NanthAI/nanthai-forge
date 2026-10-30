@@ -151,13 +151,38 @@ Freshness comes from rereading source, never from timestamps. Re-indexing captur
 
 **Native objects.** `NativeSource.put` hashes each file and stores it once under `.forge/work/objects`. A State is a manifest of paths, blob hashes, modes and parent States. A changed file is stored whole. Capture reports which paths were excluded and why. Retained files and their directory prefixes are indexed once per capture, preserving tracked files through ignore rules. Native ancestry queries stop at a verified match and share verified parent information only within one operation; full history traversal remains available for merge bases and exports. State manifests and their on-disk format are unchanged.
 
-**Hosted blob access.** Convex functions access file storage through `BlobStore` (`convex/blobStore.ts`); CLI exchange uses `ExchangeBlobs` (`src/exchange-blobs.ts`). Project objects dispatch on each row's `location`, with `r2Key` and a verified commit for R2. Server-built indexed artifacts and import cursors use opaque `r2blob:` references to `artifactBlobs` metadata, alongside legacy Convex storage IDs. Project object R2 writes require the deployment flag and the owning project's opt-in. R2 artifact writes reserve immutable pins before create-only checksum-bound PUTs and commit after HEAD verification. Readers keep dual-location support and verify downloaded bytes. See the [R2 storage plan](r2-storage-plan.md) for remaining compatibility paths.
+**Hosted blob access.** Convex functions access file storage through `BlobStore` (`convex/blobStore.ts`); CLI exchange uses `ExchangeBlobs` (`src/exchange-blobs.ts`). Project objects dispatch on each row's `location`, with `r2Key` and a verified commit for R2. Server-built indexed artifacts and import cursors use opaque `r2blob:` references to `artifactBlobs` metadata, alongside legacy Convex storage IDs. Deployment R2 mode controls new project-object placement, including projects without the legacy per-project opt-in. R2 artifact writes reserve immutable pins before create-only checksum-bound PUTs and commit after HEAD verification. Readers keep dual-location support and verify downloaded bytes. See the [R2 storage plan](r2-storage-plan.md) for remaining compatibility paths.
 
 Indexed imports and binary derivatives default to R2 independently of the old
 opt-in flags. Native self-host instances can explicitly select `FORGE_BLOBS=convex`
 to keep those artifacts in native file-inclusive snapshots. Derivative reservations
 retain their storage mode in the upload type so unknown upload replies reconcile
 through their original storage path. Existing R2 references always retain R2 reads.
+
+The fixed Convex source provider writes output bytes and durable cursor/fanout
+progress directly to R2 when `FORGE_BLOBS=r2`. Checksum-bound create-only PUTs
+and HEAD checks precede existing batched output publication; there is no new
+per-object Convex RPC. Cursor and task data use project-bound `r2source:`
+references carrying their exact digest and size, alongside existing Convex IDs.
+These internal progress references address immutable project object keys directly;
+the owning step/task rows retain them. R2 placement takes precedence over any
+retained Convex fallback copy. Turning off new R2 writes preserves R2 reads.
+
+Hosted check selection/recipe objects, browser bootstrap objects, Work detail
+objects and mirror continuations use the same checksum-verified R2 source seam.
+Repeated check selections reuse an existing digest-bound object after HEAD
+verification, without uploading its body again; the recipe format is unchanged.
+Bootstrap reserves its operation-bound project namespace and original timestamp
+before R2 upload, then publishes source/Work atomically. A reservation is not a
+completed creation and retries preserve its bytes. Existing Convex upload
+receipts remain reconcilable after the storage-mode switch.
+
+Merge preparation first verifies nearby parent frontiers. It can stop older
+history only when every loaded parent path reaches one exact common frontier;
+multiple unknown frontiers, other roots or cycles retain normal traversal. The
+operation records that explicit ancestry cut separately from stored parents.
+Native merge-base/file calculations still use exact hash-verified State bytes.
+Deep graphs retain paged hint traversal; hints never prove closure or independence.
 
 **Lanes and checks.** `materialize` writes a State into a fresh directory of ordinary files. Native Lanes clone one disposable, pinned source-tree cache per owner using APFS `clonefile` (or filesystem reflinks elsewhere). The cloned tree is checked against every manifest path, blob digest and mode before publication; an edited or incomplete cache is rebuilt from the same State. Cache preparation and cloning hold only the cache/Lane locks, outside the owner writer lock. `.forge/materialization.json` records the selected head and clone/copy result, including the reason when the filesystem needs ordinary copying. Check workspaces retain their independent byte-only materialization. Editing a Lane never changes stored objects or other Lanes.
 

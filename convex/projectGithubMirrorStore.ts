@@ -106,7 +106,7 @@ export const begin = internalMutation({
   },
 });
 export const commit = internalMutation({
-  args: { ...identity, cursor: v.union(v.id('_storage'), v.null()), mapping: v.union(v.string(), v.null()) },
+  args: { ...identity, cursor: v.union(v.string(), v.null()), mapping: v.union(v.string(), v.null()) },
   returns: v.null(),
   handler: async (ctx, input) => {
     const active = await mirrorJob(ctx, input);
@@ -166,7 +166,7 @@ export const failed = internalMutation({
     httpStatus: v.optional(v.number()),
     apiOperation: v.optional(v.string()),
     requestBytes: v.optional(v.number()),
-    cursor: v.optional(v.id('_storage')),
+    cursor: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, input) => {

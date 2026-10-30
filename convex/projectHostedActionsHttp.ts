@@ -15,6 +15,8 @@ import { hostedCheckTerminal } from '../src/hosted-check';
 import type { HostedCheckRun } from '../src/hosted-check';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
+import { storeSourceBytes } from './projectSourceBytes';
+import { savePin } from '../src/hosted-save';
 export const handle = httpAction(async (ctx, request) => {
   let reason: 'authorization' | 'validation' | 'storage' | 'cancelled' = 'authorization';
   try {
@@ -81,15 +83,31 @@ export const handle = httpAction(async (ctx, request) => {
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSession:session'), input);
       const plan = command.plan;
       reason = 'storage';
-      const selectionStorage = await ctx.storage.store(new Blob([canonicalPayload(plan.recipe.selection)]));
-      const recipeStorage = await ctx.storage.store(new Blob([canonicalPayload(plan.recipe)]));
+      // Content keys dedupe identical selections across rechecks. A verified
+      // existing HEAD avoids uploading the selection body again.
+      const selection = await storeSourceBytes(
+        ctx,
+        input.projectId,
+        new TextEncoder().encode(canonicalPayload(plan.recipe.selection)),
+        savePin(plan.recipe.selection),
+        true,
+      );
+      const recipe = await storeSourceBytes(
+        ctx,
+        input.projectId,
+        new TextEncoder().encode(canonicalPayload(plan.recipe)),
+        savePin(plan.recipe),
+        true,
+      );
       reason = 'authorization';
       value = await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsPlan:prepare'), {
         ...input,
         recipe: canonicalPayload(plan.recipe),
         lockfile: plan.lockfile,
-        selectionStorage,
-        recipeStorage,
+        ...('storageId' in selection
+          ? { selectionStorage: selection.storageId }
+          : { selectionR2Key: selection.r2Key }),
+        ...('storageId' in recipe ? { recipeStorage: recipe.storageId } : { recipeR2Key: recipe.r2Key }),
       });
     } else {
       // Storage verification happens outside the result transaction. The transaction

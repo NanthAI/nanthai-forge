@@ -26,7 +26,15 @@ process.on('message', async message => {
   }
   if (!message.run) return;
   try {
-    globalThis.fetch = async url => {
+    globalThis.fetch = async (url, init = {}) => {
+      if (init.method === 'PUT') {
+        const existed = await rpc('r2-put', { url: String(url), bytes: Buffer.from(init.body) });
+        return new Response(null, { status: existed ? 412 : 200 });
+      }
+      if (init.method === 'HEAD') {
+        const metadata = await rpc('r2-head', { url: String(url) });
+        return new Response(null, { status: metadata ? 200 : 404, headers: metadata ?? {} });
+      }
       const spec = await rpc('fetch', { url: String(url) });
       if (spec.delay) await new Promise(resolve => setTimeout(resolve, spec.delay));
       if (spec.path) return new Response(createReadStream(spec.path, { highWaterMark: 65536 }));
@@ -45,7 +53,11 @@ process.on('message', async message => {
         const spec = await rpc('get', { id });
         return spec ? new Blob([bytes(spec)]) : null;
       },
-      store: async (blob, options) => rpc('store', { bytes: await convexStoreBlob(blob, options) }),
+      store: async (blob, options) => {
+        if (process.env.FORGE_BLOBS === 'r2')
+          throw Error('Hot source worker called Convex storage.store in R2 mode');
+        return rpc('store', { bytes: await convexStoreBlob(blob, options) });
+      },
     };
     const ctx = {
       storage,

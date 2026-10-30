@@ -167,6 +167,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
       await afterAction?.(item);
     }
   }
+  const readCounts = new Map();
   async function run(item) {
     const [n, m] = item.name.split(':');
     if (!actionUrls[n]) {
@@ -210,10 +211,25 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
                 peakWork = Math.max(peakWork, work);
                 assert(work <= parallelism);
               }
+            } else if (message.kind === 'r2-put') {
+              const id = new URL(a.url).pathname.split('/o/')[1]?.split('/')[0];
+              assert.equal(digest(a.bytes), id);
+              value = objects.has(id);
+              if (!value) objects.set(id, a.bytes);
+            } else if (message.kind === 'r2-head') {
+              const id = new URL(a.url).pathname.split('/o/')[1]?.split('/')[0],
+                spec = objects.get(id);
+              value = spec
+                ? {
+                    'content-length': String(Buffer.isBuffer(spec) ? spec.length : spec.size),
+                    'x-amz-checksum-sha256': Buffer.from(id, 'hex').toString('base64'),
+                  }
+                : null;
             } else if (message.kind === 'fetch') {
               const id = new URL(a.url).pathname.split('/o/')[1]?.split('/')[0],
                 spec = objects.get(id);
               assert(spec, `source ${id}`);
+              readCounts.set(id, (readCounts.get(id) ?? 0) + 1);
               readObjects++;
               readBytes += Buffer.isBuffer(spec) ? spec.length : spec.size;
               value = Buffer.isBuffer(spec) ? spec : { ...spec, delay };
@@ -301,6 +317,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     ...f,
     projectId,
     objects,
+    readCounts,
     blobs,
     ready,
     scheduled,

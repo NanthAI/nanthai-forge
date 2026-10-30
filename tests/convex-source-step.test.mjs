@@ -245,7 +245,11 @@ test('compose and sync preserve byte-identical native results with compact ances
   const x = fixture(),
     file = (path, text) => ({ path, mode: 'file', blob: x.put(text).sha256 });
   let base = x.state([file('a', 'a\nb\nc\n')]);
-  for (let i = 0; i < 110; i++) base = x.state([file('a', 'a\nb\nc\n')], [base.sha256]);
+  const retained = [];
+  for (let i = 0; i < 110; i++) {
+    retained.push(base.sha256);
+    base = x.state([file('a', 'a\nb\nc\n')], [base.sha256]);
+  }
   const left = x.state([file('a', 'A\nb\nc\n')], [base.sha256]),
     right = x.state([file('a', 'a\nb\nC\n')], [base.sha256]);
   const inputs = buildComposePages([
@@ -284,7 +288,13 @@ test('compose and sync preserve byte-identical native results with compact ances
   for (const plan of plans) {
     const input = x.json(plan),
       expected = await buildHostedSourceState(input, x.io),
+      marker = x.reads.length,
       actual = await drain(x, input, true);
+    assert.equal(
+      x.reads.slice(marker).filter(pin => retained.includes(pin.sha256)).length,
+      0,
+      'complete common cut avoids all 110 older manifests',
+    );
     assert.equal(actual.cursor.head, expected.head);
     assert.deepEqual(actual.cursor.output, expected.output);
     t.diagnostic(JSON.stringify({ kind: plan.kind, steps: actual.metrics.length }));

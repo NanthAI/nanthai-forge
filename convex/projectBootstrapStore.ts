@@ -9,6 +9,7 @@ import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { invariant } from '../src/errors';
 import { storageDigest } from './projectStorage';
 import { report } from './errors';
+import { r2Key } from './r2';
 
 export const bootstrapInput = { operationId: v.string(), name: v.string() };
 const requestFor = (name: string) => JSON.stringify(['empty-hosted-project', name.trim()]);
@@ -32,7 +33,7 @@ async function findProject(ctx: QueryCtx, input: { operationId: string; name: st
     'WORK_OPERATION_CHANGED',
     'Retry project creation with its original name.',
   );
-  return project._id;
+  return project.currentBackup ? project._id : null;
 }
 export const find = internalQuery({
   args: bootstrapInput,
@@ -45,11 +46,31 @@ export const find = internalQuery({
     }
   },
 });
+/** A project ID gives R2 bytes their final immutable namespace before upload.
+ * The original operation/request owns this reservation; it is not completion. */
+export const prepare = internalMutation({
+  args: bootstrapInput,
+  returns: v.object({ projectId: v.id('hostedProjects'), at: v.string() }),
+  handler: async (ctx, input) => {
+    await findProject(ctx, input);
+    const user = (await ctx.auth.getUserIdentity())!;
+    const project = await createProject(ctx, {
+      owner: user.subject,
+      key: input.operationId,
+      name: input.name.trim(),
+    });
+    await ctx.db.patch(project._id, { hostingRequest: requestFor(input.name) });
+    return { projectId: project._id, at: new Date(project._creationTime).toISOString() };
+  },
+});
 export const publish = internalMutation({
   args: {
     ...bootstrapInput,
     at: v.string(),
-    objects: v.array(v.object({ storageId: v.id('_storage'), nonce: v.string() })),
+    projectId: v.optional(v.id('hostedProjects')),
+    objects: v.array(
+      v.object({ storageId: v.optional(v.id('_storage')), r2Key: v.optional(v.string()), nonce: v.string() }),
+    ),
   },
   returns: v.object({ projectId: v.id('hostedProjects'), created: v.boolean() }),
   handler: async (ctx, input) => {
@@ -65,21 +86,39 @@ export const publish = internalMutation({
       );
       for (const [index, object] of input.objects.entries()) {
         const expected = bootstrap.objects[index]!;
-        const stored = await ctx.db.system.get(object.storageId);
         invariant(
-          stored &&
-            stored.size === expected.size &&
-            storageDigest(stored.sha256) === expected.sha256 &&
-            stored.contentType === `application/x-forge-object-${object.nonce}`,
+          !!object.storageId !== !!object.r2Key,
           'INVALID_WORK_BACKUP',
-          'Bootstrap content differs from its immutable pins.',
+          'Bootstrap object needs one storage binding.',
         );
+        if (object.r2Key) {
+          invariant(
+            input.projectId && object.r2Key === r2Key(input.projectId, expected.sha256),
+            'INVALID_WORK_BACKUP',
+            'Bootstrap R2 project binding changed.',
+          );
+        } else {
+          const stored = await ctx.db.system.get(object.storageId!);
+          invariant(
+            stored &&
+              stored.size === expected.size &&
+              storageDigest(stored.sha256) === expected.sha256 &&
+              stored.contentType === `application/x-forge-object-${object.nonce}`,
+            'INVALID_WORK_BACKUP',
+            'Bootstrap content differs from its immutable pins.',
+          );
+        }
       }
       const project = await createProject(ctx, {
         owner: user.subject,
         key: input.operationId,
         name: input.name.trim(),
       });
+      invariant(
+        !input.projectId || input.projectId === project._id,
+        'INVALID_WORK_BACKUP',
+        'Bootstrap project changed.',
+      );
       const root = bootstrap.objects[2]!;
       const backupId = await ctx.db.insert('projectBackups', {
         projectId: project._id,
@@ -101,7 +140,10 @@ export const publish = internalMutation({
           projectId: project._id,
           digest: pin.sha256,
           size: pin.size,
-          ...object,
+          nonce: object.nonce,
+          ...(object.r2Key
+            ? { location: 'r2' as const, r2Key: object.r2Key, r2Committed: true }
+            : { storageId: object.storageId }),
           removed: false,
         });
       }
@@ -118,6 +160,7 @@ export const publish = internalMutation({
       for (const entry of bootstrap.projection.entries)
         await ctx.db.insert('projectWorkRecords', { projectId: project._id, generationId, ...entry });
       await ctx.db.patch(project._id, {
+        ...(input.objects.some(o => o.r2Key) ? { r2StorageUsed: true } : {}),
         hostingRequest: requestFor(input.name),
         currentBackup: backupId,
         revision: 1,

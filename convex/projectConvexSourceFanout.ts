@@ -46,7 +46,7 @@ const taskRow = (ctx: MutationCtx, batchId: Id<'projectSourceBatches'>, index: n
 export const fork = internalMutation({
   args: {
     ...identity,
-    cursor: v.id('_storage'),
+    cursor: v.string(),
     kind: v.string(),
     end: v.number(),
     tasks: v.array(v.string()),

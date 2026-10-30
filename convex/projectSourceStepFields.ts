@@ -5,9 +5,10 @@ export const sourceOutput = v.object({
   sha256: v.string(),
   size: v.number(),
   storageId: v.optional(v.id('_storage')),
+  r2Key: v.optional(v.string()),
   recipe: v.optional(v.object({ sha256: v.string(), size: v.number() })),
 });
-export const sourceTaskData = v.object({ id: v.id('_storage'), sha256: v.string() });
+export const sourceTaskData = v.object({ id: v.string(), sha256: v.string() });
 export const sourceStepTables = {
   projectSourceSteps: defineTable({
     projectId: v.id('hostedProjects'),
@@ -16,7 +17,7 @@ export const sourceStepTables = {
     executionId: v.string(),
     scheduledId: v.optional(v.id('_scheduled_functions')),
     step: v.number(),
-    cursor: v.union(v.id('_storage'), v.null()),
+    cursor: v.union(v.string(), v.null()),
     batchId: v.optional(v.id('projectSourceBatches')),
   }).index('by_project_and_job', ['projectId', 'jobId']),
   projectSourceBatches: defineTable({

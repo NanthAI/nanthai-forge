@@ -42,7 +42,7 @@ export const page = query({
         }),
         cursor: result.continueCursor,
         isDone: result.isDone,
-        r2Writes: !!project.r2Writes && r2Enabled(),
+        r2Writes: r2Enabled(),
         r2Revision: project.r2BackfillRevision ?? 0,
       };
     } catch (error) {
@@ -65,12 +65,8 @@ export const targets = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to maintain project storage.');
-      const project = await activeOwnedProject(ctx, projectId, user.subject);
-      invariant(
-        project.r2Writes && r2Enabled(),
-        'R2_NOT_ENABLED',
-        'Enable R2 writes for this project before backfill.',
-      );
+      await activeOwnedProject(ctx, projectId, user.subject);
+      invariant(r2Enabled(), 'R2_NOT_ENABLED', 'Enable R2 writes for this project before backfill.');
       invariant(pins.length <= 100, 'BAD_ARGUMENT', 'Backfill pages contain at most 100 rows.');
       const config = r2Config(),
         targets = [];
@@ -119,11 +115,7 @@ export const flip = internalMutation({
   returns: v.array(v.string()),
   handler: async (ctx, { projectId, actor, operationId, pins }) => {
     const project = await activeOwnedProject(ctx, projectId, actor);
-    invariant(
-      project.r2Writes && r2Enabled(),
-      'R2_NOT_ENABLED',
-      'Enable R2 writes for this project before backfill.',
-    );
+    invariant(r2Enabled(), 'R2_NOT_ENABLED', 'Enable R2 writes for this project before backfill.');
     invariant(pins.length <= 100, 'BAD_ARGUMENT', 'Backfill pages contain at most 100 rows.');
     const flipped = [];
     let changed = false;

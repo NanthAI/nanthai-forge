@@ -657,6 +657,8 @@ test('email contributor lookup is exact, owner-bound and preserves the existing 
 test('new contributor proposals transfer objects, preserve old archives, pull directly for native import and recheck access', async t => {
   const s = await setup(t),
     c = await candidate(t, s);
+  // This exercises legacy Convex POST/complete; the next test covers R2 proposals.
+  process.env.FORGE_BLOBS = 'convex';
   const { uploadArchiveObjects } = await import(moduleUrl('../web/src/archive-object-upload.ts'));
   const { ConvexExchange } = await import('../dist/exchange-client.js');
   const { pullNativeExchange } = await import('../dist/native-exchange.js');

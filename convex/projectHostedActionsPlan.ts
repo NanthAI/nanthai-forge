@@ -16,8 +16,10 @@ export const prepare = internalMutation({
     ...sessionArgs,
     recipe: v.string(),
     lockfile: v.string(),
-    selectionStorage: v.id('_storage'),
-    recipeStorage: v.id('_storage'),
+    selectionStorage: v.optional(v.id('_storage')),
+    selectionR2Key: v.optional(v.string()),
+    recipeStorage: v.optional(v.id('_storage')),
+    recipeR2Key: v.optional(v.string()),
   },
   returns: v.any(),
   handler: async (ctx, input) => {
@@ -123,8 +125,14 @@ export const prepare = internalMutation({
         'Check is no longer active.',
       );
       await storeSourceOutputs(ctx, input.projectId, run.executionId!, [
-        { ...selection, storageId: input.selectionStorage },
-        { ...manifest, storageId: input.recipeStorage },
+        {
+          ...selection,
+          ...(input.selectionR2Key ? { r2Key: input.selectionR2Key } : { storageId: input.selectionStorage }),
+        },
+        {
+          ...manifest,
+          ...(input.recipeR2Key ? { r2Key: input.recipeR2Key } : { storageId: input.recipeStorage }),
+        },
       ]);
       run.plan = plan;
       run.planDigest = checkPin(plan);

@@ -29,7 +29,7 @@ export const resolve = internalQuery({
       };
       result.push({
         descriptor,
-        storageId: row.storageId ?? null,
+        storageId: row.location === 'r2' && row.r2Key ? null : (row.storageId ?? null),
         url: row.location === 'r2' && row.r2Key ? await presignGet(r2Config(), row.r2Key) : null,
       });
     }

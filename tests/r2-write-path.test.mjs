@@ -15,8 +15,8 @@ const prepare = (s, values) =>
   objects.prepareBatch._handler(s.ctx, { projectId: 'project', objects: values.map(pinOf) });
 const rows = s => [...s.tables.projectObjects.values()];
 
-test('with the flag off, or without the project opt-in, prepareBatch is unchanged', async t => {
-  for (const options of [{ flag: '' }, { optIn: false }, { flag: 'other' }]) {
+test('with deployment R2 mode off, prepareBatch retains the Convex path', async t => {
+  for (const options of [{ flag: '' }, { flag: 'other' }]) {
     const { s } = await setup(t, options),
       [row] = await prepare(s, ['plain']);
     assert.equal(row.uploadUrl, 'https://fixture.invalid/upload');
@@ -27,7 +27,7 @@ test('with the flag off, or without the project opt-in, prepareBatch is unchange
   }
 });
 
-test('flag plus opt-in returns a presigned create-only PUT and a pending r2 row', async t => {
+test('deployment R2 mode returns a presigned create-only PUT and pending R2 row', async t => {
   const { s } = await setup(t),
     pin = pinOf('hello r2'),
     [row] = await prepare(s, ['hello r2']);
@@ -61,7 +61,7 @@ test('missing configuration with the flag on fails closed with a typed error and
   assert.equal(rows(s).length, 0);
 });
 
-test('single-object prepare uses the same R2 opt-in and Convex fallback as batches', async t => {
+test('single-object prepare uses deployment R2 mode and the same fallback as batches', async t => {
   for (const options of [{}, { flag: '' }, { optIn: false }, { flag: 'other' }])
     await t.test(JSON.stringify(options), async t => {
       const { s } = await setup(t, options),
@@ -72,7 +72,7 @@ test('single-object prepare uses the same R2 opt-in and Convex fallback as batch
       assert.equal(prepared.stored, false);
       assert.equal(prepared.uploadUrl, batch.uploadUrl);
       assert.deepEqual(prepared.target?.headers, batch.target?.headers);
-      if (options.flag === undefined && options.optIn !== false) {
+      if (options.flag === undefined) {
         assert.equal(prepared.target.kind, 'r2');
         assert.equal(rows(s)[0].location, 'r2');
         assert.equal(prepared.uploadUrl, undefined);
@@ -134,14 +134,14 @@ test('CLI uploads go straight to R2, commit after a HEAD check, and dedupe after
   );
 });
 
-test('a pending Convex row keeps its Convex path when the flag turns on', async t => {
+test('a pending Convex reservation switches new upload targets to deployment R2 mode', async t => {
   const { s, fake } = await setup(t, { flag: '' }),
     [first] = await prepare(s, ['old-a']);
   assert.ok(first.uploadUrl);
   process.env.FORGE_BLOBS = 'r2';
   const [again] = await prepare(s, ['old-a']);
-  assert.equal(again.target, undefined);
-  assert.equal(again.uploadUrl, 'https://fixture.invalid/upload');
+  assert.equal(again.target.kind, 'r2');
+  assert.equal(again.uploadUrl, undefined);
   assert.equal(fake.objects.size, 0);
 });
 
@@ -234,6 +234,7 @@ test('commitBatch needs current project access and an r2 row', async t => {
   assert.equal(rows(s)[0].r2Committed, undefined);
   s.caller('owner');
   s.tables.hostedProjects.get('project').r2Writes = false;
+  process.env.FORGE_BLOBS = 'convex';
   const convexRow = (await objects.prepare._handler(s.ctx, { projectId: 'project', ...pinOf('legacy') })).id;
   await assert.rejects(
     commit.commitBatch._handler(s.ctx, { objects: [{ id: convexRow }] }),
@@ -254,16 +255,17 @@ test('only the owner can change the project opt-in', async t => {
   assert.equal(project().r2Writes, false);
 });
 
-test('a pending r2 row returns to the Convex path when the opt-in is turned off', async t => {
+test('deployment R2 mode keeps new and pending objects in R2 without the legacy opt-in', async t => {
   const { s } = await setup(t),
     [first] = await prepare(s, ['flip']);
   assert.ok(first.target);
   s.tables.hostedProjects.get('project').r2Writes = false;
   const [second] = await prepare(s, ['flip']);
-  assert.equal(second.uploadUrl, 'https://fixture.invalid/upload');
-  assert.equal(second.target, undefined);
-  assert.equal(rows(s)[0].location, 'convex');
-  assert.equal(rows(s)[0].r2Key, undefined);
+  assert.equal(second.uploadUrl, undefined);
+  assert.equal(second.target.kind, 'r2');
+  assert.equal(rows(s)[0].location, 'r2');
+  const [fresh] = await prepare(s, ['fresh without opt-in']);
+  assert.equal(fresh.target.kind, 'r2');
 });
 
 test('the fake rejects bad signatures, other keys and existing objects like R2 does', async t => {

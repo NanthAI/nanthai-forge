@@ -18,8 +18,8 @@ export const prepare = internalMutation({
     r2Key: v.optional(v.string()),
   }),
   handler: async (ctx, input) => {
-    const project = await accessibleProject(ctx, input.projectId, input.actor);
-    const r2 = r2Enabled() && project.r2Writes;
+    await accessibleProject(ctx, input.projectId, input.actor);
+    const r2 = r2Enabled();
     if (r2) r2Config();
     invariant(
       /^[0-9a-f]{64}$/.test(input.digest) && Number.isSafeInteger(input.size) && input.size >= 0,
@@ -138,7 +138,7 @@ export const placement = internalQuery({
   args: { projectId: v.id('hostedProjects'), actor: v.string() },
   returns: v.boolean(),
   handler: async (ctx, { projectId, actor }) => {
-    const project = await accessibleProject(ctx, projectId, actor);
-    return project.r2Writes ?? false;
+    await accessibleProject(ctx, projectId, actor);
+    return r2Enabled();
   },
 });

@@ -66,8 +66,8 @@ async function prepareObject(
     if (!authorized) {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
-      const project = await activeProject(ctx, projectId, user.subject);
-      r2 = r2Enabled() && project.r2Writes ? r2Config() : null;
+      await activeProject(ctx, projectId, user.subject);
+      r2 = r2Enabled() ? r2Config() : null;
     }
     invariant(valid(digest, size), 'BAD_ARGUMENT', 'Use the exact content digest and size.');
     let row = await ctx.db
@@ -90,6 +90,14 @@ async function prepareObject(
         ...(r2 ? { location: 'r2' as const, r2Key: r2Key(projectId, digest), r2PreparedAt: Date.now() } : {}),
       });
       row = (await ctx.db.get(id))!;
+    } else if (!isStored(row) && r2 && row.location !== 'r2') {
+      // Reconcile a reservation created before the deployment switched storage.
+      await ctx.db.patch(row._id, {
+        location: 'r2',
+        r2Key: r2Key(projectId, digest),
+        r2PreparedAt: Date.now(),
+      });
+      row = (await ctx.db.get(row._id))!;
     } else if (!isStored(row) && row.location === 'r2' && !r2) {
       // Pending R2 row but R2 writes are now off: return it to the Convex path.
       await ctx.db.patch(row._id, { location: 'convex', r2Key: undefined });
@@ -182,8 +190,8 @@ export const prepareBatch = mutation({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
       // One atomic mutation has one authority snapshot for this project.
       const project = await activeProject(ctx, projectId, user.subject);
-      // R2 needs the flag and the project's opt-in; a missing setting with both on fails closed.
-      const r2 = r2Enabled() && project.r2Writes ? r2Config() : null;
+      // Deployment R2 mode controls new placement, including legacy projects without opt-in.
+      const r2 = r2Enabled() ? r2Config() : null;
       if (r2 && !project.r2StorageUsed) await ctx.db.patch(projectId, { r2StorageUsed: true });
       const result = [];
       for (const pin of objects) result.push(await prepareObject(ctx, { projectId, ...pin }, true, r2));

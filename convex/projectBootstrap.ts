@@ -9,6 +9,8 @@ import { internal } from './_generated/api';
 import { emptyHostedProject } from '../src/hosted-bootstrap';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import { r2Enabled } from './r2';
+import { storeSourceBytes } from './projectSourceBytes';
 
 export const create = action({
   args: { operationId: v.string(), name: v.string() },
@@ -19,22 +21,36 @@ export const create = action({
       if (existing) return existing;
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to create a project.');
-      const at = new Date().toISOString();
+      const prepared = r2Enabled()
+        ? await ctx.runMutation(internal.projectBootstrapStore.prepare, input)
+        : null;
+      const at = prepared?.at ?? new Date().toISOString();
       const bootstrap = emptyHostedProject(input.operationId, at);
+      const projectId = prepared?.projectId ?? null;
       const objects = [];
       for (const object of bootstrap.objects) {
         const nonce = randomUUID();
-        const storageId = await blobStore(ctx).store(
-          new Blob([object.text], {
-            type: `application/x-forge-object-${nonce}`,
-          }),
+        const stored = await storeSourceBytes(
+          ctx,
+          projectId,
+          new TextEncoder().encode(object.text),
+          object,
+          true,
+          `application/x-forge-object-${nonce}`,
         );
-        objects.push({ storageId: storageId as Id<'_storage'>, nonce });
+        objects.push({ ...stored, nonce });
       }
       // All project/source/Work pointers publish in one transaction. Unknown
       // outcomes retain these bytes; a retry reconciles the original operation.
-      const result = await ctx.runMutation(internal.projectBootstrapStore.publish, { ...input, at, objects });
-      if (!result.created) for (const object of objects) await blobStore(ctx).delete(object.storageId);
+      const result = await ctx.runMutation(internal.projectBootstrapStore.publish, {
+        ...input,
+        at,
+        objects,
+        ...(projectId ? { projectId } : {}),
+      });
+      if (!result.created)
+        for (const object of objects)
+          if ('storageId' in object) await blobStore(ctx).delete(object.storageId);
       return result.projectId;
     } catch (error) {
       return report(error);

@@ -56,7 +56,7 @@ export const resolve = internalMutation({
       if (result.length && bytes + descriptor.object.size > 8 * 1024 * 1024 * (args.windows ?? 1)) break;
       bytes += descriptor.object.size;
       const url = row.location === 'r2' && row.r2Key ? await presignGet(r2Config(), row.r2Key) : null;
-      result.push({ descriptor, storageId: row.storageId ?? null, url });
+      result.push({ descriptor, storageId: url ? null : (row.storageId ?? null), url });
       if (args.ancestry && generation) {
         // Hints batch a linear ancestry chain, but never establish closure.
         // Actual verified manifest parents drive every subsequent frontier.

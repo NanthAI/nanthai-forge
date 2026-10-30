@@ -221,7 +221,7 @@ export const begin = internalMutation({
       invariant(object, 'SOURCE_UNAVAILABLE', 'Source input is absent.');
       const url =
         object.location === 'r2' && object.r2Key ? await presignGet(r2Config(), object.r2Key) : null;
-      locations.push({ descriptor, storageId: object.storageId ?? null, url });
+      locations.push({ descriptor, storageId: url ? null : (object.storageId ?? null), url });
     }
     return canonicalPayload({
       input: active.job.input,
@@ -237,7 +237,7 @@ export const commit = internalMutation({
   args: {
     ...identity,
     step: v.number(),
-    cursor: v.union(v.id('_storage'), v.null()),
+    cursor: v.union(v.string(), v.null()),
     objects: v.array(sourceOutput),
     output: v.union(v.object({ sha256: v.string(), size: v.number() }), v.null()),
     failure: v.union(v.string(), v.null()),

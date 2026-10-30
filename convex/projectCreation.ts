@@ -3,6 +3,7 @@ import { ensureAccount, ensureProjectSlug } from './urlIdentity';
 import { policyPreset } from '../src/autonomy-policy';
 import type { MutationCtx } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
+import { r2Enabled } from './r2';
 
 /** Shared creation seam: archive upload and CLI hosting use the same owner/key identity. */
 export async function createProject(
@@ -19,6 +20,7 @@ export async function createProject(
       sourceAuthority: { mode: 'native-owner', epoch: 0 },
       autonomyPolicy: policyPreset('supervised'),
       visibility: input.visibility ?? 'private',
+      ...(r2Enabled() ? { r2Writes: true } : {}),
       currentBackup: null,
       revision: 0,
     });

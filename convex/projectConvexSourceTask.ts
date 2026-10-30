@@ -3,11 +3,11 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction } from './_generated/server';
-import type { Id } from './_generated/dataModel';
 import { convexSourceTransport } from './projectConvexSource';
 import { runSourceTask, type SourceTaskInput, type SourceTaskProgress } from '../src/hosted-source-fanout';
 import { storeTaskData, loadTaskData } from '../src/hosted-source-task-data';
-import { ForgeError, invariant } from '../src/errors';
+import { ForgeError } from '../src/errors';
+import { sourceStorage } from './projectConvexSourceStorage';
 const args = {
   projectId: v.id('hostedProjects'),
   jobId: v.string(),
@@ -26,13 +26,7 @@ export const run = internalAction({
     if (!loaded) return null;
     const state = JSON.parse(loaded),
       { io, outputs } = convexSourceTransport(ctx, input);
-    const read = async (id: string) => {
-      const blob = await ctx.storage.get(id as Id<'_storage'>);
-      invariant(blob, 'SOURCE_UNAVAILABLE', 'Source task progress is absent.');
-      return new Uint8Array(await blob.arrayBuffer());
-    };
-    const store = (bytes: Uint8Array) =>
-      ctx.storage.store(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }));
+    const { read, store } = sourceStorage(ctx, input.projectId);
     let result;
     try {
       const previous = state.progress ? await loadTaskData<SourceTaskProgress>(state.progress, read) : null;
