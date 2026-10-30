@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { childEnv } from '../scripts/child-env.mjs';
 import { makeFunctionReference } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { pagedFixture } from './github-import-pages-fixture.mjs';
@@ -10,84 +13,23 @@ import { importPageBytes } from '../dist/github-import-pages.js';
 const { ImportUpload } = await import(moduleUrl('../convex/projectGithubImportUpload.ts'));
 
 test('100 MiB acquisition streams bounded physical windows with memory margin', async t => {
-  const s = pagedFixture();
-  const projectId = await s.ctx.db.insert('hostedProjects', {
-    owner: 'owner',
-    key: 'stream',
-    name: 'stream',
-    currentBackup: null,
-    revision: 0,
-  });
-  // Model an external durable byte sink, rather than retaining an artificial
-  // whole database of bytes inside the action's process.
-  const store = s.ctx.storage.store;
-  s.ctx.storage.store = async blob => {
-    const id = await store(blob);
-    s.files.get(id).blob = new Blob();
-    return id;
-  };
-  const size = githubBlobEndpointBytes,
-    blockSize = 64 * 1024;
-  const block = index => {
-    const seed = createHash('sha256').update(String(index)).digest();
-    const value = Buffer.allocUnsafe(blockSize);
-    for (let offset = 0; offset < value.length; offset += seed.length) seed.copy(value, offset);
-    return value;
-  };
-  const git = createHash('sha1').update(`blob ${size}\0`),
-    logical = createHash('sha256');
-  for (let i = 0; i < size / blockSize; i++) {
-    const bytes = block(i);
-    git.update(bytes);
-    logical.update(bytes);
-  }
-  const expected = logical.digest('hex'),
-    upload = new ImportUpload(s.ctx, projectId, 'owner');
-  const builder = new ObjectRecipeBuilder(upload.put);
-  let index = 0,
-    peakRss = process.memoryUsage().rss;
-  const pin = await streamGithubSourceBlob(
-    'fixture/stream',
-    { path: 'large.bin', sha: git.digest('hex'), size, mode: '100644' },
-    async bytes => {
-      builder.update(bytes);
-      await upload.drain();
-      await upload.commit();
-      peakRss = Math.max(peakRss, process.memoryUsage().rss);
-    },
-    undefined,
-    async () =>
-      new Response(
-        new ReadableStream({
-          pull(controller) {
-            if (index * blockSize >= size) controller.close();
-            else controller.enqueue(block(index++));
-          },
-        }),
-      ),
+  const result = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        fileURLToPath(new URL('./github-import-stream-memory.mjs', import.meta.url)),
+        moduleUrl('../convex/projectGithubImportUpload.ts'),
+      ],
+      { encoding: 'utf8', env: childEnv() },
+    ),
   );
-  assert.equal(pin.blob, expected);
-  assert.equal(pin.size, size);
-  upload.recipe(pin, builder.finish({ sha256: pin.blob, size }).bytes);
-  await upload.drain(true);
-  await upload.commit();
-  const row = [...s.tables.projectObjects.values()].find(row => row.digest === expected);
-  assert.ok(row.recipe);
-  assert.equal(row.storageId, undefined);
-  assert.ok(upload.peakBufferedBytes <= importPageBytes + 1024 * 1024, String(upload.peakBufferedBytes));
+  assert.equal(result.logicalBytes, githubBlobEndpointBytes);
+  assert.ok(result.peakBufferedBytes <= importPageBytes + 1024 * 1024, String(result.peakBufferedBytes));
   assert.ok(
-    peakRss < 384 * 1024 * 1024,
-    `Streaming process RSS ${peakRss} exceeds the local 384 MiB margin target`,
+    result.peakProcessRss < 384 * 1024 * 1024,
+    `Streaming process RSS ${result.peakProcessRss} exceeds the 384 MiB margin target`,
   );
-  t.diagnostic(
-    JSON.stringify({
-      logicalBytes: size,
-      peakBufferedBytes: upload.peakBufferedBytes,
-      peakProcessRss: peakRss,
-      physicalObjects: s.tables.projectObjects.size,
-      executions: [...s.calls.values()].reduce((a, b) => a + b, 0),
-    }),
-  );
+  t.diagnostic(JSON.stringify(result));
 });
 
 test('batched completion rejects changed bytes and current access is rechecked', async () => {
