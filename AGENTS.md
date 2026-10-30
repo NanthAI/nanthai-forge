@@ -22,12 +22,12 @@ For ownerless hosted ROOTs, see [Work on a hosted project](docs/quickstart.md#wo
 ```sh
 nforge agent OWNER start '{"outcome":"What you are changing"}'   # returns a Lane path
 # edit files in that Lane path with your normal tools
-nforge agent OWNER finish '{"laneId":"…","message":"…","accept":true}'
+nforge agent OWNER land --save '{"laneId":"…","message":"…"}'
 ```
 
 Record a handoff before stopping.
 
-`finish` checkpoints, merges the latest `main`, runs the `verify` check and accepts on pass. Details: [agent workflow](docs/agents/workflow.md). Lifecycle receipts include advisory local peers; incomplete coverage never establishes independence. `start.scope.paths` retains planned claims; other lifecycle scopes declare relevance for that call. Use `peers {"laneId":"…","detail":true}` or `forge_peers` for details. Clean checkpoints succeed with an unchanged head. When Forge gets in your way, run `nforge agent OWNER friction '{"laneId":"…","title":"…","detail":"…","area":"…"}'`; `nforge improve OWNER` groups the reports that guide the next slice.
+Three verbs: `start`, `save` and `land`. `land --save` saves, merges the latest `main`, runs the `verify` check and accepts on pass; `save --sync` brings `main` in on demand. Operator actions (`abandon`, `accept`, `cancel`, `revert`, …) run as `nforge x OWNER ACTION`. Old names such as `finish` and `checkpoint` still work and print their new form. Details: [agent workflow](docs/agents/workflow.md). Lifecycle receipts include advisory local peers; incomplete coverage never establishes independence. `start.scope.paths` retains planned claims; other lifecycle scopes declare relevance for that call. Use `peers {"laneId":"…","detail":true}` or `forge_peers` for details. Clean saves succeed with an unchanged head. When Forge gets in your way, run `nforge agent OWNER save --friction '{"laneId":"…","title":"…","detail":"…","area":"…"}'`; `nforge improve OWNER` groups the reports that guide the next slice.
 
 ## Hosted landing gate
 

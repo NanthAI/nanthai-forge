@@ -109,5 +109,5 @@ test('save normalizes to checkpoint with identical pins and validation', async (
   } finally {
     process.stdout.write = write;
   }
-  assert.match(output, /checkpoint/);
+  assert.match(output, /^nforge agent ROOT save '/);
 });

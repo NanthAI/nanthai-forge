@@ -2,6 +2,7 @@ import { callerOverlaps } from './agent-caller-overlaps.js';
 import { hostedAgentAddress, hostedAgentCli } from './hosted-agent-cli.js';
 import { agentWaitCli } from './agent-wait.js';
 import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js';
+import { aliasNotice, landSaveCommand, lowerVerb, newForm, parseVerbForm } from './agent-verbs.js';
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, realpathSync } from 'node:fs';
 import { sep } from 'node:path';
@@ -12,67 +13,87 @@ import { retainedFinishCommand } from './agent-finish-journal.js';
 import { invariant } from './errors.js';
 
 export const AGENT_HELP = `Forge agent workflow
-  nforge agent ROOT ACTION [JSON | --command-file FILE]
-  nforge agent ROOT ACTION --help
+  nforge agent ROOT start|save|land [--MODE] [JSON | --command-file FILE]
+  nforge agent ROOT READ [JSON | --command-file FILE]
+  nforge x ROOT OPERATOR-ACTION [JSON | --command-file FILE]
+  nforge agent ROOT VERB [--MODE] --help
   nforge mcp ROOT --agent
 
 Typical loop:
   nforge agent ROOT start '{"outcome":"Fix the login bug"}'
   (edit files in the returned path)
-  nforge agent ROOT finish '{"laneId":"LANE_ID","message":"Fix login","accept":true}'
+  nforge agent ROOT land --save '{"laneId":"LANE_ID","message":"Fix login"}'
 
-finish checkpoints, syncs the Lane with main if main moved, composes, runs the
+Three verbs:
+  start               create or join an Intent and open a Lane
+    --open            materialize a hosted Lane          --reopen  reopen retained work
+  save                save current edits (a clean save keeps the unchanged head)
+    --sync            bring main (or the stack parent) into the Lane, like git pull
+    --candidate       compose saved inputs into a Candidate
+    --check           run the configured check on an exact Candidate
+    --contract        confirm the measured proving-test contract
+    --handoff --report --friction --decision --overlap-answer --overlap-answers
+                      record that note on the Lane (metadata only)
+    --preview         local composed static preview, no acceptance
+  land                submit saved Lane heads; unsaved edits stay untouched
+    --save            save, sync if main moved, compose, check and land (accept:true)
+    --save --check-only   the same without landing
+    --resume-ready    resume landings waiting on dependencies
+
+land --save checkpoints, syncs the Lane with main if main moved, composes, runs the
 "verify" check (or the only check) and requests acceptance under project policy.
 CHANNEL_CHANGED retries use a per-Channel landing queue (maxRetries defaults to 3);
 receipts list all attempts and waiting positions.
 New supervised projects stop at awaiting-review; a person accepts their checked Candidate.
-policy reads settings; set-policy selects a preset or edits fields (custom).
-laneUpdates:ask stops at sync-required when main moved; native undo-sync restores
-a recorded pre-sync checkpoint and refuses newer edits unless force:true.
-start/checkpoint/sync/finish and Lane status include a local peers digest; scope:{paths:["src/file.ts"]}
+policy reads settings; nforge x ROOT set-policy selects a preset or edits fields (custom).
+laneUpdates:ask stops at sync-required when main moved; nforge x ROOT undo-sync restores
+a recorded pre-sync save and refuses newer edits unless force:true.
+start, save, save --sync, land --save and Lane status include a local peers digest; scope:{paths:["src/file.ts"]}
 declares paths; start retains planned claims until the Lane closes.
-take {laneId,takeover:true} hands another actor’s Lane to you with its context. peers {laneId,detail:true} reads full details.
-save is an alias of checkpoint, with the same pins and replay identity.
-Clean checkpoints succeed with the unchanged head.
-friction captures workflow cost in owner Work; improve groups it; friction-triage records a decision.
-start/finish frictionIds:[ID] links a fixing Lane and closes reports when it lands.
-sync brings main into a Lane like git pull; resolve any conflict markers, then
-finish again. Inside a Lane directory laneId may be omitted.
+nforge x ROOT take {laneId,takeover:true} hands another actor’s Lane to you with its context. peers {laneId,detail:true} reads full details.
+save --friction captures workflow cost in owner Work; improve groups it; x friction-triage records a decision.
+start/land --save frictionIds:[ID] links a fixing Lane and closes reports when it lands.
+After save --sync, resolve any conflict markers, then land --save again. Inside a Lane directory laneId may be omitted.
 
 Omitted operationId and pins are filled from current state and returned under
 "resolved". After an unknown reply, retry with your request plus "resolved".
-Once finish has checkpointed, resume its retained request with:
-  nforge agent ROOT finish '{"operationId":"ORIGINAL_FINISH_UUID"}'
-Use the parent finish operationId, not an attempt's child operation ID.
+Once land --save has saved, resume its retained request with:
+  nforge agent ROOT land --save '{"operationId":"ORIGINAL_UUID"}'
+Use the parent operationId, not an attempt's child operation ID.
 
 Hosted addressing: pass {url,projectId,...} on this same command surface, or use
 a hosted Lane checkout ROOT. No native owner/listener is needed. Read capabilities
-and use status/observe for finite reads. Hosted checkpoint/save and run/check are aliases.
-Hosted also supports open, save, check, resolve, revert and capabilities.
-Hosted sync {candidateId} opens an exact conflict draft. Edit its files, call resolve
-in the returned root, then finish there; a clean saved resolution needs no fake edit.
-Hosted finish prepares conflict files automatically; pending source work stays durable.
-Hosted owners configure checks with configure-check, configure-runner and check-settings.
+and use status/observe for finite reads. Hosted also supports resolve and x revert.
+Hosted save --sync {candidateId} opens an exact conflict draft. Edit its files, call resolve
+in the returned root, then land --save there; a clean saved resolution needs no fake edit.
+Hosted land --save prepares conflict files automatically; pending source work stays durable.
+Hosted owners configure checks with x configure-check, x configure-runner and check-settings.
 Hosted commands retain generated UUIDs and exact pins in ROOT.forge-client/agent;
 retry identical parameters after a lost reply. A new explicit operationId starts new work.
-Hosted start returns Lane pins; open materializes it; finish saves an opened Lane,
+Hosted start returns Lane pins; start --open materializes it; land --save saves an opened Lane,
 composes and submits durable agent landing. Pending is not accepted.
 
-Actions: integrate, wait, handoff, handoff-read, tests, peers, peer-ack, link, take, start, land, landing, land-ready, checkpoint, save, sync, undo-sync, policy, set-policy, finish, compose, define-check, run, observe,
-         log, cancel, accept, complete, abandon, reopen, complete-merged, clean, status, records, candidate, provenance, candidates, review, diff, show, brief, guidance,
-         making-of, report, metrics, friction, friction-triage, improve, decide, decisions.
+Reads: tests, status, landing, observe, wait, log, link,
+       records, candidate, provenance, candidates, review, diff, show, brief, peers,
+       handoff-read, making-of, metrics, improve, decisions, policy, check-settings, capabilities.
+Operator (nforge x ROOT ACTION): accept, cancel, revert, undo-revert, undo-sync, abandon,
+       complete, complete-merged, clean, take, guidance, pre-edit, install-hooks, uninstall-hooks,
+       friction-triage, set-policy, define-check, configure-check, configure-runner, prioritize.
+Old action names (checkpoint, sync, compose, run, check, finish, open, reopen, land-ready,
+confirm-tests, handoff, report, friction, decide, peer-ack, integrate, and operator actions under
+agent) still work: they print their new form on stderr; JSON, results and replay identity are unchanged.
 start stackOn:LANE_ID bases a native Lane on that parent’s latest saved head and waits for its landing.
-sync restacks onto the latest parent; after landing it targets main. ontoMain:true detaches explicitly.
+save --sync restacks onto the latest parent; after landing it targets main. ontoMain:true detaches explicitly.
 status/peers/pending show the chain, parent movement and abandonment.
-start intentId adds a sibling Lane; finish with:[laneId] uses saved siblings and orders high overlaps when accepting.
-after:{intentId} or after:{viewId} waits for that work to land; land-ready resumes waits.
-finish/accept complete included Lanes; the Intent completes when all its Lanes are done (keepOpen:true to opt out).
-Lanes show merged:true when their head is already in a Channel; complete-merged
-completes those. clean is a dry run until apply:true. run needs only {"laneId"}; log accepts tail:BYTES, shard:N (or "static"), and attempt:N (default 1).
+start intentId adds a sibling Lane; land --save with:[laneId] uses saved siblings and orders high overlaps when accepting.
+after:{intentId} or after:{viewId} waits for that work to land; land --resume-ready resumes waits.
+land --save and x accept complete included Lanes; the Intent completes when all its Lanes are done (keepOpen:true to opt out).
+Lanes show merged:true when their head is already in a Channel; x complete-merged
+completes those. x clean is a dry run until apply:true. save --check needs only {"laneId"}; log accepts tail:BYTES, shard:N (or "static"), and attempt:N (default 1).
 start records actor:"agent-name" (or FORGE_AGENT_NAME, then FORGE_ACTOR).
 Use distinct names in concurrent shells; tool optionally names the agent tool.
 making-of reads one Intent's derived record (Lanes, saves, runs with queue/run time,
-landings, sessions); report records self-reported harness, model and token totals.
+landings, sessions); save --report records self-reported harness, model and token totals.
 candidate and candidates read pinned results; view and views are deprecated aliases (stderr notice only).
 JSON fields (viewId, views) and Work formats are unchanged.
 Read the packaged agent skill: nforge docs agent.
@@ -143,7 +164,7 @@ const examples: Record<string, unknown> = {
   start: { outcome: 'Describe the intended change' },
   landing: { operationId: 'UUID' },
   land: { operationId: 'UUID', laneIds: ['LANE_ID', 'OTHER_LANE_ID'] },
-  checkpoint: { laneId: 'LANE_ID', message: 'Describe the checkpoint' },
+  checkpoint: { laneId: 'LANE_ID', message: 'Describe the save' },
   sync: { laneId: 'LANE_ID' },
   compose: { operationId: 'UUID', intentId: 'INTENT_ID', inputs: [{ laneId: 'LANE_ID', head: 'HEAD' }] },
   finish: { laneId: 'LANE_ID', message: 'Describe the change', accept: true },
@@ -189,7 +210,9 @@ const strict: Record<string, unknown> = {
 };
 function actionHelp(action: string): string {
   invariant(action in examples, 'BAD_ARGUMENT', 'Unknown agent action. Use agent --help.');
-  let result = `nforge agent ROOT ${action} '${JSON.stringify(examples[action])}'\n`;
+  const form = newForm(action, examples[action] as Record<string, unknown>, false) ?? action;
+  const command = form.startsWith('x ') ? `nforge x ROOT ${form.slice(2)}` : `nforge agent ROOT ${form}`;
+  let result = `${command} '${JSON.stringify(examples[action])}'\n`;
   if (strict[action]) result += `Fully pinned: '${JSON.stringify(strict[action])}'\n`;
   if (action === 'start' || action === 'sync')
     result +=
@@ -307,7 +330,17 @@ function laneFromCwd(directory: string): string | undefined {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) ? id : undefined;
 }
 
-export async function agentCli(args: string[]): Promise<unknown> {
+type AgentCliOptions = { operator?: boolean; notices?: boolean };
+
+/** Alias notices print only after the command succeeds, so error stderr stays one JSON object. */
+export async function agentCli(args: string[], options: AgentCliOptions = {}): Promise<unknown> {
+  const notices: string[] = [];
+  const result = await runAgentCli(args, options, notices);
+  for (const notice of notices) process.stderr.write(notice);
+  return result;
+}
+
+async function runAgentCli(args: string[], options: AgentCliOptions, notices: string[]): Promise<unknown> {
   if (!args.length || args[0] === '--help' || args[0] === 'help') {
     process.stdout.write(AGENT_HELP);
     return undefined;
@@ -320,18 +353,20 @@ export async function agentCli(args: string[]): Promise<unknown> {
     invariant(laneId, 'BAD_ARGUMENT', 'Run peers --path inside a Lane or set FORGE_LANE_ID.');
     return workflow.dispatch({ action: 'peers', laneId, path: args[3] });
   }
-  const [root, requestedAction, option, path] = args;
-  if (requestedAction) noticeViewAlias(requestedAction);
-  const canonical = (value: string) => (value === 'save' ? 'checkpoint' : canonicalCandidateAction(value));
-  const action = requestedAction ? canonical(requestedAction) : undefined;
-  if (action === 'help' || action === '--help') {
+  const [root, requestedAction, ...tail] = args;
+  if (requestedAction === 'help' || requestedAction === '--help') {
     process.stdout.write(AGENT_HELP);
     return undefined;
   }
+  if (requestedAction) noticeViewAlias(requestedAction);
+  const [form, rest] = requestedAction
+    ? parseVerbForm(requestedAction, tail, options.operator)
+    : [undefined, tail];
+  const [option, path] = rest;
+  const canonical = (value: string) => (value === 'save' ? 'checkpoint' : canonicalCandidateAction(value));
+  let action = form ? canonical(lowerVerb(form, false)) : undefined;
   invariant(
-    root &&
-      action &&
-      (args.length === 2 || args.length === 3 || (args.length === 4 && option === '--command-file')),
+    root && action && (rest.length <= 1 || (rest.length === 2 && option === '--command-file')),
     'BAD_ARGUMENT',
     'Use agent ROOT ACTION [JSON | --command-file FILE].',
   );
@@ -361,26 +396,38 @@ export async function agentCli(args: string[]): Promise<unknown> {
     'BAD_ARGUMENT',
     'Command parameters must be a JSON object.',
   );
-  const selected = parameters as Record<string, unknown>;
+  let selected = parameters as Record<string, unknown>;
   if (typeof selected.action === 'string') noticeViewAlias(selected.action);
+  const hosted = hostedAgentAddress(root, selected);
+  action = canonical(lowerVerb(form!, Boolean(hosted)));
   invariant(
     selected.action === undefined ||
       (typeof selected.action === 'string' && canonical(selected.action) === action),
     'BAD_ARGUMENT',
     'Command action differs from the selected action.',
   );
-  const hosted = hostedAgentAddress(root, selected);
-  if (hosted) return hostedAgentCli(root, action, selected, hosted);
+  // Old spellings print their start/save/land or x form once; new forms and internal facades stay quiet.
+  const notice = (command: Record<string, unknown>) => {
+    if (options.notices === false || form!.operator || form!.flags.length) return;
+    const current = newForm(requestedAction!, command, Boolean(hosted));
+    if (current) notices.push(aliasNotice(root, requestedAction!, current));
+  };
+  if (hosted) {
+    notice(selected);
+    return hostedAgentCli(root, action, landSaveCommand(form!, true, selected), hosted);
+  }
   if (action === 'wait') {
     await agentWaitCli(root, selected, textMode);
     return undefined;
   }
   const agent = new AgentWorkflow(root);
-  if (action === 'integrate') return integrationPreview(agent.work.store, selected);
   const retained =
     action === 'finish' && typeof selected.operationId === 'string'
       ? retainedFinishCommand(agent.work.store, selected.operationId)
       : undefined;
+  notice({ ...retained, ...selected });
+  selected = landSaveCommand(form!, false, selected, retained);
+  if (action === 'integrate') return integrationPreview(agent.work.store, selected);
   if (
     ['checkpoint', 'sync', 'finish', 'handoff', 'handoff-read'].includes(action) &&
     selected.laneId === undefined &&

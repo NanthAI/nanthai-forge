@@ -74,7 +74,9 @@ Usage:
   nforge mcp-coordination <deployment-url> <project-id>
   nforge exchange ROOT pull [--target NEW_DIRECTORY]
   nforge exchange <root> pull|open|restore|receive-proposal|pull-proposal|migrate-archive --command-file FILE
-  nforge agent <root> <action> [json | --command-file FILE]
+  nforge agent <root> start|save|land [--mode] [json | --command-file FILE]   # nforge agent --help
+  nforge agent <root> <read> [json | --command-file FILE]
+  nforge x <root> <operator-action> [json | --command-file FILE]
   nforge owner refresh <root>
   nforge recover NEW_OWNER [reconnect|client] --command-file REQUEST.json
   nforge policy <root>
@@ -160,7 +162,7 @@ async function main(args: string[]): Promise<unknown> {
       'BAD_ARGUMENT',
       'Use policy ROOT or set-policy ROOT JSON.',
     );
-    return agentCli([args[1], args[0], ...(args[2] ? [args[2]] : [])]);
+    return agentCli([args[1], args[0], ...(args[2] ? [args[2]] : [])], { notices: false });
   }
   if (args[0] === 'maintenance') return (await import('./maintenance-cli.js')).maintenanceCli(args.slice(1));
   if (args[0] === 'hosted-work') return hostedWorkCli(args.slice(1));
@@ -180,6 +182,7 @@ async function main(args: string[]): Promise<unknown> {
   if (args[0] === 'release')
     return (await import('./maintainer-release-cli.js')).maintainerReleaseCli(args.slice(1));
   if (args[0] === 'agent') return agentCli(args.slice(1));
+  if (args[0] === 'x') return agentCli(args.slice(1), { operator: true });
   if (args[0] === 'local-checks') return localChecksCli(args.slice(1));
   if (args[0] === 'plugin-config') {
     invariant(
@@ -468,12 +471,16 @@ try {
   }
   if (output !== undefined) {
     process.stdout.write(
-      `${JSON.stringify(output, null, process.argv[2] === 'agent' || (process.argv[2] === 'host' && process.argv.includes('--json')) ? undefined : 2)}\n`,
+      `${JSON.stringify(output, null, process.argv[2] === 'agent' || process.argv[2] === 'x' || (process.argv[2] === 'host' && process.argv.includes('--json')) ? undefined : 2)}\n`,
     );
     // The JSON receipt on stdout carries overlapNotice too; the banner keeps it from being missed in a log.
     const notice = (output as { overlapNotice?: Parameters<typeof overlapBanner>[0] } | null)?.overlapNotice;
-    if (process.argv[2] === 'agent' && notice) process.stderr.write(overlapBanner(notice));
-    if (process.argv[2] === 'agent' && process.argv[4] === 'finish') {
+    if ((process.argv[2] === 'agent' || process.argv[2] === 'x') && notice)
+      process.stderr.write(overlapBanner(notice));
+    if (
+      process.argv[2] === 'agent' &&
+      (process.argv[4] === 'finish' || (process.argv[4] === 'land' && process.argv[5] === '--save'))
+    ) {
       const result = (output as { result?: { status?: string } }).result;
       if (result?.status === 'awaiting-review')
         process.stderr.write(
@@ -484,7 +491,7 @@ try {
 } catch (error) {
   // Known errors stay terse; system and unexpected errors also log the stack and name the log.
   const known = error instanceof ForgeError;
-  const root = process.argv[2] === 'agent' ? process.argv[3] : undefined;
+  const root = process.argv[2] === 'agent' || process.argv[2] === 'x' ? process.argv[3] : undefined;
   const failure = known ? describeFailure(error) : recordFailure(error, root ? resolve(root) : undefined);
   if (process.argv[2] === 'github-sync') {
     syncPending = false;

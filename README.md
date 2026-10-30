@@ -26,7 +26,7 @@ node dist/cli.js init-native ./demo # a new project; no Git needed
 
 To host a project and browse it in the web app: `nforge login DEPLOYMENT_URL`, then `nforge host ./demo`. The browser UI is the hosted app; there is no local web UI.
 
-For agents: `nforge agent ./demo start '{"outcome":"…"}'`, edit the returned Lane, then `nforge agent ./demo finish '{"laneId":"…","message":"…","accept":true}'`. See the [agent workflow](docs/agents/workflow.md).
+For agents: `nforge agent ./demo start '{"outcome":"…"}'`, edit the returned Lane, then `nforge agent ./demo land --save '{"laneId":"…","message":"…"}'`. See the [agent workflow](docs/agents/workflow.md).
 
 Git repositories work too ([workflows](docs/workflows.md)), and projects can be hosted so several machines and people share them ([architecture](docs/architecture.md)). Your machine controls execution; native checks run locally or through [GitHub Actions](docs/operations/github-actions-checks.md).
 

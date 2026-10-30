@@ -25,7 +25,7 @@ prints `nextCommand` for starting work. The imported snapshot is the bootstrap
 source: **there is no main Channel yet**. The first human acceptance below creates
 `main`; subsequent Lanes start from accepted main.
 
-## Define a check, start, edit and finish
+## Define a check, start, edit and land
 
 For a project with a committed `check.mjs` test script, register the local Node
 executable. Replace the script argument with your project's real check. Checks run
@@ -34,7 +34,7 @@ check itself. Checks execute with your OS account's rights.
 
 ```sh
 NODE=$(node -p 'process.execPath')
-nforge agent "$OWNER" define-check "{\"name\":\"verify\",\"executable\":\"$NODE\",\"args\":[\"check.mjs\"],\"environmentLabel\":\"Local Node\"}"
+nforge x "$OWNER" define-check "{\"name\":\"verify\",\"executable\":\"$NODE\",\"args\":[\"check.mjs\"],\"environmentLabel\":\"Local Node\"}"
 export FORGE_AGENT_NAME=agent-a
 nforge agent "$OWNER" start '{"outcome":"Improve the greeting"}'
 ```
@@ -46,16 +46,17 @@ that overrides `FORGE_AGENT_NAME`, then `FORGE_ACTOR`. Optional `"tool":"codex"`
 records the tool. These names are attribution claims, not authentication.
 
 ```sh
-nforge agent "$OWNER" finish '{"laneId":"LANE_ID","message":"Improve greeting","accept":true}'
+nforge agent "$OWNER" land --save '{"laneId":"LANE_ID","message":"Improve greeting"}'
 ```
 
-Finish checkpoints, syncs accepted main when needed, composes a Candidate and runs the
-check. Resolve any reported conflicts in the Lane and finish again. Preserve the
+`land --save` saves, syncs accepted main when needed, composes a Candidate, runs the
+check and requests acceptance (`land --save --check-only` stops after the check).
+Resolve any reported conflicts in the Lane and run `land --save` again. Preserve the
 returned operation ID and `resolved` fields when retrying an unknown outcome.
 
 ## Supervised review and first main
 
-New imports use the supervised policy. A passed check with `accept:true` returns
+New imports use the supervised policy. A passed check from `land --save` returns
 `status:"awaiting-review"`, `complete:false`: it is ready for a person and has not
 been accepted. The final human-readable line gives this exact next command with
 your owner path:
@@ -65,7 +66,7 @@ nforge serve "$OWNER"
 ```
 
 Keep that foreground server running and open its printed private local session
-URL. In Review, open the checked Candidate from the finish receipt, inspect its changes
+URL. In Review, open the checked Candidate from the `land --save` receipt, inspect its changes
 and check result, and select Accept into main as a person. This first acceptance
 establishes main. Future acceptance advances it while retaining accepted work.
 If main moved, re-check the Lane on latest main and review its new Candidate.
@@ -89,10 +90,10 @@ process is needed.
 
 ```sh
 nforge agent LANE_PATH save '{"message":"Improve greeting"}'
-nforge agent LANE_PATH finish '{"message":"Improve greeting"}'
+nforge agent LANE_PATH land --save '{"message":"Improve greeting"}'
 ```
 
-Use the returned operation ID to observe or wait for hosted finish. The project's
+Use the returned operation ID to observe or wait for the hosted landing. The project's
 configured check and acceptance policy apply. Keep ROOT and its `.forge-client`
 sibling together; the sibling holds the binding, object cache and Lane directories.
 
@@ -113,7 +114,7 @@ sibling together; the sibling holds the binding, object cache and Lane directori
 `init-native` returns `captureCoverage`: the included file count, excluded path
 count, and up to 100 excluded paths with reasons. Initialization retries return
 the original coverage saved with the initial State; older initialization receipts
-may lack this field. Lane checkpoint receipts also report capture coverage.
+may lack this field. Lane save receipts also report capture coverage.
 Inspect exclusions when adopting a directory or saving new files.
 
 Native capture includes source modules such as `src/secret-crypto.ts`,
