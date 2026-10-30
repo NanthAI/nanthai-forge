@@ -414,8 +414,11 @@ the failed API operation, HTTP status and exact request byte count, without
 payloads, response bodies or credentials. HTTP 5xx and 429 schedule retries of
 that cursor after 1, 2, 4 and 8 minutes. Verified blob replies before a failed
 request are checkpointed so retry does not repeat the whole window. Five
-consecutive failed step attempts end in a terminal failure; a fully successful
-step resets the budget.
+consecutive failures without checkpointed progress end in a terminal failure.
+A fully successful step or a durable advance to a different blob resets the
+budget; an unsuccessful cursor save does not. Failure details retain validated
+GitHub request IDs and numeric rate-limit/retry headers when present, without
+request or response bodies or credentials.
 Other failures stop immediately. `nforge status ROOT`, `nforge agent ROOT status`
 and Now show recorded mirror failure, lag and the next retry time. Status reads
 use selected rows through existing discovery/workspace requests, without polling.

@@ -177,15 +177,44 @@ test('a 500 after verified blob replies checkpoints partial progress instead of 
   assert.equal(f.github.calls.filter(call => call.path.endsWith('/blobs')).length, 2);
 });
 
+test('progressing large binary blobs do not exhaust the retry budget across different requests', async t => {
+  const bytes = Buffer.from(Uint8Array.from({ length: 341451 }, (_, i) => (i * 131 + 17) & 255));
+  let requests = 0;
+  const f = await fixture(t, () => ++requests % 2 === 1, {
+    before: {},
+    after: Object.fromEntries(
+      Array.from({ length: 6 }, (_, i) => {
+        const content = Buffer.from(bytes);
+        content[0] = i;
+        return [`blob-${i}`, { text: content, mode: 'file' }];
+      }),
+    ),
+  });
+  for (let i = 0; i < 6; i++) {
+    await f.step();
+    assert.equal(f.job().status, 'retrying');
+    assert.equal(f.job().failures, 1, 'verified durable progress starts the next request budget');
+    assert.equal(f.job().requestBytes, 455302);
+    assert.equal(f.scheduled.at(-1).delay, 60_000);
+  }
+  await f.step();
+  assert.equal(f.job().status, 'done');
+  assert.equal(requests, 12);
+  assert.equal(f.github.calls.filter(call => call.path.endsWith('/blobs')).length, 6);
+  assert.equal(f.scheduled.length, 7, 'no idle retry after draining');
+});
+
 test('partial cursor storage failure still records the API failure and retries the retained cursor visibly', async t => {
   let requests = 0;
   const f = await fixture(t, () => ++requests === 2, { before: {}, after: { a: 'first', b: 'second' } });
+  f.patch('projectGithubMirrorJobs', f.input.jobId, { failures: 3 });
   f.ctx.storage.store = async () => {
     throw Error('synthetic storage failure');
   };
   await f.step();
   assert.equal(f.job().status, 'retrying');
   assert.equal(f.job().cursor, f.cursor);
+  assert.equal(f.job().failures, 4, 'unsaved progress cannot reset the retained request budget');
   assert.match(f.job().detail, /HTTP 500.*Partial progress could not be checkpointed/);
   await f.step();
   assert.equal(f.job().status, 'done');

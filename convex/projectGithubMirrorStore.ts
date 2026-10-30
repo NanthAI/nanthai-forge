@@ -174,7 +174,10 @@ export const failed = internalMutation({
     if (!job || job.step !== input.step || ['done', 'failed'].includes(job.status)) return null;
     const queue = await mirrorRow(ctx, job.projectId);
     if (queue?.activeId !== job._id) return null;
-    const failures = (job.failures ?? 0) + 1;
+    // A checkpointed advance selects a different immutable request. Bound
+    // consecutive failures of that request, not failures accumulated while
+    // successfully publishing other blobs in the same window.
+    const failures = (input.cursor ? 0 : (job.failures ?? 0)) + 1;
     const transient =
       input.code === 'GITHUB_SYNC_API' &&
       (input.httpStatus === 429 ||
